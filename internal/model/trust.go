@@ -2,8 +2,11 @@ package model
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"strings"
 )
 
 type TrustBundle struct {
@@ -32,4 +35,27 @@ func (b TrustBundle) Ed25519PublicKey() (ed25519.PublicKey, error) {
 		return nil, fmt.Errorf("invalid public key length %d", len(key))
 	}
 	return ed25519.PublicKey(key), nil
+}
+
+func (b TrustBundle) Fingerprint() (string, error) {
+	publicKey, err := b.Ed25519PublicKey()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(publicKey)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func (b TrustBundle) VerifyPin(pin string) error {
+	if strings.TrimSpace(pin) == "" {
+		return nil
+	}
+	fingerprint, err := b.Fingerprint()
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(pin), fingerprint) {
+		return fmt.Errorf("trust pin mismatch: expected %s, got %s", pin, fingerprint)
+	}
+	return nil
 }

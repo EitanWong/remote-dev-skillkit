@@ -48,6 +48,23 @@ func NewMemoryGatewayWithClock(now func() time.Time) *MemoryGateway {
 	if err != nil {
 		panic(fmt.Sprintf("generate gateway signing key: %v", err))
 	}
+	return NewMemoryGatewayWithSigningKey(now, "gateway-dev", publicKey, privateKey)
+}
+
+func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey) *MemoryGateway {
+	if signingID == "" {
+		signingID = "gateway-dev"
+	}
+	if len(publicKey) != ed25519.PublicKeySize {
+		panic(fmt.Sprintf("invalid gateway signing public key length %d", len(publicKey)))
+	}
+	if len(privateKey) != ed25519.PrivateKeySize {
+		panic(fmt.Sprintf("invalid gateway signing private key length %d", len(privateKey)))
+	}
+	derived, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok || !derived.Equal(publicKey) {
+		panic("gateway signing public key does not match private key")
+	}
 	return &MemoryGateway{
 		now:        now,
 		tickets:    map[string]model.Ticket{},
@@ -55,9 +72,9 @@ func NewMemoryGatewayWithClock(now func() time.Time) *MemoryGateway {
 		hosts:      map[string]model.Host{},
 		jobs:       map[string]model.Job{},
 		artifacts:  map[string][]model.Artifact{},
-		signingID:  "gateway-dev",
-		publicKey:  publicKey,
-		privateKey: privateKey,
+		signingID:  signingID,
+		publicKey:  append(ed25519.PublicKey(nil), publicKey...),
+		privateKey: append(ed25519.PrivateKey(nil), privateKey...),
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 )
 
 type App struct {
@@ -115,6 +116,7 @@ func (a App) host(args []string) error {
 		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
 		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
+		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -127,6 +129,7 @@ func (a App) host(args []string) error {
 			PollInterval:    *pollInterval,
 			MaxJobs:         *maxJobs,
 			ApprovalTimeout: *approvalTimeout,
+			TrustPin:        *trustPin,
 		})
 	default:
 		return fmt.Errorf("unknown host subcommand %q", args[0])
@@ -142,6 +145,7 @@ type hostServeOptions struct {
 	PollInterval    time.Duration
 	MaxJobs         int
 	ApprovalTimeout time.Duration
+	TrustPin        string
 }
 
 func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
@@ -347,25 +351,39 @@ func (a App) gateway(args []string) error {
 		dev := fs.Bool("dev", false, "run local development gateway")
 		addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 		auditLog := fs.String("audit-log", "", "optional JSONL audit log path")
+		signingKey := fs.String("signing-key", "", "optional persistent Ed25519 signing key file")
+		signingKeyID := fs.String("signing-key-id", signing.DefaultKeyID, "signing key id for new or existing signing key file")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if !*dev {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
-		return a.gatewayServeDev(*addr, *auditLog)
+		return a.gatewayServeDev(*addr, *auditLog, *signingKey, *signingKeyID)
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
 	}
 }
 
-func (a App) gatewayServeDev(addr, auditLog string) error {
-	gw := gateway.NewMemoryGateway()
+func (a App) gatewayServeDev(addr, auditLog, signingKeyPath, signingKeyID string) error {
+	key, created, err := signing.LoadOrCreate(signingKeyPath, signingKeyID)
+	if err != nil {
+		return err
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
 	if auditLog != "" {
 		store := audit.NewJSONLStore(auditLog)
 		gw.WithAuditSink(&store)
 	}
 	server := httpapi.NewServer(gw)
+	if signingKeyPath != "" {
+		action := "loaded"
+		if created {
+			action = "created"
+		}
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway signing key %s at %s\n", action, signingKeyPath)
+	}
+	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway signing key id=%s fingerprint=%s\n", key.ID, signing.Fingerprint(key.PublicKey))
 	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev listening on http://%s\n", addr)
 	return http.ListenAndServe(addr, server.Handler())
 }
@@ -426,7 +444,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	if interval <= 0 {
 		interval = time.Second
 	}
-	trust, err := fetchTrustBundle(ctx, opts.GatewayURL)
+	trust, err := fetchTrustBundle(ctx, opts.GatewayURL, opts.TrustPin)
 	if err != nil {
 		return 0, err
 	}
@@ -461,7 +479,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	return processed, nil
 }
 
-func fetchTrustBundle(ctx context.Context, gatewayURL string) (model.TrustBundle, error) {
+func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.TrustBundle, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/trust", nil)
 	if err != nil {
 		return model.TrustBundle{}, err
@@ -485,6 +503,9 @@ func fetchTrustBundle(ctx context.Context, gatewayURL string) (model.TrustBundle
 		return model.TrustBundle{}, fmt.Errorf("fetch trust bundle failed: %s", payload.Error)
 	}
 	if _, err := payload.Trust.Ed25519PublicKey(); err != nil {
+		return model.TrustBundle{}, err
+	}
+	if err := payload.Trust.VerifyPin(trustPin); err != nil {
 		return model.TrustBundle{}, err
 	}
 	return payload.Trust, nil

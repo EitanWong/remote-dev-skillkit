@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 )
 
 func TestVersion(t *testing.T) {
@@ -201,6 +204,79 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	}
 }
 
+func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	_, err = app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:   server.URL,
+		PollInterval: 1,
+		MaxJobs:      1,
+		TrustPin:     "sha256:0000",
+	}, host.ID)
+	if err == nil {
+		t.Fatal("expected trust pin mismatch")
+	}
+	if !strings.Contains(err.Error(), "trust pin mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGatewayServeDevReusesSigningKeyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway-signing-key.json")
+
+	key, created, err := signing.LoadOrCreate(path, signing.DefaultKeyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected initial key creation")
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(timeNowForTest, key.ID, key.PublicKey, key.PrivateKey)
+	firstFingerprint, err := gw.TrustBundle().Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reused, created, err := signing.LoadOrCreate(path, signing.DefaultKeyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("expected key reuse")
+	}
+	gw = gateway.NewMemoryGatewayWithSigningKey(timeNowForTest, reused.ID, reused.PublicKey, reused.PrivateKey)
+	secondFingerprint, err := gw.TrustBundle().Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstFingerprint != secondFingerprint {
+		t.Fatalf("expected stable fingerprint, got %s then %s", firstFingerprint, secondFingerprint)
+	}
+}
+
 func TestHostServeReportsFailedDevJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -347,4 +423,8 @@ func TestGatewayServeRequiresDevFlag(t *testing.T) {
 	if !strings.Contains(err.Error(), "requires --dev") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func timeNowForTest() time.Time {
+	return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 }

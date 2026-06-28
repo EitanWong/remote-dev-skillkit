@@ -24,6 +24,7 @@
 - [x] Add dev trust bundle endpoint and host-side envelope signature verification.
 - [x] Add host-reported job failure endpoint and audit event.
 - [x] Add perfect end-state architecture blueprint.
+- [x] Add persistent dev gateway signing key and host trust pin checks.
 
 ## Next
 
@@ -37,7 +38,7 @@
 - [x] Add Windows capability detector.
 - [x] Add dev gateway job create/status/claim/complete endpoints.
 - [ ] Add policy explain engine.
-- [ ] Add durable signing key storage and host trust distribution.
+- [ ] Add production key rotation/revocation and host trust update flow.
 - [x] Add real scoped shell adapter execution.
 - [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
 - [ ] Add durable shell adapter audit schema and redaction rules.

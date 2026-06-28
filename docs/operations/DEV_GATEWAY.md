@@ -7,7 +7,28 @@ This is a development surface only. It is not production transport, does not aut
 ## Start
 
 ```bash
-rdev gateway serve --dev --addr 127.0.0.1:8787 --audit-log .rdev/audit/events.jsonl
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --audit-log .rdev/audit/events.jsonl \
+  --signing-key .rdev/keys/gateway-signing-key.json
+```
+
+When `--signing-key` is set, the dev gateway creates or reuses an Ed25519 signing key file with `0600` permissions and prints its public-key fingerprint:
+
+```text
+rdev gateway signing key id=gateway-dev fingerprint=sha256:<hex>
+```
+
+Hosts can pin that key during local development:
+
+```bash
+rdev host serve \
+  --mode temporary \
+  --gateway http://127.0.0.1:8787 \
+  --ticket-code ABCD-1234 \
+  --once=false \
+  --trust-pin sha256:<hex>
 ```
 
 ## Endpoints
@@ -83,6 +104,6 @@ curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
 - No WSS host transport.
 - No authentication.
 - No production TLS.
-- Signed job envelopes use an in-memory development Ed25519 key.
-- The dev host runner performs host-side Ed25519 envelope verification through `GET /v1/trust`, but production still needs durable key storage, rotation, revocation and pinning.
+- Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
+- With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys. Production still needs key rotation, revocation and managed trust bundle updates.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, no production redaction schema yet, and no OS-specific sandboxing beyond workspace boundary checks.

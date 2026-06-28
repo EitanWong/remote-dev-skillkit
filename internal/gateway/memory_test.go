@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
@@ -91,6 +93,33 @@ func TestMemoryGatewaySignsJobEnvelope(t *testing.T) {
 	}
 	if got := job.Envelope.Limits.MaxDurationSeconds; got != 300 {
 		t.Fatalf("expected max duration 300, got %d", got)
+	}
+}
+
+func TestMemoryGatewayUsesProvidedSigningKey(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "provided-key", publicKey, privateKey)
+
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Envelope == nil {
+		t.Fatal("job envelope must be present")
+	}
+	if job.Envelope.SigningKeyID != "provided-key" {
+		t.Fatalf("expected provided signing key id, got %q", job.Envelope.SigningKeyID)
+	}
+	if err := job.Envelope.VerifyForHost(publicKey, host.ID, now); err != nil {
+		t.Fatalf("expected envelope to verify with provided public key: %v", err)
 	}
 }
 

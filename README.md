@@ -34,6 +34,7 @@ Implemented now:
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
 - Local dev host registration, job polling, and job completion loop.
 - Development trust bundle endpoint for host-side envelope signature verification.
+- Persistent development gateway signing key files plus host trust pin checks.
 - Host-reported failed jobs with audit events.
 - Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, exit-code evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.
@@ -44,6 +45,7 @@ Not implemented yet:
 - Real gateway networking.
 - Host enrollment keys and certificates.
 - Production signing key storage and rotation.
+- Production key rotation/revocation and managed host trust bundle update flow.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
 - Artifact streaming.

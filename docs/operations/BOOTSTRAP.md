@@ -14,6 +14,8 @@
 10. Operator approves.
 11. Host receives signed policy and jobs.
 
+During development, `rdev host serve --trust-pin sha256:<hex>` can pin the gateway signing public key from `GET /v1/trust`. Production bootstrap should derive this trust pin from the signed join manifest or a pinned trust root, not from unauthenticated chat text.
+
 ## Draft Script
 
 The repository includes a visible foreground bootstrap draft:

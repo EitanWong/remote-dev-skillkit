@@ -27,3 +27,21 @@ func TestTrustBundleRejectsWrongAlgorithm(t *testing.T) {
 		t.Fatal("expected unsupported algorithm error")
 	}
 }
+
+func TestTrustBundleVerifiesPin(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := NewTrustBundle("test-key", publicKey)
+	fingerprint, err := bundle.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bundle.VerifyPin(fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if err := bundle.VerifyPin("sha256:0000"); err == nil {
+		t.Fatal("expected mismatched pin to fail")
+	}
+}
