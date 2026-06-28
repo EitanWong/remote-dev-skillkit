@@ -71,6 +71,7 @@ go run ./cmd/rdev host serve --mode temporary
 ## Documentation
 
 - [Architecture](docs/architecture/ARCHITECTURE.md)
+- [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
 - [Project Plan](docs/project/PLAN.md)
 - [Roadmap](docs/project/ROADMAP.md)
 - [Versioning](docs/project/VERSIONING.md)

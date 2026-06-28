@@ -4,6 +4,7 @@
 
 - [x] Create repository skeleton.
 - [x] Add architecture, roadmap, versioning, and threat model docs.
+- [x] Add final architecture freeze document.
 - [x] Add initial `rdev` CLI skeleton.
 - [x] Add `rdev doctor`.
 - [x] Add MCP tool contracts.
