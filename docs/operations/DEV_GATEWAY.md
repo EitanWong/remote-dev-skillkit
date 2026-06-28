@@ -13,6 +13,7 @@ rdev gateway serve --dev --addr 127.0.0.1:8787 --audit-log .rdev/audit/events.js
 ## Endpoints
 
 - `GET /healthz`
+- `GET /v1/trust`
 - `POST /v1/tickets`
 - `GET /v1/hosts`
 - `POST /v1/hosts/register`
@@ -60,7 +61,7 @@ rdev host serve \
   --approval-timeout=30s
 ```
 
-When `--once=false`, `rdev host serve` waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`.
+When `--once=false`, `rdev host serve` fetches the gateway trust bundle, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`.
 
 ## Limitations
 
@@ -69,5 +70,5 @@ When `--once=false`, `rdev host serve` waits until the registered host is approv
 - No authentication.
 - No production TLS.
 - Signed job envelopes use an in-memory development Ed25519 key.
-- The dev host runner performs structural and policy checks, but cryptographic host-side verification still needs gateway public-key trust distribution.
+- The dev host runner performs host-side Ed25519 envelope verification through `GET /v1/trust`, but production still needs durable key storage, rotation, revocation and pinning.
 - The dev host runner does not execute arbitrary shell commands yet; it only proves the policy/envelope/job-completion loop.

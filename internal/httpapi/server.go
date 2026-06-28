@@ -20,6 +20,7 @@ func NewServer(gw *gateway.MemoryGateway) Server {
 func (s Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /v1/trust", s.trust)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
 	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
@@ -34,6 +35,10 @@ func (s Server) Handler() http.Handler {
 
 func (s Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s Server) trust(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"trust": s.Gateway.TrustBundle()})
 }
 
 func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {

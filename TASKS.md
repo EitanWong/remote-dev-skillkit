@@ -21,6 +21,7 @@
 - [x] Add foreground temporary host local registration loop.
 - [x] Add local dev job polling and completion loop.
 - [x] Add host-side dev envelope/policy checks.
+- [x] Add dev trust bundle endpoint and host-side envelope signature verification.
 
 ## Next
 

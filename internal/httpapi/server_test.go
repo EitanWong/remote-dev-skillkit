@@ -41,6 +41,42 @@ func TestCreateTicketAndAudit(t *testing.T) {
 	}
 }
 
+func TestTrustEndpointVerifiesJobEnvelope(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustReq := httptest.NewRequest(http.MethodGet, "/v1/trust", nil)
+	trustRec := httptest.NewRecorder()
+	handler.ServeHTTP(trustRec, trustReq)
+	if trustRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", trustRec.Code, trustRec.Body.String())
+	}
+	var payload struct {
+		Trust model.TrustBundle `json:"trust"`
+	}
+	if err := json.Unmarshal(trustRec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := payload.Trust.Ed25519PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Envelope == nil {
+		t.Fatal("job envelope must be present")
+	}
+	if err := job.Envelope.VerifyForHost(publicKey, host.ID, job.CreatedAt); err != nil {
+		t.Fatalf("expected trust bundle to verify envelope: %v", err)
+	}
+}
+
 func TestRegisterAndApproveHost(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()

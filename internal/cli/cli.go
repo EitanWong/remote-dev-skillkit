@@ -426,6 +426,10 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	if interval <= 0 {
 		interval = time.Second
 	}
+	trust, err := fetchTrustBundle(ctx, opts.GatewayURL)
+	if err != nil {
+		return 0, err
+	}
 	processed := 0
 	for processed < maxJobs {
 		job, found, err := fetchNextJob(ctx, opts.GatewayURL, hostID)
@@ -442,7 +446,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 			}
 			continue
 		}
-		result, err := hostrunner.RunDevJob(hostID, job, time.Now())
+		result, err := hostrunner.RunDevJob(hostID, trust, job, time.Now())
 		if err != nil {
 			return processed, err
 		}
@@ -452,6 +456,35 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		processed++
 	}
 	return processed, nil
+}
+
+func fetchTrustBundle(ctx context.Context, gatewayURL string) (model.TrustBundle, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/trust", nil)
+	if err != nil {
+		return model.TrustBundle{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.TrustBundle{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Trust model.TrustBundle `json:"trust"`
+		Error string            `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.TrustBundle{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.TrustBundle{}, fmt.Errorf("fetch trust bundle failed: %s", payload.Error)
+	}
+	if _, err := payload.Trust.Ed25519PublicKey(); err != nil {
+		return model.TrustBundle{}, err
+	}
+	return payload.Trust, nil
 }
 
 func fetchNextJob(ctx context.Context, gatewayURL, hostID string) (model.Job, bool, error) {

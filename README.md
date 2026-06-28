@@ -33,6 +33,7 @@ Implemented now:
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
 - Local dev host registration, job polling, and job completion loop.
+- Development trust bundle endpoint for host-side envelope signature verification.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 

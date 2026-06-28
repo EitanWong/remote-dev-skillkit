@@ -11,7 +11,7 @@ type Result struct {
 	ArtifactContent string `json:"artifact_content"`
 }
 
-func RunDevJob(hostID string, job model.Job, now time.Time) (Result, error) {
+func RunDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
 	if job.Envelope == nil {
 		return Result{}, fmt.Errorf("job envelope is required")
 	}
@@ -19,8 +19,15 @@ func RunDevJob(hostID string, job model.Job, now time.Time) (Result, error) {
 	if envelope.HostID != hostID || job.HostID != hostID {
 		return Result{}, fmt.Errorf("job is not assigned to host")
 	}
-	if now.UTC().After(envelope.ExpiresAt) {
-		return Result{}, model.ErrEnvelopeExpired
+	if envelope.SigningKeyID != trust.SigningKeyID {
+		return Result{}, fmt.Errorf("signing key mismatch")
+	}
+	publicKey, err := trust.Ed25519PublicKey()
+	if err != nil {
+		return Result{}, err
+	}
+	if err := envelope.VerifyForHost(publicKey, hostID, now); err != nil {
+		return Result{}, err
 	}
 	if envelope.Adapter != "shell" {
 		return Result{}, fmt.Errorf("unsupported dev adapter %q", envelope.Adapter)

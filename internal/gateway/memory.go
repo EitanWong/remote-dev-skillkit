@@ -254,6 +254,13 @@ func (g *MemoryGateway) VerifyJobEnvelope(envelope model.JobEnvelope, hostID str
 	return envelope.VerifyForHost(g.publicKey, hostID, g.now())
 }
 
+func (g *MemoryGateway) TrustBundle() model.TrustBundle {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return model.NewTrustBundle(g.signingID, g.publicKey)
+}
+
 func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, model.Artifact, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
