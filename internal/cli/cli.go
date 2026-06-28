@@ -448,7 +448,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		}
 		result, err := hostrunner.RunDevJob(hostID, trust, job, time.Now())
 		if err != nil {
-			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error()); failErr != nil {
+			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
 				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
 			}
 			return processed, err
@@ -611,10 +611,11 @@ func completeJob(ctx context.Context, gatewayURL, hostID, jobID, artifactContent
 	return payload.Job, nil
 }
 
-func failJob(ctx context.Context, gatewayURL, hostID, jobID, reason string) (model.Job, error) {
+func failJob(ctx context.Context, gatewayURL, hostID, jobID, reason, artifactContent string) (model.Job, error) {
 	body, err := json.Marshal(map[string]string{
-		"host_id": hostID,
-		"reason":  reason,
+		"host_id":          hostID,
+		"reason":           reason,
+		"artifact_content": artifactContent,
 	})
 	if err != nil {
 		return model.Job{}, err

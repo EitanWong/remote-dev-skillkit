@@ -180,6 +180,38 @@ func TestJobCreateClaimAndComplete(t *testing.T) {
 	if completePayload.Artifact.Content != "done" {
 		t.Fatalf("expected artifact content, got %q", completePayload.Artifact.Content)
 	}
+
+	artifactsReq := httptest.NewRequest(http.MethodGet, "/v1/jobs/"+jobPayload.Job.ID+"/artifacts", nil)
+	artifactsRec := httptest.NewRecorder()
+	handler.ServeHTTP(artifactsRec, artifactsReq)
+	if artifactsRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", artifactsRec.Code, artifactsRec.Body.String())
+	}
+	var artifactsPayload struct {
+		Artifacts []model.Artifact `json:"artifacts"`
+	}
+	if err := json.Unmarshal(artifactsRec.Body.Bytes(), &artifactsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(artifactsPayload.Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(artifactsPayload.Artifacts))
+	}
+
+	artifactReq := httptest.NewRequest(http.MethodGet, "/v1/artifacts/"+completePayload.Artifact.ID, nil)
+	artifactRec := httptest.NewRecorder()
+	handler.ServeHTTP(artifactRec, artifactReq)
+	if artifactRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", artifactRec.Code, artifactRec.Body.String())
+	}
+	var artifactPayload struct {
+		Artifact model.Artifact `json:"artifact"`
+	}
+	if err := json.Unmarshal(artifactRec.Body.Bytes(), &artifactPayload); err != nil {
+		t.Fatal(err)
+	}
+	if artifactPayload.Artifact.Content != "done" {
+		t.Fatalf("expected artifact content, got %q", artifactPayload.Artifact.Content)
+	}
 }
 
 func TestJobFail(t *testing.T) {
@@ -207,14 +239,15 @@ func TestJobFail(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
 	}
 
-	failReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/fail", bytes.NewBufferString(`{"host_id":"`+host.ID+`","reason":"signature rejected"}`))
+	failReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/fail", bytes.NewBufferString(`{"host_id":"`+host.ID+`","reason":"signature rejected","artifact_content":"failure evidence"}`))
 	failRec := httptest.NewRecorder()
 	handler.ServeHTTP(failRec, failReq)
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", failRec.Code, failRec.Body.String())
 	}
 	var failPayload struct {
-		Job model.Job `json:"job"`
+		Job      model.Job      `json:"job"`
+		Artifact model.Artifact `json:"artifact"`
 	}
 	if err := json.Unmarshal(failRec.Body.Bytes(), &failPayload); err != nil {
 		t.Fatal(err)
@@ -224,6 +257,9 @@ func TestJobFail(t *testing.T) {
 	}
 	if failPayload.Job.FailureReason != "signature rejected" {
 		t.Fatalf("unexpected failure reason %q", failPayload.Job.FailureReason)
+	}
+	if failPayload.Artifact.Content != "failure evidence" {
+		t.Fatalf("expected failure artifact content, got %q", failPayload.Artifact.Content)
 	}
 }
 

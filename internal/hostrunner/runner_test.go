@@ -1,6 +1,7 @@
 package hostrunner
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,8 @@ func TestRunDevJobAcceptsScopedShellJob(t *testing.T) {
 	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -25,6 +28,9 @@ func TestRunDevJobAcceptsScopedShellJob(t *testing.T) {
 	}
 	if result.ArtifactContent == "" {
 		t.Fatal("artifact content must be set")
+	}
+	if !strings.Contains(result.ArtifactContent, `"exit_code": 0`) {
+		t.Fatalf("expected successful command evidence, got %s", result.ArtifactContent)
 	}
 }
 
@@ -56,6 +62,24 @@ func TestRunDevJobRejectsMissingWorkspace(t *testing.T) {
 	}
 	if _, err := RunDevJob(host.ID, gw.TrustBundle(), job, now); err == nil {
 		t.Fatal("expected missing workspace to fail")
+	}
+}
+
+func TestRunDevJobRejectsCommandNotAllowlisted(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"git"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunDevJob(host.ID, gw.TrustBundle(), job, now); err == nil {
+		t.Fatal("expected non-allowlisted command to fail")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 )
 
 type Result struct {
@@ -38,9 +39,19 @@ func RunDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 	if envelope.Workspace.Root == "" {
 		return Result{}, fmt.Errorf("workspace root is required")
 	}
-	return Result{
-		ArtifactContent: fmt.Sprintf("dev host accepted job %s in workspace %s", job.ID, envelope.Workspace.Root),
-	}, nil
+	execution, err := shelladapter.Execute(shelladapter.Spec{
+		WorkspaceRoot:      envelope.Workspace.Root,
+		WriteScope:         envelope.Workspace.WriteScope,
+		Argv:               stringSliceValue(envelope.Payload, "argv"),
+		AllowCommands:      stringSliceValue(envelope.Payload, "allow_commands"),
+		MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
+		MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
+	})
+	result := Result{ArtifactContent: execution.ArtifactContent()}
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func hasCapability(values []string, want string) bool {
@@ -50,4 +61,25 @@ func hasCapability(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func stringSliceValue(values map[string]any, key string) []string {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok && text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }

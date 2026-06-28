@@ -29,6 +29,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/jobs", s.createJob)
 	mux.HandleFunc("GET /v1/jobs/", s.getJob)
 	mux.HandleFunc("POST /v1/jobs/", s.jobAction)
+	mux.HandleFunc("GET /v1/artifacts/", s.getArtifact)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
 	return mux
 }
@@ -172,6 +173,15 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) getJob(w http.ResponseWriter, r *http.Request) {
+	if jobID, resource, ok := splitJobSubresource(r.URL.Path); ok {
+		switch resource {
+		case "artifacts":
+			writeJSON(w, http.StatusOK, map[string]any{"artifacts": s.Gateway.Artifacts(jobID)})
+		default:
+			writeError(w, http.StatusNotFound, "unknown job subresource")
+		}
+		return
+	}
 	jobID, ok := splitJobID(r.URL.Path)
 	if !ok {
 		writeError(w, http.StatusNotFound, "unknown job endpoint")
@@ -183,6 +193,20 @@ func (s Server) getJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"job": job})
+}
+
+func (s Server) getArtifact(w http.ResponseWriter, r *http.Request) {
+	artifactID, ok := splitArtifactID(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown artifact endpoint")
+		return
+	}
+	artifact, err := s.Gateway.Artifact(artifactID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"artifact": artifact})
 }
 
 func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
@@ -213,8 +237,9 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
 	case "fail":
 		var req struct {
-			HostID string `json:"host_id"`
-			Reason string `json:"reason"`
+			HostID          string `json:"host_id"`
+			Reason          string `json:"reason"`
+			ArtifactContent string `json:"artifact_content"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -224,12 +249,16 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "host_id is required")
 			return
 		}
-		job, err := s.Gateway.FailJobForHost(req.HostID, jobID, req.Reason)
+		job, artifact, err := s.Gateway.FailJobForHostWithArtifact(req.HostID, jobID, req.Reason, req.ArtifactContent)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"job": job})
+		payload := map[string]any{"job": job}
+		if artifact != nil {
+			payload["artifact"] = artifact
+		}
+		writeJSON(w, http.StatusOK, payload)
 	default:
 		writeError(w, http.StatusNotFound, "unknown job action")
 	}
@@ -299,6 +328,30 @@ func splitJobAction(path string) (jobID string, action string, ok bool) {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
+}
+
+func splitJobSubresource(path string) (jobID string, resource string, ok bool) {
+	rest := strings.TrimPrefix(path, "/v1/jobs/")
+	if rest == path {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func splitArtifactID(path string) (artifactID string, ok bool) {
+	rest := strings.TrimPrefix(path, "/v1/artifacts/")
+	if rest == path {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 1 || parts[0] == "" {
+		return "", false
+	}
+	return parts[0], true
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

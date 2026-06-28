@@ -38,8 +38,9 @@
 - [x] Add dev gateway job create/status/claim/complete endpoints.
 - [ ] Add policy explain engine.
 - [ ] Add durable signing key storage and host trust distribution.
-- [ ] Add real scoped shell adapter execution.
+- [x] Add real scoped shell adapter execution.
 - [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
+- [ ] Add durable shell adapter audit schema and redaction rules.
 
 ## Later
 

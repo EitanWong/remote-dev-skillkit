@@ -20,9 +20,11 @@ rdev gateway serve --dev --addr 127.0.0.1:8787 --audit-log .rdev/audit/events.js
 - `POST /v1/hosts/{host_id}/approve`
 - `POST /v1/jobs`
 - `GET /v1/jobs/{job_id}`
+- `GET /v1/jobs/{job_id}/artifacts`
 - `GET /v1/hosts/{host_id}/jobs/next`
 - `POST /v1/jobs/{job_id}/complete`
 - `POST /v1/jobs/{job_id}/fail`
+- `GET /v1/artifacts/{artifact_id}`
 - `GET /v1/audit`
 
 ## Example
@@ -51,7 +53,7 @@ Create and process one dev job:
 ```bash
 curl -s -X POST http://127.0.0.1:8787/v1/jobs \
   -H 'content-type: application/json' \
-  -d '{"host_id":"hst_...","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}'
+  -d '{"host_id":"hst_...","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"],"max_duration_seconds":30,"max_output_bytes":65536}}'
 
 rdev host serve \
   --mode temporary \
@@ -66,6 +68,15 @@ When `--once=false`, `rdev host serve` fetches the gateway trust bundle, waits u
 
 If the host runner rejects a job, the host reports the failure to `POST /v1/jobs/{job_id}/fail`. The gateway marks the job `failed`, stores `failure_reason`, and writes a `job.fail` audit event.
 
+The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Completion and failure artifacts include argv, canonical workspace, exit code, stdout/stderr excerpts, timeout state, truncation state, and duration.
+
+Read execution evidence:
+
+```bash
+curl -s http://127.0.0.1:8787/v1/jobs/<job_id>/artifacts
+curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
+```
+
 ## Limitations
 
 - In-memory state.
@@ -74,4 +85,4 @@ If the host runner rejects a job, the host reports the failure to `POST /v1/jobs
 - No production TLS.
 - Signed job envelopes use an in-memory development Ed25519 key.
 - The dev host runner performs host-side Ed25519 envelope verification through `GET /v1/trust`, but production still needs durable key storage, rotation, revocation and pinning.
-- The dev host runner does not execute arbitrary shell commands yet; it only proves the policy/envelope/job-completion loop.
+- The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, no production redaction schema yet, and no OS-specific sandboxing beyond workspace boundary checks.

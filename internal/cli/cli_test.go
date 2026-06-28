@@ -162,6 +162,8 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -194,6 +196,9 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	if len(artifacts) != 1 {
 		t.Fatalf("expected 1 artifact, got %d", len(artifacts))
 	}
+	if !strings.Contains(artifacts[0].Content, `"exit_code": 0`) {
+		t.Fatalf("expected shell execution evidence, got %s", artifacts[0].Content)
+	}
 }
 
 func TestHostServeReportsFailedDevJob(t *testing.T) {
@@ -218,7 +223,10 @@ func TestHostServeReportsFailedDevJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
-		"capabilities": []string{"shell.user"},
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "tool", "rdev-no-such-tool"},
+		"allow_commands": []string{"go"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -249,6 +257,13 @@ func TestHostServeReportsFailedDevJob(t *testing.T) {
 	}
 	if failed.FailureReason == "" {
 		t.Fatal("failure reason should be set")
+	}
+	artifacts := gw.Artifacts(job.ID)
+	if len(artifacts) != 1 {
+		t.Fatalf("expected 1 failure artifact, got %d", len(artifacts))
+	}
+	if !strings.Contains(artifacts[0].Content, `"exit_code":`) {
+		t.Fatalf("expected failure execution evidence, got %s", artifacts[0].Content)
 	}
 }
 

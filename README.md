@@ -35,6 +35,7 @@ Implemented now:
 - Local dev host registration, job polling, and job completion loop.
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Host-reported failed jobs with audit events.
+- Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, exit-code evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 
@@ -44,7 +45,7 @@ Not implemented yet:
 - Host enrollment keys and certificates.
 - Production signing key storage and rotation.
 - Production WSS host transport.
-- Real scoped shell adapter execution.
+- Production-grade shell adapter hardening beyond the development scoped executor.
 - Artifact streaming.
 - Windows service installation.
 - Tailscale/headscale adapter.
