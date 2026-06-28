@@ -15,6 +15,7 @@
 - Local host process.
 - In-memory tickets, hosts, jobs, artifacts, and audit events.
 - MCP stdio server for tool calls.
+- Development signed job envelopes.
 - Demonstrable local temporary session.
 
 ## v0.2.0 Windows Temporary Host
@@ -23,6 +24,7 @@
 - PowerShell bootstrap.
 - Visible foreground support window or console UI.
 - Outbound-only connection to gateway.
+- Durable signing key storage and rotation.
 - Shell and file scoped jobs.
 
 ## v0.3.0 Managed Device

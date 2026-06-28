@@ -18,6 +18,7 @@ type Job struct {
 	Adapter   string         `json:"adapter"`
 	Intent    string         `json:"intent"`
 	Policy    map[string]any `json:"policy"`
+	Envelope  *JobEnvelope   `json:"envelope,omitempty"`
 	Status    JobStatus      `json:"status"`
 	CreatedAt time.Time      `json:"created_at"`
 	StartedAt *time.Time     `json:"started_at,omitempty"`

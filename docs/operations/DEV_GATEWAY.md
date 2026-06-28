@@ -35,4 +35,4 @@ curl -s http://127.0.0.1:8787/v1/audit
 - No host transport.
 - No authentication.
 - No production TLS.
-- No signed jobs yet.
+- Signed job envelopes use an in-memory development Ed25519 key.

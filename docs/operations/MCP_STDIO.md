@@ -30,5 +30,5 @@ Tool calls return:
 
 - In-memory only.
 - No persistent host sessions yet.
-- No signed job envelopes yet.
+- Job envelopes are signed with an in-memory development Ed25519 key; production key storage is not implemented yet.
 - No real network transport yet.

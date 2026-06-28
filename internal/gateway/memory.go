@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"sort"
@@ -19,15 +21,18 @@ var (
 )
 
 type MemoryGateway struct {
-	mu        sync.Mutex
-	now       func() time.Time
-	auditSink AuditSink
-	tickets   map[string]model.Ticket
-	codeIndex map[string]string
-	hosts     map[string]model.Host
-	jobs      map[string]model.Job
-	artifacts map[string][]model.Artifact
-	audit     []model.AuditEvent
+	mu         sync.Mutex
+	now        func() time.Time
+	auditSink  AuditSink
+	tickets    map[string]model.Ticket
+	codeIndex  map[string]string
+	hosts      map[string]model.Host
+	jobs       map[string]model.Job
+	artifacts  map[string][]model.Artifact
+	audit      []model.AuditEvent
+	signingID  string
+	publicKey  ed25519.PublicKey
+	privateKey ed25519.PrivateKey
 }
 
 type AuditSink interface {
@@ -39,13 +44,20 @@ func NewMemoryGateway() *MemoryGateway {
 }
 
 func NewMemoryGatewayWithClock(now func() time.Time) *MemoryGateway {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic(fmt.Sprintf("generate gateway signing key: %v", err))
+	}
 	return &MemoryGateway{
-		now:       now,
-		tickets:   map[string]model.Ticket{},
-		codeIndex: map[string]string{},
-		hosts:     map[string]model.Host{},
-		jobs:      map[string]model.Job{},
-		artifacts: map[string][]model.Artifact{},
+		now:        now,
+		tickets:    map[string]model.Ticket{},
+		codeIndex:  map[string]string{},
+		hosts:      map[string]model.Host{},
+		jobs:       map[string]model.Job{},
+		artifacts:  map[string][]model.Artifact{},
+		signingID:  "gateway-dev",
+		publicKey:  publicKey,
+		privateKey: privateKey,
 	}
 }
 
@@ -204,6 +216,16 @@ func (g *MemoryGateway) CreateJob(hostID, adapter, intent string, jobPolicy map[
 	if host.Status != model.HostStatusActive {
 		return model.Job{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
 	}
+	ticket, ok := g.tickets[host.TicketID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("%w: ticket", ErrNotFound)
+	}
+	if ticket.Status != model.TicketStatusActive {
+		return model.Job{}, fmt.Errorf("%w: ticket is not active", ErrInvalidState)
+	}
+	if !g.now().Before(ticket.ExpiresAt) {
+		return model.Job{}, ErrTicketExpired
+	}
 	if adapter == "" || intent == "" {
 		return model.Job{}, fmt.Errorf("%w: adapter and intent are required", ErrPolicyDenied)
 	}
@@ -211,9 +233,25 @@ func (g *MemoryGateway) CreateJob(hostID, adapter, intent string, jobPolicy map[
 	if err != nil {
 		return model.Job{}, err
 	}
+	envelope, err := model.NewJobEnvelope(job, host, ticket, jobEnvelopeSpec(jobPolicy, host, g.signingID), g.now())
+	if err != nil {
+		return model.Job{}, err
+	}
+	envelope, err = envelope.Sign(g.privateKey)
+	if err != nil {
+		return model.Job{}, err
+	}
+	job.Envelope = &envelope
 	g.jobs[job.ID] = job
 	g.appendAuditLocked("operator", "job.create", job.ID, "created policy-bound job")
 	return job, nil
+}
+
+func (g *MemoryGateway) VerifyJobEnvelope(envelope model.JobEnvelope, hostID string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return envelope.VerifyForHost(g.publicKey, hostID, g.now())
 }
 
 func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, model.Artifact, error) {
@@ -348,4 +386,86 @@ func reasonOrDefault(reason, fallback string) string {
 		return fallback
 	}
 	return reason
+}
+
+func jobEnvelopeSpec(jobPolicy map[string]any, host model.Host, signingID string) model.JobEnvelopeSpec {
+	return model.JobEnvelopeSpec{
+		OperatorID:        stringValue(jobPolicy, "operator_id", "operator"),
+		Workspace:         workspaceValue(jobPolicy),
+		Capabilities:      stringSliceValue(jobPolicy, "capabilities", host.Capabilities),
+		Limits:            limitsValue(jobPolicy),
+		ApprovalsRequired: stringSliceValue(jobPolicy, "approvals_required", nil),
+		Payload:           jobPolicy,
+		TTLSeconds:        intValue(jobPolicy, "ttl_seconds", model.DefaultJobTTLSeconds),
+		SigningKeyID:      signingID,
+	}
+}
+
+func workspaceValue(values map[string]any) model.JobWorkspace {
+	root := stringValue(values, "workspace_root", "")
+	if root == "" {
+		root = stringValue(values, "cwd", "")
+	}
+	return model.JobWorkspace{
+		Root:       root,
+		WriteScope: stringSliceValue(values, "write_scope", nil),
+		Branch:     stringValue(values, "branch", ""),
+	}
+}
+
+func limitsValue(values map[string]any) model.JobLimits {
+	return model.JobLimits{
+		MaxDurationSeconds: intValue(values, "max_duration_seconds", model.DefaultJobTTLSeconds),
+		MaxOutputBytes:     intValue(values, "max_output_bytes", model.DefaultMaxOutputBytes),
+		Network:            stringValue(values, "network", "default-deny"),
+	}
+}
+
+func stringValue(values map[string]any, key, fallback string) string {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fallback
+}
+
+func intValue(values map[string]any, key string, fallback int) int {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return fallback
+	}
+}
+
+func stringSliceValue(values map[string]any, key string, fallback []string) []string {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return append([]string(nil), fallback...)
+	}
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok && text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return append([]string(nil), fallback...)
+	}
 }

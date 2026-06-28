@@ -17,12 +17,13 @@
 - [ ] Add foreground temporary host local loop.
 - [x] Add JSONL audit store.
 - [x] Add local HTTP development gateway.
+- [x] Add signed job envelope model.
 
 ## Next
 
 - [x] Define ticket data model.
 - [x] Define host data model.
-- [ ] Define signed job envelope.
+- [x] Define signed job envelope.
 - [x] Define job/artifact/audit models.
 - [x] Implement JSONL audit store.
 - [x] Implement local HTTP gateway for development.

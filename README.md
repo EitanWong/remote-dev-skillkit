@@ -31,6 +31,7 @@ Implemented now:
 - `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev gateway serve --dev` local HTTP development gateway.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
+- Development signed job envelopes using Ed25519 in-memory gateway keys.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 
@@ -38,7 +39,7 @@ Not implemented yet:
 
 - Real gateway networking.
 - Host enrollment keys and certificates.
-- Signed job execution.
+- Production signing key storage and rotation.
 - Artifact streaming.
 - Windows service installation.
 - Tailscale/headscale adapter.

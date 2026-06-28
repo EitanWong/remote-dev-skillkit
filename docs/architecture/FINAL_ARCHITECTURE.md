@@ -224,6 +224,8 @@ The join page may offer a one-line command for convenience, but the script and m
 
 Every executable request becomes a signed job envelope.
 
+The current development gateway signs envelopes with an in-memory Ed25519 key. Production deployments must replace this with durable key storage, rotation, revocation, and host trust distribution.
+
 Required fields:
 
 ```json

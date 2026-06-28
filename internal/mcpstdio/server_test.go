@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
 func TestServerInitializeAndToolsList(t *testing.T) {
@@ -56,6 +57,44 @@ func TestServerToolCallCreateTicket(t *testing.T) {
 	}
 	if _, ok := structured["joinUrl"].(string); !ok {
 		t.Fatalf("expected joinUrl in structured content: %#v", structured)
+	}
+}
+
+func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "local",
+		OS:         "darwin",
+		Arch:       "arm64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rdev.jobs.create","arguments":{"host_id":"` + host.ID + `","adapter":"codex","intent":"fix tests","policy":{"workspace_root":"/repo","capabilities":["fs.read","fs.write.scoped","dev.codex"]}}}}` + "\n"
+	var out bytes.Buffer
+	server := NewServer(gw)
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	envelope := structured["envelope"].(map[string]any)
+	if envelope["signature"] == "" {
+		t.Fatalf("expected signed envelope, got %#v", envelope)
+	}
+	if envelope["host_id"] != host.ID {
+		t.Fatalf("expected envelope host binding %q, got %#v", host.ID, envelope["host_id"])
 	}
 }
 
