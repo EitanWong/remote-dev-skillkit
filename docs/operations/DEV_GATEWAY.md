@@ -112,6 +112,24 @@ curl -s http://127.0.0.1:8787/v1/jobs/<job_id>/artifacts
 curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
 ```
 
+## Release Artifact Verification
+
+Development release artifacts can be signed and verified before bootstrap:
+
+```bash
+rdev release sign \
+  --artifact ./rdev-host.exe \
+  --key .rdev/keys/release-root.json \
+  --out ./rdev-host.exe.rdev-release.json
+
+rdev release verify \
+  --artifact ./rdev-host.exe \
+  --manifest ./rdev-host.exe.rdev-release.json \
+  --root-public-key release-root:<base64url_ed25519_public_key>
+```
+
+The release manifest is a signed `rdev.release-artifact.v1` JSON document. It is not yet wired into the Windows bootstrap script.
+
 ## Limitations
 
 - In-memory state.
@@ -121,5 +139,5 @@ curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
-- If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and binary signature verification.
+- If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and Windows bootstrap integration for release artifact signatures.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, no production redaction schema yet, and no OS-specific sandboxing beyond workspace boundary checks.

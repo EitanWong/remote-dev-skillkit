@@ -43,6 +43,15 @@ rdev-host.exe host serve --mode temporary --manifest-url <manifest-url>
 
 It does not install a Windows Service, write registry persistence, weaken execution policy, or bypass UAC.
 
+The repository also includes release artifact signature primitives:
+
+```bash
+rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
+rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:<base64url_ed25519_public_key>
+```
+
+This signs a manifest containing the artifact name, SHA-256, size, signing key id and Ed25519 signature. The current Windows draft still performs SHA-256 verification directly in PowerShell; wiring the signed release manifest into bootstrap is the next step.
+
 When `ManifestUrl` is provided, the host fetches a signed `rdev.join-manifest.v1`, verifies it, then uses the manifest-provided gateway URL, ticket code and trust fingerprint. In production, the manifest should be rooted in a release/bootstrap trust root rather than only the gateway key advertised by the manifest.
 
 `ManifestRootPublicKey` is formatted as:

@@ -25,6 +25,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 )
 
@@ -60,6 +61,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.demo(args[1:])
 	case "gateway":
 		return a.gateway(args[1:])
+	case "release":
+		return a.release(args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -384,6 +387,37 @@ func (a App) gateway(args []string) error {
 	}
 }
 
+func (a App) release(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing release subcommand")
+	}
+	switch args[0] {
+	case "sign":
+		fs := flag.NewFlagSet("release sign", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		artifact := fs.String("artifact", "", "artifact path to sign")
+		keyPath := fs.String("key", "", "Ed25519 release signing key file")
+		keyID := fs.String("key-id", "release-root", "release signing key id")
+		out := fs.String("out", "", "output manifest path; defaults to <artifact>.rdev-release.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.releaseSign(*artifact, *keyPath, *keyID, *out)
+	case "verify":
+		fs := flag.NewFlagSet("release verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		artifact := fs.String("artifact", "", "artifact path to verify")
+		manifestPath := fs.String("manifest", "", "release manifest path")
+		root := fs.String("root-public-key", "", "release trust root, formatted key_id:base64url_public_key")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.releaseVerify(*artifact, *manifestPath, *root)
+	default:
+		return fmt.Errorf("unknown release subcommand %q", args[0])
+	}
+}
+
 func (a App) gatewayServeDev(addr, auditLog, signingKeyPath, signingKeyID, manifestSigningKeyPath, manifestSigningKeyID string) error {
 	key, created, err := signing.LoadOrCreate(signingKeyPath, signingKeyID)
 	if err != nil {
@@ -420,6 +454,66 @@ func (a App) gatewayServeDev(addr, auditLog, signingKeyPath, signingKeyID, manif
 	return http.ListenAndServe(addr, server.Handler())
 }
 
+func (a App) releaseSign(artifactPath, keyPath, keyID, outPath string) error {
+	if artifactPath == "" {
+		return fmt.Errorf("artifact is required")
+	}
+	if keyPath == "" {
+		return fmt.Errorf("key is required")
+	}
+	key, _, err := signing.LoadOrCreate(keyPath, keyID)
+	if err != nil {
+		return err
+	}
+	manifest, err := release.SignArtifact(artifactPath, key, time.Now())
+	if err != nil {
+		return err
+	}
+	if outPath == "" {
+		outPath = artifactPath + ".rdev-release.json"
+	}
+	if err := release.WriteManifest(outPath, manifest); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"manifest":        manifest,
+		"manifest_path":   outPath,
+		"root_public_key": encodeRootPublicKey(key.ID, key.PublicKey),
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) releaseVerify(artifactPath, manifestPath, rootPublicKey string) error {
+	if artifactPath == "" {
+		return fmt.Errorf("artifact is required")
+	}
+	if manifestPath == "" {
+		return fmt.Errorf("manifest is required")
+	}
+	root, err := parseRootPublicKey(rootPublicKey)
+	if err != nil {
+		return err
+	}
+	manifest, err := release.ReadManifest(manifestPath)
+	if err != nil {
+		return err
+	}
+	if err := manifest.VerifyArtifact(artifactPath, root); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"artifact": artifactPath,
+		"manifest": manifestPath,
+		"sha256":   manifest.ArtifactSHA256,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev - remote development skillkit
 
@@ -432,6 +526,8 @@ Usage:
   rdev mcp tools
   rdev mcp serve
   rdev gateway serve --dev --addr 127.0.0.1:8787
+  rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
+  rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
 `))
 }

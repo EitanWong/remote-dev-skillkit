@@ -559,6 +559,96 @@ func TestGatewayServeRequiresDevFlag(t *testing.T) {
 	}
 }
 
+func TestReleaseSignAndVerify(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "rdev-host.exe")
+	if err := os.WriteFile(artifactPath, []byte("host-binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "release-root.json")
+	manifestPath := filepath.Join(dir, "rdev-host.release.json")
+	var signStdout bytes.Buffer
+	var signStderr bytes.Buffer
+	signApp := NewApp(&signStdout, &signStderr)
+
+	err := signApp.Run(context.Background(), []string{
+		"release", "sign",
+		"--artifact", artifactPath,
+		"--key", keyPath,
+		"--key-id", "release-root",
+		"--out", manifestPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var signed struct {
+		RootPublicKey string `json:"root_public_key"`
+	}
+	if err := json.Unmarshal(signStdout.Bytes(), &signed); err != nil {
+		t.Fatal(err)
+	}
+	if signed.RootPublicKey == "" {
+		t.Fatal("root public key should be returned")
+	}
+	var verifyStdout bytes.Buffer
+	var verifyStderr bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &verifyStderr)
+	err = verifyApp.Run(context.Background(), []string{
+		"release", "verify",
+		"--artifact", artifactPath,
+		"--manifest", manifestPath,
+		"--root-public-key", signed.RootPublicKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected ok verification, got %q", verifyStdout.String())
+	}
+}
+
+func TestReleaseVerifyRejectsTamperedArtifact(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "rdev-host.exe")
+	if err := os.WriteFile(artifactPath, []byte("host-binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "release-root.json")
+	manifestPath := filepath.Join(dir, "rdev-host.release.json")
+	var signStdout bytes.Buffer
+	signApp := NewApp(&signStdout, &bytes.Buffer{})
+	if err := signApp.Run(context.Background(), []string{
+		"release", "sign",
+		"--artifact", artifactPath,
+		"--key", keyPath,
+		"--out", manifestPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var signed struct {
+		RootPublicKey string `json:"root_public_key"`
+	}
+	if err := json.Unmarshal(signStdout.Bytes(), &signed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	verifyApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := verifyApp.Run(context.Background(), []string{
+		"release", "verify",
+		"--artifact", artifactPath,
+		"--manifest", manifestPath,
+		"--root-public-key", signed.RootPublicKey,
+	})
+	if err == nil {
+		t.Fatal("expected tampered artifact to fail")
+	}
+	if !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 }

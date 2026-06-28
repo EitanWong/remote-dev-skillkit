@@ -37,6 +37,7 @@ Implemented now:
 - Persistent development gateway signing key files plus host trust pin checks.
 - Signed development join manifest endpoint for manifest-driven temporary host registration.
 - Join manifests can be signed by a separate bootstrap/release trust root and verified by hosts with a pinned root public key.
+- Release artifact signing and verification primitives via `rdev release sign` / `rdev release verify`.
 - Host-reported failed jobs with audit events.
 - Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, exit-code evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.
@@ -49,6 +50,7 @@ Not implemented yet:
 - Production signing key storage and rotation.
 - Production key rotation/revocation and managed host trust bundle update flow.
 - Full production bootstrap trust root lifecycle and release signing policy.
+- Windows bootstrap integration with release artifact signature verification.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
 - Artifact streaming.
@@ -68,6 +70,7 @@ go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' | go run ./cmd/rdev mcp serve
 go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787
+go run ./cmd/rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev host serve --mode temporary
 ```
 
