@@ -1,0 +1,75 @@
+{
+  "version": "0.0.1",
+  "tools": [
+    {
+      "name": "rdev.tickets.create",
+      "description": "Create a short-lived support or remote development ticket for a target host.",
+      "safety": "Creates access path; does not execute on host."
+    },
+    {
+      "name": "rdev.tickets.revoke",
+      "description": "Revoke a support ticket and prevent new host enrollment through it.",
+      "safety": "Revocation only."
+    },
+    {
+      "name": "rdev.hosts.list",
+      "description": "List enrolled or pending hosts visible to the operator.",
+      "safety": "Read-only."
+    },
+    {
+      "name": "rdev.hosts.capabilities",
+      "description": "Inspect detected and approved capabilities for one host.",
+      "safety": "Read-only."
+    },
+    {
+      "name": "rdev.hosts.approve",
+      "description": "Approve a pending host for a ticket-scoped policy.",
+      "safety": "Access-granting; requires operator approval."
+    },
+    {
+      "name": "rdev.hosts.revoke",
+      "description": "Revoke host access and disconnect active sessions.",
+      "safety": "Revocation only."
+    },
+    {
+      "name": "rdev.jobs.create",
+      "description": "Create a signed, policy-bound remote job for an approved host.",
+      "safety": "May execute on host after policy checks."
+    },
+    {
+      "name": "rdev.jobs.status",
+      "description": "Read status and latest events for a remote job.",
+      "safety": "Read-only."
+    },
+    {
+      "name": "rdev.jobs.cancel",
+      "description": "Request cooperative cancellation of a running job.",
+      "safety": "Cancellation only."
+    },
+    {
+      "name": "rdev.jobs.approve",
+      "description": "Approve a pending high-risk job action such as elevation or package install.",
+      "safety": "Dangerous-action approval."
+    },
+    {
+      "name": "rdev.artifacts.list",
+      "description": "List artifacts produced by a job.",
+      "safety": "Read-only metadata."
+    },
+    {
+      "name": "rdev.artifacts.read",
+      "description": "Read an artifact produced by a job.",
+      "safety": "Read-only; may expose sensitive job output."
+    },
+    {
+      "name": "rdev.audit.query",
+      "description": "Query redacted audit events for tickets, hosts, and jobs.",
+      "safety": "Read-only audit access."
+    },
+    {
+      "name": "rdev.policy.explain",
+      "description": "Explain whether a requested action would be allowed by policy.",
+      "safety": "Read-only policy simulation."
+    }
+  ]
+}
