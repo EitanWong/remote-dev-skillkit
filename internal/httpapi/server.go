@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -21,6 +22,8 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
+	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
+	mux.HandleFunc("POST /v1/hosts/", s.hostAction)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
 	return mux
 }
@@ -66,10 +69,64 @@ func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s Server) registerHost(w http.ResponseWriter, r *http.Request) {
+	var req model.HostRegistration
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	host, err := s.Gateway.RegisterHost(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"host": host})
+}
+
+func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
+	hostID, action, ok := splitHostAction(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown host endpoint")
+		return
+	}
+	switch action {
+	case "approve":
+		var req struct {
+			Capabilities []string `json:"capabilities"`
+		}
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid JSON body")
+				return
+			}
+		}
+		host, err := s.Gateway.ApproveHost(hostID, req.Capabilities)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"host": host})
+	default:
+		writeError(w, http.StatusNotFound, "unknown host action")
+	}
+}
+
 func (s Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": s.Gateway.AuditEvents(),
 	})
+}
+
+func splitHostAction(path string) (hostID string, action string, ok bool) {
+	rest := strings.TrimPrefix(path, "/v1/hosts/")
+	if rest == path {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

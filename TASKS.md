@@ -18,6 +18,7 @@
 - [x] Add JSONL audit store.
 - [x] Add local HTTP development gateway.
 - [x] Add signed job envelope model.
+- [x] Add foreground temporary host local registration loop.
 
 ## Next
 
@@ -27,8 +28,8 @@
 - [x] Define job/artifact/audit models.
 - [x] Implement JSONL audit store.
 - [x] Implement local HTTP gateway for development.
-- [ ] Add PowerShell bootstrap draft.
-- [ ] Add Windows capability detector.
+- [x] Add PowerShell bootstrap draft.
+- [x] Add Windows capability detector.
 - [ ] Add policy explain engine.
 
 ## Later

@@ -4,9 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 )
 
 func TestVersion(t *testing.T) {
@@ -77,6 +83,58 @@ func TestHostServeRejectsUnknownMode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported host mode") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHostServeWithoutTicketExplainsPlaceholder(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"host", "serve", "--mode", "temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "provide --ticket-code") {
+		t.Fatalf("expected ticket-code guidance, got %q", stdout.String())
+	}
+}
+
+func TestHostServeRegistersWithLocalGateway(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err = app.Run(context.Background(), []string{"host", "serve", "--mode", "temporary", "--gateway", server.URL, "--ticket-code", ticket.Code, "--name", "test-host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Status string `json:"status"`
+		Host   struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Status != "registered-pending-approval" {
+		t.Fatalf("unexpected status %q", payload.Status)
+	}
+	if payload.Host.Name != "test-host" {
+		t.Fatalf("expected host name override, got %q", payload.Host.Name)
+	}
+	if payload.Host.Status != "pending" {
+		t.Fatalf("expected pending host, got %q", payload.Host.Status)
 	}
 }
 

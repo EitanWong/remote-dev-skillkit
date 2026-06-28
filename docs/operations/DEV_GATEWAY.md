@@ -15,6 +15,8 @@ rdev gateway serve --dev --addr 127.0.0.1:8787 --audit-log .rdev/audit/events.js
 - `GET /healthz`
 - `POST /v1/tickets`
 - `GET /v1/hosts`
+- `POST /v1/hosts/register`
+- `POST /v1/hosts/{host_id}/approve`
 - `GET /v1/audit`
 
 ## Example
@@ -29,10 +31,19 @@ curl -s -X POST http://127.0.0.1:8787/v1/tickets \
 curl -s http://127.0.0.1:8787/v1/audit
 ```
 
+Register a foreground temporary host:
+
+```bash
+rdev host serve \
+  --mode temporary \
+  --gateway http://127.0.0.1:8787 \
+  --ticket-code ABCD-1234
+```
+
 ## Limitations
 
 - In-memory state.
-- No host transport.
+- No WSS host transport.
 - No authentication.
 - No production TLS.
 - Signed job envelopes use an in-memory development Ed25519 key.

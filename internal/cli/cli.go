@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -8,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -17,6 +17,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -69,23 +70,9 @@ func (a App) version() error {
 }
 
 func (a App) doctor(ctx context.Context) error {
-	report := DoctorReport{
-		OS:           runtime.GOOS,
-		Arch:         runtime.GOARCH,
-		ModeDefaults: capabilitiesToStrings(policy.TemporaryDefaults()),
-		Executables: map[string]ExecutableStatus{
-			"git":        lookup(ctx, "git"),
-			"ssh":        lookup(ctx, "ssh"),
-			"codex":      lookup(ctx, "codex"),
-			"claude":     lookup(ctx, "claude"),
-			"acpx":       lookup(ctx, "acpx"),
-			"tailscale":  lookup(ctx, "tailscale"),
-			"powershell": lookup(ctx, "pwsh", "powershell"),
-		},
-	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(report)
+	return enc.Encode(hostcap.Detect(ctx))
 }
 
 func (a App) mcp(args []string) error {
@@ -121,29 +108,76 @@ func (a App) host(args []string) error {
 		fs.SetOutput(a.Stderr)
 		mode := fs.String("mode", "temporary", "host mode: temporary, managed, or break-glass")
 		gateway := fs.String("gateway", "https://agent.lunflux.com", "gateway URL")
+		ticketCode := fs.String("ticket-code", "", "one-time ticket code for local dev registration")
+		name := fs.String("name", "", "host display name; defaults to detected hostname")
+		once := fs.Bool("once", true, "register once and exit after printing status")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		return a.hostServe(*mode, *gateway)
+		return a.hostServe(context.Background(), hostServeOptions{
+			Mode:       *mode,
+			GatewayURL: *gateway,
+			TicketCode: *ticketCode,
+			Name:       *name,
+			Once:       *once,
+		})
 	default:
 		return fmt.Errorf("unknown host subcommand %q", args[0])
 	}
 }
 
-func (a App) hostServe(mode, gateway string) error {
-	switch mode {
+type hostServeOptions struct {
+	Mode       string
+	GatewayURL string
+	TicketCode string
+	Name       string
+	Once       bool
+}
+
+func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
+	switch opts.Mode {
 	case "temporary", "managed", "break-glass":
 	default:
-		return fmt.Errorf("unsupported host mode %q", mode)
+		return fmt.Errorf("unsupported host mode %q", opts.Mode)
+	}
+	if opts.TicketCode == "" {
+		_, err := fmt.Fprintf(
+			a.Stdout,
+			"rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --ticket-code to register with a local dev gateway; production transport is not implemented yet\n",
+			opts.Mode,
+			opts.GatewayURL,
+		)
+		return err
+	}
+	if !strings.HasPrefix(opts.GatewayURL, "http://127.0.0.1:") && !strings.HasPrefix(opts.GatewayURL, "http://localhost:") {
+		return fmt.Errorf("host registration currently supports local dev gateways only")
+	}
+	inventory := hostcap.Detect(ctx)
+	if opts.Name != "" {
+		inventory.Name = opts.Name
+	}
+	host, err := registerHost(ctx, opts.GatewayURL, model.HostRegistration{
+		TicketCode:   opts.TicketCode,
+		Name:         inventory.Name,
+		OS:           inventory.OS,
+		Arch:         inventory.Arch,
+		Capabilities: inventory.TemporaryCapabilities,
+	})
+	if err != nil {
+		return err
 	}
 
-	_, err := fmt.Fprintf(
-		a.Stdout,
-		"rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=network transport is not implemented yet\n",
-		mode,
-		gateway,
-	)
-	return err
+	payload := map[string]any{
+		"mode":      opts.Mode,
+		"gateway":   opts.GatewayURL,
+		"host":      host,
+		"inventory": inventory,
+		"status":    "registered-pending-approval",
+		"note":      "local development registration only; WSS transport is not implemented yet",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
 func (a App) ticket(args []string) error {
@@ -326,33 +360,39 @@ Usage:
   rdev mcp tools
   rdev mcp serve
   rdev gateway serve --dev --addr 127.0.0.1:8787
-  rdev host serve --mode temporary
+  rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
 `))
 }
 
-type DoctorReport struct {
-	OS           string                      `json:"os"`
-	Arch         string                      `json:"arch"`
-	ModeDefaults []string                    `json:"temporary_mode_default_capabilities"`
-	Executables  map[string]ExecutableStatus `json:"executables"`
-}
-
-type ExecutableStatus struct {
-	Found bool   `json:"found"`
-	Path  string `json:"path,omitempty"`
-}
-
-func lookup(ctx context.Context, names ...string) ExecutableStatus {
-	for _, name := range names {
-		if ctx.Err() != nil {
-			return ExecutableStatus{}
-		}
-		path, err := exec.LookPath(name)
-		if err == nil {
-			return ExecutableStatus{Found: true, Path: path}
-		}
+func registerHost(ctx context.Context, gatewayURL string, registration model.HostRegistration) (model.Host, error) {
+	body, err := json.Marshal(registration)
+	if err != nil {
+		return model.Host{}, err
 	}
-	return ExecutableStatus{}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/hosts/register", bytes.NewReader(body))
+	if err != nil {
+		return model.Host{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Host{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Host  model.Host `json:"host"`
+		Error string     `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.Host{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.Host{}, fmt.Errorf("register host failed: %s", payload.Error)
+	}
+	return payload.Host, nil
 }
 
 func capabilitiesToStrings(caps []policy.Capability) []string {

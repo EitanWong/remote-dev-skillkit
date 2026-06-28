@@ -14,6 +14,30 @@
 10. Operator approves.
 11. Host receives signed policy and jobs.
 
+## Draft Script
+
+The repository includes a visible foreground bootstrap draft:
+
+```text
+scripts/bootstrap/windows-temporary.ps1
+```
+
+It accepts:
+
+- `GatewayUrl`
+- `TicketCode`
+- `DownloadUrl`
+- `ExpectedSha256`
+- optional `HostName`
+
+The script downloads `rdev-host.exe` into a temp directory, verifies SHA-256, and runs:
+
+```powershell
+rdev-host.exe host serve --mode temporary --gateway <gateway> --ticket-code <ticket>
+```
+
+It does not install a Windows Service, write registry persistence, weaken execution policy, or bypass UAC.
+
 ## Bootstrap Requirements
 
 - No Node/Python/Git dependency.
