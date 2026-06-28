@@ -281,6 +281,75 @@ func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, m
 	return job, artifact, nil
 }
 
+func (g *MemoryGateway) CompleteJobForHost(hostID, jobID, artifactContent string) (model.Job, model.Artifact, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status != model.HostStatusActive {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
+	}
+	job, ok := g.jobs[jobID]
+	if !ok {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job", ErrNotFound)
+	}
+	if job.HostID != hostID {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job is not assigned to host", ErrPolicyDenied)
+	}
+	if job.Status != model.JobStatusQueued && job.Status != model.JobStatusRunning {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job must be queued or running", ErrInvalidState)
+	}
+	now := g.now().UTC()
+	if job.StartedAt == nil {
+		job.StartedAt = &now
+	}
+	job.Status = model.JobStatusSucceeded
+	job.EndedAt = &now
+	artifact, err := model.NewArtifact(job.ID, "text", "demo-result.txt", artifactContent, now)
+	if err != nil {
+		return model.Job{}, model.Artifact{}, err
+	}
+	g.jobs[job.ID] = job
+	g.artifacts[job.ID] = append(g.artifacts[job.ID], artifact)
+	g.appendAuditLocked("host", "job.complete", job.ID, "completed job and produced artifact")
+	return job, artifact, nil
+}
+
+func (g *MemoryGateway) NextJobForHost(hostID string) (model.Job, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.Job{}, false, fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status != model.HostStatusActive {
+		return model.Job{}, false, fmt.Errorf("%w: host must be active", ErrInvalidState)
+	}
+	jobs := make([]model.Job, 0, len(g.jobs))
+	for _, job := range g.jobs {
+		if job.HostID == hostID && job.Status == model.JobStatusQueued {
+			jobs = append(jobs, job)
+		}
+	}
+	if len(jobs) == 0 {
+		return model.Job{}, false, nil
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
+	})
+	job := jobs[0]
+	now := g.now().UTC()
+	job.Status = model.JobStatusRunning
+	job.StartedAt = &now
+	g.jobs[job.ID] = job
+	g.appendAuditLocked("host", "job.claim", job.ID, "host claimed queued job")
+	return job, true, nil
+}
+
 func (g *MemoryGateway) Job(jobID string) (model.Job, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

@@ -32,6 +32,7 @@ Implemented now:
 - `rdev gateway serve --dev` local HTTP development gateway.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
+- Local dev host registration, job polling, and job completion loop.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 
@@ -40,6 +41,8 @@ Not implemented yet:
 - Real gateway networking.
 - Host enrollment keys and certificates.
 - Production signing key storage and rotation.
+- Production WSS host transport.
+- Real scoped shell adapter execution.
 - Artifact streaming.
 - Windows service installation.
 - Tailscale/headscale adapter.

@@ -19,6 +19,8 @@
 - [x] Add local HTTP development gateway.
 - [x] Add signed job envelope model.
 - [x] Add foreground temporary host local registration loop.
+- [x] Add local dev job polling and completion loop.
+- [x] Add host-side dev envelope/policy checks.
 
 ## Next
 
@@ -30,7 +32,10 @@
 - [x] Implement local HTTP gateway for development.
 - [x] Add PowerShell bootstrap draft.
 - [x] Add Windows capability detector.
+- [x] Add dev gateway job create/status/claim/complete endpoints.
 - [ ] Add policy explain engine.
+- [ ] Add durable signing key storage and host trust distribution.
+- [ ] Add real scoped shell adapter execution.
 
 ## Later
 

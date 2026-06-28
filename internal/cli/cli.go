@@ -18,6 +18,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -111,15 +112,21 @@ func (a App) host(args []string) error {
 		ticketCode := fs.String("ticket-code", "", "one-time ticket code for local dev registration")
 		name := fs.String("name", "", "host display name; defaults to detected hostname")
 		once := fs.Bool("once", true, "register once and exit after printing status")
+		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
+		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
+		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.hostServe(context.Background(), hostServeOptions{
-			Mode:       *mode,
-			GatewayURL: *gateway,
-			TicketCode: *ticketCode,
-			Name:       *name,
-			Once:       *once,
+			Mode:            *mode,
+			GatewayURL:      *gateway,
+			TicketCode:      *ticketCode,
+			Name:            *name,
+			Once:            *once,
+			PollInterval:    *pollInterval,
+			MaxJobs:         *maxJobs,
+			ApprovalTimeout: *approvalTimeout,
 		})
 	default:
 		return fmt.Errorf("unknown host subcommand %q", args[0])
@@ -127,11 +134,14 @@ func (a App) host(args []string) error {
 }
 
 type hostServeOptions struct {
-	Mode       string
-	GatewayURL string
-	TicketCode string
-	Name       string
-	Once       bool
+	Mode            string
+	GatewayURL      string
+	TicketCode      string
+	Name            string
+	Once            bool
+	PollInterval    time.Duration
+	MaxJobs         int
+	ApprovalTimeout time.Duration
 }
 
 func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
@@ -177,6 +187,18 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
+	if opts.Once {
+		return enc.Encode(payload)
+	}
+	if _, err := waitForHostActive(ctx, opts.GatewayURL, host.ID, opts.ApprovalTimeout, opts.PollInterval); err != nil {
+		return err
+	}
+	processed, err := a.pollAndRunDevJobs(ctx, opts, host.ID)
+	if err != nil {
+		return err
+	}
+	payload["processed_jobs"] = processed
+	payload["status"] = "polling-complete"
 	return enc.Encode(payload)
 }
 
@@ -393,6 +415,164 @@ func registerHost(ctx context.Context, gatewayURL string, registration model.Hos
 		return model.Host{}, fmt.Errorf("register host failed: %s", payload.Error)
 	}
 	return payload.Host, nil
+}
+
+func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostID string) (int, error) {
+	maxJobs := opts.MaxJobs
+	if maxJobs <= 0 {
+		maxJobs = 1
+	}
+	interval := opts.PollInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	processed := 0
+	for processed < maxJobs {
+		job, found, err := fetchNextJob(ctx, opts.GatewayURL, hostID)
+		if err != nil {
+			return processed, err
+		}
+		if !found {
+			timer := time.NewTimer(interval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return processed, ctx.Err()
+			case <-timer.C:
+			}
+			continue
+		}
+		result, err := hostrunner.RunDevJob(hostID, job, time.Now())
+		if err != nil {
+			return processed, err
+		}
+		if _, err := completeJob(ctx, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); err != nil {
+			return processed, err
+		}
+		processed++
+	}
+	return processed, nil
+}
+
+func fetchNextJob(ctx context.Context, gatewayURL, hostID string) (model.Job, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/hosts/"+hostID+"/jobs/next", nil)
+	if err != nil {
+		return model.Job{}, false, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Job{}, false, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Job   *model.Job `json:"job"`
+		Error string     `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.Job{}, false, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.Job{}, false, fmt.Errorf("fetch next job failed: %s", payload.Error)
+	}
+	if payload.Job == nil {
+		return model.Job{}, false, nil
+	}
+	return *payload.Job, true, nil
+}
+
+func waitForHostActive(ctx context.Context, gatewayURL, hostID string, timeout, interval time.Duration) (model.Host, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	if interval <= 0 {
+		interval = time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		host, err := fetchHost(ctx, gatewayURL, hostID)
+		if err != nil {
+			return model.Host{}, err
+		}
+		if host.Status == model.HostStatusActive {
+			return host, nil
+		}
+		if host.Status == model.HostStatusRevoked {
+			return model.Host{}, fmt.Errorf("host was revoked before approval")
+		}
+		if time.Now().After(deadline) {
+			return model.Host{}, fmt.Errorf("timed out waiting for host approval")
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return model.Host{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func fetchHost(ctx context.Context, gatewayURL, hostID string) (model.Host, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/hosts/"+hostID, nil)
+	if err != nil {
+		return model.Host{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Host{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Host  model.Host `json:"host"`
+		Error string     `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.Host{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.Host{}, fmt.Errorf("fetch host failed: %s", payload.Error)
+	}
+	return payload.Host, nil
+}
+
+func completeJob(ctx context.Context, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
+	body, err := json.Marshal(map[string]string{
+		"host_id":          hostID,
+		"artifact_content": artifactContent,
+	})
+	if err != nil {
+		return model.Job{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/jobs/"+jobID+"/complete", bytes.NewReader(body))
+	if err != nil {
+		return model.Job{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Job{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Job   model.Job `json:"job"`
+		Error string    `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.Job{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.Job{}, fmt.Errorf("complete job failed: %s", payload.Error)
+	}
+	return payload.Job, nil
 }
 
 func capabilitiesToStrings(caps []policy.Capability) []string {

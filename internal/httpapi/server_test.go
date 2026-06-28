@@ -78,6 +78,72 @@ func TestRegisterAndApproveHost(t *testing.T) {
 	if approvePayload.Host.Status != model.HostStatusActive {
 		t.Fatalf("expected active host, got %s", approvePayload.Host.Status)
 	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+approvePayload.Host.ID, nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+}
+
+func TestJobCreateClaimAndComplete(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
+	jobRec := httptest.NewRecorder()
+	handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+	var jobPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+	if jobPayload.Job.Envelope == nil || jobPayload.Job.Envelope.Signature == "" {
+		t.Fatal("created job should include signed envelope")
+	}
+
+	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextRec := httptest.NewRecorder()
+	handler.ServeHTTP(nextRec, nextReq)
+	if nextRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
+	}
+	var nextPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(nextRec.Body.Bytes(), &nextPayload); err != nil {
+		t.Fatal(err)
+	}
+	if nextPayload.Job.Status != model.JobStatusRunning {
+		t.Fatalf("expected running job after claim, got %s", nextPayload.Job.Status)
+	}
+
+	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"done"}`))
+	completeRec := httptest.NewRecorder()
+	handler.ServeHTTP(completeRec, completeReq)
+	if completeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", completeRec.Code, completeRec.Body.String())
+	}
+	var completePayload struct {
+		Job      model.Job      `json:"job"`
+		Artifact model.Artifact `json:"artifact"`
+	}
+	if err := json.Unmarshal(completeRec.Body.Bytes(), &completePayload); err != nil {
+		t.Fatal(err)
+	}
+	if completePayload.Job.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected succeeded job, got %s", completePayload.Job.Status)
+	}
+	if completePayload.Artifact.Content != "done" {
+		t.Fatalf("expected artifact content, got %q", completePayload.Artifact.Content)
+	}
 }
 
 func createTicket(t *testing.T, handler http.Handler) model.Ticket {
@@ -96,4 +162,35 @@ func createTicket(t *testing.T, handler http.Handler) model.Ticket {
 		t.Fatal(err)
 	}
 	return payload.Ticket
+}
+
+func registerAndApproveHost(t *testing.T, handler http.Handler) model.Host {
+	t.Helper()
+	ticket := createTicket(t, handler)
+	registerBody := bytes.NewBufferString(`{"ticket_code":"` + ticket.Code + `","name":"win-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", registerBody)
+	registerRec := httptest.NewRecorder()
+	handler.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", registerRec.Code, registerRec.Body.String())
+	}
+	var registerPayload struct {
+		Host model.Host `json:"host"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
+		t.Fatal(err)
+	}
+	approveReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/"+registerPayload.Host.ID+"/approve", bytes.NewBufferString(`{"capabilities":["shell.user","fs.read"]}`))
+	approveRec := httptest.NewRecorder()
+	handler.ServeHTTP(approveRec, approveReq)
+	if approveRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+	var approvePayload struct {
+		Host model.Host `json:"host"`
+	}
+	if err := json.Unmarshal(approveRec.Body.Bytes(), &approvePayload); err != nil {
+		t.Fatal(err)
+	}
+	return approvePayload.Host
 }
