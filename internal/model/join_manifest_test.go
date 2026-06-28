@@ -39,6 +39,47 @@ func TestJoinManifestSignsAndVerifies(t *testing.T) {
 	}
 }
 
+func TestJoinManifestVerifiesWithSeparateTrustRoot(t *testing.T) {
+	gatewayPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPublicKey, rootPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongRootPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	ticket, err := NewTicket(HostModeAttendedTemporary, 600, []string{"shell.user"}, "repair", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := NewJoinManifest(ticket, JoinManifestSpec{
+		GatewayURL:   "http://127.0.0.1:8787",
+		Trust:        NewTrustBundle("gateway-jobs", gatewayPublicKey),
+		SigningKeyID: "release-root",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err = manifest.Sign(rootPrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.VerifyWithRoot(NewTrustBundle("release-root", rootPublicKey), now); err != nil {
+		t.Fatalf("expected manifest to verify with release root: %v", err)
+	}
+	if err := manifest.Verify(now); !errors.Is(err, ErrJoinManifestInvalid) {
+		t.Fatalf("expected embedded gateway trust not to verify release-root manifest, got %v", err)
+	}
+	if err := manifest.VerifyWithRoot(NewTrustBundle("release-root", wrongRootPublicKey), now); !errors.Is(err, ErrJoinManifestSignature) {
+		t.Fatalf("expected wrong release root to fail, got %v", err)
+	}
+}
+
 func TestJoinManifestRejectsTampering(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

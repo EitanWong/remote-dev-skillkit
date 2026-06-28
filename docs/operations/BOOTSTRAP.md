@@ -31,6 +31,7 @@ It accepts:
 - `DownloadUrl`
 - `ExpectedSha256`
 - optional `ManifestUrl`
+- optional `ManifestRootPublicKey`
 - optional `TrustPin`
 - optional `HostName`
 
@@ -43,6 +44,14 @@ rdev-host.exe host serve --mode temporary --manifest-url <manifest-url>
 It does not install a Windows Service, write registry persistence, weaken execution policy, or bypass UAC.
 
 When `ManifestUrl` is provided, the host fetches a signed `rdev.join-manifest.v1`, verifies it, then uses the manifest-provided gateway URL, ticket code and trust fingerprint. In production, the manifest should be rooted in a release/bootstrap trust root rather than only the gateway key advertised by the manifest.
+
+`ManifestRootPublicKey` is formatted as:
+
+```text
+<key_id>:<base64url_ed25519_public_key>
+```
+
+When it is present, `rdev-host` verifies the join manifest with that pinned root before it trusts the embedded gateway job-signing bundle. Without it, `rdev-host` only uses the development self-trust path where the manifest is signed by the same gateway key it advertises.
 
 ## Bootstrap Requirements
 

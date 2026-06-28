@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -118,20 +120,22 @@ func (a App) host(args []string) error {
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
 		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
 		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
+		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.hostServe(context.Background(), hostServeOptions{
-			Mode:            *mode,
-			GatewayURL:      *gateway,
-			TicketCode:      *ticketCode,
-			ManifestURL:     *manifestURL,
-			Name:            *name,
-			Once:            *once,
-			PollInterval:    *pollInterval,
-			MaxJobs:         *maxJobs,
-			ApprovalTimeout: *approvalTimeout,
-			TrustPin:        *trustPin,
+			Mode:                  *mode,
+			GatewayURL:            *gateway,
+			TicketCode:            *ticketCode,
+			ManifestURL:           *manifestURL,
+			Name:                  *name,
+			Once:                  *once,
+			PollInterval:          *pollInterval,
+			MaxJobs:               *maxJobs,
+			ApprovalTimeout:       *approvalTimeout,
+			TrustPin:              *trustPin,
+			ManifestRootPublicKey: *manifestRootPublicKey,
 		})
 	default:
 		return fmt.Errorf("unknown host subcommand %q", args[0])
@@ -139,16 +143,17 @@ func (a App) host(args []string) error {
 }
 
 type hostServeOptions struct {
-	Mode            string
-	GatewayURL      string
-	TicketCode      string
-	ManifestURL     string
-	Name            string
-	Once            bool
-	PollInterval    time.Duration
-	MaxJobs         int
-	ApprovalTimeout time.Duration
-	TrustPin        string
+	Mode                  string
+	GatewayURL            string
+	TicketCode            string
+	ManifestURL           string
+	Name                  string
+	Once                  bool
+	PollInterval          time.Duration
+	MaxJobs               int
+	ApprovalTimeout       time.Duration
+	TrustPin              string
+	ManifestRootPublicKey string
 }
 
 func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
@@ -158,7 +163,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		return fmt.Errorf("unsupported host mode %q", opts.Mode)
 	}
 	if opts.ManifestURL != "" {
-		manifest, err := fetchJoinManifest(ctx, opts.ManifestURL, opts.TrustPin)
+		manifest, err := fetchJoinManifest(ctx, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
 		if err != nil {
 			return err
 		}
@@ -365,24 +370,39 @@ func (a App) gateway(args []string) error {
 		auditLog := fs.String("audit-log", "", "optional JSONL audit log path")
 		signingKey := fs.String("signing-key", "", "optional persistent Ed25519 signing key file")
 		signingKeyID := fs.String("signing-key-id", signing.DefaultKeyID, "signing key id for new or existing signing key file")
+		manifestSigningKey := fs.String("manifest-signing-key", "", "optional Ed25519 key file for signing join manifests")
+		manifestSigningKeyID := fs.String("manifest-signing-key-id", "manifest-dev", "signing key id for join manifests")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if !*dev {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
-		return a.gatewayServeDev(*addr, *auditLog, *signingKey, *signingKeyID)
+		return a.gatewayServeDev(*addr, *auditLog, *signingKey, *signingKeyID, *manifestSigningKey, *manifestSigningKeyID)
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
 	}
 }
 
-func (a App) gatewayServeDev(addr, auditLog, signingKeyPath, signingKeyID string) error {
+func (a App) gatewayServeDev(addr, auditLog, signingKeyPath, signingKeyID, manifestSigningKeyPath, manifestSigningKeyID string) error {
 	key, created, err := signing.LoadOrCreate(signingKeyPath, signingKeyID)
 	if err != nil {
 		return err
 	}
 	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
+	if manifestSigningKeyPath != "" {
+		manifestKey, manifestCreated, err := signing.LoadOrCreate(manifestSigningKeyPath, manifestSigningKeyID)
+		if err != nil {
+			return err
+		}
+		gw.WithManifestSigningKey(manifestKey.ID, manifestKey.PublicKey, manifestKey.PrivateKey)
+		action := "loaded"
+		if manifestCreated {
+			action = "created"
+		}
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway manifest signing key %s at %s\n", action, manifestSigningKeyPath)
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway manifest root id=%s public_key=%s\n", manifestKey.ID, encodeRootPublicKey(manifestKey.ID, manifestKey.PublicKey))
+	}
 	if auditLog != "" {
 		store := audit.NewJSONLStore(auditLog)
 		gw.WithAuditSink(&store)
@@ -491,7 +511,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	return processed, nil
 }
 
-func fetchJoinManifest(ctx context.Context, manifestURL, trustPin string) (model.JoinManifest, error) {
+func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootPublicKey string) (model.JoinManifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
 		return model.JoinManifest{}, err
@@ -514,13 +534,40 @@ func fetchJoinManifest(ctx context.Context, manifestURL, trustPin string) (model
 		}
 		return model.JoinManifest{}, fmt.Errorf("fetch join manifest failed: %s", payload.Error)
 	}
-	if err := payload.Manifest.Verify(time.Now()); err != nil {
+	if manifestRootPublicKey != "" {
+		root, err := parseRootPublicKey(manifestRootPublicKey)
+		if err != nil {
+			return model.JoinManifest{}, err
+		}
+		if err := payload.Manifest.VerifyWithRoot(root, time.Now()); err != nil {
+			return model.JoinManifest{}, err
+		}
+	} else if err := payload.Manifest.Verify(time.Now()); err != nil {
 		return model.JoinManifest{}, err
 	}
 	if err := payload.Manifest.Trust.VerifyPin(trustPin); err != nil {
 		return model.JoinManifest{}, err
 	}
 	return payload.Manifest, nil
+}
+
+func encodeRootPublicKey(keyID string, publicKey ed25519.PublicKey) string {
+	return keyID + ":" + base64.RawURLEncoding.EncodeToString(publicKey)
+}
+
+func parseRootPublicKey(value string) (model.TrustBundle, error) {
+	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return model.TrustBundle{}, fmt.Errorf("manifest root public key must be formatted key_id:base64url_public_key")
+	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return model.TrustBundle{}, fmt.Errorf("decode manifest root public key: %w", err)
+	}
+	if len(publicKey) != ed25519.PublicKeySize {
+		return model.TrustBundle{}, fmt.Errorf("invalid manifest root public key length %d", len(publicKey))
+	}
+	return model.NewTrustBundle(parts[0], ed25519.PublicKey(publicKey)), nil
 }
 
 func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.TrustBundle, error) {

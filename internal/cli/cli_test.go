@@ -3,7 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -176,6 +179,84 @@ func TestHostServeRegistersWithJoinManifest(t *testing.T) {
 	}
 }
 
+func TestHostServeRegistersWithJoinManifestRoot(t *testing.T) {
+	gatewayPublicKey, gatewayPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPublicKey, manifestPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(timeNowForTest, "gateway-jobs", gatewayPublicKey, gatewayPrivateKey).
+		WithManifestSigningKey("manifest-root", manifestPublicKey, manifestPrivateKey)
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--manifest-url", server.URL + "/v1/tickets/" + ticket.Code + "/manifest",
+		"--manifest-root-public-key", encodeRootPublicKey("manifest-root", manifestPublicKey),
+		"--name", "manifest-root-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Host struct {
+			Name string `json:"name"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Host.Name != "manifest-root-host" {
+		t.Fatalf("expected host name override, got %q", payload.Host.Name)
+	}
+}
+
+func TestFetchJoinManifestRejectsWrongManifestRoot(t *testing.T) {
+	gatewayPublicKey, gatewayPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPublicKey, manifestPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(timeNowForTest, "gateway-jobs", gatewayPublicKey, gatewayPrivateKey).
+		WithManifestSigningKey("manifest-root", manifestPublicKey, manifestPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilitiesToStrings(policy.TemporaryDefaults()), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	_, err = fetchJoinManifest(
+		context.Background(),
+		server.URL+"/v1/tickets/"+ticket.Code+"/manifest",
+		"",
+		encodeRootPublicKey("manifest-root", wrongPublicKey),
+	)
+	if !errors.Is(err, model.ErrJoinManifestSignature) {
+		t.Fatalf("expected manifest signature failure, got %v", err)
+	}
+}
+
 func TestFetchJoinManifestRejectsPinMismatch(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilitiesToStrings(policy.TemporaryDefaults()), "test")
@@ -185,7 +266,7 @@ func TestFetchJoinManifestRejectsPinMismatch(t *testing.T) {
 	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
 	defer server.Close()
 
-	_, err = fetchJoinManifest(context.Background(), server.URL+"/v1/tickets/"+ticket.Code+"/manifest", "sha256:0000")
+	_, err = fetchJoinManifest(context.Background(), server.URL+"/v1/tickets/"+ticket.Code+"/manifest", "sha256:0000", "")
 	if err == nil {
 		t.Fatal("expected trust pin mismatch")
 	}

@@ -13,6 +13,8 @@ param(
 
   [string]$ManifestUrl = "",
 
+  [string]$ManifestRootPublicKey = "",
+
   [string]$TrustPin = "",
 
   [string]$HostName = $env:COMPUTERNAME
@@ -60,6 +62,9 @@ Write-Host "Ticket:  $TicketCode"
 if ($ManifestUrl -ne "") {
   Write-Host "Manifest: $ManifestUrl"
 }
+if ($ManifestRootPublicKey -ne "") {
+  Write-Host "Manifest root: configured"
+}
 Write-Host "Mode:    attended temporary foreground"
 Write-Host ""
 Write-Host "This script does not install a Windows Service and does not create hidden persistence."
@@ -78,6 +83,9 @@ if ($ManifestUrl -ne "") {
   $hostArgs += @("--manifest-url", $ManifestUrl)
 } else {
   $hostArgs += @("--gateway", $GatewayUrl, "--ticket-code", $TicketCode)
+}
+if ($ManifestRootPublicKey -ne "") {
+  $hostArgs += @("--manifest-root-public-key", $ManifestRootPublicKey)
 }
 if ($TrustPin -ne "") {
   $hostArgs += @("--trust-pin", $TrustPin)

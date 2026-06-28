@@ -142,6 +142,40 @@ func TestMemoryGatewayCreatesSignedJoinManifest(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayCreatesJoinManifestWithSeparateRoot(t *testing.T) {
+	gatewayPublicKey, gatewayPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPublicKey, manifestPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-jobs", gatewayPublicKey, gatewayPrivateKey).
+		WithManifestSigningKey("manifest-root", manifestPublicKey, manifestPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := gw.JoinManifest(ticket.Code, "http://127.0.0.1:8787", "http://127.0.0.1:8787/join/"+ticket.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.SigningKeyID != "manifest-root" {
+		t.Fatalf("expected manifest signing root, got %q", manifest.SigningKeyID)
+	}
+	if manifest.Trust.SigningKeyID != "gateway-jobs" {
+		t.Fatalf("expected embedded gateway job trust, got %q", manifest.Trust.SigningKeyID)
+	}
+	if err := manifest.VerifyWithRoot(model.NewTrustBundle("manifest-root", manifestPublicKey), now); err != nil {
+		t.Fatalf("expected manifest to verify with separate root: %v", err)
+	}
+	if err := manifest.Verify(now); !errors.Is(err, model.ErrJoinManifestInvalid) {
+		t.Fatalf("expected dev self-trust verify to reject separate root, got %v", err)
+	}
+}
+
 func TestMemoryGatewayRejectsJobAfterTicketExpiry(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	current := now

@@ -99,6 +99,10 @@ func (m JoinManifest) Sign(privateKey ed25519.PrivateKey) (JoinManifest, error) 
 }
 
 func (m JoinManifest) Verify(now time.Time) error {
+	return m.VerifyWithRoot(m.Trust, now)
+}
+
+func (m JoinManifest) VerifyWithRoot(root TrustBundle, now time.Time) error {
 	if err := m.validateForSigning(); err != nil {
 		return err
 	}
@@ -108,7 +112,10 @@ func (m JoinManifest) Verify(now time.Time) error {
 	if now.UTC().After(m.ExpiresAt) {
 		return ErrJoinManifestExpired
 	}
-	publicKey, err := m.Trust.Ed25519PublicKey()
+	if root.SigningKeyID != m.SigningKeyID {
+		return fmt.Errorf("%w: trust root key id mismatch", ErrJoinManifestInvalid)
+	}
+	publicKey, err := root.Ed25519PublicKey()
 	if err != nil {
 		return err
 	}
@@ -140,9 +147,6 @@ func (m JoinManifest) validateForSigning() error {
 	}
 	if m.SigningAlg != JobEnvelopeSigningAlg || m.SigningKeyID == "" {
 		return fmt.Errorf("%w: unsupported signing metadata", ErrJoinManifestInvalid)
-	}
-	if m.Trust.SigningKeyID != m.SigningKeyID {
-		return fmt.Errorf("%w: trust key id mismatch", ErrJoinManifestInvalid)
 	}
 	fingerprint, err := m.Trust.Fingerprint()
 	if err != nil {

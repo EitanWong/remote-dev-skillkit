@@ -36,6 +36,7 @@ Implemented now:
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Persistent development gateway signing key files plus host trust pin checks.
 - Signed development join manifest endpoint for manifest-driven temporary host registration.
+- Join manifests can be signed by a separate bootstrap/release trust root and verified by hosts with a pinned root public key.
 - Host-reported failed jobs with audit events.
 - Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, exit-code evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.
@@ -47,6 +48,7 @@ Not implemented yet:
 - Host enrollment keys and certificates.
 - Production signing key storage and rotation.
 - Production key rotation/revocation and managed host trust bundle update flow.
+- Full production bootstrap trust root lifecycle and release signing policy.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
 - Artifact streaming.

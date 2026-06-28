@@ -26,6 +26,7 @@
 - [x] Add perfect end-state architecture blueprint.
 - [x] Add persistent dev gateway signing key and host trust pin checks.
 - [x] Add signed dev join manifest endpoint and manifest-driven host registration.
+- [x] Add initial release/bootstrap trust root verification for join manifests.
 
 ## Next
 
@@ -40,7 +41,8 @@
 - [x] Add dev gateway job create/status/claim/complete endpoints.
 - [ ] Add policy explain engine.
 - [ ] Add production key rotation/revocation and host trust update flow.
-- [ ] Add production release/bootstrap trust root for join manifests.
+- [x] Add production release/bootstrap trust root for join manifests.
+- [ ] Add production release key lifecycle policy and binary signature verification.
 - [x] Add real scoped shell adapter execution.
 - [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
 - [ ] Add durable shell adapter audit schema and redaction rules.

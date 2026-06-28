@@ -21,18 +21,21 @@ var (
 )
 
 type MemoryGateway struct {
-	mu         sync.Mutex
-	now        func() time.Time
-	auditSink  AuditSink
-	tickets    map[string]model.Ticket
-	codeIndex  map[string]string
-	hosts      map[string]model.Host
-	jobs       map[string]model.Job
-	artifacts  map[string][]model.Artifact
-	audit      []model.AuditEvent
-	signingID  string
-	publicKey  ed25519.PublicKey
-	privateKey ed25519.PrivateKey
+	mu                 sync.Mutex
+	now                func() time.Time
+	auditSink          AuditSink
+	tickets            map[string]model.Ticket
+	codeIndex          map[string]string
+	hosts              map[string]model.Host
+	jobs               map[string]model.Job
+	artifacts          map[string][]model.Artifact
+	audit              []model.AuditEvent
+	signingID          string
+	publicKey          ed25519.PublicKey
+	privateKey         ed25519.PrivateKey
+	manifestSigningID  string
+	manifestPublicKey  ed25519.PublicKey
+	manifestPrivateKey ed25519.PrivateKey
 }
 
 type AuditSink interface {
@@ -55,27 +58,47 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 	if signingID == "" {
 		signingID = "gateway-dev"
 	}
+	validateSigningKey("gateway", publicKey, privateKey)
+	return &MemoryGateway{
+		now:                now,
+		tickets:            map[string]model.Ticket{},
+		codeIndex:          map[string]string{},
+		hosts:              map[string]model.Host{},
+		jobs:               map[string]model.Job{},
+		artifacts:          map[string][]model.Artifact{},
+		signingID:          signingID,
+		publicKey:          append(ed25519.PublicKey(nil), publicKey...),
+		privateKey:         append(ed25519.PrivateKey(nil), privateKey...),
+		manifestSigningID:  signingID,
+		manifestPublicKey:  append(ed25519.PublicKey(nil), publicKey...),
+		manifestPrivateKey: append(ed25519.PrivateKey(nil), privateKey...),
+	}
+}
+
+func validateSigningKey(label string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey) {
 	if len(publicKey) != ed25519.PublicKeySize {
-		panic(fmt.Sprintf("invalid gateway signing public key length %d", len(publicKey)))
+		panic(fmt.Sprintf("invalid %s signing public key length %d", label, len(publicKey)))
 	}
 	if len(privateKey) != ed25519.PrivateKeySize {
-		panic(fmt.Sprintf("invalid gateway signing private key length %d", len(privateKey)))
+		panic(fmt.Sprintf("invalid %s signing private key length %d", label, len(privateKey)))
 	}
 	derived, ok := privateKey.Public().(ed25519.PublicKey)
 	if !ok || !derived.Equal(publicKey) {
-		panic("gateway signing public key does not match private key")
+		panic(fmt.Sprintf("%s signing public key does not match private key", label))
 	}
-	return &MemoryGateway{
-		now:        now,
-		tickets:    map[string]model.Ticket{},
-		codeIndex:  map[string]string{},
-		hosts:      map[string]model.Host{},
-		jobs:       map[string]model.Job{},
-		artifacts:  map[string][]model.Artifact{},
-		signingID:  signingID,
-		publicKey:  append(ed25519.PublicKey(nil), publicKey...),
-		privateKey: append(ed25519.PrivateKey(nil), privateKey...),
+}
+
+func (g *MemoryGateway) WithManifestSigningKey(signingID string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey) *MemoryGateway {
+	if signingID == "" {
+		signingID = "manifest-dev"
 	}
+	validateSigningKey("manifest", publicKey, privateKey)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.manifestSigningID = signingID
+	g.manifestPublicKey = append(ed25519.PublicKey(nil), publicKey...)
+	g.manifestPrivateKey = append(ed25519.PrivateKey(nil), privateKey...)
+	return g
 }
 
 func (g *MemoryGateway) WithAuditSink(sink AuditSink) *MemoryGateway {
@@ -297,12 +320,12 @@ func (g *MemoryGateway) JoinManifest(ticketCode, gatewayURL, joinURL string) (mo
 		GatewayURL:   gatewayURL,
 		JoinURL:      joinURL,
 		Trust:        model.NewTrustBundle(g.signingID, g.publicKey),
-		SigningKeyID: g.signingID,
+		SigningKeyID: g.manifestSigningID,
 	}, g.now())
 	if err != nil {
 		return model.JoinManifest{}, err
 	}
-	return manifest.Sign(g.privateKey)
+	return manifest.Sign(g.manifestPrivateKey)
 }
 
 func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, model.Artifact, error) {

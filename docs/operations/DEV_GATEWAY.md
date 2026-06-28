@@ -11,13 +11,15 @@ rdev gateway serve \
   --dev \
   --addr 127.0.0.1:8787 \
   --audit-log .rdev/audit/events.jsonl \
-  --signing-key .rdev/keys/gateway-signing-key.json
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --manifest-signing-key .rdev/keys/manifest-root-key.json
 ```
 
 When `--signing-key` is set, the dev gateway creates or reuses an Ed25519 signing key file with `0600` permissions and prints its public-key fingerprint:
 
 ```text
 rdev gateway signing key id=gateway-dev fingerprint=sha256:<hex>
+rdev gateway manifest root id=manifest-dev public_key=manifest-dev:<base64url_ed25519_public_key>
 ```
 
 Hosts can pin that key during local development:
@@ -37,6 +39,7 @@ Or they can consume the signed join manifest, which carries the ticket code, gat
 rdev host serve \
   --mode temporary \
   --manifest-url http://127.0.0.1:8787/v1/tickets/<ticket_code>/manifest \
+  --manifest-root-public-key manifest-dev:<base64url_ed25519_public_key> \
   --once=false
 ```
 
@@ -117,5 +120,6 @@ curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
 - No production TLS.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
-- The dev join manifest is signed by the same gateway key it advertises. Production still needs a release/bootstrap trust root, key rotation, revocation and managed trust bundle updates.
+- If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
+- If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and binary signature verification.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, no production redaction schema yet, and no OS-specific sandboxing beyond workspace boundary checks.
