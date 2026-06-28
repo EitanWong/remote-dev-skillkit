@@ -74,3 +74,24 @@ func TestMemoryGatewayRejectsJobForPendingHost(t *testing.T) {
 		t.Fatal("expected pending host job creation to fail")
 	}
 }
+
+func TestMemoryGatewayRevokeTicketPreventsRegistration(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.RevokeTicket(ticket.ID, "done"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "win-temp-01",
+		OS:         "windows",
+		Arch:       "amd64",
+	}); err == nil {
+		t.Fatal("expected revoked ticket registration to fail")
+	}
+}

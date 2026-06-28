@@ -10,7 +10,7 @@
 - [x] Add Agent Skills drafts.
 - [x] Add local preview ticket creation.
 - [x] Add policy explanation command.
-- [ ] Add real MCP stdio server.
+- [x] Add real MCP stdio server.
 - [x] Add in-memory gateway for tickets, hosts, jobs, artifacts, and audit.
 - [x] Add local demo flow for ticket-host-job-audit.
 - [ ] Add foreground temporary host local loop.

@@ -8,22 +8,27 @@ import (
 )
 
 type HostMode string
+type TicketStatus string
 
 const (
 	HostModeAttendedTemporary HostMode = "attended-temporary"
 	HostModeManaged           HostMode = "managed"
 	HostModeBreakGlass        HostMode = "break-glass"
+
+	TicketStatusActive  TicketStatus = "active"
+	TicketStatusRevoked TicketStatus = "revoked"
 )
 
 type Ticket struct {
-	ID           string    `json:"id"`
-	Code         string    `json:"code"`
-	Mode         HostMode  `json:"mode"`
-	TTLSeconds   int       `json:"ttl_seconds"`
-	Capabilities []string  `json:"capabilities"`
-	Reason       string    `json:"reason"`
-	CreatedAt    time.Time `json:"created_at"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	ID           string       `json:"id"`
+	Code         string       `json:"code"`
+	Mode         HostMode     `json:"mode"`
+	Status       TicketStatus `json:"status"`
+	TTLSeconds   int          `json:"ttl_seconds"`
+	Capabilities []string     `json:"capabilities"`
+	Reason       string       `json:"reason"`
+	CreatedAt    time.Time    `json:"created_at"`
+	ExpiresAt    time.Time    `json:"expires_at"`
 }
 
 func NewTicket(mode HostMode, ttlSeconds int, capabilities []string, reason string, now time.Time) (Ticket, error) {
@@ -39,6 +44,7 @@ func NewTicket(mode HostMode, ttlSeconds int, capabilities []string, reason stri
 		ID:           id,
 		Code:         code,
 		Mode:         mode,
+		Status:       TicketStatusActive,
 		TTLSeconds:   ttlSeconds,
 		Capabilities: capabilities,
 		Reason:       reason,

@@ -15,6 +15,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 )
@@ -96,6 +97,9 @@ func (a App) mcp(args []string) error {
 		enc := json.NewEncoder(a.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
+	case "serve":
+		server := mcpstdio.NewServer(gateway.NewMemoryGateway())
+		return server.Serve(context.Background(), os.Stdin, a.Stdout)
 	default:
 		return fmt.Errorf("unknown mcp subcommand %q", args[0])
 	}
@@ -281,6 +285,7 @@ Usage:
   rdev policy explain --mode attended-temporary --capability shell.user
   rdev demo local
   rdev mcp tools
+  rdev mcp serve
   rdev host serve --mode temporary
 `))
 }

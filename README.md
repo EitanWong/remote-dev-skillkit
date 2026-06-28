@@ -28,6 +28,7 @@ Implemented now:
 - `rdev ticket create` local ticket preview.
 - `rdev policy explain` local policy simulation.
 - `rdev mcp tools` tool-contract listing.
+- `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
@@ -52,6 +53,7 @@ go run ./cmd/rdev ticket create --ttl-seconds 7200 --reason "repair Windows dev 
 go run ./cmd/rdev policy explain --mode attended-temporary --capability shell.user
 go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' | go run ./cmd/rdev mcp serve
 go run ./cmd/rdev host serve --mode temporary
 ```
 
@@ -72,6 +74,7 @@ go run ./cmd/rdev host serve --mode temporary
 - [Versioning](docs/project/VERSIONING.md)
 - [Threat Model](docs/security/THREAT_MODEL.md)
 - [Bootstrap Design](docs/operations/BOOTSTRAP.md)
+- [MCP Stdio](docs/operations/MCP_STDIO.md)
 - [MCP Tools](mcp/tools.json)
 
 ## Sources

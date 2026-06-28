@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,28 @@ func TestMCPToolsOutputsJSON(t *testing.T) {
 	}
 	if len(payload.Tools) == 0 {
 		t.Fatal("expected at least one tool")
+	}
+}
+
+func TestMCPServeProcessesInitialize(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	oldStdin := os.Stdin
+	defer func() { os.Stdin = oldStdin }()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = reader
+	_, _ = writer.WriteString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}` + "\n")
+	_ = writer.Close()
+
+	if err := app.Run(context.Background(), []string{"mcp", "serve"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"protocolVersion":"2025-11-25"`) {
+		t.Fatalf("expected initialize response, got %q", stdout.String())
 	}
 }
 

@@ -77,6 +77,9 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 		return model.Host{}, fmt.Errorf("%w: ticket code", ErrNotFound)
 	}
 	ticket := g.tickets[ticketID]
+	if ticket.Status != model.TicketStatusActive {
+		return model.Host{}, fmt.Errorf("%w: ticket is not active", ErrInvalidState)
+	}
 	if !g.now().Before(ticket.ExpiresAt) {
 		return model.Host{}, ErrTicketExpired
 	}
@@ -91,6 +94,23 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 	g.hosts[host.ID] = host
 	g.appendAuditLocked("host", "host.register", host.ID, "registered pending host")
 	return host, nil
+}
+
+func (g *MemoryGateway) RevokeTicket(ticketID, reason string) (model.Ticket, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ticket, ok := g.tickets[ticketID]
+	if !ok {
+		return model.Ticket{}, fmt.Errorf("%w: ticket", ErrNotFound)
+	}
+	if ticket.Status == model.TicketStatusRevoked {
+		return model.Ticket{}, fmt.Errorf("%w: ticket already revoked", ErrInvalidState)
+	}
+	ticket.Status = model.TicketStatusRevoked
+	g.tickets[ticket.ID] = ticket
+	g.appendAuditLocked("operator", "ticket.revoke", ticket.ID, reasonOrDefault(reason, "revoked ticket"))
+	return ticket, nil
 }
 
 func (g *MemoryGateway) ApproveHost(hostID string, capabilities []string) (model.Host, error) {
@@ -113,6 +133,51 @@ func (g *MemoryGateway) ApproveHost(hostID string, capabilities []string) (model
 	host.LastSeenAt = now
 	g.hosts[host.ID] = host
 	g.appendAuditLocked("operator", "host.approve", host.ID, "approved host")
+	return host, nil
+}
+
+func (g *MemoryGateway) RevokeHost(hostID, reason string) (model.Host, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.Host{}, fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status == model.HostStatusRevoked {
+		return model.Host{}, fmt.Errorf("%w: host already revoked", ErrInvalidState)
+	}
+	host.Status = model.HostStatusRevoked
+	host.LastSeenAt = g.now().UTC()
+	g.hosts[host.ID] = host
+	g.appendAuditLocked("operator", "host.revoke", host.ID, reasonOrDefault(reason, "revoked host"))
+	return host, nil
+}
+
+func (g *MemoryGateway) Hosts(status string) []model.Host {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	hosts := make([]model.Host, 0, len(g.hosts))
+	for _, host := range g.hosts {
+		if status == "" || string(host.Status) == status {
+			hosts = append(hosts, host)
+		}
+	}
+	sort.Slice(hosts, func(i, j int) bool {
+		return hosts[i].CreatedAt.Before(hosts[j].CreatedAt)
+	})
+	return hosts
+}
+
+func (g *MemoryGateway) Host(hostID string) (model.Host, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.Host{}, fmt.Errorf("%w: host", ErrNotFound)
+	}
 	return host, nil
 }
 
@@ -166,6 +231,72 @@ func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, m
 	return job, artifact, nil
 }
 
+func (g *MemoryGateway) Job(jobID string) (model.Job, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	job, ok := g.jobs[jobID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("%w: job", ErrNotFound)
+	}
+	return job, nil
+}
+
+func (g *MemoryGateway) CancelJob(jobID, reason string) (model.Job, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	job, ok := g.jobs[jobID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("%w: job", ErrNotFound)
+	}
+	if job.Status == model.JobStatusSucceeded || job.Status == model.JobStatusFailed || job.Status == model.JobStatusCanceled {
+		return model.Job{}, fmt.Errorf("%w: job already terminal", ErrInvalidState)
+	}
+	now := g.now().UTC()
+	job.Status = model.JobStatusCanceled
+	job.EndedAt = &now
+	g.jobs[job.ID] = job
+	g.appendAuditLocked("operator", "job.cancel", job.ID, reasonOrDefault(reason, "canceled job"))
+	return job, nil
+}
+
+func (g *MemoryGateway) ApproveJob(jobID, approvalID, decision, reason string) (model.Job, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	job, ok := g.jobs[jobID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("%w: job", ErrNotFound)
+	}
+	if decision != "approved" && decision != "denied" {
+		return model.Job{}, fmt.Errorf("%w: decision must be approved or denied", ErrPolicyDenied)
+	}
+	g.appendAuditLocked("operator", "job.approve", job.ID, fmt.Sprintf("%s approval %s: %s", decision, approvalID, reason))
+	return job, nil
+}
+
+func (g *MemoryGateway) Artifacts(jobID string) []model.Artifact {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return append([]model.Artifact(nil), g.artifacts[jobID]...)
+}
+
+func (g *MemoryGateway) Artifact(artifactID string) (model.Artifact, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for _, artifacts := range g.artifacts {
+		for _, artifact := range artifacts {
+			if artifact.ID == artifactID {
+				return artifact, nil
+			}
+		}
+	}
+	return model.Artifact{}, fmt.Errorf("%w: artifact", ErrNotFound)
+}
+
 func (g *MemoryGateway) AuditEvents() []model.AuditEvent {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -194,4 +325,11 @@ func capabilitiesToStrings(caps []policy.Capability) []string {
 		values = append(values, string(cap))
 	}
 	return values
+}
+
+func reasonOrDefault(reason, fallback string) string {
+	if reason == "" {
+		return fallback
+	}
+	return reason
 }
