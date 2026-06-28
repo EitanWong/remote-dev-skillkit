@@ -211,6 +211,25 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
+	case "fail":
+		var req struct {
+			HostID string `json:"host_id"`
+			Reason string `json:"reason"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if req.HostID == "" {
+			writeError(w, http.StatusBadRequest, "host_id is required")
+			return
+		}
+		job, err := s.Gateway.FailJobForHost(req.HostID, jobID, req.Reason)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	default:
 		writeError(w, http.StatusNotFound, "unknown job action")
 	}

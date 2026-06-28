@@ -448,6 +448,9 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		}
 		result, err := hostrunner.RunDevJob(hostID, trust, job, time.Now())
 		if err != nil {
+			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error()); failErr != nil {
+				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
+			}
 			return processed, err
 		}
 		if _, err := completeJob(ctx, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); err != nil {
@@ -604,6 +607,40 @@ func completeJob(ctx context.Context, gatewayURL, hostID, jobID, artifactContent
 			payload.Error = resp.Status
 		}
 		return model.Job{}, fmt.Errorf("complete job failed: %s", payload.Error)
+	}
+	return payload.Job, nil
+}
+
+func failJob(ctx context.Context, gatewayURL, hostID, jobID, reason string) (model.Job, error) {
+	body, err := json.Marshal(map[string]string{
+		"host_id": hostID,
+		"reason":  reason,
+	})
+	if err != nil {
+		return model.Job{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/jobs/"+jobID+"/fail", bytes.NewReader(body))
+	if err != nil {
+		return model.Job{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Job{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Job   model.Job `json:"job"`
+		Error string    `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.Job{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.Job{}, fmt.Errorf("fail job failed: %s", payload.Error)
 	}
 	return payload.Job, nil
 }

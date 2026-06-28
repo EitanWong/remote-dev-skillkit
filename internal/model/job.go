@@ -13,16 +13,17 @@ const (
 )
 
 type Job struct {
-	ID        string         `json:"id"`
-	HostID    string         `json:"host_id"`
-	Adapter   string         `json:"adapter"`
-	Intent    string         `json:"intent"`
-	Policy    map[string]any `json:"policy"`
-	Envelope  *JobEnvelope   `json:"envelope,omitempty"`
-	Status    JobStatus      `json:"status"`
-	CreatedAt time.Time      `json:"created_at"`
-	StartedAt *time.Time     `json:"started_at,omitempty"`
-	EndedAt   *time.Time     `json:"ended_at,omitempty"`
+	ID            string         `json:"id"`
+	HostID        string         `json:"host_id"`
+	Adapter       string         `json:"adapter"`
+	Intent        string         `json:"intent"`
+	Policy        map[string]any `json:"policy"`
+	Envelope      *JobEnvelope   `json:"envelope,omitempty"`
+	Status        JobStatus      `json:"status"`
+	FailureReason string         `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	StartedAt     *time.Time     `json:"started_at,omitempty"`
+	EndedAt       *time.Time     `json:"ended_at,omitempty"`
 }
 
 type Artifact struct {

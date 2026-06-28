@@ -22,6 +22,7 @@
 - [x] Add local dev job polling and completion loop.
 - [x] Add host-side dev envelope/policy checks.
 - [x] Add dev trust bundle endpoint and host-side envelope signature verification.
+- [x] Add host-reported job failure endpoint and audit event.
 
 ## Next
 

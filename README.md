@@ -34,6 +34,7 @@ Implemented now:
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
 - Local dev host registration, job polling, and job completion loop.
 - Development trust bundle endpoint for host-side envelope signature verification.
+- Host-reported failed jobs with audit events.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 

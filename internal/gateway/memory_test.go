@@ -107,6 +107,51 @@ func TestMemoryGatewayRejectsJobAfterTicketExpiry(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayFailsJobForHost(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = gw.FailJobForHost(host.ID, job.ID, "signature rejected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != model.JobStatusFailed {
+		t.Fatalf("expected failed job, got %s", job.Status)
+	}
+	if job.FailureReason != "signature rejected" {
+		t.Fatalf("unexpected failure reason %q", job.FailureReason)
+	}
+	events := gw.AuditEvents()
+	if events[len(events)-1].Action != "job.fail" {
+		t.Fatalf("expected job.fail audit event, got %s", events[len(events)-1].Action)
+	}
+}
+
+func TestMemoryGatewayRejectsFailJobForWrongHost(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.FailJobForHost("hst_other", job.ID, "nope"); err == nil {
+		t.Fatal("expected wrong host failure report to fail")
+	}
+}
+
 func TestMemoryGatewayRejectsJobForPendingHost(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

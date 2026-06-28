@@ -325,6 +325,39 @@ func (g *MemoryGateway) CompleteJobForHost(hostID, jobID, artifactContent string
 	return job, artifact, nil
 }
 
+func (g *MemoryGateway) FailJobForHost(hostID, jobID, reason string) (model.Job, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status != model.HostStatusActive {
+		return model.Job{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
+	}
+	job, ok := g.jobs[jobID]
+	if !ok {
+		return model.Job{}, fmt.Errorf("%w: job", ErrNotFound)
+	}
+	if job.HostID != hostID {
+		return model.Job{}, fmt.Errorf("%w: job is not assigned to host", ErrPolicyDenied)
+	}
+	if job.Status != model.JobStatusQueued && job.Status != model.JobStatusRunning {
+		return model.Job{}, fmt.Errorf("%w: job must be queued or running", ErrInvalidState)
+	}
+	now := g.now().UTC()
+	if job.StartedAt == nil {
+		job.StartedAt = &now
+	}
+	job.Status = model.JobStatusFailed
+	job.FailureReason = reasonOrDefault(reason, "host reported job failure")
+	job.EndedAt = &now
+	g.jobs[job.ID] = job
+	g.appendAuditLocked("host", "job.fail", job.ID, job.FailureReason)
+	return job, nil
+}
+
 func (g *MemoryGateway) NextJobForHost(hostID string) (model.Job, bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

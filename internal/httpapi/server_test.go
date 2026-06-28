@@ -182,6 +182,51 @@ func TestJobCreateClaimAndComplete(t *testing.T) {
 	}
 }
 
+func TestJobFail(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
+	jobRec := httptest.NewRecorder()
+	handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+	var jobPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextRec := httptest.NewRecorder()
+	handler.ServeHTTP(nextRec, nextReq)
+	if nextRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
+	}
+
+	failReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/fail", bytes.NewBufferString(`{"host_id":"`+host.ID+`","reason":"signature rejected"}`))
+	failRec := httptest.NewRecorder()
+	handler.ServeHTTP(failRec, failReq)
+	if failRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", failRec.Code, failRec.Body.String())
+	}
+	var failPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(failRec.Body.Bytes(), &failPayload); err != nil {
+		t.Fatal(err)
+	}
+	if failPayload.Job.Status != model.JobStatusFailed {
+		t.Fatalf("expected failed job, got %s", failPayload.Job.Status)
+	}
+	if failPayload.Job.FailureReason != "signature rejected" {
+		t.Fatalf("unexpected failure reason %q", failPayload.Job.FailureReason)
+	}
+}
+
 func createTicket(t *testing.T, handler http.Handler) model.Ticket {
 	t.Helper()
 	body := bytes.NewBufferString(`{"mode":"attended-temporary","ttl_seconds":600,"reason":"test"}`)
