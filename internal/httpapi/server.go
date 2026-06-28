@@ -22,6 +22,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /v1/trust", s.trust)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
+	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
 	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
 	mux.HandleFunc("GET /v1/hosts/", s.hostSubresource)
@@ -68,9 +69,24 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"ticket":  ticket,
-		"joinUrl": "https://agent.lunflux.com/join/" + ticket.Code,
+		"ticket":      ticket,
+		"joinUrl":     "https://agent.lunflux.com/join/" + ticket.Code,
+		"manifestUrl": requestBaseURL(r) + "/v1/tickets/" + ticket.Code + "/manifest",
 	})
+}
+
+func (s Server) ticketSubresource(w http.ResponseWriter, r *http.Request) {
+	code, resource, ok := splitTicketSubresource(r.URL.Path)
+	if !ok || resource != "manifest" {
+		writeError(w, http.StatusNotFound, "unknown ticket endpoint")
+		return
+	}
+	manifest, err := s.Gateway.JoinManifest(code, requestBaseURL(r), requestBaseURL(r)+"/join/"+code)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"manifest": manifest})
 }
 
 func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +298,18 @@ func splitHostAction(path string) (hostID string, action string, ok bool) {
 	return parts[0], parts[1], true
 }
 
+func splitTicketSubresource(path string) (code string, resource string, ok bool) {
+	rest := strings.TrimPrefix(path, "/v1/tickets/")
+	if rest == path {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 func splitHostID(path string) (hostID string, ok bool) {
 	rest := strings.TrimPrefix(path, "/v1/hosts/")
 	if rest == path {
@@ -362,4 +390,15 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{"error": message})
+}
+
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded == "http" || forwarded == "https" {
+		scheme = forwarded
+	}
+	return scheme + "://" + r.Host
 }

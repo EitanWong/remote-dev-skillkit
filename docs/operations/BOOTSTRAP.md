@@ -30,15 +30,19 @@ It accepts:
 - `TicketCode`
 - `DownloadUrl`
 - `ExpectedSha256`
+- optional `ManifestUrl`
+- optional `TrustPin`
 - optional `HostName`
 
 The script downloads `rdev-host.exe` into a temp directory, verifies SHA-256, and runs:
 
 ```powershell
-rdev-host.exe host serve --mode temporary --gateway <gateway> --ticket-code <ticket>
+rdev-host.exe host serve --mode temporary --manifest-url <manifest-url>
 ```
 
 It does not install a Windows Service, write registry persistence, weaken execution policy, or bypass UAC.
+
+When `ManifestUrl` is provided, the host fetches a signed `rdev.join-manifest.v1`, verifies it, then uses the manifest-provided gateway URL, ticket code and trust fingerprint. In production, the manifest should be rooted in a release/bootstrap trust root rather than only the gateway key advertised by the manifest.
 
 ## Bootstrap Requirements
 

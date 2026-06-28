@@ -123,6 +123,25 @@ func TestMemoryGatewayUsesProvidedSigningKey(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayCreatesSignedJoinManifest(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := gw.JoinManifest(ticket.Code, "http://127.0.0.1:8787", "http://127.0.0.1:8787/join/"+ticket.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.TicketCode != ticket.Code {
+		t.Fatalf("expected ticket code %q, got %q", ticket.Code, manifest.TicketCode)
+	}
+	if err := manifest.Verify(now); err != nil {
+		t.Fatalf("expected manifest to verify: %v", err)
+	}
+}
+
 func TestMemoryGatewayRejectsJobAfterTicketExpiry(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	current := now

@@ -31,11 +31,21 @@ rdev host serve \
   --trust-pin sha256:<hex>
 ```
 
+Or they can consume the signed join manifest, which carries the ticket code, gateway URL, trust bundle and trust fingerprint:
+
+```bash
+rdev host serve \
+  --mode temporary \
+  --manifest-url http://127.0.0.1:8787/v1/tickets/<ticket_code>/manifest \
+  --once=false
+```
+
 ## Endpoints
 
 - `GET /healthz`
 - `GET /v1/trust`
 - `POST /v1/tickets`
+- `GET /v1/tickets/{ticket_code}/manifest`
 - `GET /v1/hosts`
 - `POST /v1/hosts/register`
 - `POST /v1/hosts/{host_id}/approve`
@@ -57,6 +67,7 @@ curl -s -X POST http://127.0.0.1:8787/v1/tickets \
   -H 'content-type: application/json' \
   -d '{"mode":"attended-temporary","ttl_seconds":600,"reason":"local dev"}'
 
+curl -s http://127.0.0.1:8787/v1/tickets/<ticket_code>/manifest
 curl -s http://127.0.0.1:8787/v1/audit
 ```
 
@@ -105,5 +116,6 @@ curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
 - No authentication.
 - No production TLS.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
-- With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys. Production still needs key rotation, revocation and managed trust bundle updates.
+- With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
+- The dev join manifest is signed by the same gateway key it advertises. Production still needs a release/bootstrap trust root, key rotation, revocation and managed trust bundle updates.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, no production redaction schema yet, and no OS-specific sandboxing beyond workspace boundary checks.

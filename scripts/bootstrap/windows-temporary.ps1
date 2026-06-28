@@ -11,6 +11,10 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExpectedSha256,
 
+  [string]$ManifestUrl = "",
+
+  [string]$TrustPin = "",
+
   [string]$HostName = $env:COMPUTERNAME
 )
 
@@ -53,6 +57,9 @@ Write-Host ""
 Write-Host "Remote Dev Skillkit temporary support session"
 Write-Host "Gateway: $GatewayUrl"
 Write-Host "Ticket:  $TicketCode"
+if ($ManifestUrl -ne "") {
+  Write-Host "Manifest: $ManifestUrl"
+}
 Write-Host "Mode:    attended temporary foreground"
 Write-Host ""
 Write-Host "This script does not install a Windows Service and does not create hidden persistence."
@@ -66,11 +73,16 @@ Invoke-Download -Url $DownloadUrl -OutFile $hostExe
 Assert-Sha256 -Path $hostExe -Expected $ExpectedSha256
 
 Write-Step "Starting foreground temporary host"
-& $hostExe host serve `
-  --mode temporary `
-  --gateway $GatewayUrl `
-  --ticket-code $TicketCode `
-  --name $HostName
+$hostArgs = @("host", "serve", "--mode", "temporary", "--name", $HostName)
+if ($ManifestUrl -ne "") {
+  $hostArgs += @("--manifest-url", $ManifestUrl)
+} else {
+  $hostArgs += @("--gateway", $GatewayUrl, "--ticket-code", $TicketCode)
+}
+if ($TrustPin -ne "") {
+  $hostArgs += @("--trust-pin", $TrustPin)
+}
+& $hostExe @hostArgs
 
 $exitCode = $LASTEXITCODE
 Write-Step "rdev-host exited with code $exitCode"

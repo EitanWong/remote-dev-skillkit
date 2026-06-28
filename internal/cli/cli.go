@@ -111,6 +111,7 @@ func (a App) host(args []string) error {
 		mode := fs.String("mode", "temporary", "host mode: temporary, managed, or break-glass")
 		gateway := fs.String("gateway", "https://agent.lunflux.com", "gateway URL")
 		ticketCode := fs.String("ticket-code", "", "one-time ticket code for local dev registration")
+		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
 		name := fs.String("name", "", "host display name; defaults to detected hostname")
 		once := fs.Bool("once", true, "register once and exit after printing status")
 		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
@@ -124,6 +125,7 @@ func (a App) host(args []string) error {
 			Mode:            *mode,
 			GatewayURL:      *gateway,
 			TicketCode:      *ticketCode,
+			ManifestURL:     *manifestURL,
 			Name:            *name,
 			Once:            *once,
 			PollInterval:    *pollInterval,
@@ -140,6 +142,7 @@ type hostServeOptions struct {
 	Mode            string
 	GatewayURL      string
 	TicketCode      string
+	ManifestURL     string
 	Name            string
 	Once            bool
 	PollInterval    time.Duration
@@ -153,6 +156,15 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	case "temporary", "managed", "break-glass":
 	default:
 		return fmt.Errorf("unsupported host mode %q", opts.Mode)
+	}
+	if opts.ManifestURL != "" {
+		manifest, err := fetchJoinManifest(ctx, opts.ManifestURL, opts.TrustPin)
+		if err != nil {
+			return err
+		}
+		opts.GatewayURL = manifest.GatewayURL
+		opts.TicketCode = manifest.TicketCode
+		opts.TrustPin = manifest.TrustFingerprint
 	}
 	if opts.TicketCode == "" {
 		_, err := fmt.Fprintf(
@@ -477,6 +489,38 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		processed++
 	}
 	return processed, nil
+}
+
+func fetchJoinManifest(ctx context.Context, manifestURL, trustPin string) (model.JoinManifest, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
+	if err != nil {
+		return model.JoinManifest{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.JoinManifest{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+		Error    string             `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.JoinManifest{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.JoinManifest{}, fmt.Errorf("fetch join manifest failed: %s", payload.Error)
+	}
+	if err := payload.Manifest.Verify(time.Now()); err != nil {
+		return model.JoinManifest{}, err
+	}
+	if err := payload.Manifest.Trust.VerifyPin(trustPin); err != nil {
+		return model.JoinManifest{}, err
+	}
+	return payload.Manifest, nil
 }
 
 func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.TrustBundle, error) {

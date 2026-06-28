@@ -35,6 +35,7 @@ Implemented now:
 - Local dev host registration, job polling, and job completion loop.
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Persistent development gateway signing key files plus host trust pin checks.
+- Signed development join manifest endpoint for manifest-driven temporary host registration.
 - Host-reported failed jobs with audit events.
 - Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, exit-code evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.

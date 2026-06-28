@@ -141,6 +141,59 @@ func TestHostServeRegistersWithLocalGateway(t *testing.T) {
 	}
 }
 
+func TestHostServeRegistersWithJoinManifest(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err = app.Run(context.Background(), []string{"host", "serve", "--mode", "temporary", "--manifest-url", server.URL + "/v1/tickets/" + ticket.Code + "/manifest", "--name", "manifest-host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Status string `json:"status"`
+		Host   struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Status != "registered-pending-approval" {
+		t.Fatalf("unexpected status %q", payload.Status)
+	}
+	if payload.Host.Name != "manifest-host" {
+		t.Fatalf("expected host name override, got %q", payload.Host.Name)
+	}
+}
+
+func TestFetchJoinManifestRejectsPinMismatch(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilitiesToStrings(policy.TemporaryDefaults()), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	_, err = fetchJoinManifest(context.Background(), server.URL+"/v1/tickets/"+ticket.Code+"/manifest", "sha256:0000")
+	if err == nil {
+		t.Fatal("expected trust pin mismatch")
+	}
+	if !strings.Contains(err.Error(), "trust pin mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())

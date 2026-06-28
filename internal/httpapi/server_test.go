@@ -77,6 +77,35 @@ func TestTrustEndpointVerifiesJobEnvelope(t *testing.T) {
 	}
 }
 
+func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+ticket.Code+"/manifest", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Manifest.TicketCode != ticket.Code {
+		t.Fatalf("expected ticket code %q, got %q", ticket.Code, payload.Manifest.TicketCode)
+	}
+	if payload.Manifest.TrustFingerprint == "" {
+		t.Fatal("manifest should include trust fingerprint")
+	}
+	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
+		t.Fatalf("expected manifest to verify: %v", err)
+	}
+}
+
 func TestRegisterAndApproveHost(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()

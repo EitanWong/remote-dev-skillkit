@@ -278,6 +278,33 @@ func (g *MemoryGateway) TrustBundle() model.TrustBundle {
 	return model.NewTrustBundle(g.signingID, g.publicKey)
 }
 
+func (g *MemoryGateway) JoinManifest(ticketCode, gatewayURL, joinURL string) (model.JoinManifest, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ticketID, ok := g.codeIndex[ticketCode]
+	if !ok {
+		return model.JoinManifest{}, fmt.Errorf("%w: ticket code", ErrNotFound)
+	}
+	ticket := g.tickets[ticketID]
+	if ticket.Status != model.TicketStatusActive {
+		return model.JoinManifest{}, fmt.Errorf("%w: ticket is not active", ErrInvalidState)
+	}
+	if !g.now().Before(ticket.ExpiresAt) {
+		return model.JoinManifest{}, ErrTicketExpired
+	}
+	manifest, err := model.NewJoinManifest(ticket, model.JoinManifestSpec{
+		GatewayURL:   gatewayURL,
+		JoinURL:      joinURL,
+		Trust:        model.NewTrustBundle(g.signingID, g.publicKey),
+		SigningKeyID: g.signingID,
+	}, g.now())
+	if err != nil {
+		return model.JoinManifest{}, err
+	}
+	return manifest.Sign(g.privateKey)
+}
+
 func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, model.Artifact, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
