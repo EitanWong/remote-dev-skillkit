@@ -37,6 +37,8 @@ The project is complete when:
 - Expose local HTTP API for development.
 - Add MCP server transport.
 
+Phase 2 starts with an in-memory gateway to validate ticket, host, job, artifact, and audit state transitions before durable storage.
+
 ## Phase 3: Windows Temporary Host MVP
 
 - Build self-contained Windows binary.

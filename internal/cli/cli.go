@@ -14,6 +14,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
+	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 )
@@ -46,6 +47,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.ticket(args[1:])
 	case "policy":
 		return a.policy(args[1:])
+	case "demo":
+		return a.demo(args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -208,6 +211,66 @@ func (a App) policy(args []string) error {
 	}
 }
 
+func (a App) demo(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing demo subcommand")
+	}
+
+	switch args[0] {
+	case "local":
+		return a.demoLocal()
+	default:
+		return fmt.Errorf("unknown demo subcommand %q", args[0])
+	}
+}
+
+func (a App) demoLocal() error {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "local demo")
+	if err != nil {
+		return err
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "local-demo-host",
+		OS:           runtime.GOOS,
+		Arch:         runtime.GOARCH,
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		return err
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		return err
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "local demo diagnostic", map[string]any{
+		"cwd":            ".",
+		"allow_commands": []string{"echo"},
+	})
+	if err != nil {
+		return err
+	}
+	job, artifact, err := gw.CompleteJob(job.ID, "local demo completed without remote transport")
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]any{
+		"ticket":    ticket,
+		"joinUrl":   "https://agent.lunflux.com/join/" + ticket.Code,
+		"host":      host,
+		"job":       job,
+		"artifact":  artifact,
+		"audit":     gw.AuditEvents(),
+		"transport": "in-memory demo only",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev - remote development skillkit
 
@@ -216,6 +279,7 @@ Usage:
   rdev doctor
   rdev ticket create --mode attended-temporary --ttl-seconds 7200
   rdev policy explain --mode attended-temporary --capability shell.user
+  rdev demo local
   rdev mcp tools
   rdev host serve --mode temporary
 `))

@@ -90,3 +90,37 @@ func TestPolicyExplainOutputsJSON(t *testing.T) {
 		t.Fatal("shell.user should be allowed in temporary mode")
 	}
 }
+
+func TestDemoLocalOutputsClosedLoop(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"demo", "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Host struct {
+			Status string `json:"status"`
+		} `json:"host"`
+		Job struct {
+			Status string `json:"status"`
+		} `json:"job"`
+		Audit []struct {
+			Action string `json:"action"`
+		} `json:"audit"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Host.Status != "active" {
+		t.Fatalf("host should be active, got %q", payload.Host.Status)
+	}
+	if payload.Job.Status != "succeeded" {
+		t.Fatalf("job should succeed, got %q", payload.Job.Status)
+	}
+	if len(payload.Audit) != 5 {
+		t.Fatalf("expected 5 audit events, got %d", len(payload.Audit))
+	}
+}

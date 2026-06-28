@@ -25,7 +25,10 @@ Implemented now:
 - Project plan, architecture, security model, and versioning docs.
 - Initial `rdev` CLI.
 - `rdev doctor` capability detection.
+- `rdev ticket create` local ticket preview.
+- `rdev policy explain` local policy simulation.
 - `rdev mcp tools` tool-contract listing.
+- `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 
@@ -47,6 +50,7 @@ go run ./cmd/rdev version
 go run ./cmd/rdev doctor
 go run ./cmd/rdev ticket create --ttl-seconds 7200 --reason "repair Windows dev environment"
 go run ./cmd/rdev policy explain --mode attended-temporary --capability shell.user
+go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
 go run ./cmd/rdev host serve --mode temporary
 ```

@@ -11,14 +11,16 @@
 - [x] Add local preview ticket creation.
 - [x] Add policy explanation command.
 - [ ] Add real MCP stdio server.
-- [ ] Add in-memory gateway for tickets, hosts, jobs, artifacts, and audit.
+- [x] Add in-memory gateway for tickets, hosts, jobs, artifacts, and audit.
+- [x] Add local demo flow for ticket-host-job-audit.
 - [ ] Add foreground temporary host local loop.
 
 ## Next
 
-- [ ] Define ticket data model.
-- [ ] Define host data model.
+- [x] Define ticket data model.
+- [x] Define host data model.
 - [ ] Define signed job envelope.
+- [x] Define job/artifact/audit models.
 - [ ] Implement JSONL audit store.
 - [ ] Implement local HTTP gateway for development.
 - [ ] Add PowerShell bootstrap draft.
