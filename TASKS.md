@@ -14,6 +14,8 @@
 - [x] Add in-memory gateway for tickets, hosts, jobs, artifacts, and audit.
 - [x] Add local demo flow for ticket-host-job-audit.
 - [ ] Add foreground temporary host local loop.
+- [x] Add JSONL audit store.
+- [x] Add local HTTP development gateway.
 
 ## Next
 
@@ -21,8 +23,8 @@
 - [x] Define host data model.
 - [ ] Define signed job envelope.
 - [x] Define job/artifact/audit models.
-- [ ] Implement JSONL audit store.
-- [ ] Implement local HTTP gateway for development.
+- [x] Implement JSONL audit store.
+- [x] Implement local HTTP gateway for development.
 - [ ] Add PowerShell bootstrap draft.
 - [ ] Add Windows capability detector.
 - [ ] Add policy explain engine.

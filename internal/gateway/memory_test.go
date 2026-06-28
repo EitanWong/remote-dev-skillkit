@@ -1,9 +1,12 @@
 package gateway
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
@@ -93,5 +96,23 @@ func TestMemoryGatewayRevokeTicketPreventsRegistration(t *testing.T) {
 		Arch:       "amd64",
 	}); err == nil {
 		t.Fatal("expected revoked ticket registration to fail")
+	}
+}
+
+func TestMemoryGatewayWritesAuditSink(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	store := audit.NewJSONLStore(path)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now }).WithAuditSink(&store)
+
+	if _, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "repair"); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) == 0 {
+		t.Fatal("expected audit file to contain an event")
 	}
 }

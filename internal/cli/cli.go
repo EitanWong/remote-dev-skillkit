@@ -6,15 +6,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
@@ -50,6 +53,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.policy(args[1:])
 	case "demo":
 		return a.demo(args[1:])
+	case "gateway":
+		return a.gateway(args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -275,6 +280,40 @@ func (a App) demoLocal() error {
 	return enc.Encode(payload)
 }
 
+func (a App) gateway(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing gateway subcommand")
+	}
+	switch args[0] {
+	case "serve":
+		fs := flag.NewFlagSet("gateway serve", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		dev := fs.Bool("dev", false, "run local development gateway")
+		addr := fs.String("addr", "127.0.0.1:8787", "listen address")
+		auditLog := fs.String("audit-log", "", "optional JSONL audit log path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if !*dev {
+			return fmt.Errorf("gateway serve currently requires --dev")
+		}
+		return a.gatewayServeDev(*addr, *auditLog)
+	default:
+		return fmt.Errorf("unknown gateway subcommand %q", args[0])
+	}
+}
+
+func (a App) gatewayServeDev(addr, auditLog string) error {
+	gw := gateway.NewMemoryGateway()
+	if auditLog != "" {
+		store := audit.NewJSONLStore(auditLog)
+		gw.WithAuditSink(&store)
+	}
+	server := httpapi.NewServer(gw)
+	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev listening on http://%s\n", addr)
+	return http.ListenAndServe(addr, server.Handler())
+}
+
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev - remote development skillkit
 
@@ -286,6 +325,7 @@ Usage:
   rdev demo local
   rdev mcp tools
   rdev mcp serve
+  rdev gateway serve --dev --addr 127.0.0.1:8787
   rdev host serve --mode temporary
 `))
 }

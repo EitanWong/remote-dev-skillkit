@@ -7,3 +7,4 @@
 - Added basic tests for CLI, MCP contracts, and temporary-mode capability defaults.
 - Added in-memory gateway model and `rdev demo local` closed-loop demo.
 - Added `rdev mcp serve` with MCP initialize, tools/list, and tools/call support backed by the in-memory gateway.
+- Added JSONL audit store and `rdev gateway serve --dev` local HTTP development gateway.

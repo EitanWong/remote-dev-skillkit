@@ -21,12 +21,17 @@ var (
 type MemoryGateway struct {
 	mu        sync.Mutex
 	now       func() time.Time
+	auditSink AuditSink
 	tickets   map[string]model.Ticket
 	codeIndex map[string]string
 	hosts     map[string]model.Host
 	jobs      map[string]model.Job
 	artifacts map[string][]model.Artifact
 	audit     []model.AuditEvent
+}
+
+type AuditSink interface {
+	Append(model.AuditEvent) error
 }
 
 func NewMemoryGateway() *MemoryGateway {
@@ -42,6 +47,13 @@ func NewMemoryGatewayWithClock(now func() time.Time) *MemoryGateway {
 		jobs:      map[string]model.Job{},
 		artifacts: map[string][]model.Artifact{},
 	}
+}
+
+func (g *MemoryGateway) WithAuditSink(sink AuditSink) *MemoryGateway {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.auditSink = sink
+	return g
 }
 
 func (g *MemoryGateway) CreateTicket(mode model.HostMode, ttlSeconds int, capabilities []string, reason string) (model.Ticket, error) {
@@ -309,14 +321,18 @@ func (g *MemoryGateway) AuditEvents() []model.AuditEvent {
 }
 
 func (g *MemoryGateway) appendAuditLocked(actor, action, targetID, message string) {
-	g.audit = append(g.audit, model.AuditEvent{
+	event := model.AuditEvent{
 		Sequence: len(g.audit) + 1,
 		Actor:    actor,
 		Action:   action,
 		TargetID: targetID,
 		Message:  message,
 		At:       g.now().UTC(),
-	})
+	}
+	g.audit = append(g.audit, event)
+	if g.auditSink != nil {
+		_ = g.auditSink.Append(event)
+	}
 }
 
 func capabilitiesToStrings(caps []policy.Capability) []string {

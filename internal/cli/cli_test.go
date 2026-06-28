@@ -147,3 +147,17 @@ func TestDemoLocalOutputsClosedLoop(t *testing.T) {
 		t.Fatalf("expected 5 audit events, got %d", len(payload.Audit))
 	}
 }
+
+func TestGatewayServeRequiresDevFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"gateway", "serve"})
+	if err == nil {
+		t.Fatal("expected gateway serve without --dev to fail")
+	}
+	if !strings.Contains(err.Error(), "requires --dev") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
