@@ -20,6 +20,10 @@
 | Silent persistence on third-party hosts | Temporary mode is foreground-only and TTL-bound. Managed mode requires explicit setup. |
 | Credential exfiltration | Secret redaction, deny credential-dump capabilities, no raw prompt secrets. |
 | Gateway compromise | Per-host revocation, signing key separation, audit, emergency revoke-all. |
+| Tampered job envelope | Canonical signed envelopes, host binding, expiry, nonce replay protection, host-side verification. |
+| Workspace escape | Canonical path checks, scoped write roots, symlink escape rejection, adapter-local policy enforcement. |
+| Agent self-approval | Approval tokens are separate from agent tool calls; dangerous actions require operator or local-user approval. |
+| Audit tampering | Append-only audit events, durable store, planned hash chain and export verification. |
 
 ## Required Audit Fields
 
@@ -37,3 +41,7 @@
 - artifacts;
 - approval decisions;
 - start/end timestamps.
+
+## Perfect End-State References
+
+The complete end-state trust model, protocol design, threat matrix, and acceptance tests live in `docs/architecture/PERFECT_END_STATE.md`.

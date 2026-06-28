@@ -1,5 +1,7 @@
 # Roadmap
 
+The roadmap implements the canonical [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, approval gates, audit evidence, and agent-native MCP/Skill packaging.
+
 ## v0.0.1 Foundation
 
 - Repository skeleton.
@@ -17,6 +19,7 @@
 - MCP stdio server for tool calls.
 - Development signed job envelopes.
 - Demonstrable local temporary session.
+- Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, output caps, and failure reporting.
 
 ## v0.2.0 Windows Temporary Host
 
@@ -26,6 +29,7 @@
 - Outbound-only connection to gateway.
 - Durable signing key storage and rotation.
 - Shell and file scoped jobs.
+- Host local audit spool and revocation handling.
 
 ## v0.3.0 Managed Device
 
@@ -54,3 +58,4 @@
 - Full audit trail.
 - Signed releases.
 - Installation docs for Hermes, Codex, Claude Code, and OpenCode.
+- End-to-end acceptance demos for temporary Windows repair and managed coding.

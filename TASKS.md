@@ -14,7 +14,7 @@
 - [x] Add real MCP stdio server.
 - [x] Add in-memory gateway for tickets, hosts, jobs, artifacts, and audit.
 - [x] Add local demo flow for ticket-host-job-audit.
-- [ ] Add foreground temporary host local loop.
+- [x] Add foreground temporary host local loop.
 - [x] Add JSONL audit store.
 - [x] Add local HTTP development gateway.
 - [x] Add signed job envelope model.
@@ -23,6 +23,7 @@
 - [x] Add host-side dev envelope/policy checks.
 - [x] Add dev trust bundle endpoint and host-side envelope signature verification.
 - [x] Add host-reported job failure endpoint and audit event.
+- [x] Add perfect end-state architecture blueprint.
 
 ## Next
 
@@ -38,6 +39,7 @@
 - [ ] Add policy explain engine.
 - [ ] Add durable signing key storage and host trust distribution.
 - [ ] Add real scoped shell adapter execution.
+- [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
 
 ## Later
 
@@ -50,6 +52,16 @@
 - [ ] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
 - [ ] Add RustDesk/MeshCentral adapter.
+
+## Final End-State Gates
+
+- [ ] Temporary Windows host joins from one visible PowerShell command and leaves no service behind.
+- [ ] Managed Mac runs a Codex coding job in a locked worktree and returns diff/test evidence.
+- [ ] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
+- [ ] Workspace escape and non-allowlisted command attempts are rejected host-side.
+- [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
+- [ ] Revocation stops future jobs and is recorded in audit.
+- [ ] Production releases verify signed manifests and binaries before host execution.
 
 ## Definition Of Done For v0.1.0
 
