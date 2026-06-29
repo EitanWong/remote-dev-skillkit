@@ -126,7 +126,7 @@ func TestMemoryGatewayUsesProvidedSigningKey(t *testing.T) {
 	}
 }
 
-func TestMemoryGatewayApproveJobSignsGrantedApproval(t *testing.T) {
+func TestMemoryGatewayApproveJobSignsApprovalToken(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
 	host := activeHost(t, gw)
@@ -147,8 +147,18 @@ func TestMemoryGatewayApproveJobSignsGrantedApproval(t *testing.T) {
 	if approved.Envelope == nil {
 		t.Fatal("approved job envelope must be present")
 	}
-	if len(approved.Envelope.ApprovalsGranted) != 1 || approved.Envelope.ApprovalsGranted[0] != "git.push" {
-		t.Fatalf("unexpected granted approvals: %#v", approved.Envelope.ApprovalsGranted)
+	if len(approved.Envelope.ApprovalTokens) != 1 {
+		t.Fatalf("expected one approval token, got %#v", approved.Envelope.ApprovalTokens)
+	}
+	token := approved.Envelope.ApprovalTokens[0]
+	if token.Operation != "git.push" || token.ApprovalID != "git.push" {
+		t.Fatalf("unexpected approval token scope: %#v", token)
+	}
+	if token.Signature == "" {
+		t.Fatal("approval token signature must be set")
+	}
+	if err := token.Verify(gw.TrustBundle(), approved.ID, host.ID, "git.push", now); err != nil {
+		t.Fatalf("expected approval token to verify: %v", err)
 	}
 	if err := gw.VerifyJobEnvelope(*approved.Envelope, host.ID); err != nil {
 		t.Fatalf("expected re-signed approved envelope to verify: %v", err)

@@ -48,27 +48,27 @@ type JobEnvelopeSpec struct {
 }
 
 type JobEnvelope struct {
-	SchemaVersion           string         `json:"schema_version"`
-	JobID                   string         `json:"job_id"`
-	HostID                  string         `json:"host_id"`
-	HostIdentityFingerprint string         `json:"host_identity_fingerprint,omitempty"`
-	TicketID                string         `json:"ticket_id,omitempty"`
-	OperatorID              string         `json:"operator_id"`
-	IssuedAt                time.Time      `json:"issued_at"`
-	ExpiresAt               time.Time      `json:"expires_at"`
-	Nonce                   string         `json:"nonce"`
-	Mode                    HostMode       `json:"mode"`
-	Adapter                 string         `json:"adapter"`
-	Intent                  string         `json:"intent"`
-	Workspace               JobWorkspace   `json:"workspace"`
-	Capabilities            []string       `json:"capabilities"`
-	Limits                  JobLimits      `json:"limits"`
-	ApprovalsRequired       []string       `json:"approvals_required,omitempty"`
-	ApprovalsGranted        []string       `json:"approvals_granted,omitempty"`
-	Payload                 map[string]any `json:"payload,omitempty"`
-	SigningAlg              string         `json:"signing_alg"`
-	SigningKeyID            string         `json:"signing_key_id"`
-	Signature               string         `json:"signature,omitempty"`
+	SchemaVersion           string          `json:"schema_version"`
+	JobID                   string          `json:"job_id"`
+	HostID                  string          `json:"host_id"`
+	HostIdentityFingerprint string          `json:"host_identity_fingerprint,omitempty"`
+	TicketID                string          `json:"ticket_id,omitempty"`
+	OperatorID              string          `json:"operator_id"`
+	IssuedAt                time.Time       `json:"issued_at"`
+	ExpiresAt               time.Time       `json:"expires_at"`
+	Nonce                   string          `json:"nonce"`
+	Mode                    HostMode        `json:"mode"`
+	Adapter                 string          `json:"adapter"`
+	Intent                  string          `json:"intent"`
+	Workspace               JobWorkspace    `json:"workspace"`
+	Capabilities            []string        `json:"capabilities"`
+	Limits                  JobLimits       `json:"limits"`
+	ApprovalsRequired       []string        `json:"approvals_required,omitempty"`
+	ApprovalTokens          []ApprovalToken `json:"approval_tokens,omitempty"`
+	Payload                 map[string]any  `json:"payload,omitempty"`
+	SigningAlg              string          `json:"signing_alg"`
+	SigningKeyID            string          `json:"signing_key_id"`
+	Signature               string          `json:"signature,omitempty"`
 }
 
 func NewJobEnvelope(job Job, host Host, ticket Ticket, spec JobEnvelopeSpec, now time.Time) (JobEnvelope, error) {

@@ -1561,7 +1561,7 @@ Done or nearly done:
 
 Still required:
 
-- production approval-token flow.
+- durable approval-token consumption and persistence.
 
 Exit criteria:
 

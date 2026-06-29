@@ -193,6 +193,42 @@ func TestRunDevJobExecutesAfterApprovalSatisfied(t *testing.T) {
 	}
 }
 
+func TestRunDevJobRejectsTamperedApprovalToken(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := hostrunnerTestKeyPair(t)
+	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "env", "GOOS"},
+		"allow_commands":       []string{"go"},
+		"approvals_required":   []string{"git.push"},
+		"max_output_bytes":     4096,
+		"max_duration_seconds": 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = gw.ApproveJob(job.ID, "git.push", "approved", "test approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Envelope == nil || len(job.Envelope.ApprovalTokens) != 1 {
+		t.Fatalf("expected one approval token, got %#v", job.Envelope)
+	}
+	envelope := *job.Envelope
+	envelope.ApprovalTokens[0].Operation = "deploy.run"
+	envelope.Signature = ""
+	envelope, err = envelope.Sign(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Envelope = &envelope
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "approval_token_signature_invalid")
+}
+
 func TestRunDevJobRejectsWrongHost(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })

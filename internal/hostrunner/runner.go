@@ -36,6 +36,7 @@ type ApprovalRequired struct {
 	Adapter           string   `json:"adapter,omitempty"`
 	RequiredApprovals []string `json:"required_approvals"`
 	ApprovedApprovals []string `json:"approved_approvals,omitempty"`
+	ApprovalTokenIDs  []string `json:"approval_token_ids,omitempty"`
 	Retryable         bool     `json:"retryable"`
 }
 
@@ -170,8 +171,12 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 			return deny(job, nonceDenial(job, err), err)
 		}
 	}
-	if missing := missingApprovals(envelope.ApprovalsRequired, envelope.ApprovalsGranted); len(missing) > 0 {
-		return requireApproval(job, missing, envelope.ApprovalsGranted)
+	approved, tokenIDs, missing, err := verifyApprovalTokens(trust, envelope, now)
+	if err != nil {
+		return deny(job, approvalTokenDenial(job, err), err)
+	}
+	if len(missing) > 0 {
+		return requireApproval(job, missing, approved, tokenIDs)
 	}
 	if envelope.Adapter != "shell" {
 		return deny(job, denialSpec{
@@ -228,16 +233,26 @@ func hasCapability(values []string, want string) bool {
 	return false
 }
 
-func missingApprovals(required, approved []string) []string {
-	approvedSet := make(map[string]struct{}, len(approved))
-	for _, value := range approved {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			approvedSet[value] = struct{}{}
+func verifyApprovalTokens(trust model.TrustBundle, envelope model.JobEnvelope, now time.Time) ([]string, []string, []string, error) {
+	approved := make([]string, 0, len(envelope.ApprovalTokens))
+	tokenIDs := make([]string, 0, len(envelope.ApprovalTokens))
+	approvedSet := make(map[string]struct{}, len(envelope.ApprovalTokens))
+	for _, token := range envelope.ApprovalTokens {
+		if err := token.Verify(trust, envelope.JobID, envelope.HostID, token.Operation, now); err != nil {
+			return nil, nil, nil, err
+		}
+		if strings.TrimSpace(token.Operation) != "" {
+			if _, exists := approvedSet[token.Operation]; !exists {
+				approved = append(approved, token.Operation)
+				approvedSet[token.Operation] = struct{}{}
+			}
+		}
+		if strings.TrimSpace(token.TokenID) != "" {
+			tokenIDs = append(tokenIDs, token.TokenID)
 		}
 	}
 	var missing []string
-	for _, value := range required {
+	for _, value := range envelope.ApprovalsRequired {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
@@ -246,10 +261,10 @@ func missingApprovals(required, approved []string) []string {
 			missing = append(missing, value)
 		}
 	}
-	return missing
+	return approved, tokenIDs, missing, nil
 }
 
-func requireApproval(job model.Job, missing, approved []string) (Result, error) {
+func requireApproval(job model.Job, missing, approved, tokenIDs []string) (Result, error) {
 	explanation := ApprovalRequired{
 		SchemaVersion:     ApprovalRequiredSchemaVersion,
 		Code:              "approval_required",
@@ -259,6 +274,7 @@ func requireApproval(job model.Job, missing, approved []string) (Result, error) 
 		HostID:            job.HostID,
 		RequiredApprovals: append([]string(nil), missing...),
 		ApprovedApprovals: append([]string(nil), approved...),
+		ApprovalTokenIDs:  append([]string(nil), tokenIDs...),
 		Retryable:         true,
 	}
 	if job.Envelope != nil {
@@ -397,6 +413,46 @@ func nonceDenial(job model.Job, err error) denialSpec {
 		Summary:   summary,
 		Detail:    err.Error(),
 		Retryable: false,
+	}
+}
+
+func approvalTokenDenial(job model.Job, err error) denialSpec {
+	switch {
+	case errors.Is(err, model.ErrApprovalTokenExpired):
+		return denialSpec{
+			Code:      "approval_token_expired",
+			Summary:   "Approval token has expired.",
+			Detail:    err.Error(),
+			Retryable: true,
+		}
+	case errors.Is(err, model.ErrApprovalTokenConsumed):
+		return denialSpec{
+			Code:      "approval_token_consumed",
+			Summary:   "Approval token has already been consumed.",
+			Detail:    err.Error(),
+			Retryable: true,
+		}
+	case errors.Is(err, model.ErrApprovalTokenSignature):
+		return denialSpec{
+			Code:      "approval_token_signature_invalid",
+			Summary:   "Approval token signature is invalid.",
+			Detail:    err.Error(),
+			Retryable: false,
+		}
+	case errors.Is(err, model.ErrApprovalTokenInvalid):
+		return denialSpec{
+			Code:      "approval_token_invalid",
+			Summary:   "Approval token is invalid for this job.",
+			Detail:    err.Error(),
+			Retryable: true,
+		}
+	default:
+		return denialSpec{
+			Code:      "approval_token_invalid",
+			Summary:   "Approval token failed host verification.",
+			Detail:    err.Error(),
+			Retryable: false,
+		}
 	}
 }
 

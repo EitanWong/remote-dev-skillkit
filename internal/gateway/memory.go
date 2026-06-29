@@ -586,7 +586,24 @@ func (g *MemoryGateway) ApproveJob(jobID, approvalID, decision, reason string) (
 			return model.Job{}, fmt.Errorf("%w: job envelope is required", ErrInvalidState)
 		}
 		envelope := *job.Envelope
-		envelope.ApprovalsGranted = appendUniqueString(envelope.ApprovalsGranted, approvalID)
+		token, err := model.NewApprovalToken(model.ApprovalTokenSpec{
+			JobID:        envelope.JobID,
+			HostID:       envelope.HostID,
+			ApprovalID:   approvalID,
+			Operation:    approvalID,
+			OperatorID:   envelope.OperatorID,
+			Source:       "operator",
+			ExpiresAt:    envelope.ExpiresAt,
+			SigningKeyID: envelope.SigningKeyID,
+		}, g.now())
+		if err != nil {
+			return model.Job{}, err
+		}
+		token, err = token.Sign(g.privateKey)
+		if err != nil {
+			return model.Job{}, err
+		}
+		envelope.ApprovalTokens = appendApprovalToken(envelope.ApprovalTokens, token)
 		envelope.Signature = ""
 		signed, err := envelope.Sign(g.privateKey)
 		if err != nil {
@@ -744,14 +761,11 @@ func stringSliceValue(values map[string]any, key string, fallback []string) []st
 	}
 }
 
-func appendUniqueString(values []string, next string) []string {
-	next = strings.TrimSpace(next)
-	result := append([]string(nil), values...)
-	if next == "" {
-		return result
-	}
-	for _, value := range result {
-		if value == next {
+func appendApprovalToken(values []model.ApprovalToken, next model.ApprovalToken) []model.ApprovalToken {
+	result := append([]model.ApprovalToken(nil), values...)
+	for index, value := range result {
+		if value.ApprovalID == next.ApprovalID && value.Operation == next.Operation {
+			result[index] = next
 			return result
 		}
 	}
