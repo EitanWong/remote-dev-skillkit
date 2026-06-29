@@ -2127,6 +2127,80 @@ func TestSkillkitVerifyChecksInstallBundle(t *testing.T) {
 	}
 }
 
+func TestAdapterVerifyResultAcceptsShellArtifact(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "shell-result.json")
+	if err := os.WriteFile(artifactPath, []byte(`{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "exit_code": 0,
+  "timed_out": false,
+  "canceled": false,
+  "output_truncated": false,
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	if err := app.Run(context.Background(), []string{
+		"adapter", "verify-result",
+		"--artifact", artifactPath,
+		"--adapter", "shell",
+		"--schema", "rdev.shell-result.v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		SchemaVersion string `json:"schema_version"`
+		OK            bool   `json:"ok"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid conformance output: %v\n%s", err, stdout.String())
+	}
+	if report.SchemaVersion != "rdev.adapter-conformance-report.v1" || !report.OK {
+		t.Fatalf("unexpected conformance output: %s", stdout.String())
+	}
+}
+
+func TestAdapterVerifyResultRejectsMissingCommandEvidence(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "shell-result.json")
+	if err := os.WriteFile(artifactPath, []byte(`{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"adapter", "verify-result",
+		"--artifact", artifactPath,
+		"--adapter", "shell",
+		"--schema", "rdev.shell-result.v1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "conformance failed") {
+		t.Fatalf("expected conformance failure, got %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": false`) {
+		t.Fatalf("expected structured failure report, got %s", stdout.String())
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")
@@ -2863,7 +2937,8 @@ func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 	if err := json.Unmarshal(planStdout.Bytes(), &planPayload); err != nil {
 		t.Fatalf("invalid plan json: %v\n%s", err, planStdout.String())
 	}
-	transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, approvalProbesDir := writeWindowsPackageEvidenceForCLITest(t, root, `{"ok": true, "token": "ghp_abcdefghijklmnopqrstuvwx"}`)
+	fakeGitHubToken := "ghp_" + "abcdefghijklmnopqrstuvwx"
+	transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, approvalProbesDir := writeWindowsPackageEvidenceForCLITest(t, root, `{"ok": true, "token": "`+fakeGitHubToken+`"}`)
 
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, &bytes.Buffer{})

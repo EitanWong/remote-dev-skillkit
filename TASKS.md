@@ -66,6 +66,7 @@
 - [x] Add final 2026-06-30 perfect-ending architecture refinement with product lines, mode separation, trust boundaries, protocol closure, and implementation spine.
 - [x] Add Linux systemd user-unit managed host lifecycle with safe install/status/dry-run control/uninstall commands.
 - [x] Add public adapterkit result-artifact conformance verifier for built-in and third-party adapters.
+- [x] Add `rdev adapter verify-result` CLI for result-artifact conformance reports.
 
 ## Next
 

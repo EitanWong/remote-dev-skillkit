@@ -23,6 +23,24 @@ if !report.OK {
 }
 ```
 
+Agents and adapter authors can also run the same contract through the CLI:
+
+```bash
+rdev adapter verify-result \
+  --artifact shell-result.json \
+  --adapter shell \
+  --schema rdev.shell-result.v1
+
+rdev adapter verify-result \
+  --artifact codex-result.json \
+  --adapter codex \
+  --schema rdev.codex-result.v1 \
+  --command-fields codex_command,git_status,git_diff_stat,git_diff
+```
+
+The CLI prints `rdev.adapter-conformance-report.v1`. When `ok=false`, it prints
+the structured report before returning a nonzero exit code.
+
 Top-level command artifacts, such as shell and PowerShell, use the default
 command contract. Nested command artifacts, such as Codex, set `CommandFields`
 to the command evidence objects that must be present.
