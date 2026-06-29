@@ -120,6 +120,14 @@ func Tools() []Tool {
 			}, []string{"artifact_id"}),
 		},
 		{
+			Name:        "rdev.artifacts.export_bundle",
+			Description: "Export a reviewable evidence bundle for one job, including manifest, checksums, envelope, artifacts, and audit slice.",
+			Safety:      "Read-only evidence export; may expose sensitive job output.",
+			InputSchema: object(map[string]any{
+				"job_id": stringField(),
+			}, []string{"job_id"}),
+		},
+		{
 			Name:        "rdev.audit.query",
 			Description: "Query redacted audit events for tickets, hosts, and jobs.",
 			Safety:      "Read-only audit access.",

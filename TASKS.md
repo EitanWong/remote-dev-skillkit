@@ -78,7 +78,7 @@
 - [x] Add approval-required results for signed jobs with unsatisfied approval requirements.
 - [x] Add signed approval tokens for package install, elevation, GUI, service changes, push, merge, and deploy operations.
 - [x] Add durable approval-token consumption and persistence.
-- [ ] Add gateway/API evidence bundle export directly from job ids.
+- [x] Add gateway/API evidence bundle export directly from job ids.
 
 ## Later
 

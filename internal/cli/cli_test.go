@@ -1051,6 +1051,76 @@ func TestEvidenceExportWritesBundle(t *testing.T) {
 	}
 }
 
+func TestEvidenceExportFromGatewayJobIDWritesBundle(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteJobForHost(host.ID, job.ID, `{"schema_version":"rdev.shell-result.v1","exit_code":0}`); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	out := filepath.Join(t.TempDir(), "bundle")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"evidence", "export",
+		"--gateway", server.URL,
+		"--job-id", job.ID,
+		"--out", out,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"source": "gateway"`) {
+		t.Fatalf("expected gateway source output, got %s", stdout.String())
+	}
+	for _, path := range []string{"manifest.json", "job.json", "envelope.json", "artifacts.json", "audit-slice.jsonl", "audit-chain.json", "checksums.txt"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected gateway evidence bundle file %s: %v", path, err)
+		}
+	}
+	artifactFiles, err := os.ReadDir(filepath.Join(out, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifactFiles) != 1 {
+		t.Fatalf("expected one artifact file, got %d", len(artifactFiles))
+	}
+	artifactContent := readFileForTest(t, filepath.Join(out, "artifacts", artifactFiles[0].Name()))
+	if !strings.Contains(artifactContent, "rdev.shell-result.v1") {
+		t.Fatalf("expected shell result artifact content, got %s", artifactContent)
+	}
+	if content := readFileForTest(t, filepath.Join(out, "audit-slice.jsonl")); !strings.Contains(content, "job.complete") {
+		t.Fatalf("expected job.complete audit event, got %s", content)
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")
@@ -1154,6 +1224,15 @@ func writeJSONForTest(t *testing.T, path string, value any) {
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func readFileForTest(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
 
 func runHostServeWithIdentityStore(t *testing.T, gatewayURL, ticketCode, identityPath, name string) string {

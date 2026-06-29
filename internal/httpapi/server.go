@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
@@ -231,6 +233,8 @@ func (s Server) getJob(w http.ResponseWriter, r *http.Request) {
 		switch resource {
 		case "artifacts":
 			writeJSON(w, http.StatusOK, map[string]any{"artifacts": s.Gateway.Artifacts(jobID)})
+		case "evidence-bundle":
+			s.exportJobEvidenceBundle(w, r, jobID)
 		default:
 			writeError(w, http.StatusNotFound, "unknown job subresource")
 		}
@@ -261,6 +265,38 @@ func (s Server) getArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"artifact": artifact})
+}
+
+func (s Server) exportJobEvidenceBundle(w http.ResponseWriter, r *http.Request, jobID string) {
+	out := r.URL.Query().Get("out")
+	if out == "" {
+		writeError(w, http.StatusBadRequest, "out query parameter is required")
+		return
+	}
+	job, err := s.Gateway.Job(jobID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	manifest, err := evidence.ExportDirectory(out, evidence.Input{
+		Job:         job,
+		Artifacts:   s.Gateway.Artifacts(jobID),
+		AuditEvents: s.Gateway.AuditEvents(),
+		GeneratedAt: time.Now(),
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                true,
+		"out":               out,
+		"job_id":            manifest.JobID,
+		"file_count":        len(manifest.Files) + 1,
+		"audit_event_count": manifest.AuditEventCount,
+		"audit_root_hash":   manifest.AuditRootHash,
+		"manifest":          manifest,
+	})
 }
 
 func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {

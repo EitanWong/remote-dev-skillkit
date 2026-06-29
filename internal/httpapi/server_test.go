@@ -10,6 +10,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -454,6 +457,71 @@ func TestJobCreateClaimAndComplete(t *testing.T) {
 	}
 	if artifactPayload.Artifact.Content != "done" {
 		t.Fatalf("expected artifact content, got %q", artifactPayload.Artifact.Content)
+	}
+}
+
+func TestJobEvidenceBundleEndpointExportsBundleFromJobID(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
+	jobRec := httptest.NewRecorder()
+	handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+	var jobPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextRec := httptest.NewRecorder()
+	handler.ServeHTTP(nextRec, nextReq)
+	if nextRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
+	}
+	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"done"}`))
+	completeRec := httptest.NewRecorder()
+	handler.ServeHTTP(completeRec, completeReq)
+	if completeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", completeRec.Code, completeRec.Body.String())
+	}
+
+	out := filepath.Join(t.TempDir(), "bundle")
+	exportReq := httptest.NewRequest(http.MethodGet, "/v1/jobs/"+jobPayload.Job.ID+"/evidence-bundle?out="+url.QueryEscape(out), nil)
+	exportRec := httptest.NewRecorder()
+	handler.ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", exportRec.Code, exportRec.Body.String())
+	}
+	var exportPayload struct {
+		OK       bool   `json:"ok"`
+		JobID    string `json:"job_id"`
+		Manifest struct {
+			SchemaVersion   string `json:"schema_version"`
+			AuditEventCount int    `json:"audit_event_count"`
+		} `json:"manifest"`
+	}
+	if err := json.Unmarshal(exportRec.Body.Bytes(), &exportPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !exportPayload.OK || exportPayload.JobID != jobPayload.Job.ID {
+		t.Fatalf("unexpected export payload: %s", exportRec.Body.String())
+	}
+	if exportPayload.Manifest.SchemaVersion != "rdev.evidence-bundle.v1" {
+		t.Fatalf("unexpected manifest schema %q", exportPayload.Manifest.SchemaVersion)
+	}
+	if exportPayload.Manifest.AuditEventCount == 0 {
+		t.Fatal("expected audit slice in exported bundle")
+	}
+	for _, path := range []string{"manifest.json", "job.json", "artifacts.json", "audit-chain.json", "checksums.txt"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected evidence bundle file %s: %v", path, err)
+		}
 	}
 }
 

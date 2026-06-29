@@ -62,6 +62,11 @@
       "safety": "Read-only; may expose sensitive job output."
     },
     {
+      "name": "rdev.artifacts.export_bundle",
+      "description": "Export a reviewable evidence bundle for one job, including manifest, checksums, envelope, artifacts, and audit slice.",
+      "safety": "Read-only evidence export; may expose sensitive job output."
+    },
+    {
       "name": "rdev.audit.query",
       "description": "Query redacted audit events for tickets, hosts, and jobs.",
       "safety": "Read-only audit access."

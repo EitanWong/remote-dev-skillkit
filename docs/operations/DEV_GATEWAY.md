@@ -61,6 +61,7 @@ rdev host serve \
 - `POST /v1/jobs`
 - `GET /v1/jobs/{job_id}`
 - `GET /v1/jobs/{job_id}/artifacts`
+- `GET /v1/jobs/{job_id}/evidence-bundle?out=<directory>`
 - `GET /v1/hosts/{host_id}/jobs/next`
 - `POST /v1/jobs/{job_id}/complete`
 - `POST /v1/jobs/{job_id}/fail`
@@ -165,6 +166,23 @@ Read execution evidence:
 ```bash
 curl -s http://127.0.0.1:8787/v1/jobs/<job_id>/artifacts
 curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
+```
+
+Export a complete job evidence bundle from gateway state:
+
+```bash
+rdev evidence export \
+  --gateway http://127.0.0.1:8787 \
+  --job-id <job_id> \
+  --out .rdev/evidence/<job_id>
+```
+
+The CLI fetches the job, artifacts, and audit events from the gateway API and writes the same `rdev.evidence-bundle.v1` directory shape as file-based export: `manifest.json`, `checksums.txt`, `job.json`, `envelope.json`, `policy-decision.json`, `artifacts.json`, artifact files, `audit-slice.jsonl`, and `audit-chain.json`.
+
+The dev gateway also exposes server-side export for local diagnostics:
+
+```bash
+curl -s "http://127.0.0.1:8787/v1/jobs/<job_id>/evidence-bundle?out=$(pwd)/.rdev/evidence/<job_id>"
 ```
 
 Revoke a host and cancel its pending/running jobs:

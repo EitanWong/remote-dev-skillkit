@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -72,7 +73,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 	case "audit":
 		return a.audit(args[1:])
 	case "evidence":
-		return a.evidence(args[1:])
+		return a.evidence(ctx, args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -471,7 +472,7 @@ func (a App) audit(args []string) error {
 	}
 }
 
-func (a App) evidence(args []string) error {
+func (a App) evidence(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing evidence subcommand")
 	}
@@ -482,11 +483,13 @@ func (a App) evidence(args []string) error {
 		jobPath := fs.String("job-json", "", "job JSON path")
 		artifactsPath := fs.String("artifacts-json", "", "artifacts JSON path")
 		auditPath := fs.String("audit-jsonl", "", "audit JSONL path")
+		gatewayURL := fs.String("gateway", "", "gateway API URL for job-id export")
+		jobID := fs.String("job-id", "", "job id to export from gateway API")
 		out := fs.String("out", "", "output evidence bundle directory")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		return a.evidenceExport(*jobPath, *artifactsPath, *auditPath, *out)
+		return a.evidenceExport(ctx, *jobPath, *artifactsPath, *auditPath, *gatewayURL, *jobID, *out)
 	default:
 		return fmt.Errorf("unknown evidence subcommand %q", args[0])
 	}
@@ -664,39 +667,59 @@ func (a App) auditVerify(inputPath string) error {
 	return enc.Encode(payload)
 }
 
-func (a App) evidenceExport(jobPath, artifactsPath, auditPath, outPath string) error {
-	if jobPath == "" {
-		return fmt.Errorf("job-json is required")
-	}
+func (a App) evidenceExport(ctx context.Context, jobPath, artifactsPath, auditPath, gatewayURL, jobID, outPath string) error {
 	if outPath == "" {
 		return fmt.Errorf("out is required")
 	}
-	job, err := readJobJSON(jobPath)
-	if err != nil {
-		return err
-	}
-	artifacts, err := readArtifactsJSON(artifactsPath)
-	if err != nil {
-		return err
-	}
-	var events []model.AuditEvent
-	if auditPath != "" {
-		events, err = audit.ReadJSONL(auditPath)
+	input := evidence.Input{GeneratedAt: time.Now()}
+	source := "files"
+	if gatewayURL != "" || jobID != "" {
+		if gatewayURL == "" {
+			return fmt.Errorf("gateway is required when job-id is set")
+		}
+		if jobID == "" {
+			return fmt.Errorf("job-id is required when gateway is set")
+		}
+		if jobPath != "" || artifactsPath != "" || auditPath != "" {
+			return fmt.Errorf("gateway/job-id export cannot be combined with job-json, artifacts-json, or audit-jsonl")
+		}
+		gatewayInput, err := fetchEvidenceInput(ctx, gatewayURL, jobID)
 		if err != nil {
 			return err
 		}
+		input = gatewayInput
+		input.GeneratedAt = time.Now()
+		source = "gateway"
+	} else {
+		if jobPath == "" {
+			return fmt.Errorf("job-json is required")
+		}
+		job, err := readJobJSON(jobPath)
+		if err != nil {
+			return err
+		}
+		artifacts, err := readArtifactsJSON(artifactsPath)
+		if err != nil {
+			return err
+		}
+		var events []model.AuditEvent
+		if auditPath != "" {
+			events, err = audit.ReadJSONL(auditPath)
+			if err != nil {
+				return err
+			}
+		}
+		input.Job = job
+		input.Artifacts = artifacts
+		input.AuditEvents = events
 	}
-	manifest, err := evidence.ExportDirectory(outPath, evidence.Input{
-		Job:         job,
-		Artifacts:   artifacts,
-		AuditEvents: events,
-		GeneratedAt: time.Now(),
-	})
+	manifest, err := evidence.ExportDirectory(outPath, input)
 	if err != nil {
 		return err
 	}
 	payload := map[string]any{
 		"ok":                true,
+		"source":            source,
 		"out":               outPath,
 		"job_id":            manifest.JobID,
 		"file_count":        len(manifest.Files) + 1,
@@ -725,6 +748,7 @@ Usage:
   rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/chain.json
   rdev audit verify --input .rdev/audit/chain.json
   rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence
+  rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
@@ -1113,6 +1137,105 @@ func fetchHost(ctx context.Context, gatewayURL, hostID string) (model.Host, erro
 		return model.Host{}, fmt.Errorf("fetch host failed: %s", payload.Error)
 	}
 	return payload.Host, nil
+}
+
+func fetchEvidenceInput(ctx context.Context, gatewayURL, jobID string) (evidence.Input, error) {
+	job, err := fetchJob(ctx, gatewayURL, jobID)
+	if err != nil {
+		return evidence.Input{}, err
+	}
+	artifacts, err := fetchJobArtifacts(ctx, gatewayURL, jobID)
+	if err != nil {
+		return evidence.Input{}, err
+	}
+	events, err := fetchAuditEvents(ctx, gatewayURL)
+	if err != nil {
+		return evidence.Input{}, err
+	}
+	return evidence.Input{
+		Job:         job,
+		Artifacts:   artifacts,
+		AuditEvents: events,
+		GeneratedAt: time.Now(),
+	}, nil
+}
+
+func fetchJob(ctx context.Context, gatewayURL, jobID string) (model.Job, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/jobs/"+url.PathEscape(jobID), nil)
+	if err != nil {
+		return model.Job{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Job{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Job   model.Job `json:"job"`
+		Error string    `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.Job{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.Job{}, fmt.Errorf("fetch job failed: %s", payload.Error)
+	}
+	return payload.Job, nil
+}
+
+func fetchJobArtifacts(ctx context.Context, gatewayURL, jobID string) ([]model.Artifact, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/jobs/"+url.PathEscape(jobID)+"/artifacts", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Artifacts []model.Artifact `json:"artifacts"`
+		Error     string           `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return nil, fmt.Errorf("fetch job artifacts failed: %s", payload.Error)
+	}
+	return payload.Artifacts, nil
+}
+
+func fetchAuditEvents(ctx context.Context, gatewayURL string) ([]model.AuditEvent, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/audit", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Events []model.AuditEvent `json:"events"`
+		Error  string             `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return nil, fmt.Errorf("fetch audit events failed: %s", payload.Error)
+	}
+	return payload.Events, nil
 }
 
 func completeJob(ctx context.Context, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
