@@ -102,6 +102,7 @@
 - [x] Add shared implicit approval preflight for risky shell and Codex actions.
 - [x] Add managed Mac coding acceptance harness with locked-worktree evidence export.
 - [x] Add acceptance report verifier for evidence checksums, artifact index, audit chain, approval gate, and workspace-lock release.
+- [x] Add managed Mac LaunchAgent acceptance plan command with checked plist, launchctl steps, service-backed acceptance commands, and uninstall guidance.
 
 ## Later
 
@@ -109,7 +110,7 @@
 - [ ] Add authenticated production managed host trust lifecycle with OS-protected storage.
 - [ ] Add OS-protected managed host identity storage and registration proof.
 - [ ] Add Windows Service mode.
-- [ ] Add launchctl start/stop execution and systemd mode.
+- [ ] Add opt-in launchctl start/stop execution and systemd mode.
 - [ ] Add acpx adapter.
 - [ ] Generalize cooperative cancellation across shell, PowerShell, and future adapter SDK implementations.
 - [ ] Add Claude Code adapter.

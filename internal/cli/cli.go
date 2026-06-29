@@ -137,6 +137,44 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			MaxDurationSeconds:        *maxDuration,
 			MaxOutputBytes:            *maxOutput,
 		})
+	case "managed-mac-service":
+		fs := flag.NewFlagSet("acceptance managed-mac-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", "", "git repository root to include in the follow-up managed-mac acceptance command")
+		out := fs.String("out", "", "empty output directory for the service plan and generated plist")
+		binaryPath := fs.String("binary", "", "absolute path to rdev binary; defaults to current executable")
+		gatewayURL := fs.String("gateway", "", "gateway URL for managed ticket enrollment")
+		ticketCode := fs.String("ticket-code", "", "managed enrollment ticket code")
+		manifestURL := fs.String("manifest-url", "", "signed managed enrollment manifest URL")
+		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		plistOut := fs.String("plist-out", "", "LaunchAgent plist output path; defaults to <out>/<label>.plist")
+		identityStore := fs.String("identity-store", "", "managed host identity store path")
+		trustStore := fs.String("trust-store", "", "managed host trust bundle store path")
+		nonceStore := fs.String("nonce-store", "", "managed host nonce store path")
+		approvalStore := fs.String("approval-store", "", "managed host approval store path")
+		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
+		logDir := fs.String("log-dir", "", "managed host log directory")
+		force := fs.Bool("force", false, "overwrite an existing plist output path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceManagedMacService(ctx, acceptance.ManagedMacServiceOptions{
+			RepoRoot:           *repo,
+			OutDir:             *out,
+			BinaryPath:         *binaryPath,
+			GatewayURL:         *gatewayURL,
+			TicketCode:         *ticketCode,
+			ManifestURL:        *manifestURL,
+			Label:              *label,
+			PlistOut:           *plistOut,
+			IdentityStore:      *identityStore,
+			TrustStore:         *trustStore,
+			NonceStore:         *nonceStore,
+			ApprovalStore:      *approvalStore,
+			WorkspaceLockStore: *workspaceLockStore,
+			LogDir:             *logDir,
+			Force:              *force,
+		})
 	case "verify":
 		fs := flag.NewFlagSet("acceptance verify", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -169,6 +207,29 @@ func (a App) acceptanceManagedMac(ctx context.Context, opts acceptance.ManagedMa
 		"approval_probe_job_id":  report.ApprovalJob.ID,
 		"checks":                 report.Checks,
 		"recommended_next_steps": report.RecommendedNextSteps,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) acceptanceManagedMacService(ctx context.Context, opts acceptance.ManagedMacServiceOptions) error {
+	plan, err := acceptance.RunManagedMacServicePlan(ctx, opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  allAcceptanceChecksPassed(plan.Checks),
+		"schema":              plan.SchemaVersion,
+		"out":                 plan.OutDir,
+		"plan":                filepath.Join(plan.OutDir, "service-plan.json"),
+		"plist":               plan.PlistPath,
+		"label":               plan.LaunchAgent.Label,
+		"program_arguments":   plan.LaunchAgent.ProgramArguments,
+		"checks":              plan.Checks,
+		"commands":            plan.Commands,
+		"recommended_actions": plan.RecommendedActions,
+		"note":                "plist and plan written only; launchctl was not executed by this command",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1373,6 +1434,7 @@ Usage:
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev acceptance managed-mac --out acceptance-run --repo .
+  rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
   rdev acceptance verify --report acceptance-run/report.json
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...

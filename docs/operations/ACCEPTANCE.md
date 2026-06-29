@@ -95,11 +95,38 @@ nonzero if any release-gate check fails. It validates:
 - `git.push` approval-required probe;
 - workspace lock release after the job.
 
+## Managed Mac LaunchAgent Plan
+
+Before running a real service-backed acceptance, generate a checked LaunchAgent plan:
+
+```bash
+rdev acceptance managed-mac-service \
+  --out .rdev/acceptance/managed-mac-service \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --repo .
+```
+
+The command writes `service-plan.json` with schema
+`rdev.acceptance.managed-mac-service-plan.v1` and a LaunchAgent plist. It validates:
+
+- plist is written with `0600` permissions;
+- label matches the generated plist;
+- `RunAtLoad` and `KeepAlive` are enabled for explicit managed mode;
+- host arguments include `--mode managed`, `--once=false`, transport, identity,
+  trust, nonce, approval, and workspace-lock stores;
+- enrollment uses either `--ticket-code` or `--manifest-url`;
+- manual `launchctl bootstrap`, `launchctl print`, `launchctl bootout`, managed
+  coding acceptance, `rdev acceptance verify`, and uninstall commands are present.
+
+This command does not execute `launchctl`. It produces the operator-reviewed plan
+for the real LaunchAgent acceptance run.
+
 ## Current Boundary
 
 This harness proves the managed test-process path. It does not yet prove:
 
-- macOS LaunchAgent installed and started with `launchctl`;
+- macOS LaunchAgent installed and started with `launchctl` after reviewing the generated plan;
 - reconnect after reboot;
 - OS-protected identity/trust storage;
 - real Codex authentication on Eitan's managed Mac;

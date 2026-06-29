@@ -1947,6 +1947,53 @@ func main() {
 	}
 }
 
+func TestAcceptanceManagedMacServicePlan(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "managed-mac-service")
+	repo := t.TempDir()
+	binaryPath := filepath.Join(t.TempDir(), "rdev")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "managed-mac-service",
+		"--out", out,
+		"--binary", binaryPath,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--repo", repo,
+		"--label", "com.example.rdev-acceptance",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK       bool   `json:"ok"`
+		Schema   string `json:"schema"`
+		Plan     string `json:"plan"`
+		Plist    string `json:"plist"`
+		Commands []struct {
+			Name  string `json:"name"`
+			Shell string `json:"shell"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected service acceptance plan ok, got %s", stdout.String())
+	}
+	if payload.Schema != "rdev.acceptance.managed-mac-service-plan.v1" {
+		t.Fatalf("unexpected schema %q", payload.Schema)
+	}
+	for _, path := range []string{payload.Plan, payload.Plist} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected generated path %s: %v", path, err)
+		}
+	}
+	commands := stdout.String()
+	if !strings.Contains(commands, "launchctl bootstrap") || !strings.Contains(commands, "rdev acceptance verify") {
+		t.Fatalf("expected launchctl and verification commands, got %s", commands)
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
 }
