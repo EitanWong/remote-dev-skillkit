@@ -49,7 +49,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Multi-platform GitHub Release dry-run planning through `scripts/github/plan-platform-release.sh`, producing unique platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and command previews without external mutation.
 - Post-release install verification planning through `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification commands from a local GitHub Release dry-run plan without external mutation.
 - Post-release install plan verification through `scripts/github/verify-post-release-install-plan.sh`, checking the generated plan and scripts before they are archived as release evidence and rejecting tampered verification scripts in CI smoke.
-- Public adapter result-artifact conformance verifier through `pkg/adapterkit`, `rdev adapter verify-result`, and MCP tool `rdev.adapter.verify_result`, with built-in shell, PowerShell, and Codex tests checking schema, timing, redaction metadata, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
+- Public adapter conformance verifiers through `pkg/adapterkit`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle`, with lifecycle manifests checking required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, and Codex result tests checking schema, timing, redaction metadata, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 
@@ -107,7 +107,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - launchd support.
 - Restart/recovery.
 - Auto-update/rollback.
-- Full lifecycle adapter SDK beyond result-artifact conformance.
+- Full runtime adapter SDK beyond lifecycle-manifest and result-artifact conformance.
 - Claude Code and ACP adapters.
 - Artifact streaming.
 - Durable hosted storage.

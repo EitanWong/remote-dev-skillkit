@@ -1780,6 +1780,30 @@ func (a App) adapter(args []string) error {
 			RequireRedaction:         *requireRedaction,
 			RejectUnredactedPatterns: *rejectSecrets,
 		})
+	case "verify-lifecycle":
+		fs := flag.NewFlagSet("adapter verify-lifecycle", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		artifact := fs.String("artifact", "", "adapter lifecycle manifest JSON path, or - for stdin")
+		adapterName := fs.String("adapter", "", "expected adapter name")
+		schemaVersion := fs.String("schema", adapterkit.LifecycleManifestSchemaVersion, "expected adapter lifecycle manifest schema version")
+		requiredPhases := fs.String("required-phases", "detect,plan,prepare,run,collect,cleanup", "comma-separated required lifecycle phases")
+		requireSafety := fs.Bool("require-safety", true, "require safety boundary declarations")
+		requireCancellation := fs.Bool("require-cancellation", true, "require cancellation support declarations")
+		requireResultSchema := fs.Bool("require-result-schema", true, "require collect.result_schema")
+		rejectSecrets := fs.Bool("reject-secret-patterns", true, "reject common unredacted secret patterns")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.adapterVerifyLifecycle(adapterVerifyLifecycleOptions{
+			ArtifactPath:             *artifact,
+			Adapter:                  *adapterName,
+			SchemaVersion:            *schemaVersion,
+			RequiredPhases:           splitCapabilities(*requiredPhases),
+			RequireSafety:            *requireSafety,
+			RequireCancellation:      *requireCancellation,
+			RequireResultSchema:      *requireResultSchema,
+			RejectUnredactedPatterns: *rejectSecrets,
+		})
 	default:
 		return fmt.Errorf("unknown adapter subcommand %q", args[0])
 	}
@@ -1793,6 +1817,17 @@ type adapterVerifyResultOptions struct {
 	RequiredStringFields     []string
 	RequireTiming            bool
 	RequireRedaction         bool
+	RejectUnredactedPatterns bool
+}
+
+type adapterVerifyLifecycleOptions struct {
+	ArtifactPath             string
+	Adapter                  string
+	SchemaVersion            string
+	RequiredPhases           []string
+	RequireSafety            bool
+	RequireCancellation      bool
+	RequireResultSchema      bool
 	RejectUnredactedPatterns bool
 }
 
@@ -2270,6 +2305,46 @@ func (a App) adapterVerifyResult(opts adapterVerifyResultOptions) error {
 	}
 	if !report.OK {
 		return fmt.Errorf("adapter result conformance failed")
+	}
+	return nil
+}
+
+func (a App) adapterVerifyLifecycle(opts adapterVerifyLifecycleOptions) error {
+	if strings.TrimSpace(opts.ArtifactPath) == "" {
+		return fmt.Errorf("artifact is required")
+	}
+	if strings.TrimSpace(opts.Adapter) == "" {
+		return fmt.Errorf("adapter is required")
+	}
+	if strings.TrimSpace(opts.SchemaVersion) == "" {
+		return fmt.Errorf("schema is required")
+	}
+	var content []byte
+	var err error
+	if opts.ArtifactPath == "-" {
+		content, err = io.ReadAll(os.Stdin)
+	} else {
+		content, err = os.ReadFile(opts.ArtifactPath)
+	}
+	if err != nil {
+		return err
+	}
+	report := adapterkit.VerifyLifecycleManifestJSON(content, adapterkit.LifecycleContract{
+		Adapter:                 opts.Adapter,
+		SchemaVersion:           opts.SchemaVersion,
+		RequiredPhases:          opts.RequiredPhases,
+		RequireSafety:           opts.RequireSafety,
+		RequireCancellation:     opts.RequireCancellation,
+		RequireResultSchema:     opts.RequireResultSchema,
+		RejectUnredactedSecrets: opts.RejectUnredactedPatterns,
+	})
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(report); err != nil {
+		return err
+	}
+	if !report.OK {
+		return fmt.Errorf("adapter lifecycle conformance failed")
 	}
 	return nil
 }
@@ -2899,6 +2974,7 @@ Usage:
   rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
   rdev skillkit verify --bundle dist/remote-dev-skillkit
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
+  rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
   rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
   rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
   rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"

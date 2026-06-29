@@ -170,6 +170,22 @@ func Tools() []Tool {
 				"reject_secret_patterns": boolField(),
 			}, []string{"adapter", "schema"}),
 		},
+		{
+			Name:        "rdev.adapter.verify_lifecycle",
+			Description: "Verify an adapter lifecycle manifest against the public Adapter SDK lifecycle conformance contract.",
+			Safety:      "Read-only manifest validation; does not execute on a host.",
+			InputSchema: object(map[string]any{
+				"adapter":                stringField(),
+				"schema":                 stringField(),
+				"artifact_json":          stringField(),
+				"artifact_id":            stringField(),
+				"required_phases":        stringArray(),
+				"require_safety":         boolField(),
+				"require_cancellation":   boolField(),
+				"require_result_schema":  boolField(),
+				"reject_secret_patterns": boolField(),
+			}, []string{"adapter"}),
+		},
 	}
 }
 

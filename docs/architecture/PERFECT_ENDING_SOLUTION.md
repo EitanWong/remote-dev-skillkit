@@ -118,8 +118,9 @@ changes.
 
 ### Adapter Lifecycle Contract
 
-The result-artifact verifier is the first public Adapter SDK slice. The final
-SDK must extend that into a lifecycle contract:
+The lifecycle-manifest and result-artifact verifiers are the first public
+Adapter SDK slices. The final runtime SDK must extend those into executable
+lifecycle fixtures:
 
 | Phase | Adapter must provide | Kernel must enforce |
 |---|---|---|
@@ -1325,13 +1326,17 @@ collect(job, raw_result) -> redacted_artifacts, checksums, evidence_manifest
 cleanup(job, result) -> cleanup_status
 ```
 
-The first public SDK slice is already narrower and intentionally boring:
-`pkg/adapterkit`, `rdev adapter verify-result`, and MCP tool
-`rdev.adapter.verify_result` verify result-artifact JSON for adapter/schema
-identity, timing, redaction metadata, command evidence, cancellation/timeout
-exclusivity, and common secret-pattern rejection. Shell, PowerShell, and Codex
-use this shared verifier in tests, so third-party adapter authors have a
-concrete evidence contract before the full lifecycle interface is extracted.
+The first public SDK slices are already narrower and intentionally boring:
+`pkg/adapterkit`, `rdev adapter verify-lifecycle`, `rdev adapter verify-result`,
+and MCP tools `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_result`
+verify lifecycle manifests and result-artifact JSON. Lifecycle conformance checks
+required phases, safety boundaries, cancellation, cleanup, and result schema
+declarations. Result conformance checks adapter/schema identity, timing,
+redaction metadata, command evidence, cancellation/timeout exclusivity, and
+common secret-pattern rejection. Shell, PowerShell, and Codex use the shared
+result verifier in tests, so third-party adapter authors have concrete
+declaration and evidence contracts before the full runtime lifecycle interface
+is extracted.
 
 Conformance tests must prove:
 
@@ -1541,7 +1546,7 @@ the remaining gaps that matter before public confidence:
 | Real managed Mac service run | LaunchAgent planning/control exists; durable reconnect must be proven outside a dry-run | service-backed run survives logout/reboot, completes Codex job, verifies evidence, stops and uninstalls |
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
-| Adapter SDK extraction | result-artifact conformance exists, but adapters are still mostly internal lifecycle implementations | full lifecycle SDK, fixtures, cancellation conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
+| Adapter SDK extraction | lifecycle-manifest and result-artifact conformance exist, but adapters are still mostly internal runtime implementations | full runtime SDK, fixtures, cancellation conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
 | Multi-platform release UX | aggregate dry-run plan, platform archives, index, and install guide exist; public release still needs real download verification after publication | verified public download commands and post-release install transcript |
 | Public release execution | real build artifacts, release candidates, and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 

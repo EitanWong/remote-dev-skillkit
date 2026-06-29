@@ -6,7 +6,7 @@
 - [ ] `go vet ./...`
 - [ ] `./scripts/check.sh`
 - [ ] `./scripts/ci/release-smoke.sh`
-- [ ] Confirm built-in adapter result artifacts pass `pkg/adapterkit`, `rdev adapter verify-result`, and `rdev.adapter.verify_result` conformance tests.
+- [ ] Confirm adapter lifecycle manifests and built-in adapter result artifacts pass `pkg/adapterkit`, `rdev adapter verify-lifecycle`, `rdev adapter verify-result`, `rdev.adapter.verify_lifecycle`, and `rdev.adapter.verify_result` conformance tests.
 - [ ] GitHub Actions CI passes for the release commit.
 - [ ] Build binaries for macOS, Linux, and Windows with `scripts/release/build-artifacts.sh`.
 - [ ] Review `rdev.build-artifacts.v1` and `checksums.txt`.

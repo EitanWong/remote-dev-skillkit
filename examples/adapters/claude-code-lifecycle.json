@@ -1,0 +1,53 @@
+{
+  "schema_version": "rdev.adapter-lifecycle.v1",
+  "adapter": "claude-code",
+  "phases": {
+    "detect": {
+      "implemented": true,
+      "evidence": ["binary_path", "version", "capabilities"]
+    },
+    "plan": {
+      "implemented": true,
+      "evidence": ["prompt_summary", "planned_commands", "expected_artifacts"],
+      "declares_external_consequences": true,
+      "declares_required_approvals": true
+    },
+    "prepare": {
+      "implemented": true,
+      "evidence": ["workspace_root", "worktree_path", "lock_id"],
+      "enforces_workspace_boundary": true,
+      "uses_workspace_lock": true
+    },
+    "run": {
+      "implemented": true,
+      "evidence": ["argv", "started_at", "exit_code"],
+      "supports_timeout": true,
+      "supports_cancellation": true
+    },
+    "collect": {
+      "implemented": true,
+      "evidence": ["stdout", "stderr", "git_status", "git_diff", "verification_commands"],
+      "emits_result_artifact": true,
+      "result_schema": "rdev.claude-code-result.v1"
+    },
+    "cleanup": {
+      "implemented": true,
+      "evidence": ["lock_released", "temp_files_removed", "processes_stopped"],
+      "idempotent": true,
+      "releases_locks": true
+    }
+  },
+  "safety": {
+    "adapter_authorizes_jobs": false,
+    "adapter_approves_dangerous_actions": false,
+    "adapter_installs_persistence": false,
+    "host_validates_before_run": true,
+    "redacts_outputs": true
+  },
+  "cancellation": {
+    "supported": true,
+    "evidence_field": "canceled",
+    "timeout_exclusive": true,
+    "cleanup_on_cancel": true
+  }
+}

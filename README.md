@@ -54,7 +54,7 @@ Implemented now:
 - `rdev ticket create` local ticket preview.
 - `rdev policy explain` local policy simulation.
 - `rdev policy explain-shell` shell job policy preflight explanation.
-- `rdev mcp tools` tool-contract listing, including `rdev.adapter.verify_result` for agent-side adapter artifact conformance checks.
+- `rdev mcp tools` tool-contract listing, including `rdev.adapter.verify_result` and `rdev.adapter.verify_lifecycle` for agent-side adapter conformance checks.
 - `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev gateway serve --dev` local HTTP development gateway.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
@@ -85,7 +85,7 @@ Implemented now:
 - PowerShell adapter MVP through `adapter=powershell`: runs an explicit PowerShell command through an allowlisted `pwsh`, `powershell`, `powershell.exe`, or payload-provided executable, requires `powershell.user`, never adds `-ExecutionPolicy Bypass`, gates high-risk commands on approval, and captures `rdev.powershell-result.v1` evidence with redaction.
 - Codex, shell, and PowerShell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
 - Canceled Codex, shell, and PowerShell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
-- Public adapter result-artifact conformance verifier through `pkg/adapterkit`, `rdev adapter verify-result`, and MCP tool `rdev.adapter.verify_result`, used by built-in shell, PowerShell, and Codex tests to check schema, timing, redaction, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
+- Public adapter conformance verifiers through `pkg/adapterkit`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle`, covering result artifacts plus lifecycle manifests for required phases, safety boundaries, cancellation, cleanup, result schemas, timing, redaction, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Built-in shell, PowerShell, and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, credential changes, and execution-policy changes.
@@ -121,7 +121,7 @@ Not implemented yet:
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
-- Full lifecycle adapter SDK beyond the current result-artifact conformance verifier.
+- Full runtime adapter SDK beyond the current lifecycle-manifest and result-artifact conformance verifiers.
 - OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
 - Windows service installation.
@@ -159,6 +159,7 @@ go run ./cmd/rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_.
 go run ./cmd/rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
 go run ./cmd/rdev skillkit verify --bundle dist/remote-dev-skillkit
 go run ./cmd/rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
+go run ./cmd/rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
 go run ./cmd/rdev acceptance managed-mac --out .rdev/acceptance/managed-mac --repo .
 go run ./cmd/rdev acceptance managed-mac-service --out .rdev/acceptance/managed-mac-service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
 go run ./cmd/rdev acceptance windows-temporary --out .rdev/acceptance/windows-temporary --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example.com/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example.com/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example.com/rdev-verify.exe --verifier-sha256 <sha256>

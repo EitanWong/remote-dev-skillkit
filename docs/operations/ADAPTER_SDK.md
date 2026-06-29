@@ -1,8 +1,62 @@
 # Adapter SDK
 
-The adapter SDK starts with one stable rule: every adapter result must be
-independently checkable as evidence. `pkg/adapterkit` provides the first public
-contract for that rule.
+The adapter SDK starts with two stable rules:
+
+1. every adapter result must be independently checkable as evidence;
+2. every adapter must describe how it passes through the host kernel lifecycle
+   before it is exposed to agents.
+
+`pkg/adapterkit` provides the first public contracts for those rules.
+
+## Lifecycle Manifest Conformance
+
+Use `adapterkit.VerifyLifecycleManifestJSON` before treating a new adapter as a
+candidate for hostrunner integration.
+
+```go
+report := adapterkit.VerifyLifecycleManifestJSON(content, adapterkit.LifecycleContract{
+    Adapter:                 "my-adapter",
+    RequireSafety:           true,
+    RequireCancellation:     true,
+    RequireResultSchema:     true,
+    RejectUnredactedSecrets: true,
+})
+if !report.OK {
+    t.Fatalf("adapter lifecycle failed conformance: %#v", report)
+}
+```
+
+The lifecycle manifest uses schema `rdev.adapter-lifecycle.v1` and describes the
+six required phases:
+
+```text
+detect -> plan -> prepare -> run -> collect -> cleanup
+```
+
+The verifier checks that:
+
+- every required phase is present, implemented, and has evidence declarations;
+- `plan` declares external consequences and required approvals;
+- `prepare` enforces workspace boundaries and workspace locks;
+- `run` supports timeout and, when required, cancellation;
+- `collect` emits a result artifact and result schema;
+- `cleanup` is idempotent and releases locks;
+- safety declarations state that the adapter does not authorize jobs, self-
+  approve dangerous actions, or install hidden persistence;
+- cancellation declarations include a canceled evidence field, timeout
+  exclusivity, and cleanup-on-cancel behavior;
+- common unredacted secret patterns are absent when requested.
+
+Adapter authors can run the same check through the CLI:
+
+```bash
+rdev adapter verify-lifecycle \
+  --artifact examples/adapters/claude-code-lifecycle.json \
+  --adapter claude-code
+```
+
+Agent runtimes can call MCP tool `rdev.adapter.verify_lifecycle` with
+`artifact_json` or `artifact_id`.
 
 ## Result Artifact Conformance
 
@@ -72,8 +126,9 @@ The verifier checks:
 
 ## Current Scope
 
-This is not the full lifecycle SDK yet. Adapter authors still implement their
-own detect, plan, prepare, run, collect, and cleanup phases behind the host
-runner and policy engine. The current package is the shared conformance layer
-for result evidence, and the built-in shell, PowerShell, and Codex tests use it
-as fixtures for future third-party adapters.
+Lifecycle manifest conformance is not the full runtime Adapter SDK yet. Adapter
+authors still implement their detect, plan, prepare, run, collect, and cleanup
+phases behind the host runner and policy engine. The current package is the
+shared conformance layer for lifecycle declarations and result evidence, and the
+built-in shell, PowerShell, and Codex tests use the result checks as fixtures
+for future third-party adapters.

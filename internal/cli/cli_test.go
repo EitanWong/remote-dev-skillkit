@@ -2201,6 +2201,95 @@ func TestAdapterVerifyResultRejectsMissingCommandEvidence(t *testing.T) {
 	}
 }
 
+func TestAdapterVerifyLifecycleAcceptsManifest(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "claude-code-lifecycle.json")
+	if err := os.WriteFile(artifactPath, []byte(`{
+  "schema_version": "rdev.adapter-lifecycle.v1",
+  "adapter": "claude-code",
+  "phases": {
+    "detect": {"implemented": true, "evidence": ["version"]},
+    "plan": {"implemented": true, "evidence": ["commands"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
+    "run": {"implemented": true, "evidence": ["process"], "supports_timeout": true, "supports_cancellation": true},
+    "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
+    "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
+  },
+  "safety": {
+    "adapter_authorizes_jobs": false,
+    "adapter_approves_dangerous_actions": false,
+    "adapter_installs_persistence": false,
+    "host_validates_before_run": true,
+    "redacts_outputs": true
+  },
+  "cancellation": {"supported": true, "evidence_field": "canceled", "timeout_exclusive": true, "cleanup_on_cancel": true}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	if err := app.Run(context.Background(), []string{
+		"adapter", "verify-lifecycle",
+		"--artifact", artifactPath,
+		"--adapter", "claude-code",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var report struct {
+		SchemaVersion  string `json:"schema_version"`
+		ArtifactSchema string `json:"artifact_schema"`
+		OK             bool   `json:"ok"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid lifecycle conformance output: %v\n%s", err, stdout.String())
+	}
+	if report.SchemaVersion != "rdev.adapter-conformance-report.v1" || report.ArtifactSchema != "rdev.adapter-lifecycle.v1" || !report.OK {
+		t.Fatalf("unexpected lifecycle conformance output: %s", stdout.String())
+	}
+}
+
+func TestAdapterVerifyLifecycleRejectsMissingCancellation(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "claude-code-lifecycle.json")
+	if err := os.WriteFile(artifactPath, []byte(`{
+  "schema_version": "rdev.adapter-lifecycle.v1",
+  "adapter": "claude-code",
+  "phases": {
+    "detect": {"implemented": true, "evidence": ["version"]},
+    "plan": {"implemented": true, "evidence": ["commands"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
+    "run": {"implemented": true, "evidence": ["process"], "supports_timeout": true, "supports_cancellation": false},
+    "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
+    "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
+  },
+  "safety": {
+    "adapter_authorizes_jobs": false,
+    "adapter_approves_dangerous_actions": false,
+    "adapter_installs_persistence": false,
+    "host_validates_before_run": true,
+    "redacts_outputs": true
+  },
+  "cancellation": {"supported": false, "evidence_field": "", "timeout_exclusive": true, "cleanup_on_cancel": true}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"adapter", "verify-lifecycle",
+		"--artifact", artifactPath,
+		"--adapter", "claude-code",
+	})
+	if err == nil || !strings.Contains(err.Error(), "lifecycle conformance failed") {
+		t.Fatalf("expected lifecycle conformance failure, got %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": false`) || !strings.Contains(stdout.String(), "run_supports_cancellation") {
+		t.Fatalf("expected structured lifecycle failure report, got %s", stdout.String())
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")

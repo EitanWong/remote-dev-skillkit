@@ -148,6 +148,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.explainShellPolicy(params.Arguments)
 	case "rdev.adapter.verify_result":
 		data, err = s.verifyAdapterResult(params.Arguments)
+	case "rdev.adapter.verify_lifecycle":
+		data, err = s.verifyAdapterLifecycle(params.Arguments)
 	default:
 		err = fmt.Errorf("unknown tool %q", params.Name)
 	}
@@ -287,6 +289,30 @@ func (s Server) verifyAdapterResult(args map[string]any) (any, error) {
 		RequiredStringFields:    requiredFields,
 		RequireTiming:           boolArg(args, "require_timing", true),
 		RequireRedaction:        boolArg(args, "require_redaction", true),
+		RejectUnredactedSecrets: boolArg(args, "reject_secret_patterns", true),
+	}), nil
+}
+
+func (s Server) verifyAdapterLifecycle(args map[string]any) (any, error) {
+	artifactJSON := stringArg(args, "artifact_json", "")
+	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
+		artifact, err := s.Gateway.Artifact(artifactID)
+		if err != nil {
+			return nil, err
+		}
+		artifactJSON = artifact.Content
+	}
+	if artifactJSON == "" {
+		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+	}
+	schema := stringArg(args, "schema", adapterkit.LifecycleManifestSchemaVersion)
+	return adapterkit.VerifyLifecycleManifestJSON([]byte(artifactJSON), adapterkit.LifecycleContract{
+		Adapter:                 requiredString(args, "adapter"),
+		SchemaVersion:           schema,
+		RequiredPhases:          stringSliceArg(args, "required_phases"),
+		RequireSafety:           boolArg(args, "require_safety", true),
+		RequireCancellation:     boolArg(args, "require_cancellation", true),
+		RequireResultSchema:     boolArg(args, "require_result_schema", true),
 		RejectUnredactedSecrets: boolArg(args, "reject_secret_patterns", true),
 	}), nil
 }

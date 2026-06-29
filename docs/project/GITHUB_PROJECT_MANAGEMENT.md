@@ -108,7 +108,7 @@ These should not be opened as new GitHub issues unless regression work is needed
 - shared risky-action approval preflight for shell and Codex;
 - managed Mac local acceptance harness and independent evidence verifier;
 - managed Mac LaunchAgent service acceptance plan;
-- public `pkg/adapterkit`, `rdev adapter verify-result`, and `rdev.adapter.verify_result` result-artifact conformance verifier used by shell, PowerShell, and Codex tests.
+- public `pkg/adapterkit`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev.adapter.verify_result`, and `rdev.adapter.verify_lifecycle` conformance verifiers for lifecycle manifests and result artifacts; shell, PowerShell, and Codex tests use the result-artifact checks.
 
 ## Seed Issues To Create After Approval
 
@@ -152,7 +152,7 @@ The current bootstrap script creates the following seed backlog.
      - file-backed dev stores remain available for tests;
      - rollback and revocation checks still pass.
 
-5. **Extract full adapter lifecycle SDK and conformance suite**
+5. **Extract full runtime adapter SDK and conformance suite**
    - Labels: `area:adapter`, `area:policy`, `area:evidence`, `kind:feature`, `kind:test`, `priority:p1`
    - Acceptance:
      - shared adapter interface covers detect, plan, prepare, run, collect, cleanup;

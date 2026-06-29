@@ -10,6 +10,7 @@ import (
 )
 
 const ConformanceReportSchemaVersion = "rdev.adapter-conformance-report.v1"
+const LifecycleManifestSchemaVersion = "rdev.adapter-lifecycle.v1"
 
 type ResultArtifactContract struct {
 	Adapter                 string
@@ -18,6 +19,16 @@ type ResultArtifactContract struct {
 	RequiredStringFields    []string
 	RequireTiming           bool
 	RequireRedaction        bool
+	RejectUnredactedSecrets bool
+}
+
+type LifecycleContract struct {
+	Adapter                 string
+	SchemaVersion           string
+	RequiredPhases          []string
+	RequireSafety           bool
+	RequireCancellation     bool
+	RequireResultSchema     bool
 	RejectUnredactedSecrets bool
 }
 
@@ -100,6 +111,91 @@ func VerifyResultArtifactJSON(content []byte, contract ResultArtifactContract) C
 	return report
 }
 
+func VerifyLifecycleManifestJSON(content []byte, contract LifecycleContract) ConformanceReport {
+	if strings.TrimSpace(contract.SchemaVersion) == "" {
+		contract.SchemaVersion = LifecycleManifestSchemaVersion
+	}
+	if len(contract.RequiredPhases) == 0 {
+		contract.RequiredPhases = []string{"detect", "plan", "prepare", "run", "collect", "cleanup"}
+	}
+	report := ConformanceReport{
+		SchemaVersion:  ConformanceReportSchemaVersion,
+		Adapter:        contract.Adapter,
+		ArtifactSchema: contract.SchemaVersion,
+	}
+	add := func(name string, passed bool, detail string) {
+		report.Checks = append(report.Checks, Check{Name: name, Passed: passed, Detail: detail})
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		add("json_valid", false, err.Error())
+		report.OK = report.allChecksPassed()
+		return report
+	}
+	add("json_valid", true, "")
+	add("schema_version", stringField(manifest, "schema_version") == contract.SchemaVersion, stringField(manifest, "schema_version"))
+	add("adapter", stringField(manifest, "adapter") == contract.Adapter, stringField(manifest, "adapter"))
+
+	phases, phasesOK := objectField(manifest, "phases")
+	add("phases_object", phasesOK, "")
+	for _, phaseName := range contract.RequiredPhases {
+		phase, ok := objectField(phases, phaseName)
+		add("phase_present:"+phaseName, phasesOK && ok, "")
+		if !ok {
+			continue
+		}
+		implemented, implementedOK := boolField(phase, "implemented")
+		add("phase_implemented:"+phaseName, implementedOK && implemented, "")
+		add("phase_evidence:"+phaseName, nonEmptyStringArrayField(phase, "evidence"), strings.Join(stringArrayField(phase, "evidence"), ","))
+	}
+	if plan, ok := objectField(phases, "plan"); ok {
+		add("plan_declares_external_consequences", boolFieldEquals(plan, "declares_external_consequences", true), "")
+		add("plan_declares_required_approvals", boolFieldEquals(plan, "declares_required_approvals", true), "")
+	}
+	if prepare, ok := objectField(phases, "prepare"); ok {
+		add("prepare_enforces_workspace_boundary", boolFieldEquals(prepare, "enforces_workspace_boundary", true), "")
+		add("prepare_uses_workspace_lock", boolFieldEquals(prepare, "uses_workspace_lock", true), "")
+	}
+	if run, ok := objectField(phases, "run"); ok {
+		add("run_supports_timeout", boolFieldEquals(run, "supports_timeout", true), "")
+		if contract.RequireCancellation {
+			add("run_supports_cancellation", boolFieldEquals(run, "supports_cancellation", true), "")
+		}
+	}
+	if collect, ok := objectField(phases, "collect"); ok {
+		add("collect_emits_result_artifact", boolFieldEquals(collect, "emits_result_artifact", true), "")
+		if contract.RequireResultSchema {
+			add("collect_result_schema", strings.TrimSpace(stringField(collect, "result_schema")) != "", stringField(collect, "result_schema"))
+		}
+	}
+	if cleanup, ok := objectField(phases, "cleanup"); ok {
+		add("cleanup_idempotent", boolFieldEquals(cleanup, "idempotent", true), "")
+		add("cleanup_releases_locks", boolFieldEquals(cleanup, "releases_locks", true), "")
+	}
+	if contract.RequireSafety {
+		safety, safetyOK := objectField(manifest, "safety")
+		add("safety_object", safetyOK, "")
+		add("safety_adapter_does_not_authorize_jobs", safetyOK && boolFieldEquals(safety, "adapter_authorizes_jobs", false), "")
+		add("safety_adapter_does_not_self_approve", safetyOK && boolFieldEquals(safety, "adapter_approves_dangerous_actions", false), "")
+		add("safety_no_hidden_persistence", safetyOK && boolFieldEquals(safety, "adapter_installs_persistence", false), "")
+		add("safety_host_validates_before_run", safetyOK && boolFieldEquals(safety, "host_validates_before_run", true), "")
+		add("safety_redacts_outputs", safetyOK && boolFieldEquals(safety, "redacts_outputs", true), "")
+	}
+	if contract.RequireCancellation {
+		cancellation, cancellationOK := objectField(manifest, "cancellation")
+		add("cancellation_object", cancellationOK, "")
+		add("cancellation_supported", cancellationOK && boolFieldEquals(cancellation, "supported", true), "")
+		add("cancellation_evidence_field", cancellationOK && strings.TrimSpace(stringField(cancellation, "evidence_field")) != "", stringField(cancellation, "evidence_field"))
+		add("cancellation_timeout_exclusive", cancellationOK && boolFieldEquals(cancellation, "timeout_exclusive", true), "")
+		add("cancellation_cleanup_on_cancel", cancellationOK && boolFieldEquals(cancellation, "cleanup_on_cancel", true), "")
+	}
+	if contract.RejectUnredactedSecrets {
+		add("no_unredacted_secret_patterns", !containsSecretPattern(string(content)), "")
+	}
+	report.OK = report.allChecksPassed()
+	return report
+}
+
 func (r ConformanceReport) allChecksPassed() bool {
 	if len(r.Checks) == 0 {
 		return false
@@ -149,6 +245,49 @@ func boolField(values map[string]any, key string) (bool, bool) {
 	}
 	typed, ok := value.(bool)
 	return typed, ok
+}
+
+func objectField(values map[string]any, key string) (map[string]any, bool) {
+	if values == nil {
+		return nil, false
+	}
+	value, ok := values[key]
+	if !ok || value == nil {
+		return nil, false
+	}
+	typed, ok := value.(map[string]any)
+	return typed, ok
+}
+
+func boolFieldEquals(values map[string]any, key string, expected bool) bool {
+	actual, ok := boolField(values, key)
+	return ok && actual == expected
+}
+
+func stringArrayField(values map[string]any, key string) []string {
+	if values == nil {
+		return nil
+	}
+	raw, ok := values[key].([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(raw))
+	for _, item := range raw {
+		text, ok := item.(string)
+		if !ok {
+			continue
+		}
+		text = strings.TrimSpace(text)
+		if text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func nonEmptyStringArrayField(values map[string]any, key string) bool {
+	return len(stringArrayField(values, key)) > 0
 }
 
 func commandObject(artifact map[string]any, field string) (map[string]any, bool) {

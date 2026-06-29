@@ -85,6 +85,11 @@
       "name": "rdev.adapter.verify_result",
       "description": "Verify an adapter result artifact against the public result-artifact conformance contract.",
       "safety": "Read-only artifact validation; does not execute on a host."
+    },
+    {
+      "name": "rdev.adapter.verify_lifecycle",
+      "description": "Verify an adapter lifecycle manifest against the public Adapter SDK lifecycle conformance contract.",
+      "safety": "Read-only manifest validation; does not execute on a host."
     }
   ]
 }

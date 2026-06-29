@@ -181,6 +181,45 @@ func TestServerToolCallVerifyAdapterResultReportsFailure(t *testing.T) {
 	}
 }
 
+func TestServerToolCallVerifyAdapterLifecycle(t *testing.T) {
+	manifest := `{
+  "schema_version": "rdev.adapter-lifecycle.v1",
+  "adapter": "claude-code",
+  "phases": {
+    "detect": {"implemented": true, "evidence": ["version"]},
+    "plan": {"implemented": true, "evidence": ["commands"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
+    "run": {"implemented": true, "evidence": ["process"], "supports_timeout": true, "supports_cancellation": true},
+    "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
+    "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
+  },
+  "safety": {
+    "adapter_authorizes_jobs": false,
+    "adapter_approves_dangerous_actions": false,
+    "adapter_installs_persistence": false,
+    "host_validates_before_run": true,
+    "redacts_outputs": true
+  },
+  "cancellation": {"supported": true, "evidence_field": "canceled", "timeout_exclusive": true, "cleanup_on_cancel": true}
+}`
+	input := mcpRequestLine(t, "rdev.adapter.verify_lifecycle", map[string]any{
+		"adapter":       "claude-code",
+		"artifact_json": manifest,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.adapter-conformance-report.v1" || structured["artifact_schema"] != "rdev.adapter-lifecycle.v1" || structured["ok"] != true {
+		t.Fatalf("expected adapter lifecycle conformance success, got %#v", structured)
+	}
+}
+
 func mcpRequestLine(t *testing.T, tool string, arguments map[string]any) string {
 	t.Helper()
 	content, err := json.Marshal(map[string]any{

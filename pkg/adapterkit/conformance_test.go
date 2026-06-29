@@ -112,3 +112,102 @@ func TestVerifyResultArtifactJSONRejectsSecretPatterns(t *testing.T) {
 		t.Fatalf("expected conformance failure, got %#v", report)
 	}
 }
+
+func TestVerifyLifecycleManifestJSONAcceptsCompleteManifest(t *testing.T) {
+	report := VerifyLifecycleManifestJSON([]byte(`{
+  "schema_version": "rdev.adapter-lifecycle.v1",
+  "adapter": "claude-code",
+  "phases": {
+    "detect": {"implemented": true, "evidence": ["version", "path"]},
+    "plan": {"implemented": true, "evidence": ["planned_commands"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "prepare": {"implemented": true, "evidence": ["workspace_root"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
+    "run": {"implemented": true, "evidence": ["argv", "exit_code"], "supports_timeout": true, "supports_cancellation": true},
+    "collect": {"implemented": true, "evidence": ["result_artifact"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
+    "cleanup": {"implemented": true, "evidence": ["locks_released"], "idempotent": true, "releases_locks": true}
+  },
+  "safety": {
+    "adapter_authorizes_jobs": false,
+    "adapter_approves_dangerous_actions": false,
+    "adapter_installs_persistence": false,
+    "host_validates_before_run": true,
+    "redacts_outputs": true
+  },
+  "cancellation": {
+    "supported": true,
+    "evidence_field": "canceled",
+    "timeout_exclusive": true,
+    "cleanup_on_cancel": true
+  }
+}`), LifecycleContract{
+		Adapter:                 "claude-code",
+		RequireSafety:           true,
+		RequireCancellation:     true,
+		RequireResultSchema:     true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("expected lifecycle conformance success, got %#v", report)
+	}
+}
+
+func TestVerifyLifecycleManifestJSONRejectsMissingCancellation(t *testing.T) {
+	report := VerifyLifecycleManifestJSON([]byte(`{
+  "schema_version": "rdev.adapter-lifecycle.v1",
+  "adapter": "claude-code",
+  "phases": {
+    "detect": {"implemented": true, "evidence": ["version"]},
+    "plan": {"implemented": true, "evidence": ["plan"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
+    "run": {"implemented": true, "evidence": ["command"], "supports_timeout": true, "supports_cancellation": false},
+    "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
+    "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
+  },
+  "safety": {
+    "adapter_authorizes_jobs": false,
+    "adapter_approves_dangerous_actions": false,
+    "adapter_installs_persistence": false,
+    "host_validates_before_run": true,
+    "redacts_outputs": true
+  },
+  "cancellation": {"supported": false, "evidence_field": "", "timeout_exclusive": true, "cleanup_on_cancel": true}
+}`), LifecycleContract{
+		Adapter:             "claude-code",
+		RequireSafety:       true,
+		RequireCancellation: true,
+		RequireResultSchema: true,
+	})
+	if report.OK {
+		t.Fatalf("expected lifecycle conformance failure, got %#v", report)
+	}
+}
+
+func TestVerifyLifecycleManifestJSONRejectsHiddenPersistence(t *testing.T) {
+	report := VerifyLifecycleManifestJSON([]byte(`{
+  "schema_version": "rdev.adapter-lifecycle.v1",
+  "adapter": "gui",
+  "phases": {
+    "detect": {"implemented": true, "evidence": ["version"]},
+    "plan": {"implemented": true, "evidence": ["plan"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
+    "run": {"implemented": true, "evidence": ["session"], "supports_timeout": true, "supports_cancellation": true},
+    "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.gui-result.v1"},
+    "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
+  },
+  "safety": {
+    "adapter_authorizes_jobs": false,
+    "adapter_approves_dangerous_actions": false,
+    "adapter_installs_persistence": true,
+    "host_validates_before_run": true,
+    "redacts_outputs": true
+  },
+  "cancellation": {"supported": true, "evidence_field": "canceled", "timeout_exclusive": true, "cleanup_on_cancel": true}
+}`), LifecycleContract{
+		Adapter:             "gui",
+		RequireSafety:       true,
+		RequireCancellation: true,
+		RequireResultSchema: true,
+	})
+	if report.OK {
+		t.Fatalf("expected lifecycle conformance failure, got %#v", report)
+	}
+}
