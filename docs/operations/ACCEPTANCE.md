@@ -160,6 +160,28 @@ for a real Windows VM or support-host acceptance run. The generated launcher is
 intentionally visible and foreground-only; it does not install a service or
 autorun entry.
 
+Verify the generated plan before sending or running the launcher:
+
+```bash
+rdev acceptance verify-windows-temporary \
+  --plan .rdev/acceptance/windows-temporary/windows-temporary-plan.json
+```
+
+The verifier emits `rdev.acceptance-verification.windows-temporary-plan.v1` JSON
+and exits nonzero if any preflight check fails. It validates:
+
+- plan schema and generated plan checks;
+- launcher existence, private file mode, and parameter agreement with the plan;
+- launcher absence of forbidden persistence or policy-weakening operations such
+  as `Set-ExecutionPolicy`, service creation, scheduled-task registration,
+  Run-key mutation, firewall-rule creation, or elevation through `runas`;
+- local bootstrap script SHA-256 when the script path is available, or a pinned
+  bootstrap SHA-256 when the launcher downloads the script by URL;
+- release manifest, release root, verifier URL, host SHA-256, and verifier
+  SHA-256 inputs;
+- foreground run command, transcript commands, no-persistence checks, approval
+  probes, and required evidence checklist.
+
 ## Current Boundary
 
 This harness proves the managed test-process path. It does not yet prove:

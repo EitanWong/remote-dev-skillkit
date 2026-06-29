@@ -75,6 +75,78 @@ func TestRunWindowsTemporaryPlanWritesLauncherAndChecks(t *testing.T) {
 	}
 }
 
+func TestVerifyWindowsTemporaryPlan(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "windows-temporary")
+	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := RunWindowsTemporaryPlan(WindowsTemporaryOptions{
+		OutDir:                 out,
+		GatewayURL:             "https://api.example.com/v1",
+		TicketCode:             "ABCD-1234",
+		DownloadURL:            "https://agent.example.com/rdev-host.exe",
+		ExpectedSHA256:         strings.Repeat("a", 64),
+		BootstrapScriptPath:    script,
+		ReleaseManifestURL:     "https://agent.example.com/rdev-host.exe.rdev-release.json",
+		ReleaseRootPublicKey:   "release-root:abc",
+		VerifierDownloadURL:    "https://agent.example.com/rdev-verify.exe",
+		VerifierExpectedSHA256: strings.Repeat("b", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verification, err := VerifyWindowsTemporaryPlan(filepath.Join(out, "windows-temporary-plan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected verification ok: %#v", verification.Checks)
+	}
+
+	if err := os.WriteFile(plan.LauncherPath, []byte("New-Service rdev\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	verification, err = VerifyWindowsTemporaryPlan(filepath.Join(out, "windows-temporary-plan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatalf("expected tampered launcher verification to fail")
+	}
+	if !strings.Contains(failedCheckNames(verification.Checks), "launcher_has_no_forbidden_side_effects") {
+		t.Fatalf("expected forbidden side-effect failure: %#v", verification.Checks)
+	}
+}
+
+func TestVerifyWindowsTemporaryPlanWithRemoteBootstrapPin(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "windows-temporary")
+	missingScript := filepath.Join(t.TempDir(), "missing-windows-temporary.ps1")
+	if _, err := RunWindowsTemporaryPlan(WindowsTemporaryOptions{
+		OutDir:                        out,
+		GatewayURL:                    "https://api.example.com/v1",
+		TicketCode:                    "ABCD-1234",
+		DownloadURL:                   "https://agent.example.com/rdev-host.exe",
+		ExpectedSHA256:                strings.Repeat("a", 64),
+		BootstrapScriptPath:           missingScript,
+		BootstrapScriptURL:            "https://agent.example.com/windows-temporary.ps1",
+		BootstrapScriptExpectedSHA256: strings.Repeat("c", 64),
+		ReleaseManifestURL:            "https://agent.example.com/rdev-host.exe.rdev-release.json",
+		ReleaseRootPublicKey:          "release-root:abc",
+		VerifierDownloadURL:           "https://agent.example.com/rdev-verify.exe",
+		VerifierExpectedSHA256:        strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	verification, err := VerifyWindowsTemporaryPlan(filepath.Join(out, "windows-temporary-plan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected verification ok with remote bootstrap pin: %#v", verification.Checks)
+	}
+}
+
 func joinedWindowsCommands(commands []WindowsAcceptanceCommand) string {
 	var builder strings.Builder
 	for _, command := range commands {

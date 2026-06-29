@@ -226,6 +226,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerify(*report)
+	case "verify-windows-temporary":
+		fs := flag.NewFlagSet("acceptance verify-windows-temporary", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "Windows temporary acceptance plan path, for example <out>/windows-temporary-plan.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerifyWindowsTemporary(*plan)
 	default:
 		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
 	}
@@ -327,6 +335,30 @@ func (a App) acceptanceVerify(reportPath string) error {
 	}
 	if !verification.OK() {
 		return fmt.Errorf("acceptance verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptanceVerifyWindowsTemporary(planPath string) error {
+	verification, err := acceptance.VerifyWindowsTemporaryPlan(planPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"plan":                verification.PlanPath,
+		"plan_schema":         verification.PlanSchema,
+		"checks":              verification.Checks,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("windows temporary acceptance plan verification failed")
 	}
 	return nil
 }
@@ -1676,6 +1708,7 @@ Usage:
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
   rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256>
   rdev acceptance verify --report acceptance-run/report.json
+  rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234

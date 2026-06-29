@@ -35,27 +35,32 @@ type WindowsTemporaryOptions struct {
 }
 
 type WindowsTemporaryPlan struct {
-	SchemaVersion         string                     `json:"schema_version"`
-	GeneratedAt           time.Time                  `json:"generated_at"`
-	Platform              string                     `json:"platform"`
-	OutDir                string                     `json:"out_dir"`
-	BootstrapScriptPath   string                     `json:"bootstrap_script_path,omitempty"`
-	BootstrapScriptURL    string                     `json:"bootstrap_script_url,omitempty"`
-	BootstrapScriptSHA256 string                     `json:"bootstrap_script_sha256,omitempty"`
-	LauncherPath          string                     `json:"launcher_path"`
-	GatewayURL            string                     `json:"gateway_url"`
-	TicketCode            string                     `json:"ticket_code"`
-	ManifestURL           string                     `json:"manifest_url,omitempty"`
-	ReleaseManifestURL    string                     `json:"release_manifest_url,omitempty"`
-	VerifierDownloadURL   string                     `json:"verifier_download_url,omitempty"`
-	HostDownloadURL       string                     `json:"host_download_url"`
-	HostExpectedSHA256    string                     `json:"host_expected_sha256"`
-	Checks                []Check                    `json:"checks"`
-	Commands              []WindowsAcceptanceCommand `json:"commands"`
-	NoPersistenceChecks   []WindowsAcceptanceCommand `json:"no_persistence_checks"`
-	ApprovalProbes        []WindowsApprovalProbe     `json:"approval_probes"`
-	RecommendedActions    []string                   `json:"recommended_actions"`
-	RequiredEvidence      []string                   `json:"required_evidence"`
+	SchemaVersion          string                     `json:"schema_version"`
+	GeneratedAt            time.Time                  `json:"generated_at"`
+	Platform               string                     `json:"platform"`
+	OutDir                 string                     `json:"out_dir"`
+	BootstrapScriptPath    string                     `json:"bootstrap_script_path,omitempty"`
+	BootstrapScriptURL     string                     `json:"bootstrap_script_url,omitempty"`
+	BootstrapScriptSHA256  string                     `json:"bootstrap_script_sha256,omitempty"`
+	LauncherPath           string                     `json:"launcher_path"`
+	GatewayURL             string                     `json:"gateway_url"`
+	TicketCode             string                     `json:"ticket_code"`
+	ManifestURL            string                     `json:"manifest_url,omitempty"`
+	ManifestRootPublicKey  string                     `json:"manifest_root_public_key,omitempty"`
+	ReleaseManifestURL     string                     `json:"release_manifest_url,omitempty"`
+	ReleaseRootPublicKey   string                     `json:"release_root_public_key,omitempty"`
+	VerifierDownloadURL    string                     `json:"verifier_download_url,omitempty"`
+	VerifierExpectedSHA256 string                     `json:"verifier_expected_sha256,omitempty"`
+	TrustPin               string                     `json:"trust_pin,omitempty"`
+	HostName               string                     `json:"host_name,omitempty"`
+	HostDownloadURL        string                     `json:"host_download_url"`
+	HostExpectedSHA256     string                     `json:"host_expected_sha256"`
+	Checks                 []Check                    `json:"checks"`
+	Commands               []WindowsAcceptanceCommand `json:"commands"`
+	NoPersistenceChecks    []WindowsAcceptanceCommand `json:"no_persistence_checks"`
+	ApprovalProbes         []WindowsApprovalProbe     `json:"approval_probes"`
+	RecommendedActions     []string                   `json:"recommended_actions"`
+	RequiredEvidence       []string                   `json:"required_evidence"`
 }
 
 type WindowsAcceptanceCommand struct {
@@ -96,24 +101,29 @@ func RunWindowsTemporaryPlan(opts WindowsTemporaryOptions) (WindowsTemporaryPlan
 		return WindowsTemporaryPlan{}, err
 	}
 	plan := WindowsTemporaryPlan{
-		SchemaVersion:         WindowsTemporaryPlanSchemaVersion,
-		GeneratedAt:           now.UTC(),
-		Platform:              "windows",
-		OutDir:                outDir,
-		BootstrapScriptPath:   resolved.BootstrapScriptPath,
-		BootstrapScriptURL:    resolved.BootstrapScriptURL,
-		BootstrapScriptSHA256: resolved.BootstrapScriptExpectedSHA256,
-		LauncherPath:          resolved.LauncherPath,
-		GatewayURL:            resolved.GatewayURL,
-		TicketCode:            resolved.TicketCode,
-		ManifestURL:           resolved.ManifestURL,
-		ReleaseManifestURL:    resolved.ReleaseManifestURL,
-		VerifierDownloadURL:   resolved.VerifierDownloadURL,
-		HostDownloadURL:       resolved.DownloadURL,
-		HostExpectedSHA256:    resolved.ExpectedSHA256,
-		Commands:              windowsTemporaryCommands(resolved),
-		NoPersistenceChecks:   windowsNoPersistenceChecks(),
-		ApprovalProbes:        windowsApprovalProbes(),
+		SchemaVersion:          WindowsTemporaryPlanSchemaVersion,
+		GeneratedAt:            now.UTC(),
+		Platform:               "windows",
+		OutDir:                 outDir,
+		BootstrapScriptPath:    resolved.BootstrapScriptPath,
+		BootstrapScriptURL:     resolved.BootstrapScriptURL,
+		BootstrapScriptSHA256:  resolved.BootstrapScriptExpectedSHA256,
+		LauncherPath:           resolved.LauncherPath,
+		GatewayURL:             resolved.GatewayURL,
+		TicketCode:             resolved.TicketCode,
+		ManifestURL:            resolved.ManifestURL,
+		ManifestRootPublicKey:  resolved.ManifestRootPublicKey,
+		ReleaseManifestURL:     resolved.ReleaseManifestURL,
+		ReleaseRootPublicKey:   resolved.ReleaseRootPublicKey,
+		VerifierDownloadURL:    resolved.VerifierDownloadURL,
+		VerifierExpectedSHA256: resolved.VerifierExpectedSHA256,
+		TrustPin:               resolved.TrustPin,
+		HostName:               resolved.HostName,
+		HostDownloadURL:        resolved.DownloadURL,
+		HostExpectedSHA256:     resolved.ExpectedSHA256,
+		Commands:               windowsTemporaryCommands(resolved),
+		NoPersistenceChecks:    windowsNoPersistenceChecks(),
+		ApprovalProbes:         windowsApprovalProbes(),
 		RecommendedActions: []string{
 			"Review the generated PowerShell launcher and bootstrap script before using them on a Windows host.",
 			"Run the launcher in a clean Windows 10/11 VM or target support host as a visible foreground session.",

@@ -2124,6 +2124,66 @@ func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	}
 }
 
+func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "windows-temporary")
+	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "windows-temporary",
+		"--out", out,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--download-url", "https://agent.example.com/rdev-host.exe",
+		"--expected-sha256", strings.Repeat("a", 64),
+		"--bootstrap-script", script,
+		"--release-manifest-url", "https://agent.example.com/rdev-host.exe.rdev-release.json",
+		"--release-root-public-key", "release-root:abc",
+		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
+		"--verifier-sha256", strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Plan     string `json:"plan"`
+		Launcher string `json:"launcher"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"acceptance", "verify-windows-temporary",
+		"--plan", payload.Plan,
+	}); err != nil {
+		t.Fatalf("expected verification to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected ok verification, got %s", verifyStdout.String())
+	}
+
+	if err := os.WriteFile(payload.Launcher, []byte("Set-ExecutionPolicy Bypass\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var tamperedStdout bytes.Buffer
+	tamperedApp := NewApp(&tamperedStdout, &bytes.Buffer{})
+	err := tamperedApp.Run(context.Background(), []string{
+		"acceptance", "verify-windows-temporary",
+		"--plan", payload.Plan,
+	})
+	if err == nil {
+		t.Fatalf("expected tampered verification to fail: %s", tamperedStdout.String())
+	}
+	if !strings.Contains(tamperedStdout.String(), `"ok": false`) || !strings.Contains(tamperedStdout.String(), "launcher_has_no_forbidden_side_effects") {
+		t.Fatalf("expected structured tampered failure, got %s", tamperedStdout.String())
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
 }
