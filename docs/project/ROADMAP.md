@@ -38,10 +38,11 @@ The roadmap implements the canonical [Final System Design](../architecture/FINAL
 - Hash-chained audit export verifier.
 - Evidence bundle export.
 - Gateway/API evidence bundle export directly from job ids.
+- Skillkit bundle export for agent runtimes and mainstream framework notes.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 
-Exit gate: local demo proves ticket, host registration, outbound host job wait through short-poll or long-poll, signed job execution, artifact storage, evidence export, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
+Exit gate: local demo proves ticket, host registration, outbound host job wait through short-poll or long-poll, signed job execution, artifact storage, evidence export, Skillkit export, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
 
 ## v0.2.0 Windows Temporary Host
 
@@ -95,6 +96,7 @@ Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation 
 
 - Stable MCP contract.
 - Stable host enrollment protocol.
+- Stable `rdev skillkit export` package for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Full audit trail.
 - Signed releases.
 - Installation docs for Hermes, Codex, Claude Code, and OpenCode.

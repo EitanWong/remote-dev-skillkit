@@ -78,6 +78,114 @@ The complete open-source product should ship as four installable surfaces and on
 
 The protocol is more important than any single binary. If another gateway, hosted service, or agent runtime implements the same contracts without weakening the safety kernel, it is part of the ecosystem rather than a fork in spirit.
 
+### Final Delivery Blueprint
+
+The finished project should ship as one coherent system with five deliverables. Each deliverable is independently useful, but the full safety guarantee exists only when they run together.
+
+| Deliverable | Shipped as | Final contract |
+|---|---|---|
+| Skillkit Bundle | `rdev skillkit export` | portable skills, MCP tool contracts, framework install notes, and checksummed manifest |
+| Gateway | `rdev gateway serve` plus HTTP/MCP API | tickets, host registry, policies, signing, approvals, artifacts, audit, revocation |
+| Host Runtime | `rdev host serve` plus managed service installers | outbound channel, host identity, local policy, adapters, local audit spool |
+| Adapter SDK | Go interfaces, schemas, conformance tests | shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, workspace integrations |
+| Evidence Tooling | `rdev evidence export`, `rdev audit export`, verifiers | portable review bundles and tamper-evident audit reconstruction |
+
+The final open-source install flow should therefore be:
+
+```text
+install rdev
+  -> export or install Skillkit
+  -> configure MCP stdio/HTTP
+  -> start or connect gateway
+  -> invite or approve host
+  -> run typed job
+  -> review evidence
+  -> approve continuation or revoke
+```
+
+This is the universal shape for Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor-style agents, and generic MCP agents. A runtime may present different UI, but it must preserve the same protocol objects and approval boundaries.
+
+### Final Capability Rings
+
+Capabilities should be organized into rings so agents and operators can reason about risk consistently across adapters.
+
+| Ring | Examples | Default posture |
+|---|---|---|
+| Ring 0: observe | host info, tool versions, git status, read-only logs | allowed after host approval |
+| Ring 1: scoped workspace | read/write inside approved repo or temp directory, run allowlisted tests | allowed by explicit host policy |
+| Ring 2: environment repair | package manager, dependency changes, service inspection, network diagnostics | approval required unless managed policy grants it narrowly |
+| Ring 3: privileged or visual | elevation, GUI control, screenshots, browser profile access, service mutation | per-operation approval required |
+| Ring 4: external consequence | push, merge, deploy, publish, paid action, credential change | per-operation approval and evidence review required |
+
+Adapters must map their local actions into these rings before execution. Unknown actions default to denied or approval-required.
+
+### Final Protocol Set
+
+The end state is complete only when these schemas are stable, versioned, documented, and covered by conformance tests:
+
+| Schema | Purpose |
+|---|---|
+| `rdev.skillkit-bundle.v1` | portable agent installation bundle |
+| `rdev.ticket.v1` | temporary or managed invitation intent |
+| `rdev.join-manifest.v1` | bootstrap trust, downloads, release roots, and ticket binding |
+| `rdev.release-artifact.v1` | signed artifact digest, size, platform policy, and verification metadata |
+| `rdev.trust-bundle.v1` | gateway job-signing key set, rotation sequence, and revocation state |
+| `rdev.host-policy.v1` | approved capabilities, adapters, workspaces, limits, and approval gates |
+| `rdev.job.v1` | canonical signed executable intent |
+| `rdev.approval-token.v1` | scoped human decision for one high-risk operation |
+| `rdev.host-denial.v1` | structured refusal with safer next step |
+| `rdev.approval-required.v1` | structured pause before dangerous execution |
+| `rdev.evidence-bundle.v1` | review package containing artifacts, policy, envelope, audit slice, and checksums |
+| `rdev.audit-event.v1` | append-only event for tamper-evident reconstruction |
+
+The schemas are the product's durable API. CLIs, hosted deployments, UI consoles, and agent frameworks can evolve around them.
+
+### Final Eitan Deployment
+
+Eitan's personal production topology should stay single-operator first:
+
+```text
+Hermes/Lucky
+  -> Remote Dev Skillkit skills
+  -> rdev MCP HTTP at https://api.lunflux.com/v1
+  -> rdev-gateway on the server
+  -> job signing, approvals, artifacts, audit
+  -> host relay/join surface at https://agent.lunflux.com
+  -> managed Eitan hosts or attended temporary hosts
+```
+
+The server may initially run one binary, but the public contract should keep `api.lunflux.com` and `agent.lunflux.com` separate in responsibility:
+
+- `api.lunflux.com/v1`: authenticated agent/operator API, MCP tools, jobs, approvals, artifacts, audit.
+- `agent.lunflux.com`: human join page, bootstrap manifests, release downloads, outbound host relay.
+
+Hermes/Lucky should hold an agent-client identity with tool permissions. It should not hold reusable host credentials, raw SSH passwords, or approval power for dangerous operations.
+
+### Final Public Install Experience
+
+The public project should support three complete install stories:
+
+| Path | Command shape | User outcome |
+|---|---|---|
+| Local demo | `rdev demo local` and `rdev mcp serve` | one developer can understand the safety kernel locally |
+| Self-host | `rdev gateway serve` plus release/host setup | a power user can run their own gateway and hosts |
+| Skillkit only | `rdev skillkit export --gateway-url ...` | an existing agent platform can install the workflows and tool schemas |
+
+The Skillkit path is important because it lets other agent ecosystems adopt the safe workflow before they adopt the full runtime. The package must contain no Hermes-only assumptions.
+
+### Final Implementation Order
+
+The remaining path to the perfect ending should be implemented in this order:
+
+1. Finish the local safety kernel and bundle export so the protocol is installable and testable.
+2. Harden temporary Windows bootstrap because it is the riskiest and most universal support path.
+3. Build managed Mac coding because it proves Lucky can safely delegate real development to Codex on Eitan-owned hardware.
+4. Generalize managed services across Windows, macOS, and Linux with protected identity storage and trust updates.
+5. Add adapter SDK and conformance tests so Codex, Claude Code, ACP, GUI, mesh, Coder, and DevPod integrations cannot bypass the kernel.
+6. Stabilize schemas, signed releases, docs, threat model, and public install paths for v1.0.
+
+Any shortcut that makes a demo easier but weakens signed envelopes, local host validation, approval gates, evidence, or revocation is not on the final path.
+
 ### Authority Separation
 
 No final deployment may collapse all authority into one bearer token, one SSH credential, or one remote desktop session.

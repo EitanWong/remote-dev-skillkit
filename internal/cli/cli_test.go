@@ -1196,6 +1196,39 @@ func TestEvidenceExportFromGatewayJobIDWritesBundle(t *testing.T) {
 	}
 }
 
+func TestSkillkitExportWritesInstallBundle(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "skillkit")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"skillkit", "export",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", out,
+		"--gateway-url", "https://api.example.com/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"schema": "rdev.skillkit-bundle.v1"`) {
+		t.Fatalf("expected skillkit schema output, got %s", stdout.String())
+	}
+	for _, path := range []string{
+		"manifest.json",
+		"INSTALL.md",
+		"mcp/tools.json",
+		"skills/remote-vibe-coding/SKILL.md",
+		"frameworks/codex.md",
+		"frameworks/claude-code.md",
+		"frameworks/hermes.md",
+		"frameworks/openclaw-opencode.md",
+	} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected skillkit bundle file %s: %v", path, err)
+		}
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")

@@ -236,8 +236,8 @@ The local test suite currently covers:
 - host revocation canceling queued/running jobs;
 - release artifact signing and verification primitives;
 - Windows bootstrap verifier handoff logic;
-- shell artifact schema and redaction metadata.
-- signed trust bundle HTTP read/update flow with rollback rejection.
+- shell artifact schema and redaction metadata;
+- signed trust bundle HTTP read/update flow with rollback rejection;
 - host-side job verification through signed trust bundle active keys, with legacy trust fallback.
 - durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.
 - durable host identity key file storage with 0600 permissions, registration identity preservation, signed job envelope identity binding, and host-side fingerprint mismatch rejection.
@@ -245,6 +245,7 @@ The local test suite currently covers:
 - hash-chained audit export and verification through `rdev audit export` / `rdev audit verify`.
 - local evidence bundle export through `rdev evidence export`, including manifest, checksums, signed envelope, policy decision, artifacts, audit slice, and audit chain.
 - gateway/API evidence bundle export from job ids through `GET /v1/jobs/{job_id}/evidence-bundle` and `rdev evidence export --gateway ... --job-id ...`.
+- Skillkit bundle export through `rdev skillkit export`, including manifest checksums, skills, MCP contracts, and framework install notes.
 - structured host-side denial artifacts through `rdev.host-denial.v1`, covering missing envelope, wrong host, identity mismatch, expired/tampered envelopes, replayed nonce, unsupported adapter, missing capability, missing workspace, non-allowlisted command, and workspace escape.
 - CLI host polling reports host-side denials to the dev gateway as failed-job artifacts.
 - development HTTPS long-poll host job transport through `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=...` and `rdev host serve --transport long-poll`.

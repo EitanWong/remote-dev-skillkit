@@ -43,6 +43,7 @@
 - [x] Add durable host-side approval token consumption store.
 - [x] Finalize endgame operating model, authority separation, maturity gates, and failure conditions in the canonical design.
 - [x] Add development HTTPS long-poll host job transport prototype.
+- [x] Add portable agent Skillkit bundle export for mainstream frameworks.
 
 ## Next
 
@@ -81,6 +82,7 @@
 - [x] Add durable approval-token consumption and persistence.
 - [x] Add gateway/API evidence bundle export directly from job ids.
 - [x] Add HTTPS long-poll fallback before WSS/mTLS transport.
+- [x] Add installable Skillkit bundle generation with manifest checksums and framework notes.
 
 ## Later
 
@@ -110,6 +112,7 @@
 - [x] Host-side approval token consumption is persisted and rejects token reuse.
 - [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.
+- [x] Agent Skillkit can be exported as a checksummed bundle for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 
 ## Definition Of Done For v0.1.0
@@ -120,6 +123,7 @@
 - Audit records can be exported as a verifiable hash chain.
 - Jobs can be exported as local evidence bundles with manifest, checksums, artifacts, envelope, policy decision, audit slice, and audit chain.
 - Gateway/API can export the same evidence bundle directly from a job id.
+- Agent Skills and MCP contracts can be exported as a portable Skillkit bundle with checksums and framework install notes.
 - Host-side denials and approval-required pauses are structured artifacts, not opaque errors.
 - Signed approval tokens are scoped, expiring, and consumed once by the host.
 - Tests cover policy gates and command contracts.

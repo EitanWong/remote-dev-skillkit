@@ -34,6 +34,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
+	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 )
 
@@ -75,6 +76,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.audit(args[1:])
 	case "evidence":
 		return a.evidence(ctx, args[1:])
+	case "skillkit":
+		return a.skillkit(args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -510,6 +513,26 @@ func (a App) evidence(ctx context.Context, args []string) error {
 	}
 }
 
+func (a App) skillkit(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing skillkit subcommand")
+	}
+	switch args[0] {
+	case "export":
+		fs := flag.NewFlagSet("skillkit export", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		sourceRoot := fs.String("source-root", ".", "repository source root containing skills/ and mcp/tools.json")
+		out := fs.String("out", "", "output skillkit bundle directory")
+		gatewayURL := fs.String("gateway-url", "", "default gateway URL to include in install docs")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.skillkitExport(*sourceRoot, *out, *gatewayURL)
+	default:
+		return fmt.Errorf("unknown skillkit subcommand %q", args[0])
+	}
+}
+
 func (a App) release(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing release subcommand")
@@ -747,6 +770,33 @@ func (a App) evidenceExport(ctx context.Context, jobPath, artifactsPath, auditPa
 	return enc.Encode(payload)
 }
 
+func (a App) skillkitExport(sourceRoot, outPath, gatewayURL string) error {
+	if outPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	manifest, err := skillkit.Export(skillkit.ExportOptions{
+		SourceRoot: sourceRoot,
+		OutDir:     outPath,
+		GatewayURL: gatewayURL,
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":          true,
+		"out":         outPath,
+		"schema":      manifest.SchemaVersion,
+		"skill_count": len(manifest.Skills),
+		"file_count":  len(manifest.Files),
+		"frameworks":  manifest.Frameworks,
+		"manifest":    filepath.Join(outPath, "manifest.json"),
+		"gateway_url": manifest.GatewayURL,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev - remote development skillkit
 
@@ -764,6 +814,7 @@ Usage:
   rdev audit verify --input .rdev/audit/chain.json
   rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence
   rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
+  rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
