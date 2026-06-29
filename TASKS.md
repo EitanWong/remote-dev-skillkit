@@ -29,6 +29,7 @@
 - [x] Add initial release/bootstrap trust root verification for join manifests.
 - [x] Add release artifact signature manifest and CLI verifier.
 - [x] Wire release artifact signature verification into Windows bootstrap via hash-pinned verifier.
+- [x] Add shell job policy explain engine and MCP tool.
 
 ## Next
 
@@ -41,7 +42,7 @@
 - [x] Add PowerShell bootstrap draft.
 - [x] Add Windows capability detector.
 - [x] Add dev gateway job create/status/claim/complete endpoints.
-- [ ] Add policy explain engine.
+- [x] Add policy explain engine.
 - [ ] Add production key rotation/revocation and host trust update flow.
 - [x] Add production release/bootstrap trust root for join manifests.
 - [x] Add release artifact signature verification primitive.

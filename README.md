@@ -27,6 +27,7 @@ Implemented now:
 - `rdev doctor` capability detection.
 - `rdev ticket create` local ticket preview.
 - `rdev policy explain` local policy simulation.
+- `rdev policy explain-shell` shell job policy preflight explanation.
 - `rdev mcp tools` tool-contract listing.
 - `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev gateway serve --dev` local HTTP development gateway.
@@ -67,6 +68,7 @@ go run ./cmd/rdev version
 go run ./cmd/rdev doctor
 go run ./cmd/rdev ticket create --ttl-seconds 7200 --reason "repair Windows dev environment"
 go run ./cmd/rdev policy explain --mode attended-temporary --capability shell.user
+go run ./cmd/rdev policy explain-shell --policy-json '{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}'
 go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' | go run ./cmd/rdev mcp serve

@@ -137,6 +137,15 @@ func Tools() []Tool {
 				"capability": stringField(),
 			}, []string{"mode", "capability"}),
 		},
+		{
+			Name:        "rdev.policy.explain_shell",
+			Description: "Explain whether a shell job policy is structurally allowed before creating a signed job.",
+			Safety:      "Read-only policy simulation; host still re-validates before execution.",
+			InputSchema: object(map[string]any{
+				"mode":   enum("attended-temporary", "managed", "break-glass"),
+				"policy": map[string]any{"type": "object"},
+			}, []string{"mode", "policy"}),
+		},
 	}
 }
 

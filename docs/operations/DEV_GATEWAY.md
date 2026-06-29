@@ -99,6 +99,15 @@ rdev host serve \
   --approval-timeout=30s
 ```
 
+Preflight the same shell job policy before creating it:
+
+```bash
+rdev policy explain-shell \
+  --policy-json '{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"],"max_duration_seconds":30,"max_output_bytes":65536}'
+```
+
+Agents can call the same policy engine through MCP tool `rdev.policy.explain_shell`.
+
 When `--once=false`, `rdev host serve` fetches the gateway trust bundle, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`.
 
 If the host runner rejects a job, the host reports the failure to `POST /v1/jobs/{job_id}/fail`. The gateway marks the job `failed`, stores `failure_reason`, and writes a `job.fail` audit event.

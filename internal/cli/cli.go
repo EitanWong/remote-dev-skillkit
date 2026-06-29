@@ -295,6 +295,25 @@ func (a App) policy(args []string) error {
 		enc := json.NewEncoder(a.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(explanation)
+	case "explain-shell":
+		fs := flag.NewFlagSet("policy explain-shell", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		mode := fs.String("mode", string(model.HostModeAttendedTemporary), "host mode")
+		policyJSON := fs.String("policy-json", "", "shell job policy JSON")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *policyJSON == "" {
+			return fmt.Errorf("policy-json is required")
+		}
+		var jobPolicy map[string]any
+		if err := json.Unmarshal([]byte(*policyJSON), &jobPolicy); err != nil {
+			return fmt.Errorf("invalid policy-json: %w", err)
+		}
+		explanation := policy.ExplainShellJob(model.HostMode(*mode), jobPolicy)
+		enc := json.NewEncoder(a.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(explanation)
 	default:
 		return fmt.Errorf("unknown policy subcommand %q", args[0])
 	}
@@ -522,6 +541,7 @@ Usage:
   rdev doctor
   rdev ticket create --mode attended-temporary --ttl-seconds 7200
   rdev policy explain --mode attended-temporary --capability shell.user
+  rdev policy explain-shell --policy-json '{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}'
   rdev demo local
   rdev mcp tools
   rdev mcp serve

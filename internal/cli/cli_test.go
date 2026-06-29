@@ -511,6 +511,29 @@ func TestPolicyExplainOutputsJSON(t *testing.T) {
 	}
 }
 
+func TestPolicyExplainShellOutputsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{
+		"policy", "explain-shell",
+		"--policy-json", `{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Allowed bool `json:"allowed"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.Allowed {
+		t.Fatalf("expected shell policy to be allowed, got %s", stdout.String())
+	}
+}
+
 func TestDemoLocalOutputsClosedLoop(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

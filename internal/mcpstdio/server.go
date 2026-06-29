@@ -143,6 +143,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.queryAudit(params.Arguments)
 	case "rdev.policy.explain":
 		data, err = s.explainPolicy(params.Arguments)
+	case "rdev.policy.explain_shell":
+		data, err = s.explainShellPolicy(params.Arguments)
 	default:
 		err = fmt.Errorf("unknown tool %q", params.Name)
 	}
@@ -249,6 +251,13 @@ func (s Server) explainPolicy(args map[string]any) (any, error) {
 	return policy.Explain(
 		model.HostMode(requiredString(args, "mode")),
 		policy.Capability(requiredString(args, "capability")),
+	), nil
+}
+
+func (s Server) explainShellPolicy(args map[string]any) (any, error) {
+	return policy.ExplainShellJob(
+		model.HostMode(requiredString(args, "mode")),
+		objectArg(args, "policy"),
 	), nil
 }
 

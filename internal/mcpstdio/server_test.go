@@ -98,6 +98,22 @@ func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {
 	}
 }
 
+func TestServerToolCallExplainShellPolicy(t *testing.T) {
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rdev.policy.explain_shell","arguments":{"mode":"attended-temporary","policy":{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}}}}` + "\n"
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["allowed"] != true {
+		t.Fatalf("expected shell policy allowed, got %#v", structured)
+	}
+}
+
 func responseLines(t *testing.T, output string) []map[string]any {
 	t.Helper()
 	parts := strings.Split(strings.TrimSpace(output), "\n")
