@@ -107,7 +107,8 @@ These should not be opened as new GitHub issues unless regression work is needed
 - Codex adapter MVP with diff/test evidence, redaction, truncation, timeout, and cancellation evidence;
 - shared risky-action approval preflight for shell and Codex;
 - managed Mac local acceptance harness and independent evidence verifier;
-- managed Mac LaunchAgent service acceptance plan.
+- managed Mac LaunchAgent service acceptance plan;
+- public `pkg/adapterkit` result-artifact conformance verifier used by shell, PowerShell, and Codex tests.
 
 ## Seed Issues To Create After Approval
 
@@ -151,11 +152,11 @@ The current bootstrap script creates the following seed backlog.
      - file-backed dev stores remain available for tests;
      - rollback and revocation checks still pass.
 
-5. **Extract adapter SDK and conformance suite**
+5. **Extract full adapter lifecycle SDK and conformance suite**
    - Labels: `area:adapter`, `area:policy`, `area:evidence`, `kind:feature`, `kind:test`, `priority:p1`
    - Acceptance:
      - shared adapter interface covers detect, plan, prepare, run, collect, cleanup;
-     - shell and Codex pass shared conformance fixtures;
+     - shell, PowerShell, and Codex pass shared lifecycle and cancellation conformance fixtures;
      - new adapter authors can run local conformance tests.
 
 6. **Implement Claude Code and ACP adapters behind the safety kernel**

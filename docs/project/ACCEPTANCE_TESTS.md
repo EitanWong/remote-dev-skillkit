@@ -288,13 +288,14 @@ The local test suite currently covers:
 - shell adapter cooperative cancellation through `ExecuteContext` and hostrunner context propagation, returning `rdev.shell-result.v1` artifacts with `canceled=true` instead of timeout evidence.
 - PowerShell adapter MVP through `adapter=powershell`, covering `powershell.user` capability enforcement, allowlisted PowerShell executable execution, no `-ExecutionPolicy Bypass`, `rdev.powershell-result.v1` evidence, redaction, workspace-lock release, approval-required service-management detection, and context cancellation.
 - canceled-job artifact reporting for built-in shell, PowerShell, and Codex adapters, preserving the gateway job's `canceled` terminal state while adding reviewable cancellation evidence.
+- public adapterkit result-artifact conformance through `pkg/adapterkit`, covering built-in shell, PowerShell, and Codex artifacts for schema, timing, redaction metadata, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
 
 ## Next Automation Targets
 
 - Real managed Mac LaunchAgent acceptance execution: review generated plan, start/inspect/stop with `rdev host service-control --execute`, reconnect after reboot, run locked-worktree Codex, verify evidence, and uninstall.
 - Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, approval-required probes, and revocation transcript.
 - Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and evidence bundle checksums for each release candidate.
-- Adapter SDK cancellation conformance fixtures for future third-party adapters.
+- Full adapter SDK lifecycle and cancellation conformance fixtures for future third-party adapters.
 
 The following remain real-environment acceptance tests:
 
@@ -303,6 +304,6 @@ The following remain real-environment acceptance tests:
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall and reconnect after reboot;
 - managed Linux systemd user-unit install/uninstall and reconnect after reboot;
-- cooperative cancellation generalized across future Adapter SDK implementations;
+- cooperative cancellation generalized across future Adapter SDK lifecycle implementations;
 - OS-protected managed host trust and identity storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.

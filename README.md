@@ -85,6 +85,7 @@ Implemented now:
 - PowerShell adapter MVP through `adapter=powershell`: runs an explicit PowerShell command through an allowlisted `pwsh`, `powershell`, `powershell.exe`, or payload-provided executable, requires `powershell.user`, never adds `-ExecutionPolicy Bypass`, gates high-risk commands on approval, and captures `rdev.powershell-result.v1` evidence with redaction.
 - Codex, shell, and PowerShell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
 - Canceled Codex, shell, and PowerShell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
+- Public adapter result-artifact conformance verifier through `pkg/adapterkit`, used by built-in shell, PowerShell, and Codex tests to check schema, timing, redaction, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Built-in shell, PowerShell, and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, credential changes, and execution-policy changes.
@@ -120,6 +121,7 @@ Not implemented yet:
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
+- Full lifecycle adapter SDK beyond the current result-artifact conformance verifier.
 - OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
 - Windows service installation.
@@ -219,6 +221,7 @@ go run ./cmd/rdev host uninstall-service --platform linux --label rdev-host.serv
 - [Release Key Lifecycle](docs/security/RELEASE_KEY_LIFECYCLE.md)
 - [Bootstrap Design](docs/operations/BOOTSTRAP.md)
 - [Acceptance Operations](docs/operations/ACCEPTANCE.md)
+- [Adapter SDK](docs/operations/ADAPTER_SDK.md)
 - [Development Gateway](docs/operations/DEV_GATEWAY.md)
 - [MCP Stdio](docs/operations/MCP_STDIO.md)
 - [Skillkit Install](docs/operations/SKILLKIT_INSTALL.md)

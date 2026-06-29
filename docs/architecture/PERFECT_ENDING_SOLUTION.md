@@ -1096,6 +1096,13 @@ collect(job, raw_result) -> redacted_artifacts, checksums, evidence_manifest
 cleanup(job, result) -> cleanup_status
 ```
 
+The first public SDK slice is already narrower and intentionally boring:
+`pkg/adapterkit` verifies result-artifact JSON for adapter/schema identity,
+timing, redaction metadata, command evidence, cancellation/timeout exclusivity,
+and common secret-pattern rejection. Shell, PowerShell, and Codex use this
+shared verifier in tests, so third-party adapter authors have a concrete
+evidence contract before the full lifecycle interface is extracted.
+
 Conformance tests must prove:
 
 - no execution before envelope and host validation;
@@ -1304,7 +1311,7 @@ the remaining gaps that matter before public confidence:
 | Real managed Mac service run | LaunchAgent planning/control exists; durable reconnect must be proven outside a dry-run | service-backed run survives logout/reboot, completes Codex job, verifies evidence, stops and uninstalls |
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
-| Adapter SDK extraction | adapters are still mostly internal implementations | public SDK, fixtures, conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
+| Adapter SDK extraction | result-artifact conformance exists, but adapters are still mostly internal lifecycle implementations | full lifecycle SDK, fixtures, cancellation conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
 | Multi-platform release UX | aggregate dry-run plan, platform archives, index, and install guide exist; public release still needs real download verification after publication | verified public download commands and post-release install transcript |
 | Public release execution | real build artifacts, release candidates, and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 

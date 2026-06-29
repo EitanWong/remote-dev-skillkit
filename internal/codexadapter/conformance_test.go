@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
 func TestConformanceCanonicalizesWorkspaceRoot(t *testing.T) {
@@ -124,6 +126,7 @@ func main() {
 	if !strings.Contains(artifact.GitDiff.Stdout, "changed before failure") {
 		t.Fatalf("expected diff evidence after failure, got %q", artifact.GitDiff.Stdout)
 	}
+	assertCodexAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestConformanceRedactsPromptArgvOutputAndDiff(t *testing.T) {
@@ -173,6 +176,7 @@ func main() {
 	if artifact.RedactionCounts["openai_api_key"] == 0 {
 		t.Fatalf("expected openai redaction count, got %#v", artifact.RedactionCounts)
 	}
+	assertCodexAdapterKitConformance(t, content)
 }
 
 func TestConformanceOutputTruncationIsReported(t *testing.T) {
@@ -208,6 +212,7 @@ func main() {
 	if len(artifact.CodexCommand.Stdout) > 64 {
 		t.Fatalf("expected truncated stdout length <= 64, got %d", len(artifact.CodexCommand.Stdout))
 	}
+	assertCodexAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestConformanceTimeoutCancelsCodexCommandWithEvidence(t *testing.T) {
@@ -237,6 +242,7 @@ func main() {
 	if !artifact.CodexCommand.TimedOut {
 		t.Fatalf("expected timeout evidence, got %#v", artifact.CodexCommand)
 	}
+	assertCodexAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestConformanceExternalContextCancelsCodexCommandWithEvidence(t *testing.T) {
@@ -274,6 +280,23 @@ func main() {
 	}
 	if artifact.GitStatus.Argv == nil || artifact.GitDiff.Argv == nil {
 		t.Fatalf("expected cancellation evidence to include git status and diff, got %#v", artifact)
+	}
+	assertCodexAdapterKitConformance(t, result.ArtifactContent())
+}
+
+func assertCodexAdapterKitConformance(t *testing.T, content string) {
+	t.Helper()
+	report := adapterkit.VerifyResultArtifactJSON([]byte(content), adapterkit.ResultArtifactContract{
+		Adapter:                 "codex",
+		SchemaVersion:           ResultSchemaVersion,
+		CommandFields:           []string{"codex_command", "git_status", "git_diff_stat", "git_diff"},
+		RequiredStringFields:    []string{"workspace_root"},
+		RequireTiming:           true,
+		RequireRedaction:        true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("Codex artifact failed adapterkit conformance: %#v\n%s", report, content)
 	}
 }
 

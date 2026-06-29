@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
 func TestExecuteAllowedCommand(t *testing.T) {
@@ -32,6 +34,7 @@ func TestExecuteAllowedCommand(t *testing.T) {
 	if result.ArtifactContent() == "" {
 		t.Fatal("artifact content should be present")
 	}
+	assertShellAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestExecuteRejectsCommandNotAllowlisted(t *testing.T) {
@@ -233,6 +236,7 @@ func main() {
 	if !artifact.Canceled {
 		t.Fatalf("expected canceled artifact, got %#v", artifact)
 	}
+	assertShellAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestArtifactContentIncludesSchemaAndPreservesNonSecretOutput(t *testing.T) {
@@ -266,6 +270,7 @@ func TestArtifactContentIncludesSchemaAndPreservesNonSecretOutput(t *testing.T) 
 	if len(artifact.RedactionRules) == 0 {
 		t.Fatal("redaction rules should be recorded")
 	}
+	assertShellAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestArtifactContentRedactsSecretsAndReportsMetadata(t *testing.T) {
@@ -309,6 +314,22 @@ func TestArtifactContentRedactsSecretsAndReportsMetadata(t *testing.T) {
 	}
 	if !strings.Contains(content, "[REDACTED:openai_api_key]") {
 		t.Fatalf("expected redaction marker in %s", content)
+	}
+	assertShellAdapterKitConformance(t, content)
+}
+
+func assertShellAdapterKitConformance(t *testing.T, content string) {
+	t.Helper()
+	report := adapterkit.VerifyResultArtifactJSON([]byte(content), adapterkit.ResultArtifactContract{
+		Adapter:                 "shell",
+		SchemaVersion:           ResultSchemaVersion,
+		RequiredStringFields:    []string{"workspace_root"},
+		RequireTiming:           true,
+		RequireRedaction:        true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("shell artifact failed adapterkit conformance: %#v\n%s", report, content)
 	}
 }
 

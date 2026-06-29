@@ -65,6 +65,7 @@
 - [x] Add trust lifecycle CLI for root/gateway key initialization, rotation, revocation, and bundle verification.
 - [x] Add final 2026-06-30 perfect-ending architecture refinement with product lines, mode separation, trust boundaries, protocol closure, and implementation spine.
 - [x] Add Linux systemd user-unit managed host lifecycle with safe install/status/dry-run control/uninstall commands.
+- [x] Add public adapterkit result-artifact conformance verifier for built-in and third-party adapters.
 
 ## Next
 
@@ -152,7 +153,7 @@
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
-- [ ] Add adapter SDK and conformance tests.
+- [ ] Add full adapter lifecycle SDK and cancellation conformance tests.
 
 ## Final End-State Gates
 
@@ -182,6 +183,7 @@
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 - [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.
+- [x] Built-in shell, PowerShell, and Codex adapters pass public adapterkit result-artifact conformance checks.
 
 ## Definition Of Done For v0.1.0
 

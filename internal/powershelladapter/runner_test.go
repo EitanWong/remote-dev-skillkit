@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
 func TestExecuteRunsAllowlistedPowerShellCommand(t *testing.T) {
@@ -52,6 +54,7 @@ func main() {
 	if artifact.Adapter != "powershell" {
 		t.Fatalf("unexpected adapter %q", artifact.Adapter)
 	}
+	assertPowerShellAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestExecuteRejectsMissingCommand(t *testing.T) {
@@ -123,6 +126,7 @@ func main() {
 	if !artifact.Canceled {
 		t.Fatalf("expected canceled artifact, got %#v", artifact)
 	}
+	assertPowerShellAdapterKitConformance(t, result.ArtifactContent())
 }
 
 func TestArtifactRedactsPowerShellSecrets(t *testing.T) {
@@ -145,6 +149,22 @@ func TestArtifactRedactsPowerShellSecrets(t *testing.T) {
 	}
 	if !strings.Contains(content, "[REDACTED:openai_api_key]") {
 		t.Fatalf("expected redaction marker, got %s", content)
+	}
+	assertPowerShellAdapterKitConformance(t, content)
+}
+
+func assertPowerShellAdapterKitConformance(t *testing.T, content string) {
+	t.Helper()
+	report := adapterkit.VerifyResultArtifactJSON([]byte(content), adapterkit.ResultArtifactContract{
+		Adapter:                 "powershell",
+		SchemaVersion:           ResultSchemaVersion,
+		RequiredStringFields:    []string{"workspace_root"},
+		RequireTiming:           true,
+		RequireRedaction:        true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("PowerShell artifact failed adapterkit conformance: %#v\n%s", report, content)
 	}
 }
 
