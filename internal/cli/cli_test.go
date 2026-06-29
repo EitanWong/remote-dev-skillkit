@@ -1839,6 +1839,80 @@ func TestWorkspacePrepareWorktreeCreatesGitWorktree(t *testing.T) {
 	}
 }
 
+func TestAcceptanceManagedMacGeneratesEvidence(t *testing.T) {
+	requireGitForCLITest(t)
+	fakeCodex := buildCLITestBinary(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# rdev acceptance fixture\n\nChanged by managed Mac acceptance.\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake codex acceptance run")
+}
+`)
+	out := filepath.Join(t.TempDir(), "managed-mac-acceptance")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "managed-mac",
+		"--out", out,
+		"--codex-command", fakeCodex,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK               bool `json:"ok"`
+		Report           string
+		Evidence         string
+		ApprovalEvidence string `json:"approval_evidence"`
+		Worktree         string
+		Checks           []struct {
+			Name   string `json:"name"`
+			Passed bool   `json:"passed"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected acceptance ok, got %s", stdout.String())
+	}
+	for _, path := range []string{
+		payload.Report,
+		filepath.Join(payload.Evidence, "manifest.json"),
+		filepath.Join(payload.ApprovalEvidence, "manifest.json"),
+		filepath.Join(payload.Worktree, "README.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected generated path %s: %v", path, err)
+		}
+	}
+	readme := readFileForTest(t, filepath.Join(payload.Worktree, "README.md"))
+	if !strings.Contains(readme, "Changed by managed Mac acceptance") {
+		t.Fatalf("expected fake codex change in worktree, got %s", readme)
+	}
+	if len(payload.Checks) == 0 {
+		t.Fatal("expected checks")
+	}
+	for _, check := range payload.Checks {
+		if !check.Passed {
+			t.Fatalf("expected check %s to pass: %s", check.Name, stdout.String())
+		}
+	}
+	report := readFileForTest(t, payload.Report)
+	if !strings.Contains(report, `"schema_version": "rdev.acceptance.managed-mac.v1"`) {
+		t.Fatalf("expected managed Mac acceptance report, got %s", report)
+	}
+	if !strings.Contains(report, `"schema_version": "rdev.evidence-bundle.v1"`) {
+		t.Fatalf("expected embedded evidence manifests, got %s", report)
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 }

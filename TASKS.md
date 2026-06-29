@@ -99,6 +99,7 @@
 - [x] Add Codex adapter cooperative cancellation from host/job context and gateway job cancellation polling.
 - [x] Add canceled-job artifact reporting without changing the gateway job's canceled terminal state.
 - [x] Add shared implicit approval preflight for risky shell and Codex actions.
+- [x] Add managed Mac coding acceptance harness with locked-worktree evidence export.
 
 ## Later
 

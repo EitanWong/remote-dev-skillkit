@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/acceptance"
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
@@ -83,12 +84,87 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.skillkit(args[1:])
 	case "workspace":
 		return a.workspace(ctx, args[1:])
+	case "acceptance":
+		return a.acceptance(ctx, args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func (a App) acceptance(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing acceptance subcommand")
+	}
+	switch args[0] {
+	case "managed-mac":
+		fs := flag.NewFlagSet("acceptance managed-mac", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", "", "git repository root; defaults to a generated fixture repo inside --out")
+		out := fs.String("out", "", "empty output directory for the acceptance report and evidence bundles")
+		worktreeRoot := fs.String("worktree-root", "", "directory for generated worktrees; defaults to <out>/worktrees")
+		workspaceLockStore := fs.String("workspace-lock-store", "", "workspace lock store directory; defaults to <out>/workspace-locks")
+		codexCommand := fs.String("codex-command", "", "codex command override; defaults to real codex")
+		codexArgsJSON := fs.String("codex-args-json", "", "JSON array of codex command args")
+		prompt := fs.String("prompt", "", "prompt for the Codex job")
+		verificationJSON := fs.String("verification-commands-json", "", "JSON matrix of verification commands")
+		allowVerification := fs.String("allow-verification-commands", "", "comma-separated allowlist for verification commands")
+		maxDuration := fs.Int("max-duration-seconds", 300, "maximum adapter duration")
+		maxOutput := fs.Int("max-output-bytes", 1024*1024, "maximum captured output bytes")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		codexArgs, err := parseJSONStringArray(*codexArgsJSON, "codex-args-json")
+		if err != nil {
+			return err
+		}
+		verificationCommands, err := parseJSONStringMatrix(*verificationJSON, "verification-commands-json")
+		if err != nil {
+			return err
+		}
+		return a.acceptanceManagedMac(ctx, acceptance.ManagedMacOptions{
+			RepoRoot:                  *repo,
+			OutDir:                    *out,
+			WorktreeRoot:              *worktreeRoot,
+			WorkspaceLockStore:        *workspaceLockStore,
+			CodexCommand:              *codexCommand,
+			CodexArgs:                 codexArgs,
+			Prompt:                    *prompt,
+			VerificationCommands:      verificationCommands,
+			AllowVerificationCommands: splitCapabilities(*allowVerification),
+			MaxDurationSeconds:        *maxDuration,
+			MaxOutputBytes:            *maxOutput,
+		})
+	default:
+		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
+	}
+}
+
+func (a App) acceptanceManagedMac(ctx context.Context, opts acceptance.ManagedMacOptions) error {
+	report, err := acceptance.RunManagedMac(ctx, opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                     allAcceptanceChecksPassed(report.Checks),
+		"schema":                 report.SchemaVersion,
+		"out":                    report.OutDir,
+		"report":                 filepath.Join(report.OutDir, "report.json"),
+		"evidence":               report.EvidenceDir,
+		"approval_evidence":      report.ApprovalEvidenceDir,
+		"repo":                   report.RepoRoot,
+		"worktree":               report.Worktree.WorktreePath,
+		"host_id":                report.Host.ID,
+		"coding_job_id":          report.CodingJob.ID,
+		"approval_probe_job_id":  report.ApprovalJob.ID,
+		"checks":                 report.Checks,
+		"recommended_next_steps": report.RecommendedNextSteps,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
 func (a App) version() error {
@@ -1261,6 +1337,7 @@ Usage:
   rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
+  rdev acceptance managed-mac --out acceptance-run --repo .
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
@@ -2054,6 +2131,40 @@ func splitCapabilities(value string) []string {
 		}
 	}
 	return capabilities
+}
+
+func parseJSONStringArray(raw, name string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	return values, nil
+}
+
+func parseJSONStringMatrix(raw, name string) ([][]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var values [][]string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	return values, nil
+}
+
+func allAcceptanceChecksPassed(checks []acceptance.Check) bool {
+	if len(checks) == 0 {
+		return false
+	}
+	for _, check := range checks {
+		if !check.Passed {
+			return false
+		}
+	}
+	return true
 }
 
 func Main() {
