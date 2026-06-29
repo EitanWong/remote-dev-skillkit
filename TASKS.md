@@ -48,6 +48,7 @@
 - [x] Add concise final closure blueprint for release-facing architecture decisions.
 - [x] Add ultimate closure design with protocol objects, capability rings, host runtime rules, golden paths, and v1.0 gates.
 - [x] Add perfect ending solution with state machines, authority map, discovery model, mode contracts, evidence gates, and final implementation order.
+- [x] Refresh GitHub project management with current milestones, seed backlog, dry-run bootstrap, and issue/PR templates.
 - [x] Add development HTTPS long-poll host job transport prototype.
 - [x] Add portable agent Skillkit bundle export for mainstream frameworks.
 

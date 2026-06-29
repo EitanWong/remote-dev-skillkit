@@ -1,0 +1,44 @@
+name: Acceptance Run
+description: Track real-environment acceptance evidence for a release gate
+title: "[Acceptance]: "
+labels: ["kind:test", "area:evidence"]
+body:
+  - type: dropdown
+    id: gate
+    attributes:
+      label: Gate
+      options:
+        - Temporary Windows Host
+        - Managed Mac Coding
+        - Managed Device Generalization
+        - Public Skillkit Release
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS, version, architecture, gateway mode, release SHA, and redacted host alias.
+    validations:
+      required: true
+  - type: textarea
+    id: transcript
+    attributes:
+      label: Command Transcript
+      description: Commands run, exit codes, and links to redacted logs.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Evidence bundle ids, checksums, audit export, verification JSON, and screenshots only when needed.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result
+      description: Pass/fail summary, residual risk, and follow-up issues.
+    validations:
+      required: true

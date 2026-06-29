@@ -1,0 +1,33 @@
+name: Security Hardening
+description: Track trust, policy, approval, persistence, or release-safety work
+title: "[Security]: "
+labels: ["kind:security"]
+body:
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Security Boundary
+      description: What boundary, invariant, or threat model item does this issue protect?
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk
+      description: What can go wrong if this is missing or broken?
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Notes
+      description: Expected code, docs, tests, or release-process changes.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification Evidence
+      description: Tests, acceptance runs, audit output, or independent verifier output required before closing.
+    validations:
+      required: true

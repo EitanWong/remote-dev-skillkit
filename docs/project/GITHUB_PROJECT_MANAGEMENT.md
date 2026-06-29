@@ -1,6 +1,7 @@
 # GitHub Project Management
 
-This document defines the GitHub operating model for Remote Dev Skillkit. It is intentionally concrete so the repository can move from local implementation loops to public, trackable engineering work.
+This document defines the GitHub operating model for Remote Dev Skillkit. It is
+kept local until Eitan explicitly approves external GitHub mutations.
 
 ## Current State
 
@@ -8,12 +9,14 @@ As of 2026-06-29:
 
 - local repository path: `/Users/eitan/Documents/Codex/2026-06-28/pe/work/remote-dev-skillkit`
 - current branch: `main`
-- latest local commit: `05f9c12 feat: export local evidence bundles`
+- latest audited local baseline before this project-management update:
+  `f5bedc6 docs: add perfect ending solution`
 - GitHub CLI account: `EitanWong`
 - local git remote: none configured
-- matching remote repository under `EitanWong`: not found by read-only `gh repo list`
+- `gh repo view EitanWong/remote-dev-skillkit`: no repository found at audit time
 
-No GitHub repository, issues, labels, milestones, or project board should be created until Eitan explicitly approves that external change.
+No GitHub repository, issues, labels, milestones, project board, release, or push
+should be created until Eitan explicitly approves that external change.
 
 Recommended remote repository:
 
@@ -27,15 +30,37 @@ Recommended visibility while the safety model is still pre-v1:
 private
 ```
 
+## Project Board Model
+
+Use one GitHub project board with these views:
+
+| View | Purpose |
+|---|---|
+| Roadmap | group by milestone from v0.2 through v1.0 |
+| Current Iteration | only issues actively being implemented or verified |
+| Security Gates | `kind:security` plus approval, trust, bootstrap, and persistence work |
+| Acceptance Evidence | real-environment transcripts and release-gate evidence |
+| Public Launch | docs, installers, signed releases, examples, community readiness |
+
+Recommended fields:
+
+| Field | Values |
+|---|---|
+| Status | Backlog, Ready, In Progress, In Review, Blocked, Done |
+| Priority | P0, P1, P2 |
+| Milestone | v0.2, v0.3, v0.4, v1.0 |
+| Surface | gateway, host, transport, adapter, skillkit, release, docs |
+| Evidence | missing, partial, automated, real-environment, release-ready |
+
 ## Milestones
 
 | Milestone | Purpose | Exit Gate |
 |---|---|---|
-| `v0.1 Local Safety Kernel` | prove signed local job execution, policy checks, evidence, audit, and review loop | local demo plus tests pass for signed envelope, host identity, nonce replay, workspace/symlink rejection, evidence bundle, audit chain |
-| `v0.2 Temporary Windows MVP` | one-command attended Windows repair session | clean Windows VM joins visibly, verifies signed artifacts, connects outbound only, leaves no persistence |
-| `v0.3 Managed Mac Coding` | Eitan-owned managed Mac runs Codex jobs safely | LaunchAgent/managed test mode, workspace lock/worktree, Codex adapter, diff/test evidence, approval before push |
-| `v0.4 Multi-Host Runtime` | generalize to Mac/Windows/Linux managed hosts and adapters | durable gateway storage, service modes, WSS, trust rotation, artifact streaming, adapter SDK |
-| `v1.0 Public Skillkit` | stable open-source release | stable MCP schemas, install docs, signed releases, threat model, acceptance demos, security policy |
+| `v0.1 Local Safety Kernel` | signed local job execution, host-side verification, approvals, evidence, audit, Skillkit export | substantially implemented locally; keep open only for release-note/evidence cleanup |
+| `v0.2 Temporary Windows Host` | one visible verified Windows command starts an attended outbound host | clean Windows VM joins, verifies signed artifacts, enforces approvals, revokes, leaves no persistence |
+| `v0.3 Managed Mac Coding` | Eitan-owned managed Mac runs Codex jobs safely | service-backed LaunchAgent transcript proves reconnect, locked worktree, diff/test evidence, approval gates |
+| `v0.4 Managed Device Generalization` | generalize managed runtime across Mac, Windows, Linux | Windows Service, systemd, WSS/mTLS, OS-protected storage, adapter SDK |
+| `v1.0 Public Skillkit` | stable open-source release for mainstream agent frameworks | signed releases, stable schemas, install docs, threat model, security policy, public acceptance transcripts |
 
 ## Labels
 
@@ -47,98 +72,125 @@ private
 | `area:evidence` | `9467bd` | artifacts, evidence bundles, audit export, redaction |
 | `area:transport` | `17becf` | HTTPS polling, WSS, mTLS, reconnect |
 | `area:adapter` | `ff7f0e` | shell, PowerShell, Git, Codex, Claude Code, ACP, GUI, mesh |
-| `area:bootstrap` | `8c564b` | join manifest, release verification, Windows/macOS/Linux bootstrap |
+| `area:bootstrap` | `8c564b` | join manifest, release verification, platform bootstrap |
+| `area:service` | `c27ba0` | launchd, Windows Service, systemd, lifecycle control |
+| `area:skillkit` | `7057ff` | agent skills, MCP contracts, install bundles |
+| `area:release` | `5319e7` | signed artifacts, changelog, release evidence, distribution |
 | `area:docs` | `7f7f7f` | architecture, operations, release docs, runbooks |
 | `kind:feature` | `0e8a16` | new product capability |
 | `kind:security` | `b60205` | security boundary, exploit prevention, trust model |
 | `kind:test` | `5319e7` | automated or real-environment acceptance coverage |
 | `kind:ops` | `0052cc` | deployment, service management, release operations |
+| `kind:docs` | `6f42c1` | documentation, examples, runbooks, public packaging |
 | `priority:p0` | `b60205` | blocks safe use or release |
 | `priority:p1` | `fbca04` | required for current milestone |
 | `priority:p2` | `c5def5` | useful but not blocking current milestone |
 
-## Initial Issues
+## Completed Local Capabilities
 
-### v0.1 Local Safety Kernel
+These should not be opened as new GitHub issues unless regression work is needed:
 
-1. **Add host-side denial policy explanations**
-   - Labels: `area:policy`, `area:host`, `kind:security`, `priority:p1`
-   - Acceptance:
-     - every hostrunner denial returns a structured explanation code and human summary;
-     - missing workspace, missing capability, unsupported adapter, non-allowlisted command, workspace escape, identity mismatch, expired/tampered/replayed envelopes are covered;
-     - CLI/HTTP failure reporting includes the explanation in artifacts or failure payload.
+- host-side structured denials and approval-required artifacts;
+- gateway-backed evidence bundle export;
+- hash-chained audit export and verification;
+- portable Skillkit bundle export;
+- HTTPS long-poll host job transport prototype;
+- host trust-bundle update checks;
+- macOS LaunchAgent plist generation, status, safe uninstall, and service-control;
+- workspace lock manager and Git worktree preparation foundation;
+- Codex adapter MVP with diff/test evidence, redaction, truncation, timeout, and cancellation evidence;
+- shared risky-action approval preflight for shell and Codex;
+- managed Mac local acceptance harness and independent evidence verifier;
+- managed Mac LaunchAgent service acceptance plan.
 
-2. **Export evidence bundles directly from gateway job ids**
-   - Labels: `area:evidence`, `area:gateway`, `kind:feature`, `priority:p1`
-   - Acceptance:
-     - dev gateway can export a job evidence bundle without manually assembling JSON input files;
-     - bundle includes job, envelope, artifacts, audit slice, chain, checksums, manifest;
-     - tests cover succeeded and failed jobs.
+## Seed Issues To Create After Approval
 
-3. **Add local demo evidence bundle command**
-   - Labels: `area:evidence`, `area:docs`, `kind:test`, `priority:p2`
-   - Acceptance:
-     - README quick start can produce a demo bundle end to end;
-     - bundle can be inspected and audit chain verifies.
-
-4. **Complete v0.1 release checklist**
-   - Labels: `area:docs`, `kind:ops`, `priority:p1`
-   - Acceptance:
-     - `./scripts/check.sh` passes;
-     - all v0.1 Definition of Done bullets are backed by command evidence;
-     - CHANGELOG entry and tag plan are ready.
-
-### v0.2 Temporary Windows MVP
-
-5. **Implement outbound host transport prototype**
-   - Labels: `area:transport`, `area:host`, `area:gateway`, `kind:feature`, `priority:p1`
-   - Acceptance:
-     - host can claim/complete jobs over HTTPS polling without local-only restrictions;
-     - reconnect/backoff behavior is tested;
-     - cancellation/revocation checked between claims and during long-running jobs.
-
-6. **Build Windows foreground temporary host UX**
-   - Labels: `area:host`, `area:bootstrap`, `kind:feature`, `priority:p1`
-   - Acceptance:
-     - Windows host runs visibly in foreground;
-     - shows operator, reason, TTL, gateway, stop instructions;
-     - no service/scheduled-task/Run-key persistence in temporary mode.
-
-7. **Harden Windows bootstrap verification**
-   - Labels: `area:bootstrap`, `kind:security`, `priority:p1`
-   - Acceptance:
-     - bootstrap verifies signed manifest and host binary before execution;
-     - Authenticode policy path is documented and testable;
-     - bootstrap does not weaken execution policy, Defender, UAC, firewall, or Group Policy.
+The current bootstrap script creates the following seed backlog.
 
 ### v0.3 Managed Mac Coding
 
-8. **Add workspace lock manager**
-   - Labels: `area:host`, `area:policy`, `kind:feature`, `priority:p1`
+1. **Run service-backed managed Mac acceptance transcript**
+   - Labels: `area:service`, `area:host`, `area:evidence`, `kind:test`, `priority:p1`
    - Acceptance:
-     - one writer per repo root unless isolated worktree is created;
-     - stale locks expire or release through cancel;
-     - lock acquire/release are audited.
+     - generate and review a managed Mac LaunchAgent plan;
+     - start and inspect with `rdev host service-control --execute`;
+     - confirm reconnect after login or reboot;
+     - run service-backed managed Mac Codex acceptance;
+     - verify evidence with `rdev acceptance verify`;
+     - stop and uninstall without touching unrelated plists.
 
-9. **Implement Git worktree evidence flow**
-   - Labels: `area:adapter`, `area:evidence`, `kind:feature`, `priority:p1`
+### v0.2 Temporary Windows Host
+
+2. **Build Windows foreground temporary host no-persistence acceptance**
+   - Labels: `area:bootstrap`, `area:host`, `area:evidence`, `kind:test`, `priority:p1`
    - Acceptance:
-     - managed coding job creates branch/worktree;
-     - captures status, diff stat, full diff artifact, verification commands;
-     - push/merge/tag requires approval.
+     - clean Windows 10/11 VM joins from one visible command;
+     - bootstrap verifies pinned verifier and signed host artifact before execution;
+     - host is foreground, outbound-only, revocable, and approval-gated;
+     - no service, scheduled task, Run key, startup shortcut, or firewall rule remains.
 
-10. **Implement Codex adapter MVP**
-    - Labels: `area:adapter`, `area:host`, `kind:feature`, `priority:p1`
-    - Acceptance:
-      - runs Codex CLI inside locked workspace;
-      - streams bounded output;
-      - returns adapter result, diff/test evidence, residual risk.
+### v0.4 Managed Device Generalization
+
+3. **Add production WSS host channel with authenticated fallback**
+   - Labels: `area:transport`, `area:gateway`, `area:host`, `kind:feature`, `kind:security`, `priority:p1`
+   - Acceptance:
+     - authenticated WSS supports interactive job status and artifact events;
+     - HTTPS long-poll remains a stable fallback;
+     - reconnect, lease expiry, cancellation, and revocation are tested.
+
+4. **Add OS-protected managed host identity and trust storage**
+   - Labels: `area:host`, `area:policy`, `kind:security`, `priority:p1`
+   - Acceptance:
+     - Keychain, DPAPI, and libsecret or documented fallback are supported;
+     - file-backed dev stores remain available for tests;
+     - rollback and revocation checks still pass.
+
+5. **Extract adapter SDK and conformance suite**
+   - Labels: `area:adapter`, `area:policy`, `area:evidence`, `kind:feature`, `kind:test`, `priority:p1`
+   - Acceptance:
+     - shared adapter interface covers detect, plan, prepare, run, collect, cleanup;
+     - shell and Codex pass shared conformance fixtures;
+     - new adapter authors can run local conformance tests.
+
+6. **Implement Claude Code and ACP adapters behind the safety kernel**
+   - Labels: `area:adapter`, `area:skillkit`, `kind:feature`, `priority:p2`
+   - Acceptance:
+     - adapters run only after signed envelope, host validation, workspace lock, and approval preflight;
+     - diff/test evidence matches Codex expectations where possible;
+     - dangerous external consequences pause before execution.
+
+7. **Add Windows Service and systemd managed host lifecycle**
+   - Labels: `area:service`, `area:host`, `kind:feature`, `kind:ops`, `priority:p1`
+   - Acceptance:
+     - `rdev host install-service` supports Windows Service and systemd;
+     - install, status, service-control, stop, and uninstall are inspectable;
+     - temporary mode cannot install persistence through these commands.
+
+### v1.0 Public Skillkit
+
+8. **Package public Skillkit install paths for Codex Claude Code OpenCode Hermes and generic MCP**
+   - Labels: `area:skillkit`, `area:docs`, `kind:docs`, `priority:p1`
+   - Acceptance:
+     - one install path each for Codex, Claude Code, OpenCode/OpenClaw, Hermes, and generic MCP;
+     - exported bundle includes manifest checksums and framework notes;
+     - a self-host user can create a ticket, run a job, and export evidence without Hermes-specific assumptions.
+
+9. **Prepare signed release pipeline and public acceptance transcript package**
+   - Labels: `area:release`, `area:evidence`, `kind:ops`, `kind:security`, `priority:p1`
+   - Acceptance:
+     - staged artifacts exist for macOS, Linux, and Windows;
+     - checksums, signed artifact manifests, and signed release index verify;
+     - redacted acceptance transcripts, report JSON, audit verification, and evidence checksums are packaged.
 
 ## Bootstrap Script
 
-The repository includes `scripts/github/bootstrap-project.sh` as a proposed automation for labels, milestones, and initial issues. Run it only after Eitan approves external GitHub changes.
+Preview the GitHub changes locally:
 
-Recommended sequence after approval:
+```bash
+scripts/github/bootstrap-project.sh --dry-run EitanWong/remote-dev-skillkit
+```
+
+Recommended sequence after explicit approval:
 
 ```bash
 gh repo create EitanWong/remote-dev-skillkit --private --source . --remote origin --push
@@ -152,3 +204,12 @@ git remote add origin https://github.com/EitanWong/remote-dev-skillkit.git
 git push -u origin main
 scripts/github/bootstrap-project.sh EitanWong/remote-dev-skillkit
 ```
+
+After public launch, switch visibility deliberately:
+
+```bash
+gh repo edit EitanWong/remote-dev-skillkit --visibility public
+```
+
+Do this only after the security policy, release signing, acceptance transcripts,
+and install docs match the shipped behavior.

@@ -167,6 +167,8 @@ go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-d
 - [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
 - [Project Plan](docs/project/PLAN.md)
 - [Acceptance Tests](docs/project/ACCEPTANCE_TESTS.md)
+- [GitHub Project Management](docs/project/GITHUB_PROJECT_MANAGEMENT.md)
+- [Release Checklist](docs/project/RELEASE_CHECKLIST.md)
 - [Roadmap](docs/project/ROADMAP.md)
 - [Versioning](docs/project/VERSIONING.md)
 - [Threat Model](docs/security/THREAT_MODEL.md)
