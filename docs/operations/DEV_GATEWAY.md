@@ -204,7 +204,7 @@ By default the adapter runs:
 codex exec -C <workspace_root> --sandbox workspace-write --json <prompt>
 ```
 
-For deterministic local tests, signed job payloads may override `codex_command` and `codex_args`. The result artifact uses schema `rdev.codex-result.v1` and includes Codex command output, Git status, Git diff/stat, optional verification command results, output truncation flags, duration, redaction rules, and redaction counts. Verification commands must be allowlisted through `allow_verification_commands`.
+For deterministic local tests, signed job payloads may override `codex_command` and `codex_args`. The result artifact uses schema `rdev.codex-result.v1` and includes Codex command output, Git status, Git diff/stat, optional verification command results, output truncation flags, duration, redaction rules, and redaction counts. Verification commands must be allowlisted through `allow_verification_commands`. When a verification command is `go test -json ...`, the command result also includes a `rdev.test-report.v1` summary with package/test pass, fail, skip counts and parsed test cases.
 
 Codex jobs also run an implicit approval preflight before workspace lock acquisition and before adapter execution. If `intent`, `prompt`, `codex_args`, `verification_commands`, `external_actions`, `dangerous_actions`, `approval_actions`, or `requested_approvals` request high-risk external consequences, the host returns `rdev.approval-required.v1` unless a matching approval token is present. Current operations include `git.push`, `git.merge`, `deploy.run`, `publish.run`, `credential.change`, and `service.manage`.
 

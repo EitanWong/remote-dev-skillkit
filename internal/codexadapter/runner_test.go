@@ -60,6 +60,86 @@ func main() {
 	}
 }
 
+func TestExecuteParsesGoTestJSONVerificationReport(t *testing.T) {
+	repo := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/rdevtest\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "math.go"), []byte(`package rdevtest
+
+func Add(a, b int) int {
+	return a + b
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "math_test.go"), []byte(`package rdevtest
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if Add(2, 3) != 5 {
+		t.Fatal("bad sum")
+	}
+}
+
+func TestSkip(t *testing.T) {
+	t.Skip("exercise skip reporting")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "go.mod", "math.go", "math_test.go")
+	runGit(t, repo, "commit", "-m", "add go tests")
+	fakeCodex := writeFakeCodexProgram(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("NOTE.md", []byte("codex note\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake codex wrote NOTE")
+}
+`)
+	result, err := Execute(Spec{
+		WorkspaceRoot:             repo,
+		Prompt:                    "write a note and run tests",
+		CodexCommand:              "go",
+		CodexArgs:                 []string{"run", fakeCodex},
+		VerificationCommands:      [][]string{{"go", "test", "-json", "./..."}},
+		AllowVerificationCommands: []string{"go"},
+		MaxDurationSeconds:        30,
+		MaxOutputBytes:            256 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact ResultArtifact
+	if err := json.Unmarshal([]byte(result.ArtifactContent()), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if len(artifact.VerificationResults) != 1 {
+		t.Fatalf("expected one verification result, got %#v", artifact.VerificationResults)
+	}
+	report := artifact.VerificationResults[0].TestReport
+	if report == nil {
+		t.Fatalf("expected go test report, got %#v", artifact.VerificationResults[0])
+	}
+	if report.SchemaVersion != TestReportSchemaVersion || report.Tool != "go test" {
+		t.Fatalf("unexpected report metadata: %#v", report)
+	}
+	if report.Passed != 1 || report.Skipped != 1 || report.Failed != 0 || report.Total != 2 {
+		t.Fatalf("unexpected test counts: %#v", report)
+	}
+	if len(report.Tests) != 2 {
+		t.Fatalf("expected two test cases, got %#v", report.Tests)
+	}
+}
+
 func TestExecuteRejectsVerificationCommandWithoutAllowlist(t *testing.T) {
 	repo := initGitRepo(t)
 	fakeCodex := writeFakeCodexProgram(t, `package main

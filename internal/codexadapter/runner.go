@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ import (
 )
 
 const ResultSchemaVersion = "rdev.codex-result.v1"
+const TestReportSchemaVersion = "rdev.test-report.v1"
 
 type Spec struct {
 	WorkspaceRoot             string
@@ -30,13 +33,40 @@ type Spec struct {
 }
 
 type CommandResult struct {
-	Argv            []string `json:"argv"`
-	Dir             string   `json:"dir"`
-	ExitCode        int      `json:"exit_code"`
-	Stdout          string   `json:"stdout,omitempty"`
-	Stderr          string   `json:"stderr,omitempty"`
-	TimedOut        bool     `json:"timed_out"`
-	OutputTruncated bool     `json:"output_truncated"`
+	Argv            []string    `json:"argv"`
+	Dir             string      `json:"dir"`
+	ExitCode        int         `json:"exit_code"`
+	Stdout          string      `json:"stdout,omitempty"`
+	Stderr          string      `json:"stderr,omitempty"`
+	TimedOut        bool        `json:"timed_out"`
+	OutputTruncated bool        `json:"output_truncated"`
+	TestReport      *TestReport `json:"test_report,omitempty"`
+}
+
+type TestReport struct {
+	SchemaVersion string        `json:"schema_version"`
+	Tool          string        `json:"tool"`
+	Total         int           `json:"total"`
+	Passed        int           `json:"passed"`
+	Failed        int           `json:"failed"`
+	Skipped       int           `json:"skipped"`
+	Packages      []TestPackage `json:"packages,omitempty"`
+	Tests         []TestCase    `json:"tests,omitempty"`
+	ParseErrors   []string      `json:"parse_errors,omitempty"`
+	Incomplete    bool          `json:"incomplete"`
+}
+
+type TestPackage struct {
+	Name    string  `json:"name"`
+	Action  string  `json:"action"`
+	Elapsed float64 `json:"elapsed,omitempty"`
+}
+
+type TestCase struct {
+	Package string  `json:"package"`
+	Name    string  `json:"name"`
+	Action  string  `json:"action"`
+	Elapsed float64 `json:"elapsed,omitempty"`
 }
 
 type Result struct {
@@ -123,7 +153,7 @@ func Execute(spec Spec) (Result, error) {
 			})
 			return result, fmt.Errorf("verification command %q is not allowlisted", commandName(command[0]))
 		}
-		result.VerificationResults = append(result.VerificationResults, runCommand(ctx, workspaceRoot, command, maxOutputBytes))
+		result.VerificationResults = append(result.VerificationResults, runVerificationCommand(ctx, workspaceRoot, command, maxOutputBytes))
 	}
 	ended := time.Now().UTC()
 	result.EndedAt = ended.Format(time.RFC3339Nano)
@@ -208,6 +238,14 @@ func redactCommand(redactor *shelladapter.ArtifactRedactor, command CommandResul
 	return command
 }
 
+func runVerificationCommand(ctx context.Context, dir string, argv []string, maxOutputBytes int) CommandResult {
+	result := runCommand(ctx, dir, argv, maxOutputBytes)
+	if report := parseTestReport(argv, result.Stdout, result.OutputTruncated); report != nil {
+		result.TestReport = report
+	}
+	return result
+}
+
 func runCommand(ctx context.Context, dir string, argv []string, maxOutputBytes int) CommandResult {
 	if len(argv) == 0 {
 		return CommandResult{Dir: dir, ExitCode: -1, Stderr: "argv is required"}
@@ -231,6 +269,98 @@ func runCommand(ctx context.Context, dir string, argv []string, maxOutputBytes i
 		TimedOut:        ctx.Err() == context.DeadlineExceeded,
 		OutputTruncated: limiter.truncated(),
 	}
+}
+
+func parseTestReport(argv []string, stdout string, outputTruncated bool) *TestReport {
+	if !isGoTestJSONCommand(argv) {
+		return nil
+	}
+	return parseGoTestJSON(stdout, outputTruncated)
+}
+
+func isGoTestJSONCommand(argv []string) bool {
+	if len(argv) < 3 || commandName(argv[0]) != "go" || argv[1] != "test" {
+		return false
+	}
+	for _, arg := range argv[2:] {
+		if arg == "-json" || arg == "--json" || arg == "-json=true" || arg == "--json=true" {
+			return true
+		}
+	}
+	return false
+}
+
+func parseGoTestJSON(stdout string, outputTruncated bool) *TestReport {
+	report := &TestReport{
+		SchemaVersion: TestReportSchemaVersion,
+		Tool:          "go test",
+		Incomplete:    outputTruncated,
+	}
+	decoder := json.NewDecoder(strings.NewReader(stdout))
+	packages := map[string]TestPackage{}
+	tests := map[string]TestCase{}
+	for {
+		var event struct {
+			Action  string  `json:"Action"`
+			Package string  `json:"Package"`
+			Test    string  `json:"Test"`
+			Elapsed float64 `json:"Elapsed"`
+		}
+		if err := decoder.Decode(&event); err != nil {
+			if err == io.EOF {
+				break
+			}
+			report.ParseErrors = append(report.ParseErrors, err.Error())
+			break
+		}
+		action := strings.TrimSpace(event.Action)
+		if action != "pass" && action != "fail" && action != "skip" {
+			continue
+		}
+		pkg := strings.TrimSpace(event.Package)
+		test := strings.TrimSpace(event.Test)
+		if test == "" {
+			if pkg != "" {
+				packages[pkg] = TestPackage{Name: pkg, Action: action, Elapsed: event.Elapsed}
+			}
+			continue
+		}
+		key := pkg + "\x00" + test
+		tests[key] = TestCase{
+			Package: pkg,
+			Name:    test,
+			Action:  action,
+			Elapsed: event.Elapsed,
+		}
+	}
+	for _, pkg := range packages {
+		report.Packages = append(report.Packages, pkg)
+	}
+	for _, test := range tests {
+		report.Tests = append(report.Tests, test)
+		switch test.Action {
+		case "pass":
+			report.Passed++
+		case "fail":
+			report.Failed++
+		case "skip":
+			report.Skipped++
+		}
+	}
+	sort.Slice(report.Packages, func(i, j int) bool {
+		return report.Packages[i].Name < report.Packages[j].Name
+	})
+	sort.Slice(report.Tests, func(i, j int) bool {
+		if report.Tests[i].Package == report.Tests[j].Package {
+			return report.Tests[i].Name < report.Tests[j].Name
+		}
+		return report.Tests[i].Package < report.Tests[j].Package
+	})
+	report.Total = report.Passed + report.Failed + report.Skipped
+	if report.Total == 0 && len(report.Packages) == 0 && len(report.ParseErrors) == 0 {
+		return nil
+	}
+	return report
 }
 
 func verifyWriteScope(root string, scopes []string) error {
