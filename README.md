@@ -97,6 +97,7 @@ Implemented now:
 - Real release artifact builds via `scripts/release/build-artifacts.sh`, producing target directories, `rdev.build-artifacts.v1`, and checksums for `rdev`, `rdev-host`, `rdev-gateway`, `rdev-mcp`, and `rdev-verify`.
 - Per-platform release candidate preparation via `scripts/release/prepare-platform-candidates.sh`, grouping `rdev.build-artifacts.v1` by `GOOS/GOARCH`, generating one verified candidate per target, and writing `rdev.platform-release-candidates.v1` without external mutation.
 - Multi-platform GitHub Release dry-run planning via `scripts/github/plan-platform-release.sh`, producing unique platform archives, a platform release index, verification summary, install guide, release notes, and command previews without mutating GitHub.
+- Post-release install verification planning via `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, platform verification scripts, and a Skillkit verification script from a local GitHub Release dry-run plan without mutating GitHub.
 - GitHub Release dry-run planning via `scripts/github/plan-release.sh`, producing a local release plan, commands preview, generated release notes, Skillkit tarball, and candidate verification output without mutating GitHub.
 - GitHub Actions CI for tests, vet, shell syntax, release candidate verification, and GitHub Release dry-run planning.
 - Windows bootstrap can hash-pin `rdev-verify.exe` and use it to verify either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host.
@@ -167,6 +168,7 @@ go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-c
 go run ./cmd/rdev release verify-candidate --candidate dist/release-candidate-windows-amd64 --require-artifacts rdev-host.exe,rdev-verify.exe
 scripts/github/plan-release.sh --candidate dist/release-candidates/windows-amd64 --repo EitanWong/remote-dev-skillkit --require-artifacts rdev-host.exe,rdev-verify.exe
 scripts/github/plan-platform-release.sh --platform-candidates dist/release-candidates/platform-candidates.json --repo EitanWong/remote-dev-skillkit
+scripts/github/plan-post-release-install.sh --release-plan dist/release-candidates/github-platform-release-plan/plan.json
 go run ./cmd/rdev host serve --mode temporary
 go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll --workspace-lock-store .rdev/workspace-locks
 go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --plist-out ./com.remote-dev-skillkit.host.plist

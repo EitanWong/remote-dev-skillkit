@@ -220,6 +220,18 @@ scripts/github/plan-platform-release.sh \
   --repo EitanWong/remote-dev-skillkit
 ```
 
+Preview post-release download and install verification steps from that local
+release plan:
+
+```bash
+scripts/github/plan-post-release-install.sh \
+  --release-plan dist/release-candidates/github-platform-release-plan/plan.json
+```
+
+This writes `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, one
+platform verification script per archive, and a Skillkit verification script. It
+does not publish or download anything during planning.
+
 This generates platform archives, `platform-release-index.json`,
 `platform-release-verification.json`, `INSTALL_PLATFORMS.md`, release notes, and
 command previews. It does not create a release or upload assets.

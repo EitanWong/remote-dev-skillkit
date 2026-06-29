@@ -34,6 +34,12 @@ scripts/github/plan-platform-release.sh \
   --out "$plan_dir" \
   > "$work_dir/plan-output.json"
 
+post_release_dir="$work_dir/post-release-install"
+scripts/github/plan-post-release-install.sh \
+  --release-plan "$plan_dir/plan.json" \
+  --out "$post_release_dir" \
+  > "$work_dir/post-release-output.json"
+
 python3 - "$work_dir" <<'PY'
 import json
 import pathlib
@@ -45,6 +51,8 @@ platform_output = json.loads((root / "platform-candidates-output.json").read_tex
 platform_manifest = json.loads(pathlib.Path(platform_output["manifest"]).read_text())
 plan_output = json.loads((root / "plan-output.json").read_text())
 plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
+post_release_output = json.loads((root / "post-release-output.json").read_text())
+post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
 assert build["ok"] is True, build
@@ -71,6 +79,16 @@ assert any(asset["kind"] == "skillkit-archive" for asset in plan["assets"]), pla
 assert len({asset["name"] for asset in plan["assets"]}) == len(plan["assets"]), plan["assets"]
 assert "gh release create" in commands, commands
 assert "gh release upload" in commands, commands
+assert post_release_output["ok"] is True, post_release_output
+assert post_release_plan["schema_version"] == "rdev.post-release-install-plan.v1", post_release_plan
+assert post_release_plan["external_mutation"] is False, post_release_plan
+assert post_release_output["platform_count"] == 2, post_release_output
+assert {platform["target"] for platform in post_release_plan["platforms"]} == {"linux/amd64", "windows/amd64"}, post_release_plan["platforms"]
+assert all(platform["archive"]["download_url"].startswith("https://github.com/") for platform in post_release_plan["platforms"]), post_release_plan["platforms"]
+assert any("rdev release verify-candidate" in "\n".join(platform["commands"]) for platform in post_release_plan["platforms"]), post_release_plan["platforms"]
+assert any("rdev-verify" in "\n".join(platform["commands"]) for platform in post_release_plan["platforms"]), post_release_plan["platforms"]
+assert pathlib.Path(post_release_plan["documents"]["verify_install"]).is_file(), post_release_plan["documents"]
+assert pathlib.Path(post_release_plan["skillkit"]["verification_script"]).is_file(), post_release_plan["skillkit"]
 
 print(json.dumps({
     "ok": True,
@@ -79,7 +97,9 @@ print(json.dumps({
     "platform_candidates_schema": platform_manifest["schema_version"],
     "platform_candidate_count": len(platform_manifest["candidates"]),
     "plan_schema": plan["schema_version"],
+    "post_release_schema": post_release_plan["schema_version"],
     "planned_platforms": plan_output["platform_count"],
+    "post_release_platforms": post_release_output["platform_count"],
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))

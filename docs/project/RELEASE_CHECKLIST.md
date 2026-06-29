@@ -17,6 +17,8 @@
 - [ ] Review `rdev.platform-release-candidates.v1`.
 - [ ] Generate and review a multi-platform GitHub Release dry-run plan with `scripts/github/plan-platform-release.sh`.
 - [ ] Review `rdev.github-platform-release-plan.v1`, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, and `INSTALL_PLATFORMS.md`.
+- [ ] Generate and review a post-release install verification plan with `scripts/github/plan-post-release-install.sh`.
+- [ ] Archive `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification script.
 - [ ] Prepare a local release candidate with `rdev release prepare-candidate`.
 - [ ] Verify the local release candidate with `rdev release verify-candidate`.
 - [ ] Generate and review a GitHub Release dry-run plan with `scripts/github/plan-release.sh`.
@@ -50,6 +52,7 @@
 
 - [ ] Create GitHub release.
 - [ ] Verify release downloads.
+- [ ] Run generated post-release verification scripts for macOS, Linux, Windows, and Skillkit where applicable.
 - [ ] Install on a clean Windows VM.
 - [ ] Install on macOS.
 - [ ] Install on Linux.

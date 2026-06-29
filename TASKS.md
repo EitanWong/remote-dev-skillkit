@@ -60,6 +60,7 @@
 - [x] Add per-platform release candidate automation from real build artifacts.
 - [x] Add multi-platform GitHub Release dry-run planning from verified platform candidates.
 - [x] Refine the canonical perfect ending into a final delivery architecture with sealed contracts, component boundaries, host kernel layers, API surfaces, reliability rules, and close plan.
+- [x] Add post-release install verification planning from local GitHub Release dry-run plans.
 
 ## Next
 
@@ -172,6 +173,7 @@
 - [x] Windows bootstrap can verify signed release bundles before target-host execution through a hash-pinned standalone verifier.
 - [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, approval probes, no-persistence checks, redaction, and checksums.
 - [ ] Production releases verify signed manifests and binaries before host execution.
+- [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 
 ## Definition Of Done For v0.1.0
 
