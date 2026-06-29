@@ -33,6 +33,8 @@ It accepts:
 - optional `ManifestUrl`
 - optional `ManifestRootPublicKey`
 - optional `ReleaseManifestUrl`
+- optional `ReleaseBundleUrl`
+- optional `ReleaseBundleRequiredArtifacts`
 - optional `ReleaseRootPublicKey`
 - optional `VerifierDownloadUrl`
 - optional `VerifierExpectedSha256`
@@ -63,7 +65,7 @@ index binding the release artifacts to their manifests and expected hashes. The
 standalone `rdev-verify` binary can verify either one artifact manifest or the
 full signed bundle index after it has been hash-pinned by the bootstrap.
 
-When `ReleaseManifestUrl` is provided, the Windows bootstrap requires `ReleaseRootPublicKey`, `VerifierDownloadUrl`, and `VerifierExpectedSha256`. It downloads `rdev-verify.exe`, checks the verifier SHA-256 first, then uses that verifier to validate the signed `rdev-host.exe` release manifest before starting the host.
+When `ReleaseManifestUrl` or `ReleaseBundleUrl` is provided, the Windows bootstrap requires `ReleaseRootPublicKey`, `VerifierDownloadUrl`, and `VerifierExpectedSha256`. It downloads `rdev-verify.exe`, checks the verifier SHA-256 first, then uses that verifier to validate either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host. Bundle mode downloads the bundle's listed manifest files, then runs `rdev-verify --bundle ... --require-artifacts rdev-host.exe,rdev-verify.exe` by default.
 
 This avoids asking the untrusted host binary to verify itself. Production release signing and platform-native Windows code signing are governed by [Release Key Lifecycle](../security/RELEASE_KEY_LIFECYCLE.md).
 

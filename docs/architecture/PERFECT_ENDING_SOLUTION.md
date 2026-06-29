@@ -442,8 +442,8 @@ The final Windows temporary support path should feel like this:
 3. Join page shows operator, reason, TTL, requested capability rings, server
    identity, stop instructions, and a visible command.
 4. Bootstrap downloads only to a temporary location.
-5. Bootstrap verifies a pinned verifier, release manifest, host binary digest,
-   signature, and platform policy before execution.
+5. Bootstrap verifies a pinned verifier, signed release bundle or manifest,
+   host binary digest, signature, and platform policy before execution.
 6. Host starts foreground, displays local stop instructions, generates a
    session key, registers capabilities, and waits for host approval.
 7. Lucky runs bounded diagnosis and repair jobs.

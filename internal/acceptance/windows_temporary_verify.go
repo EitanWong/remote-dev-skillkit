@@ -73,7 +73,8 @@ func VerifyWindowsTemporaryPlan(planPath string) (WindowsTemporaryPlanVerificati
 	add("bootstrap_hash_pinned_or_matches", bootstrapHashPinnedOrMatches(plan), plan.BootstrapScriptSHA256)
 	add("host_sha256_valid", isHexSHA256(plan.HostExpectedSHA256), plan.HostExpectedSHA256)
 	add("verifier_sha256_valid", isHexSHA256(plan.VerifierExpectedSHA256), plan.VerifierExpectedSHA256)
-	add("release_manifest_present", plan.ReleaseManifestURL != "", plan.ReleaseManifestURL)
+	add("release_manifest_or_bundle_present", plan.ReleaseManifestURL != "" || plan.ReleaseBundleURL != "", firstNonEmptyString(plan.ReleaseBundleURL, plan.ReleaseManifestURL))
+	add("release_bundle_required_artifacts_present", plan.ReleaseBundleURL == "" || plan.ReleaseBundleRequiredArtifacts != "", plan.ReleaseBundleRequiredArtifacts)
 	add("release_root_present", plan.ReleaseRootPublicKey != "", "")
 	add("verifier_download_present", plan.VerifierDownloadURL != "", plan.VerifierDownloadURL)
 	add("foreground_command_present", commandNamed(plan.Commands, "run_foreground_temporary_host"), "")
@@ -116,10 +117,18 @@ func launcherMatchesWindowsPlan(launcher string, plan WindowsTemporaryPlan) bool
 		"-TicketCode " + powershellQuote(plan.TicketCode),
 		"-DownloadUrl " + powershellQuote(plan.HostDownloadURL),
 		"-ExpectedSha256 " + powershellQuote(plan.HostExpectedSHA256),
-		"-ReleaseManifestUrl " + powershellQuote(plan.ReleaseManifestURL),
 		"-ReleaseRootPublicKey " + powershellQuote(plan.ReleaseRootPublicKey),
 		"-VerifierDownloadUrl " + powershellQuote(plan.VerifierDownloadURL),
 		"-VerifierExpectedSha256 " + powershellQuote(plan.VerifierExpectedSHA256),
+	}
+	if plan.ReleaseManifestURL != "" {
+		required = append(required, "-ReleaseManifestUrl "+powershellQuote(plan.ReleaseManifestURL))
+	}
+	if plan.ReleaseBundleURL != "" {
+		required = append(required, "-ReleaseBundleUrl "+powershellQuote(plan.ReleaseBundleURL))
+		if plan.ReleaseBundleRequiredArtifacts != "" {
+			required = append(required, "-ReleaseBundleRequiredArtifacts "+powershellQuote(plan.ReleaseBundleRequiredArtifacts))
+		}
 	}
 	for _, value := range required {
 		if !strings.Contains(launcher, value) {

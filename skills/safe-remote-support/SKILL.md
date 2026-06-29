@@ -10,8 +10,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 ## Rules
 
 - Use attended temporary mode for third-party machines.
-- For Windows temporary acceptance, generate and verify `rdev acceptance windows-temporary --out <empty-dir> ...` with `rdev acceptance verify-windows-temporary --plan <out>/windows-temporary-plan.json` before sending a one-command bootstrap to a target user.
-- For published Windows bootstrap artifacts, prefer a hash-pinned `rdev-verify` path and verify either the signed host manifest or the signed release bundle with `rdev-verify --bundle`.
+- For Windows temporary acceptance, prefer `rdev acceptance windows-temporary --release-bundle-url <url> --out <empty-dir> ...`, then verify it with `rdev acceptance verify-windows-temporary --plan <out>/windows-temporary-plan.json` before sending a one-command bootstrap to a target user.
+- For published Windows bootstrap artifacts, hash-pin `rdev-verify.exe` and prefer signed release bundle verification; use single host release manifests only for compatibility.
 - Do not create hidden persistence.
 - Do not bypass UAC, sudo, or OS security controls.
 - Do not request secrets in chat.

@@ -190,6 +190,8 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "pinned manifest root public key")
 		releaseManifestURL := fs.String("release-manifest-url", "", "signed rdev-host release manifest URL")
+		releaseBundleURL := fs.String("release-bundle-url", "", "signed release bundle index URL")
+		releaseBundleRequiredArtifacts := fs.String("release-bundle-required-artifacts", "rdev-host.exe,rdev-verify.exe", "comma-separated artifact ids required in the release bundle")
 		releaseRootPublicKey := fs.String("release-root-public-key", "", "pinned release root public key")
 		verifierDownloadURL := fs.String("verifier-download-url", "", "rdev-verify.exe download URL")
 		verifierSHA256 := fs.String("verifier-sha256", "", "expected SHA-256 for rdev-verify.exe")
@@ -200,23 +202,25 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceWindowsTemporary(acceptance.WindowsTemporaryOptions{
-			OutDir:                        *out,
-			GatewayURL:                    *gatewayURL,
-			TicketCode:                    *ticketCode,
-			DownloadURL:                   *downloadURL,
-			ExpectedSHA256:                *expectedSHA256,
-			BootstrapScriptPath:           *bootstrapScript,
-			BootstrapScriptURL:            *bootstrapScriptURL,
-			BootstrapScriptExpectedSHA256: *bootstrapScriptSHA256,
-			ManifestURL:                   *manifestURL,
-			ManifestRootPublicKey:         *manifestRootPublicKey,
-			ReleaseManifestURL:            *releaseManifestURL,
-			ReleaseRootPublicKey:          *releaseRootPublicKey,
-			VerifierDownloadURL:           *verifierDownloadURL,
-			VerifierExpectedSHA256:        *verifierSHA256,
-			TrustPin:                      *trustPin,
-			HostName:                      *hostName,
-			Force:                         *force,
+			OutDir:                         *out,
+			GatewayURL:                     *gatewayURL,
+			TicketCode:                     *ticketCode,
+			DownloadURL:                    *downloadURL,
+			ExpectedSHA256:                 *expectedSHA256,
+			BootstrapScriptPath:            *bootstrapScript,
+			BootstrapScriptURL:             *bootstrapScriptURL,
+			BootstrapScriptExpectedSHA256:  *bootstrapScriptSHA256,
+			ManifestURL:                    *manifestURL,
+			ManifestRootPublicKey:          *manifestRootPublicKey,
+			ReleaseManifestURL:             *releaseManifestURL,
+			ReleaseBundleURL:               *releaseBundleURL,
+			ReleaseBundleRequiredArtifacts: *releaseBundleRequiredArtifacts,
+			ReleaseRootPublicKey:           *releaseRootPublicKey,
+			VerifierDownloadURL:            *verifierDownloadURL,
+			VerifierExpectedSHA256:         *verifierSHA256,
+			TrustPin:                       *trustPin,
+			HostName:                       *hostName,
+			Force:                          *force,
 		})
 	case "verify":
 		fs := flag.NewFlagSet("acceptance verify", flag.ContinueOnError)
@@ -1816,7 +1820,7 @@ Usage:
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
-  rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256>
+  rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example/rdev-verify.exe --verifier-sha256 <sha256>
   rdev acceptance verify --report acceptance-run/report.json
   rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json

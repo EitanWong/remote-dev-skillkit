@@ -344,13 +344,13 @@ For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
   -TicketCode ABCD-1234 `
   -DownloadUrl https://example/rdev-host.exe `
   -ExpectedSha256 <host_sha256> `
-  -ReleaseManifestUrl https://example/rdev-host.exe.rdev-release.json `
+  -ReleaseBundleUrl https://example/release-bundle.json `
   -ReleaseRootPublicKey release-root:<base64url_ed25519_public_key> `
   -VerifierDownloadUrl https://example/rdev-verify.exe `
   -VerifierExpectedSha256 <verifier_sha256>
 ```
 
-The script hash-pins `rdev-verify.exe` before using it to verify the signed host release manifest.
+The script hash-pins `rdev-verify.exe` before using it to verify the signed release bundle. Single-artifact `-ReleaseManifestUrl` remains supported for compatibility.
 
 ## Limitations
 

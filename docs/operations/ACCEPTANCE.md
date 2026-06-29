@@ -135,7 +135,7 @@ rdev acceptance windows-temporary \
   --ticket-code ABCD-1234 \
   --download-url https://agent.example.com/rdev-host.exe \
   --expected-sha256 <rdev-host-sha256> \
-  --release-manifest-url https://agent.example.com/rdev-host.exe.rdev-release.json \
+  --release-bundle-url https://agent.example.com/release-bundle.json \
   --release-root-public-key release-root:... \
   --verifier-download-url https://agent.example.com/rdev-verify.exe \
   --verifier-sha256 <rdev-verify-sha256>
@@ -148,7 +148,9 @@ validates:
 - local or URL bootstrap script availability;
 - bootstrap script SHA-256 availability;
 - gateway URL, ticket code, host download URL, and host SHA-256;
-- release manifest, release root, verifier download URL, and verifier SHA-256;
+- signed release manifest or signed release bundle, release root, verifier
+  download URL, verifier SHA-256, and bundle required artifacts when bundle mode
+  is used;
 - approval probes for package install, elevation, service management, GUI
   control, and credential changes;
 - no-persistence inspection commands for services, scheduled tasks, Run keys,
@@ -176,8 +178,8 @@ and exits nonzero if any preflight check fails. It validates:
   Run-key mutation, firewall-rule creation, or elevation through `runas`;
 - local bootstrap script SHA-256 when the script path is available, or a pinned
   bootstrap SHA-256 when the launcher downloads the script by URL;
-- release manifest, release root, verifier URL, host SHA-256, and verifier
-  SHA-256 inputs;
+- signed release manifest or signed release bundle, release root, verifier URL,
+  host SHA-256, verifier SHA-256, and bundle required-artifact inputs;
 - foreground run command, transcript commands, no-persistence checks, approval
   probes, and required evidence checklist.
 

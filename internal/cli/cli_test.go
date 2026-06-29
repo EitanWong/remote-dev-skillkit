@@ -2201,6 +2201,65 @@ func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	if !strings.Contains(output, "run_foreground_temporary_host") || !strings.Contains(output, "Get-ScheduledTask") {
 		t.Fatalf("expected foreground and no-persistence commands, got %s", output)
 	}
+	launcher := readFileForTest(t, payload.Launcher)
+	if strings.Contains(launcher, "-ReleaseBundleRequiredArtifacts") {
+		t.Fatalf("manifest-only launcher should not contain bundle args: %s", launcher)
+	}
+}
+
+func TestAcceptanceWindowsTemporaryBundlePlan(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "windows-temporary")
+	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "windows-temporary",
+		"--out", out,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--download-url", "https://agent.example.com/rdev-host.exe",
+		"--expected-sha256", strings.Repeat("a", 64),
+		"--bootstrap-script", script,
+		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
+		"--release-root-public-key", "release-root:abc",
+		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
+		"--verifier-sha256", strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK       bool   `json:"ok"`
+		Schema   string `json:"schema"`
+		Plan     string `json:"plan"`
+		Launcher string `json:"launcher"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected windows temporary bundle plan ok, got %s", stdout.String())
+	}
+	if payload.Schema != "rdev.acceptance.windows-temporary-plan.v1" {
+		t.Fatalf("unexpected schema %q", payload.Schema)
+	}
+	launcher := readFileForTest(t, payload.Launcher)
+	if !strings.Contains(launcher, "-ReleaseBundleUrl 'https://agent.example.com/release-bundle.json'") {
+		t.Fatalf("expected release bundle launcher arg, got %s", launcher)
+	}
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"acceptance", "verify-windows-temporary",
+		"--plan", payload.Plan,
+	}); err != nil {
+		t.Fatalf("expected bundle verification to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected ok verification, got %s", verifyStdout.String())
+	}
 }
 
 func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {

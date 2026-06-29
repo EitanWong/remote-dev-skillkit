@@ -119,6 +119,61 @@ func TestVerifyWindowsTemporaryPlan(t *testing.T) {
 	}
 }
 
+func TestVerifyWindowsTemporaryPlanWithReleaseBundle(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "windows-temporary")
+	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := RunWindowsTemporaryPlan(WindowsTemporaryOptions{
+		OutDir:                 out,
+		GatewayURL:             "https://api.example.com/v1",
+		TicketCode:             "ABCD-1234",
+		DownloadURL:            "https://agent.example.com/rdev-host.exe",
+		ExpectedSHA256:         strings.Repeat("a", 64),
+		BootstrapScriptPath:    script,
+		ReleaseBundleURL:       "https://agent.example.com/release-bundle.json",
+		ReleaseRootPublicKey:   "release-root:abc",
+		VerifierDownloadURL:    "https://agent.example.com/rdev-verify.exe",
+		VerifierExpectedSHA256: strings.Repeat("b", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allChecksPassed(plan.Checks) {
+		t.Fatalf("expected all checks to pass: %#v", plan.Checks)
+	}
+	if plan.ReleaseManifestURL != "" {
+		t.Fatalf("expected bundle-only plan to omit release manifest, got %q", plan.ReleaseManifestURL)
+	}
+	if plan.ReleaseBundleRequiredArtifacts != "rdev-host.exe,rdev-verify.exe" {
+		t.Fatalf("unexpected required artifacts %q", plan.ReleaseBundleRequiredArtifacts)
+	}
+	launcherBytes, err := os.ReadFile(plan.LauncherPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := string(launcherBytes)
+	for _, expected := range []string{
+		"-ReleaseBundleUrl 'https://agent.example.com/release-bundle.json'",
+		"-ReleaseBundleRequiredArtifacts 'rdev-host.exe,rdev-verify.exe'",
+	} {
+		if !strings.Contains(launcher, expected) {
+			t.Fatalf("expected launcher to contain %q:\n%s", expected, launcher)
+		}
+	}
+	if strings.Contains(launcher, "-ReleaseManifestUrl") {
+		t.Fatalf("bundle-only launcher should not include release manifest:\n%s", launcher)
+	}
+	verification, err := VerifyWindowsTemporaryPlan(filepath.Join(out, "windows-temporary-plan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected verification ok: %#v", verification.Checks)
+	}
+}
+
 func TestVerifyWindowsTemporaryPlanWithRemoteBootstrapPin(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
 	missingScript := filepath.Join(t.TempDir(), "missing-windows-temporary.ps1")

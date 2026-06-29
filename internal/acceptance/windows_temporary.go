@@ -14,53 +14,57 @@ import (
 const WindowsTemporaryPlanSchemaVersion = "rdev.acceptance.windows-temporary-plan.v1"
 
 type WindowsTemporaryOptions struct {
-	OutDir                        string
-	GatewayURL                    string
-	TicketCode                    string
-	DownloadURL                   string
-	ExpectedSHA256                string
-	BootstrapScriptPath           string
-	BootstrapScriptURL            string
-	BootstrapScriptExpectedSHA256 string
-	ManifestURL                   string
-	ManifestRootPublicKey         string
-	ReleaseManifestURL            string
-	ReleaseRootPublicKey          string
-	VerifierDownloadURL           string
-	VerifierExpectedSHA256        string
-	TrustPin                      string
-	HostName                      string
-	Force                         bool
-	Now                           time.Time
+	OutDir                         string
+	GatewayURL                     string
+	TicketCode                     string
+	DownloadURL                    string
+	ExpectedSHA256                 string
+	BootstrapScriptPath            string
+	BootstrapScriptURL             string
+	BootstrapScriptExpectedSHA256  string
+	ManifestURL                    string
+	ManifestRootPublicKey          string
+	ReleaseManifestURL             string
+	ReleaseBundleURL               string
+	ReleaseBundleRequiredArtifacts string
+	ReleaseRootPublicKey           string
+	VerifierDownloadURL            string
+	VerifierExpectedSHA256         string
+	TrustPin                       string
+	HostName                       string
+	Force                          bool
+	Now                            time.Time
 }
 
 type WindowsTemporaryPlan struct {
-	SchemaVersion          string                     `json:"schema_version"`
-	GeneratedAt            time.Time                  `json:"generated_at"`
-	Platform               string                     `json:"platform"`
-	OutDir                 string                     `json:"out_dir"`
-	BootstrapScriptPath    string                     `json:"bootstrap_script_path,omitempty"`
-	BootstrapScriptURL     string                     `json:"bootstrap_script_url,omitempty"`
-	BootstrapScriptSHA256  string                     `json:"bootstrap_script_sha256,omitempty"`
-	LauncherPath           string                     `json:"launcher_path"`
-	GatewayURL             string                     `json:"gateway_url"`
-	TicketCode             string                     `json:"ticket_code"`
-	ManifestURL            string                     `json:"manifest_url,omitempty"`
-	ManifestRootPublicKey  string                     `json:"manifest_root_public_key,omitempty"`
-	ReleaseManifestURL     string                     `json:"release_manifest_url,omitempty"`
-	ReleaseRootPublicKey   string                     `json:"release_root_public_key,omitempty"`
-	VerifierDownloadURL    string                     `json:"verifier_download_url,omitempty"`
-	VerifierExpectedSHA256 string                     `json:"verifier_expected_sha256,omitempty"`
-	TrustPin               string                     `json:"trust_pin,omitempty"`
-	HostName               string                     `json:"host_name,omitempty"`
-	HostDownloadURL        string                     `json:"host_download_url"`
-	HostExpectedSHA256     string                     `json:"host_expected_sha256"`
-	Checks                 []Check                    `json:"checks"`
-	Commands               []WindowsAcceptanceCommand `json:"commands"`
-	NoPersistenceChecks    []WindowsAcceptanceCommand `json:"no_persistence_checks"`
-	ApprovalProbes         []WindowsApprovalProbe     `json:"approval_probes"`
-	RecommendedActions     []string                   `json:"recommended_actions"`
-	RequiredEvidence       []string                   `json:"required_evidence"`
+	SchemaVersion                  string                     `json:"schema_version"`
+	GeneratedAt                    time.Time                  `json:"generated_at"`
+	Platform                       string                     `json:"platform"`
+	OutDir                         string                     `json:"out_dir"`
+	BootstrapScriptPath            string                     `json:"bootstrap_script_path,omitempty"`
+	BootstrapScriptURL             string                     `json:"bootstrap_script_url,omitempty"`
+	BootstrapScriptSHA256          string                     `json:"bootstrap_script_sha256,omitempty"`
+	LauncherPath                   string                     `json:"launcher_path"`
+	GatewayURL                     string                     `json:"gateway_url"`
+	TicketCode                     string                     `json:"ticket_code"`
+	ManifestURL                    string                     `json:"manifest_url,omitempty"`
+	ManifestRootPublicKey          string                     `json:"manifest_root_public_key,omitempty"`
+	ReleaseManifestURL             string                     `json:"release_manifest_url,omitempty"`
+	ReleaseBundleURL               string                     `json:"release_bundle_url,omitempty"`
+	ReleaseBundleRequiredArtifacts string                     `json:"release_bundle_required_artifacts,omitempty"`
+	ReleaseRootPublicKey           string                     `json:"release_root_public_key,omitempty"`
+	VerifierDownloadURL            string                     `json:"verifier_download_url,omitempty"`
+	VerifierExpectedSHA256         string                     `json:"verifier_expected_sha256,omitempty"`
+	TrustPin                       string                     `json:"trust_pin,omitempty"`
+	HostName                       string                     `json:"host_name,omitempty"`
+	HostDownloadURL                string                     `json:"host_download_url"`
+	HostExpectedSHA256             string                     `json:"host_expected_sha256"`
+	Checks                         []Check                    `json:"checks"`
+	Commands                       []WindowsAcceptanceCommand `json:"commands"`
+	NoPersistenceChecks            []WindowsAcceptanceCommand `json:"no_persistence_checks"`
+	ApprovalProbes                 []WindowsApprovalProbe     `json:"approval_probes"`
+	RecommendedActions             []string                   `json:"recommended_actions"`
+	RequiredEvidence               []string                   `json:"required_evidence"`
 }
 
 type WindowsAcceptanceCommand struct {
@@ -101,29 +105,31 @@ func RunWindowsTemporaryPlan(opts WindowsTemporaryOptions) (WindowsTemporaryPlan
 		return WindowsTemporaryPlan{}, err
 	}
 	plan := WindowsTemporaryPlan{
-		SchemaVersion:          WindowsTemporaryPlanSchemaVersion,
-		GeneratedAt:            now.UTC(),
-		Platform:               "windows",
-		OutDir:                 outDir,
-		BootstrapScriptPath:    resolved.BootstrapScriptPath,
-		BootstrapScriptURL:     resolved.BootstrapScriptURL,
-		BootstrapScriptSHA256:  resolved.BootstrapScriptExpectedSHA256,
-		LauncherPath:           resolved.LauncherPath,
-		GatewayURL:             resolved.GatewayURL,
-		TicketCode:             resolved.TicketCode,
-		ManifestURL:            resolved.ManifestURL,
-		ManifestRootPublicKey:  resolved.ManifestRootPublicKey,
-		ReleaseManifestURL:     resolved.ReleaseManifestURL,
-		ReleaseRootPublicKey:   resolved.ReleaseRootPublicKey,
-		VerifierDownloadURL:    resolved.VerifierDownloadURL,
-		VerifierExpectedSHA256: resolved.VerifierExpectedSHA256,
-		TrustPin:               resolved.TrustPin,
-		HostName:               resolved.HostName,
-		HostDownloadURL:        resolved.DownloadURL,
-		HostExpectedSHA256:     resolved.ExpectedSHA256,
-		Commands:               windowsTemporaryCommands(resolved),
-		NoPersistenceChecks:    windowsNoPersistenceChecks(),
-		ApprovalProbes:         windowsApprovalProbes(),
+		SchemaVersion:                  WindowsTemporaryPlanSchemaVersion,
+		GeneratedAt:                    now.UTC(),
+		Platform:                       "windows",
+		OutDir:                         outDir,
+		BootstrapScriptPath:            resolved.BootstrapScriptPath,
+		BootstrapScriptURL:             resolved.BootstrapScriptURL,
+		BootstrapScriptSHA256:          resolved.BootstrapScriptExpectedSHA256,
+		LauncherPath:                   resolved.LauncherPath,
+		GatewayURL:                     resolved.GatewayURL,
+		TicketCode:                     resolved.TicketCode,
+		ManifestURL:                    resolved.ManifestURL,
+		ManifestRootPublicKey:          resolved.ManifestRootPublicKey,
+		ReleaseManifestURL:             resolved.ReleaseManifestURL,
+		ReleaseBundleURL:               resolved.ReleaseBundleURL,
+		ReleaseBundleRequiredArtifacts: resolved.ReleaseBundleRequiredArtifacts,
+		ReleaseRootPublicKey:           resolved.ReleaseRootPublicKey,
+		VerifierDownloadURL:            resolved.VerifierDownloadURL,
+		VerifierExpectedSHA256:         resolved.VerifierExpectedSHA256,
+		TrustPin:                       resolved.TrustPin,
+		HostName:                       resolved.HostName,
+		HostDownloadURL:                resolved.DownloadURL,
+		HostExpectedSHA256:             resolved.ExpectedSHA256,
+		Commands:                       windowsTemporaryCommands(resolved),
+		NoPersistenceChecks:            windowsNoPersistenceChecks(),
+		ApprovalProbes:                 windowsApprovalProbes(),
 		RecommendedActions: []string{
 			"Review the generated PowerShell launcher and bootstrap script before using them on a Windows host.",
 			"Run the launcher in a clean Windows 10/11 VM or target support host as a visible foreground session.",
@@ -134,7 +140,7 @@ func RunWindowsTemporaryPlan(opts WindowsTemporaryOptions) (WindowsTemporaryPlan
 		RequiredEvidence: []string{
 			"PowerShell transcript for bootstrap and foreground host startup.",
 			"SHA-256 verification output for the bootstrap script, verifier, and rdev-host binary.",
-			"Signed release manifest verification output from rdev-verify.",
+			"Signed release manifest or release bundle verification output from rdev-verify.",
 			"Host registration, host approval, job, approval-required, revoke, and cancellation audit events.",
 			"No-persistence inspection output for services, scheduled tasks, Run keys, startup folders, and firewall rules.",
 		},
@@ -147,23 +153,25 @@ func RunWindowsTemporaryPlan(opts WindowsTemporaryOptions) (WindowsTemporaryPlan
 }
 
 type windowsTemporaryResolvedOptions struct {
-	OutDir                        string
-	LauncherPath                  string
-	GatewayURL                    string
-	TicketCode                    string
-	DownloadURL                   string
-	ExpectedSHA256                string
-	BootstrapScriptPath           string
-	BootstrapScriptURL            string
-	BootstrapScriptExpectedSHA256 string
-	ManifestURL                   string
-	ManifestRootPublicKey         string
-	ReleaseManifestURL            string
-	ReleaseRootPublicKey          string
-	VerifierDownloadURL           string
-	VerifierExpectedSHA256        string
-	TrustPin                      string
-	HostName                      string
+	OutDir                         string
+	LauncherPath                   string
+	GatewayURL                     string
+	TicketCode                     string
+	DownloadURL                    string
+	ExpectedSHA256                 string
+	BootstrapScriptPath            string
+	BootstrapScriptURL             string
+	BootstrapScriptExpectedSHA256  string
+	ManifestURL                    string
+	ManifestRootPublicKey          string
+	ReleaseManifestURL             string
+	ReleaseBundleURL               string
+	ReleaseBundleRequiredArtifacts string
+	ReleaseRootPublicKey           string
+	VerifierDownloadURL            string
+	VerifierExpectedSHA256         string
+	TrustPin                       string
+	HostName                       string
 }
 
 func resolveWindowsTemporaryOptions(outDir string, opts WindowsTemporaryOptions) (windowsTemporaryResolvedOptions, error) {
@@ -184,24 +192,33 @@ func resolveWindowsTemporaryOptions(outDir string, opts WindowsTemporaryOptions)
 			bootstrapHash = hash
 		}
 	}
+	releaseBundleURL := strings.TrimSpace(opts.ReleaseBundleURL)
+	releaseBundleRequiredArtifacts := strings.TrimSpace(opts.ReleaseBundleRequiredArtifacts)
+	if releaseBundleURL == "" {
+		releaseBundleRequiredArtifacts = ""
+	} else if releaseBundleRequiredArtifacts == "" {
+		releaseBundleRequiredArtifacts = "rdev-host.exe,rdev-verify.exe"
+	}
 	return windowsTemporaryResolvedOptions{
-		OutDir:                        outDir,
-		LauncherPath:                  filepath.Join(outDir, "run-windows-temporary.ps1"),
-		GatewayURL:                    strings.TrimSpace(opts.GatewayURL),
-		TicketCode:                    strings.TrimSpace(opts.TicketCode),
-		DownloadURL:                   strings.TrimSpace(opts.DownloadURL),
-		ExpectedSHA256:                strings.ToLower(strings.TrimSpace(opts.ExpectedSHA256)),
-		BootstrapScriptPath:           bootstrapScriptPath,
-		BootstrapScriptURL:            strings.TrimSpace(opts.BootstrapScriptURL),
-		BootstrapScriptExpectedSHA256: strings.ToLower(bootstrapHash),
-		ManifestURL:                   strings.TrimSpace(opts.ManifestURL),
-		ManifestRootPublicKey:         strings.TrimSpace(opts.ManifestRootPublicKey),
-		ReleaseManifestURL:            strings.TrimSpace(opts.ReleaseManifestURL),
-		ReleaseRootPublicKey:          strings.TrimSpace(opts.ReleaseRootPublicKey),
-		VerifierDownloadURL:           strings.TrimSpace(opts.VerifierDownloadURL),
-		VerifierExpectedSHA256:        strings.ToLower(strings.TrimSpace(opts.VerifierExpectedSHA256)),
-		TrustPin:                      strings.TrimSpace(opts.TrustPin),
-		HostName:                      strings.TrimSpace(opts.HostName),
+		OutDir:                         outDir,
+		LauncherPath:                   filepath.Join(outDir, "run-windows-temporary.ps1"),
+		GatewayURL:                     strings.TrimSpace(opts.GatewayURL),
+		TicketCode:                     strings.TrimSpace(opts.TicketCode),
+		DownloadURL:                    strings.TrimSpace(opts.DownloadURL),
+		ExpectedSHA256:                 strings.ToLower(strings.TrimSpace(opts.ExpectedSHA256)),
+		BootstrapScriptPath:            bootstrapScriptPath,
+		BootstrapScriptURL:             strings.TrimSpace(opts.BootstrapScriptURL),
+		BootstrapScriptExpectedSHA256:  strings.ToLower(bootstrapHash),
+		ManifestURL:                    strings.TrimSpace(opts.ManifestURL),
+		ManifestRootPublicKey:          strings.TrimSpace(opts.ManifestRootPublicKey),
+		ReleaseManifestURL:             strings.TrimSpace(opts.ReleaseManifestURL),
+		ReleaseBundleURL:               releaseBundleURL,
+		ReleaseBundleRequiredArtifacts: releaseBundleRequiredArtifacts,
+		ReleaseRootPublicKey:           strings.TrimSpace(opts.ReleaseRootPublicKey),
+		VerifierDownloadURL:            strings.TrimSpace(opts.VerifierDownloadURL),
+		VerifierExpectedSHA256:         strings.ToLower(strings.TrimSpace(opts.VerifierExpectedSHA256)),
+		TrustPin:                       strings.TrimSpace(opts.TrustPin),
+		HostName:                       strings.TrimSpace(opts.HostName),
 	}, nil
 }
 
@@ -215,7 +232,8 @@ func windowsTemporaryChecks(plan WindowsTemporaryPlan, opts windowsTemporaryReso
 		{Name: "ticket_code", Passed: opts.TicketCode != "", Detail: opts.TicketCode},
 		{Name: "host_download_url", Passed: opts.DownloadURL != "", Detail: opts.DownloadURL},
 		{Name: "host_sha256", Passed: isHexSHA256(opts.ExpectedSHA256), Detail: opts.ExpectedSHA256},
-		{Name: "release_manifest_url", Passed: opts.ReleaseManifestURL != "", Detail: opts.ReleaseManifestURL},
+		{Name: "release_manifest_or_bundle_url", Passed: opts.ReleaseManifestURL != "" || opts.ReleaseBundleURL != "", Detail: firstNonEmptyString(opts.ReleaseBundleURL, opts.ReleaseManifestURL)},
+		{Name: "release_bundle_required_artifacts", Passed: opts.ReleaseBundleURL == "" || opts.ReleaseBundleRequiredArtifacts != "", Detail: opts.ReleaseBundleRequiredArtifacts},
 		{Name: "release_root_public_key", Passed: opts.ReleaseRootPublicKey != ""},
 		{Name: "verifier_download_url", Passed: opts.VerifierDownloadURL != "", Detail: opts.VerifierDownloadURL},
 		{Name: "verifier_sha256", Passed: isHexSHA256(opts.VerifierExpectedSHA256), Detail: opts.VerifierExpectedSHA256},
@@ -337,6 +355,8 @@ func windowsTemporaryLauncher(opts windowsTemporaryResolvedOptions) string {
 	appendPowerShellArg(&builder, "ManifestUrl", opts.ManifestURL)
 	appendPowerShellArg(&builder, "ManifestRootPublicKey", opts.ManifestRootPublicKey)
 	appendPowerShellArg(&builder, "ReleaseManifestUrl", opts.ReleaseManifestURL)
+	appendPowerShellArg(&builder, "ReleaseBundleUrl", opts.ReleaseBundleURL)
+	appendPowerShellArg(&builder, "ReleaseBundleRequiredArtifacts", opts.ReleaseBundleRequiredArtifacts)
 	appendPowerShellArg(&builder, "ReleaseRootPublicKey", opts.ReleaseRootPublicKey)
 	appendPowerShellArg(&builder, "VerifierDownloadUrl", opts.VerifierDownloadURL)
 	appendPowerShellArg(&builder, "VerifierExpectedSha256", opts.VerifierExpectedSHA256)

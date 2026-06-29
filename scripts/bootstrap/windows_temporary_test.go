@@ -14,11 +14,15 @@ func TestWindowsTemporaryBootstrapWiresReleaseVerifier(t *testing.T) {
 	script := string(content)
 	required := []string{
 		"$ReleaseManifestUrl",
+		"$ReleaseBundleUrl",
+		"$ReleaseBundleRequiredArtifacts",
 		"$ReleaseRootPublicKey",
 		"$VerifierDownloadUrl",
 		"$VerifierExpectedSha256",
 		"Assert-ReleaseSignature",
+		"Assert-ReleaseBundle",
 		"--root-public-key",
+		"--bundle",
 		"rdev-verify.exe",
 	}
 	for _, needle := range required {
@@ -33,5 +37,12 @@ func TestWindowsTemporaryBootstrapWiresReleaseVerifier(t *testing.T) {
 	}
 	if verifierHash > releaseVerify {
 		t.Fatal("verifier must be SHA256-pinned before it verifies the host artifact")
+	}
+	bundleVerify := strings.Index(script, "Assert-ReleaseBundle -VerifierExe $verifierExe")
+	if bundleVerify < 0 {
+		t.Fatal("expected release bundle verification step")
+	}
+	if verifierHash > bundleVerify {
+		t.Fatal("verifier must be SHA256-pinned before it verifies the release bundle")
 	}
 }

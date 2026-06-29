@@ -49,7 +49,7 @@ Exit gate: local demo proves ticket, host registration, outbound host job wait t
 
 - Signed Windows binary.
 - PowerShell bootstrap.
-- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, including reviewed launcher generation, release verification requirements, launcher safety checks, approval probes, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
+- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, including reviewed launcher generation, signed release manifest or release bundle verification requirements, launcher safety checks, approval probes, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
 - Visible foreground support window or console UI.
 - Outbound-only connection to gateway.
 - Durable signing key storage and rotation.

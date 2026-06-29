@@ -34,7 +34,7 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 - PowerShell 5.1 available.
 - No preinstalled Node, Go, Git, Python, or package manager requirement for bootstrap.
 - Network allows outbound HTTPS to the gateway.
-- Gateway has a valid release manifest, verifier binary, host binary, and join manifest.
+- Gateway has a valid signed release bundle or host release manifest, verifier binary, host binary, and join manifest.
 
 ### Steps
 
@@ -50,7 +50,7 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 4. Run the one visible PowerShell command from the join page.
 5. Confirm bootstrap downloads to a temporary location.
 6. Confirm `rdev-verify.exe` is hash-pinned before execution.
-7. Confirm `rdev-host.exe` is verified through the signed release manifest.
+7. Confirm `rdev-host.exe` is verified through the signed release bundle or signed host release manifest.
 8. Confirm Authenticode is checked when the release policy requires it.
 9. Confirm the host starts in foreground temporary mode.
 10. Approve the pending host with only scoped capabilities.
@@ -69,7 +69,7 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 - Join page screenshot or saved HTML.
 - Bootstrap transcript.
 - `Get-FileHash` evidence for downloaded verifier and host binary.
-- Release manifest verification output.
+- Release bundle or release manifest verification output.
 - Authenticode verification output when enabled.
 - Host registration and approval audit events.
 - Job artifacts with schema versions and redaction metadata.
@@ -211,7 +211,7 @@ The host must reject or require approval for:
 
 Bootstrap must reject:
 
-- missing release manifest;
+- missing release bundle or release manifest;
 - wrong SHA-256;
 - wrong release root;
 - tampered host binary;
@@ -274,7 +274,7 @@ The local test suite currently covers:
 - acceptance report verification through `rdev acceptance verify`, covering report checks, coding and approval evidence bundle checksums, artifact index consistency, audit-chain verification, approval-required probe evidence, and workspace-lock release.
 - managed Mac LaunchAgent acceptance planning through `rdev acceptance managed-mac-service`, covering checked plist generation, managed host arguments, `rdev host service-control --execute` command plan, service-backed acceptance command plan, evidence verification command plan, and uninstall guidance without auto-starting launchd.
 - macOS LaunchAgent lifecycle control through `rdev host service-control`, covering dry-run by default, explicit `--execute` for launchctl, plist label checks, and start/inspect/stop action planning.
-- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, covering reviewed PowerShell launcher generation, bootstrap script hash capture, release manifest/verifier requirements, launcher safety checks, approval probes for package/elevation/service/GUI/credential operations, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
+- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, covering reviewed PowerShell launcher generation, bootstrap script hash capture, signed release manifest or release bundle verifier requirements, launcher safety checks, approval probes for package/elevation/service/GUI/credential operations, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
 - release bundle verification through `rdev release create-bundle`, `rdev release verify-bundle`, and standalone `rdev-verify --bundle`, covering signed bundle index verification, per-artifact signed manifest verification, artifact and manifest SHA-256/size checks, required artifact presence, and tamper failure evidence.
 
 ## Next Automation Targets
