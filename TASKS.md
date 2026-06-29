@@ -59,6 +59,7 @@
 - [x] Add real release artifact builder and thin `rdev-host`, `rdev-gateway`, and `rdev-mcp` entrypoints.
 - [x] Add per-platform release candidate automation from real build artifacts.
 - [x] Add multi-platform GitHub Release dry-run planning from verified platform candidates.
+- [x] Refine the canonical perfect ending into a final delivery architecture with sealed contracts, component boundaries, host kernel layers, API surfaces, reliability rules, and close plan.
 
 ## Next
 
