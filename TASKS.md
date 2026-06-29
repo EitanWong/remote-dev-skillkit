@@ -71,6 +71,7 @@
 - [x] Add final product constitution for the perfect-ending architecture, including planes, adapter lifecycle, permission lattice, storage, API/MCP contract, Eitan deployment, v1.0 definition, and build order.
 - [x] Add adapter lifecycle manifest conformance through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
 - [x] Add `rdev adapter scaffold` for copyable third-party adapter lifecycle manifest templates.
+- [x] Add adapter cancellation artifact conformance through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
 
 ## Next
 
@@ -152,13 +153,14 @@
 - [x] Add systemd user-unit mode.
 - [ ] Add real Linux systemd acceptance execution with reboot/reconnect proof.
 - [ ] Add acpx adapter.
-- [ ] Generalize cooperative cancellation across future Adapter SDK implementations.
+- [x] Add cancellation artifact conformance for built-in shell, PowerShell, and Codex result evidence.
+- [ ] Generalize runtime cooperative cancellation across future Adapter SDK implementations.
 - [ ] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
-- [ ] Add full runtime adapter SDK and cancellation conformance fixtures beyond lifecycle-manifest checks.
+- [ ] Add full runtime adapter SDK and executable lifecycle/cancellation fixtures beyond artifact conformance.
 
 ## Final End-State Gates
 
@@ -192,6 +194,7 @@
 - [x] MCP stdio exposes adapter result-artifact conformance as `rdev.adapter.verify_result`.
 - [x] Adapter lifecycle manifests can be verified through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
 - [x] Third-party adapter authors can scaffold a lifecycle manifest and verify it before runtime integration.
+- [x] Adapter cancellation artifacts can be verified through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
 
 ## Definition Of Done For v0.1.0
 

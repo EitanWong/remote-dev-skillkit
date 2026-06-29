@@ -108,7 +108,7 @@ These should not be opened as new GitHub issues unless regression work is needed
 - shared risky-action approval preflight for shell and Codex;
 - managed Mac local acceptance harness and independent evidence verifier;
 - managed Mac LaunchAgent service acceptance plan;
-- public `pkg/adapterkit`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev.adapter.verify_result`, and `rdev.adapter.verify_lifecycle` onboarding/conformance flow for lifecycle manifests and result artifacts; shell, PowerShell, and Codex tests use the result-artifact checks.
+- public `pkg/adapterkit`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, and `rdev.adapter.verify_cancellation` onboarding/conformance flow for lifecycle manifests, result artifacts, and cancellation artifacts; shell, PowerShell, and Codex tests use the result and cancellation checks.
 
 ## Seed Issues To Create After Approval
 
@@ -156,7 +156,7 @@ The current bootstrap script creates the following seed backlog.
    - Labels: `area:adapter`, `area:policy`, `area:evidence`, `kind:feature`, `kind:test`, `priority:p1`
    - Acceptance:
      - shared adapter interface covers detect, plan, prepare, run, collect, cleanup;
-     - shell, PowerShell, and Codex pass shared lifecycle and cancellation conformance fixtures;
+     - shell, PowerShell, and Codex pass shared lifecycle, result, cancellation artifact, and runtime cancellation conformance fixtures;
      - new adapter authors can run local conformance tests.
 
 6. **Implement Claude Code and ACP adapters behind the safety kernel**

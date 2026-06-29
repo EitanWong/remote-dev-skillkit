@@ -28,4 +28,7 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 	if !seen["rdev.adapter.verify_lifecycle"] {
 		t.Fatal("expected adapter lifecycle verification tool")
 	}
+	if !seen["rdev.adapter.verify_cancellation"] {
+		t.Fatal("expected adapter cancellation verification tool")
+	}
 }

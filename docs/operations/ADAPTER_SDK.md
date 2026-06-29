@@ -1,10 +1,11 @@
 # Adapter SDK
 
-The adapter SDK starts with two stable rules:
+The adapter SDK starts with three stable rules:
 
 1. every adapter result must be independently checkable as evidence;
 2. every adapter must describe how it passes through the host kernel lifecycle
-   before it is exposed to agents.
+   before it is exposed to agents;
+3. cancellation must be distinguishable from timeout and ordinary failure.
 
 `pkg/adapterkit` provides the first public contracts for those rules.
 
@@ -134,11 +135,68 @@ The verifier checks:
 - cancellation and timeout are not both true for the same command.
 - common unredacted secret patterns are absent when requested.
 
+## Cancellation Artifact Conformance
+
+Use `adapterkit.VerifyCancellationArtifactJSON` when testing a canceled job or
+before accepting cancellation evidence from a new adapter.
+
+```go
+report := adapterkit.VerifyCancellationArtifactJSON(content, adapterkit.CancellationContract{
+    Adapter:                 "my-adapter",
+    SchemaVersion:           "rdev.my-adapter-result.v1",
+    CommandFields:           []string{"my_command"},
+    RequiredStringFields:    []string{"workspace_root"},
+    RequireTiming:           true,
+    RequireRedaction:        true,
+    RejectUnredactedSecrets: true,
+})
+if !report.OK {
+    t.Fatalf("adapter cancellation failed conformance: %#v", report)
+}
+```
+
+The cancellation verifier first runs normal result-artifact conformance, then
+adds cancellation-specific checks for each command evidence object:
+
+- the command evidence object exists;
+- `canceled` is present and true;
+- `timed_out` is present and false;
+- `exit_code` is present;
+- `output_truncated` is present;
+- redaction, timing, schema, adapter, required fields, and secret-pattern checks
+  still pass when requested.
+
+Top-level command adapters such as shell and PowerShell use the default command
+field:
+
+```bash
+rdev adapter verify-cancellation \
+  --artifact shell-result.json \
+  --adapter shell \
+  --schema rdev.shell-result.v1
+```
+
+Nested command adapters such as Codex pass the nested command evidence field:
+
+```bash
+rdev adapter verify-cancellation \
+  --artifact codex-result.json \
+  --adapter codex \
+  --schema rdev.codex-result.v1 \
+  --command-fields codex_command
+```
+
+Agent runtimes can call MCP tool `rdev.adapter.verify_cancellation` with
+`artifact_json` or `artifact_id`. The tool returns
+`rdev.adapter-conformance-report.v1` just like the result and lifecycle
+verifiers.
+
 ## Current Scope
 
-Lifecycle manifest conformance is not the full runtime Adapter SDK yet. Adapter
-authors still implement their detect, plan, prepare, run, collect, and cleanup
-phases behind the host runner and policy engine. The current package is the
-shared conformance layer for lifecycle declarations and result evidence, and the
-built-in shell, PowerShell, and Codex tests use the result checks as fixtures
-for future third-party adapters.
+Lifecycle manifest, result artifact, and cancellation artifact conformance are
+not the full runtime Adapter SDK yet. Adapter authors still implement their
+detect, plan, prepare, run, collect, and cleanup phases behind the host runner
+and policy engine. The current package is the shared conformance layer for
+lifecycle declarations, result evidence, and cancellation evidence. Built-in
+shell, PowerShell, and Codex tests use these checks as fixtures for future
+third-party adapters.

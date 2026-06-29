@@ -186,6 +186,22 @@ func Tools() []Tool {
 				"reject_secret_patterns": boolField(),
 			}, []string{"adapter"}),
 		},
+		{
+			Name:        "rdev.adapter.verify_cancellation",
+			Description: "Verify an adapter cancellation result artifact against the public cancellation conformance contract.",
+			Safety:      "Read-only artifact validation; does not execute on a host.",
+			InputSchema: object(map[string]any{
+				"adapter":                stringField(),
+				"schema":                 stringField(),
+				"artifact_json":          stringField(),
+				"artifact_id":            stringField(),
+				"command_fields":         stringArray(),
+				"required_string_fields": stringArray(),
+				"require_timing":         boolField(),
+				"require_redaction":      boolField(),
+				"reject_secret_patterns": boolField(),
+			}, []string{"adapter", "schema"}),
+		},
 	}
 }
 

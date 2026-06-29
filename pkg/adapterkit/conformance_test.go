@@ -113,6 +113,85 @@ func TestVerifyResultArtifactJSONRejectsSecretPatterns(t *testing.T) {
 	}
 }
 
+func TestVerifyCancellationArtifactJSONAcceptsTopLevelCanceledArtifact(t *testing.T) {
+	report := VerifyCancellationArtifactJSON([]byte(`{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "argv": ["sleep", "30"],
+  "workspace_root": "/tmp/repo",
+  "exit_code": -1,
+  "timed_out": false,
+  "canceled": true,
+  "output_truncated": false,
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`), CancellationContract{
+		Adapter:                 "shell",
+		SchemaVersion:           "rdev.shell-result.v1",
+		RequiredStringFields:    []string{"workspace_root"},
+		RequireTiming:           true,
+		RequireRedaction:        true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("expected cancellation conformance success, got %#v", report)
+	}
+}
+
+func TestVerifyCancellationArtifactJSONAcceptsNestedCanceledArtifact(t *testing.T) {
+	report := VerifyCancellationArtifactJSON([]byte(`{
+  "schema_version": "rdev.codex-result.v1",
+  "adapter": "codex",
+  "workspace_root": "/tmp/repo",
+  "prompt": "cancel",
+  "codex_command": {"argv": ["codex"], "dir": "/tmp/repo", "exit_code": -1, "timed_out": false, "canceled": true, "output_truncated": false},
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`), CancellationContract{
+		Adapter:              "codex",
+		SchemaVersion:        "rdev.codex-result.v1",
+		CommandFields:        []string{"codex_command"},
+		RequiredStringFields: []string{"workspace_root"},
+		RequireTiming:        true,
+		RequireRedaction:     true,
+	})
+	if !report.OK {
+		t.Fatalf("expected nested cancellation conformance success, got %#v", report)
+	}
+}
+
+func TestVerifyCancellationArtifactJSONRejectsTimeoutAsCancellation(t *testing.T) {
+	report := VerifyCancellationArtifactJSON([]byte(`{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "exit_code": -1,
+  "timed_out": true,
+  "canceled": false,
+  "output_truncated": false,
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`), CancellationContract{
+		Adapter:              "shell",
+		SchemaVersion:        "rdev.shell-result.v1",
+		RequiredStringFields: []string{"workspace_root"},
+		RequireTiming:        true,
+		RequireRedaction:     true,
+	})
+	if report.OK {
+		t.Fatalf("expected cancellation conformance failure, got %#v", report)
+	}
+}
+
 func TestVerifyLifecycleManifestJSONAcceptsCompleteManifest(t *testing.T) {
 	report := VerifyLifecycleManifestJSON([]byte(`{
   "schema_version": "rdev.adapter-lifecycle.v1",

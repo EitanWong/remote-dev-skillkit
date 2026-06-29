@@ -282,6 +282,7 @@ func main() {
 		t.Fatalf("expected cancellation evidence to include git status and diff, got %#v", artifact)
 	}
 	assertCodexAdapterKitConformance(t, result.ArtifactContent())
+	assertCodexAdapterKitCancellationConformance(t, result.ArtifactContent())
 }
 
 func assertCodexAdapterKitConformance(t *testing.T, content string) {
@@ -297,6 +298,22 @@ func assertCodexAdapterKitConformance(t *testing.T, content string) {
 	})
 	if !report.OK {
 		t.Fatalf("Codex artifact failed adapterkit conformance: %#v\n%s", report, content)
+	}
+}
+
+func assertCodexAdapterKitCancellationConformance(t *testing.T, content string) {
+	t.Helper()
+	report := adapterkit.VerifyCancellationArtifactJSON([]byte(content), adapterkit.CancellationContract{
+		Adapter:                 "codex",
+		SchemaVersion:           ResultSchemaVersion,
+		CommandFields:           []string{"codex_command"},
+		RequiredStringFields:    []string{"workspace_root"},
+		RequireTiming:           true,
+		RequireRedaction:        true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("Codex cancellation artifact failed adapterkit conformance: %#v\n%s", report, content)
 	}
 }
 

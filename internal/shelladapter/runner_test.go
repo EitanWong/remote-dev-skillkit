@@ -237,6 +237,7 @@ func main() {
 		t.Fatalf("expected canceled artifact, got %#v", artifact)
 	}
 	assertShellAdapterKitConformance(t, result.ArtifactContent())
+	assertShellAdapterKitCancellationConformance(t, result.ArtifactContent())
 }
 
 func TestArtifactContentIncludesSchemaAndPreservesNonSecretOutput(t *testing.T) {
@@ -330,6 +331,21 @@ func assertShellAdapterKitConformance(t *testing.T, content string) {
 	})
 	if !report.OK {
 		t.Fatalf("shell artifact failed adapterkit conformance: %#v\n%s", report, content)
+	}
+}
+
+func assertShellAdapterKitCancellationConformance(t *testing.T, content string) {
+	t.Helper()
+	report := adapterkit.VerifyCancellationArtifactJSON([]byte(content), adapterkit.CancellationContract{
+		Adapter:                 "shell",
+		SchemaVersion:           ResultSchemaVersion,
+		RequiredStringFields:    []string{"workspace_root"},
+		RequireTiming:           true,
+		RequireRedaction:        true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("shell cancellation artifact failed adapterkit conformance: %#v\n%s", report, content)
 	}
 }
 

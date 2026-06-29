@@ -2357,6 +2357,77 @@ func TestAdapterVerifyLifecycleRejectsMissingCancellation(t *testing.T) {
 	}
 }
 
+func TestAdapterVerifyCancellationAcceptsCanceledShellArtifact(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "shell-result.json")
+	if err := os.WriteFile(artifactPath, []byte(`{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "exit_code": -1,
+  "timed_out": false,
+  "canceled": true,
+  "output_truncated": false,
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	if err := app.Run(context.Background(), []string{
+		"adapter", "verify-cancellation",
+		"--artifact", artifactPath,
+		"--adapter", "shell",
+		"--schema", "rdev.shell-result.v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) || !strings.Contains(stdout.String(), "cancellation_canceled_true:.") {
+		t.Fatalf("expected cancellation conformance success, got %s", stdout.String())
+	}
+}
+
+func TestAdapterVerifyCancellationRejectsTimeoutArtifact(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "shell-result.json")
+	if err := os.WriteFile(artifactPath, []byte(`{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "exit_code": -1,
+  "timed_out": true,
+  "canceled": false,
+  "output_truncated": false,
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"adapter", "verify-cancellation",
+		"--artifact", artifactPath,
+		"--adapter", "shell",
+		"--schema", "rdev.shell-result.v1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cancellation conformance failed") {
+		t.Fatalf("expected cancellation conformance failure, got %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": false`) || !strings.Contains(stdout.String(), "cancellation_not_timed_out:.") {
+		t.Fatalf("expected structured cancellation failure, got %s", stdout.String())
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")

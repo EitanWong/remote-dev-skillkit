@@ -22,6 +22,16 @@ type ResultArtifactContract struct {
 	RejectUnredactedSecrets bool
 }
 
+type CancellationContract struct {
+	Adapter                 string
+	SchemaVersion           string
+	CommandFields           []string
+	RequiredStringFields    []string
+	RequireTiming           bool
+	RequireRedaction        bool
+	RejectUnredactedSecrets bool
+}
+
 type LifecycleContract struct {
 	Adapter                 string
 	SchemaVersion           string
@@ -106,6 +116,47 @@ func VerifyResultArtifactJSON(content []byte, contract ResultArtifactContract) C
 	}
 	if contract.RejectUnredactedSecrets {
 		add("no_unredacted_secret_patterns", !containsSecretPattern(string(content)), "")
+	}
+	report.OK = report.allChecksPassed()
+	return report
+}
+
+func VerifyCancellationArtifactJSON(content []byte, contract CancellationContract) ConformanceReport {
+	report := VerifyResultArtifactJSON(content, ResultArtifactContract{
+		Adapter:                 contract.Adapter,
+		SchemaVersion:           contract.SchemaVersion,
+		CommandFields:           contract.CommandFields,
+		RequiredStringFields:    contract.RequiredStringFields,
+		RequireTiming:           contract.RequireTiming,
+		RequireRedaction:        contract.RequireRedaction,
+		RejectUnredactedSecrets: contract.RejectUnredactedSecrets,
+	})
+	add := func(name string, passed bool, detail string) {
+		report.Checks = append(report.Checks, Check{Name: name, Passed: passed, Detail: detail})
+	}
+	var artifact map[string]any
+	if err := json.Unmarshal(content, &artifact); err != nil {
+		report.OK = report.allChecksPassed()
+		return report
+	}
+	commandFields := contract.CommandFields
+	if len(commandFields) == 0 {
+		commandFields = []string{"."}
+	}
+	for _, field := range commandFields {
+		command, ok := commandObject(artifact, field)
+		add("cancellation_command_field_present:"+field, ok, "")
+		if !ok {
+			continue
+		}
+		canceled, canceledOK := boolField(command, "canceled")
+		add("cancellation_canceled_true:"+field, canceledOK && canceled, boolDetail(canceled, canceledOK))
+		timedOut, timedOutOK := boolField(command, "timed_out")
+		add("cancellation_not_timed_out:"+field, timedOutOK && !timedOut, boolDetail(timedOut, timedOutOK))
+		exitCode, exitOK := numericField(command, "exit_code")
+		add("cancellation_exit_code_present:"+field, exitOK, numericDetail(exitCode, exitOK))
+		outputTruncated, truncatedOK := boolField(command, "output_truncated")
+		add("cancellation_output_truncated_present:"+field, truncatedOK, boolDetail(outputTruncated, truncatedOK))
 	}
 	report.OK = report.allChecksPassed()
 	return report
@@ -318,6 +369,13 @@ func numericDetail(value float64, ok bool) string {
 		return ""
 	}
 	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func boolDetail(value bool, ok bool) string {
+	if !ok {
+		return ""
+	}
+	return strconv.FormatBool(value)
 }
 
 var secretPatterns = []*regexp.Regexp{

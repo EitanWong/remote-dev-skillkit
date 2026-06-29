@@ -33,6 +33,94 @@ The system responds with typed intent, signed bounded execution, host-side
 verification, approval gates, workspace isolation, evidence, audit, and
 revocation.
 
+## Final Kernel Specification - 2026-06-30
+
+This section is the implementation-level lock. It turns the final product
+constitution into a small kernel that can accept or reject future design
+changes.
+
+### Kernel Thesis
+
+Remote Dev Skillkit is a permissioned work-delegation kernel for agents. Its
+core job is not to execute work itself; its core job is to make powerful
+execution tools usable only through consent, scope, local verification,
+evidence, audit, and revocation.
+
+The kernel is complete only when these seven facts are machine-checkable:
+
+1. who asked for the work;
+2. which host intentionally joined;
+3. what exact job was authorized;
+4. why local host validation accepted or denied it;
+5. what adapter did inside which boundary;
+6. what evidence proves the result;
+7. how the operator can stop, revoke, uninstall, rotate, or audit it.
+
+### Minimal Core Objects
+
+The final product should keep the protocol family small. New features should
+prefer extending these objects over inventing parallel authority paths.
+
+| Object | Purpose | Verifier expectation |
+|---|---|---|
+| `rdev.ticket.v1` | enrollment intent with mode, reason, TTL, and requested capability rings | expired or revoked tickets cannot enroll hosts |
+| `rdev.host-registration.v1` | host identity, mode, capability inventory, and local stop contract | wrong ticket, duplicate misuse, or unsupported mode is rejected |
+| `rdev.trust-bundle.v1` | active gateway keys, sequence, previous hash, and revocations | stale, rolled-back, wrong-root, or revoked keys are rejected |
+| `rdev.job-envelope.v1` | host-bound executable intent with nonce, expiry, workspace/session, limits, and approvals | tamper, replay, wrong host, missing capability, or expired jobs are denied locally |
+| `rdev.approval-token.v1` | one scoped exception for a dangerous operation | token reuse, broader scope, wrong subject, or expiry is rejected |
+| `rdev.adapter-*.v1` | lifecycle, result, and cancellation evidence contracts | lifecycle, result, cancellation, redaction, and secret checks return structured reports |
+| `rdev.evidence-bundle.v1` | reconstructable proof of the job outcome | checksums, artifact index, redaction metadata, and audit slice verify |
+| `rdev.audit-chain.v1` | tamper-evident event history | missing or changed events break verification |
+| `rdev.release-bundle.v1` | signed software distribution index | required binaries, manifests, hashes, and signer are verified before execution |
+
+The system may add transport formats, storage backends, UI flows, or adapters,
+but those additions must map back to these objects.
+
+### Replaceable Edges
+
+The core should stay boring so the edges can be creative.
+
+| Edge | Examples | Rule |
+|---|---|---|
+| Agent runtime | Hermes/Lucky, Codex, Claude Code, OpenCode, generic MCP clients | agents receive typed tools, not standing host credentials |
+| Transport | HTTPS long-poll, WSS/mTLS, optional owned-host mesh | transport delivers leases; it never authorizes work by itself |
+| Adapter | shell, PowerShell, Codex, Claude Code, ACP, browser, GUI, Coder, DevPod | adapters execute one domain and cannot self-approve |
+| Storage | local files, SQLite, Postgres, object store, KMS/HSM | storage persists state but does not become an authority |
+| Distribution | GitHub Releases, self-hosted downloads, enterprise mirrors | release verification runs before target-host execution |
+
+This is the final buy-vs-build boundary: reuse mature tools for execution and
+connectivity, but keep consent, policy, signing, approval, evidence, and
+revocation in `rdev`.
+
+### Acceptance Matrix
+
+Every release promise needs one archived proof package.
+
+| Promise | Required proof |
+|---|---|
+| temporary Windows support | clean Windows 10/11 transcript, verified release bundle, outbound-only foreground host, approval probes, revocation, and no-persistence checks |
+| managed Mac coding | service-backed LaunchAgent run, reconnect proof, locked-worktree Codex job, diff/test evidence, approval-required proof, stop, and uninstall |
+| managed Linux support | systemd user-unit install/start/status/reboot/reconnect/stop/uninstall transcript and evidence spool proof |
+| adapter extensibility | lifecycle, result, and cancellation conformance reports for built-in and third-party adapters |
+| public release | signed release bundle, release candidate verification, post-release download/install verification, Skillkit verification, threat model, and security checklist |
+
+The project should never claim a path is complete when it only has a plan. A
+plan is useful. A verifier-backed transcript is the gate.
+
+### Final Product Boundary
+
+The final open-source project ships exactly five primary surfaces:
+
+1. `rdev` operator CLI and verifier surface.
+2. `rdev-gateway` self-hosted control plane and MCP/API server.
+3. `rdev-host` temporary and managed host runtime.
+4. Skillkit bundle for agent runtimes.
+5. Adapter SDK and conformance suite.
+
+Everything else is optional packaging, adapter work, or deployment-specific
+integration. This keeps the public project universal instead of Hermes-only,
+Lunflux-only, macOS-only, GitHub-only, or Codex-only.
+
 ## Final Product Constitution - 2026-06-30
 
 This is the final architecture constitution. It does not replace the detailed
@@ -1328,14 +1416,18 @@ cleanup(job, result) -> cleanup_status
 
 The first public SDK slices are already narrower and intentionally boring:
 `pkg/adapterkit`, `rdev adapter scaffold`, `rdev adapter verify-lifecycle`,
-`rdev adapter verify-result`, and MCP tools `rdev.adapter.verify_lifecycle` /
-`rdev.adapter.verify_result` generate and verify lifecycle manifests and
-result-artifact JSON. Lifecycle conformance checks required phases, safety
-boundaries, cancellation, cleanup, and result schema declarations. Result
-conformance checks adapter/schema identity, timing, redaction metadata, command
-evidence, cancellation/timeout exclusivity, and common secret-pattern rejection.
-Shell, PowerShell, and Codex use the shared result verifier in tests, so
-third-party adapter authors have concrete declaration and evidence contracts
+`rdev adapter verify-result`, `rdev adapter verify-cancellation`, and MCP tools
+`rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_result` /
+`rdev.adapter.verify_cancellation` generate and verify lifecycle manifests,
+result-artifact JSON, and cancellation evidence. Lifecycle conformance checks
+required phases, safety boundaries, cancellation, cleanup, and result schema
+declarations. Result conformance checks adapter/schema identity, timing,
+redaction metadata, command evidence, cancellation/timeout exclusivity, and
+common secret-pattern rejection. Cancellation conformance first runs result
+checks, then requires canceled command evidence to prove `canceled=true`,
+`timed_out=false`, an `exit_code`, and `output_truncated` metadata. Shell,
+PowerShell, and Codex use the shared result and cancellation verifiers in tests,
+so third-party adapter authors have concrete declaration and evidence contracts
 before the full runtime lifecycle interface is extracted.
 
 Conformance tests must prove:
@@ -1546,7 +1638,7 @@ the remaining gaps that matter before public confidence:
 | Real managed Mac service run | LaunchAgent planning/control exists; durable reconnect must be proven outside a dry-run | service-backed run survives logout/reboot, completes Codex job, verifies evidence, stops and uninstalls |
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
-| Adapter SDK extraction | lifecycle-manifest and result-artifact conformance exist, but adapters are still mostly internal runtime implementations | full runtime SDK, fixtures, cancellation conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
+| Adapter SDK extraction | lifecycle-manifest, result-artifact, and cancellation-artifact conformance exist, but adapters are still mostly internal runtime implementations | full runtime SDK, executable lifecycle/cancellation fixtures, and docs for Codex, Claude Code, ACP, shell, PowerShell |
 | Multi-platform release UX | aggregate dry-run plan, platform archives, index, and install guide exist; public release still needs real download verification after publication | verified public download commands and post-release install transcript |
 | Public release execution | real build artifacts, release candidates, and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 

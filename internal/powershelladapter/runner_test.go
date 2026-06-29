@@ -127,6 +127,7 @@ func main() {
 		t.Fatalf("expected canceled artifact, got %#v", artifact)
 	}
 	assertPowerShellAdapterKitConformance(t, result.ArtifactContent())
+	assertPowerShellAdapterKitCancellationConformance(t, result.ArtifactContent())
 }
 
 func TestArtifactRedactsPowerShellSecrets(t *testing.T) {
@@ -165,6 +166,21 @@ func assertPowerShellAdapterKitConformance(t *testing.T, content string) {
 	})
 	if !report.OK {
 		t.Fatalf("PowerShell artifact failed adapterkit conformance: %#v\n%s", report, content)
+	}
+}
+
+func assertPowerShellAdapterKitCancellationConformance(t *testing.T, content string) {
+	t.Helper()
+	report := adapterkit.VerifyCancellationArtifactJSON([]byte(content), adapterkit.CancellationContract{
+		Adapter:                 "powershell",
+		SchemaVersion:           ResultSchemaVersion,
+		RequiredStringFields:    []string{"workspace_root"},
+		RequireTiming:           true,
+		RequireRedaction:        true,
+		RejectUnredactedSecrets: true,
+	})
+	if !report.OK {
+		t.Fatalf("PowerShell cancellation artifact failed adapterkit conformance: %#v\n%s", report, content)
 	}
 }
 

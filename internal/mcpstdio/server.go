@@ -150,6 +150,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.verifyAdapterResult(params.Arguments)
 	case "rdev.adapter.verify_lifecycle":
 		data, err = s.verifyAdapterLifecycle(params.Arguments)
+	case "rdev.adapter.verify_cancellation":
+		data, err = s.verifyAdapterCancellation(params.Arguments)
 	default:
 		err = fmt.Errorf("unknown tool %q", params.Name)
 	}
@@ -313,6 +315,33 @@ func (s Server) verifyAdapterLifecycle(args map[string]any) (any, error) {
 		RequireSafety:           boolArg(args, "require_safety", true),
 		RequireCancellation:     boolArg(args, "require_cancellation", true),
 		RequireResultSchema:     boolArg(args, "require_result_schema", true),
+		RejectUnredactedSecrets: boolArg(args, "reject_secret_patterns", true),
+	}), nil
+}
+
+func (s Server) verifyAdapterCancellation(args map[string]any) (any, error) {
+	artifactJSON := stringArg(args, "artifact_json", "")
+	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
+		artifact, err := s.Gateway.Artifact(artifactID)
+		if err != nil {
+			return nil, err
+		}
+		artifactJSON = artifact.Content
+	}
+	if artifactJSON == "" {
+		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+	}
+	requiredFields := stringSliceArg(args, "required_string_fields")
+	if len(requiredFields) == 0 {
+		requiredFields = []string{"workspace_root"}
+	}
+	return adapterkit.VerifyCancellationArtifactJSON([]byte(artifactJSON), adapterkit.CancellationContract{
+		Adapter:                 requiredString(args, "adapter"),
+		SchemaVersion:           requiredString(args, "schema"),
+		CommandFields:           stringSliceArg(args, "command_fields"),
+		RequiredStringFields:    requiredFields,
+		RequireTiming:           boolArg(args, "require_timing", true),
+		RequireRedaction:        boolArg(args, "require_redaction", true),
 		RejectUnredactedSecrets: boolArg(args, "reject_secret_patterns", true),
 	}), nil
 }

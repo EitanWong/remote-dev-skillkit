@@ -220,6 +220,40 @@ func TestServerToolCallVerifyAdapterLifecycle(t *testing.T) {
 	}
 }
 
+func TestServerToolCallVerifyAdapterCancellation(t *testing.T) {
+	artifact := `{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "exit_code": -1,
+  "timed_out": false,
+  "canceled": true,
+  "output_truncated": false,
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`
+	input := mcpRequestLine(t, "rdev.adapter.verify_cancellation", map[string]any{
+		"adapter":       "shell",
+		"schema":        "rdev.shell-result.v1",
+		"artifact_json": artifact,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.adapter-conformance-report.v1" || structured["ok"] != true {
+		t.Fatalf("expected adapter cancellation conformance success, got %#v", structured)
+	}
+}
+
 func mcpRequestLine(t *testing.T, tool string, arguments map[string]any) string {
 	t.Helper()
 	content, err := json.Marshal(map[string]any{
