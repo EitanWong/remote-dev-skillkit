@@ -68,7 +68,7 @@
 - [x] Add final buy-vs-build boundary for MCP, Tailscale/headscale, SSH, Coder, DevPod, VS Code Remote Tunnels, RustDesk/MeshCentral, and Sigstore-style release trust.
 - [x] Add explicit exit criteria for v0.1 through v1.0 gates.
 - [x] Add stronger workspace and symlink escape tests.
-- [ ] Add local evidence bundle export.
+- [x] Add local evidence bundle export.
 - [ ] Add policy explanation for every host-side denial and approval-required result.
 
 ## Later
@@ -103,5 +103,6 @@
 - MCP stdio server exposes the Phase 1 tools.
 - All jobs produce audit records.
 - Audit records can be exported as a verifiable hash chain.
+- Jobs can be exported as local evidence bundles with manifest, checksums, artifacts, envelope, policy decision, audit slice, and audit chain.
 - Tests cover policy gates and command contracts.
 - README has a working local demo.

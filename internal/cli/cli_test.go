@@ -791,6 +791,81 @@ func TestAuditVerifyRejectsTamperedChain(t *testing.T) {
 	}
 }
 
+func TestEvidenceExportWritesBundle(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	job := model.Job{
+		ID:        "job_1",
+		HostID:    "hst_1",
+		Adapter:   "shell",
+		Intent:    "demo",
+		Status:    model.JobStatusSucceeded,
+		CreatedAt: now,
+		Envelope: &model.JobEnvelope{
+			SchemaVersion: "rdev.job.v1",
+			JobID:         "job_1",
+			HostID:        "hst_1",
+			TicketID:      "tkt_1",
+			OperatorID:    "operator",
+			IssuedAt:      now,
+			ExpiresAt:     now.Add(time.Hour),
+			Nonce:         "nonce",
+			Mode:          model.HostModeAttendedTemporary,
+			Adapter:       "shell",
+			Intent:        "demo",
+			Capabilities:  []string{"shell.user"},
+			Limits:        model.JobLimits{MaxDurationSeconds: 60, MaxOutputBytes: 1024, Network: "default-deny"},
+			SigningAlg:    "ed25519",
+			SigningKeyID:  "gateway-dev",
+			Signature:     "signature",
+		},
+	}
+	artifact := model.Artifact{
+		ID:        "art_1",
+		JobID:     "job_1",
+		Kind:      "text",
+		Name:      "result.json",
+		Content:   `{"schema_version":"rdev.shell-result.v1"}`,
+		CreatedAt: now,
+	}
+	jobPath := filepath.Join(dir, "job.json")
+	artifactsPath := filepath.Join(dir, "artifacts.json")
+	auditPath := filepath.Join(dir, "events.jsonl")
+	out := filepath.Join(dir, "bundle")
+	writeJSONForTest(t, jobPath, job)
+	writeJSONForTest(t, artifactsPath, []model.Artifact{artifact})
+	store := audit.NewJSONLStore(auditPath)
+	for _, event := range []model.AuditEvent{
+		{Sequence: 1, Actor: "operator", Action: "job.create", TargetID: "job_1", Message: "created", At: now},
+		{Sequence: 2, Actor: "host", Action: "job.complete", TargetID: "job_1", Message: "done", At: now},
+	} {
+		if err := store.Append(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"evidence", "export",
+		"--job-json", jobPath,
+		"--artifacts-json", artifactsPath,
+		"--audit-jsonl", auditPath,
+		"--out", out,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) {
+		t.Fatalf("expected ok output, got %s", stdout.String())
+	}
+	for _, path := range []string{"manifest.json", "job.json", "envelope.json", "artifacts/art_1-result.json", "audit-chain.json", "checksums.txt"} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected bundle file %s: %v", path, err)
+		}
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")
@@ -883,6 +958,17 @@ func TestReleaseVerifyRejectsTamperedArtifact(t *testing.T) {
 
 func timeNowForTest() time.Time {
 	return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+}
+
+func writeJSONForTest(t *testing.T, path string, value any) {
+	t.Helper()
+	content, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func runHostServeWithIdentityStore(t *testing.T, gatewayURL, ticketCode, identityPath, name string) string {

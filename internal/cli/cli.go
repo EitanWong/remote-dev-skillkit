@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
+	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
@@ -68,6 +70,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.release(args[1:])
 	case "audit":
 		return a.audit(args[1:])
+	case "evidence":
+		return a.evidence(args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -463,6 +467,27 @@ func (a App) audit(args []string) error {
 	}
 }
 
+func (a App) evidence(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing evidence subcommand")
+	}
+	switch args[0] {
+	case "export":
+		fs := flag.NewFlagSet("evidence export", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		jobPath := fs.String("job-json", "", "job JSON path")
+		artifactsPath := fs.String("artifacts-json", "", "artifacts JSON path")
+		auditPath := fs.String("audit-jsonl", "", "audit JSONL path")
+		out := fs.String("out", "", "output evidence bundle directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.evidenceExport(*jobPath, *artifactsPath, *auditPath, *out)
+	default:
+		return fmt.Errorf("unknown evidence subcommand %q", args[0])
+	}
+}
+
 func (a App) release(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing release subcommand")
@@ -635,6 +660,51 @@ func (a App) auditVerify(inputPath string) error {
 	return enc.Encode(payload)
 }
 
+func (a App) evidenceExport(jobPath, artifactsPath, auditPath, outPath string) error {
+	if jobPath == "" {
+		return fmt.Errorf("job-json is required")
+	}
+	if outPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	job, err := readJobJSON(jobPath)
+	if err != nil {
+		return err
+	}
+	artifacts, err := readArtifactsJSON(artifactsPath)
+	if err != nil {
+		return err
+	}
+	var events []model.AuditEvent
+	if auditPath != "" {
+		events, err = audit.ReadJSONL(auditPath)
+		if err != nil {
+			return err
+		}
+	}
+	manifest, err := evidence.ExportDirectory(outPath, evidence.Input{
+		Job:         job,
+		Artifacts:   artifacts,
+		AuditEvents: events,
+		GeneratedAt: time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                true,
+		"out":               outPath,
+		"job_id":            manifest.JobID,
+		"file_count":        len(manifest.Files) + 1,
+		"audit_event_count": manifest.AuditEventCount,
+		"audit_root_hash":   manifest.AuditRootHash,
+		"manifest":          filepath.Join(outPath, "manifest.json"),
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev - remote development skillkit
 
@@ -650,10 +720,44 @@ Usage:
   rdev gateway serve --dev --addr 127.0.0.1:8787
   rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/chain.json
   rdev audit verify --input .rdev/audit/chain.json
+  rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
 `))
+}
+
+func readJobJSON(path string) (model.Job, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return model.Job{}, err
+	}
+	var job model.Job
+	if err := json.Unmarshal(content, &job); err != nil {
+		return model.Job{}, fmt.Errorf("decode job-json: %w", err)
+	}
+	return job, nil
+}
+
+func readArtifactsJSON(path string) ([]model.Artifact, error) {
+	if path == "" {
+		return nil, nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var artifacts []model.Artifact
+	if err := json.Unmarshal(content, &artifacts); err == nil {
+		return artifacts, nil
+	}
+	var wrapped struct {
+		Artifacts []model.Artifact `json:"artifacts"`
+	}
+	if err := json.Unmarshal(content, &wrapped); err != nil {
+		return nil, fmt.Errorf("decode artifacts-json: %w", err)
+	}
+	return wrapped.Artifacts, nil
 }
 
 func registerHost(ctx context.Context, gatewayURL string, registration model.HostRegistration) (model.Host, error) {
