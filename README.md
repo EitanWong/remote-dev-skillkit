@@ -92,6 +92,7 @@ go run ./cmd/rdev host serve --mode temporary
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Perfect End-State Architecture](docs/architecture/PERFECT_END_STATE.md)
 - [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
+- [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md)
 - [Project Plan](docs/project/PLAN.md)
 - [Roadmap](docs/project/ROADMAP.md)
 - [Versioning](docs/project/VERSIONING.md)

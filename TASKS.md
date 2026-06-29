@@ -24,6 +24,7 @@
 - [x] Add dev trust bundle endpoint and host-side envelope signature verification.
 - [x] Add host-reported job failure endpoint and audit event.
 - [x] Add perfect end-state architecture blueprint.
+- [x] Refine final system design for implementation, deployment, and open-source packaging.
 - [x] Add persistent dev gateway signing key and host trust pin checks.
 - [x] Add signed dev join manifest endpoint and manifest-driven host registration.
 - [x] Add initial release/bootstrap trust root verification for join manifests.
