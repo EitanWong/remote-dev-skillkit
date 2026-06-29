@@ -36,13 +36,16 @@ Every production release must publish:
 - SHA-256 checksum file;
 - `rdev.release-artifact.v1` manifest for each binary;
 - release manifest index that lists every artifact and manifest;
-- detached signature or signed manifest index;
+- signed `rdev.release-bundle.v1` manifest index;
 - SBOM when packaging is public;
 - changelog and upgrade notes;
 - Windows Authenticode signatures for Windows executables and scripts;
 - notarization evidence for macOS releases when applicable.
 
-The release manifest must include key ids, artifact names, SHA-256 digests, sizes, timestamps, and signatures.
+The per-artifact release manifest must include key ids, artifact names, SHA-256
+digests, sizes, timestamps, and signatures. The bundle index must include every
+artifact path, manifest path, artifact and manifest SHA-256/size, required
+artifact ids, signing key id, and index signature.
 
 ## Signing Rules
 
@@ -50,6 +53,8 @@ The release manifest must include key ids, artifact names, SHA-256 digests, size
 - Generate checksums before signing.
 - Sign release manifests, not only release notes.
 - Sign the release manifest index after all artifact manifests are complete.
+- Verify the signed release bundle index with `rdev release verify-bundle`
+  before publishing download links or bootstrap instructions.
 - Time-stamp Windows Authenticode signatures.
 - Never sign from a developer laptop for production releases.
 - Never store release private keys in the repository, chat, CI logs, or local test fixtures.
@@ -173,6 +178,8 @@ Emergency stop does not delete audit records.
 This policy is implemented when:
 
 - release manifests include key ids and can be verified with pinned public roots;
+- signed release bundle indexes verify every listed artifact manifest, binary,
+  hash, size, and required artifact before publishing;
 - Windows release artifacts are Authenticode-signed and CI verifies them;
 - bootstrap rejects missing/invalid release signatures when policy requires them;
 - managed hosts can receive signed trust-bundle updates;

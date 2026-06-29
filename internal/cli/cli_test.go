@@ -1819,6 +1819,85 @@ func TestReleaseVerifyRejectsTamperedArtifact(t *testing.T) {
 	}
 }
 
+func TestReleaseCreateAndVerifyBundle(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "release-root.json")
+	root := signReleaseArtifactWithCLIForTest(t, dir, keyPath, "rdev-host.exe", "host-binary")
+	signReleaseArtifactWithCLIForTest(t, dir, keyPath, "rdev-verify.exe", "verify-binary")
+
+	var createStdout bytes.Buffer
+	createApp := NewApp(&createStdout, &bytes.Buffer{})
+	if err := createApp.Run(context.Background(), []string{
+		"release", "create-bundle",
+		"--dir", dir,
+		"--artifacts", "rdev-host.exe,rdev-verify.exe",
+		"--require-artifacts", "rdev-host.exe,rdev-verify.exe",
+		"--key", keyPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(createStdout.String(), `"schema": "rdev.release-bundle.v1"`) {
+		t.Fatalf("expected bundle output, got %s", createStdout.String())
+	}
+	bundlePath := filepath.Join(dir, "release-bundle.json")
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("expected bundle file: %v", err)
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"release", "verify-bundle",
+		"--bundle", bundlePath,
+		"--root-public-key", root,
+	}); err != nil {
+		t.Fatalf("expected bundle verification to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) || !strings.Contains(verifyStdout.String(), "signed_manifest_verifies_artifact") {
+		t.Fatalf("expected structured bundle verification, got %s", verifyStdout.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "rdev-host.exe"), []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var tamperedStdout bytes.Buffer
+	tamperedApp := NewApp(&tamperedStdout, &bytes.Buffer{})
+	err := tamperedApp.Run(context.Background(), []string{
+		"release", "verify-bundle",
+		"--bundle", bundlePath,
+		"--root-public-key", root,
+	})
+	if err == nil {
+		t.Fatalf("expected tampered bundle verification to fail: %s", tamperedStdout.String())
+	}
+	if !strings.Contains(tamperedStdout.String(), `"ok": false`) ||
+		!strings.Contains(tamperedStdout.String(), "artifact_sha256_matches_index") ||
+		!strings.Contains(tamperedStdout.String(), "signed_manifest_verifies_artifact") {
+		t.Fatalf("expected structured tampered bundle failure, got %s", tamperedStdout.String())
+	}
+}
+
+func TestReleaseCreateBundleRejectsOutOutsideReleaseDir(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "release-root.json")
+	signReleaseArtifactWithCLIForTest(t, dir, keyPath, "rdev-host.exe", "host-binary")
+
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"release", "create-bundle",
+		"--dir", dir,
+		"--artifacts", "rdev-host.exe",
+		"--key", keyPath,
+		"--out", filepath.Join(t.TempDir(), "release-bundle.json"),
+	})
+	if err == nil {
+		t.Fatal("expected out path outside release dir to fail")
+	}
+	if !strings.Contains(err.Error(), "bundle output must be inside release directory") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestWorkspaceLockStatusAndUnlock(t *testing.T) {
 	repo := t.TempDir()
 	store := filepath.Join(t.TempDir(), "locks")
@@ -2186,6 +2265,34 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
+}
+
+func signReleaseArtifactWithCLIForTest(t *testing.T, dir, keyPath, name, content string) string {
+	t.Helper()
+	artifactPath := filepath.Join(dir, name)
+	if err := os.WriteFile(artifactPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"release", "sign",
+		"--artifact", artifactPath,
+		"--key", keyPath,
+		"--key-id", "release-root",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var signed struct {
+		RootPublicKey string `json:"root_public_key"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &signed); err != nil {
+		t.Fatalf("invalid sign output: %v\n%s", err, stdout.String())
+	}
+	if signed.RootPublicKey == "" {
+		t.Fatalf("expected root public key in sign output: %s", stdout.String())
+	}
+	return signed.RootPublicKey
 }
 
 func writeJSONForTest(t *testing.T, path string, value any) {

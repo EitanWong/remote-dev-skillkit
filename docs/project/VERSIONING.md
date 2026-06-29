@@ -21,6 +21,7 @@ Release artifacts should include:
 - SHA-256 checksums;
 - signatures;
 - signed release manifest index;
+- signed `rdev.release-bundle.v1` index verified by `rdev release verify-bundle`;
 - Windows Authenticode signatures for Windows artifacts;
 - changelog;
 - upgrade notes.

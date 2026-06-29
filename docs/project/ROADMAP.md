@@ -56,6 +56,7 @@ Exit gate: local demo proves ticket, host registration, outbound host job wait t
 - Shell and file scoped jobs.
 - Host local audit spool and revocation handling.
 - Authenticode verification policy.
+- Signed release bundle index creation and verification through `rdev release create-bundle` and `rdev release verify-bundle`.
 - No-persistence inspection script.
 - Local-user approval prompt for elevation, GUI, service, and destructive requests.
 - Clean Windows acceptance run.

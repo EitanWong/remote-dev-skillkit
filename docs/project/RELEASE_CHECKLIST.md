@@ -8,6 +8,8 @@
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.
+- [ ] Create signed release bundle index with `rdev release create-bundle`.
+- [ ] Verify signed release bundle index with `rdev release verify-bundle`.
 - [ ] Authenticode-sign Windows binaries and scripts.
 - [ ] Verify Windows Authenticode signatures in CI.
 - [ ] Confirm release key ids are active and not revoked.

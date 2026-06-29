@@ -275,6 +275,7 @@ The local test suite currently covers:
 - managed Mac LaunchAgent acceptance planning through `rdev acceptance managed-mac-service`, covering checked plist generation, managed host arguments, `rdev host service-control --execute` command plan, service-backed acceptance command plan, evidence verification command plan, and uninstall guidance without auto-starting launchd.
 - macOS LaunchAgent lifecycle control through `rdev host service-control`, covering dry-run by default, explicit `--execute` for launchctl, plist label checks, and start/inspect/stop action planning.
 - Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, covering reviewed PowerShell launcher generation, bootstrap script hash capture, release manifest/verifier requirements, launcher safety checks, approval probes for package/elevation/service/GUI/credential operations, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
+- release bundle verification through `rdev release create-bundle` and `rdev release verify-bundle`, covering signed bundle index verification, per-artifact signed manifest verification, artifact and manifest SHA-256/size checks, required artifact presence, and tamper failure evidence.
 
 ## Next Automation Targets
 

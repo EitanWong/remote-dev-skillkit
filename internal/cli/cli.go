@@ -1389,6 +1389,29 @@ func (a App) release(args []string) error {
 			return err
 		}
 		return a.releaseVerify(*artifact, *manifestPath, *root)
+	case "create-bundle":
+		fs := flag.NewFlagSet("release create-bundle", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		dir := fs.String("dir", "", "release directory containing artifacts and .rdev-release.json manifests")
+		artifacts := fs.String("artifacts", "", "comma-separated artifact paths relative to --dir")
+		requiredArtifacts := fs.String("require-artifacts", "", "comma-separated artifact ids that must be present in the bundle")
+		keyPath := fs.String("key", "", "Ed25519 release signing key file")
+		keyID := fs.String("key-id", "release-root", "release signing key id")
+		out := fs.String("out", "", "output bundle index path; defaults to <dir>/release-bundle.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.releaseCreateBundle(*dir, splitCapabilities(*artifacts), splitCapabilities(*requiredArtifacts), *keyPath, *keyID, *out)
+	case "verify-bundle":
+		fs := flag.NewFlagSet("release verify-bundle", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		bundlePath := fs.String("bundle", "", "release bundle index path")
+		root := fs.String("root-public-key", "", "release trust root, formatted key_id:base64url_public_key")
+		requiredArtifacts := fs.String("require-artifacts", "", "comma-separated artifact ids that must be present in the bundle")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.releaseVerifyBundle(*bundlePath, *root, splitCapabilities(*requiredArtifacts))
 	default:
 		return fmt.Errorf("unknown release subcommand %q", args[0])
 	}
@@ -1488,6 +1511,93 @@ func (a App) releaseVerify(artifactPath, manifestPath, rootPublicKey string) err
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func (a App) releaseCreateBundle(dir string, artifactPaths, requiredArtifacts []string, keyPath, keyID, outPath string) error {
+	if dir == "" {
+		return fmt.Errorf("dir is required")
+	}
+	if len(artifactPaths) == 0 {
+		return fmt.Errorf("artifacts are required")
+	}
+	if keyPath == "" {
+		return fmt.Errorf("key is required")
+	}
+	key, _, err := signing.LoadOrCreate(keyPath, keyID)
+	if err != nil {
+		return err
+	}
+	bundle, err := release.CreateBundle(release.BundleOptions{
+		Dir:               dir,
+		ArtifactPaths:     artifactPaths,
+		RequiredArtifacts: requiredArtifacts,
+		Key:               key,
+		Now:               time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if outPath == "" {
+		outPath = filepath.Join(absDir, "release-bundle.json")
+	} else if !filepath.IsAbs(outPath) {
+		outPath = filepath.Join(absDir, outPath)
+	}
+	outDir, err := filepath.Abs(filepath.Dir(outPath))
+	if err != nil {
+		return err
+	}
+	if outDir != absDir {
+		return fmt.Errorf("bundle output must be inside release directory %s", absDir)
+	}
+	if err := release.WriteBundle(outPath, bundle); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":              true,
+		"schema":          bundle.SchemaVersion,
+		"bundle":          outPath,
+		"artifacts":       bundle.Artifacts,
+		"root_public_key": encodeRootPublicKey(key.ID, key.PublicKey),
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) releaseVerifyBundle(bundlePath, rootPublicKey string, requiredArtifacts []string) error {
+	if bundlePath == "" {
+		return fmt.Errorf("bundle is required")
+	}
+	root, err := parseRootPublicKey(rootPublicKey)
+	if err != nil {
+		return err
+	}
+	verification, err := release.VerifyBundle(bundlePath, root, requiredArtifacts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"bundle":              verification.BundlePath,
+		"root_key_id":         verification.RootKeyID,
+		"checks":              verification.Checks,
+		"artifacts":           verification.Artifacts,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("release bundle verification failed")
+	}
+	return nil
 }
 
 func (a App) auditExport(inputPath, outputPath string) error {
@@ -1711,6 +1821,8 @@ Usage:
   rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
+  rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
+  rdev release verify-bundle --bundle dist/release-bundle.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist

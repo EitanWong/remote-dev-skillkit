@@ -312,9 +312,22 @@ rdev release verify \
   --artifact ./rdev-host.exe \
   --manifest ./rdev-host.exe.rdev-release.json \
   --root-public-key release-root:<base64url_ed25519_public_key>
+
+rdev release create-bundle \
+  --dir ./dist \
+  --artifacts rdev-host.exe,rdev-verify.exe \
+  --require-artifacts rdev-host.exe,rdev-verify.exe \
+  --key .rdev/keys/release-root.json
+
+rdev release verify-bundle \
+  --bundle ./dist/release-bundle.json \
+  --root-public-key release-root:<base64url_ed25519_public_key>
 ```
 
 The release manifest is a signed `rdev.release-artifact.v1` JSON document.
+The release bundle is a signed `rdev.release-bundle.v1` index that verifies the
+bundle signature, every listed artifact manifest, artifact and manifest
+SHA-256/size, and required artifact presence before publishing.
 
 For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
 
