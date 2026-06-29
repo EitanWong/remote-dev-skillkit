@@ -114,6 +114,90 @@ func TestServerToolCallExplainShellPolicy(t *testing.T) {
 	}
 }
 
+func TestServerToolCallVerifyAdapterResult(t *testing.T) {
+	artifact := `{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "exit_code": 0,
+  "timed_out": false,
+  "canceled": false,
+  "output_truncated": false,
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`
+	input := mcpRequestLine(t, "rdev.adapter.verify_result", map[string]any{
+		"adapter":       "shell",
+		"schema":        "rdev.shell-result.v1",
+		"artifact_json": artifact,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.adapter-conformance-report.v1" || structured["ok"] != true {
+		t.Fatalf("expected adapter conformance success, got %#v", structured)
+	}
+}
+
+func TestServerToolCallVerifyAdapterResultReportsFailure(t *testing.T) {
+	artifact := `{
+  "schema_version": "rdev.shell-result.v1",
+  "adapter": "shell",
+  "workspace_root": "/tmp/repo",
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "redacted": false,
+  "redaction_rules": ["openai_api_key"]
+}`
+	input := mcpRequestLine(t, "rdev.adapter.verify_result", map[string]any{
+		"adapter":       "shell",
+		"schema":        "rdev.shell-result.v1",
+		"artifact_json": artifact,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	if lines[0]["error"] != nil {
+		t.Fatalf("conformance failure should be structured content, got RPC error: %#v", lines[0]["error"])
+	}
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["ok"] != false {
+		t.Fatalf("expected adapter conformance failure report, got %#v", structured)
+	}
+}
+
+func mcpRequestLine(t *testing.T, tool string, arguments map[string]any) string {
+	t.Helper()
+	content, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      tool,
+			"arguments": arguments,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content) + "\n"
+}
+
 func responseLines(t *testing.T, output string) []map[string]any {
 	t.Helper()
 	parts := strings.Split(strings.TrimSpace(output), "\n")

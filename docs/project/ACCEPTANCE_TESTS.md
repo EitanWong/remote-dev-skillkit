@@ -288,7 +288,7 @@ The local test suite currently covers:
 - shell adapter cooperative cancellation through `ExecuteContext` and hostrunner context propagation, returning `rdev.shell-result.v1` artifacts with `canceled=true` instead of timeout evidence.
 - PowerShell adapter MVP through `adapter=powershell`, covering `powershell.user` capability enforcement, allowlisted PowerShell executable execution, no `-ExecutionPolicy Bypass`, `rdev.powershell-result.v1` evidence, redaction, workspace-lock release, approval-required service-management detection, and context cancellation.
 - canceled-job artifact reporting for built-in shell, PowerShell, and Codex adapters, preserving the gateway job's `canceled` terminal state while adding reviewable cancellation evidence.
-- public adapterkit result-artifact conformance through `pkg/adapterkit` and `rdev adapter verify-result`, covering built-in shell, PowerShell, and Codex artifacts for schema, timing, redaction metadata, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
+- public adapterkit result-artifact conformance through `pkg/adapterkit`, `rdev adapter verify-result`, and MCP tool `rdev.adapter.verify_result`, covering built-in shell, PowerShell, and Codex artifacts for schema, timing, redaction metadata, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
 
 ## Next Automation Targets
 

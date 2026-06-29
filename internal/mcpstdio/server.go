@@ -12,6 +12,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
 const protocolVersion = "2025-11-25"
@@ -145,6 +146,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.explainPolicy(params.Arguments)
 	case "rdev.policy.explain_shell":
 		data, err = s.explainShellPolicy(params.Arguments)
+	case "rdev.adapter.verify_result":
+		data, err = s.verifyAdapterResult(params.Arguments)
 	default:
 		err = fmt.Errorf("unknown tool %q", params.Name)
 	}
@@ -261,6 +264,33 @@ func (s Server) explainShellPolicy(args map[string]any) (any, error) {
 	), nil
 }
 
+func (s Server) verifyAdapterResult(args map[string]any) (any, error) {
+	artifactJSON := stringArg(args, "artifact_json", "")
+	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
+		artifact, err := s.Gateway.Artifact(artifactID)
+		if err != nil {
+			return nil, err
+		}
+		artifactJSON = artifact.Content
+	}
+	if artifactJSON == "" {
+		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+	}
+	requiredFields := stringSliceArg(args, "required_string_fields")
+	if len(requiredFields) == 0 {
+		requiredFields = []string{"workspace_root"}
+	}
+	return adapterkit.VerifyResultArtifactJSON([]byte(artifactJSON), adapterkit.ResultArtifactContract{
+		Adapter:                 requiredString(args, "adapter"),
+		SchemaVersion:           requiredString(args, "schema"),
+		CommandFields:           stringSliceArg(args, "command_fields"),
+		RequiredStringFields:    requiredFields,
+		RequireTiming:           boolArg(args, "require_timing", true),
+		RequireRedaction:        boolArg(args, "require_redaction", true),
+		RejectUnredactedSecrets: boolArg(args, "reject_secret_patterns", true),
+	}), nil
+}
+
 func success(id any, result any) response {
 	return response{JSONRPC: "2.0", ID: id, Result: result}
 }
@@ -314,6 +344,18 @@ func intArg(args map[string]any, key string, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+func boolArg(args map[string]any, key string, fallback bool) bool {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	typed, ok := value.(bool)
+	if !ok {
+		return fallback
+	}
+	return typed
 }
 
 func stringSliceArg(args map[string]any, key string) []string {

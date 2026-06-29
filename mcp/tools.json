@@ -80,6 +80,11 @@
       "name": "rdev.policy.explain_shell",
       "description": "Explain whether a shell job policy is structurally allowed before creating a signed job.",
       "safety": "Read-only policy simulation; host still re-validates before execution."
+    },
+    {
+      "name": "rdev.adapter.verify_result",
+      "description": "Verify an adapter result artifact against the public result-artifact conformance contract.",
+      "safety": "Read-only artifact validation; does not execute on a host."
     }
   ]
 }

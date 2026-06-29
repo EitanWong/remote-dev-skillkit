@@ -54,7 +54,7 @@ Implemented now:
 - `rdev ticket create` local ticket preview.
 - `rdev policy explain` local policy simulation.
 - `rdev policy explain-shell` shell job policy preflight explanation.
-- `rdev mcp tools` tool-contract listing.
+- `rdev mcp tools` tool-contract listing, including `rdev.adapter.verify_result` for agent-side adapter artifact conformance checks.
 - `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev gateway serve --dev` local HTTP development gateway.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
@@ -85,7 +85,7 @@ Implemented now:
 - PowerShell adapter MVP through `adapter=powershell`: runs an explicit PowerShell command through an allowlisted `pwsh`, `powershell`, `powershell.exe`, or payload-provided executable, requires `powershell.user`, never adds `-ExecutionPolicy Bypass`, gates high-risk commands on approval, and captures `rdev.powershell-result.v1` evidence with redaction.
 - Codex, shell, and PowerShell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
 - Canceled Codex, shell, and PowerShell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
-- Public adapter result-artifact conformance verifier through `pkg/adapterkit` and `rdev adapter verify-result`, used by built-in shell, PowerShell, and Codex tests to check schema, timing, redaction, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
+- Public adapter result-artifact conformance verifier through `pkg/adapterkit`, `rdev adapter verify-result`, and MCP tool `rdev.adapter.verify_result`, used by built-in shell, PowerShell, and Codex tests to check schema, timing, redaction, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Built-in shell, PowerShell, and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, credential changes, and execution-policy changes.

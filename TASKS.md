@@ -67,6 +67,7 @@
 - [x] Add Linux systemd user-unit managed host lifecycle with safe install/status/dry-run control/uninstall commands.
 - [x] Add public adapterkit result-artifact conformance verifier for built-in and third-party adapters.
 - [x] Add `rdev adapter verify-result` CLI for result-artifact conformance reports.
+- [x] Add `rdev.adapter.verify_result` MCP tool for agent-side result-artifact conformance.
 
 ## Next
 
@@ -185,6 +186,7 @@
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 - [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.
 - [x] Built-in shell, PowerShell, and Codex adapters pass public adapterkit result-artifact conformance checks.
+- [x] MCP stdio exposes adapter result-artifact conformance as `rdev.adapter.verify_result`.
 
 ## Definition Of Done For v0.1.0
 

@@ -41,6 +41,18 @@ rdev adapter verify-result \
 The CLI prints `rdev.adapter-conformance-report.v1`. When `ok=false`, it prints
 the structured report before returning a nonzero exit code.
 
+Agent runtimes can call the same verifier through MCP tool
+`rdev.adapter.verify_result`. Pass either `artifact_json` directly or
+`artifact_id` for an artifact stored in the current gateway:
+
+```json
+{
+  "adapter": "shell",
+  "schema": "rdev.shell-result.v1",
+  "artifact_json": "{\"schema_version\":\"rdev.shell-result.v1\",...}"
+}
+```
+
 Top-level command artifacts, such as shell and PowerShell, use the default
 command contract. Nested command artifacts, such as Codex, set `CommandFields`
 to the command evidence objects that must be present.

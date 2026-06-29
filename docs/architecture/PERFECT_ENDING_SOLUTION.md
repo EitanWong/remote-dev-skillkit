@@ -1097,12 +1097,12 @@ cleanup(job, result) -> cleanup_status
 ```
 
 The first public SDK slice is already narrower and intentionally boring:
-`pkg/adapterkit` and `rdev adapter verify-result` verify result-artifact JSON
-for adapter/schema identity, timing, redaction metadata, command evidence,
-cancellation/timeout exclusivity, and common secret-pattern rejection. Shell,
-PowerShell, and Codex use this shared verifier in tests, so third-party adapter
-authors have a concrete evidence contract before the full lifecycle interface is
-extracted.
+`pkg/adapterkit`, `rdev adapter verify-result`, and MCP tool
+`rdev.adapter.verify_result` verify result-artifact JSON for adapter/schema
+identity, timing, redaction metadata, command evidence, cancellation/timeout
+exclusivity, and common secret-pattern rejection. Shell, PowerShell, and Codex
+use this shared verifier in tests, so third-party adapter authors have a
+concrete evidence contract before the full lifecycle interface is extracted.
 
 Conformance tests must prove:
 

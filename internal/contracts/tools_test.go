@@ -22,4 +22,7 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 			t.Fatalf("tool %s missing input schema", tool.Name)
 		}
 	}
+	if !seen["rdev.adapter.verify_result"] {
+		t.Fatal("expected adapter result verification tool")
+	}
 }

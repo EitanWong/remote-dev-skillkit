@@ -154,6 +154,22 @@ func Tools() []Tool {
 				"policy": map[string]any{"type": "object"},
 			}, []string{"mode", "policy"}),
 		},
+		{
+			Name:        "rdev.adapter.verify_result",
+			Description: "Verify an adapter result artifact against the public result-artifact conformance contract.",
+			Safety:      "Read-only artifact validation; does not execute on a host.",
+			InputSchema: object(map[string]any{
+				"adapter":                stringField(),
+				"schema":                 stringField(),
+				"artifact_json":          stringField(),
+				"artifact_id":            stringField(),
+				"command_fields":         stringArray(),
+				"required_string_fields": stringArray(),
+				"require_timing":         boolField(),
+				"require_redaction":      boolField(),
+				"reject_secret_patterns": boolField(),
+			}, []string{"adapter", "schema"}),
+		},
 	}
 }
 
@@ -182,6 +198,10 @@ func stringArray() map[string]any {
 
 func integer(minimum, maximum int) map[string]any {
 	return map[string]any{"type": "integer", "minimum": minimum, "maximum": maximum}
+}
+
+func boolField() map[string]any {
+	return map[string]any{"type": "boolean"}
 }
 
 func enum(values ...string) map[string]any {
