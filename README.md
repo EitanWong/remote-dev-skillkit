@@ -97,6 +97,7 @@ go run ./cmd/rdev host serve --mode temporary
 - [Roadmap](docs/project/ROADMAP.md)
 - [Versioning](docs/project/VERSIONING.md)
 - [Threat Model](docs/security/THREAT_MODEL.md)
+- [Release Key Lifecycle](docs/security/RELEASE_KEY_LIFECYCLE.md)
 - [Bootstrap Design](docs/operations/BOOTSTRAP.md)
 - [Development Gateway](docs/operations/DEV_GATEWAY.md)
 - [MCP Stdio](docs/operations/MCP_STDIO.md)

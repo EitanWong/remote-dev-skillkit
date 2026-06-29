@@ -7,6 +7,11 @@
 - [ ] Build binaries for macOS, Linux, and Windows.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
+- [ ] Sign and verify the release manifest index.
+- [ ] Authenticode-sign Windows binaries and scripts.
+- [ ] Verify Windows Authenticode signatures in CI.
+- [ ] Confirm release key ids are active and not revoked.
+- [ ] Archive release evidence: checksums, manifests, signatures, SBOM, verification logs.
 - [ ] Update `CHANGELOG.md`.
 - [ ] Update install docs.
 - [ ] Review `SECURITY.md` and threat model.
@@ -19,6 +24,8 @@
 - [ ] No hardcoded secrets.
 - [ ] No target-host inbound public port by default.
 - [ ] Dangerous actions require approval gates.
+- [ ] Bootstrap does not weaken PowerShell execution policy or Group Policy.
+- [ ] Temporary Windows bootstrap verifies signed manifests and binaries before execution.
 
 ## Post-Release
 

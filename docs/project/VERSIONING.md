@@ -20,5 +20,7 @@ Release artifacts should include:
 - `rdev` binaries for macOS, Windows, Linux;
 - SHA-256 checksums;
 - signatures;
+- signed release manifest index;
+- Windows Authenticode signatures for Windows artifacts;
 - changelog;
 - upgrade notes.

@@ -48,8 +48,8 @@
 - [ ] Add production key rotation/revocation and host trust update flow.
 - [x] Add production release/bootstrap trust root for join manifests.
 - [x] Add release artifact signature verification primitive.
-- [ ] Add production release key lifecycle policy.
-- [ ] Add platform-native Windows Authenticode verification policy.
+- [x] Add production release key lifecycle policy.
+- [x] Add platform-native Windows Authenticode verification policy.
 - [x] Add real scoped shell adapter execution.
 - [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
 - [x] Add durable shell adapter audit schema and redaction rules.
