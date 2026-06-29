@@ -27,6 +27,7 @@ The project is complete when:
 - Define MCP tool contracts.
 - Draft Agent Skills.
 - Add tests and local CI script.
+- Add GitHub Actions CI for tests, script syntax checks, and release dry-run smoke.
 
 ## Phase 2: Gateway and Ticket MVP
 

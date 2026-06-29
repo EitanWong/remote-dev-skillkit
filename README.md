@@ -95,6 +95,7 @@ Implemented now:
 - Release candidate packaging via `rdev release prepare-candidate`, staging built artifacts, signed manifests, a signed release bundle, a verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Release candidate verification via `rdev release verify-candidate`, checking a staged or downloaded candidate's summary, checksums, signed bundle, manifests, artifacts, Skillkit bundle, required artifacts, and unlisted files.
 - GitHub Release dry-run planning via `scripts/github/plan-release.sh`, producing a local release plan, commands preview, generated release notes, Skillkit tarball, and candidate verification output without mutating GitHub.
+- GitHub Actions CI for tests, vet, shell syntax, release candidate verification, and GitHub Release dry-run planning.
 - Windows bootstrap can hash-pin `rdev-verify.exe` and use it to verify either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host.
 - Host-reported failed jobs with audit events.
 - Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, schema-versioned redacted evidence, and failure artifacts.
@@ -122,6 +123,8 @@ Not implemented yet:
 
 ```bash
 go test ./...
+./scripts/check.sh
+./scripts/ci/release-smoke.sh
 go run ./cmd/rdev version
 go run ./cmd/rdev doctor
 go run ./cmd/rdev ticket create --ttl-seconds 7200 --reason "repair Windows dev environment"

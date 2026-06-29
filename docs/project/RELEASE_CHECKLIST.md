@@ -4,6 +4,9 @@
 
 - [ ] `go test ./...`
 - [ ] `go vet ./...`
+- [ ] `./scripts/check.sh`
+- [ ] `./scripts/ci/release-smoke.sh`
+- [ ] GitHub Actions CI passes for the release commit.
 - [ ] Build binaries for macOS, Linux, and Windows.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.

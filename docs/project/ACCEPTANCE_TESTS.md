@@ -263,6 +263,7 @@ The local test suite currently covers:
 - Release candidate packaging through `rdev release prepare-candidate`, covering staged built artifacts, signed artifact manifests, signed release bundle verification, Skillkit export/verify, checksums, and `rdev.release-candidate.v1` summary generation without publishing to GitHub.
 - release candidate verification through `rdev release verify-candidate`, covering relocated candidates, summary schema, root public key, checksums, signed release bundle verification, required artifacts, Skillkit verification, listed file hashes/sizes, and unlisted-file rejection.
 - GitHub Release dry-run planning through `scripts/github/plan-release.sh`, covering candidate verification, generated release notes, concise asset plan, Skillkit tarball generation, commands preview, and `external_mutation=false`.
+- GitHub Actions CI through `.github/workflows/ci.yml`, covering `./scripts/check.sh` and `./scripts/ci/release-smoke.sh`.
 - structured host-side denial artifacts through `rdev.host-denial.v1`, covering missing envelope, wrong host, identity mismatch, expired/tampered envelopes, replayed nonce, unsupported adapter, missing capability, missing workspace, non-allowlisted command, and workspace escape.
 - CLI host polling reports host-side denials to the dev gateway as failed-job artifacts.
 - development HTTPS long-poll host job transport through `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=...` and `rdev host serve --transport long-poll`.

@@ -25,6 +25,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Before publishing release artifacts or bootstrap download instructions, create and verify a signed release bundle with `rdev release create-bundle ...`, `rdev release verify-bundle --bundle <bundle> --root-public-key <root>`, and standalone `rdev-verify --bundle <bundle> --root-public-key <root>` when target-host bootstrap verification matters.
 - Before publishing a GitHub Release or instructing users to install artifacts, run `rdev release prepare-candidate ...` and then `rdev release verify-candidate --candidate <dir|release-candidate.json>`; treat `ok=false` as release-blocking.
 - Use `scripts/github/plan-release.sh --candidate <dir|release-candidate.json> --repo <owner/repo>` to create a local GitHub Release plan; do not run the generated `gh release` commands without explicit operator approval.
+- For release-surface changes, expect `./scripts/check.sh` and `./scripts/ci/release-smoke.sh` to pass locally and in GitHub Actions before claiming release readiness.
 - For service-backed managed Mac acceptance, first generate and review `rdev acceptance managed-mac-service --out <empty-dir> --gateway <url> --ticket-code <code> --repo <repo>`; it must not auto-run `launchctl`. Use `rdev host service-control --execute` only after reviewing the generated plan.
 - Do not push, merge, deploy, or modify credentials without approval.
 - Return evidence: diff summary, tests run, exit codes, and artifacts.
