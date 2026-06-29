@@ -50,6 +50,22 @@ type LaunchAgentStatus struct {
 	SizeBytes        int64    `json:"size_bytes,omitempty"`
 }
 
+type LaunchAgentControlOptions struct {
+	Action    string
+	Label     string
+	PlistPath string
+	Domain    string
+}
+
+type LaunchAgentControlPlan struct {
+	Action    string   `json:"action"`
+	Label     string   `json:"label"`
+	PlistPath string   `json:"plist_path"`
+	Domain    string   `json:"domain"`
+	Argv      []string `json:"argv"`
+	Shell     string   `json:"shell"`
+}
+
 func NewMacOSLaunchAgent(opts LaunchAgentOptions) (LaunchAgent, error) {
 	if opts.Label == "" {
 		opts.Label = DefaultMacOSLaunchAgentLabel
@@ -106,6 +122,40 @@ func NewMacOSLaunchAgent(opts LaunchAgentOptions) (LaunchAgent, error) {
 		KeepAlive:        true,
 		RunAtLoad:        true,
 	}, nil
+}
+
+func NewMacOSLaunchAgentControlPlan(opts LaunchAgentControlOptions) (LaunchAgentControlPlan, error) {
+	if opts.Label == "" {
+		opts.Label = DefaultMacOSLaunchAgentLabel
+	}
+	if opts.Domain == "" {
+		opts.Domain = "gui/$(id -u)"
+	}
+	switch opts.Action {
+	case "start", "stop":
+		if strings.TrimSpace(opts.PlistPath) == "" {
+			return LaunchAgentControlPlan{}, fmt.Errorf("plist path is required for %s", opts.Action)
+		}
+	case "inspect":
+	default:
+		return LaunchAgentControlPlan{}, fmt.Errorf("unsupported launchctl action %q", opts.Action)
+	}
+	plan := LaunchAgentControlPlan{
+		Action:    opts.Action,
+		Label:     opts.Label,
+		PlistPath: opts.PlistPath,
+		Domain:    opts.Domain,
+	}
+	switch opts.Action {
+	case "start":
+		plan.Argv = []string{"launchctl", "bootstrap", opts.Domain, opts.PlistPath}
+	case "stop":
+		plan.Argv = []string{"launchctl", "bootout", opts.Domain, opts.PlistPath}
+	case "inspect":
+		plan.Argv = []string{"launchctl", "print", opts.Domain + "/" + opts.Label}
+	}
+	plan.Shell = shellCommand(plan.Argv)
+	return plan, nil
 }
 
 func DefaultMacOSLaunchAgentPath(homeDir, label string) string {
@@ -357,4 +407,39 @@ func boolTag(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func shellCommand(argv []string) string {
+	parts := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		parts = append(parts, shellQuote(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if value == "gui/$(id -u)" {
+		return value
+	}
+	if safeShellToken(value) {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func safeShellToken(value string) bool {
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '/', r == '.', r == '_', r == '-', r == ':', r == '$', r == '(', r == ')':
+		default:
+			return false
+		}
+	}
+	return value != ""
 }

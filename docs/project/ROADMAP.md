@@ -76,6 +76,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Managed Mac coding acceptance harness through `rdev acceptance managed-mac`, producing a managed-mode report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification through `rdev acceptance verify`, including evidence bundle checksum validation, artifact index validation, audit-chain verification, approval-gate checks, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning through `rdev acceptance managed-mac-service`, producing a verified plist, launchctl start/inspect/stop commands, service-backed coding acceptance commands, verification command, and safe uninstall guidance without auto-starting launchd.
+- macOS LaunchAgent lifecycle control through `rdev host service-control`, dry-running by default and requiring `--execute` before invoking launchctl start, inspect, or stop.
 - Git diff and test evidence bundles.
 - Shared implicit approval preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell and Codex jobs.
 - Managed install, health, stop, and uninstall commands.

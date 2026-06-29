@@ -64,6 +64,7 @@ Implemented now:
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Host-bound trust bundle update checks for managed host trust-store refresh.
 - macOS LaunchAgent plist generation, status inspection, and safe plist removal via `rdev host install-service`, `rdev host service-status`, and `rdev host uninstall-service`.
+- macOS LaunchAgent dry-run and opt-in lifecycle control via `rdev host service-control --action start|inspect|stop`, with `--execute` required before running `launchctl`.
 - Persistent development gateway signing key files plus host trust pin checks.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
@@ -142,6 +143,7 @@ go run ./cmd/rdev host serve --mode temporary
 go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll --workspace-lock-store .rdev/workspace-locks
 go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --plist-out ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
+go run ./cmd/rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
 ```
 

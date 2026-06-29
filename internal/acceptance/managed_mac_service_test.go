@@ -47,11 +47,11 @@ func TestRunManagedMacServicePlanWritesVerifiedPlist(t *testing.T) {
 	}
 	commands := joinedServiceCommands(plan.Commands)
 	for _, expected := range []string{
-		"launchctl bootstrap",
-		"launchctl print",
+		"rdev host service-control --platform macos --action start",
+		"rdev host service-control --platform macos --action inspect",
 		"rdev acceptance managed-mac",
 		"rdev acceptance verify",
-		"launchctl bootout",
+		"rdev host service-control --platform macos --action stop",
 		"rdev host uninstall-service",
 	} {
 		if !strings.Contains(commands, expected) {

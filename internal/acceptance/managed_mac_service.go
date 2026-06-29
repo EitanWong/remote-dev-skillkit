@@ -240,14 +240,14 @@ func managedMacServiceCommands(opts managedMacServiceResolvedOptions, repoRoot s
 		},
 		{
 			Name:    "start",
-			Purpose: "Load the LaunchAgent for the current GUI user.",
-			Shell:   "launchctl bootstrap gui/$(id -u) " + shellQuote(opts.PlistOut),
+			Purpose: "Load the LaunchAgent for the current GUI user through rdev's explicit service-control command.",
+			Shell:   "rdev host service-control --platform macos --action start --label " + shellQuote(opts.Label) + " --plist " + shellQuote(opts.PlistOut) + " --execute",
 			Manual:  true,
 		},
 		{
 			Name:    "inspect",
-			Purpose: "Confirm launchd knows about the managed host service.",
-			Shell:   "launchctl print gui/$(id -u)/" + shellQuote(opts.Label),
+			Purpose: "Confirm launchd knows about the managed host service through rdev's service-control command.",
+			Shell:   "rdev host service-control --platform macos --action inspect --label " + shellQuote(opts.Label) + " --plist " + shellQuote(opts.PlistOut) + " --execute",
 			Manual:  true,
 		},
 		{
@@ -264,8 +264,8 @@ func managedMacServiceCommands(opts managedMacServiceResolvedOptions, repoRoot s
 		},
 		{
 			Name:    "stop",
-			Purpose: "Stop the LaunchAgent after the service-backed acceptance run.",
-			Shell:   "launchctl bootout gui/$(id -u) " + shellQuote(opts.PlistOut),
+			Purpose: "Stop the LaunchAgent after the service-backed acceptance run through rdev's service-control command.",
+			Shell:   "rdev host service-control --platform macos --action stop --label " + shellQuote(opts.Label) + " --plist " + shellQuote(opts.PlistOut) + " --execute",
 			Manual:  true,
 		},
 		{

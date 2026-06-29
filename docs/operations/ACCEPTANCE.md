@@ -116,17 +116,18 @@ The command writes `service-plan.json` with schema
 - host arguments include `--mode managed`, `--once=false`, transport, identity,
   trust, nonce, approval, and workspace-lock stores;
 - enrollment uses either `--ticket-code` or `--manifest-url`;
-- manual `launchctl bootstrap`, `launchctl print`, `launchctl bootout`, managed
-  coding acceptance, `rdev acceptance verify`, and uninstall commands are present.
+- manual `rdev host service-control --execute` start/inspect/stop commands,
+  managed coding acceptance, `rdev acceptance verify`, and uninstall commands are present.
 
 This command does not execute `launchctl`. It produces the operator-reviewed plan
-for the real LaunchAgent acceptance run.
+for the real LaunchAgent acceptance run. Use `rdev host service-control` without
+`--execute` to preview the launchctl command and with `--execute` to run it.
 
 ## Current Boundary
 
 This harness proves the managed test-process path. It does not yet prove:
 
-- macOS LaunchAgent installed and started with `launchctl` after reviewing the generated plan;
+- macOS LaunchAgent installed and started with `rdev host service-control --execute` after reviewing the generated plan;
 - reconnect after reboot;
 - OS-protected identity/trust storage;
 - real Codex authentication on Eitan's managed Mac;

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -398,6 +399,26 @@ func (a App) host(ctx context.Context, args []string) error {
 			Label:    *label,
 			Plist:    *plistPath,
 		})
+	case "service-control":
+		fs := flag.NewFlagSet("host service-control", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		platform := fs.String("platform", "macos", "service platform: macos")
+		action := fs.String("action", "", "service action: start, stop, or inspect")
+		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
+		domain := fs.String("domain", "gui/$(id -u)", "launchctl domain; default is resolved for --execute")
+		execute := fs.Bool("execute", false, "execute launchctl instead of only printing the planned command")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.hostServiceControl(ctx, hostServiceControlOptions{
+			Platform: *platform,
+			Action:   *action,
+			Label:    *label,
+			Plist:    *plistPath,
+			Domain:   *domain,
+			Execute:  *execute,
+		})
 	case "uninstall-service":
 		fs := flag.NewFlagSet("host uninstall-service", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -463,6 +484,15 @@ type hostServiceOptions struct {
 	Label    string
 	Plist    string
 	Force    bool
+}
+
+type hostServiceControlOptions struct {
+	Platform string
+	Action   string
+	Label    string
+	Plist    string
+	Domain   string
+	Execute  bool
 }
 
 func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
@@ -685,6 +715,148 @@ func (a App) hostServiceStatus(opts hostServiceOptions) error {
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+type launchctlRunResult struct {
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+}
+
+func (a App) hostServiceControl(ctx context.Context, opts hostServiceControlOptions) error {
+	if opts.Platform == "" {
+		opts.Platform = "macos"
+	}
+	if opts.Platform != "macos" {
+		return fmt.Errorf("host service-control currently supports macos only")
+	}
+	if opts.Label == "" {
+		opts.Label = service.DefaultMacOSLaunchAgentLabel
+	}
+	if strings.TrimSpace(opts.Action) == "" {
+		return fmt.Errorf("service action is required")
+	}
+	plistPath, err := servicePlistPath(hostServiceOptions{
+		Platform: opts.Platform,
+		Label:    opts.Label,
+		Plist:    opts.Plist,
+	})
+	if err != nil {
+		return err
+	}
+	status, err := service.InspectMacOSLaunchAgent(plistPath)
+	if err != nil {
+		return err
+	}
+	if opts.Action == "start" || opts.Action == "stop" {
+		if !status.Exists {
+			return fmt.Errorf("plist does not exist: %s", plistPath)
+		}
+	}
+	if status.Exists && status.Label != opts.Label {
+		return fmt.Errorf("refusing service-control for plist label %q; expected %q", status.Label, opts.Label)
+	}
+	domain := opts.Domain
+	if domain == "" {
+		domain = "gui/$(id -u)"
+	}
+	if opts.Execute {
+		domain, err = resolveLaunchctlDomain(ctx, domain)
+		if err != nil {
+			return err
+		}
+	}
+	plan, err := service.NewMacOSLaunchAgentControlPlan(service.LaunchAgentControlOptions{
+		Action:    opts.Action,
+		Label:     opts.Label,
+		PlistPath: plistPath,
+		Domain:    domain,
+	})
+	if err != nil {
+		return err
+	}
+	var result *launchctlRunResult
+	if opts.Execute {
+		runResult, err := runLaunchctl(ctx, plan.Argv)
+		result = &runResult
+		payload := map[string]any{
+			"ok":       err == nil,
+			"platform": opts.Platform,
+			"label":    opts.Label,
+			"plist":    plistPath,
+			"execute":  true,
+			"status":   status,
+			"command":  plan,
+			"result":   result,
+			"note":     "launchctl was executed because --execute was set",
+		}
+		enc := json.NewEncoder(a.Stdout)
+		enc.SetIndent("", "  ")
+		if encodeErr := enc.Encode(payload); encodeErr != nil {
+			return encodeErr
+		}
+		return err
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"platform": opts.Platform,
+		"label":    opts.Label,
+		"plist":    plistPath,
+		"execute":  false,
+		"status":   status,
+		"command":  plan,
+		"note":     "dry-run only; add --execute to run launchctl",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func resolveLaunchctlDomain(ctx context.Context, domain string) (string, error) {
+	if domain != "gui/$(id -u)" {
+		return domain, nil
+	}
+	cmd := exec.CommandContext(ctx, "id", "-u")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("resolve launchctl domain uid: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	uid := strings.TrimSpace(stdout.String())
+	if uid == "" {
+		return "", fmt.Errorf("resolve launchctl domain uid: empty uid")
+	}
+	return "gui/" + uid, nil
+}
+
+func runLaunchctl(ctx context.Context, argv []string) (launchctlRunResult, error) {
+	if len(argv) == 0 {
+		return launchctlRunResult{ExitCode: -1}, fmt.Errorf("launchctl argv is required")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	result := launchctlRunResult{
+		ExitCode: processExitCode(err),
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+	}
+	return result, err
+}
+
+func processExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 func (a App) hostUninstallService(opts hostServiceOptions) error {
@@ -1441,6 +1613,7 @@ Usage:
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
+  rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
   rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
 `))
 }

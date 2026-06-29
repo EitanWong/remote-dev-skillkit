@@ -200,6 +200,77 @@ func TestHostServiceStatusReadsMacOSLaunchAgentPlist(t *testing.T) {
 	}
 }
 
+func TestHostServiceControlDryRunPlansLaunchctl(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--plist-out", plistPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	controlApp := NewApp(&stdout, &bytes.Buffer{})
+	if err := controlApp.Run(context.Background(), []string{
+		"host", "service-control",
+		"--platform", "macos",
+		"--action", "start",
+		"--label", "com.example.rdev-host",
+		"--plist", plistPath,
+		"--domain", "gui/501",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"execute": false`,
+		`"action": "start"`,
+		`"launchctl"`,
+		`"bootstrap"`,
+		`"gui/501"`,
+		`dry-run only`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected service-control output to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
+func TestHostServiceControlRejectsLabelMismatch(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.other.rdev-host.plist")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "macos",
+		"--label", "com.other.rdev-host",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--plist-out", plistPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := app.Run(context.Background(), []string{
+		"host", "service-control",
+		"--platform", "macos",
+		"--action", "start",
+		"--label", "com.example.rdev-host",
+		"--plist", plistPath,
+	})
+	if err == nil {
+		t.Fatal("expected label mismatch to fail")
+	}
+	if !strings.Contains(err.Error(), "refusing service-control") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHostUninstallServiceRemovesMacOSLaunchAgentPlist(t *testing.T) {
 	dir := t.TempDir()
 	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
@@ -1989,8 +2060,8 @@ func TestAcceptanceManagedMacServicePlan(t *testing.T) {
 		}
 	}
 	commands := stdout.String()
-	if !strings.Contains(commands, "launchctl bootstrap") || !strings.Contains(commands, "rdev acceptance verify") {
-		t.Fatalf("expected launchctl and verification commands, got %s", commands)
+	if !strings.Contains(commands, "rdev host service-control") || !strings.Contains(commands, "rdev acceptance verify") {
+		t.Fatalf("expected service-control and verification commands, got %s", commands)
 	}
 }
 

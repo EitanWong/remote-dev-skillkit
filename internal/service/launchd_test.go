@@ -131,6 +131,38 @@ func TestInspectMacOSLaunchAgentReadsRenderedPlist(t *testing.T) {
 	}
 }
 
+func TestNewMacOSLaunchAgentControlPlan(t *testing.T) {
+	start, err := NewMacOSLaunchAgentControlPlan(LaunchAgentControlOptions{
+		Action:    "start",
+		Label:     "com.example.rdev-host",
+		PlistPath: "/Users/eitan/Library/LaunchAgents/com.example.rdev-host.plist",
+		Domain:    "gui/501",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(start.Argv, " ") != "launchctl bootstrap gui/501 /Users/eitan/Library/LaunchAgents/com.example.rdev-host.plist" {
+		t.Fatalf("unexpected start argv %#v", start.Argv)
+	}
+	if !strings.Contains(start.Shell, "launchctl bootstrap gui/501") {
+		t.Fatalf("unexpected shell command %q", start.Shell)
+	}
+	inspect, err := NewMacOSLaunchAgentControlPlan(LaunchAgentControlOptions{
+		Action: "inspect",
+		Label:  "com.example.rdev-host",
+		Domain: "gui/501",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(inspect.Argv, " ") != "launchctl print gui/501/com.example.rdev-host" {
+		t.Fatalf("unexpected inspect argv %#v", inspect.Argv)
+	}
+	if _, err := NewMacOSLaunchAgentControlPlan(LaunchAgentControlOptions{Action: "restart"}); err == nil {
+		t.Fatal("expected unsupported action to fail")
+	}
+}
+
 func TestNewMacOSLaunchAgentRejectsUnsafeOptions(t *testing.T) {
 	_, err := NewMacOSLaunchAgent(LaunchAgentOptions{
 		Label:      "bad label",
