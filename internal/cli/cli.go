@@ -1844,6 +1844,28 @@ func (a App) adapter(args []string) error {
 			RequireRedaction:         *requireRedaction,
 			RejectUnredactedPatterns: *rejectSecrets,
 		})
+	case "verify-runtime":
+		fs := flag.NewFlagSet("adapter verify-runtime", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		artifact := fs.String("artifact", "", "adapter runtime fixture JSON path, or - for stdin")
+		adapterName := fs.String("adapter", "", "expected adapter name")
+		requiredPhases := fs.String("required-phases", "detect,plan,prepare,run,collect,cleanup", "comma-separated required runtime phases")
+		requireSuccessful := fs.Bool("require-successful", true, "require each required phase to have ok=true")
+		requireCleanup := fs.Bool("require-cleanup", true, "require cleanup_attempted and cleanup_ok")
+		requireResultArtifact := fs.Bool("require-result-artifact", false, "require result_artifact_schema and result_artifact")
+		requireCancellation := fs.Bool("require-cancellation", false, "require canceled=true, timed_out=false, and cleanup after cancel")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.adapterVerifyRuntime(adapterVerifyRuntimeOptions{
+			ArtifactPath:          *artifact,
+			Adapter:               *adapterName,
+			RequiredPhases:        splitCapabilities(*requiredPhases),
+			RequireSuccessful:     *requireSuccessful,
+			RequireCleanup:        *requireCleanup,
+			RequireResultArtifact: *requireResultArtifact,
+			RequireCancellation:   *requireCancellation,
+		})
 	default:
 		return fmt.Errorf("unknown adapter subcommand %q", args[0])
 	}
@@ -1887,6 +1909,16 @@ type adapterVerifyCancellationOptions struct {
 	RequireTiming            bool
 	RequireRedaction         bool
 	RejectUnredactedPatterns bool
+}
+
+type adapterVerifyRuntimeOptions struct {
+	ArtifactPath          string
+	Adapter               string
+	RequiredPhases        []string
+	RequireSuccessful     bool
+	RequireCleanup        bool
+	RequireResultArtifact bool
+	RequireCancellation   bool
 }
 
 type adapterLifecycleManifest struct {
@@ -2548,6 +2580,42 @@ func (a App) adapterVerifyCancellation(opts adapterVerifyCancellationOptions) er
 	}
 	if !report.OK {
 		return fmt.Errorf("adapter cancellation conformance failed")
+	}
+	return nil
+}
+
+func (a App) adapterVerifyRuntime(opts adapterVerifyRuntimeOptions) error {
+	if strings.TrimSpace(opts.ArtifactPath) == "" {
+		return fmt.Errorf("artifact is required")
+	}
+	if strings.TrimSpace(opts.Adapter) == "" {
+		return fmt.Errorf("adapter is required")
+	}
+	var content []byte
+	var err error
+	if opts.ArtifactPath == "-" {
+		content, err = io.ReadAll(os.Stdin)
+	} else {
+		content, err = os.ReadFile(opts.ArtifactPath)
+	}
+	if err != nil {
+		return err
+	}
+	report := adapterkit.VerifyRuntimeFixtureJSON(content, adapterkit.RuntimeFixtureContract{
+		Adapter:               opts.Adapter,
+		RequiredPhases:        opts.RequiredPhases,
+		RequireSuccessful:     opts.RequireSuccessful,
+		RequireCleanup:        opts.RequireCleanup,
+		RequireResultArtifact: opts.RequireResultArtifact,
+		RequireCancellation:   opts.RequireCancellation,
+	})
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(report); err != nil {
+		return err
+	}
+	if !report.OK {
+		return fmt.Errorf("adapter runtime conformance failed")
 	}
 	return nil
 }
@@ -3236,6 +3304,7 @@ Usage:
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
   rdev adapter verify-cancellation --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
+  rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
   rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
   rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
   rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"

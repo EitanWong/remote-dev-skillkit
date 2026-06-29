@@ -72,6 +72,7 @@
 - [x] Add adapter lifecycle manifest conformance through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
 - [x] Add `rdev adapter scaffold` for copyable third-party adapter lifecycle manifest templates.
 - [x] Add adapter cancellation artifact conformance through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
+- [x] Add first runtime Adapter SDK lifecycle runner and runtime fixture verifier through `adapterkit.RunLifecycle`, `rdev adapter verify-runtime`, and MCP tool `rdev.adapter.verify_runtime`.
 
 ## Next
 
@@ -160,7 +161,7 @@
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
-- [ ] Add full runtime adapter SDK and executable lifecycle/cancellation fixtures beyond artifact conformance.
+- [ ] Add full production Adapter SDK integration for hostrunner adapters beyond the first public runtime lifecycle runner and fixture verifier.
 
 ## Final End-State Gates
 
@@ -195,6 +196,7 @@
 - [x] Adapter lifecycle manifests can be verified through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
 - [x] Third-party adapter authors can scaffold a lifecycle manifest and verify it before runtime integration.
 - [x] Adapter cancellation artifacts can be verified through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
+- [x] Adapter runtime lifecycle fixtures can be generated through `adapterkit.RunLifecycle` and verified through `pkg/adapterkit`, `rdev adapter verify-runtime`, and MCP tool `rdev.adapter.verify_runtime`.
 
 ## Definition Of Done For v0.1.0
 

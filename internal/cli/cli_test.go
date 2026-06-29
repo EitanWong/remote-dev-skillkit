@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2428,6 +2429,50 @@ func TestAdapterVerifyCancellationRejectsTimeoutArtifact(t *testing.T) {
 	}
 }
 
+func TestAdapterVerifyRuntimeAcceptsRuntimeFixture(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "adapter-runtime-fixture.json")
+	if err := os.WriteFile(artifactPath, []byte(runtimeFixtureJSON("fake", true)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	if err := app.Run(context.Background(), []string{
+		"adapter", "verify-runtime",
+		"--artifact", artifactPath,
+		"--adapter", "fake",
+		"--require-result-artifact",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) || !strings.Contains(stdout.String(), "result_artifact_object") {
+		t.Fatalf("expected runtime conformance success, got %s", stdout.String())
+	}
+}
+
+func TestAdapterVerifyRuntimeRejectsMissingCleanup(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "adapter-runtime-fixture.json")
+	if err := os.WriteFile(artifactPath, []byte(runtimeFixtureJSON("fake", false)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"adapter", "verify-runtime",
+		"--artifact", artifactPath,
+		"--adapter", "fake",
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime conformance failed") {
+		t.Fatalf("expected runtime conformance failure, got %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": false`) || !strings.Contains(stdout.String(), "cleanup_attempted") {
+		t.Fatalf("expected structured runtime failure, got %s", stdout.String())
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")
@@ -2474,6 +2519,40 @@ func TestReleaseSignAndVerify(t *testing.T) {
 	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
 		t.Fatalf("expected ok verification, got %q", verifyStdout.String())
 	}
+}
+
+func runtimeFixtureJSON(adapter string, cleanup bool) string {
+	cleanupAttempted := "false"
+	cleanupOK := "false"
+	cleanupPhase := ""
+	if cleanup {
+		cleanupAttempted = "true"
+		cleanupOK = "true"
+		cleanupPhase = `,
+    {"phase": "cleanup", "ok": true, "evidence": ["cleanup"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0}`
+	}
+	return fmt.Sprintf(`{
+  "schema_version": "rdev.adapter-runtime-fixture.v1",
+  "adapter": %q,
+  "job_id": "job_123",
+  "workspace_root": "/tmp/repo",
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "canceled": false,
+  "timed_out": false,
+  "cleanup_attempted": %s,
+  "cleanup_ok": %s,
+  "result_artifact_schema": "rdev.fake-result.v1",
+  "result_artifact": {"schema_version": "rdev.fake-result.v1", "adapter": "fake", "workspace_root": "/tmp/repo"},
+  "phases": [
+    {"phase": "detect", "ok": true, "evidence": ["version"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "plan", "ok": true, "evidence": ["commands"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "prepare", "ok": true, "evidence": ["workspace"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "run", "ok": true, "evidence": ["process"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "collect", "ok": true, "evidence": ["result"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0}%s
+  ]
+}`, adapter, cleanupAttempted, cleanupOK, cleanupPhase)
 }
 
 func TestReleaseVerifyRejectsTamperedArtifact(t *testing.T) {

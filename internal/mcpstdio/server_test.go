@@ -254,6 +254,49 @@ func TestServerToolCallVerifyAdapterCancellation(t *testing.T) {
 	}
 }
 
+func TestServerToolCallVerifyAdapterRuntime(t *testing.T) {
+	fixture := `{
+  "schema_version": "rdev.adapter-runtime-fixture.v1",
+  "adapter": "fake",
+  "job_id": "job_123",
+  "workspace_root": "/tmp/repo",
+  "started_at": "2026-06-30T00:00:00Z",
+  "ended_at": "2026-06-30T00:00:01Z",
+  "duration_millis": 1000,
+  "canceled": false,
+  "timed_out": false,
+  "cleanup_attempted": true,
+  "cleanup_ok": true,
+  "result_artifact_schema": "rdev.fake-result.v1",
+  "result_artifact": {"schema_version": "rdev.fake-result.v1", "adapter": "fake", "workspace_root": "/tmp/repo"},
+  "phases": [
+    {"phase": "detect", "ok": true, "evidence": ["version"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "plan", "ok": true, "evidence": ["commands"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "prepare", "ok": true, "evidence": ["workspace"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "run", "ok": true, "evidence": ["process"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "collect", "ok": true, "evidence": ["result"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0},
+    {"phase": "cleanup", "ok": true, "evidence": ["cleanup"], "started_at": "2026-06-30T00:00:00Z", "ended_at": "2026-06-30T00:00:00Z", "duration_millis": 0}
+  ]
+}`
+	input := mcpRequestLine(t, "rdev.adapter.verify_runtime", map[string]any{
+		"adapter":                 "fake",
+		"artifact_json":           fixture,
+		"require_result_artifact": true,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.adapter-conformance-report.v1" || structured["artifact_schema"] != "rdev.adapter-runtime-fixture.v1" || structured["ok"] != true {
+		t.Fatalf("expected adapter runtime conformance success, got %#v", structured)
+	}
+}
+
 func mcpRequestLine(t *testing.T, tool string, arguments map[string]any) string {
 	t.Helper()
 	content, err := json.Marshal(map[string]any{

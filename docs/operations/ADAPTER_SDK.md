@@ -9,6 +9,55 @@ The adapter SDK starts with three stable rules:
 
 `pkg/adapterkit` provides the first public contracts for those rules.
 
+## Runtime Lifecycle Runner
+
+Use `adapterkit.RunLifecycle` when building or testing a runtime adapter. It
+executes the public lifecycle in order:
+
+```text
+detect -> plan -> prepare -> run -> collect -> cleanup
+```
+
+The runner returns `rdev.adapter-runtime-fixture.v1`, a machine-readable record
+of phase order, phase evidence, timing, cancellation/timeout state, cleanup, and
+the collected result artifact.
+
+```go
+fixture, err := adapterkit.RunLifecycle(ctx, adapter, adapterkit.RuntimeRequest{
+    Adapter:       "my-adapter",
+    JobID:         "job_123",
+    WorkspaceRoot: "/repo",
+    Intent:        "run adapter acceptance",
+})
+content, _ := fixture.JSON()
+report := adapterkit.VerifyRuntimeFixtureJSON(content, adapterkit.RuntimeFixtureContract{
+    Adapter:               "my-adapter",
+    RequireSuccessful:     true,
+    RequireCleanup:        true,
+    RequireResultArtifact: true,
+})
+if err != nil || !report.OK {
+    t.Fatalf("runtime adapter failed lifecycle: err=%v report=%#v", err, report)
+}
+```
+
+If `run` or another post-prepare phase fails with `context.Canceled`, the
+fixture records `canceled=true`, `timed_out=false`, and still runs `cleanup`
+with an independent cleanup context. This lets adapter authors prove
+cleanup-on-cancel behavior without relying on narration.
+
+Agents and CI can verify a saved fixture through the CLI:
+
+```bash
+rdev adapter verify-runtime \
+  --artifact adapter-runtime-fixture.json \
+  --adapter claude-code \
+  --require-result-artifact
+```
+
+MCP clients can call `rdev.adapter.verify_runtime` with `artifact_json` or
+`artifact_id`. The verifier returns `rdev.adapter-conformance-report.v1`.
+
 ## Lifecycle Manifest Conformance
 
 Use `adapterkit.VerifyLifecycleManifestJSON` before treating a new adapter as a
@@ -193,10 +242,10 @@ verifiers.
 
 ## Current Scope
 
-Lifecycle manifest, result artifact, and cancellation artifact conformance are
-not the full runtime Adapter SDK yet. Adapter authors still implement their
-detect, plan, prepare, run, collect, and cleanup phases behind the host runner
-and policy engine. The current package is the shared conformance layer for
-lifecycle declarations, result evidence, and cancellation evidence. Built-in
-shell, PowerShell, and Codex tests use these checks as fixtures for future
-third-party adapters.
+The current runtime lifecycle runner is the first executable SDK slice, not the
+complete production Adapter SDK. Adapter authors still need hostrunner
+integration, policy planning, workspace/session preparation, and adapter-specific
+execution wrappers. The current package provides shared runtime fixture
+generation plus conformance layers for lifecycle declarations, runtime fixtures,
+result evidence, and cancellation evidence. Built-in shell, PowerShell, and
+Codex tests use these checks as fixtures for future third-party adapters.

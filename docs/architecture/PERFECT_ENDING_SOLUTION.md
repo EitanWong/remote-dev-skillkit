@@ -206,9 +206,10 @@ changes.
 
 ### Adapter Lifecycle Contract
 
-The lifecycle-manifest and result-artifact verifiers are the first public
-Adapter SDK slices. The final runtime SDK must extend those into executable
-lifecycle fixtures:
+The lifecycle-manifest, runtime-fixture, result-artifact, and cancellation
+verifiers are the first public Adapter SDK slices. `adapterkit.RunLifecycle` is
+the first executable lifecycle runner. The final production SDK must extend
+those into hostrunner-integrated adapter wrappers:
 
 | Phase | Adapter must provide | Kernel must enforce |
 |---|---|---|
@@ -1416,19 +1417,23 @@ cleanup(job, result) -> cleanup_status
 
 The first public SDK slices are already narrower and intentionally boring:
 `pkg/adapterkit`, `rdev adapter scaffold`, `rdev adapter verify-lifecycle`,
-`rdev adapter verify-result`, `rdev adapter verify-cancellation`, and MCP tools
-`rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_result` /
-`rdev.adapter.verify_cancellation` generate and verify lifecycle manifests,
-result-artifact JSON, and cancellation evidence. Lifecycle conformance checks
-required phases, safety boundaries, cancellation, cleanup, and result schema
-declarations. Result conformance checks adapter/schema identity, timing,
-redaction metadata, command evidence, cancellation/timeout exclusivity, and
-common secret-pattern rejection. Cancellation conformance first runs result
-checks, then requires canceled command evidence to prove `canceled=true`,
-`timed_out=false`, an `exit_code`, and `output_truncated` metadata. Shell,
-PowerShell, and Codex use the shared result and cancellation verifiers in tests,
-so third-party adapter authors have concrete declaration and evidence contracts
-before the full runtime lifecycle interface is extracted.
+`rdev adapter verify-result`, `rdev adapter verify-cancellation`,
+`rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_lifecycle` /
+`rdev.adapter.verify_result` / `rdev.adapter.verify_cancellation` /
+`rdev.adapter.verify_runtime` generate and verify lifecycle manifests,
+runtime-fixture JSON, result-artifact JSON, and cancellation evidence.
+Lifecycle conformance checks required phases, safety boundaries, cancellation,
+cleanup, and result schema declarations. Runtime fixture conformance checks
+actual phase order, phase evidence, timing, cleanup, optional collected result
+artifacts, and optional cancellation behavior. Result conformance checks
+adapter/schema identity, timing, redaction metadata, command evidence,
+cancellation/timeout exclusivity, and common secret-pattern rejection.
+Cancellation conformance first runs result checks, then requires canceled
+command evidence to prove `canceled=true`, `timed_out=false`, an `exit_code`,
+and `output_truncated` metadata. Shell, PowerShell, and Codex use the shared
+result and cancellation verifiers in tests, so third-party adapter authors have
+concrete declaration and evidence contracts before full production hostrunner
+integration is extracted.
 
 Conformance tests must prove:
 
@@ -1638,7 +1643,7 @@ the remaining gaps that matter before public confidence:
 | Real managed Mac service run | LaunchAgent planning/control exists; durable reconnect must be proven outside a dry-run | service-backed run survives logout/reboot, completes Codex job, verifies evidence, stops and uninstalls |
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
-| Adapter SDK extraction | lifecycle-manifest, result-artifact, and cancellation-artifact conformance exist, but adapters are still mostly internal runtime implementations | full runtime SDK, executable lifecycle/cancellation fixtures, and docs for Codex, Claude Code, ACP, shell, PowerShell |
+| Adapter SDK extraction | lifecycle-manifest, runtime-fixture, result-artifact, and cancellation-artifact conformance exist, and `adapterkit.RunLifecycle` provides the first executable lifecycle runner; adapters are still mostly internal hostrunner implementations | full production SDK integration, executable lifecycle/cancellation fixtures, and docs for Codex, Claude Code, ACP, shell, PowerShell |
 | Multi-platform release UX | aggregate dry-run plan, platform archives, index, and install guide exist; public release still needs real download verification after publication | verified public download commands and post-release install transcript |
 | Public release execution | real build artifacts, release candidates, and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 

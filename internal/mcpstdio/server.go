@@ -152,6 +152,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.verifyAdapterLifecycle(params.Arguments)
 	case "rdev.adapter.verify_cancellation":
 		data, err = s.verifyAdapterCancellation(params.Arguments)
+	case "rdev.adapter.verify_runtime":
+		data, err = s.verifyAdapterRuntime(params.Arguments)
 	default:
 		err = fmt.Errorf("unknown tool %q", params.Name)
 	}
@@ -343,6 +345,28 @@ func (s Server) verifyAdapterCancellation(args map[string]any) (any, error) {
 		RequireTiming:           boolArg(args, "require_timing", true),
 		RequireRedaction:        boolArg(args, "require_redaction", true),
 		RejectUnredactedSecrets: boolArg(args, "reject_secret_patterns", true),
+	}), nil
+}
+
+func (s Server) verifyAdapterRuntime(args map[string]any) (any, error) {
+	artifactJSON := stringArg(args, "artifact_json", "")
+	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
+		artifact, err := s.Gateway.Artifact(artifactID)
+		if err != nil {
+			return nil, err
+		}
+		artifactJSON = artifact.Content
+	}
+	if artifactJSON == "" {
+		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+	}
+	return adapterkit.VerifyRuntimeFixtureJSON([]byte(artifactJSON), adapterkit.RuntimeFixtureContract{
+		Adapter:               requiredString(args, "adapter"),
+		RequiredPhases:        stringSliceArg(args, "required_phases"),
+		RequireSuccessful:     boolArg(args, "require_successful", true),
+		RequireCleanup:        boolArg(args, "require_cleanup", true),
+		RequireResultArtifact: boolArg(args, "require_result_artifact", false),
+		RequireCancellation:   boolArg(args, "require_cancellation", false),
 	}), nil
 }
 
