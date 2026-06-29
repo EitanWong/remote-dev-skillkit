@@ -71,7 +71,7 @@ Implemented now:
 - Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
 - Local evidence bundle export via `rdev evidence export`.
 - Gateway-backed evidence bundle export from a job id via `rdev evidence export --gateway ... --job-id ...`.
-- Skillkit bundle export via `rdev skillkit export` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
+- Skillkit bundle export and verification via `rdev skillkit export` / `rdev skillkit verify` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Managed Mac coding acceptance harness via `rdev acceptance managed-mac`, producing a report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification via `rdev acceptance verify --report ...`, including evidence manifest checksums, artifact index validation, audit-chain verification, approval-gate evidence, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning via `rdev acceptance managed-mac-service`, producing a checked plist, service plan, launchctl commands, service-backed acceptance commands, and uninstall steps without auto-starting launchd.
@@ -133,6 +133,7 @@ go run ./cmd/rdev audit verify --input .rdev/audit/audit-chain.json
 go run ./cmd/rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl .rdev/audit/events.jsonl --out job_evidence
 go run ./cmd/rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
 go run ./cmd/rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
+go run ./cmd/rdev skillkit verify --bundle dist/remote-dev-skillkit
 go run ./cmd/rdev acceptance managed-mac --out .rdev/acceptance/managed-mac --repo .
 go run ./cmd/rdev acceptance managed-mac-service --out .rdev/acceptance/managed-mac-service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
 go run ./cmd/rdev acceptance windows-temporary --out .rdev/acceptance/windows-temporary --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example.com/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example.com/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example.com/rdev-verify.exe --verifier-sha256 <sha256>

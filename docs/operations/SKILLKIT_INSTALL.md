@@ -9,6 +9,9 @@ rdev skillkit export \
   --source-root . \
   --out dist/remote-dev-skillkit \
   --gateway-url https://api.example.com/v1
+
+rdev skillkit verify \
+  --bundle dist/remote-dev-skillkit
 ```
 
 The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
@@ -19,17 +22,23 @@ The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
 - `INSTALL.md` with generic install steps;
 - `frameworks/` with notes for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 
+Verification emits schema `rdev.skillkit-bundle-verification.v1` and checks the
+manifest schema, required skills, required framework notes, safe relative paths,
+listed file SHA-256/size, and absence of unlisted bundle files. Do not install a
+bundle into any agent runtime until verification returns `ok=true`.
+
 ## Generic Agent Runtime
 
 1. Install or build the `rdev` binary.
-2. Copy `skills/*` into the agent runtime's skill or instruction directory.
-3. Configure MCP stdio with `rdev mcp serve`, or configure MCP HTTP/API against the deployed gateway.
-4. Keep these skills installed together:
+2. Verify the exported or downloaded bundle with `rdev skillkit verify --bundle <bundle-dir>`.
+3. Copy `skills/*` into the agent runtime's skill or instruction directory.
+4. Configure MCP stdio with `rdev mcp serve`, or configure MCP HTTP/API against the deployed gateway.
+5. Keep these skills installed together:
    - `safe-remote-support`;
    - `host-triage`;
    - `remote-vibe-coding`;
    - `remote-job-review`.
-5. Require the agent to export or read a `rdev.evidence-bundle.v1` bundle before claiming remote work is complete.
+6. Require the agent to export or read a `rdev.evidence-bundle.v1` bundle before claiming remote work is complete.
 
 ## Framework Notes
 

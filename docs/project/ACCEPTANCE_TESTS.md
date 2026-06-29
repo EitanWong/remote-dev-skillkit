@@ -259,7 +259,7 @@ The local test suite currently covers:
 - hash-chained audit export and verification through `rdev audit export` / `rdev audit verify`.
 - local evidence bundle export through `rdev evidence export`, including manifest, checksums, signed envelope, policy decision, artifacts, audit slice, and audit chain.
 - gateway/API evidence bundle export from job ids through `GET /v1/jobs/{job_id}/evidence-bundle` and `rdev evidence export --gateway ... --job-id ...`.
-- Skillkit bundle export through `rdev skillkit export`, including manifest checksums, skills, MCP contracts, and framework install notes.
+- Skillkit bundle export and verification through `rdev skillkit export` and `rdev skillkit verify`, including manifest checksums, required skills, MCP contracts, framework install notes, safe bundle paths, listed file SHA-256/size checks, and unlisted-file detection.
 - structured host-side denial artifacts through `rdev.host-denial.v1`, covering missing envelope, wrong host, identity mismatch, expired/tampered envelopes, replayed nonce, unsupported adapter, missing capability, missing workspace, non-allowlisted command, and workspace escape.
 - CLI host polling reports host-side denials to the dev gateway as failed-job artifacts.
 - development HTTPS long-poll host job transport through `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=...` and `rdev host serve --transport long-poll`.

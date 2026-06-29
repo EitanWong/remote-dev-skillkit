@@ -1729,6 +1729,47 @@ func TestSkillkitExportWritesInstallBundle(t *testing.T) {
 	}
 }
 
+func TestSkillkitVerifyChecksInstallBundle(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "skillkit")
+	exportApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := exportApp.Run(context.Background(), []string{
+		"skillkit", "export",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", out,
+		"--gateway-url", "https://api.example.com/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"skillkit", "verify",
+		"--bundle", out,
+	}); err != nil {
+		t.Fatalf("expected verify to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) || !strings.Contains(verifyStdout.String(), `"schema": "rdev.skillkit-bundle-verification.v1"`) {
+		t.Fatalf("expected skillkit verification output, got %s", verifyStdout.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(out, "skills", "host-triage", "SKILL.md"), []byte("tampered\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var tamperedStdout bytes.Buffer
+	tamperedApp := NewApp(&tamperedStdout, &bytes.Buffer{})
+	err := tamperedApp.Run(context.Background(), []string{
+		"skillkit", "verify",
+		"--bundle", out,
+	})
+	if err == nil {
+		t.Fatalf("expected tampered bundle verification to fail: %s", tamperedStdout.String())
+	}
+	if !strings.Contains(tamperedStdout.String(), `"ok": false`) || !strings.Contains(tamperedStdout.String(), "listed_files_sha256_match") {
+		t.Fatalf("expected structured tamper failure, got %s", tamperedStdout.String())
+	}
+}
+
 func TestReleaseSignAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "rdev-host.exe")

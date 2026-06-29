@@ -83,6 +83,80 @@ func TestExportRejectsNonEmptyOutputDirectory(t *testing.T) {
 	}
 }
 
+func TestVerifyAcceptsExportedBundle(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     out,
+		GatewayURL: "https://api.example.com/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Verify(VerifyOptions{BundleDir: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK() {
+		t.Fatalf("expected exported bundle to verify: %#v", report.Checks)
+	}
+	if report.SchemaVersion != VerificationSchemaVersion {
+		t.Fatalf("unexpected schema %q", report.SchemaVersion)
+	}
+	if report.FilesVerified == 0 {
+		t.Fatalf("expected verified files")
+	}
+}
+
+func TestVerifyRejectsTamperedBundleFile(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     out,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(out, "skills", "remote-vibe-coding", "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("tampered\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Verify(VerifyOptions{BundleDir: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK() {
+		t.Fatalf("expected tampered bundle verification to fail")
+	}
+	if !checkDetailContains(report.Checks, "listed_files_sha256_match", "skills/remote-vibe-coding/SKILL.md") {
+		t.Fatalf("expected sha256 failure for tampered skill: %#v", report.Checks)
+	}
+}
+
+func TestVerifyRejectsUnlistedBundleFile(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     out,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "surprise.txt"), []byte("not in manifest\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Verify(VerifyOptions{BundleDir: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK() {
+		t.Fatalf("expected unlisted bundle file verification to fail")
+	}
+	if !checkDetailContains(report.Checks, "bundle_has_no_unlisted_files", "surprise.txt") {
+		t.Fatalf("expected unlisted file failure: %#v", report.Checks)
+	}
+}
+
 func hasSkill(manifest Manifest, name string) bool {
 	for _, skill := range manifest.Skills {
 		if skill.Name == name {
@@ -108,4 +182,13 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(content)
+}
+
+func checkDetailContains(checks []VerificationCheck, name, value string) bool {
+	for _, check := range checks {
+		if check.Name == name && strings.Contains(check.Detail, value) {
+			return true
+		}
+	}
+	return false
 }

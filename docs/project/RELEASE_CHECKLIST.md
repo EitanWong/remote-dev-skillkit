@@ -8,6 +8,7 @@
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.
+- [ ] Export and verify the Skillkit bundle with `rdev skillkit export` and `rdev skillkit verify`.
 - [ ] Create signed release bundle index with `rdev release create-bundle`.
 - [ ] Verify signed release bundle index with `rdev release verify-bundle`.
 - [ ] Verify the same signed bundle with standalone `rdev-verify --bundle`.

@@ -1329,6 +1329,14 @@ func (a App) skillkit(args []string) error {
 			return err
 		}
 		return a.skillkitExport(*sourceRoot, *out, *gatewayURL)
+	case "verify":
+		fs := flag.NewFlagSet("skillkit verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		bundle := fs.String("bundle", "", "skillkit bundle directory containing manifest.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.skillkitVerify(*bundle)
 	default:
 		return fmt.Errorf("unknown skillkit subcommand %q", args[0])
 	}
@@ -1792,6 +1800,37 @@ func (a App) skillkitExport(sourceRoot, outPath, gatewayURL string) error {
 	return enc.Encode(payload)
 }
 
+func (a App) skillkitVerify(bundleDir string) error {
+	if bundleDir == "" {
+		return fmt.Errorf("bundle is required")
+	}
+	report, err := skillkit.Verify(skillkit.VerifyOptions{BundleDir: bundleDir})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  report.OK(),
+		"schema":              report.SchemaVersion,
+		"bundle":              report.BundleDir,
+		"manifest":            report.ManifestPath,
+		"manifest_schema":     report.ManifestSchema,
+		"checks":              report.Checks,
+		"files_verified":      report.FilesVerified,
+		"skills_verified":     report.SkillsVerified,
+		"frameworks_verified": report.FrameworksVerified,
+		"recommended_actions": report.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !report.OK() {
+		return fmt.Errorf("skillkit bundle verification failed")
+	}
+	return nil
+}
+
 func (a App) workspaceLock(opts workspace.LockOptions) error {
 	lock, err := workspace.NewFileLockStore(opts.StoreDir).Acquire(opts, time.Now())
 	if err != nil {
@@ -1867,6 +1906,7 @@ Usage:
   rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence
   rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
   rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
+  rdev skillkit verify --bundle dist/remote-dev-skillkit
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev acceptance managed-mac --out acceptance-run --repo .

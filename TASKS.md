@@ -51,6 +51,7 @@
 - [x] Refresh GitHub project management with current milestones, seed backlog, dry-run bootstrap, and issue/PR templates.
 - [x] Add development HTTPS long-poll host job transport prototype.
 - [x] Add portable agent Skillkit bundle export for mainstream frameworks.
+- [x] Add Skillkit bundle verification for mainstream framework installation.
 
 ## Next
 
@@ -90,6 +91,7 @@
 - [x] Add gateway/API evidence bundle export directly from job ids.
 - [x] Add HTTPS long-poll fallback before WSS/mTLS transport.
 - [x] Add installable Skillkit bundle generation with manifest checksums and framework notes.
+- [x] Add installable Skillkit bundle verification for required skills, framework docs, file checksums, safe paths, and unlisted files.
 - [x] Add host-bound managed trust bundle update checks for trust-store refresh.
 - [x] Add macOS LaunchAgent plist generation for explicit managed host install.
 - [x] Add macOS LaunchAgent status inspection and safe plist uninstall.
@@ -144,6 +146,7 @@
 - [x] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.
 - [x] Agent Skillkit can be exported as a checksummed bundle for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
+- [x] Agent Skillkit bundles can be independently verified before installation into Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
 - [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.
 - [x] Managed Mac acceptance reports can be independently verified through `rdev acceptance verify`, including checksum and audit-chain validation.
