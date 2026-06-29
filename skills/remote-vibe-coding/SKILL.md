@@ -16,7 +16,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Treat Codex, Claude Code, ACP, shell, and PowerShell as adapters behind the signed-job/evidence/approval contract.
 - For Codex MVP jobs, require `codex.run` and `git.diff`, use a locked workspace/worktree, and expect `rdev.codex-result.v1` artifacts with Git status, diff/stat, and verification command evidence.
 - Prefer `go test -json` when verifying Go projects so Codex artifacts include `rdev.test-report.v1` summaries.
-- For Codex jobs that may push, merge, deploy, publish, change credentials, or manage services, expect `rdev.approval-required.v1` before execution unless a matching approval token is present.
+- For shell or Codex jobs that may install packages, request elevation, control GUI, manage services, push, merge, deploy, publish, or change credentials, expect `rdev.approval-required.v1` before execution unless a matching approval token is present.
 - When canceling a running Codex job, expect the host to cooperatively cancel the local Codex process, keep the gateway job in `canceled` state, and append cancellation evidence when available.
 - Do not push, merge, deploy, or modify credentials without approval.
 - Return evidence: diff summary, tests run, exit codes, and artifacts.

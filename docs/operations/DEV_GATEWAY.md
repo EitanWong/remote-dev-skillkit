@@ -175,7 +175,7 @@ When `--trust-store <path>` is set, the host persists verified signed trust bund
 
 If the host runner rejects a job, the host reports the failure to `POST /v1/jobs/{job_id}/fail`. The gateway marks the job `failed`, stores `failure_reason`, and writes a `job.fail` audit event.
 
-The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, truncation state, duration, redaction rules, and redaction counts.
+The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Before execution, the host also runs the shared implicit approval preflight. Shell jobs that request package installation, elevation, GUI control, service management, push, merge, deploy, publish, or credential changes return `rdev.approval-required.v1` unless a matching signed approval token is present. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, truncation state, duration, redaction rules, and redaction counts.
 
 The development Codex adapter uses the same host safety path. Create an `adapter=codex` job with `codex.run` and `git.diff` capabilities:
 
@@ -206,7 +206,7 @@ codex exec -C <workspace_root> --sandbox workspace-write --json <prompt>
 
 For deterministic local tests, signed job payloads may override `codex_command` and `codex_args`. The result artifact uses schema `rdev.codex-result.v1` and includes Codex command output, Git status, Git diff/stat, optional verification command results, output truncation flags, duration, redaction rules, and redaction counts. Verification commands must be allowlisted through `allow_verification_commands`. When a verification command is `go test -json ...`, the command result also includes a `rdev.test-report.v1` summary with package/test pass, fail, skip counts and parsed test cases.
 
-Codex jobs also run an implicit approval preflight before workspace lock acquisition and before adapter execution. If `intent`, `prompt`, `codex_args`, `verification_commands`, `external_actions`, `dangerous_actions`, `approval_actions`, or `requested_approvals` request high-risk external consequences, the host returns `rdev.approval-required.v1` unless a matching approval token is present. Current operations include `git.push`, `git.merge`, `deploy.run`, `publish.run`, `credential.change`, and `service.manage`.
+Codex jobs also run the same implicit approval preflight before workspace lock acquisition and before adapter execution. If `intent`, `prompt`, `codex_args`, `verification_commands`, `external_actions`, `dangerous_actions`, `approval_actions`, or `requested_approvals` request high-risk external consequences, the host returns `rdev.approval-required.v1` unless a matching approval token is present. Current operations include `git.push`, `git.merge`, `deploy.run`, `publish.run`, `credential.change`, `service.manage`, `package.install`, `elevation.request`, and `gui.control`.
 
 ## Workspace Locks And Git Worktrees
 

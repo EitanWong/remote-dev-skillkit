@@ -74,7 +74,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
 - Canceled Codex jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
 - Git diff and test evidence bundles.
-- Approval before push, merge, deploy, credential changes, or service changes.
+- Shared implicit approval preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell and Codex jobs.
 - Managed install, health, stop, and uninstall commands.
 
 Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through MCP, Codex runs in a locked worktree, and the result includes diff, tests, artifacts, audit slice, and residual risk.

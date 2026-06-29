@@ -98,6 +98,7 @@
 - [x] Add Codex adapter conformance coverage for workspace canonicalization, write-scope escapes, failure evidence, redaction, truncation, and timeout cancellation evidence.
 - [x] Add Codex adapter cooperative cancellation from host/job context and gateway job cancellation polling.
 - [x] Add canceled-job artifact reporting without changing the gateway job's canceled terminal state.
+- [x] Add shared implicit approval preflight for risky shell and Codex actions.
 
 ## Later
 
@@ -125,7 +126,7 @@
 - [x] Unsatisfied job approvals return structured `rdev.approval-required.v1` artifacts before adapter execution.
 - [x] Gateway-approved jobs carry signed `rdev.approval-token.v1` tokens.
 - [x] Host-side approval token consumption is persisted and rejects token reuse.
-- [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
+- [x] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.
 - [x] Agent Skillkit can be exported as a checksummed bundle for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.

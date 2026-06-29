@@ -604,6 +604,126 @@ func TestRunDevJobRequiresApprovalForCodexExternalActionsPayload(t *testing.T) {
 	}
 }
 
+func TestRunDevJobRequiresApprovalForShellRiskyArgv(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		argv     []string
+		approval string
+	}{
+		{name: "git push", argv: []string{"git", "push", "origin", "main"}, approval: "git.push"},
+		{name: "git merge", argv: []string{"git", "merge", "main"}, approval: "git.merge"},
+		{name: "package install", argv: []string{"brew", "install", "node"}, approval: "package.install"},
+		{name: "elevation", argv: []string{"sudo", "true"}, approval: "elevation.request"},
+		{name: "service", argv: []string{"launchctl", "kickstart", "gui/501/com.example"}, approval: "service.manage"},
+		{name: "gui", argv: []string{"osascript", "-e", `tell application "System Events" to keystroke "a"`}, approval: "gui.control"},
+		{name: "deploy", argv: []string{"vercel", "--prod"}, approval: "deploy.run"},
+		{name: "publish", argv: []string{"npm", "publish"}, approval: "publish.run"},
+		{name: "credentials", argv: []string{"gh", "auth", "login"}, approval: "credential.change"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+			host := activeHost(t, gw)
+			job, err := gw.CreateJob(host.ID, "shell", "risk check", map[string]any{
+				"workspace_root":   t.TempDir(),
+				"capabilities":     []string{"shell.user"},
+				"argv":             tc.argv,
+				"allow_commands":   []string{tc.argv[0]},
+				"max_output_bytes": 1024,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+			assertApprovalRequired(t, result, err, tc.approval)
+		})
+	}
+}
+
+func TestRunDevJobDoesNotExecuteShellBeforeImplicitApproval(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	marker := filepath.Join(repo, "ran.txt")
+	writer := writeHostrunnerFakeCodex(t, `package main
+
+import "os"
+
+func main() {
+	if err := os.WriteFile("ran.txt", []byte("ran without approval"), 0o644); err != nil {
+		panic(err)
+	}
+}
+`)
+	job, err := gw.CreateJob(host.ID, "shell", "safe command with external push intent", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "run", writer},
+		"allow_commands":       []string{"go"},
+		"external_actions":     []string{"git.push"},
+		"max_duration_seconds": 30,
+		"max_output_bytes":     1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "git.push")
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("shell command executed before approval; marker stat err=%v", statErr)
+	}
+}
+
+func TestRunDevJobExecutesShellAfterImplicitApprovalSatisfied(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	marker := filepath.Join(repo, "ran.txt")
+	writer := writeHostrunnerFakeCodex(t, `package main
+
+import "os"
+
+func main() {
+	if err := os.WriteFile("ran.txt", []byte("approved"), 0o644); err != nil {
+		panic(err)
+	}
+}
+`)
+	job, err := gw.CreateJob(host.ID, "shell", "safe command with external push intent", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "run", writer},
+		"allow_commands":       []string{"go"},
+		"requested_approvals":  []string{"git.push"},
+		"max_duration_seconds": 30,
+		"max_output_bytes":     1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = gw.ApproveJob(job.ID, "git.push", "approved", "test approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.shell-result.v1"`) {
+		t.Fatalf("expected shell result artifact, got %s", result.ArtifactContent)
+	}
+	content, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "approved" {
+		t.Fatalf("unexpected marker content %q", string(content))
+	}
+}
+
 func TestRunDevJobRejectsCodexWithoutCapability(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })

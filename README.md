@@ -77,6 +77,7 @@ Implemented now:
 - Canceled Codex jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
+- Built-in shell and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, and credential changes.
 - Durable host-side approval token consumption stores with in-memory and file-backed development modes, exposed through `rdev host serve --approval-store`.
 - Signed development join manifest endpoint for manifest-driven temporary host registration.
 - Join manifests can be signed by a separate bootstrap/release trust root and verified by hosts with a pinned root public key.

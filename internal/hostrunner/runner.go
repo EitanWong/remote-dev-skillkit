@@ -370,9 +370,6 @@ func verifyApprovalTokens(trust model.TrustBundle, envelope model.JobEnvelope, n
 }
 
 func missingImplicitApprovals(envelope model.JobEnvelope, approved []string) []string {
-	if envelope.Adapter != "codex" {
-		return nil
-	}
 	approvedSet := make(map[string]struct{}, len(approved))
 	for _, value := range approved {
 		value = strings.TrimSpace(value)
@@ -381,7 +378,7 @@ func missingImplicitApprovals(envelope model.JobEnvelope, approved []string) []s
 		}
 	}
 	var missing []string
-	for _, operation := range implicitCodexApprovals(envelope) {
+	for _, operation := range implicitRiskApprovals(envelope) {
 		if _, ok := approvedSet[operation]; ok {
 			continue
 		}
@@ -390,7 +387,7 @@ func missingImplicitApprovals(envelope model.JobEnvelope, approved []string) []s
 	return missing
 }
 
-func implicitCodexApprovals(envelope model.JobEnvelope) []string {
+func implicitRiskApprovals(envelope model.JobEnvelope) []string {
 	seen := map[string]struct{}{}
 	var operations []string
 	add := func(operation string) {
@@ -409,7 +406,16 @@ func implicitCodexApprovals(envelope model.JobEnvelope) []string {
 			add(action)
 		}
 	}
-	text := strings.ToLower(strings.Join(codexRiskText(envelope), "\n"))
+	var textValues []string
+	switch envelope.Adapter {
+	case "codex":
+		textValues = codexRiskText(envelope)
+	case "shell":
+		textValues = shellRiskText(envelope)
+	default:
+		return operations
+	}
+	text := strings.ToLower(strings.Join(textValues, "\n"))
 	for _, rule := range []struct {
 		operation string
 		needles   []string
@@ -428,15 +434,27 @@ func implicitCodexApprovals(envelope model.JobEnvelope) []string {
 		},
 		{
 			operation: "publish.run",
-			needles:   []string{"npm publish", "cargo publish", "publish package", "publish release"},
+			needles:   []string{"npm publish", "cargo publish", "twine upload", "gh release create", "publish package", "publish release"},
 		},
 		{
 			operation: "credential.change",
-			needles:   []string{"rotate credential", "change credential", "update secret", "modify secret", "write api key"},
+			needles:   []string{"rotate credential", "change credential", "update secret", "modify secret", "write api key", "gh auth", "aws configure", "security add-generic-password"},
 		},
 		{
 			operation: "service.manage",
-			needles:   []string{"systemctl", "launchctl", "install service", "restart service", "modify service"},
+			needles:   []string{"systemctl", "launchctl", "install service", "restart service", "modify service", "set-service", "service restart", "service stop", "service start"},
+		},
+		{
+			operation: "package.install",
+			needles:   []string{"brew install", "apt install", "apt-get install", "dnf install", "yum install", "pacman -s", "choco install", "winget install", "scoop install", "pip install", "npm install -g", "cargo install", "package install"},
+		},
+		{
+			operation: "elevation.request",
+			needles:   []string{"sudo ", "sudo\t", "pkexec", "runas", "start-process", "-verb runas", "elevation", "administrator privilege"},
+		},
+		{
+			operation: "gui.control",
+			needles:   []string{"xdotool", "cliclick", "system events", "sendkeys", "setcursorpos", "gui control", "control gui"},
 		},
 	} {
 		for _, needle := range rule.needles {
@@ -458,6 +476,15 @@ func codexRiskText(envelope model.JobEnvelope) []string {
 	return values
 }
 
+func shellRiskText(envelope model.JobEnvelope) []string {
+	values := []string{envelope.Intent}
+	argv := stringSliceValue(envelope.Payload, "argv")
+	if len(argv) > 0 {
+		values = append(values, strings.Join(argv, " "))
+	}
+	return values
+}
+
 func normalizeRiskOperation(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, "_", ".")
@@ -475,6 +502,12 @@ func normalizeRiskOperation(value string) string {
 		return "credential.change"
 	case "service", "service.manage", "manage.service", "service.change":
 		return "service.manage"
+	case "package", "package.install", "package.install.requiresapproval", "install.package":
+		return "package.install"
+	case "elevation", "elevation.request", "admin", "administrator", "sudo":
+		return "elevation.request"
+	case "gui", "gui.control", "gui.control.requiresapproval", "control.gui":
+		return "gui.control"
 	default:
 		return value
 	}
