@@ -20,6 +20,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - For shell or Codex jobs that may install packages, request elevation, control GUI, manage services, push, merge, deploy, publish, or change credentials, expect `rdev.approval-required.v1` before execution unless a matching approval token is present.
 - When canceling a running Codex job, expect the host to cooperatively cancel the local Codex process, keep the gateway job in `canceled` state, and append cancellation evidence when available.
 - Use `rdev acceptance managed-mac --out <empty-dir> --repo <repo>` before claiming the managed Mac coding golden path; review both `evidence/` and `approval-evidence/`.
+- Verify acceptance output with `rdev acceptance verify --report <out>/report.json` before treating it as release evidence.
 - Do not push, merge, deploy, or modify credentials without approval.
 - Return evidence: diff summary, tests run, exit codes, and artifacts.
 

@@ -137,6 +137,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			MaxDurationSeconds:        *maxDuration,
 			MaxOutputBytes:            *maxOutput,
 		})
+	case "verify":
+		fs := flag.NewFlagSet("acceptance verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		report := fs.String("report", "", "acceptance report path, for example <out>/report.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerify(*report)
 	default:
 		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
 	}
@@ -165,6 +173,33 @@ func (a App) acceptanceManagedMac(ctx context.Context, opts acceptance.ManagedMa
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func (a App) acceptanceVerify(reportPath string) error {
+	verification, err := acceptance.VerifyManagedMacReport(reportPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"report":              verification.ReportPath,
+		"checks":              verification.Checks,
+		"evidence_checks":     verification.Evidence.Checks,
+		"approval_checks":     verification.ApprovalEvidence.Checks,
+		"recommended_actions": verification.RecommendedActions,
+		"evidence_manifest":   verification.Evidence.Manifest,
+		"approval_manifest":   verification.ApprovalEvidence.Manifest,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("acceptance verification failed")
+	}
+	return nil
 }
 
 func (a App) version() error {
@@ -1338,6 +1373,7 @@ Usage:
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev acceptance managed-mac --out acceptance-run --repo .
+  rdev acceptance verify --report acceptance-run/report.json
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234

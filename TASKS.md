@@ -101,6 +101,7 @@
 - [x] Add canceled-job artifact reporting without changing the gateway job's canceled terminal state.
 - [x] Add shared implicit approval preflight for risky shell and Codex actions.
 - [x] Add managed Mac coding acceptance harness with locked-worktree evidence export.
+- [x] Add acceptance report verifier for evidence checksums, artifact index, audit chain, approval gate, and workspace-lock release.
 
 ## Later
 
@@ -133,6 +134,7 @@
 - [x] Agent Skillkit can be exported as a checksummed bundle for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
 - [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.
+- [x] Managed Mac acceptance reports can be independently verified through `rdev acceptance verify`, including checksum and audit-chain validation.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 
 ## Definition Of Done For v0.1.0

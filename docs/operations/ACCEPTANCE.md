@@ -74,6 +74,27 @@ The report is considered passing only when all checks are true:
 - workspace lock is released after execution;
 - evidence bundle is written.
 
+## Acceptance Verification
+
+After a run, verify the report and both evidence bundles:
+
+```bash
+rdev acceptance verify --report .rdev/acceptance/managed-mac/report.json
+```
+
+The verifier emits `rdev.acceptance-verification.managed-mac.v1` JSON and exits
+nonzero if any release-gate check fails. It validates:
+
+- report schema and generated acceptance checks;
+- coding evidence bundle manifest checksums;
+- approval evidence bundle manifest checksums;
+- artifact index consistency;
+- audit slice and hash-chained audit export;
+- embedded report manifests against on-disk manifests;
+- Codex result, diff, verification output, and fixture test-report evidence;
+- `git.push` approval-required probe;
+- workspace lock release after the job.
+
 ## Current Boundary
 
 This harness proves the managed test-process path. It does not yet prove:

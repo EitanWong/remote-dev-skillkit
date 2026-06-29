@@ -78,6 +78,60 @@ func TestExportDirectoryWritesReviewableBundle(t *testing.T) {
 	}
 }
 
+func TestVerifyDirectoryAcceptsExportedBundle(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	job := evidenceTestJob(now)
+	out := filepath.Join(t.TempDir(), "bundle")
+	_, err := ExportDirectory(out, Input{
+		Job:         job,
+		AuditEvents: []model.AuditEvent{{Sequence: 1, Actor: "host", Action: "job.complete", TargetID: job.ID, Message: "done", At: now}},
+		GeneratedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := VerifyDirectory(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK() {
+		t.Fatalf("expected verification ok: %#v", report.Checks)
+	}
+	if report.Manifest.JobID != job.ID {
+		t.Fatalf("expected job id %q, got %q", job.ID, report.Manifest.JobID)
+	}
+}
+
+func TestVerifyDirectoryDetectsTamperedArtifact(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	job := evidenceTestJob(now)
+	artifact := model.Artifact{
+		ID:        "art_1",
+		JobID:     job.ID,
+		Kind:      "text",
+		Name:      "shell-result.json",
+		Content:   `{"schema_version":"rdev.shell-result.v1","exit_code":0}`,
+		CreatedAt: now,
+	}
+	out := filepath.Join(t.TempDir(), "bundle")
+	if _, err := ExportDirectory(out, Input{Job: job, Artifacts: []model.Artifact{artifact}, GeneratedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "artifacts", "art_1-shell-result.json"), []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := VerifyDirectory(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK() {
+		t.Fatalf("expected verification failure: %#v", report.Checks)
+	}
+	if !hasFailedEvidenceCheck(report.Checks, "manifest_files_verified") {
+		t.Fatalf("expected file verification failure: %#v", report.Checks)
+	}
+}
+
 func TestExportDirectoryRejectsNonEmptyDirectory(t *testing.T) {
 	out := t.TempDir()
 	if err := os.WriteFile(filepath.Join(out, "old.txt"), []byte("old"), 0o600); err != nil {
@@ -90,6 +144,15 @@ func TestExportDirectoryRejectsNonEmptyDirectory(t *testing.T) {
 	if !strings.Contains(err.Error(), "must be empty") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func hasFailedEvidenceCheck(checks []VerificationCheck, name string) bool {
+	for _, check := range checks {
+		if check.Name == name && !check.Passed {
+			return true
+		}
+	}
+	return false
 }
 
 func evidenceTestJob(now time.Time) model.Job {

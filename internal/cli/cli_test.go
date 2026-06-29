@@ -1911,6 +1911,40 @@ func main() {
 	if !strings.Contains(report, `"schema_version": "rdev.evidence-bundle.v1"`) {
 		t.Fatalf("expected embedded evidence manifests, got %s", report)
 	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"acceptance", "verify",
+		"--report", payload.Report,
+	}); err != nil {
+		t.Fatalf("expected acceptance verification to pass: %v\n%s", err, verifyStdout.String())
+	}
+	var verifyPayload struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(verifyStdout.Bytes(), &verifyPayload); err != nil {
+		t.Fatalf("invalid verification json: %v\n%s", err, verifyStdout.String())
+	}
+	if !verifyPayload.OK {
+		t.Fatalf("expected verification ok, got %s", verifyStdout.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(payload.Evidence, "artifacts.json"), []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var tamperedStdout bytes.Buffer
+	tamperedApp := NewApp(&tamperedStdout, &bytes.Buffer{})
+	err := tamperedApp.Run(context.Background(), []string{
+		"acceptance", "verify",
+		"--report", payload.Report,
+	})
+	if err == nil {
+		t.Fatalf("expected tampered acceptance verification to fail: %s", tamperedStdout.String())
+	}
+	if !strings.Contains(tamperedStdout.String(), `"ok": false`) {
+		t.Fatalf("expected structured failed verification, got %s", tamperedStdout.String())
+	}
 }
 
 func timeNowForTest() time.Time {

@@ -74,6 +74,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
 - Canceled Codex jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
 - Managed Mac coding acceptance harness through `rdev acceptance managed-mac`, producing a managed-mode report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
+- Acceptance report verification through `rdev acceptance verify`, including evidence bundle checksum validation, artifact index validation, audit-chain verification, approval-gate checks, and workspace-lock release checks.
 - Git diff and test evidence bundles.
 - Shared implicit approval preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell and Codex jobs.
 - Managed install, health, stop, and uninstall commands.
