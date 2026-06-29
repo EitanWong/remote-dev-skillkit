@@ -30,7 +30,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Development signed job envelopes.
 - Demonstrable local temporary session.
 - Development HTTPS long-poll host job transport.
-- Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, output caps, and failure reporting.
+- Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, cooperative cancellation, output caps, and failure reporting.
 - Host identity storage wired into registration and job binding.
 - Durable host trust bundle store.
 - Trust-bundle key rotation/revocation flow.
@@ -84,7 +84,8 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Codex adapter MVP with hostrunner integration, `codex.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, and redaction.
 - Codex adapter conformance coverage for workspace canonicalization, write-scope escape rejection before execution, nonzero-exit evidence, host-side redaction, output truncation, and timeout cancellation evidence.
 - Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
-- Canceled Codex jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
+- Shell adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and `rdev.shell-result.v1` artifacts with explicit `canceled` state.
+- Canceled shell and Codex jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
 - Managed Mac coding acceptance harness through `rdev acceptance managed-mac`, producing a managed-mode report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification through `rdev acceptance verify`, including evidence bundle checksum validation, artifact index validation, audit-chain verification, approval-gate checks, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning through `rdev acceptance managed-mac-service`, producing a verified plist, launchctl start/inspect/stop commands, service-backed coding acceptance commands, verification command, and safe uninstall guidance without auto-starting launchd.

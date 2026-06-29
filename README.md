@@ -82,8 +82,8 @@ Implemented now:
 - Host job execution can enforce one-writer workspace locks through `rdev host serve --workspace-lock-store`.
 - Codex adapter MVP through `adapter=codex`: runs `codex exec` or a signed payload-provided command inside the validated workspace, requires `codex.run` and `git.diff`, gates push/merge/deploy/publish/credential/service intents on approval, and captures `rdev.codex-result.v1` evidence with Codex output, Git status, Git diff/stat, optional verification command results, `go test -json` test reports, output caps, and redaction.
 - Codex adapter conformance coverage for canonical workspace roots, write-scope escape rejection before execution, failure evidence, redaction, output truncation, and timeout cancellation evidence.
-- Codex adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
-- Canceled Codex jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
+- Codex and shell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
+- Canceled Codex and shell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Built-in shell and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, and credential changes.
@@ -104,7 +104,7 @@ Implemented now:
 - GitHub Actions CI for tests, vet, shell syntax, release candidate verification, and GitHub Release dry-run planning.
 - Windows bootstrap can hash-pin `rdev-verify.exe` and use it to verify either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host.
 - Host-reported failed jobs with audit events.
-- Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, schema-versioned redacted evidence, and failure artifacts.
+- Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, cooperative cancellation, output caps, schema-versioned redacted evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 

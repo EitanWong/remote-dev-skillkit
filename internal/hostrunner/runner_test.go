@@ -501,6 +501,51 @@ func main() {
 	}
 }
 
+func TestRunDevJobCancelsShellWhenContextCanceled(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	sleeper := buildHostrunnerFakeCodexBinary(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	job, err := gw.CreateJob(host.ID, "shell", "sleep until canceled", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{sleeper},
+		"allow_commands":       []string{sleeper},
+		"max_duration_seconds": 30,
+		"max_output_bytes":     64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	result, err := RunDevJobWithOptionsContext(ctx, host.ID, gw.TrustBundle(), job, now, Options{})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.shell-result.v1"`) {
+		t.Fatalf("expected shell artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, `"canceled": true`) {
+		t.Fatalf("expected canceled evidence, got %s", result.ArtifactContent)
+	}
+	if strings.Contains(result.ArtifactContent, `"timed_out": true`) {
+		t.Fatalf("canceled shell job should not be marked timed out, got %s", result.ArtifactContent)
+	}
+}
+
 func TestRunDevJobRequiresApprovalForCodexGitPushIntent(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })

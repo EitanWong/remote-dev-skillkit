@@ -1,12 +1,15 @@
 package shelladapter
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecuteAllowedCommand(t *testing.T) {
@@ -192,6 +195,46 @@ func TestExecuteReturnsNonZeroEvidence(t *testing.T) {
 	}
 }
 
+func TestExecuteContextCancelsRunningCommand(t *testing.T) {
+	workspace := t.TempDir()
+	sleeper := buildShellAdapterHelper(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	result, err := ExecuteContext(ctx, Spec{
+		WorkspaceRoot:      workspace,
+		Argv:               []string{sleeper},
+		AllowCommands:      []string{sleeper},
+		MaxDurationSeconds: 30,
+		MaxOutputBytes:     1024,
+	})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected canceled command error, got %v", err)
+	}
+	if !result.Canceled {
+		t.Fatalf("expected canceled result, got %#v", result)
+	}
+	if result.TimedOut {
+		t.Fatalf("canceled command should not be marked timed out: %#v", result)
+	}
+	var artifact ResultArtifact
+	if err := json.Unmarshal([]byte(result.ArtifactContent()), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.Canceled {
+		t.Fatalf("expected canceled artifact, got %#v", artifact)
+	}
+}
+
 func TestArtifactContentIncludesSchemaAndPreservesNonSecretOutput(t *testing.T) {
 	result := Result{
 		Adapter:        "shell",
@@ -275,4 +318,23 @@ func createSymlinkOrSkip(t *testing.T, target, link string) string {
 		t.Skipf("symlink creation is not available: %v", err)
 	}
 	return link
+}
+
+func buildShellAdapterHelper(t *testing.T, source string) string {
+	t.Helper()
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := filepath.Join(dir, "helper")
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", binaryPath, sourcePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build helper: %v\n%s", err, string(output))
+	}
+	return binaryPath
 }

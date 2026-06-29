@@ -258,7 +258,7 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 		}
 		return result, nil
 	}
-	execution, err := shelladapter.Execute(shelladapter.Spec{
+	execution, err := shelladapter.ExecuteContext(ctx, shelladapter.Spec{
 		WorkspaceRoot:      envelope.Workspace.Root,
 		WriteScope:         envelope.Workspace.WriteScope,
 		Argv:               stringSliceValue(envelope.Payload, "argv"),

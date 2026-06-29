@@ -31,6 +31,7 @@ type Result struct {
 	Stdout          string   `json:"stdout,omitempty"`
 	Stderr          string   `json:"stderr,omitempty"`
 	TimedOut        bool     `json:"timed_out"`
+	Canceled        bool     `json:"canceled"`
 	OutputTruncated bool     `json:"output_truncated"`
 	StartedAt       string   `json:"started_at"`
 	EndedAt         string   `json:"ended_at"`
@@ -46,6 +47,7 @@ type ResultArtifact struct {
 	Stdout          string         `json:"stdout,omitempty"`
 	Stderr          string         `json:"stderr,omitempty"`
 	TimedOut        bool           `json:"timed_out"`
+	Canceled        bool           `json:"canceled"`
 	OutputTruncated bool           `json:"output_truncated"`
 	StartedAt       string         `json:"started_at"`
 	EndedAt         string         `json:"ended_at"`
@@ -56,6 +58,13 @@ type ResultArtifact struct {
 }
 
 func Execute(spec Spec) (Result, error) {
+	return ExecuteContext(context.Background(), spec)
+}
+
+func ExecuteContext(ctx context.Context, spec Spec) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	workspaceRoot, err := canonicalWorkspace(spec.WorkspaceRoot)
 	if err != nil {
 		return Result{}, err
@@ -78,7 +87,7 @@ func Execute(spec Spec) (Result, error) {
 		maxOutputBytes = 1024 * 1024
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxDuration)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(maxDuration)*time.Second)
 	defer cancel()
 
 	started := time.Now().UTC()
@@ -98,6 +107,7 @@ func Execute(spec Spec) (Result, error) {
 		Stdout:          limiter.stdout(),
 		Stderr:          limiter.stderr(),
 		TimedOut:        ctx.Err() == context.DeadlineExceeded,
+		Canceled:        ctx.Err() == context.Canceled,
 		OutputTruncated: limiter.truncated(),
 		StartedAt:       started.Format(time.RFC3339Nano),
 		EndedAt:         ended.Format(time.RFC3339Nano),
@@ -106,6 +116,10 @@ func Execute(spec Spec) (Result, error) {
 	if result.TimedOut {
 		result.ExitCode = -1
 		return result, fmt.Errorf("command timed out after %ds", maxDuration)
+	}
+	if result.Canceled {
+		result.ExitCode = -1
+		return result, fmt.Errorf("command canceled")
 	}
 	if err != nil {
 		return result, fmt.Errorf("command exited with status %d", result.ExitCode)
@@ -141,6 +155,7 @@ func (r Result) Artifact() ResultArtifact {
 		Stdout:          stdout,
 		Stderr:          stderr,
 		TimedOut:        r.TimedOut,
+		Canceled:        r.Canceled,
 		OutputTruncated: r.OutputTruncated,
 		StartedAt:       r.StartedAt,
 		EndedAt:         r.EndedAt,

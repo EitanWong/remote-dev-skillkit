@@ -285,16 +285,15 @@ The local test suite currently covers:
 - Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, covering reviewed PowerShell launcher generation, bootstrap script hash capture, signed release manifest or release bundle verifier requirements, launcher safety checks, approval probes for package/elevation/service/GUI/credential operations, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
 - Windows temporary acceptance evidence packaging through `rdev acceptance package-windows-temporary`, covering verified plan and launcher archival, redacted transcript and verifier output, audit capture, approval-probe evidence coverage, no-persistence evidence coverage, checksums, and release-blocking failure when verifier output is not `ok=true`.
 - release bundle verification through `rdev release create-bundle`, `rdev release verify-bundle`, and standalone `rdev-verify --bundle`, covering signed bundle index verification, per-artifact signed manifest verification, artifact and manifest SHA-256/size checks, required artifact presence, and tamper failure evidence.
+- shell adapter cooperative cancellation through `ExecuteContext` and hostrunner context propagation, returning `rdev.shell-result.v1` artifacts with `canceled=true` instead of timeout evidence.
+- canceled-job artifact reporting for built-in shell and Codex adapters, preserving the gateway job's `canceled` terminal state while adding reviewable cancellation evidence.
 
 ## Next Automation Targets
 
 - Real managed Mac LaunchAgent acceptance execution: review generated plan, start/inspect/stop with `rdev host service-control --execute`, reconnect after reboot, run locked-worktree Codex, verify evidence, and uninstall.
 - Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, approval-required probes, and revocation transcript.
 - Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and evidence bundle checksums for each release candidate.
-- Codex adapter MVP through `adapter=codex`, including `codex.run` and `git.diff` capability checks, locked-workspace hostrunner execution, implicit approval preflight for push/merge/deploy/publish/credential/service intents, `rdev.codex-result.v1` artifacts, Git status/diff evidence, optional allowlisted verification command evidence, `rdev.test-report.v1` parsing for `go test -json`, output caps, redaction, and lock release after execution.
-- Codex adapter conformance tests through `internal/codexadapter/conformance_test.go`, covering canonical workspace roots, write-scope escape rejection before execution, nonzero Codex exits that still produce evidence, prompt/argv/stdout/stderr/diff redaction, output truncation flags, and duration-timeout cancellation evidence.
-- Codex adapter cooperative cancellation through `ExecuteContext`, hostrunner context propagation, and `rdev host serve` gateway job status monitoring that stops a running Codex process when the job becomes `canceled`.
-- Canceled-job artifact reporting through `POST /v1/jobs/{job_id}/artifact`, preserving the gateway job's `canceled` terminal state while adding reviewable cancellation evidence.
+- Adapter SDK cancellation conformance fixtures for PowerShell and future third-party adapters.
 
 The following remain real-environment acceptance tests:
 
@@ -303,6 +302,6 @@ The following remain real-environment acceptance tests:
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall and reconnect after reboot;
 - managed Linux systemd user-unit install/uninstall and reconnect after reboot;
-- cooperative cancellation generalized across shell, PowerShell, and future adapter SDK implementations;
+- cooperative cancellation generalized across PowerShell and future adapter SDK implementations;
 - OS-protected managed host trust and identity storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.
