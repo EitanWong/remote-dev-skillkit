@@ -17,6 +17,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 func TestRunDevJobAcceptsScopedShellJob(t *testing.T) {
@@ -257,6 +258,147 @@ func TestRunDevJobRejectsConsumedApprovalToken(t *testing.T) {
 	}
 	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts)
 	assertDenial(t, result, err, "approval_token_consumed")
+}
+
+func TestRunDevJobAcquiresAndReleasesWorkspaceLock(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": repo,
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore: lockStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"exit_code": 0`) {
+		t.Fatalf("expected successful shell artifact, got %s", result.ArtifactContent)
+	}
+	status, err := workspace.NewFileLockStore(lockStore).Status(repo, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Exists {
+		t.Fatalf("expected workspace lock release after execution, got %#v", status)
+	}
+}
+
+func TestRunDevJobRejectsLockedWorkspace(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	if _, err := workspace.NewFileLockStore(lockStore).Acquire(workspace.LockOptions{
+		RepoRoot:     repo,
+		HostID:       host.ID,
+		JobID:        "job_existing",
+		OwnerAdapter: "codex",
+		TTL:          time.Hour,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": repo,
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore: lockStore,
+	})
+	assertDenial(t, result, err, "workspace_locked")
+}
+
+func TestRunDevJobDoesNotConsumeApprovalTokenWhenWorkspaceLocked(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	store := workspace.NewFileLockStore(lockStore)
+	if _, err := store.Acquire(workspace.LockOptions{
+		RepoRoot:     repo,
+		HostID:       host.ID,
+		JobID:        "job_existing",
+		OwnerAdapter: "codex",
+		TTL:          time.Hour,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "env", "GOOS"},
+		"allow_commands":       []string{"go"},
+		"approvals_required":   []string{"git.push"},
+		"max_output_bytes":     4096,
+		"max_duration_seconds": 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = gw.ApproveJob(job.ID, "git.push", "approved", "test approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{
+		WorkspaceLockStore: lockStore,
+		ApprovalStore:      hostapproval.NewMemoryStore(),
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts)
+	assertDenial(t, result, err, "workspace_locked")
+	if _, _, err := store.Release(repo, "job_existing", false); err != nil {
+		t.Fatal(err)
+	}
+	result, err = RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts)
+	if err != nil {
+		t.Fatalf("expected approval token to remain usable after workspace lock denial: %v", err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"exit_code": 0`) {
+		t.Fatalf("expected successful shell artifact, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobReleasesWorkspaceLockAfterAdapterDenial(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": repo,
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"git"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore: lockStore,
+	})
+	assertDenial(t, result, err, "command_not_allowlisted")
+	status, err := workspace.NewFileLockStore(lockStore).Status(repo, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Exists {
+		t.Fatalf("expected workspace lock release after adapter denial, got %#v", status)
+	}
 }
 
 func TestRunDevJobRejectsWrongHost(t *testing.T) {

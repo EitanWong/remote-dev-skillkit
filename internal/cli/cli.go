@@ -149,6 +149,7 @@ func (a App) host(args []string) error {
 		identityKeyID := fs.String("identity-key-id", hostidentity.DefaultKeyID, "host identity key id")
 		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
 		approvalStore := fs.String("approval-store", "", "optional local host approval token consumption store path")
+		workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -171,6 +172,7 @@ func (a App) host(args []string) error {
 			IdentityKeyID:         *identityKeyID,
 			NonceStorePath:        *nonceStore,
 			ApprovalStorePath:     *approvalStore,
+			WorkspaceLockStore:    *workspaceLockStore,
 			ManifestRootPublicKey: *manifestRootPublicKey,
 		})
 	case "install-service":
@@ -186,6 +188,7 @@ func (a App) host(args []string) error {
 		trustStore := fs.String("trust-store", "", "managed host trust bundle store path")
 		nonceStore := fs.String("nonce-store", "", "managed host nonce store path")
 		approvalStore := fs.String("approval-store", "", "managed host approval store path")
+		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
 		logDir := fs.String("log-dir", "", "managed host log directory")
 		plistOut := fs.String("plist-out", "", "LaunchAgent plist output path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
 		force := fs.Bool("force", false, "overwrite an existing plist output path")
@@ -193,19 +196,20 @@ func (a App) host(args []string) error {
 			return err
 		}
 		return a.hostInstallService(hostInstallServiceOptions{
-			Platform:          *platform,
-			Label:             *label,
-			BinaryPath:        *binaryPath,
-			GatewayURL:        *gatewayURL,
-			TicketCode:        *ticketCode,
-			ManifestURL:       *manifestURL,
-			IdentityStorePath: *identityStore,
-			TrustStorePath:    *trustStore,
-			NonceStorePath:    *nonceStore,
-			ApprovalStorePath: *approvalStore,
-			LogDir:            *logDir,
-			PlistOut:          *plistOut,
-			Force:             *force,
+			Platform:           *platform,
+			Label:              *label,
+			BinaryPath:         *binaryPath,
+			GatewayURL:         *gatewayURL,
+			TicketCode:         *ticketCode,
+			ManifestURL:        *manifestURL,
+			IdentityStorePath:  *identityStore,
+			TrustStorePath:     *trustStore,
+			NonceStorePath:     *nonceStore,
+			ApprovalStorePath:  *approvalStore,
+			WorkspaceLockStore: *workspaceLockStore,
+			LogDir:             *logDir,
+			PlistOut:           *plistOut,
+			Force:              *force,
 		})
 	case "service-status":
 		fs := flag.NewFlagSet("host service-status", flag.ContinueOnError)
@@ -260,23 +264,25 @@ type hostServeOptions struct {
 	IdentityKeyID         string
 	NonceStorePath        string
 	ApprovalStorePath     string
+	WorkspaceLockStore    string
 	ManifestRootPublicKey string
 }
 
 type hostInstallServiceOptions struct {
-	Platform          string
-	Label             string
-	BinaryPath        string
-	GatewayURL        string
-	TicketCode        string
-	ManifestURL       string
-	IdentityStorePath string
-	TrustStorePath    string
-	NonceStorePath    string
-	ApprovalStorePath string
-	LogDir            string
-	PlistOut          string
-	Force             bool
+	Platform           string
+	Label              string
+	BinaryPath         string
+	GatewayURL         string
+	TicketCode         string
+	ManifestURL        string
+	IdentityStorePath  string
+	TrustStorePath     string
+	NonceStorePath     string
+	ApprovalStorePath  string
+	WorkspaceLockStore string
+	LogDir             string
+	PlistOut           string
+	Force              bool
 }
 
 type hostServiceOptions struct {
@@ -405,18 +411,19 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 		plistOut = service.DefaultMacOSLaunchAgentPath(home, label)
 	}
 	agent, err := service.NewMacOSLaunchAgent(service.LaunchAgentOptions{
-		Label:             opts.Label,
-		BinaryPath:        binaryPath,
-		GatewayURL:        opts.GatewayURL,
-		TicketCode:        opts.TicketCode,
-		ManifestURL:       opts.ManifestURL,
-		IdentityStorePath: opts.IdentityStorePath,
-		TrustStorePath:    opts.TrustStorePath,
-		NonceStorePath:    opts.NonceStorePath,
-		ApprovalStorePath: opts.ApprovalStorePath,
-		LogDir:            opts.LogDir,
-		Transport:         "long-poll",
-		LongPollTimeout:   "25s",
+		Label:                  opts.Label,
+		BinaryPath:             binaryPath,
+		GatewayURL:             opts.GatewayURL,
+		TicketCode:             opts.TicketCode,
+		ManifestURL:            opts.ManifestURL,
+		IdentityStorePath:      opts.IdentityStorePath,
+		TrustStorePath:         opts.TrustStorePath,
+		NonceStorePath:         opts.NonceStorePath,
+		ApprovalStorePath:      opts.ApprovalStorePath,
+		WorkspaceLockStorePath: opts.WorkspaceLockStore,
+		LogDir:                 opts.LogDir,
+		Transport:              "long-poll",
+		LongPollTimeout:        "25s",
 	})
 	if err != nil {
 		return err
@@ -1357,6 +1364,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	}
 	trust.NonceStore = hostNonceStore(opts.NonceStorePath)
 	trust.ApprovalStore = hostApprovalStore(opts.ApprovalStorePath)
+	trust.WorkspaceLockStore = opts.WorkspaceLockStore
 	processed := 0
 	for processed < maxJobs {
 		wait := time.Duration(0)
@@ -1442,10 +1450,11 @@ func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootP
 }
 
 type hostTrust struct {
-	Legacy        *model.TrustBundle
-	SignedBundle  *model.SignedTrustBundle
-	NonceStore    hostnonce.Store
-	ApprovalStore hostapproval.Store
+	Legacy             *model.TrustBundle
+	SignedBundle       *model.SignedTrustBundle
+	NonceStore         hostnonce.Store
+	ApprovalStore      hostapproval.Store
+	WorkspaceLockStore string
 }
 
 func (t hostTrust) RunDevJob(hostID, identityFingerprint string, job model.Job, now time.Time) (hostrunner.Result, error) {
@@ -1453,6 +1462,7 @@ func (t hostTrust) RunDevJob(hostID, identityFingerprint string, job model.Job, 
 		IdentityFingerprint: identityFingerprint,
 		NonceStore:          t.NonceStore,
 		ApprovalStore:       t.ApprovalStore,
+		WorkspaceLockStore:  t.WorkspaceLockStore,
 	}
 	if t.SignedBundle != nil {
 		return hostrunner.RunDevJobWithTrustBundleOptions(hostID, *t.SignedBundle, job, now, opts)

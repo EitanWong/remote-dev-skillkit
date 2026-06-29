@@ -12,6 +12,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Prefer ACP/acpx adapters over raw PTY scraping when available.
 - Lock a workspace before starting a coding job.
 - Use a branch or worktree for code changes.
+- Prefer hosts started with `--workspace-lock-store` for coding jobs.
 - Do not push, merge, deploy, or modify credentials without approval.
 - Return evidence: diff summary, tests run, exit codes, and artifacts.
 

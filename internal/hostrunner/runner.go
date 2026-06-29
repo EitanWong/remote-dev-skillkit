@@ -11,6 +11,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
+	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 const (
@@ -26,6 +27,8 @@ type Options struct {
 	IdentityFingerprint string
 	NonceStore          hostnonce.Store
 	ApprovalStore       hostapproval.Store
+	WorkspaceLockStore  string
+	WorkspaceLockTTL    time.Duration
 }
 
 type ApprovalRequired struct {
@@ -180,11 +183,6 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 	if len(missing) > 0 {
 		return requireApproval(job, missing, approved, tokenIDs)
 	}
-	if opts.ApprovalStore != nil {
-		if err := consumeApprovalTokens(opts.ApprovalStore, envelope.ApprovalTokens, now); err != nil {
-			return deny(job, approvalTokenDenial(job, err), err)
-		}
-	}
 	if envelope.Adapter != "shell" {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
@@ -213,6 +211,16 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 			Retryable: true,
 		}, fmt.Errorf("workspace root is required"))
 	}
+	releaseWorkspaceLock, err := acquireWorkspaceLock(hostID, envelope, opts, now)
+	if err != nil {
+		return deny(job, workspaceLockDenial(err), err)
+	}
+	defer releaseWorkspaceLock()
+	if opts.ApprovalStore != nil {
+		if err := consumeApprovalTokens(opts.ApprovalStore, envelope.ApprovalTokens, now); err != nil {
+			return deny(job, approvalTokenDenial(job, err), err)
+		}
+	}
 	execution, err := shelladapter.Execute(shelladapter.Spec{
 		WorkspaceRoot:      envelope.Workspace.Root,
 		WriteScope:         envelope.Workspace.WriteScope,
@@ -229,6 +237,33 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 		return result, err
 	}
 	return result, nil
+}
+
+func acquireWorkspaceLock(hostID string, envelope model.JobEnvelope, opts Options, now time.Time) (func(), error) {
+	if strings.TrimSpace(opts.WorkspaceLockStore) == "" {
+		return func() {}, nil
+	}
+	ttl := opts.WorkspaceLockTTL
+	if ttl <= 0 {
+		ttl = workspace.DefaultLockTTL
+	}
+	store := workspace.NewFileLockStore(opts.WorkspaceLockStore)
+	lock, err := store.Acquire(workspace.LockOptions{
+		RepoRoot:     envelope.Workspace.Root,
+		HostID:       hostID,
+		JobID:        envelope.JobID,
+		WorktreePath: envelope.Workspace.Root,
+		BaseRef:      "",
+		Branch:       envelope.Workspace.Branch,
+		OwnerAdapter: envelope.Adapter,
+		TTL:          ttl,
+	}, now)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		_, _, _ = store.Release(lock.RepoRoot, envelope.JobID, false)
+	}, nil
 }
 
 func consumeApprovalTokens(store hostapproval.Store, tokens []model.ApprovalToken, now time.Time) error {
@@ -469,6 +504,25 @@ func approvalTokenDenial(job model.Job, err error) denialSpec {
 			Detail:    err.Error(),
 			Retryable: false,
 		}
+	}
+}
+
+func workspaceLockDenial(err error) denialSpec {
+	if errors.Is(err, workspace.ErrLocked) {
+		return denialSpec{
+			Code:      "workspace_locked",
+			Summary:   "Workspace is already locked by another job.",
+			Detail:    err.Error(),
+			Adapter:   "shell",
+			Retryable: true,
+		}
+	}
+	return denialSpec{
+		Code:      "workspace_invalid",
+		Summary:   "Workspace lock could not be acquired.",
+		Detail:    err.Error(),
+		Adapter:   "shell",
+		Retryable: true,
 	}
 }
 

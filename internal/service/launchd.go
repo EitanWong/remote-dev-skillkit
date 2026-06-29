@@ -13,18 +13,19 @@ import (
 const DefaultMacOSLaunchAgentLabel = "com.remote-dev-skillkit.host"
 
 type LaunchAgentOptions struct {
-	Label             string
-	BinaryPath        string
-	GatewayURL        string
-	TicketCode        string
-	ManifestURL       string
-	IdentityStorePath string
-	TrustStorePath    string
-	NonceStorePath    string
-	ApprovalStorePath string
-	LogDir            string
-	Transport         string
-	LongPollTimeout   string
+	Label                  string
+	BinaryPath             string
+	GatewayURL             string
+	TicketCode             string
+	ManifestURL            string
+	IdentityStorePath      string
+	TrustStorePath         string
+	NonceStorePath         string
+	ApprovalStorePath      string
+	WorkspaceLockStorePath string
+	LogDir                 string
+	Transport              string
+	LongPollTimeout        string
 }
 
 type LaunchAgent struct {
@@ -93,6 +94,9 @@ func NewMacOSLaunchAgent(opts LaunchAgentOptions) (LaunchAgent, error) {
 	}
 	if opts.ApprovalStorePath != "" {
 		args = append(args, "--approval-store", opts.ApprovalStorePath)
+	}
+	if opts.WorkspaceLockStorePath != "" {
+		args = append(args, "--workspace-lock-store", opts.WorkspaceLockStorePath)
 	}
 	return LaunchAgent{
 		Label:            opts.Label,

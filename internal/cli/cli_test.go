@@ -23,6 +23,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
+	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 func TestVersion(t *testing.T) {
@@ -100,6 +101,7 @@ func TestHostInstallServiceWritesMacOSLaunchAgentPlist(t *testing.T) {
 		"--trust-store", filepath.Join(dir, "trust.json"),
 		"--nonce-store", filepath.Join(dir, "nonces.json"),
 		"--approval-store", filepath.Join(dir, "approvals.json"),
+		"--workspace-lock-store", filepath.Join(dir, "workspace-locks"),
 		"--log-dir", filepath.Join(dir, "logs"),
 		"--plist-out", plistPath,
 	})
@@ -115,6 +117,8 @@ func TestHostInstallServiceWritesMacOSLaunchAgentPlist(t *testing.T) {
 		"<string>managed</string>",
 		"<string>https://api.example.com/v1</string>",
 		"<string>ABCD-1234</string>",
+		"<string>--workspace-lock-store</string>",
+		"<string>" + filepath.Join(dir, "workspace-locks") + "</string>",
 		"<key>KeepAlive</key>",
 	} {
 		if !strings.Contains(content, expected) {
@@ -1077,6 +1081,79 @@ func TestHostServeReportsHostDenialArtifact(t *testing.T) {
 	}
 	if !strings.Contains(artifacts[0].Content, `"code": "workspace_required"`) {
 		t.Fatalf("expected workspace_required denial artifact, got %s", artifacts[0].Content)
+	}
+}
+
+func TestHostServeReportsWorkspaceLockedArtifact(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := t.TempDir()
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	if _, err := workspace.NewFileLockStore(lockStore).Acquire(workspace.LockOptions{
+		RepoRoot:     repo,
+		HostID:       host.ID,
+		JobID:        "job_existing",
+		OwnerAdapter: "codex",
+		TTL:          time.Hour,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": repo,
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:         server.URL,
+		PollInterval:       1,
+		MaxJobs:            1,
+		WorkspaceLockStore: lockStore,
+	}, host.ID, "")
+	if err == nil {
+		t.Fatal("expected workspace lock denial")
+	}
+	if processed != 0 {
+		t.Fatalf("expected 0 processed jobs, got %d", processed)
+	}
+	failed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != model.JobStatusFailed {
+		t.Fatalf("expected failed job, got %s", failed.Status)
+	}
+	artifacts := gw.Artifacts(job.ID)
+	if len(artifacts) != 1 {
+		t.Fatalf("expected 1 failure artifact, got %d", len(artifacts))
+	}
+	if !strings.Contains(artifacts[0].Content, `"code": "workspace_locked"`) {
+		t.Fatalf("expected workspace_locked denial artifact, got %s", artifacts[0].Content)
 	}
 }
 

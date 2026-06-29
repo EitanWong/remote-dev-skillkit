@@ -12,15 +12,16 @@ import (
 
 func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 	agent, err := NewMacOSLaunchAgent(LaunchAgentOptions{
-		Label:             "com.example.rdev-host",
-		BinaryPath:        "/opt/rdev/bin/rdev",
-		GatewayURL:        "https://api.example.com/v1",
-		TicketCode:        "ABCD-1234",
-		IdentityStorePath: "/Users/eitan/.rdev/host/identity.json",
-		TrustStorePath:    "/Users/eitan/.rdev/host/trust.json",
-		NonceStorePath:    "/Users/eitan/.rdev/host/nonces.json",
-		ApprovalStorePath: "/Users/eitan/.rdev/host/approvals.json",
-		LogDir:            "/Users/eitan/Library/Logs/rdev",
+		Label:                  "com.example.rdev-host",
+		BinaryPath:             "/opt/rdev/bin/rdev",
+		GatewayURL:             "https://api.example.com/v1",
+		TicketCode:             "ABCD-1234",
+		IdentityStorePath:      "/Users/eitan/.rdev/host/identity.json",
+		TrustStorePath:         "/Users/eitan/.rdev/host/trust.json",
+		NonceStorePath:         "/Users/eitan/.rdev/host/nonces.json",
+		ApprovalStorePath:      "/Users/eitan/.rdev/host/approvals.json",
+		WorkspaceLockStorePath: "/Users/eitan/.rdev/host/workspace-locks",
+		LogDir:                 "/Users/eitan/Library/Logs/rdev",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +44,8 @@ func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 		"/Users/eitan/.rdev/host/identity.json",
 		"--trust-store",
 		"/Users/eitan/.rdev/host/trust.json",
+		"--workspace-lock-store",
+		"/Users/eitan/.rdev/host/workspace-locks",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected argument %q in %#v", expected, agent.ProgramArguments)

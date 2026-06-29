@@ -213,6 +213,19 @@ rdev workspace prepare-worktree \
 
 The response uses schema `rdev.git-worktree-plan.v1`, records the lock, branch, worktree path, and command evidence for `git rev-parse` and `git worktree add`. If `git worktree add` fails, the CLI releases the lock so another job is not blocked by a failed preparation step.
 
+To enforce the same lock during host job execution, start the host with a lock store:
+
+```bash
+rdev host serve \
+  --mode managed \
+  --gateway http://127.0.0.1:8787 \
+  --ticket-code ABCD-1234 \
+  --once=false \
+  --workspace-lock-store .rdev/workspace-locks
+```
+
+When `--workspace-lock-store` is set, the hostrunner acquires `rdev.workspace-lock.v1` after signature, nonce, identity, capability, and approval checks, and before adapter execution. The lock is released after success or adapter denial. If another active job holds the canonical repo root, the job fails with structured denial code `workspace_locked`.
+
 The host redacts common secret patterns before artifact upload:
 
 - `sk-...` API keys

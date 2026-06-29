@@ -68,6 +68,7 @@ Implemented now:
 - Gateway-backed evidence bundle export from a job id via `rdev evidence export --gateway ... --job-id ...`.
 - Skillkit bundle export via `rdev skillkit export` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Workspace lock and Git worktree foundation via `rdev workspace lock`, `rdev workspace status`, `rdev workspace unlock`, and `rdev workspace prepare-worktree`.
+- Host job execution can enforce one-writer workspace locks through `rdev host serve --workspace-lock-store`.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Durable host-side approval token consumption stores with in-memory and file-backed development modes, exposed through `rdev host serve --approval-store`.
@@ -122,8 +123,8 @@ go run ./cmd/rdev workspace prepare-worktree --repo . --host-id hst_... --job-id
 go run ./cmd/rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev-verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
 go run ./cmd/rdev host serve --mode temporary
-go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll
-go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
+go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll --workspace-lock-store .rdev/workspace-locks
+go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --plist-out ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
 ```

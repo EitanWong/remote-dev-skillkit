@@ -87,10 +87,11 @@ rdev host install-service \
   --platform macos \
   --gateway https://api.example.com/v1 \
   --ticket-code ABCD-1234 \
+  --workspace-lock-store ~/.rdev/host/workspace-locks \
   --plist-out ~/Library/LaunchAgents/com.remote-dev-skillkit.host.plist
 ```
 
-On macOS, the current command writes a LaunchAgent plist and prints the explicit `launchctl bootstrap`, `launchctl bootout`, and `launchctl print` commands. It does not run `launchctl` automatically. This command is not used for third-party temporary sessions.
+On macOS, the current command writes a LaunchAgent plist and prints the explicit `launchctl bootstrap`, `launchctl bootout`, and `launchctl print` commands. It does not run `launchctl` automatically. This command is not used for third-party temporary sessions. When `--workspace-lock-store` is set, managed jobs enforce one-writer workspace locks before adapter execution.
 
 Inspect or remove the LaunchAgent plist without executing `launchctl`:
 
