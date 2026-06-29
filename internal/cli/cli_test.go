@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -639,6 +640,94 @@ func TestHostServeLongPollWaitsAndCompletesDevJob(t *testing.T) {
 	}
 }
 
+func TestHostServeCancelsRunningCodexJobWhenGatewayJobCanceled(t *testing.T) {
+	requireGitForCLITest(t)
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := initGitRepoForCLITest(t)
+	fakeCodex := buildCLITestBinary(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	job, err := gw.CreateJob(host.ID, "codex", "cancel running codex", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"codex.run", "git.diff"},
+		"prompt":               "sleep until the gateway cancels this job",
+		"codex_command":        fakeCodex,
+		"max_duration_seconds": 30,
+		"max_output_bytes":     64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct {
+		processed int
+		err       error
+	}, 1)
+	go func() {
+		processed, err := app.pollAndRunDevJobs(ctx, hostServeOptions{
+			GatewayURL:   server.URL,
+			PollInterval: 50 * time.Millisecond,
+			MaxJobs:      1,
+		}, host.ID, "")
+		done <- struct {
+			processed int
+			err       error
+		}{processed: processed, err: err}
+	}()
+	waitForJobStatus(t, gw, job.ID, model.JobStatusRunning, 2*time.Second)
+	if _, err := gw.CancelJob(job.ID, "operator cancel"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.processed != 1 {
+			t.Fatalf("expected one processed canceled job, got %d", result.processed)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	canceled, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Status != model.JobStatusCanceled {
+		t.Fatalf("expected job to remain canceled, got %s", canceled.Status)
+	}
+}
+
 func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -863,10 +952,10 @@ func TestHostTrustRejectsReplayWithNonceStore(t *testing.T) {
 		NonceStore: hostNonceStore(filepath.Join(t.TempDir(), "nonce", "store.json")),
 	}
 	now := time.Now()
-	if _, err := trust.RunDevJob(host.ID, "", job, now); err != nil {
+	if _, err := trust.RunDevJob(context.Background(), host.ID, "", job, now); err != nil {
 		t.Fatalf("expected first execution to pass: %v", err)
 	}
-	if _, err := trust.RunDevJob(host.ID, "", job, now); err == nil {
+	if _, err := trust.RunDevJob(context.Background(), host.ID, "", job, now); err == nil {
 		t.Fatal("expected replay rejection")
 	}
 }
@@ -912,10 +1001,10 @@ func TestHostTrustRejectsConsumedApprovalWithApprovalStore(t *testing.T) {
 		ApprovalStore: hostApprovalStore(filepath.Join(t.TempDir(), "approval", "store.json")),
 	}
 	now := time.Now()
-	if _, err := trust.RunDevJob(host.ID, "", job, now); err != nil {
+	if _, err := trust.RunDevJob(context.Background(), host.ID, "", job, now); err != nil {
 		t.Fatalf("expected first approved execution to pass: %v", err)
 	}
-	if _, err := trust.RunDevJob(host.ID, "", job, now); !errors.Is(err, model.ErrApprovalTokenConsumed) {
+	if _, err := trust.RunDevJob(context.Background(), host.ID, "", job, now); !errors.Is(err, model.ErrApprovalTokenConsumed) {
 		t.Fatalf("expected consumed approval token rejection, got %v", err)
 	}
 }
@@ -1837,4 +1926,47 @@ func runGitForCLITest(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
 	}
+}
+
+func buildCLITestBinary(t *testing.T, source string) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is required")
+	}
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binaryName := "rdev-cli-test"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(dir, binaryName)
+	cmd := exec.Command("go", "build", "-o", binaryPath, sourcePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(output))
+	}
+	return binaryPath
+}
+
+func waitForJobStatus(t *testing.T, gw *gateway.MemoryGateway, jobID string, status model.JobStatus, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		job, err := gw.Job(jobID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.Status == status {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	job, err := gw.Job(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Fatalf("timed out waiting for job %s status %s, got %s", jobID, status, job.Status)
 }

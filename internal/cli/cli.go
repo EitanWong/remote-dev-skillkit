@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
@@ -63,7 +64,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 	case "mcp":
 		return a.mcp(args[1:])
 	case "host":
-		return a.host(args[1:])
+		return a.host(ctx, args[1:])
 	case "ticket":
 		return a.ticket(args[1:])
 	case "policy":
@@ -123,7 +124,7 @@ func (a App) mcp(args []string) error {
 	}
 }
 
-func (a App) host(args []string) error {
+func (a App) host(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing host subcommand")
 	}
@@ -154,7 +155,7 @@ func (a App) host(args []string) error {
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		return a.hostServe(context.Background(), hostServeOptions{
+		return a.hostServe(ctx, hostServeOptions{
 			Mode:                  *mode,
 			GatewayURL:            *gateway,
 			TicketCode:            *ticketCode,
@@ -1394,8 +1395,29 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 			}
 			continue
 		}
-		result, err := trust.RunDevJob(hostID, identityFingerprint, job, time.Now())
+		jobCtx, cancelJob := context.WithCancel(ctx)
+		monitorCtx, stopMonitor := context.WithCancel(ctx)
+		var canceledByGateway atomic.Bool
+		monitorDone := make(chan struct{})
+		go func() {
+			defer close(monitorDone)
+			monitorJobCancellation(monitorCtx, opts.GatewayURL, job.ID, cancellationPollInterval(interval), func() {
+				canceledByGateway.Store(true)
+				cancelJob()
+			})
+		}()
+		result, err := trust.RunDevJob(jobCtx, hostID, identityFingerprint, job, time.Now())
+		cancelJob()
+		stopMonitor()
+		<-monitorDone
 		if err != nil {
+			if canceledByGateway.Load() {
+				processed++
+				continue
+			}
+			if ctx.Err() != nil {
+				return processed, ctx.Err()
+			}
 			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
 				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
 			}
@@ -1407,6 +1429,39 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		processed++
 	}
 	return processed, nil
+}
+
+func cancellationPollInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return time.Second
+	}
+	if interval < 50*time.Millisecond {
+		return 50 * time.Millisecond
+	}
+	if interval > time.Second {
+		return time.Second
+	}
+	return interval
+}
+
+func monitorJobCancellation(ctx context.Context, gatewayURL, jobID string, interval time.Duration, cancel func()) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			job, err := fetchJob(ctx, gatewayURL, jobID)
+			if err != nil {
+				continue
+			}
+			if job.Status == model.JobStatusCanceled {
+				cancel()
+				return
+			}
+		}
+	}
 }
 
 func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootPublicKey string) (model.JoinManifest, error) {
@@ -1457,7 +1512,7 @@ type hostTrust struct {
 	WorkspaceLockStore string
 }
 
-func (t hostTrust) RunDevJob(hostID, identityFingerprint string, job model.Job, now time.Time) (hostrunner.Result, error) {
+func (t hostTrust) RunDevJob(ctx context.Context, hostID, identityFingerprint string, job model.Job, now time.Time) (hostrunner.Result, error) {
 	opts := hostrunner.Options{
 		IdentityFingerprint: identityFingerprint,
 		NonceStore:          t.NonceStore,
@@ -1465,10 +1520,10 @@ func (t hostTrust) RunDevJob(hostID, identityFingerprint string, job model.Job, 
 		WorkspaceLockStore:  t.WorkspaceLockStore,
 	}
 	if t.SignedBundle != nil {
-		return hostrunner.RunDevJobWithTrustBundleOptions(hostID, *t.SignedBundle, job, now, opts)
+		return hostrunner.RunDevJobWithTrustBundleOptionsContext(ctx, hostID, *t.SignedBundle, job, now, opts)
 	}
 	if t.Legacy != nil {
-		return hostrunner.RunDevJobWithOptions(hostID, *t.Legacy, job, now, opts)
+		return hostrunner.RunDevJobWithOptionsContext(ctx, hostID, *t.Legacy, job, now, opts)
 	}
 	return hostrunner.Result{}, fmt.Errorf("host trust is not configured")
 }

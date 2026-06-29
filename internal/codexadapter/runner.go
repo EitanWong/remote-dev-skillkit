@@ -38,6 +38,7 @@ type CommandResult struct {
 	ExitCode        int         `json:"exit_code"`
 	Stdout          string      `json:"stdout,omitempty"`
 	Stderr          string      `json:"stderr,omitempty"`
+	Canceled        bool        `json:"canceled"`
 	TimedOut        bool        `json:"timed_out"`
 	OutputTruncated bool        `json:"output_truncated"`
 	TestReport      *TestReport `json:"test_report,omitempty"`
@@ -102,6 +103,13 @@ type ResultArtifact struct {
 }
 
 func Execute(spec Spec) (Result, error) {
+	return ExecuteContext(context.Background(), spec)
+}
+
+func ExecuteContext(parent context.Context, spec Spec) (Result, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
 	workspaceRoot, err := workspace.CanonicalDir(spec.WorkspaceRoot)
 	if err != nil {
 		return Result{}, err
@@ -121,7 +129,7 @@ func Execute(spec Spec) (Result, error) {
 	if maxOutputBytes <= 0 {
 		maxOutputBytes = 1024 * 1024
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxDuration)*time.Second)
+	ctx, cancel := context.WithTimeout(parent, time.Duration(maxDuration)*time.Second)
 	defer cancel()
 
 	started := time.Now().UTC()
@@ -134,30 +142,37 @@ func Execute(spec Spec) (Result, error) {
 		CodexCommand:  codexResult,
 		StartedAt:     started.Format(time.RFC3339Nano),
 	}
-	result.GitStatus = runCommand(ctx, workspaceRoot, []string{"git", "status", "--short"}, maxOutputBytes)
-	result.GitDiffStat = runCommand(ctx, workspaceRoot, []string{"git", "diff", "--stat"}, maxOutputBytes)
-	result.GitDiff = runCommand(ctx, workspaceRoot, []string{"git", "diff", "--"}, maxOutputBytes)
-	for _, command := range spec.VerificationCommands {
-		if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
-			continue
+	evidenceCtx, evidenceCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer evidenceCancel()
+	result.GitStatus = runCommand(evidenceCtx, workspaceRoot, []string{"git", "status", "--short"}, maxOutputBytes)
+	result.GitDiffStat = runCommand(evidenceCtx, workspaceRoot, []string{"git", "diff", "--stat"}, maxOutputBytes)
+	result.GitDiff = runCommand(evidenceCtx, workspaceRoot, []string{"git", "diff", "--"}, maxOutputBytes)
+	if !codexResult.Canceled && !codexResult.TimedOut {
+		for _, command := range spec.VerificationCommands {
+			if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+				continue
+			}
+			if !allowedCommand(command[0], spec.AllowVerificationCommands) {
+				ended := time.Now().UTC()
+				result.EndedAt = ended.Format(time.RFC3339Nano)
+				result.DurationMillis = ended.Sub(started).Milliseconds()
+				result.VerificationResults = append(result.VerificationResults, CommandResult{
+					Argv:     append([]string(nil), command...),
+					Dir:      workspaceRoot,
+					ExitCode: -1,
+					Stderr:   fmt.Sprintf("verification command %q is not allowlisted", commandName(command[0])),
+				})
+				return result, fmt.Errorf("verification command %q is not allowlisted", commandName(command[0]))
+			}
+			result.VerificationResults = append(result.VerificationResults, runVerificationCommand(ctx, workspaceRoot, command, maxOutputBytes))
 		}
-		if !allowedCommand(command[0], spec.AllowVerificationCommands) {
-			ended := time.Now().UTC()
-			result.EndedAt = ended.Format(time.RFC3339Nano)
-			result.DurationMillis = ended.Sub(started).Milliseconds()
-			result.VerificationResults = append(result.VerificationResults, CommandResult{
-				Argv:     append([]string(nil), command...),
-				Dir:      workspaceRoot,
-				ExitCode: -1,
-				Stderr:   fmt.Sprintf("verification command %q is not allowlisted", commandName(command[0])),
-			})
-			return result, fmt.Errorf("verification command %q is not allowlisted", commandName(command[0]))
-		}
-		result.VerificationResults = append(result.VerificationResults, runVerificationCommand(ctx, workspaceRoot, command, maxOutputBytes))
 	}
 	ended := time.Now().UTC()
 	result.EndedAt = ended.Format(time.RFC3339Nano)
 	result.DurationMillis = ended.Sub(started).Milliseconds()
+	if codexResult.Canceled {
+		return result, fmt.Errorf("codex command canceled")
+	}
 	if codexResult.TimedOut {
 		return result, fmt.Errorf("codex command timed out after %ds", maxDuration)
 	}
@@ -165,6 +180,12 @@ func Execute(spec Spec) (Result, error) {
 		return result, fmt.Errorf("codex command exited with status %d", codexResult.ExitCode)
 	}
 	for _, verification := range result.VerificationResults {
+		if verification.Canceled {
+			return result, fmt.Errorf("verification command canceled")
+		}
+		if verification.TimedOut {
+			return result, fmt.Errorf("verification command timed out")
+		}
 		if verification.ExitCode != 0 {
 			return result, fmt.Errorf("verification command exited with status %d", verification.ExitCode)
 		}
@@ -260,13 +281,15 @@ func runCommand(ctx context.Context, dir string, argv []string, maxOutputBytes i
 	if err != nil && strings.TrimSpace(stderr) == "" {
 		stderr = err.Error()
 	}
+	ctxErr := ctx.Err()
 	return CommandResult{
 		Argv:            append([]string(nil), argv...),
 		Dir:             dir,
 		ExitCode:        exitCode(err),
 		Stdout:          limiter.stdout(),
 		Stderr:          stderr,
-		TimedOut:        ctx.Err() == context.DeadlineExceeded,
+		Canceled:        ctxErr == context.Canceled,
+		TimedOut:        ctxErr == context.DeadlineExceeded,
 		OutputTruncated: limiter.truncated(),
 	}
 }

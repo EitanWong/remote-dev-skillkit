@@ -1,6 +1,7 @@
 package codexadapter
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConformanceCanonicalizesWorkspaceRoot(t *testing.T) {
@@ -234,6 +236,44 @@ func main() {
 	}
 	if !artifact.CodexCommand.TimedOut {
 		t.Fatalf("expected timeout evidence, got %#v", artifact.CodexCommand)
+	}
+}
+
+func TestConformanceExternalContextCancelsCodexCommandWithEvidence(t *testing.T) {
+	repo := initGitRepo(t)
+	fakeCodex := buildFakeCodexBinary(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	result, err := ExecuteContext(ctx, Spec{
+		WorkspaceRoot:      repo,
+		Prompt:             "cancel from caller",
+		CodexCommand:       fakeCodex,
+		MaxDurationSeconds: 30,
+		MaxOutputBytes:     64 * 1024,
+	})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	var artifact ResultArtifact
+	if err := json.Unmarshal([]byte(result.ArtifactContent()), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.CodexCommand.Canceled || artifact.CodexCommand.TimedOut {
+		t.Fatalf("expected canceled non-timeout evidence, got %#v", artifact.CodexCommand)
+	}
+	if artifact.GitStatus.Argv == nil || artifact.GitDiff.Argv == nil {
+		t.Fatalf("expected cancellation evidence to include git status and diff, got %#v", artifact)
 	}
 }
 

@@ -73,6 +73,7 @@ Implemented now:
 - Host job execution can enforce one-writer workspace locks through `rdev host serve --workspace-lock-store`.
 - Codex adapter MVP through `adapter=codex`: runs `codex exec` or a signed payload-provided command inside the validated workspace, requires `codex.run` and `git.diff`, gates push/merge/deploy/publish/credential/service intents on approval, and captures `rdev.codex-result.v1` evidence with Codex output, Git status, Git diff/stat, optional verification command results, `go test -json` test reports, output caps, and redaction.
 - Codex adapter conformance coverage for canonical workspace roots, write-scope escape rejection before execution, failure evidence, redaction, output truncation, and timeout cancellation evidence.
+- Codex adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Durable host-side approval token consumption stores with in-memory and file-backed development modes, exposed through `rdev host serve --approval-store`.

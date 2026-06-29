@@ -1,6 +1,7 @@
 package hostrunner
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,26 +87,34 @@ func (e DenialError) Unwrap() error {
 }
 
 func RunDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
-	return runDevJob(hostID, trust, job, now, Options{})
+	return RunDevJobWithOptionsContext(context.Background(), hostID, trust, job, now, Options{})
 }
 
 func RunDevJobForIdentity(hostID, identityFingerprint string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
-	return runDevJob(hostID, trust, job, now, Options{IdentityFingerprint: identityFingerprint})
+	return RunDevJobWithOptionsContext(context.Background(), hostID, trust, job, now, Options{IdentityFingerprint: identityFingerprint})
 }
 
 func RunDevJobWithOptions(hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
-	return runDevJob(hostID, trust, job, now, opts)
+	return RunDevJobWithOptionsContext(context.Background(), hostID, trust, job, now, opts)
+}
+
+func RunDevJobWithOptionsContext(ctx context.Context, hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
+	return runDevJob(ctx, hostID, trust, job, now, opts)
 }
 
 func RunDevJobWithTrustBundle(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
-	return RunDevJobWithTrustBundleOptions(hostID, trustBundle, job, now, Options{})
+	return RunDevJobWithTrustBundleOptionsContext(context.Background(), hostID, trustBundle, job, now, Options{})
 }
 
 func RunDevJobWithTrustBundleForIdentity(hostID, identityFingerprint string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
-	return RunDevJobWithTrustBundleOptions(hostID, trustBundle, job, now, Options{IdentityFingerprint: identityFingerprint})
+	return RunDevJobWithTrustBundleOptionsContext(context.Background(), hostID, trustBundle, job, now, Options{IdentityFingerprint: identityFingerprint})
 }
 
 func RunDevJobWithTrustBundleOptions(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
+	return RunDevJobWithTrustBundleOptionsContext(context.Background(), hostID, trustBundle, job, now, opts)
+}
+
+func RunDevJobWithTrustBundleOptionsContext(ctx context.Context, hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
 	if job.Envelope == nil {
 		return deny(job, denialSpec{
 			Code:      "job_envelope_required",
@@ -118,10 +127,13 @@ func RunDevJobWithTrustBundleOptions(hostID string, trustBundle model.SignedTrus
 	if err != nil {
 		return deny(job, trustBundleDenial(job, err), err)
 	}
-	return runDevJob(hostID, trust, job, now, opts)
+	return runDevJob(ctx, hostID, trust, job, now, opts)
 }
 
-func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
+func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if job.Envelope == nil {
 		return deny(job, denialSpec{
 			Code:      "job_envelope_required",
@@ -226,7 +238,7 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 		}
 	}
 	if envelope.Adapter == "codex" {
-		execution, err := codexadapter.Execute(codexadapter.Spec{
+		execution, err := codexadapter.ExecuteContext(ctx, codexadapter.Spec{
 			WorkspaceRoot:             envelope.Workspace.Root,
 			WriteScope:                envelope.Workspace.WriteScope,
 			Prompt:                    stringValue(envelope.Payload, "prompt", envelope.Intent),

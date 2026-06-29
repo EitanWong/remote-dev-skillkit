@@ -258,6 +258,7 @@ The local test suite currently covers:
 - workspace lock enforcement during host execution through `rdev host serve --workspace-lock-store`, including hostrunner lock acquire/release, `workspace_locked` structured denial artifacts, lock release after adapter denial, and managed LaunchAgent `--workspace-lock-store` argument generation.
 - Codex adapter MVP through `adapter=codex`, including `codex.run` and `git.diff` capability checks, locked-workspace hostrunner execution, implicit approval preflight for push/merge/deploy/publish/credential/service intents, `rdev.codex-result.v1` artifacts, Git status/diff evidence, optional allowlisted verification command evidence, `rdev.test-report.v1` parsing for `go test -json`, output caps, redaction, and lock release after execution.
 - Codex adapter conformance tests through `internal/codexadapter/conformance_test.go`, covering canonical workspace roots, write-scope escape rejection before execution, nonzero Codex exits that still produce evidence, prompt/argv/stdout/stderr/diff redaction, output truncation flags, and duration-timeout cancellation evidence.
+- Codex adapter cooperative cancellation through `ExecuteContext`, hostrunner context propagation, and `rdev host serve` gateway job status monitoring that stops a running Codex process when the job becomes `canceled`.
 
 The following remain real-environment acceptance tests:
 
@@ -265,6 +266,6 @@ The following remain real-environment acceptance tests:
 - Windows Authenticode verification against a real code-signing certificate;
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall;
-- Codex adapter cooperative cancellation beyond duration timeout cancellation;
+- cooperative cancellation generalized across shell, PowerShell, and future adapter SDK implementations;
 - OS-protected managed host trust and identity storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.

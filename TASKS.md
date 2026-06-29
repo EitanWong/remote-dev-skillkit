@@ -95,6 +95,7 @@
 - [x] Add Codex adapter implicit approval preflight for push, merge, deploy, publish, credential, and service intents before adapter execution.
 - [x] Add Codex adapter `go test -json` parsing into `rdev.test-report.v1` verification summaries.
 - [x] Add Codex adapter conformance coverage for workspace canonicalization, write-scope escapes, failure evidence, redaction, truncation, and timeout cancellation evidence.
+- [x] Add Codex adapter cooperative cancellation from host/job context and gateway job cancellation polling.
 
 ## Later
 
@@ -104,7 +105,8 @@
 - [ ] Add Windows Service mode.
 - [ ] Add launchctl start/stop execution and systemd mode.
 - [ ] Add acpx adapter.
-- [ ] Add Codex adapter cooperative cancellation API beyond duration timeout cancellation.
+- [ ] Generalize cooperative cancellation across shell, PowerShell, and future adapter SDK implementations.
+- [ ] Add canceled-job artifact reporting without changing the gateway job's canceled terminal state.
 - [ ] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
 - [ ] Add RustDesk/MeshCentral adapter.

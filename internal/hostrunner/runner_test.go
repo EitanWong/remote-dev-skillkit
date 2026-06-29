@@ -1,6 +1,7 @@
 package hostrunner
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -457,6 +459,48 @@ func main() {
 	}
 }
 
+func TestRunDevJobCancelsCodexWhenContextCanceled(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeCodex := buildHostrunnerFakeCodexBinary(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	job, err := gw.CreateJob(host.ID, "codex", "sleep until canceled", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"codex.run", "git.diff"},
+		"prompt":               "sleep until canceled",
+		"codex_command":        fakeCodex,
+		"max_duration_seconds": 30,
+		"max_output_bytes":     64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	result, err := RunDevJobWithOptionsContext(ctx, host.ID, gw.TrustBundle(), job, now, Options{})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.codex-result.v1"`) {
+		t.Fatalf("expected codex artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, `"canceled": true`) {
+		t.Fatalf("expected canceled evidence, got %s", result.ArtifactContent)
+	}
+}
+
 func TestRunDevJobRequiresApprovalForCodexGitPushIntent(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -876,6 +920,29 @@ func writeHostrunnerFakeCodex(t *testing.T, source string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func buildHostrunnerFakeCodexBinary(t *testing.T, source string) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is required for hostrunner codex adapter tests")
+	}
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "fakecodex.go")
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binaryName := "fakecodex"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(dir, binaryName)
+	cmd := exec.Command("go", "build", "-o", binaryPath, sourcePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build fake codex binary: %v\n%s", err, string(output))
+	}
+	return binaryPath
 }
 
 func assertDenial(t *testing.T, result Result, err error, wantCode string) {
