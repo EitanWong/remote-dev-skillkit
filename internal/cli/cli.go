@@ -66,6 +66,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.gateway(args[1:])
 	case "release":
 		return a.release(args[1:])
+	case "audit":
+		return a.audit(args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -434,6 +436,33 @@ func (a App) gateway(args []string) error {
 	}
 }
 
+func (a App) audit(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing audit subcommand")
+	}
+	switch args[0] {
+	case "export":
+		fs := flag.NewFlagSet("audit export", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		input := fs.String("input", "", "input audit JSONL path")
+		out := fs.String("out", "", "output audit chain JSON path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.auditExport(*input, *out)
+	case "verify":
+		fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		input := fs.String("input", "", "input audit chain JSON path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.auditVerify(*input)
+	default:
+		return fmt.Errorf("unknown audit subcommand %q", args[0])
+	}
+}
+
 func (a App) release(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing release subcommand")
@@ -561,6 +590,51 @@ func (a App) releaseVerify(artifactPath, manifestPath, rootPublicKey string) err
 	return enc.Encode(payload)
 }
 
+func (a App) auditExport(inputPath, outputPath string) error {
+	if inputPath == "" {
+		return fmt.Errorf("input is required")
+	}
+	if outputPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	chain, err := audit.ExportChainFromJSONL(inputPath, outputPath, time.Now())
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":          true,
+		"input":       inputPath,
+		"out":         outputPath,
+		"event_count": chain.EventCount,
+		"root_hash":   chain.RootHash,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) auditVerify(inputPath string) error {
+	if inputPath == "" {
+		return fmt.Errorf("input is required")
+	}
+	chain, err := audit.ReadChain(inputPath)
+	if err != nil {
+		return err
+	}
+	if err := audit.VerifyChain(chain); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":          true,
+		"input":       inputPath,
+		"event_count": chain.EventCount,
+		"root_hash":   chain.RootHash,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev - remote development skillkit
 
@@ -574,6 +648,8 @@ Usage:
   rdev mcp tools
   rdev mcp serve
   rdev gateway serve --dev --addr 127.0.0.1:8787
+  rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/chain.json
+  rdev audit verify --input .rdev/audit/chain.json
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234

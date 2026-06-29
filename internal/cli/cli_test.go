@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
@@ -735,6 +736,58 @@ func TestGatewayServeRequiresDevFlag(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "requires --dev") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAuditExportAndVerify(t *testing.T) {
+	dir := t.TempDir()
+	jsonlPath := filepath.Join(dir, "events.jsonl")
+	chainPath := filepath.Join(dir, "chain.json")
+	store := audit.NewJSONLStore(jsonlPath)
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	for _, event := range []model.AuditEvent{
+		{Sequence: 1, Actor: "operator", Action: "ticket.create", TargetID: "tkt_1", Message: "created", At: now},
+		{Sequence: 2, Actor: "host", Action: "host.register", TargetID: "hst_1", Message: "registered", At: now.Add(time.Second)},
+	} {
+		if err := store.Append(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var exportStdout bytes.Buffer
+	exportApp := NewApp(&exportStdout, &bytes.Buffer{})
+	if err := exportApp.Run(context.Background(), []string{"audit", "export", "--input", jsonlPath, "--out", chainPath}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(exportStdout.String(), `"ok": true`) {
+		t.Fatalf("expected export ok, got %s", exportStdout.String())
+	}
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{"audit", "verify", "--input", chainPath}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"event_count": 2`) {
+		t.Fatalf("expected verify event count, got %s", verifyStdout.String())
+	}
+}
+
+func TestAuditVerifyRejectsTamperedChain(t *testing.T) {
+	dir := t.TempDir()
+	chainPath := filepath.Join(dir, "chain.json")
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	chain, err := audit.ExportChain([]model.AuditEvent{
+		{Sequence: 1, Actor: "operator", Action: "ticket.create", TargetID: "tkt_1", Message: "created", At: now},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain.Entries[0].Event.Message = "tampered"
+	if err := audit.WriteChain(chainPath, chain); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"audit", "verify", "--input", chainPath}); err == nil {
+		t.Fatal("expected tampered chain verification to fail")
 	}
 }
 

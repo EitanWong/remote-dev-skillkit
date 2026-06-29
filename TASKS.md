@@ -35,6 +35,7 @@
 - [x] Make host revocation cancel queued/running jobs and audit the stop.
 - [x] Add host identity key storage and signed job identity binding.
 - [x] Add host-side nonce replay cache.
+- [x] Add hash-chained audit export verifier.
 
 ## Next
 
@@ -62,6 +63,7 @@
 - [x] Add durable host trust bundle file store.
 - [x] Add durable host identity key store.
 - [x] Add durable host nonce replay store.
+- [x] Add hash-chained audit export and verification.
 
 ## Later
 
@@ -91,5 +93,6 @@
 - Local gateway and local host can complete a demo ticket/job flow.
 - MCP stdio server exposes the Phase 1 tools.
 - All jobs produce audit records.
+- Audit records can be exported as a verifiable hash chain.
 - Tests cover policy gates and command contracts.
 - README has a working local demo.

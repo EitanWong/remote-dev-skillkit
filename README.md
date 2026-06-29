@@ -38,6 +38,7 @@ Implemented now:
 - Persistent development gateway signing key files plus host trust pin checks.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
+- Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
 - Signed development join manifest endpoint for manifest-driven temporary host registration.
 - Join manifests can be signed by a separate bootstrap/release trust root and verified by hosts with a pinned root public key.
 - Release artifact signing and verification primitives via `rdev release sign` / `rdev release verify`.
@@ -76,6 +77,8 @@ go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' | go run ./cmd/rdev mcp serve
 go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787
+go run ./cmd/rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/audit-chain.json
+go run ./cmd/rdev audit verify --input .rdev/audit/audit-chain.json
 go run ./cmd/rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev-verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
 go run ./cmd/rdev host serve --mode temporary

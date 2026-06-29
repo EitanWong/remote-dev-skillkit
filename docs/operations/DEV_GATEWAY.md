@@ -80,6 +80,19 @@ curl -s http://127.0.0.1:8787/v1/tickets/<ticket_code>/manifest
 curl -s http://127.0.0.1:8787/v1/audit
 ```
 
+Export and verify an audit hash chain from a JSONL audit log:
+
+```bash
+rdev audit export \
+  --input .rdev/audit/events.jsonl \
+  --out .rdev/audit/audit-chain.json
+
+rdev audit verify \
+  --input .rdev/audit/audit-chain.json
+```
+
+The exported file uses schema `rdev.audit-chain.v1`. Each entry stores the canonical event hash, previous chain hash, and current chain hash. Verification recomputes every event hash and the final root hash, rejecting tampered events or broken chain links.
+
 Read or update the development signed trust bundle:
 
 ```bash

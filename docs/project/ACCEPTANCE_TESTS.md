@@ -241,6 +241,7 @@ The local test suite currently covers:
 - durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.
 - durable host identity key file storage with 0600 permissions, registration identity preservation, signed job envelope identity binding, and host-side fingerprint mismatch rejection.
 - host-side nonce replay rejection with in-memory and file-backed stores.
+- hash-chained audit export and verification through `rdev audit export` / `rdev audit verify`.
 
 The following remain real-environment acceptance tests:
 
