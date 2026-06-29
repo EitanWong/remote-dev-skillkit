@@ -32,6 +32,55 @@ The highest-level rule is:
 
 That rule resolves the tension between remote repair convenience and safety. Temporary third-party machines get visible, time-limited, foreground sessions. Eitan-owned or formally managed machines can opt into durable service mode.
 
+## Final Safety Kernel
+
+The final architecture is intentionally split into a small non-negotiable kernel and a large replaceable adapter surface.
+
+The kernel is what makes the product safe:
+
+```text
+identity -> ticket/policy -> signed envelope -> host validation -> adapter run
+        -> artifact/evidence -> audit hash chain -> review/revoke
+```
+
+Everything in this path must be deterministic, schema-versioned, tested, and boring. It should not depend on a specific coding CLI, transport vendor, mesh provider, remote desktop tool, or hosted workspace product.
+
+The replaceable surface is what makes the product useful:
+
+```text
+Codex, Claude Code, ACP, shell, PowerShell, Git, browser, GUI, SSH,
+Tailscale/headscale, Coder, DevPod, local tmux, future agent runtimes
+```
+
+Adapters may be powerful, but they do not get to define trust. They receive bounded jobs from the kernel, return evidence to the kernel, and are revoked by the kernel.
+
+### Kernel Responsibilities
+
+| Kernel area | Final responsibility | Why it cannot be delegated |
+|---|---|---|
+| identity | operator, agent client, gateway, host, release, approval identities | every other decision depends on knowing who asked and who executes |
+| policy | capability rings, workspace scope, approval gates, limits | adapters and prompts are not reliable security boundaries |
+| envelope | canonical signed executable request | prevents ambiguous intent, tampering, wrong-host execution, and replay |
+| host validation | local verification before every run | gateway approval alone is not enough when clients or transports fail |
+| approval | human decision bound to one operation | agents can request escalation but cannot grant it to themselves |
+| audit | append-only hash-chained events | remote work must be reviewable after the fact |
+| evidence | per-job artifacts, diffs, test output, denials, redaction metadata | the operator needs proof, not a confident summary |
+| revocation | cancel jobs, disable tickets, hosts, approvals, and keys | the operator must be able to stop the system quickly |
+
+### Adapter Responsibilities
+
+Adapters own execution details only:
+
+- detect local capability;
+- prepare a workspace or session;
+- run the requested operation within signed limits;
+- stream bounded output;
+- redact before upload;
+- return schema-versioned artifacts;
+- clean up or leave reviewable state.
+
+An adapter that needs extra authority must request a capability or approval. It must never create a private bypass around signed jobs, workspace locks, redaction, approval, or audit.
+
 ## Ultimate End-State Solution
 
 The final product is a universal remote-work safety layer for agents. It lets an operator say "use that machine to solve this problem" without handing the agent SSH credentials, a raw desktop session, or broad terminal ownership.
@@ -76,6 +125,15 @@ Lucky on Hermes
 ```
 
 For Eitan-owned machines, Lucky should be able to select a managed Mac, Windows host, or Linux host by capability, repository root, current load, and last heartbeat. For third-party machines, Lucky should create a short-lived join link and wait for explicit operator approval before the first job.
+
+The personal deployment should optimize for one operator first, not premature multi-tenant complexity:
+
+1. `api.lunflux.com` exposes the authenticated rdev API and MCP HTTP surface.
+2. `agent.lunflux.com` exposes the join page, signed manifests, release downloads, and host relay.
+3. Hermes/Lucky holds an agent-client identity with tool permissions, not host credentials.
+4. Managed Eitan devices keep durable host identity and trust bundles.
+5. Third-party devices use temporary session-scoped identity and no persistence.
+6. Every remote coding session ends in an evidence bundle Lucky can summarize before Eitan decides whether to continue, push, merge, deploy, or revoke.
 
 ### Public Perfect Ending For The Open-Source Project
 
@@ -343,6 +401,93 @@ Owns:
 - managed service watchdog, only in managed mode.
 
 The host must remain capable of saying no even if the gateway asks for something unsafe.
+
+## Canonical Object Model
+
+The implementation should keep these objects explicit instead of hiding them inside ad hoc JSON blobs. These are the stable nouns agents, APIs, audits, and adapters should share.
+
+| Object | Owner | Purpose | Must be auditable |
+|---|---|---|---|
+| `Owner` | gateway | tenant/operator boundary; starts as `default` for single-user installs | yes |
+| `Operator` | gateway/auth provider | human who approves hosts and dangerous actions | yes |
+| `AgentClient` | MCP/API auth layer | agent runtime calling rdev tools | yes |
+| `Ticket` | gateway | temporary invitation, TTL, reason, requested capabilities | yes |
+| `Host` | host/gateway | registered machine identity and capability inventory | yes |
+| `HostPolicy` | gateway and host | approved capabilities, roots, adapters, limits, gates | yes |
+| `TrustBundle` | gateway and host | active/retired/revoked job-signing keys and sequence | yes |
+| `JoinManifest` | gateway/release trust | signed bootstrap instructions for a ticket/session | yes |
+| `ReleaseManifest` | release trust | signed artifact metadata, digests, sizes, platform policy | yes |
+| `Approval` | operator/local user | scoped decision for one high-risk operation | yes |
+| `JobEnvelope` | gateway | signed executable intent bound to host, policy, nonce, expiry | yes |
+| `JobLease` | gateway/host | bounded claim that one host may run one job | yes |
+| `AdapterRun` | host | concrete execution attempt through shell, Codex, GUI, etc. | yes |
+| `Artifact` | host/gateway | redacted output, diff, tests, screenshots, files, logs | yes |
+| `Denial` | gateway or host | structured explanation for refused work | yes |
+| `EvidenceBundle` | gateway/exporter | review package for one job/session | yes |
+| `AuditEvent` | gateway and host spool | immutable event in hash chain | yes |
+
+Object relationships:
+
+```text
+Owner
+  -> Operator
+  -> AgentClient
+  -> Ticket -> Host -> HostPolicy
+  -> TrustBundle
+  -> Approval
+  -> JobEnvelope -> JobLease -> AdapterRun -> Artifact
+  -> EvidenceBundle
+  -> AuditEvent*
+```
+
+The host must store only the subset it needs to validate and execute: host identity, trust bundle, host policy, nonce cache, local audit spool, leases in progress, and adapter state. The gateway stores the authoritative control state.
+
+## Closed Control Loop
+
+Remote development should follow the same loop every time, regardless of adapter:
+
+```text
+1. Discover or invite host
+2. Register host identity
+3. Approve scoped policy
+4. Dry-run policy decision
+5. Sign job envelope
+6. Lease job to bound host
+7. Validate again locally
+8. Run adapter
+9. Produce evidence
+10. Review result
+11. Approve escalation or finish
+12. Revoke or leave managed policy in place
+```
+
+This loop is the core product. A transport, coding CLI, or GUI tool can improve a step, but it cannot skip one.
+
+### Denial Is A First-Class Result
+
+A denied job is not an exception to hide in logs. It is a successful safety outcome and must produce a structured result with:
+
+- stable denial code;
+- human summary;
+- matched policy rule or validation step;
+- host id, job id, adapter, and capability when known;
+- retryability;
+- safer next action;
+- audit event id;
+- optional evidence artifact.
+
+Required denial families:
+
+| Family | Example codes |
+|---|---|
+| envelope | `job_envelope_required`, `envelope_invalid`, `envelope_expired`, `envelope_signature_invalid` |
+| identity | `wrong_host`, `host_identity_mismatch`, `signing_key_mismatch` |
+| trust | `trust_public_key_invalid`, `trust_bundle_revoked`, `nonce_replay` |
+| policy | `unsupported_adapter`, `missing_capability`, `approval_required`, `operation_denied` |
+| workspace | `workspace_required`, `workspace_escape`, `symlink_escape`, `workspace_locked` |
+| adapter | `command_not_allowlisted`, `timeout`, `output_limit_exceeded`, `artifact_rejected` |
+
+Agents should be able to recover from denials by asking for a safer job, requesting approval, narrowing scope, or showing the denial to the operator.
 
 ## Canonical State Machines
 
@@ -1411,12 +1556,12 @@ Done or nearly done:
 - host identity storage wired into registration and job binding;
 - nonce replay cache;
 - hash-chained audit export verifier.
+- stronger workspace and symlink escape tests;
+- local evidence bundle export.
 
 Still required:
 
-- stronger workspace and symlink escape tests;
 - policy explanation for every denial/approval;
-- local evidence bundle export.
 
 Exit criteria:
 
@@ -1521,6 +1666,8 @@ These decisions are now fixed unless a security review proves them wrong:
 13. Release trust, bootstrap trust, gateway job trust, host identity, and approval trust are separate authorities.
 14. Evidence bundles and audit export are product features, not logs.
 15. Open-source distribution must ship safe defaults, not just powerful primitives.
+16. Denials are structured policy results, not opaque errors.
+17. The safety kernel is smaller than the adapter surface and never depends on a single runtime vendor.
 
 ## Acceptance Tests For The Perfect Ending
 
