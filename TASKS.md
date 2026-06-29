@@ -109,6 +109,7 @@
 - [x] Add Windows temporary acceptance plan command with reviewed launcher, release-verification requirements, approval probes, no-persistence checks, and evidence checklist.
 - [x] Add Windows temporary acceptance plan verifier for launcher safety, hashes, release inputs, approval probes, no-persistence checks, and required evidence.
 - [x] Add signed release bundle index creation and verification for release artifacts, manifests, hashes, sizes, and required artifact presence.
+- [x] Add standalone `rdev-verify --bundle` support for bootstrap-side signed release bundle verification.
 
 ## Later
 
@@ -145,6 +146,7 @@
 - [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.
 - [x] Managed Mac acceptance reports can be independently verified through `rdev acceptance verify`, including checksum and audit-chain validation.
 - [x] Release bundle indexes can be signed and verified before publishing, including every listed artifact manifest and binary checksum.
+- [x] Standalone `rdev-verify` can verify signed release bundles before target-host execution.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 
 ## Definition Of Done For v0.1.0

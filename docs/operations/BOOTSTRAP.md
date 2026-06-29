@@ -54,11 +54,14 @@ rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
 rdev-verify.exe --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:<base64url_ed25519_public_key>
 rdev release create-bundle --dir dist --artifacts rdev-host.exe,rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
 rdev release verify-bundle --bundle dist/release-bundle.json --root-public-key release-root:<base64url_ed25519_public_key>
+rdev-verify.exe --bundle dist/release-bundle.json --root-public-key release-root:<base64url_ed25519_public_key> --require-artifacts rdev-host.exe,rdev-verify.exe
 ```
 
 This signs per-artifact manifests containing artifact names, SHA-256 values,
 sizes, signing key ids, and Ed25519 signatures. The bundle command signs an
-index binding the release artifacts to their manifests and expected hashes.
+index binding the release artifacts to their manifests and expected hashes. The
+standalone `rdev-verify` binary can verify either one artifact manifest or the
+full signed bundle index after it has been hash-pinned by the bootstrap.
 
 When `ReleaseManifestUrl` is provided, the Windows bootstrap requires `ReleaseRootPublicKey`, `VerifierDownloadUrl`, and `VerifierExpectedSha256`. It downloads `rdev-verify.exe`, checks the verifier SHA-256 first, then uses that verifier to validate the signed `rdev-host.exe` release manifest before starting the host.
 

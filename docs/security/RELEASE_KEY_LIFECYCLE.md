@@ -79,7 +79,9 @@ Target-machine verification order for Windows temporary bootstrap:
 1. Download `rdev-verify.exe`.
 2. Check the pinned SHA-256 for `rdev-verify.exe`.
 3. Check Authenticode for `rdev-verify.exe` when policy data is present.
-4. Use `rdev-verify.exe` to verify the signed `rdev-host.exe` release manifest.
+4. Use `rdev-verify.exe` to verify the signed release bundle when a bundle
+   index is distributed, or the signed `rdev-host.exe` release manifest for the
+   current single-artifact bootstrap path.
 5. Check Authenticode for `rdev-host.exe` when policy data is present.
 6. Run `rdev-host.exe` in foreground temporary mode.
 

@@ -322,12 +322,19 @@ rdev release create-bundle \
 rdev release verify-bundle \
   --bundle ./dist/release-bundle.json \
   --root-public-key release-root:<base64url_ed25519_public_key>
+
+rdev-verify \
+  --bundle ./dist/release-bundle.json \
+  --root-public-key release-root:<base64url_ed25519_public_key> \
+  --require-artifacts rdev-host.exe,rdev-verify.exe
 ```
 
 The release manifest is a signed `rdev.release-artifact.v1` JSON document.
 The release bundle is a signed `rdev.release-bundle.v1` index that verifies the
 bundle signature, every listed artifact manifest, artifact and manifest
-SHA-256/size, and required artifact presence before publishing.
+SHA-256/size, and required artifact presence before publishing. The standalone
+verifier supports the same bundle check for target-host or bootstrap contexts
+after the verifier binary itself has been hash-pinned.
 
 For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
 
