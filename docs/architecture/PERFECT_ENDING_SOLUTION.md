@@ -795,14 +795,17 @@ scripts/release/build-artifacts.sh
   -> rdev.build-artifacts.v1
   -> target directories such as windows-amd64/
   -> checksums.txt
-  -> release prepare-candidate
-  -> release verify-candidate
+  -> scripts/release/prepare-platform-candidates.sh
+  -> per-target release prepare-candidate
+  -> per-target release verify-candidate
   -> GitHub Release dry-run plan
 ```
 
-Until multi-target release-candidate layout is added, release candidates should
-be treated as platform slices or carefully reviewed asset sets with unique
-artifact basenames. The Windows temporary bootstrap slice must include real
+The current multi-platform layout is explicit platform slicing: one verified
+release candidate per `GOOS/GOARCH` target, summarized by
+`rdev.platform-release-candidates.v1`. This avoids duplicate basenames such as
+`rdev-host` across Unix targets while keeping each candidate independently
+verifiable. The Windows temporary bootstrap slice must include real
 `rdev-host.exe` and `rdev-verify.exe` binaries built from the repository before
 bundle signing and candidate verification.
 
@@ -859,7 +862,7 @@ the remaining gaps that matter before public confidence:
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
 | Adapter SDK extraction | adapters are still mostly internal implementations | public SDK, fixtures, conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
-| Multi-target release layout | real build artifacts exist, but release candidates are still safest as platform slices because flat candidates reject duplicate basenames | platform-qualified release assets or per-platform verified candidates with documented installer selection |
+| Multi-platform release UX | per-target verified candidates exist, but public release still needs aggregate asset selection and installer guidance | aggregate GitHub release plan, platform-selecting install docs, and verified download commands |
 | Public release execution | real build artifacts, release candidates, and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 
 Anything not in this ledger is secondary until these are closed.

@@ -13,31 +13,38 @@ trap cleanup EXIT
 scripts/release/build-artifacts.sh \
   --out "$work_dir/artifacts" \
   --version "$version" \
-  --targets windows/amd64 \
+  --targets linux/amd64,windows/amd64 \
   --commands rdev,rdev-host,rdev-verify \
   > "$work_dir/build.json"
 
-candidate_dir="$work_dir/candidate"
+platform_candidates_dir="$work_dir/platform-candidates"
 plan_dir="$work_dir/github-release-plan"
-artifact_dir="$work_dir/artifacts/windows-amd64"
 
-go run ./cmd/rdev release prepare-candidate \
+scripts/release/prepare-platform-candidates.sh \
+  --build-manifest "$work_dir/artifacts/build-artifacts.json" \
+  --out "$platform_candidates_dir" \
   --source-root . \
-  --out "$candidate_dir" \
-  --version "$version" \
   --gateway-url https://api.example.com/v1 \
-  --artifacts "$artifact_dir/rdev.exe,$artifact_dir/rdev-host.exe,$artifact_dir/rdev-verify.exe" \
-  --require-artifacts rdev-host.exe,rdev-verify.exe \
   --key "$work_dir/release-root.json" \
-  > "$work_dir/prepare.json"
+  > "$work_dir/platform-candidates-output.json"
 
-go run ./cmd/rdev release verify-candidate \
-  --candidate "$candidate_dir" \
-  --require-artifacts rdev-host.exe,rdev-verify.exe \
-  > "$work_dir/verify.json"
+windows_candidate="$(python3 - "$work_dir/platform-candidates/platform-candidates.json" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+for candidate in manifest["candidates"]:
+    if candidate["target"] == "windows/amd64":
+        print(candidate["candidate_dir"])
+        break
+else:
+    raise SystemExit("windows/amd64 candidate missing")
+PY
+)"
 
 scripts/github/plan-release.sh \
-  --candidate "$candidate_dir" \
+  --candidate "$windows_candidate" \
   --repo "$repo" \
   --require-artifacts rdev-host.exe,rdev-verify.exe \
   --out "$plan_dir" \
@@ -50,8 +57,8 @@ import sys
 
 root = pathlib.Path(sys.argv[1])
 build = json.loads((root / "build.json").read_text())
-prepare = json.loads((root / "prepare.json").read_text())
-verify = json.loads((root / "verify.json").read_text())
+platform_output = json.loads((root / "platform-candidates-output.json").read_text())
+platform_manifest = json.loads(pathlib.Path(platform_output["manifest"]).read_text())
 plan_output = json.loads((root / "plan-output.json").read_text())
 plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
@@ -59,10 +66,15 @@ commands = pathlib.Path(plan_output["commands"]).read_text()
 assert build["ok"] is True, build
 build_manifest = json.loads(pathlib.Path(build["manifest"]).read_text())
 assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_manifest
-assert len(build_manifest["artifacts"]) == 3, build_manifest["artifacts"]
+assert len(build_manifest["artifacts"]) == 6, build_manifest["artifacts"]
 assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
-assert prepare["ok"] is True, prepare
-assert verify["ok"] is True, verify
+assert platform_output["ok"] is True, platform_output
+assert platform_manifest["schema_version"] == "rdev.platform-release-candidates.v1", platform_manifest
+assert platform_manifest["external_mutation"] is False, platform_manifest
+assert len(platform_manifest["candidates"]) == 2, platform_manifest["candidates"]
+assert {candidate["target"] for candidate in platform_manifest["candidates"]} == {"linux/amd64", "windows/amd64"}, platform_manifest["candidates"]
+assert all(candidate["candidate_schema"] == "rdev.release-candidate.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
+assert all(candidate["verification_schema"] == "rdev.release-candidate-verification.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
 assert plan_output["ok"] is True, plan_output
 assert plan["schema_version"] == "rdev.github-release-plan.v1", plan
 assert plan["external_mutation"] is False, plan
@@ -75,8 +87,8 @@ print(json.dumps({
     "ok": True,
     "build_schema": build_manifest["schema_version"],
     "built_artifacts": len(build_manifest["artifacts"]),
-    "candidate_schema": prepare["schema"],
-    "verification_schema": verify["schema"],
+    "platform_candidates_schema": platform_manifest["schema_version"],
+    "platform_candidate_count": len(platform_manifest["candidates"]),
     "plan_schema": plan["schema_version"],
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],

@@ -13,6 +13,8 @@
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.
 - [ ] Export and verify the Skillkit bundle with `rdev skillkit export` and `rdev skillkit verify`.
+- [ ] Prepare and verify per-platform candidates with `scripts/release/prepare-platform-candidates.sh`.
+- [ ] Review `rdev.platform-release-candidates.v1`.
 - [ ] Prepare a local release candidate with `rdev release prepare-candidate`.
 - [ ] Verify the local release candidate with `rdev release verify-candidate`.
 - [ ] Generate and review a GitHub Release dry-run plan with `scripts/github/plan-release.sh`.

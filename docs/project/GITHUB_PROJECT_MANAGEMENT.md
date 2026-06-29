@@ -97,7 +97,8 @@ These should not be opened as new GitHub issues unless regression work is needed
 - local release candidate packaging with signed artifacts, release bundle, verified Skillkit, checksums, and summary JSON;
 - local GitHub Release dry-run planning from verified candidates with generated release notes, Skillkit archive, asset manifest, and commands preview;
 - real build artifact generation with `rdev.build-artifacts.v1` and checksums;
-- GitHub Actions CI for `./scripts/check.sh` and real build artifact / release candidate / GitHub release-plan smoke;
+- per-platform release candidate automation with `rdev.platform-release-candidates.v1`;
+- GitHub Actions CI for `./scripts/check.sh` and real build artifact / per-platform release candidate / GitHub release-plan smoke;
 - HTTPS long-poll host job transport prototype;
 - host trust-bundle update checks;
 - macOS LaunchAgent plist generation, status, safe uninstall, and service-control;
