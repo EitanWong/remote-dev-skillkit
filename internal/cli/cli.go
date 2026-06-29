@@ -278,7 +278,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		approvalStore := fs.String("approval-store", "", "managed host approval store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
 		logDir := fs.String("log-dir", "", "managed host log directory")
-		force := fs.Bool("force", false, "overwrite an existing plist output path")
+		force := fs.Bool("force", false, "overwrite an existing service output path")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -629,8 +629,8 @@ func (a App) host(ctx context.Context, args []string) error {
 	case "install-service":
 		fs := flag.NewFlagSet("host install-service", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos")
-		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		platform := fs.String("platform", "macos", "service platform: macos or linux")
+		label := fs.String("label", "", "managed host service label or systemd unit name")
 		binaryPath := fs.String("binary", "", "absolute path to rdev binary; defaults to current executable")
 		gatewayURL := fs.String("gateway", "", "gateway URL")
 		ticketCode := fs.String("ticket-code", "", "managed enrollment ticket code")
@@ -642,6 +642,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
 		logDir := fs.String("log-dir", "", "managed host log directory")
 		plistOut := fs.String("plist-out", "", "LaunchAgent plist output path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
+		unitOut := fs.String("unit-out", "", "systemd user unit output path; defaults to ~/.config/systemd/user/<unit>.service on Linux")
 		force := fs.Bool("force", false, "overwrite an existing plist output path")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -660,14 +661,16 @@ func (a App) host(ctx context.Context, args []string) error {
 			WorkspaceLockStore: *workspaceLockStore,
 			LogDir:             *logDir,
 			PlistOut:           *plistOut,
+			UnitOut:            *unitOut,
 			Force:              *force,
 		})
 	case "service-status":
 		fs := flag.NewFlagSet("host service-status", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos")
-		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		platform := fs.String("platform", "macos", "service platform: macos or linux")
+		label := fs.String("label", "", "managed host service label or systemd unit name")
 		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
+		unitPath := fs.String("unit", "", "systemd user unit path; defaults to ~/.config/systemd/user/<unit>.service on Linux")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -675,16 +678,18 @@ func (a App) host(ctx context.Context, args []string) error {
 			Platform: *platform,
 			Label:    *label,
 			Plist:    *plistPath,
+			Unit:     *unitPath,
 		})
 	case "service-control":
 		fs := flag.NewFlagSet("host service-control", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos")
+		platform := fs.String("platform", "macos", "service platform: macos or linux")
 		action := fs.String("action", "", "service action: start, stop, or inspect")
-		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		label := fs.String("label", "", "managed host service label or systemd unit name")
 		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
+		unitPath := fs.String("unit", "", "systemd user unit path; defaults to ~/.config/systemd/user/<unit>.service on Linux")
 		domain := fs.String("domain", "gui/$(id -u)", "launchctl domain; default is resolved for --execute")
-		execute := fs.Bool("execute", false, "execute launchctl instead of only printing the planned command")
+		execute := fs.Bool("execute", false, "execute the OS service manager instead of only printing the planned command")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -693,16 +698,18 @@ func (a App) host(ctx context.Context, args []string) error {
 			Action:   *action,
 			Label:    *label,
 			Plist:    *plistPath,
+			Unit:     *unitPath,
 			Domain:   *domain,
 			Execute:  *execute,
 		})
 	case "uninstall-service":
 		fs := flag.NewFlagSet("host uninstall-service", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos")
-		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		platform := fs.String("platform", "macos", "service platform: macos or linux")
+		label := fs.String("label", "", "managed host service label or systemd unit name")
 		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
-		force := fs.Bool("force", false, "remove plist even if the embedded label does not match --label")
+		unitPath := fs.String("unit", "", "systemd user unit path; defaults to ~/.config/systemd/user/<unit>.service on Linux")
+		force := fs.Bool("force", false, "remove service file even if the embedded label or unit name does not match --label")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -710,6 +717,7 @@ func (a App) host(ctx context.Context, args []string) error {
 			Platform: *platform,
 			Label:    *label,
 			Plist:    *plistPath,
+			Unit:     *unitPath,
 			Force:    *force,
 		})
 	default:
@@ -753,6 +761,7 @@ type hostInstallServiceOptions struct {
 	WorkspaceLockStore string
 	LogDir             string
 	PlistOut           string
+	UnitOut            string
 	Force              bool
 }
 
@@ -760,6 +769,7 @@ type hostServiceOptions struct {
 	Platform string
 	Label    string
 	Plist    string
+	Unit     string
 	Force    bool
 }
 
@@ -768,6 +778,7 @@ type hostServiceControlOptions struct {
 	Action   string
 	Label    string
 	Plist    string
+	Unit     string
 	Domain   string
 	Execute  bool
 }
@@ -864,9 +875,6 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 	if opts.Platform == "" {
 		opts.Platform = "macos"
 	}
-	if opts.Platform != "macos" {
-		return fmt.Errorf("host install-service currently supports macos only")
-	}
 	binaryPath := opts.BinaryPath
 	if binaryPath == "" {
 		current, err := os.Executable()
@@ -878,6 +886,17 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 	if !filepath.IsAbs(binaryPath) {
 		return fmt.Errorf("binary path must be absolute")
 	}
+	switch opts.Platform {
+	case "macos", "darwin":
+		return a.hostInstallMacOSService(opts, binaryPath)
+	case "linux", "systemd":
+		return a.hostInstallLinuxSystemdService(opts, binaryPath)
+	default:
+		return fmt.Errorf("unsupported service platform %q", opts.Platform)
+	}
+}
+
+func (a App) hostInstallMacOSService(opts hostInstallServiceOptions, binaryPath string) error {
 	plistOut := opts.PlistOut
 	if plistOut == "" {
 		home, err := os.UserHomeDir()
@@ -917,7 +936,7 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 	}
 	payload := map[string]any{
 		"ok":                true,
-		"platform":          opts.Platform,
+		"platform":          "macos",
 		"label":             agent.Label,
 		"plist":             plistOut,
 		"program_arguments": agent.ProgramArguments,
@@ -929,6 +948,62 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 			"inspect": "launchctl print gui/$(id -u)/" + agent.Label,
 		},
 		"note": "plist written only; launchctl was not executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) hostInstallLinuxSystemdService(opts hostInstallServiceOptions, binaryPath string) error {
+	unitName := opts.Label
+	if unitName == "" {
+		unitName = service.DefaultLinuxSystemdUnitName
+	}
+	unitOut := opts.UnitOut
+	if unitOut == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		unitOut = service.DefaultLinuxSystemdUserUnitPath(home, unitName)
+	}
+	unit, err := service.NewLinuxSystemdUserService(service.SystemdUserServiceOptions{
+		UnitName:               unitName,
+		BinaryPath:             binaryPath,
+		GatewayURL:             opts.GatewayURL,
+		TicketCode:             opts.TicketCode,
+		ManifestURL:            opts.ManifestURL,
+		IdentityStorePath:      opts.IdentityStorePath,
+		TrustStorePath:         opts.TrustStorePath,
+		NonceStorePath:         opts.NonceStorePath,
+		ApprovalStorePath:      opts.ApprovalStorePath,
+		WorkspaceLockStorePath: opts.WorkspaceLockStore,
+		LogDir:                 opts.LogDir,
+		Transport:              "long-poll",
+		LongPollTimeout:        "25s",
+	})
+	if err != nil {
+		return err
+	}
+	content, err := service.RenderLinuxSystemdUserService(unit)
+	if err != nil {
+		return err
+	}
+	if err := writeServiceFile(unitOut, content, opts.Force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":          true,
+		"platform":    "linux",
+		"unit_name":   unit.UnitName,
+		"unit":        unitOut,
+		"exec_start":  unit.ExecStart,
+		"stdout":      unit.StandardOutput,
+		"stderr":      unit.StandardError,
+		"restart":     unit.Restart,
+		"restart_sec": unit.RestartSec,
+		"next":        linuxSystemdNextSteps(unit.UnitName, unitOut),
+		"note":        "systemd unit written only; systemctl was not executed by this command",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -966,9 +1041,17 @@ func (a App) hostServiceStatus(opts hostServiceOptions) error {
 	if opts.Platform == "" {
 		opts.Platform = "macos"
 	}
-	if opts.Platform != "macos" {
-		return fmt.Errorf("host service-status currently supports macos only")
+	switch opts.Platform {
+	case "macos", "darwin":
+		return a.hostMacOSServiceStatus(opts)
+	case "linux", "systemd":
+		return a.hostLinuxSystemdServiceStatus(opts)
+	default:
+		return fmt.Errorf("unsupported service platform %q", opts.Platform)
 	}
+}
+
+func (a App) hostMacOSServiceStatus(opts hostServiceOptions) error {
 	if opts.Label == "" {
 		opts.Label = service.DefaultMacOSLaunchAgentLabel
 	}
@@ -982,12 +1065,39 @@ func (a App) hostServiceStatus(opts hostServiceOptions) error {
 	}
 	payload := map[string]any{
 		"ok":       true,
-		"platform": opts.Platform,
+		"platform": "macos",
 		"label":    opts.Label,
 		"plist":    plistPath,
 		"status":   status,
 		"next":     macOSLaunchAgentNextSteps(opts.Label, plistPath),
 		"note":     "status reads the plist only; launchctl was not executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) hostLinuxSystemdServiceStatus(opts hostServiceOptions) error {
+	unitName := opts.Label
+	if unitName == "" {
+		unitName = service.DefaultLinuxSystemdUnitName
+	}
+	unitPath, err := serviceUnitPath(opts)
+	if err != nil {
+		return err
+	}
+	status, err := service.InspectLinuxSystemdUserService(unitPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":        true,
+		"platform":  "linux",
+		"unit_name": unitName,
+		"unit":      unitPath,
+		"status":    status,
+		"next":      linuxSystemdNextSteps(unitName, unitPath),
+		"note":      "status reads the unit file only; systemctl was not executed by this command",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1004,9 +1114,17 @@ func (a App) hostServiceControl(ctx context.Context, opts hostServiceControlOpti
 	if opts.Platform == "" {
 		opts.Platform = "macos"
 	}
-	if opts.Platform != "macos" {
-		return fmt.Errorf("host service-control currently supports macos only")
+	switch opts.Platform {
+	case "macos", "darwin":
+		return a.hostMacOSServiceControl(ctx, opts)
+	case "linux", "systemd":
+		return a.hostLinuxSystemdServiceControl(ctx, opts)
+	default:
+		return fmt.Errorf("unsupported service platform %q", opts.Platform)
 	}
+}
+
+func (a App) hostMacOSServiceControl(ctx context.Context, opts hostServiceControlOptions) error {
 	if opts.Label == "" {
 		opts.Label = service.DefaultMacOSLaunchAgentLabel
 	}
@@ -1089,6 +1207,77 @@ func (a App) hostServiceControl(ctx context.Context, opts hostServiceControlOpti
 	return enc.Encode(payload)
 }
 
+func (a App) hostLinuxSystemdServiceControl(ctx context.Context, opts hostServiceControlOptions) error {
+	unitName := opts.Label
+	if unitName == "" {
+		unitName = service.DefaultLinuxSystemdUnitName
+	}
+	if strings.TrimSpace(opts.Action) == "" {
+		return fmt.Errorf("service action is required")
+	}
+	unitPath, err := serviceUnitPath(hostServiceOptions{
+		Platform: opts.Platform,
+		Label:    unitName,
+		Unit:     opts.Unit,
+	})
+	if err != nil {
+		return err
+	}
+	status, err := service.InspectLinuxSystemdUserService(unitPath)
+	if err != nil {
+		return err
+	}
+	if opts.Action == "start" || opts.Action == "stop" {
+		if !status.Exists {
+			return fmt.Errorf("unit does not exist: %s", unitPath)
+		}
+	}
+	if status.Exists && status.UnitName != unitName {
+		return fmt.Errorf("refusing service-control for unit %q; expected %q", status.UnitName, unitName)
+	}
+	plan, err := service.NewLinuxSystemdControlPlan(service.SystemdControlOptions{
+		Action:   opts.Action,
+		UnitName: unitName,
+		User:     true,
+	})
+	if err != nil {
+		return err
+	}
+	if opts.Execute {
+		results, runErr := runServiceCommands(ctx, plan.Commands)
+		payload := map[string]any{
+			"ok":        runErr == nil,
+			"platform":  "linux",
+			"unit_name": unitName,
+			"unit":      unitPath,
+			"execute":   true,
+			"status":    status,
+			"command":   plan,
+			"results":   results,
+			"note":      "systemctl was executed because --execute was set",
+		}
+		enc := json.NewEncoder(a.Stdout)
+		enc.SetIndent("", "  ")
+		if encodeErr := enc.Encode(payload); encodeErr != nil {
+			return encodeErr
+		}
+		return runErr
+	}
+	payload := map[string]any{
+		"ok":        true,
+		"platform":  "linux",
+		"unit_name": unitName,
+		"unit":      unitPath,
+		"execute":   false,
+		"status":    status,
+		"command":   plan,
+		"note":      "dry-run only; add --execute to run systemctl",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func resolveLaunchctlDomain(ctx context.Context, domain string) (string, error) {
 	if domain != "gui/$(id -u)" {
 		return domain, nil
@@ -1109,8 +1298,24 @@ func resolveLaunchctlDomain(ctx context.Context, domain string) (string, error) 
 }
 
 func runLaunchctl(ctx context.Context, argv []string) (launchctlRunResult, error) {
+	return runServiceCommand(ctx, argv)
+}
+
+func runServiceCommands(ctx context.Context, commands [][]string) ([]launchctlRunResult, error) {
+	results := make([]launchctlRunResult, 0, len(commands))
+	for _, command := range commands {
+		result, err := runServiceCommand(ctx, command)
+		results = append(results, result)
+		if err != nil {
+			return results, err
+		}
+	}
+	return results, nil
+}
+
+func runServiceCommand(ctx context.Context, argv []string) (launchctlRunResult, error) {
 	if len(argv) == 0 {
-		return launchctlRunResult{ExitCode: -1}, fmt.Errorf("launchctl argv is required")
+		return launchctlRunResult{ExitCode: -1}, fmt.Errorf("service command argv is required")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	var stdout bytes.Buffer
@@ -1140,9 +1345,17 @@ func (a App) hostUninstallService(opts hostServiceOptions) error {
 	if opts.Platform == "" {
 		opts.Platform = "macos"
 	}
-	if opts.Platform != "macos" {
-		return fmt.Errorf("host uninstall-service currently supports macos only")
+	switch opts.Platform {
+	case "macos", "darwin":
+		return a.hostUninstallMacOSService(opts)
+	case "linux", "systemd":
+		return a.hostUninstallLinuxSystemdService(opts)
+	default:
+		return fmt.Errorf("unsupported service platform %q", opts.Platform)
 	}
+}
+
+func (a App) hostUninstallMacOSService(opts hostServiceOptions) error {
 	if opts.Label == "" {
 		opts.Label = service.DefaultMacOSLaunchAgentLabel
 	}
@@ -1166,7 +1379,7 @@ func (a App) hostUninstallService(opts hostServiceOptions) error {
 	}
 	payload := map[string]any{
 		"ok":       true,
-		"platform": opts.Platform,
+		"platform": "macos",
 		"label":    opts.Label,
 		"plist":    plistPath,
 		"removed":  removed,
@@ -1175,6 +1388,47 @@ func (a App) hostUninstallService(opts hostServiceOptions) error {
 			"ensure_stopped": "launchctl bootout gui/$(id -u) " + plistPath,
 		},
 		"note": "plist removal only; launchctl was not executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) hostUninstallLinuxSystemdService(opts hostServiceOptions) error {
+	unitName := opts.Label
+	if unitName == "" {
+		unitName = service.DefaultLinuxSystemdUnitName
+	}
+	unitPath, err := serviceUnitPath(opts)
+	if err != nil {
+		return err
+	}
+	status, err := service.InspectLinuxSystemdUserService(unitPath)
+	if err != nil {
+		return err
+	}
+	if status.Exists && status.UnitName != unitName && !opts.Force {
+		return fmt.Errorf("refusing to remove unit %q; expected %q", status.UnitName, unitName)
+	}
+	removed := false
+	if status.Exists {
+		if err := os.Remove(unitPath); err != nil {
+			return err
+		}
+		removed = true
+	}
+	payload := map[string]any{
+		"ok":        true,
+		"platform":  "linux",
+		"unit_name": unitName,
+		"unit":      unitPath,
+		"removed":   removed,
+		"previous":  status,
+		"next": map[string]string{
+			"ensure_stopped": "systemctl --user disable --now " + unitName,
+			"reload":         "systemctl --user daemon-reload",
+		},
+		"note": "unit removal only; systemctl was not executed by this command",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1195,6 +1449,21 @@ func servicePlistPath(opts hostServiceOptions) (string, error) {
 	return service.DefaultMacOSLaunchAgentPath(home, opts.Label), nil
 }
 
+func serviceUnitPath(opts hostServiceOptions) (string, error) {
+	unitName := opts.Label
+	if unitName == "" {
+		unitName = service.DefaultLinuxSystemdUnitName
+	}
+	if opts.Unit != "" {
+		return opts.Unit, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return service.DefaultLinuxSystemdUserUnitPath(home, unitName), nil
+}
+
 func macOSLaunchAgentNextSteps(label, plistPath string) map[string]string {
 	if label == "" {
 		label = service.DefaultMacOSLaunchAgentLabel
@@ -1204,6 +1473,20 @@ func macOSLaunchAgentNextSteps(label, plistPath string) map[string]string {
 		"stop":      "launchctl bootout gui/$(id -u) " + plistPath,
 		"inspect":   "launchctl print gui/$(id -u)/" + label,
 		"uninstall": "rdev host uninstall-service --platform macos --label " + label + " --plist " + plistPath,
+	}
+}
+
+func linuxSystemdNextSteps(unitName, unitPath string) map[string]string {
+	if unitName == "" {
+		unitName = service.DefaultLinuxSystemdUnitName
+	}
+	return map[string]string{
+		"reload":    "systemctl --user daemon-reload",
+		"start":     "systemctl --user enable --now " + unitName,
+		"stop":      "systemctl --user disable --now " + unitName,
+		"inspect":   "systemctl --user status " + unitName,
+		"logs":      "journalctl --user -u " + unitName + " -n 100 --no-pager",
+		"uninstall": "rdev host uninstall-service --platform linux --label " + unitName + " --unit " + unitPath,
 	}
 }
 
@@ -2550,6 +2833,10 @@ Usage:
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
   rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
   rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
+  rdev host install-service --platform linux --label rdev-host.service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --unit-out ./rdev-host.service
+  rdev host service-status --platform linux --label rdev-host.service --unit ./rdev-host.service
+  rdev host service-control --platform linux --action start --label rdev-host.service --unit ./rdev-host.service
+  rdev host uninstall-service --platform linux --label rdev-host.service --unit ./rdev-host.service
 `))
 }
 

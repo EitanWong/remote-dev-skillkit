@@ -163,6 +163,70 @@ func TestHostInstallServiceDoesNotOverwriteWithoutForce(t *testing.T) {
 	}
 }
 
+func TestHostInstallServiceWritesLinuxSystemdUnit(t *testing.T) {
+	dir := t.TempDir()
+	unitPath := filepath.Join(dir, "systemd", "user", "rdev-host.service")
+	binaryPath := filepath.Join(dir, "bin", "rdev")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "linux",
+		"--label", "rdev-host.service",
+		"--binary", binaryPath,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--identity-store", filepath.Join(dir, "identity.json"),
+		"--trust-store", filepath.Join(dir, "trust.json"),
+		"--nonce-store", filepath.Join(dir, "nonces.json"),
+		"--approval-store", filepath.Join(dir, "approvals.json"),
+		"--workspace-lock-store", filepath.Join(dir, "workspace-locks"),
+		"--log-dir", filepath.Join(dir, "logs"),
+		"--unit-out", unitPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := readFileForTest(t, unitPath)
+	for _, expected := range []string{
+		"[Unit]",
+		"Description=Remote Dev Skillkit managed host",
+		"[Service]",
+		"ExecStart=" + binaryPath + " host serve --mode managed",
+		"--gateway https://api.example.com/v1",
+		"--ticket-code ABCD-1234",
+		"--workspace-lock-store " + filepath.Join(dir, "workspace-locks"),
+		"Restart=on-failure",
+		"NoNewPrivileges=true",
+		"PrivateTmp=true",
+		"StandardOutput=append:" + filepath.Join(dir, "logs", "rdev-host.out.log"),
+		"[Install]",
+		"WantedBy=default.target",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("expected unit to contain %q, got %s", expected, content)
+		}
+	}
+	info, err := os.Stat(unitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("expected unit permissions 0600, got %#o", got)
+	}
+	for _, expected := range []string{
+		`"platform": "linux"`,
+		`"unit_name": "rdev-host.service"`,
+		`"systemctl --user enable --now rdev-host.service"`,
+		`systemctl was not executed`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected stdout to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
 func TestHostServiceStatusReadsMacOSLaunchAgentPlist(t *testing.T) {
 	dir := t.TempDir()
 	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
@@ -193,6 +257,43 @@ func TestHostServiceStatusReadsMacOSLaunchAgentPlist(t *testing.T) {
 		`"label": "com.example.rdev-host"`,
 		`"launchctl print gui/$(id -u)/com.example.rdev-host"`,
 		`launchctl was not executed`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected status output to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
+func TestHostServiceStatusReadsLinuxSystemdUnit(t *testing.T) {
+	dir := t.TempDir()
+	unitPath := filepath.Join(dir, "rdev-host.service")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "linux",
+		"--label", "rdev-host.service",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--unit-out", unitPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	statusApp := NewApp(&stdout, &bytes.Buffer{})
+	if err := statusApp.Run(context.Background(), []string{
+		"host", "service-status",
+		"--platform", "linux",
+		"--label", "rdev-host.service",
+		"--unit", unitPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"exists": true`,
+		`"unit_name": "rdev-host.service"`,
+		`"systemctl --user status rdev-host.service"`,
+		`systemctl was not executed`,
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("expected status output to contain %q, got %s", expected, stdout.String())
@@ -241,6 +342,47 @@ func TestHostServiceControlDryRunPlansLaunchctl(t *testing.T) {
 	}
 }
 
+func TestHostServiceControlDryRunPlansSystemd(t *testing.T) {
+	dir := t.TempDir()
+	unitPath := filepath.Join(dir, "rdev-host.service")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "linux",
+		"--label", "rdev-host.service",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--unit-out", unitPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	controlApp := NewApp(&stdout, &bytes.Buffer{})
+	if err := controlApp.Run(context.Background(), []string{
+		"host", "service-control",
+		"--platform", "linux",
+		"--action", "start",
+		"--label", "rdev-host.service",
+		"--unit", unitPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"execute": false`,
+		`"action": "start"`,
+		`"systemctl"`,
+		`"daemon-reload"`,
+		`"enable"`,
+		`"--now"`,
+		`dry-run only`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected service-control output to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
 func TestHostServiceControlRejectsLabelMismatch(t *testing.T) {
 	dir := t.TempDir()
 	plistPath := filepath.Join(dir, "com.other.rdev-host.plist")
@@ -265,6 +407,36 @@ func TestHostServiceControlRejectsLabelMismatch(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected label mismatch to fail")
+	}
+	if !strings.Contains(err.Error(), "refusing service-control") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHostServiceControlRejectsSystemdUnitMismatch(t *testing.T) {
+	dir := t.TempDir()
+	unitPath := filepath.Join(dir, "other-rdev-host.service")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "linux",
+		"--label", "other-rdev-host.service",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--unit-out", unitPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := app.Run(context.Background(), []string{
+		"host", "service-control",
+		"--platform", "linux",
+		"--action", "start",
+		"--label", "rdev-host.service",
+		"--unit", unitPath,
+	})
+	if err == nil {
+		t.Fatal("expected unit mismatch to fail")
 	}
 	if !strings.Contains(err.Error(), "refusing service-control") {
 		t.Fatalf("unexpected error: %v", err)
@@ -301,6 +473,42 @@ func TestHostUninstallServiceRemovesMacOSLaunchAgentPlist(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"removed": true`) {
 		t.Fatalf("expected removed output, got %s", stdout.String())
+	}
+}
+
+func TestHostUninstallServiceRemovesLinuxSystemdUnit(t *testing.T) {
+	dir := t.TempDir()
+	unitPath := filepath.Join(dir, "rdev-host.service")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "linux",
+		"--label", "rdev-host.service",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--unit-out", unitPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	uninstallApp := NewApp(&stdout, &bytes.Buffer{})
+	if err := uninstallApp.Run(context.Background(), []string{
+		"host", "uninstall-service",
+		"--platform", "linux",
+		"--label", "rdev-host.service",
+		"--unit", unitPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(unitPath); !os.IsNotExist(err) {
+		t.Fatalf("expected unit removal, stat err=%v", err)
+	}
+	if !strings.Contains(stdout.String(), `"removed": true`) {
+		t.Fatalf("expected removed output, got %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `systemctl was not executed`) {
+		t.Fatalf("expected no systemctl execution note, got %s", stdout.String())
 	}
 }
 

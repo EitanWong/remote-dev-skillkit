@@ -330,6 +330,67 @@ curl -s -X POST http://127.0.0.1:8787/v1/hosts/<host_id>/revoke \
   -d '{"reason":"support session complete"}'
 ```
 
+## Managed Service Files
+
+Managed service commands write inspectable service files first. They do not
+start a background service unless `rdev host service-control --execute` is used.
+
+macOS uses a LaunchAgent plist:
+
+```bash
+rdev host install-service \
+  --platform macos \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --workspace-lock-store ~/.rdev/host/workspace-locks \
+  --plist-out ./com.remote-dev-skillkit.host.plist
+
+rdev host service-status \
+  --platform macos \
+  --plist ./com.remote-dev-skillkit.host.plist
+
+rdev host service-control \
+  --platform macos \
+  --action start \
+  --plist ./com.remote-dev-skillkit.host.plist
+
+rdev host uninstall-service \
+  --platform macos \
+  --plist ./com.remote-dev-skillkit.host.plist
+```
+
+Linux uses a systemd user unit:
+
+```bash
+rdev host install-service \
+  --platform linux \
+  --label rdev-host.service \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --workspace-lock-store ~/.rdev/host/workspace-locks \
+  --unit-out ./rdev-host.service
+
+rdev host service-status \
+  --platform linux \
+  --label rdev-host.service \
+  --unit ./rdev-host.service
+
+rdev host service-control \
+  --platform linux \
+  --action start \
+  --label rdev-host.service \
+  --unit ./rdev-host.service
+
+rdev host uninstall-service \
+  --platform linux \
+  --label rdev-host.service \
+  --unit ./rdev-host.service
+```
+
+For both platforms, `service-control` is a dry-run by default. It prints the
+planned `launchctl` or `systemctl --user` commands and requires `--execute`
+before invoking the OS service manager.
+
 ## Release Artifact Verification
 
 Development release artifacts can be signed and verified before bootstrap:
@@ -398,4 +459,5 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 - `--trust-store` is a file-backed development store. Production managed hosts should move this to OS-protected storage where available.
 - `--identity-store` is a file-backed development host identity store. Production managed hosts should move identity keys to OS-protected storage and add signed registration proofs.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
+- Linux systemd support currently writes and controls user units. Real managed Linux acceptance still needs reboot/reconnect evidence on a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

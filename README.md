@@ -63,8 +63,8 @@ Implemented now:
 - Development HTTPS long-poll host job transport via `rdev host serve --transport long-poll`.
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Host-bound trust bundle update checks for managed host trust-store refresh.
-- macOS LaunchAgent plist generation, status inspection, and safe plist removal via `rdev host install-service`, `rdev host service-status`, and `rdev host uninstall-service`.
-- macOS LaunchAgent dry-run and opt-in lifecycle control via `rdev host service-control --action start|inspect|stop`, with `--execute` required before running `launchctl`.
+- macOS LaunchAgent plist generation, status inspection, safe plist removal, and opt-in lifecycle control via `rdev host install-service`, `rdev host service-status`, `rdev host service-control`, and `rdev host uninstall-service`, with `--execute` required before running `launchctl`.
+- Linux systemd user-unit generation, status inspection, safe unit removal, and opt-in lifecycle control via the same host service commands, with `--execute` required before running `systemctl --user`.
 - Persistent development gateway signing key files plus host trust pin checks.
 - Trust lifecycle operator commands via `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed `rdev.trust-bundle.v1` bundles with sequence, previous-hash, key rotation, key retirement, key revocation, and pinned-root verification.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
@@ -121,7 +121,7 @@ Not implemented yet:
 - OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
 - Windows service installation.
-- launchctl start/stop execution and systemd service lifecycle commands.
+- Real Linux systemd managed-host acceptance execution and reboot/reconnect proof.
 - Tailscale/headscale adapter.
 - GUI adapter.
 
@@ -182,6 +182,10 @@ go run ./cmd/rdev host install-service --platform macos --gateway https://api.ex
 go run ./cmd/rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
+go run ./cmd/rdev host install-service --platform linux --label rdev-host.service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --unit-out ./rdev-host.service
+go run ./cmd/rdev host service-status --platform linux --label rdev-host.service --unit ./rdev-host.service
+go run ./cmd/rdev host service-control --platform linux --action start --label rdev-host.service --unit ./rdev-host.service
+go run ./cmd/rdev host uninstall-service --platform linux --label rdev-host.service --unit ./rdev-host.service
 ```
 
 ## Design Invariants

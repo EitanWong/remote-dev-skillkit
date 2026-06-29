@@ -275,6 +275,7 @@ The local test suite currently covers:
 - durable host-side approval token consumption through in-memory and file-backed `rdev.host-approval-store.v1`, including 0600 file permissions, 0700 directory permissions, expiry pruning, and CLI `--approval-store` wiring.
 - macOS LaunchAgent plist generation through `rdev host install-service --platform macos`, including managed host arguments, `0600` plist permissions, and explicit launchctl next steps without auto-starting the service.
 - macOS LaunchAgent plist status and safe uninstall through `rdev host service-status` and `rdev host uninstall-service`, including label-mismatch refusal to avoid deleting unrelated plists.
+- Linux systemd user-unit generation through `rdev host install-service --platform linux`, including managed host arguments, `0600` unit permissions, basic hardening flags, explicit `systemctl --user` next steps, status inspection, dry-run service-control planning, unit mismatch refusal, and safe uninstall without auto-starting the service.
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.
 - workspace lock enforcement during host execution through `rdev host serve --workspace-lock-store`, including hostrunner lock acquire/release, `workspace_locked` structured denial artifacts, lock release after adapter denial, and managed LaunchAgent `--workspace-lock-store` argument generation.
 - managed Mac coding harness through `rdev acceptance managed-mac`, covering managed host registration, Git worktree creation, Codex adapter execution with workspace locking, diff/test evidence export, approval-required probe for `git.push`, workspace lock release, and evidence bundle creation.
@@ -301,6 +302,7 @@ The following remain real-environment acceptance tests:
 - Windows Authenticode verification against a real code-signing certificate;
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall and reconnect after reboot;
+- managed Linux systemd user-unit install/uninstall and reconnect after reboot;
 - cooperative cancellation generalized across shell, PowerShell, and future adapter SDK implementations;
 - OS-protected managed host trust and identity storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.

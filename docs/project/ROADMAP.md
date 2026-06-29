@@ -98,7 +98,9 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 ## v0.4.0 Managed Device Generalization
 
 - Windows Service.
-- systemd and launchd support.
+- Linux systemd user-unit generation, status inspection, dry-run/opt-in lifecycle control, and safe uninstall.
+- Real Linux systemd reboot/reconnect acceptance proof.
+- launchd support.
 - Restart/recovery.
 - Auto-update/rollback.
 - Claude Code and ACP adapters.

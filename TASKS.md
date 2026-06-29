@@ -64,6 +64,7 @@
 - [x] Add post-release install plan verification and tamper smoke coverage.
 - [x] Add trust lifecycle CLI for root/gateway key initialization, rotation, revocation, and bundle verification.
 - [x] Add final 2026-06-30 perfect-ending architecture refinement with product lines, mode separation, trust boundaries, protocol closure, and implementation spine.
+- [x] Add Linux systemd user-unit managed host lifecycle with safe install/status/dry-run control/uninstall commands.
 
 ## Next
 
@@ -140,7 +141,8 @@
 - [ ] Add authenticated production managed host trust lifecycle with OS-protected storage.
 - [ ] Add OS-protected managed host identity storage and registration proof.
 - [ ] Add Windows Service mode.
-- [ ] Add systemd mode.
+- [x] Add systemd user-unit mode.
+- [ ] Add real Linux systemd acceptance execution with reboot/reconnect proof.
 - [ ] Add acpx adapter.
 - [ ] Generalize cooperative cancellation across shell, PowerShell, and future adapter SDK implementations.
 - [ ] Add Claude Code adapter.
