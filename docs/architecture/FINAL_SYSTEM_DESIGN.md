@@ -32,6 +32,265 @@ The highest-level rule is:
 
 That rule resolves the tension between remote repair convenience and safety. Temporary third-party machines get visible, time-limited, foreground sessions. Eitan-owned or formally managed machines can opt into durable service mode.
 
+## Final Architecture Lock
+
+This is the final refined architecture decision for the project. The product should be built as a small safety microkernel with many replaceable adapters around it.
+
+```text
+agent intent
+  -> typed Skill/MCP request
+  -> gateway policy dry-run
+  -> signed, host-bound job envelope
+  -> outbound host lease
+  -> host-side validation
+  -> locked workspace/session
+  -> adapter execution
+  -> redacted artifacts
+  -> evidence bundle
+  -> hash-chained audit
+  -> approval, continuation, or revocation
+```
+
+The "perfect ending" is not maximum remote control. It is maximum useful delegation without ambient machine ownership.
+
+### Final Product Boundary
+
+Remote Dev Skillkit owns the agent safety kernel. It should not try to replace every mature remote-development product.
+
+| Layer | Final decision |
+|---|---|
+| Agent workflow | Agent Skills plus MCP tools teach agents how to invite, approve, run, review, and revoke |
+| Control plane | `rdev-gateway` owns tickets, host registry, policy, signing, approvals, artifacts, audit, and revocation |
+| Host plane | `rdev-host` owns local identity, trust, policy validation, workspace locks, adapters, evidence, and local stop controls |
+| Transport | outbound HTTPS/WSS first; mesh or SSH only as optional owned-host transports |
+| Execution | shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, Coder, DevPod, and mesh are adapters |
+| Proof | every job ends in structured denial, approval request, or evidence bundle |
+
+This boundary keeps the core small enough to secure while leaving the ecosystem broad enough to be useful.
+
+### Final Deployment Shape
+
+Eitan's personal production deployment should be the reference implementation:
+
+```text
+Hermes/Lucky
+  -> Remote Dev Skillkit skills
+  -> MCP HTTP or local MCP bridge
+  -> https://api.lunflux.com/v1
+  -> rdev-gateway
+  -> tickets, jobs, approvals, artifacts, audit, signing
+  -> https://agent.lunflux.com
+  -> join page, signed manifests, host relay, release downloads
+  -> managed hosts or temporary attended hosts
+```
+
+The server can start as one binary on one VPS, but the architecture must preserve separate responsibilities:
+
+- `api.lunflux.com/v1` is the authenticated agent/operator API surface.
+- `agent.lunflux.com` is the human join, bootstrap, release, and host-relay surface.
+- Hermes/Lucky holds an agent-client identity, not host credentials.
+- Eitan approves high-risk operations through scoped approval tokens.
+- The host verifies every executable job even if the gateway or client behaves incorrectly.
+
+### Final Runtime Loops
+
+The system has three loops. Every feature must fit one of them.
+
+| Loop | Purpose | Final output |
+|---|---|---|
+| Enrollment loop | turn a human-approved machine into an identified host | ticket, host identity, capability inventory, host policy, trust bundle |
+| Execution loop | turn agent intent into bounded machine work | signed envelope, lease, adapter run, denial or artifacts |
+| Review loop | turn remote work into an auditable decision | evidence bundle, audit slice, approval request, continuation, or revoke |
+
+The loops are intentionally boring. They make retries, reconnects, cancellation, and audit reconstruction possible.
+
+### Final Host Selection Model
+
+Lucky or another agent should never pick a host by hostname alone. Host selection should be a policy decision over a registry snapshot.
+
+Selection inputs:
+
+- host id and verified identity fingerprint;
+- mode: `attended-temporary`, `managed`, `break-glass`, or `workspace-provider`;
+- online status, last heartbeat, current lease, and load;
+- platform, architecture, tools, adapters, and coding CLIs;
+- approved workspace roots and capability rings;
+- trust bundle sequence and revocation state;
+- local stop status and remaining session TTL;
+- workspace lock status and active worktrees.
+
+Selection output:
+
+- selected host id;
+- selected adapter;
+- selected workspace or new worktree;
+- required approvals before execution;
+- risk explanation when the best host is temporary, privileged, stale, or missing evidence.
+
+### Final Scheduler And Concurrency Model
+
+The gateway schedules intent. The host owns execution.
+
+| Concern | Final rule |
+|---|---|
+| Job binding | every job is bound to one host id before execution |
+| Leasing | a host must claim a bounded lease before running |
+| Idempotency | job creation, claim, completion, artifact upload, and cancellation must be retry-safe |
+| Workspace writes | one active writer per workspace root unless distinct worktrees are used |
+| Approval tokens | consumed only after envelope, policy, nonce, capability, workspace, and lock checks pass |
+| Cancellation | host, ticket, job, key, or approval revocation cancels queued work and requests cooperative stop for running work |
+| Offline behavior | managed hosts may reconnect and flush audit/evidence; temporary hosts do not silently resurrect after stop or expiry |
+
+The current workspace lock implementation is part of this contract: coding adapters should run only after the host has acquired the lock or prepared a separate worktree.
+
+### Final Adapter Contract
+
+Adapters are plugins behind the safety kernel. They may be powerful, but they do not define authorization.
+
+```text
+detect(context) -> adapter_capabilities
+plan(job, host_policy) -> required_capabilities, approvals, workspace_plan
+prepare(job) -> locked_workspace_or_session
+run(job, limits) -> stream, artifacts, exit_status
+collect(job) -> evidence_manifest
+cleanup(job) -> cleanup_status
+```
+
+Required adapter guarantees:
+
+- no execution before host validation;
+- no writes outside declared workspace scope;
+- no push, merge, deploy, publish, credential access, service mutation, GUI control, or elevation without approval;
+- bounded logs and output redaction;
+- stable artifacts with checksums;
+- cancellation hooks;
+- conformance tests for capability mapping, denials, approvals, evidence, and cleanup.
+
+Initial adapter priority:
+
+1. `shell` and `powershell` for controlled diagnostics and repair.
+2. `git` for branches, worktrees, diffs, commits, and evidence.
+3. `codex` for Eitan's managed Mac coding path.
+4. `claude-code` and `acp` for broader coding-agent compatibility.
+5. `browser-e2e`, GUI, mesh, Coder, and DevPod after the safety kernel is stable.
+
+### Final Temporary Host Design
+
+Temporary hosts are for third-party or short-lived machines. They must be useful without becoming hidden administration.
+
+Final properties:
+
+- visible foreground process or window;
+- local stop control;
+- short TTL;
+- outbound-only HTTPS/WSS connection;
+- no service install, autorun entry, registry persistence, launchd job, systemd unit, scheduled task, or hidden restart;
+- signed join manifest and signed release artifact verification before host execution;
+- local host key generated for the session;
+- pending approval before first job;
+- approval gates for elevation, GUI, service changes, package installation, destructive actions, credential access, push, merge, deploy, publish, and long unattended work;
+- automatic cleanup and final audit/evidence upload when the session ends.
+
+If a temporary host needs durable reconnect after reboot, the correct answer is not silent persistence. The correct answer is a separate managed enrollment with explicit consent.
+
+### Final Managed Host Design
+
+Managed hosts are for Eitan-owned or formally managed machines.
+
+Final properties:
+
+- explicit `rdev host install-service` enrollment;
+- install summary, service account, paths, logs, trust roots, stop command, and uninstall command are visible;
+- OS-native service manager: LaunchAgent or LaunchDaemon on macOS, systemd on Linux, Windows Service on Windows;
+- durable host identity protected by OS storage where available;
+- signed trust bundle update protocol;
+- watchdog/restart only for managed mode;
+- health/status/stop/uninstall commands;
+- no inherited approval for external consequences such as push, merge, deploy, publish, paid actions, or credential changes.
+
+Managed mode gives reliability, not unlimited authority.
+
+### Final Policy Kernel
+
+Policy should be deny-by-default and explainable. The same vocabulary must be used by gateway dry-runs, host validation, adapter planning, evidence bundles, and Skills.
+
+| Ring | Default posture | Examples |
+|---|---|---|
+| Ring 0 observe | allowed after host approval | capability detection, git status, read-only logs |
+| Ring 1 workspace | allowed when root is approved | scoped reads/writes, tests, build commands |
+| Ring 2 repair | approval or managed narrow grant | package changes, dependency repair, process kill |
+| Ring 3 privileged/visual | per-operation approval | elevation, GUI control, screenshots, service mutation |
+| Ring 4 external consequence | per-operation approval after evidence review | push, merge, deploy, publish, paid actions, credential changes |
+
+Denial is a valid successful outcome. The agent should receive `rdev.host-denial.v1` or `rdev.approval-required.v1` instead of a vague failure when the safe answer is "not yet."
+
+### Final Storage And Evidence Model
+
+The first production deployment can be single-operator and simple, but the object model must be future-proof.
+
+| Data | First production storage | Final requirement |
+|---|---|---|
+| gateway state | SQLite with backups | Postgres-compatible schema later |
+| artifacts | local filesystem with quota | S3-compatible object storage later |
+| audit | append-only JSONL plus verifier | hash-chain reconstruction and export |
+| gateway signing keys | locked file or OS store | rotation, revocation, KMS/HSM option |
+| host identity | file-backed dev store | OS keychain/DPAPI/libsecret for managed mode |
+| host trust | file-backed trust bundle | signed update protocol and rollback protection |
+| approval tokens | gateway state plus host consumption store | single-use, scoped, expiring, auditable |
+
+Evidence bundles are the unit of review. They should contain envelope, policy decisions, approval tokens used, adapter result, logs, diffs, test output, artifact checksums, redaction metadata, and an audit slice.
+
+### Final Release And Bootstrap Model
+
+One-command installation is acceptable only when verification is built in.
+
+Release requirements:
+
+- signed release manifest;
+- artifact digest, size, platform, signer, and validity window;
+- Windows Authenticode verification when policy requires it;
+- macOS notarization for public macOS releases;
+- checksums and detached signatures for all platforms;
+- rollback strategy for managed hosts;
+- security advisory and key-rotation process.
+
+Bootstrap requirements:
+
+- bootstrap script is inspectable;
+- bootstrap verifies manifest and binary before execution;
+- temporary mode starts foreground by default;
+- managed mode uses a separate explicit command;
+- no weakening of UAC, sudo, TCC, Gatekeeper, Defender, enterprise policy, firewall, or PowerShell execution policy.
+
+### Final Open-Source Package Shape
+
+The public project should ship five things:
+
+| Package | User value |
+|---|---|
+| `rdev` CLI | local demo, operator workflows, diagnostics, service install, evidence export |
+| `rdev-gateway` | self-hosted control plane and MCP/API server |
+| `rdev-host` | cross-platform temporary and managed host runtime |
+| Skillkit bundle | portable install surface for Hermes, Codex, Claude Code, OpenCode, and generic MCP agents |
+| Adapter SDK and conformance tests | safe extension surface for new execution backends |
+
+Success means other users can adopt the safe workflow without adopting Hermes, while Eitan's Hermes/Lucky deployment remains the first reference environment.
+
+### Final Implementation Finish Line
+
+The final architecture is done when these are true:
+
+1. A temporary Windows machine can join from a visible verified command, run bounded repair jobs, and leave no persistence.
+2. Eitan's managed Mac can reconnect after reboot, receive a Codex job, lock a worktree, return diff/test evidence, and require approval before push or merge.
+3. Every executable job is a signed, host-bound, nonce-protected, expiring envelope.
+4. Gateway policy and host policy both enforce the same capability vocabulary.
+5. Adapters cannot bypass workspace locks, approval gates, evidence, redaction, or audit.
+6. Revocation stops future work and cancels queued or running jobs where possible.
+7. Skillkit export installs cleanly into Hermes, Codex, Claude Code, OpenCode, and generic MCP environments.
+8. Public releases verify signed manifests and binaries before host execution.
+
+Everything else is an adapter, transport, UI, or deployment improvement.
+
 ## Endgame Solution Layer
 
 This section is the final scorecard for the "perfect ending." Later sections explain the mechanics; this section decides whether a feature belongs in the product.

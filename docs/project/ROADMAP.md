@@ -1,6 +1,6 @@
 # Roadmap
 
-The roadmap implements the canonical [Final System Design](../architecture/FINAL_SYSTEM_DESIGN.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, approval gates, audit evidence, and agent-native MCP/Skill packaging. [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md) remains the broader blueprint; `FINAL_SYSTEM_DESIGN.md` is the implementation contract.
+The roadmap implements the canonical [Final System Design](../architecture/FINAL_SYSTEM_DESIGN.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, workspace locks, approval gates, audit evidence, and agent-native MCP/Skill packaging. Its "Final Architecture Lock" is the implementation contract: a small safety microkernel with replaceable adapters for shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, and DevPod. [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md) remains the broader blueprint.
 
 ## Maturity Gates
 

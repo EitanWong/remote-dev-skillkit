@@ -38,6 +38,8 @@ shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevP
 
 The project intentionally reuses mature ecosystems where they fit: MCP for agent tools, Tailscale/headscale or SSH for owned-host connectivity, Coder/DevPod for governed workspaces, RustDesk/MeshCentral for explicit GUI sessions, and platform/Sigstore-style signing for release trust. What `rdev` owns is the missing agent safety kernel: signed job envelopes, host-side policy, approval gates, workspace locks, redaction, evidence bundles, audit chains, and revocation.
 
+The canonical endgame is locked in [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md): a small safety microkernel with replaceable adapters. The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
+
 ## Current Status
 
 This repository is in Phase 1: project foundation and safe MVP.

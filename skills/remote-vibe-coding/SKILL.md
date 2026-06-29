@@ -13,6 +13,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Lock a workspace before starting a coding job.
 - Use a branch or worktree for code changes.
 - Prefer hosts started with `--workspace-lock-store` for coding jobs.
+- Treat Codex, Claude Code, ACP, shell, and PowerShell as adapters behind the signed-job/evidence/approval contract.
 - Do not push, merge, deploy, or modify credentials without approval.
 - Return evidence: diff summary, tests run, exit codes, and artifacts.
 
