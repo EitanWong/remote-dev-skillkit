@@ -1,6 +1,6 @@
 # Final System Design
 
-This is the final implementation decision for Remote Dev Skillkit. It refines the broader end-state architecture into a product-grade design that can guide implementation, release, self-hosted deployment, and future open-source packaging.
+This is the final implementation decision for Remote Dev Skillkit. It refines the broader end-state architecture into a product-grade design that can guide implementation, release, self-hosted deployment, and future open-source packaging. For the concise release-facing contract, see [Final Closure Blueprint](FINAL_CLOSURE_BLUEPRINT.md).
 
 ## Final Verdict
 

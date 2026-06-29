@@ -395,6 +395,25 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			payload["artifact"] = artifact
 		}
 		writeJSON(w, http.StatusOK, payload)
+	case "artifact":
+		var req struct {
+			HostID          string `json:"host_id"`
+			ArtifactContent string `json:"artifact_content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if req.HostID == "" {
+			writeError(w, http.StatusBadRequest, "host_id is required")
+			return
+		}
+		job, artifact, err := s.Gateway.AppendCanceledJobArtifactForHost(req.HostID, jobID, req.ArtifactContent)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
 	default:
 		writeError(w, http.StatusNotFound, "unknown job action")
 	}

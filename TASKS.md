@@ -45,6 +45,7 @@
 - [x] Add final endgame solution layer with architecture scorecard, operating modes, authority map, golden paths, and v1.0 release definition.
 - [x] Lock final refined architecture as a safety microkernel with replaceable adapters, runtime loops, scheduler rules, temporary/managed host boundaries, storage model, and release contract.
 - [x] Add final reference blueprint that makes the endgame architecture a single implementation contract.
+- [x] Add concise final closure blueprint for release-facing architecture decisions.
 - [x] Add development HTTPS long-poll host job transport prototype.
 - [x] Add portable agent Skillkit bundle export for mainstream frameworks.
 
@@ -96,6 +97,7 @@
 - [x] Add Codex adapter `go test -json` parsing into `rdev.test-report.v1` verification summaries.
 - [x] Add Codex adapter conformance coverage for workspace canonicalization, write-scope escapes, failure evidence, redaction, truncation, and timeout cancellation evidence.
 - [x] Add Codex adapter cooperative cancellation from host/job context and gateway job cancellation polling.
+- [x] Add canceled-job artifact reporting without changing the gateway job's canceled terminal state.
 
 ## Later
 
@@ -106,7 +108,6 @@
 - [ ] Add launchctl start/stop execution and systemd mode.
 - [ ] Add acpx adapter.
 - [ ] Generalize cooperative cancellation across shell, PowerShell, and future adapter SDK implementations.
-- [ ] Add canceled-job artifact reporting without changing the gateway job's canceled terminal state.
 - [ ] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
 - [ ] Add RustDesk/MeshCentral adapter.

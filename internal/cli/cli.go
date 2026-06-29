@@ -1412,6 +1412,11 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		<-monitorDone
 		if err != nil {
 			if canceledByGateway.Load() {
+				if result.ArtifactContent != "" {
+					if _, appendErr := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); appendErr != nil {
+						return processed, appendErr
+					}
+				}
 				processed++
 				continue
 			}
@@ -1990,6 +1995,40 @@ func failJob(ctx context.Context, gatewayURL, hostID, jobID, reason, artifactCon
 			payload.Error = resp.Status
 		}
 		return model.Job{}, fmt.Errorf("fail job failed: %s", payload.Error)
+	}
+	return payload.Job, nil
+}
+
+func appendJobArtifact(ctx context.Context, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
+	body, err := json.Marshal(map[string]string{
+		"host_id":          hostID,
+		"artifact_content": artifactContent,
+	})
+	if err != nil {
+		return model.Job{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/jobs/"+jobID+"/artifact", bytes.NewReader(body))
+	if err != nil {
+		return model.Job{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.Job{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Job   model.Job `json:"job"`
+		Error string    `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.Job{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.Job{}, fmt.Errorf("append job artifact failed: %s", payload.Error)
 	}
 	return payload.Job, nil
 }

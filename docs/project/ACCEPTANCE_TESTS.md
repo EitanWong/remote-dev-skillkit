@@ -259,6 +259,7 @@ The local test suite currently covers:
 - Codex adapter MVP through `adapter=codex`, including `codex.run` and `git.diff` capability checks, locked-workspace hostrunner execution, implicit approval preflight for push/merge/deploy/publish/credential/service intents, `rdev.codex-result.v1` artifacts, Git status/diff evidence, optional allowlisted verification command evidence, `rdev.test-report.v1` parsing for `go test -json`, output caps, redaction, and lock release after execution.
 - Codex adapter conformance tests through `internal/codexadapter/conformance_test.go`, covering canonical workspace roots, write-scope escape rejection before execution, nonzero Codex exits that still produce evidence, prompt/argv/stdout/stderr/diff redaction, output truncation flags, and duration-timeout cancellation evidence.
 - Codex adapter cooperative cancellation through `ExecuteContext`, hostrunner context propagation, and `rdev host serve` gateway job status monitoring that stops a running Codex process when the job becomes `canceled`.
+- Canceled-job artifact reporting through `POST /v1/jobs/{job_id}/artifact`, preserving the gateway job's `canceled` terminal state while adding reviewable cancellation evidence.
 
 The following remain real-environment acceptance tests:
 

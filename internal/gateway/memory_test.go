@@ -347,6 +347,77 @@ func TestMemoryGatewayRejectsFailJobForWrongHost(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayAppendsCanceledJobArtifactWithoutChangingStatus(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "codex", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"codex.run", "git.diff"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.CancelJob(job.ID, "operator cancel"); err != nil {
+		t.Fatal(err)
+	}
+	job, artifact, err := gw.AppendCanceledJobArtifactForHost(host.ID, job.ID, `{"schema_version":"rdev.codex-result.v1","canceled":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != model.JobStatusCanceled {
+		t.Fatalf("expected canceled status to be preserved, got %s", job.Status)
+	}
+	if artifact.Name != "canceled-result.txt" {
+		t.Fatalf("unexpected artifact name %q", artifact.Name)
+	}
+	if got := gw.Artifacts(job.ID); len(got) != 1 || got[0].ID != artifact.ID {
+		t.Fatalf("expected appended cancellation artifact, got %#v", got)
+	}
+	events := gw.AuditEvents()
+	if events[len(events)-1].Action != "job.artifact" {
+		t.Fatalf("expected job.artifact audit event, got %s", events[len(events)-1].Action)
+	}
+}
+
+func TestMemoryGatewayRejectsCanceledArtifactForWrongHost(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "codex", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"codex.run", "git.diff"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.CancelJob(job.ID, "operator cancel"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.AppendCanceledJobArtifactForHost("hst_other", job.ID, "evidence"); err == nil {
+		t.Fatal("expected wrong host cancellation artifact to fail")
+	}
+}
+
+func TestMemoryGatewayRejectsCanceledArtifactForNonCanceledJob(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "codex", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"codex.run", "git.diff"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.AppendCanceledJobArtifactForHost(host.ID, job.ID, "evidence"); err == nil {
+		t.Fatal("expected non-canceled job artifact append to fail")
+	}
+}
+
 func TestMemoryGatewayRejectsJobForPendingHost(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

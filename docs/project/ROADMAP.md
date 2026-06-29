@@ -1,6 +1,6 @@
 # Roadmap
 
-The roadmap implements the canonical [Final System Design](../architecture/FINAL_SYSTEM_DESIGN.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, workspace locks, approval gates, audit evidence, and agent-native MCP/Skill packaging. Its "Final Reference Blueprint" and "Final Architecture Lock" are the implementation contract: a small safety microkernel with replaceable adapters for shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, and DevPod. [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md) remains the broader blueprint.
+The roadmap implements the canonical [Final System Design](../architecture/FINAL_SYSTEM_DESIGN.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, workspace locks, approval gates, audit evidence, and agent-native MCP/Skill packaging. Its "Final Reference Blueprint" and "Final Architecture Lock" are the implementation contract: a small safety microkernel with replaceable adapters for shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, and DevPod. [Final Closure Blueprint](../architecture/FINAL_CLOSURE_BLUEPRINT.md) is the concise release-facing contract, and [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md) remains the broader blueprint.
 
 ## Maturity Gates
 
@@ -72,6 +72,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Codex adapter MVP with hostrunner integration, `codex.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, and redaction.
 - Codex adapter conformance coverage for workspace canonicalization, write-scope escape rejection before execution, nonzero-exit evidence, host-side redaction, output truncation, and timeout cancellation evidence.
 - Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
+- Canceled Codex jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
 - Git diff and test evidence bundles.
 - Approval before push, merge, deploy, credential changes, or service changes.
 - Managed install, health, stop, and uninstall commands.

@@ -38,7 +38,7 @@ shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevP
 
 The project intentionally reuses mature ecosystems where they fit: MCP for agent tools, Tailscale/headscale or SSH for owned-host connectivity, Coder/DevPod for governed workspaces, RustDesk/MeshCentral for explicit GUI sessions, and platform/Sigstore-style signing for release trust. What `rdev` owns is the missing agent safety kernel: signed job envelopes, host-side policy, approval gates, workspace locks, redaction, evidence bundles, audit chains, and revocation.
 
-The canonical endgame is locked in [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md): a small safety microkernel with replaceable adapters. The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
+The canonical endgame is locked in [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md): a small safety microkernel with replaceable adapters. The concise release-facing contract lives in [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md). The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
 
 ## Current Status
 
@@ -74,6 +74,7 @@ Implemented now:
 - Codex adapter MVP through `adapter=codex`: runs `codex exec` or a signed payload-provided command inside the validated workspace, requires `codex.run` and `git.diff`, gates push/merge/deploy/publish/credential/service intents on approval, and captures `rdev.codex-result.v1` evidence with Codex output, Git status, Git diff/stat, optional verification command results, `go test -json` test reports, output caps, and redaction.
 - Codex adapter conformance coverage for canonical workspace roots, write-scope escape rejection before execution, failure evidence, redaction, output truncation, and timeout cancellation evidence.
 - Codex adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
+- Canceled Codex jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Durable host-side approval token consumption stores with in-memory and file-backed development modes, exposed through `rdev host serve --approval-store`.
@@ -149,6 +150,7 @@ go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-d
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Perfect End-State Architecture](docs/architecture/PERFECT_END_STATE.md)
 - [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) — canonical product contract
+- [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md) — concise release-facing closure contract
 - [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
 - [Project Plan](docs/project/PLAN.md)
 - [Acceptance Tests](docs/project/ACCEPTANCE_TESTS.md)

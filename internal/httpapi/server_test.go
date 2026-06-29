@@ -735,6 +735,53 @@ func TestJobFail(t *testing.T) {
 	}
 }
 
+func TestJobCanceledArtifact(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"codex","intent":"local demo","policy":{"workspace_root":".","capabilities":["codex.run","git.diff"]}}`)
+	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
+	jobRec := httptest.NewRecorder()
+	handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+	var jobPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.CancelJob(jobPayload.Job.ID, "operator cancel"); err != nil {
+		t.Fatal(err)
+	}
+
+	artifactReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/artifact", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"cancellation evidence"}`))
+	artifactRec := httptest.NewRecorder()
+	handler.ServeHTTP(artifactRec, artifactReq)
+	if artifactRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", artifactRec.Code, artifactRec.Body.String())
+	}
+	var artifactPayload struct {
+		Job      model.Job      `json:"job"`
+		Artifact model.Artifact `json:"artifact"`
+	}
+	if err := json.Unmarshal(artifactRec.Body.Bytes(), &artifactPayload); err != nil {
+		t.Fatal(err)
+	}
+	if artifactPayload.Job.Status != model.JobStatusCanceled {
+		t.Fatalf("expected canceled job, got %s", artifactPayload.Job.Status)
+	}
+	if artifactPayload.Artifact.Content != "cancellation evidence" {
+		t.Fatalf("expected cancellation evidence, got %q", artifactPayload.Artifact.Content)
+	}
+	if artifacts := gw.Artifacts(jobPayload.Job.ID); len(artifacts) != 1 {
+		t.Fatalf("expected one artifact, got %d", len(artifacts))
+	}
+}
+
 func createTicket(t *testing.T, handler http.Handler) model.Ticket {
 	t.Helper()
 	body := bytes.NewBufferString(`{"mode":"attended-temporary","ttl_seconds":600,"reason":"test"}`)

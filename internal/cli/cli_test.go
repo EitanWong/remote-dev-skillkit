@@ -726,6 +726,13 @@ func main() {
 	if canceled.Status != model.JobStatusCanceled {
 		t.Fatalf("expected job to remain canceled, got %s", canceled.Status)
 	}
+	artifacts := gw.Artifacts(job.ID)
+	if len(artifacts) != 1 {
+		t.Fatalf("expected one cancellation artifact, got %d", len(artifacts))
+	}
+	if !strings.Contains(artifacts[0].Content, `"canceled": true`) {
+		t.Fatalf("expected canceled evidence artifact, got %s", artifacts[0].Content)
+	}
 }
 
 func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
