@@ -13,10 +13,18 @@ type Result struct {
 }
 
 func RunDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
-	return runDevJob(hostID, trust, job, now)
+	return runDevJob(hostID, "", trust, job, now)
+}
+
+func RunDevJobForIdentity(hostID, identityFingerprint string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
+	return runDevJob(hostID, identityFingerprint, trust, job, now)
 }
 
 func RunDevJobWithTrustBundle(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
+	return RunDevJobWithTrustBundleForIdentity(hostID, "", trustBundle, job, now)
+}
+
+func RunDevJobWithTrustBundleForIdentity(hostID, identityFingerprint string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
 	if job.Envelope == nil {
 		return Result{}, fmt.Errorf("job envelope is required")
 	}
@@ -24,16 +32,19 @@ func RunDevJobWithTrustBundle(hostID string, trustBundle model.SignedTrustBundle
 	if err != nil {
 		return Result{}, err
 	}
-	return runDevJob(hostID, trust, job, now)
+	return runDevJob(hostID, identityFingerprint, trust, job, now)
 }
 
-func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
+func runDevJob(hostID, identityFingerprint string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
 	if job.Envelope == nil {
 		return Result{}, fmt.Errorf("job envelope is required")
 	}
 	envelope := *job.Envelope
 	if envelope.HostID != hostID || job.HostID != hostID {
 		return Result{}, fmt.Errorf("job is not assigned to host")
+	}
+	if identityFingerprint != "" && envelope.HostIdentityFingerprint != identityFingerprint {
+		return Result{}, fmt.Errorf("host identity fingerprint mismatch")
 	}
 	if envelope.SigningKeyID != trust.SigningKeyID {
 		return Result{}, fmt.Errorf("signing key mismatch")

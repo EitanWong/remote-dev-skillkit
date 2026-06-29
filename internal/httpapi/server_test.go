@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -271,6 +274,48 @@ func TestRegisterAndApproveHost(t *testing.T) {
 	}
 }
 
+func TestRegisterHostPreservesIdentityFields(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := httpHostIdentityFingerprint(publicKey)
+	body, err := json.Marshal(map[string]any{
+		"ticket_code":          ticket.Code,
+		"name":                 "win-temp",
+		"os":                   "windows",
+		"arch":                 "amd64",
+		"capabilities":         []string{"shell.user"},
+		"identity_key_id":      "host-test",
+		"identity_public_key":  base64.RawURLEncoding.EncodeToString(publicKey),
+		"identity_fingerprint": fingerprint,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Host model.Host `json:"host"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Host.IdentityKeyID != "host-test" {
+		t.Fatalf("expected identity key id, got %q", payload.Host.IdentityKeyID)
+	}
+	if payload.Host.IdentityFingerprint != fingerprint {
+		t.Fatalf("expected identity fingerprint %q, got %q", fingerprint, payload.Host.IdentityFingerprint)
+	}
+}
+
 func TestRevokeHostCancelsQueuedJobs(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
@@ -517,4 +562,9 @@ func httpTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 		t.Fatal(err)
 	}
 	return publicKey, privateKey
+}
+
+func httpHostIdentityFingerprint(publicKey ed25519.PublicKey) string {
+	sum := sha256.Sum256(publicKey)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

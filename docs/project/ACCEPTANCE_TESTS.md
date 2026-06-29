@@ -135,6 +135,7 @@ Purpose: prove that an Eitan-owned Mac can run a Lucky-requested coding job thro
 ### Required Evidence
 
 - Host capability inventory.
+- Host identity key id, public key fingerprint, and evidence that the job envelope is bound to the same fingerprint.
 - Managed install or managed test-mode transcript.
 - Job envelope showing host and workspace binding.
 - Workspace lock evidence.
@@ -238,6 +239,7 @@ The local test suite currently covers:
 - signed trust bundle HTTP read/update flow with rollback rejection.
 - host-side job verification through signed trust bundle active keys, with legacy trust fallback.
 - durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.
+- durable host identity key file storage with 0600 permissions, registration identity preservation, signed job envelope identity binding, and host-side fingerprint mismatch rejection.
 
 The following remain real-environment acceptance tests:
 
@@ -246,5 +248,5 @@ The following remain real-environment acceptance tests:
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall;
 - Codex adapter execution in a locked worktree;
-- OS-protected managed host trust storage beyond file-backed dev mode;
+- OS-protected managed host trust and identity storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.

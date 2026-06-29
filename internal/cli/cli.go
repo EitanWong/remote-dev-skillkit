@@ -19,6 +19,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
@@ -125,6 +126,8 @@ func (a App) host(args []string) error {
 		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
 		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
 		trustStore := fs.String("trust-store", "", "optional local signed trust bundle store path for managed hosts")
+		identityStore := fs.String("identity-store", "", "optional local host identity key store path")
+		identityKeyID := fs.String("identity-key-id", hostidentity.DefaultKeyID, "host identity key id")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -141,6 +144,8 @@ func (a App) host(args []string) error {
 			ApprovalTimeout:       *approvalTimeout,
 			TrustPin:              *trustPin,
 			TrustStorePath:        *trustStore,
+			IdentityStorePath:     *identityStore,
+			IdentityKeyID:         *identityKeyID,
 			ManifestRootPublicKey: *manifestRootPublicKey,
 		})
 	default:
@@ -160,6 +165,8 @@ type hostServeOptions struct {
 	ApprovalTimeout       time.Duration
 	TrustPin              string
 	TrustStorePath        string
+	IdentityStorePath     string
+	IdentityKeyID         string
 	ManifestRootPublicKey string
 }
 
@@ -190,16 +197,23 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if !strings.HasPrefix(opts.GatewayURL, "http://127.0.0.1:") && !strings.HasPrefix(opts.GatewayURL, "http://localhost:") {
 		return fmt.Errorf("host registration currently supports local dev gateways only")
 	}
+	identity, identityCreated, err := hostidentity.LoadOrCreate(opts.IdentityStorePath, opts.IdentityKeyID)
+	if err != nil {
+		return err
+	}
 	inventory := hostcap.Detect(ctx)
 	if opts.Name != "" {
 		inventory.Name = opts.Name
 	}
 	host, err := registerHost(ctx, opts.GatewayURL, model.HostRegistration{
-		TicketCode:   opts.TicketCode,
-		Name:         inventory.Name,
-		OS:           inventory.OS,
-		Arch:         inventory.Arch,
-		Capabilities: inventory.TemporaryCapabilities,
+		TicketCode:          opts.TicketCode,
+		Name:                inventory.Name,
+		OS:                  inventory.OS,
+		Arch:                inventory.Arch,
+		Capabilities:        inventory.TemporaryCapabilities,
+		IdentityKeyID:       identity.KeyID,
+		IdentityPublicKey:   identity.EncodedPublicKey(),
+		IdentityFingerprint: identity.Fingerprint(),
 	})
 	if err != nil {
 		return err
@@ -210,8 +224,14 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		"gateway":   opts.GatewayURL,
 		"host":      host,
 		"inventory": inventory,
-		"status":    "registered-pending-approval",
-		"note":      "local development registration only; WSS transport is not implemented yet",
+		"identity": map[string]any{
+			"key_id":      identity.KeyID,
+			"fingerprint": identity.Fingerprint(),
+			"created":     identityCreated,
+			"stored":      opts.IdentityStorePath != "",
+		},
+		"status": "registered-pending-approval",
+		"note":   "local development registration only; WSS transport is not implemented yet",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -221,7 +241,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if _, err := waitForHostActive(ctx, opts.GatewayURL, host.ID, opts.ApprovalTimeout, opts.PollInterval); err != nil {
 		return err
 	}
-	processed, err := a.pollAndRunDevJobs(ctx, opts, host.ID)
+	processed, err := a.pollAndRunDevJobs(ctx, opts, host.ID, identity.Fingerprint())
 	if err != nil {
 		return err
 	}
@@ -587,7 +607,7 @@ func registerHost(ctx context.Context, gatewayURL string, registration model.Hos
 	return payload.Host, nil
 }
 
-func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostID string) (int, error) {
+func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostID, identityFingerprint string) (int, error) {
 	maxJobs := opts.MaxJobs
 	if maxJobs <= 0 {
 		maxJobs = 1
@@ -616,7 +636,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 			}
 			continue
 		}
-		result, err := trust.RunDevJob(hostID, job, time.Now())
+		result, err := trust.RunDevJob(hostID, identityFingerprint, job, time.Now())
 		if err != nil {
 			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
 				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
@@ -676,12 +696,12 @@ type hostTrust struct {
 	SignedBundle *model.SignedTrustBundle
 }
 
-func (t hostTrust) RunDevJob(hostID string, job model.Job, now time.Time) (hostrunner.Result, error) {
+func (t hostTrust) RunDevJob(hostID, identityFingerprint string, job model.Job, now time.Time) (hostrunner.Result, error) {
 	if t.SignedBundle != nil {
-		return hostrunner.RunDevJobWithTrustBundle(hostID, *t.SignedBundle, job, now)
+		return hostrunner.RunDevJobWithTrustBundleForIdentity(hostID, identityFingerprint, *t.SignedBundle, job, now)
 	}
 	if t.Legacy != nil {
-		return hostrunner.RunDevJob(hostID, *t.Legacy, job, now)
+		return hostrunner.RunDevJobForIdentity(hostID, identityFingerprint, *t.Legacy, job, now)
 	}
 	return hostrunner.Result{}, fmt.Errorf("host trust is not configured")
 }

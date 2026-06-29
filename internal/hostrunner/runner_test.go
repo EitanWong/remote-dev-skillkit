@@ -3,6 +3,9 @@ package hostrunner
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -153,6 +156,45 @@ func TestRunDevJobRejectsWrongHost(t *testing.T) {
 	}
 }
 
+func TestRunDevJobRejectsWrongHostIdentityFingerprint(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunDevJobForIdentity(host.ID, "sha256:wrong", gw.TrustBundle(), job, now); err == nil {
+		t.Fatal("expected identity fingerprint mismatch")
+	}
+}
+
+func TestRunDevJobAcceptsMatchingHostIdentityFingerprint(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Envelope == nil || job.Envelope.HostIdentityFingerprint == "" {
+		t.Fatal("expected envelope to include host identity fingerprint")
+	}
+	if _, err := RunDevJobForIdentity(host.ID, host.IdentityFingerprint, gw.TrustBundle(), job, now); err != nil {
+		t.Fatalf("expected matching identity to execute: %v", err)
+	}
+}
+
 func TestRunDevJobRejectsMissingWorkspace(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -209,11 +251,18 @@ func activeHost(t *testing.T, gw *gateway.MemoryGateway) model.Host {
 	if err != nil {
 		t.Fatal(err)
 	}
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	host, err := gw.RegisterHost(model.HostRegistration{
-		TicketCode: ticket.Code,
-		Name:       "host",
-		OS:         "darwin",
-		Arch:       "arm64",
+		TicketCode:          ticket.Code,
+		Name:                "host",
+		OS:                  "darwin",
+		Arch:                "arm64",
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   encodeHostIdentityPublicKey(publicKey),
+		IdentityFingerprint: hostIdentityFingerprint(publicKey),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -223,6 +272,15 @@ func activeHost(t *testing.T, gw *gateway.MemoryGateway) model.Host {
 		t.Fatal(err)
 	}
 	return host
+}
+
+func encodeHostIdentityPublicKey(publicKey ed25519.PublicKey) string {
+	return base64.RawURLEncoding.EncodeToString(publicKey)
+}
+
+func hostIdentityFingerprint(publicKey ed25519.PublicKey) string {
+	sum := sha256.Sum256(publicKey)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func signedHostrunnerTrustBundle(t *testing.T, spec model.SignedTrustBundleSpec, privateKey ed25519.PrivateKey, now time.Time) model.SignedTrustBundle {

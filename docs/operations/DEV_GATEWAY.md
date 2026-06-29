@@ -30,6 +30,7 @@ rdev host serve \
   --gateway http://127.0.0.1:8787 \
   --ticket-code ABCD-1234 \
   --once=false \
+  --identity-store .rdev/host/identity.json \
   --trust-store .rdev/host/trust-bundle.json \
   --trust-pin sha256:<hex>
 ```
@@ -95,7 +96,8 @@ Register a foreground temporary host:
 rdev host serve \
   --mode temporary \
   --gateway http://127.0.0.1:8787 \
-  --ticket-code ABCD-1234
+  --ticket-code ABCD-1234 \
+  --identity-store .rdev/host/identity.json
 ```
 
 Create and process one dev job:
@@ -123,7 +125,9 @@ rdev policy explain-shell \
 
 Agents can call the same policy engine through MCP tool `rdev.policy.explain_shell`.
 
-When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
+`rdev host serve` generates an Ed25519 host identity for the session. When `--identity-store <path>` is set, the identity is persisted to a local `0600` JSON file using schema `rdev.host-identity.v1`; the parent directory is created with `0700` permissions. The host registration includes the identity key id, public key and fingerprint. Signed job envelopes include the registered host identity fingerprint, and a host with a local identity rejects jobs bound to a different fingerprint.
+
+When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle and the local host identity fingerprint, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
 
 When `--trust-store <path>` is set, the host persists verified signed trust bundles to a local `0600` JSON file. Future updates must verify against the stored bundle's active signing key, increase sequence, and match `previous_bundle_hash`. If the gateway trust-bundle endpoint is unavailable, the host can use the stored bundle for job verification.
 
@@ -201,4 +205,5 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed host
 - If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
 - `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode and are not durable across process restarts.
 - `--trust-store` is a file-backed development store. Production managed hosts should move this to OS-protected storage where available.
+- `--identity-store` is a file-backed development host identity store. Production managed hosts should move identity keys to OS-protected storage and add signed registration proofs.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

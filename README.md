@@ -36,6 +36,7 @@ Implemented now:
 - Local dev host registration, job polling, and job completion loop.
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Persistent development gateway signing key files plus host trust pin checks.
+- File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - Signed development join manifest endpoint for manifest-driven temporary host registration.
 - Join manifests can be signed by a separate bootstrap/release trust root and verified by hosts with a pinned root public key.
 - Release artifact signing and verification primitives via `rdev release sign` / `rdev release verify`.
@@ -48,13 +49,14 @@ Implemented now:
 Not implemented yet:
 
 - Real gateway networking.
-- Host enrollment keys and certificates.
+- Production host enrollment certificates and registration proofs.
 - Production signing key storage and rotation.
 - Production key rotation/revocation and managed host trust bundle update flow.
 - Full production bootstrap trust root lifecycle and release signing policy.
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
+- OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
 - Windows service installation.
 - Tailscale/headscale adapter.

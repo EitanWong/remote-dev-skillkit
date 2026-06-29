@@ -3,6 +3,9 @@ package gateway
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -139,6 +142,77 @@ func TestMemoryGatewayCreatesSignedJoinManifest(t *testing.T) {
 	}
 	if err := manifest.Verify(now); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)
+	}
+}
+
+func TestMemoryGatewayPreservesHostIdentityAndBindsEnvelope(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := hostIdentityFingerprint(publicKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                "win-temp-01",
+		OS:                  "windows",
+		Arch:                "amd64",
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   encodeHostIdentityPublicKey(publicKey),
+		IdentityFingerprint: fingerprint,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.IdentityFingerprint != fingerprint {
+		t.Fatalf("expected host identity fingerprint %q, got %q", fingerprint, host.IdentityFingerprint)
+	}
+	host, err = gw.ApproveHost(host.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Envelope == nil {
+		t.Fatal("job envelope must be present")
+	}
+	if job.Envelope.HostIdentityFingerprint != fingerprint {
+		t.Fatalf("expected envelope fingerprint %q, got %q", fingerprint, job.Envelope.HostIdentityFingerprint)
+	}
+}
+
+func TestMemoryGatewayRejectsHostIdentityFingerprintMismatch(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = gw.RegisterHost(model.HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                "win-temp-01",
+		OS:                  "windows",
+		Arch:                "amd64",
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   encodeHostIdentityPublicKey(publicKey),
+		IdentityFingerprint: "sha256:wrong",
+	})
+	if err == nil {
+		t.Fatal("expected identity fingerprint mismatch")
 	}
 }
 
@@ -357,6 +431,15 @@ func countAuditAction(events []model.AuditEvent, action string) int {
 
 func hasAuditAction(events []model.AuditEvent, action string) bool {
 	return countAuditAction(events, action) > 0
+}
+
+func encodeHostIdentityPublicKey(publicKey ed25519.PublicKey) string {
+	return base64.RawURLEncoding.EncodeToString(publicKey)
+}
+
+func hostIdentityFingerprint(publicKey ed25519.PublicKey) string {
+	sum := sha256.Sum256(publicKey)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func activeHost(t *testing.T, gw *MemoryGateway) model.Host {

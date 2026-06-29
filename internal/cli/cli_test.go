@@ -146,6 +146,46 @@ func TestHostServeRegistersWithLocalGateway(t *testing.T) {
 	}
 }
 
+func TestHostServeRegistersWithIdentityStore(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	identityPath := filepath.Join(t.TempDir(), "identity", "host.json")
+
+	firstFingerprint := runHostServeWithIdentityStore(t, server.URL, ticket.Code, identityPath, "test-host-1")
+	hosts := gw.Hosts("")
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].IdentityFingerprint != firstFingerprint {
+		t.Fatalf("expected stored host fingerprint %q, got %q", firstFingerprint, hosts[0].IdentityFingerprint)
+	}
+	if hosts[0].IdentityKeyID != "host-test" {
+		t.Fatalf("expected identity key id host-test, got %q", hosts[0].IdentityKeyID)
+	}
+	info, err := os.Stat(identityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("expected identity store 0600 permissions, got %#o", got)
+	}
+
+	secondTicket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondFingerprint := runHostServeWithIdentityStore(t, server.URL, secondTicket.Code, identityPath, "test-host-2")
+	if secondFingerprint != firstFingerprint {
+		t.Fatalf("expected identity fingerprint reuse, got %s then %s", firstFingerprint, secondFingerprint)
+	}
+}
+
 func TestHostServeRegistersWithJoinManifest(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -317,7 +357,7 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, host.ID)
+	}, host.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +412,7 @@ func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
 		PollInterval: 1,
 		MaxJobs:      1,
 		TrustPin:     "sha256:0000",
-	}, host.ID)
+	}, host.ID, "")
 	if err == nil {
 		t.Fatal("expected trust pin mismatch")
 	}
@@ -523,7 +563,7 @@ func TestHostServeReportsFailedDevJob(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, host.ID)
+	}, host.ID, "")
 	if err == nil {
 		t.Fatal("expected host runner failure")
 	}
@@ -746,4 +786,45 @@ func TestReleaseVerifyRejectsTamperedArtifact(t *testing.T) {
 
 func timeNowForTest() time.Time {
 	return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+}
+
+func runHostServeWithIdentityStore(t *testing.T, gatewayURL, ticketCode, identityPath, name string) string {
+	t.Helper()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	err := app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", gatewayURL,
+		"--ticket-code", ticketCode,
+		"--identity-store", identityPath,
+		"--identity-key-id", "host-test",
+		"--name", name,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Host struct {
+			IdentityFingerprint string `json:"identity_fingerprint"`
+		} `json:"host"`
+		Identity struct {
+			Fingerprint string `json:"fingerprint"`
+			Stored      bool   `json:"stored"`
+		} `json:"identity"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Identity.Fingerprint == "" {
+		t.Fatalf("expected identity fingerprint in output, got %s", stdout.String())
+	}
+	if !payload.Identity.Stored {
+		t.Fatalf("expected identity to be stored, got %s", stdout.String())
+	}
+	if payload.Host.IdentityFingerprint != payload.Identity.Fingerprint {
+		t.Fatalf("expected host identity fingerprint %q, got %q", payload.Identity.Fingerprint, payload.Host.IdentityFingerprint)
+	}
+	return payload.Identity.Fingerprint
 }

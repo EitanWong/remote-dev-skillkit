@@ -645,14 +645,15 @@ func reasonOrDefault(reason, fallback string) string {
 
 func jobEnvelopeSpec(jobPolicy map[string]any, host model.Host, signingID string) model.JobEnvelopeSpec {
 	return model.JobEnvelopeSpec{
-		OperatorID:        stringValue(jobPolicy, "operator_id", "operator"),
-		Workspace:         workspaceValue(jobPolicy),
-		Capabilities:      stringSliceValue(jobPolicy, "capabilities", host.Capabilities),
-		Limits:            limitsValue(jobPolicy),
-		ApprovalsRequired: stringSliceValue(jobPolicy, "approvals_required", nil),
-		Payload:           jobPolicy,
-		TTLSeconds:        intValue(jobPolicy, "ttl_seconds", model.DefaultJobTTLSeconds),
-		SigningKeyID:      signingID,
+		OperatorID:              stringValue(jobPolicy, "operator_id", "operator"),
+		HostIdentityFingerprint: host.IdentityFingerprint,
+		Workspace:               workspaceValue(jobPolicy),
+		Capabilities:            stringSliceValue(jobPolicy, "capabilities", host.Capabilities),
+		Limits:                  limitsValue(jobPolicy),
+		ApprovalsRequired:       stringSliceValue(jobPolicy, "approvals_required", nil),
+		Payload:                 jobPolicy,
+		TTLSeconds:              intValue(jobPolicy, "ttl_seconds", model.DefaultJobTTLSeconds),
+		SigningKeyID:            signingID,
 	}
 }
 

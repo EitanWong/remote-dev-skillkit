@@ -33,6 +33,7 @@
 - [x] Wire release artifact signature verification into Windows bootstrap via hash-pinned verifier.
 - [x] Add shell job policy explain engine and MCP tool.
 - [x] Make host revocation cancel queued/running jobs and audit the stop.
+- [x] Add host identity key storage and signed job identity binding.
 
 ## Next
 
@@ -58,12 +59,13 @@
 - [x] Add development trust bundle read/update endpoint.
 - [x] Wire host-side job verification to signed trust bundle active keys.
 - [x] Add durable host trust bundle file store.
+- [x] Add durable host identity key store.
 
 ## Later
 
 - [ ] Add WSS/mTLS transport.
-- [ ] Add host identity key storage.
 - [ ] Add production managed host trust bundle update policy endpoint.
+- [ ] Add OS-protected managed host identity storage and registration proof.
 - [ ] Add Windows Service mode.
 - [ ] Add systemd and launchd modes.
 - [ ] Add acpx adapter.

@@ -36,36 +36,38 @@ type JobLimits struct {
 }
 
 type JobEnvelopeSpec struct {
-	OperatorID        string
-	Workspace         JobWorkspace
-	Capabilities      []string
-	Limits            JobLimits
-	ApprovalsRequired []string
-	Payload           map[string]any
-	TTLSeconds        int
-	SigningKeyID      string
+	OperatorID              string
+	HostIdentityFingerprint string
+	Workspace               JobWorkspace
+	Capabilities            []string
+	Limits                  JobLimits
+	ApprovalsRequired       []string
+	Payload                 map[string]any
+	TTLSeconds              int
+	SigningKeyID            string
 }
 
 type JobEnvelope struct {
-	SchemaVersion     string         `json:"schema_version"`
-	JobID             string         `json:"job_id"`
-	HostID            string         `json:"host_id"`
-	TicketID          string         `json:"ticket_id,omitempty"`
-	OperatorID        string         `json:"operator_id"`
-	IssuedAt          time.Time      `json:"issued_at"`
-	ExpiresAt         time.Time      `json:"expires_at"`
-	Nonce             string         `json:"nonce"`
-	Mode              HostMode       `json:"mode"`
-	Adapter           string         `json:"adapter"`
-	Intent            string         `json:"intent"`
-	Workspace         JobWorkspace   `json:"workspace"`
-	Capabilities      []string       `json:"capabilities"`
-	Limits            JobLimits      `json:"limits"`
-	ApprovalsRequired []string       `json:"approvals_required,omitempty"`
-	Payload           map[string]any `json:"payload,omitempty"`
-	SigningAlg        string         `json:"signing_alg"`
-	SigningKeyID      string         `json:"signing_key_id"`
-	Signature         string         `json:"signature,omitempty"`
+	SchemaVersion           string         `json:"schema_version"`
+	JobID                   string         `json:"job_id"`
+	HostID                  string         `json:"host_id"`
+	HostIdentityFingerprint string         `json:"host_identity_fingerprint,omitempty"`
+	TicketID                string         `json:"ticket_id,omitempty"`
+	OperatorID              string         `json:"operator_id"`
+	IssuedAt                time.Time      `json:"issued_at"`
+	ExpiresAt               time.Time      `json:"expires_at"`
+	Nonce                   string         `json:"nonce"`
+	Mode                    HostMode       `json:"mode"`
+	Adapter                 string         `json:"adapter"`
+	Intent                  string         `json:"intent"`
+	Workspace               JobWorkspace   `json:"workspace"`
+	Capabilities            []string       `json:"capabilities"`
+	Limits                  JobLimits      `json:"limits"`
+	ApprovalsRequired       []string       `json:"approvals_required,omitempty"`
+	Payload                 map[string]any `json:"payload,omitempty"`
+	SigningAlg              string         `json:"signing_alg"`
+	SigningKeyID            string         `json:"signing_key_id"`
+	Signature               string         `json:"signature,omitempty"`
 }
 
 func NewJobEnvelope(job Job, host Host, ticket Ticket, spec JobEnvelopeSpec, now time.Time) (JobEnvelope, error) {
@@ -84,6 +86,9 @@ func NewJobEnvelope(job Job, host Host, ticket Ticket, spec JobEnvelopeSpec, now
 	if spec.SigningKeyID == "" {
 		spec.SigningKeyID = "gateway-dev"
 	}
+	if spec.HostIdentityFingerprint == "" {
+		spec.HostIdentityFingerprint = host.IdentityFingerprint
+	}
 	if len(spec.Capabilities) == 0 {
 		spec.Capabilities = append([]string(nil), host.Capabilities...)
 	}
@@ -99,24 +104,25 @@ func NewJobEnvelope(job Job, host Host, ticket Ticket, spec JobEnvelopeSpec, now
 		return JobEnvelope{}, err
 	}
 	return JobEnvelope{
-		SchemaVersion:     JobEnvelopeSchemaVersion,
-		JobID:             job.ID,
-		HostID:            host.ID,
-		TicketID:          host.TicketID,
-		OperatorID:        spec.OperatorID,
-		IssuedAt:          issuedAt,
-		ExpiresAt:         expiresAt,
-		Nonce:             nonce,
-		Mode:              host.Mode,
-		Adapter:           job.Adapter,
-		Intent:            job.Intent,
-		Workspace:         spec.Workspace,
-		Capabilities:      append([]string(nil), spec.Capabilities...),
-		Limits:            spec.Limits,
-		ApprovalsRequired: append([]string(nil), spec.ApprovalsRequired...),
-		Payload:           cloneMap(spec.Payload),
-		SigningAlg:        JobEnvelopeSigningAlg,
-		SigningKeyID:      spec.SigningKeyID,
+		SchemaVersion:           JobEnvelopeSchemaVersion,
+		JobID:                   job.ID,
+		HostID:                  host.ID,
+		HostIdentityFingerprint: spec.HostIdentityFingerprint,
+		TicketID:                host.TicketID,
+		OperatorID:              spec.OperatorID,
+		IssuedAt:                issuedAt,
+		ExpiresAt:               expiresAt,
+		Nonce:                   nonce,
+		Mode:                    host.Mode,
+		Adapter:                 job.Adapter,
+		Intent:                  job.Intent,
+		Workspace:               spec.Workspace,
+		Capabilities:            append([]string(nil), spec.Capabilities...),
+		Limits:                  spec.Limits,
+		ApprovalsRequired:       append([]string(nil), spec.ApprovalsRequired...),
+		Payload:                 cloneMap(spec.Payload),
+		SigningAlg:              JobEnvelopeSigningAlg,
+		SigningKeyID:            spec.SigningKeyID,
 	}, nil
 }
 
