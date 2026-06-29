@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const ResultSchemaVersion = "rdev.shell-result.v1"
+
 type Spec struct {
 	WorkspaceRoot      string
 	WriteScope         []string
@@ -33,6 +35,24 @@ type Result struct {
 	StartedAt       string   `json:"started_at"`
 	EndedAt         string   `json:"ended_at"`
 	DurationMillis  int64    `json:"duration_millis"`
+}
+
+type ResultArtifact struct {
+	SchemaVersion   string         `json:"schema_version"`
+	Adapter         string         `json:"adapter"`
+	Argv            []string       `json:"argv"`
+	WorkspaceRoot   string         `json:"workspace_root"`
+	ExitCode        int            `json:"exit_code"`
+	Stdout          string         `json:"stdout,omitempty"`
+	Stderr          string         `json:"stderr,omitempty"`
+	TimedOut        bool           `json:"timed_out"`
+	OutputTruncated bool           `json:"output_truncated"`
+	StartedAt       string         `json:"started_at"`
+	EndedAt         string         `json:"ended_at"`
+	DurationMillis  int64          `json:"duration_millis"`
+	Redacted        bool           `json:"redacted"`
+	RedactionRules  []string       `json:"redaction_rules"`
+	RedactionCounts map[string]int `json:"redaction_counts,omitempty"`
 }
 
 func Execute(spec Spec) (Result, error) {
@@ -97,11 +117,38 @@ func (r Result) ArtifactContent() string {
 	if r.Adapter == "" {
 		return ""
 	}
-	content, err := json.MarshalIndent(r, "", "  ")
+	content, err := json.MarshalIndent(r.Artifact(), "", "  ")
 	if err != nil {
 		return ""
 	}
 	return string(content)
+}
+
+func (r Result) Artifact() ResultArtifact {
+	redactor := newRedactor()
+	argv := make([]string, 0, len(r.Argv))
+	for _, arg := range r.Argv {
+		argv = append(argv, redactor.Redact(arg))
+	}
+	stdout := redactor.Redact(r.Stdout)
+	stderr := redactor.Redact(r.Stderr)
+	return ResultArtifact{
+		SchemaVersion:   ResultSchemaVersion,
+		Adapter:         r.Adapter,
+		Argv:            argv,
+		WorkspaceRoot:   r.WorkspaceRoot,
+		ExitCode:        r.ExitCode,
+		Stdout:          stdout,
+		Stderr:          stderr,
+		TimedOut:        r.TimedOut,
+		OutputTruncated: r.OutputTruncated,
+		StartedAt:       r.StartedAt,
+		EndedAt:         r.EndedAt,
+		DurationMillis:  r.DurationMillis,
+		Redacted:        redactor.Redacted(),
+		RedactionRules:  RedactionRuleNames(),
+		RedactionCounts: redactor.Counts(),
+	}
 }
 
 func canonicalWorkspace(root string) (string, error) {

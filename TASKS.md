@@ -52,7 +52,7 @@
 - [ ] Add platform-native Windows Authenticode verification policy.
 - [x] Add real scoped shell adapter execution.
 - [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
-- [ ] Add durable shell adapter audit schema and redaction rules.
+- [x] Add durable shell adapter audit schema and redaction rules.
 
 ## Later
 

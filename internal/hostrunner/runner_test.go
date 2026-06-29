@@ -1,6 +1,8 @@
 package hostrunner
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +33,51 @@ func TestRunDevJobAcceptsScopedShellJob(t *testing.T) {
 	}
 	if !strings.Contains(result.ArtifactContent, `"exit_code": 0`) {
 		t.Fatalf("expected successful command evidence, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobRedactsShellArtifact(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	workspace := t.TempDir()
+	secret := "sk-" + "testsecret12345678901234567890"
+	source := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("token=` + secret + `")
+}
+`
+	if err := os.WriteFile(filepath.Join(workspace, "printsecret.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "redaction demo", map[string]any{
+		"workspace_root":        workspace,
+		"capabilities":          []string{"shell.user"},
+		"argv":                  []string{"go", "run", "./printsecret.go"},
+		"allow_commands":        []string{"go"},
+		"max_duration_seconds":  30,
+		"max_output_bytes":      4096,
+		"approvals_required":    []string{},
+		"network_access_policy": "default-deny",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.ArtifactContent, secret) {
+		t.Fatalf("artifact leaked secret: %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.shell-result.v1"`) {
+		t.Fatalf("expected shell result schema, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, "[REDACTED:openai_api_key]") {
+		t.Fatalf("expected redaction marker, got %s", result.ArtifactContent)
 	}
 }
 

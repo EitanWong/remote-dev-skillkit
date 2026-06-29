@@ -1,6 +1,7 @@
 package shelladapter
 
 import (
+	"encoding/json"
 	"runtime"
 	"strings"
 	"testing"
@@ -104,5 +105,82 @@ func TestExecuteReturnsNonZeroEvidence(t *testing.T) {
 	}
 	if result.ArtifactContent() == "" {
 		t.Fatal("nonzero command should still produce artifact content")
+	}
+}
+
+func TestArtifactContentIncludesSchemaAndPreservesNonSecretOutput(t *testing.T) {
+	result := Result{
+		Adapter:        "shell",
+		Argv:           []string{"go", "env", "GOOS"},
+		WorkspaceRoot:  t.TempDir(),
+		ExitCode:       0,
+		Stdout:         "darwin\n",
+		Stderr:         "ok\n",
+		StartedAt:      "2026-06-29T00:00:00Z",
+		EndedAt:        "2026-06-29T00:00:01Z",
+		DurationMillis: 1000,
+	}
+	var artifact ResultArtifact
+	if err := json.Unmarshal([]byte(result.ArtifactContent()), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.SchemaVersion != ResultSchemaVersion {
+		t.Fatalf("unexpected schema version %q", artifact.SchemaVersion)
+	}
+	if artifact.Stdout != result.Stdout || artifact.Stderr != result.Stderr {
+		t.Fatalf("expected nonsecret output to be preserved, got stdout=%q stderr=%q", artifact.Stdout, artifact.Stderr)
+	}
+	if artifact.Redacted {
+		t.Fatal("nonsecret artifact should not be marked redacted")
+	}
+	if len(artifact.RedactionCounts) != 0 {
+		t.Fatalf("expected no redaction counts, got %#v", artifact.RedactionCounts)
+	}
+	if len(artifact.RedactionRules) == 0 {
+		t.Fatal("redaction rules should be recorded")
+	}
+}
+
+func TestArtifactContentRedactsSecretsAndReportsMetadata(t *testing.T) {
+	openAIKey := "sk-" + "testsecret12345678901234567890"
+	githubToken := "ghp_" + "abcdefghijklmnopqrstuvwxyz123456"
+	bearer := "abc1234567890.token-value"
+	awsKey := "AKIA" + "1234567890ABCDEF"
+	result := Result{
+		Adapter:       "shell",
+		Argv:          []string{"tool", "password=hunter2", "token=cli-token-value"},
+		WorkspaceRoot: t.TempDir(),
+		ExitCode:      0,
+		Stdout: strings.Join([]string{
+			"OPENAI_API_KEY=" + openAIKey,
+			"Authorization: Bearer " + bearer,
+			`{"api_key":"json-secret-value"}`,
+			"aws=" + awsKey,
+		}, "\n"),
+		Stderr:         "github token " + githubToken,
+		StartedAt:      "2026-06-29T00:00:00Z",
+		EndedAt:        "2026-06-29T00:00:01Z",
+		DurationMillis: 1000,
+	}
+	content := result.ArtifactContent()
+	for _, secret := range []string{openAIKey, githubToken, bearer, awsKey, "hunter2", "cli-token-value", "json-secret-value"} {
+		if strings.Contains(content, secret) {
+			t.Fatalf("artifact leaked secret %q in %s", secret, content)
+		}
+	}
+	var artifact ResultArtifact
+	if err := json.Unmarshal([]byte(content), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.Redacted {
+		t.Fatal("secret artifact should be marked redacted")
+	}
+	for _, rule := range []string{"openai_api_key", "authorization_bearer", "github_token", "aws_access_key_id", "secret_assignment", "secret_json"} {
+		if artifact.RedactionCounts[rule] == 0 {
+			t.Fatalf("expected redaction count for %s, got %#v", rule, artifact.RedactionCounts)
+		}
+	}
+	if !strings.Contains(content, "[REDACTED:openai_api_key]") {
+		t.Fatalf("expected redaction marker in %s", content)
 	}
 }

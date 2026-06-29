@@ -41,7 +41,7 @@ Implemented now:
 - Release artifact signing and verification primitives via `rdev release sign` / `rdev release verify`.
 - Windows bootstrap can hash-pin `rdev-verify.exe` and use it to verify the signed `rdev-host.exe` release manifest before starting the host.
 - Host-reported failed jobs with audit events.
-- Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, exit-code evidence, and failure artifacts.
+- Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, schema-versioned redacted evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 
