@@ -37,6 +37,7 @@ Implemented now:
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Persistent development gateway signing key files plus host trust pin checks.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
+- Host-side nonce replay cache with in-memory and file-backed development stores.
 - Signed development join manifest endpoint for manifest-driven temporary host registration.
 - Join manifests can be signed by a separate bootstrap/release trust root and verified by hosts with a pinned root public key.
 - Release artifact signing and verification primitives via `rdev release sign` / `rdev release verify`.

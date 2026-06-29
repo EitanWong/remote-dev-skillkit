@@ -491,6 +491,50 @@ func TestFetchHostTrustUsesStoredBundleWhenGatewayTrustBundleUnavailable(t *test
 	}
 }
 
+func TestHostTrustRejectsReplayWithNonceStore(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := gw.TrustBundle()
+	trust := hostTrust{
+		Legacy:     &legacy,
+		NonceStore: hostNonceStore(filepath.Join(t.TempDir(), "nonce", "store.json")),
+	}
+	now := time.Now()
+	if _, err := trust.RunDevJob(host.ID, "", job, now); err != nil {
+		t.Fatalf("expected first execution to pass: %v", err)
+	}
+	if _, err := trust.RunDevJob(host.ID, "", job, now); err == nil {
+		t.Fatal("expected replay rejection")
+	}
+}
+
 func TestGatewayServeDevReusesSigningKeyFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gateway-signing-key.json")
 

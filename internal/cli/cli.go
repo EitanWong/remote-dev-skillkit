@@ -20,6 +20,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
@@ -128,6 +129,7 @@ func (a App) host(args []string) error {
 		trustStore := fs.String("trust-store", "", "optional local signed trust bundle store path for managed hosts")
 		identityStore := fs.String("identity-store", "", "optional local host identity key store path")
 		identityKeyID := fs.String("identity-key-id", hostidentity.DefaultKeyID, "host identity key id")
+		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -146,6 +148,7 @@ func (a App) host(args []string) error {
 			TrustStorePath:        *trustStore,
 			IdentityStorePath:     *identityStore,
 			IdentityKeyID:         *identityKeyID,
+			NonceStorePath:        *nonceStore,
 			ManifestRootPublicKey: *manifestRootPublicKey,
 		})
 	default:
@@ -167,6 +170,7 @@ type hostServeOptions struct {
 	TrustStorePath        string
 	IdentityStorePath     string
 	IdentityKeyID         string
+	NonceStorePath        string
 	ManifestRootPublicKey string
 }
 
@@ -620,6 +624,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	if err != nil {
 		return 0, err
 	}
+	trust.NonceStore = hostNonceStore(opts.NonceStorePath)
 	processed := 0
 	for processed < maxJobs {
 		job, found, err := fetchNextJob(ctx, opts.GatewayURL, hostID)
@@ -694,14 +699,19 @@ func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootP
 type hostTrust struct {
 	Legacy       *model.TrustBundle
 	SignedBundle *model.SignedTrustBundle
+	NonceStore   hostnonce.Store
 }
 
 func (t hostTrust) RunDevJob(hostID, identityFingerprint string, job model.Job, now time.Time) (hostrunner.Result, error) {
+	opts := hostrunner.Options{
+		IdentityFingerprint: identityFingerprint,
+		NonceStore:          t.NonceStore,
+	}
 	if t.SignedBundle != nil {
-		return hostrunner.RunDevJobWithTrustBundleForIdentity(hostID, identityFingerprint, *t.SignedBundle, job, now)
+		return hostrunner.RunDevJobWithTrustBundleOptions(hostID, *t.SignedBundle, job, now, opts)
 	}
 	if t.Legacy != nil {
-		return hostrunner.RunDevJobForIdentity(hostID, identityFingerprint, *t.Legacy, job, now)
+		return hostrunner.RunDevJobWithOptions(hostID, *t.Legacy, job, now, opts)
 	}
 	return hostrunner.Result{}, fmt.Errorf("host trust is not configured")
 }
@@ -731,6 +741,13 @@ func fetchHostTrust(ctx context.Context, gatewayURL, trustPin, trustStorePath st
 		return hostTrust{}, fmt.Errorf("fetch signed trust bundle failed: %v; fallback legacy trust failed: %w", err, legacyErr)
 	}
 	return hostTrust{Legacy: &legacy}, nil
+}
+
+func hostNonceStore(path string) hostnonce.Store {
+	if path != "" {
+		return hostnonce.FileStore{Path: path}
+	}
+	return hostnonce.NewMemoryStore()
 }
 
 func activeSigningRoot(bundle model.SignedTrustBundle) (model.TrustBundle, error) {

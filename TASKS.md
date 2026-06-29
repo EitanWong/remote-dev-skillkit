@@ -34,6 +34,7 @@
 - [x] Add shell job policy explain engine and MCP tool.
 - [x] Make host revocation cancel queued/running jobs and audit the stop.
 - [x] Add host identity key storage and signed job identity binding.
+- [x] Add host-side nonce replay cache.
 
 ## Next
 
@@ -60,6 +61,7 @@
 - [x] Wire host-side job verification to signed trust bundle active keys.
 - [x] Add durable host trust bundle file store.
 - [x] Add durable host identity key store.
+- [x] Add durable host nonce replay store.
 
 ## Later
 
@@ -78,7 +80,7 @@
 
 - [ ] Temporary Windows host joins from one visible PowerShell command and leaves no service behind.
 - [ ] Managed Mac runs a Codex coding job in a locked worktree and returns diff/test evidence.
-- [ ] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
+- [x] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
 - [ ] Workspace escape and non-allowlisted command attempts are rejected host-side.
 - [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.

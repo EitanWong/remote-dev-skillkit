@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
@@ -192,6 +193,32 @@ func TestRunDevJobAcceptsMatchingHostIdentityFingerprint(t *testing.T) {
 	}
 	if _, err := RunDevJobForIdentity(host.ID, host.IdentityFingerprint, gw.TrustBundle(), job, now); err != nil {
 		t.Fatalf("expected matching identity to execute: %v", err)
+	}
+}
+
+func TestRunDevJobRejectsReplayedNonce(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := hostnonce.NewMemoryStore()
+	opts := Options{
+		IdentityFingerprint: host.IdentityFingerprint,
+		NonceStore:          store,
+	}
+	if _, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts); err != nil {
+		t.Fatalf("expected first execution to pass: %v", err)
+	}
+	if _, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts); err == nil {
+		t.Fatal("expected replayed nonce to fail")
 	}
 }
 

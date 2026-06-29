@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 )
@@ -12,19 +13,32 @@ type Result struct {
 	ArtifactContent string `json:"artifact_content"`
 }
 
+type Options struct {
+	IdentityFingerprint string
+	NonceStore          hostnonce.Store
+}
+
 func RunDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
-	return runDevJob(hostID, "", trust, job, now)
+	return runDevJob(hostID, trust, job, now, Options{})
 }
 
 func RunDevJobForIdentity(hostID, identityFingerprint string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
-	return runDevJob(hostID, identityFingerprint, trust, job, now)
+	return runDevJob(hostID, trust, job, now, Options{IdentityFingerprint: identityFingerprint})
+}
+
+func RunDevJobWithOptions(hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
+	return runDevJob(hostID, trust, job, now, opts)
 }
 
 func RunDevJobWithTrustBundle(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
-	return RunDevJobWithTrustBundleForIdentity(hostID, "", trustBundle, job, now)
+	return RunDevJobWithTrustBundleOptions(hostID, trustBundle, job, now, Options{})
 }
 
 func RunDevJobWithTrustBundleForIdentity(hostID, identityFingerprint string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
+	return RunDevJobWithTrustBundleOptions(hostID, trustBundle, job, now, Options{IdentityFingerprint: identityFingerprint})
+}
+
+func RunDevJobWithTrustBundleOptions(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
 	if job.Envelope == nil {
 		return Result{}, fmt.Errorf("job envelope is required")
 	}
@@ -32,10 +46,10 @@ func RunDevJobWithTrustBundleForIdentity(hostID, identityFingerprint string, tru
 	if err != nil {
 		return Result{}, err
 	}
-	return runDevJob(hostID, identityFingerprint, trust, job, now)
+	return runDevJob(hostID, trust, job, now, opts)
 }
 
-func runDevJob(hostID, identityFingerprint string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
+func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
 	if job.Envelope == nil {
 		return Result{}, fmt.Errorf("job envelope is required")
 	}
@@ -43,7 +57,7 @@ func runDevJob(hostID, identityFingerprint string, trust model.TrustBundle, job 
 	if envelope.HostID != hostID || job.HostID != hostID {
 		return Result{}, fmt.Errorf("job is not assigned to host")
 	}
-	if identityFingerprint != "" && envelope.HostIdentityFingerprint != identityFingerprint {
+	if opts.IdentityFingerprint != "" && envelope.HostIdentityFingerprint != opts.IdentityFingerprint {
 		return Result{}, fmt.Errorf("host identity fingerprint mismatch")
 	}
 	if envelope.SigningKeyID != trust.SigningKeyID {
@@ -55,6 +69,16 @@ func runDevJob(hostID, identityFingerprint string, trust model.TrustBundle, job 
 	}
 	if err := envelope.VerifyForHost(publicKey, hostID, now); err != nil {
 		return Result{}, err
+	}
+	if opts.NonceStore != nil {
+		if err := opts.NonceStore.Remember(hostnonce.Entry{
+			JobID:     envelope.JobID,
+			HostID:    envelope.HostID,
+			Nonce:     envelope.Nonce,
+			ExpiresAt: envelope.ExpiresAt,
+		}, now); err != nil {
+			return Result{}, err
+		}
 	}
 	if envelope.Adapter != "shell" {
 		return Result{}, fmt.Errorf("unsupported dev adapter %q", envelope.Adapter)
