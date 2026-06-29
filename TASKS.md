@@ -67,7 +67,7 @@
 - [x] Add hash-chained audit export and verification.
 - [x] Add final buy-vs-build boundary for MCP, Tailscale/headscale, SSH, Coder, DevPod, VS Code Remote Tunnels, RustDesk/MeshCentral, and Sigstore-style release trust.
 - [x] Add explicit exit criteria for v0.1 through v1.0 gates.
-- [ ] Add stronger workspace and symlink escape tests.
+- [x] Add stronger workspace and symlink escape tests.
 - [ ] Add local evidence bundle export.
 - [ ] Add policy explanation for every host-side denial and approval-required result.
 
@@ -92,7 +92,7 @@
 - [ ] Temporary Windows host joins from one visible PowerShell command and leaves no service behind.
 - [ ] Managed Mac runs a Codex coding job in a locked worktree and returns diff/test evidence.
 - [x] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
-- [ ] Workspace escape and non-allowlisted command attempts are rejected host-side.
+- [x] Workspace escape and non-allowlisted command attempts are rejected host-side.
 - [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.
 - [ ] Production releases verify signed manifests and binaries before host execution.

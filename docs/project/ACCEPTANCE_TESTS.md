@@ -231,6 +231,7 @@ The local test suite currently covers:
 - scoped shell execution;
 - allowlist rejection;
 - workspace write-scope rejection;
+- symlink write-scope escape rejection, including missing child paths below symlinks;
 - shell policy explain;
 - host revocation canceling queued/running jobs;
 - release artifact signing and verification primitives;

@@ -255,6 +255,31 @@ func TestRunDevJobRejectsCommandNotAllowlisted(t *testing.T) {
 	}
 }
 
+func TestRunDevJobRejectsSymlinkWriteScopeEscape(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	link := filepath.Join(workspace, "outside-link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink creation is not available: %v", err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": workspace,
+		"write_scope":    []string{filepath.Join(link, "missing-child")},
+		"capabilities":   []string{"shell.user", "fs.write.scoped"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunDevJob(host.ID, gw.TrustBundle(), job, now); err == nil {
+		t.Fatal("expected symlink write scope escape to fail")
+	}
+}
+
 func TestRunDevJobRejectsTamperedEnvelope(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })

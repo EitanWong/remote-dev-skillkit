@@ -2,6 +2,8 @@ package shelladapter
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -86,6 +88,88 @@ func TestExecuteRejectsWriteScopeEscape(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "escapes workspace root") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteRejectsSymlinkWriteScopeEscape(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	link := createSymlinkOrSkip(t, outside, filepath.Join(workspace, "outside-link"))
+	_, err := Execute(Spec{
+		WorkspaceRoot:      workspace,
+		WriteScope:         []string{link},
+		Argv:               []string{"go", "env", "GOOS"},
+		AllowCommands:      []string{"go"},
+		MaxDurationSeconds: 10,
+		MaxOutputBytes:     1024,
+	})
+	if err == nil {
+		t.Fatal("expected symlink escaping write scope to fail")
+	}
+	if !strings.Contains(err.Error(), "escapes workspace root") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteRejectsSymlinkWriteScopeEscapeForMissingChild(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	link := createSymlinkOrSkip(t, outside, filepath.Join(workspace, "outside-link"))
+	_, err := Execute(Spec{
+		WorkspaceRoot:      workspace,
+		WriteScope:         []string{filepath.Join(link, "missing-child")},
+		Argv:               []string{"go", "env", "GOOS"},
+		AllowCommands:      []string{"go"},
+		MaxDurationSeconds: 10,
+		MaxOutputBytes:     1024,
+	})
+	if err == nil {
+		t.Fatal("expected symlink escaping missing child write scope to fail")
+	}
+	if !strings.Contains(err.Error(), "escapes workspace root") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteRejectsSymlinkParentTraversalEscape(t *testing.T) {
+	workspace := t.TempDir()
+	outsideParent := t.TempDir()
+	outsideChild := filepath.Join(outsideParent, "child")
+	if err := os.Mkdir(outsideChild, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := createSymlinkOrSkip(t, outsideChild, filepath.Join(workspace, "outside-link"))
+	_, err := Execute(Spec{
+		WorkspaceRoot:      workspace,
+		WriteScope:         []string{link + string(filepath.Separator) + ".."},
+		Argv:               []string{"go", "env", "GOOS"},
+		AllowCommands:      []string{"go"},
+		MaxDurationSeconds: 10,
+		MaxOutputBytes:     1024,
+	})
+	if err == nil {
+		t.Fatal("expected symlink parent traversal write scope to fail")
+	}
+	if !strings.Contains(err.Error(), "escapes workspace root") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteAllowsMissingNestedWriteScopeInsideWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	result, err := Execute(Spec{
+		WorkspaceRoot:      workspace,
+		WriteScope:         []string{filepath.Join("missing", "nested")},
+		Argv:               []string{"go", "env", "GOOS"},
+		AllowCommands:      []string{"go"},
+		MaxDurationSeconds: 10,
+		MaxOutputBytes:     1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d", result.ExitCode)
 	}
 }
 
@@ -183,4 +267,12 @@ func TestArtifactContentRedactsSecretsAndReportsMetadata(t *testing.T) {
 	if !strings.Contains(content, "[REDACTED:openai_api_key]") {
 		t.Fatalf("expected redaction marker in %s", content)
 	}
+}
+
+func createSymlinkOrSkip(t *testing.T, target, link string) string {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink creation is not available: %v", err)
+	}
+	return link
 }
