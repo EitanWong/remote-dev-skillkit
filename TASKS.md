@@ -106,6 +106,7 @@
 - [x] Add acceptance report verifier for evidence checksums, artifact index, audit chain, approval gate, and workspace-lock release.
 - [x] Add managed Mac LaunchAgent acceptance plan command with checked plist, launchctl steps, service-backed acceptance commands, and uninstall guidance.
 - [x] Add opt-in macOS LaunchAgent service-control dry-run/execute command for start, inspect, and stop.
+- [x] Add Windows temporary acceptance plan command with reviewed launcher, release-verification requirements, approval probes, no-persistence checks, and evidence checklist.
 
 ## Later
 
@@ -126,6 +127,7 @@
 ## Final End-State Gates
 
 - [ ] Temporary Windows host joins from one visible PowerShell command and leaves no service behind.
+- [x] Windows temporary acceptance can generate a preflight plan, foreground launcher, no-persistence checks, approval probes, and required evidence checklist without executing PowerShell.
 - [ ] Managed Mac runs a Codex coding job in a locked worktree and returns diff/test evidence.
 - [x] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
 - [x] Workspace escape and non-allowlisted command attempts are rejected host-side.

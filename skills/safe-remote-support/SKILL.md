@@ -10,6 +10,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 ## Rules
 
 - Use attended temporary mode for third-party machines.
+- For Windows temporary acceptance, generate and review `rdev acceptance windows-temporary --out <empty-dir> ...` before sending a one-command bootstrap to a target user.
 - Do not create hidden persistence.
 - Do not bypass UAC, sudo, or OS security controls.
 - Do not request secrets in chat.
@@ -20,14 +21,15 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 ## Workflow
 
 1. Create a ticket with `rdev.tickets.create`.
-2. Explain the join URL and visible consent screen.
-3. Wait for the host to appear pending.
-4. Ask the operator to approve the host with scoped capabilities.
-5. Inspect capabilities with `rdev.hosts.capabilities`.
-6. Create small scoped jobs with `rdev.jobs.create`.
-7. Use `rdev.jobs.approve` for dangerous actions.
-8. Read artifacts and audit evidence.
-9. Revoke the ticket/host when finished.
+2. For Windows temporary support, generate the acceptance plan and review the launcher, release-verification requirements, no-persistence checks, and approval probes.
+3. Explain the join URL and visible consent screen.
+4. Wait for the host to appear pending.
+5. Ask the operator to approve the host with scoped capabilities.
+6. Inspect capabilities with `rdev.hosts.capabilities`.
+7. Create small scoped jobs with `rdev.jobs.create`.
+8. Use `rdev.jobs.approve` for dangerous actions.
+9. Read artifacts and audit evidence.
+10. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
 
 ## Default Temporary Capabilities
 

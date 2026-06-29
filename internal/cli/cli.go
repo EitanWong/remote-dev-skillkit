@@ -176,6 +176,48 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			LogDir:             *logDir,
 			Force:              *force,
 		})
+	case "windows-temporary":
+		fs := flag.NewFlagSet("acceptance windows-temporary", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "empty output directory for the Windows temporary acceptance plan")
+		gatewayURL := fs.String("gateway", "", "gateway URL for attended temporary enrollment")
+		ticketCode := fs.String("ticket-code", "", "attended temporary ticket code")
+		downloadURL := fs.String("download-url", "", "rdev-host.exe download URL")
+		expectedSHA256 := fs.String("expected-sha256", "", "expected SHA-256 for rdev-host.exe")
+		bootstrapScript := fs.String("bootstrap-script", "", "local windows-temporary.ps1 path; defaults to scripts/bootstrap/windows-temporary.ps1")
+		bootstrapScriptURL := fs.String("bootstrap-script-url", "", "optional URL for downloading windows-temporary.ps1 on the target host")
+		bootstrapScriptSHA256 := fs.String("bootstrap-script-sha256", "", "expected SHA-256 for windows-temporary.ps1; defaults to local script hash when available")
+		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
+		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "pinned manifest root public key")
+		releaseManifestURL := fs.String("release-manifest-url", "", "signed rdev-host release manifest URL")
+		releaseRootPublicKey := fs.String("release-root-public-key", "", "pinned release root public key")
+		verifierDownloadURL := fs.String("verifier-download-url", "", "rdev-verify.exe download URL")
+		verifierSHA256 := fs.String("verifier-sha256", "", "expected SHA-256 for rdev-verify.exe")
+		trustPin := fs.String("trust-pin", "", "optional gateway trust pin for development acceptance")
+		hostName := fs.String("host-name", "", "optional host display name override")
+		force := fs.Bool("force", false, "overwrite generated launcher if it already exists")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceWindowsTemporary(acceptance.WindowsTemporaryOptions{
+			OutDir:                        *out,
+			GatewayURL:                    *gatewayURL,
+			TicketCode:                    *ticketCode,
+			DownloadURL:                   *downloadURL,
+			ExpectedSHA256:                *expectedSHA256,
+			BootstrapScriptPath:           *bootstrapScript,
+			BootstrapScriptURL:            *bootstrapScriptURL,
+			BootstrapScriptExpectedSHA256: *bootstrapScriptSHA256,
+			ManifestURL:                   *manifestURL,
+			ManifestRootPublicKey:         *manifestRootPublicKey,
+			ReleaseManifestURL:            *releaseManifestURL,
+			ReleaseRootPublicKey:          *releaseRootPublicKey,
+			VerifierDownloadURL:           *verifierDownloadURL,
+			VerifierExpectedSHA256:        *verifierSHA256,
+			TrustPin:                      *trustPin,
+			HostName:                      *hostName,
+			Force:                         *force,
+		})
 	case "verify":
 		fs := flag.NewFlagSet("acceptance verify", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -231,6 +273,31 @@ func (a App) acceptanceManagedMacService(ctx context.Context, opts acceptance.Ma
 		"commands":            plan.Commands,
 		"recommended_actions": plan.RecommendedActions,
 		"note":                "plist and plan written only; launchctl was not executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) acceptanceWindowsTemporary(opts acceptance.WindowsTemporaryOptions) error {
+	plan, err := acceptance.RunWindowsTemporaryPlan(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    allAcceptanceChecksPassed(plan.Checks),
+		"schema":                plan.SchemaVersion,
+		"out":                   plan.OutDir,
+		"plan":                  filepath.Join(plan.OutDir, "windows-temporary-plan.json"),
+		"launcher":              plan.LauncherPath,
+		"bootstrap_script_hash": plan.BootstrapScriptSHA256,
+		"checks":                plan.Checks,
+		"commands":              plan.Commands,
+		"no_persistence_checks": plan.NoPersistenceChecks,
+		"approval_probes":       plan.ApprovalProbes,
+		"required_evidence":     plan.RequiredEvidence,
+		"recommended_actions":   plan.RecommendedActions,
+		"note":                  "plan and launcher written only; no PowerShell command was executed by this command",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1607,6 +1674,7 @@ Usage:
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
+  rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256>
   rdev acceptance verify --report acceptance-run/report.json
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...

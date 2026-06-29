@@ -124,10 +124,48 @@ This command does not execute `launchctl`. It produces the operator-reviewed pla
 for the real LaunchAgent acceptance run. Use `rdev host service-control` without
 `--execute` to preview the launchctl command and with `--execute` to run it.
 
+## Windows Temporary Host Plan
+
+Before running a real clean-VM Windows acceptance, generate a checked temporary
+host plan:
+
+```bash
+rdev acceptance windows-temporary \
+  --out .rdev/acceptance/windows-temporary \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --download-url https://agent.example.com/rdev-host.exe \
+  --expected-sha256 <rdev-host-sha256> \
+  --release-manifest-url https://agent.example.com/rdev-host.exe.rdev-release.json \
+  --release-root-public-key release-root:... \
+  --verifier-download-url https://agent.example.com/rdev-verify.exe \
+  --verifier-sha256 <rdev-verify-sha256>
+```
+
+The command writes `windows-temporary-plan.json` with schema
+`rdev.acceptance.windows-temporary-plan.v1` and `run-windows-temporary.ps1`. It
+validates:
+
+- local or URL bootstrap script availability;
+- bootstrap script SHA-256 availability;
+- gateway URL, ticket code, host download URL, and host SHA-256;
+- release manifest, release root, verifier download URL, and verifier SHA-256;
+- approval probes for package install, elevation, service management, GUI
+  control, and credential changes;
+- no-persistence inspection commands for services, scheduled tasks, Run keys,
+  startup folders, and firewall rules.
+
+This command does not execute PowerShell. It produces the operator-reviewed plan
+for a real Windows VM or support-host acceptance run. The generated launcher is
+intentionally visible and foreground-only; it does not install a service or
+autorun entry.
+
 ## Current Boundary
 
 This harness proves the managed test-process path. It does not yet prove:
 
+- Windows clean-VM execution of the generated temporary-host plan;
+- Windows no-persistence inspection output from a real machine;
 - macOS LaunchAgent installed and started with `rdev host service-control --execute` after reviewing the generated plan;
 - reconnect after reboot;
 - OS-protected identity/trust storage;
@@ -140,3 +178,7 @@ The next managed Mac acceptance command should prove the LaunchAgent path: gener
 the plist, start it with the documented `launchctl` command, confirm reconnect after
 login or reboot, run the same locked-worktree Codex job, export service-backed
 evidence, and uninstall the service without touching unrelated plists.
+
+The next Windows acceptance run should execute the generated Windows plan on a
+clean Windows 10/11 VM, collect release-verification output, approval-required
+probe evidence, revocation transcript, and no-persistence inspection output.

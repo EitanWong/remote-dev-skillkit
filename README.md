@@ -75,6 +75,7 @@ Implemented now:
 - Managed Mac coding acceptance harness via `rdev acceptance managed-mac`, producing a report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification via `rdev acceptance verify --report ...`, including evidence manifest checksums, artifact index validation, audit-chain verification, approval-gate evidence, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning via `rdev acceptance managed-mac-service`, producing a checked plist, service plan, launchctl commands, service-backed acceptance commands, and uninstall steps without auto-starting launchd.
+- Windows temporary acceptance planning via `rdev acceptance windows-temporary`, producing a machine-readable plan, reviewed PowerShell launcher, release verification requirements, approval probes, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
 - Workspace lock and Git worktree foundation via `rdev workspace lock`, `rdev workspace status`, `rdev workspace unlock`, and `rdev workspace prepare-worktree`.
 - Host job execution can enforce one-writer workspace locks through `rdev host serve --workspace-lock-store`.
 - Codex adapter MVP through `adapter=codex`: runs `codex exec` or a signed payload-provided command inside the validated workspace, requires `codex.run` and `git.diff`, gates push/merge/deploy/publish/credential/service intents on approval, and captures `rdev.codex-result.v1` evidence with Codex output, Git status, Git diff/stat, optional verification command results, `go test -json` test reports, output caps, and redaction.
@@ -131,6 +132,7 @@ go run ./cmd/rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_.
 go run ./cmd/rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
 go run ./cmd/rdev acceptance managed-mac --out .rdev/acceptance/managed-mac --repo .
 go run ./cmd/rdev acceptance managed-mac-service --out .rdev/acceptance/managed-mac-service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
+go run ./cmd/rdev acceptance windows-temporary --out .rdev/acceptance/windows-temporary --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example.com/rdev-host.exe --expected-sha256 <sha256> --release-manifest-url https://agent.example.com/rdev-host.exe.rdev-release.json --release-root-public-key release-root:... --verifier-download-url https://agent.example.com/rdev-verify.exe --verifier-sha256 <sha256>
 go run ./cmd/rdev acceptance verify --report .rdev/acceptance/managed-mac/report.json
 go run ./cmd/rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
 go run ./cmd/rdev workspace status --repo .

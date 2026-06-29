@@ -2065,6 +2065,65 @@ func TestAcceptanceManagedMacServicePlan(t *testing.T) {
 	}
 }
 
+func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "windows-temporary")
+	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "windows-temporary",
+		"--out", out,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--download-url", "https://agent.example.com/rdev-host.exe",
+		"--expected-sha256", strings.Repeat("a", 64),
+		"--bootstrap-script", script,
+		"--manifest-url", "https://agent.example.com/j/ABCD-1234/manifest",
+		"--manifest-root-public-key", "manifest-root:abc",
+		"--release-manifest-url", "https://agent.example.com/rdev-host.exe.rdev-release.json",
+		"--release-root-public-key", "release-root:abc",
+		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
+		"--verifier-sha256", strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK       bool   `json:"ok"`
+		Schema   string `json:"schema"`
+		Plan     string `json:"plan"`
+		Launcher string `json:"launcher"`
+		Commands []struct {
+			Name  string `json:"name"`
+			Shell string `json:"shell"`
+		} `json:"commands"`
+		NoPersistenceChecks []struct {
+			Name  string `json:"name"`
+			Shell string `json:"shell"`
+		} `json:"no_persistence_checks"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected windows temporary plan ok, got %s", stdout.String())
+	}
+	if payload.Schema != "rdev.acceptance.windows-temporary-plan.v1" {
+		t.Fatalf("unexpected schema %q", payload.Schema)
+	}
+	for _, path := range []string{payload.Plan, payload.Launcher} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected generated path %s: %v", path, err)
+		}
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "run_foreground_temporary_host") || !strings.Contains(output, "Get-ScheduledTask") {
+		t.Fatalf("expected foreground and no-persistence commands, got %s", output)
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
 }
