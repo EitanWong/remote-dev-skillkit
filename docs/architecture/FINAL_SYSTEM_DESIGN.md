@@ -53,6 +53,168 @@ agent intent
 
 The "perfect ending" is not maximum remote control. It is maximum useful delegation without ambient machine ownership.
 
+## Final Reference Blueprint
+
+This section is the canonical endgame blueprint. The rest of this document gives rationale, examples, and implementation detail. If a later feature conflicts with this blueprint, the feature must be redesigned or a new architecture decision must explicitly replace this section.
+
+### Product Constitution
+
+Remote Dev Skillkit is an agent work-control system. It is not a remote shell product, a hidden remote-admin product, or a remote desktop clone.
+
+The product is correct only when all three statements remain true:
+
+1. Agents request typed work; they do not receive ambient machine ownership.
+2. Hosts execute only signed, scoped, expiring, locally verified jobs.
+3. Humans can approve, stop, review, audit, and revoke every meaningful remote action.
+
+Every executable attempt must end in exactly one reviewable outcome:
+
+| Outcome | Meaning |
+|---|---|
+| `rdev.host-denial.v1` | the safe answer is no, with a machine-readable reason and next safe action |
+| `rdev.approval-required.v1` | the safe answer is not yet; a scoped approval token is required |
+| `rdev.evidence-bundle.v1` | the action ran and produced reviewable artifacts, redaction metadata, and audit events |
+
+Natural-language agent confidence is never a completion proof. Evidence is the completion proof.
+
+### Four Product Planes
+
+The final system has four planes. They may live in one binary at first, but their authority must stay separate.
+
+| Plane | Owns | Must not own |
+|---|---|---|
+| Agent interface | Skills, MCP tools, API clients, policy dry-run requests, evidence review workflows | host credentials, dangerous-action approval authority |
+| Gateway governance | tickets, host registry, leases, signing, policy, approvals, artifacts, audit, revocation | local host execution or release signing authority |
+| Host sovereignty | host identity, trust bundle, local policy validation, nonce store, approval consumption, workspace/session locks, adapter runner, local stop control | broader policy than the gateway granted |
+| Adapter execution | shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevPod work | authorization, approval, persistence, or trust roots |
+
+This split is the architecture's main safety property. If an adapter, transport, mesh, SSH tunnel, GUI tool, or coding CLI becomes the security root, the design has regressed.
+
+### Closed Operating Loop
+
+Every remote-development workflow must follow the same loop:
+
+```text
+agent intent
+  -> typed Skill/MCP/API request
+  -> gateway policy dry-run
+  -> signed host-bound job envelope
+  -> outbound host lease
+  -> host-side validation
+  -> locked workspace or foreground session
+  -> adapter execution
+  -> redacted artifacts
+  -> evidence bundle
+  -> hash-chained audit
+  -> review
+  -> approval, continuation, cancellation, or revocation
+```
+
+No product surface is allowed to skip the signed envelope, host-side validation, approval gates, evidence, or audit path.
+
+### Final Operating Modes
+
+The same kernel supports four intentionally separate modes:
+
+| Mode | Use case | Persistence | Default authority | Non-negotiable rule |
+|---|---|---:|---|---|
+| `attended-temporary` | third-party or short-lived support | none | foreground, TTL-bound, scoped repair | no service, autorun, hidden restart, or silent resurrection |
+| `managed` | Eitan-owned or formally managed machines | explicit service | durable reconnect with approved roots | service install, status, stop, and uninstall must be visible |
+| `break-glass` | urgent recovery | short-lived only | narrow, high-audit emergency actions | stronger approvals and shorter TTL than normal temporary mode |
+| `workspace-provider` | Coder, DevPod, devcontainers, disposable cloud workspaces | provider-owned | bounded workspace lifecycle | provider identity never replaces rdev job authorization |
+
+Temporary mode never upgrades itself into managed mode. Managed mode never inherits approval for push, merge, deploy, publish, credential changes, GUI control, service changes, or paid actions.
+
+### Authority Separation
+
+The final architecture deliberately avoids any one master credential.
+
+| Authority | Grants | Does not grant |
+|---|---|---|
+| Agent client auth | permission to request rdev tools | permission to run on hosts or approve danger |
+| Operator session | permission to approve hosts and scoped actions | permission to bypass host verification |
+| Gateway job-signing key | one bounded executable job envelope | release trust, host identity, or approval by itself |
+| Approval token key | one scoped exception for one operation | reusable standing privilege |
+| Host identity key | proof of the enrolled host | permission to broaden local policy |
+| Release signing key | software artifact trust | runtime job authority |
+| Audit chain | tamper evidence | authorization |
+
+The blast radius target is simple: compromising any one authority must not grant all three powers of publishing software, enrolling hosts, and authorizing execution.
+
+### Adapter SDK Contract
+
+All adapters implement the same safety wrapper:
+
+```text
+detect(context) -> capabilities
+plan(job, host_policy) -> required_capabilities, approvals, workspace_or_session_plan
+prepare(job, locks, limits) -> prepared_workspace_or_session
+run(job, cancellation, limits) -> events, raw_result
+collect(job, raw_result) -> redacted_artifacts, checksums, evidence_manifest
+cleanup(job, result) -> cleanup_status
+```
+
+Conformance tests must prove:
+
+- capability mapping is explicit and deny-by-default;
+- workspace and symlink escapes are rejected;
+- approval-required operations pause before side effects;
+- cancellation is honored where the underlying tool allows it;
+- output limits and redaction apply to argv, prompt, stdout, stderr, files, diffs, and screenshots;
+- failures still produce artifacts or structured denials;
+- cleanup is visible and auditable.
+
+Adapters make the project useful. They are never the place where trust is invented.
+
+### Final Personal Deployment
+
+Eitan's reference deployment is the first production shape:
+
+```text
+Hermes/Lucky
+  -> Remote Dev Skillkit skills
+  -> MCP HTTP or local bridge
+  -> https://api.lunflux.com/v1
+  -> rdev-gateway
+  -> tickets, hosts, jobs, approvals, artifacts, audit, signing
+  -> https://agent.lunflux.com
+  -> join page, release manifests, bootstrap, outbound host relay
+  -> managed Eitan hosts and attended temporary hosts
+```
+
+`api.lunflux.com` is the authenticated agent/operator API surface. `agent.lunflux.com` is the human join, bootstrap, release-download, and host-relay surface. They can share a deployment at first, but their responsibilities must stay separate.
+
+### Final Open-Source Shape
+
+The public project ships five installable deliverables:
+
+| Deliverable | Purpose |
+|---|---|
+| `rdev` CLI | local demo, operator workflows, diagnostics, service lifecycle, release and evidence verification |
+| `rdev-gateway` | self-hosted control plane and MCP/API server |
+| `rdev-host` | cross-platform temporary and managed host runtime |
+| Skillkit bundle | portable Skills and MCP contracts for Hermes, Codex, Claude Code, OpenCode, and generic agents |
+| Adapter SDK and conformance suite | safe extension point for new execution backends |
+
+The public package succeeds only if another user can adopt the safe workflow without adopting Hermes, while Eitan's Hermes/Lucky deployment remains the reference environment.
+
+### Perfect Ending Gates
+
+The final architecture is realized when these gates pass:
+
+1. A temporary Windows host joins from one visible verified command, connects outbound only, runs foreground, enforces approvals, and leaves no persistence.
+2. Eitan's managed Mac reconnects after reboot, receives a Lucky-requested Codex job, locks a Git worktree, returns diff/test evidence, and requires approval before push or merge.
+3. Tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, workspace-escaping, or missing-capability jobs are rejected host-side with structured denials.
+4. Package install, elevation, GUI control, service mutation, credential changes, push, merge, deploy, publish, and paid actions require scoped approval tokens.
+5. Revocation of tickets, hosts, jobs, approvals, or keys prevents future work and cancels queued or running work where possible.
+6. Release manifests and binaries are signature and checksum verified before host execution.
+7. Evidence bundles and audit export are sufficient for another human or agent to reconstruct what happened.
+8. Built-in adapters pass conformance tests and cannot bypass the safety kernel.
+9. Skillkit export installs cleanly into mainstream agent runtimes without Hermes-specific assumptions.
+10. The threat model, release process, security policy, and acceptance transcripts match the shipped behavior.
+
+The perfect ending is reached when Eitan can say, "Lucky, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
+
 ### Final Product Boundary
 
 Remote Dev Skillkit owns the agent safety kernel. It should not try to replace every mature remote-development product.

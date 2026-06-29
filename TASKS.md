@@ -44,6 +44,7 @@
 - [x] Finalize endgame operating model, authority separation, maturity gates, and failure conditions in the canonical design.
 - [x] Add final endgame solution layer with architecture scorecard, operating modes, authority map, golden paths, and v1.0 release definition.
 - [x] Lock final refined architecture as a safety microkernel with replaceable adapters, runtime loops, scheduler rules, temporary/managed host boundaries, storage model, and release contract.
+- [x] Add final reference blueprint that makes the endgame architecture a single implementation contract.
 - [x] Add development HTTPS long-poll host job transport prototype.
 - [x] Add portable agent Skillkit bundle export for mainstream frameworks.
 
