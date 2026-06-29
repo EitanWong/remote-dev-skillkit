@@ -18,6 +18,11 @@ Supporting documents have narrower jobs:
 This file defines the product, the open-source project, and Eitan's
 Hermes/Lucky deployment.
 
+The **Final Architecture Closure** section below is the decision header. The
+dated layers that follow are retained as rationale and implementation detail,
+but future architecture changes should either preserve this closure or replace
+it with an explicit architecture decision.
+
 The goal is not "remote control." The goal is safe, useful agent delegation to
 real machines.
 
@@ -32,6 +37,183 @@ Lucky, use that approved machine to solve this.
 The system responds with typed intent, signed bounded execution, host-side
 verification, approval gates, workspace isolation, evidence, audit, and
 revocation.
+
+## Final Architecture Closure - 2026-06-30
+
+This is the final perfect-ending design. It deliberately stops the project from
+becoming a bigger remote-control stack, a tunnel manager, a coding CLI wrapper,
+or a Hermes-only private integration.
+
+Remote Dev Skillkit is a **permissioned delegation operating layer** for agentic
+development work. Its value is the verified space between "an agent wants
+something done" and "a real machine safely did it."
+
+### Closure Thesis
+
+The whole system has one shape:
+
+```text
+operator intent
+  -> agent Skill/MCP plan
+  -> gateway policy dry-run
+  -> signed host-bound job envelope
+  -> outbound host lease
+  -> host sovereignty validation
+  -> adapter lifecycle execution
+  -> evidence bundle and audit chain
+  -> review, approval, cancel, revoke, rotate, or continue
+```
+
+Every feature must map to this shape. If it cannot, it belongs outside the core
+project.
+
+### Seven Invariants
+
+These are the final design laws:
+
+1. Agents get typed tools, never standing host credentials.
+2. Gateways govern work, but never execute local host work.
+3. Hosts execute work, but never invent authority.
+4. Adapters run tools, but never approve themselves or install persistence.
+5. Temporary support is foreground, visible, TTL-bound, outbound-only, and
+   non-persistent.
+6. Managed support adds reconnect and recovery, not ambient permission.
+7. No success claim is final until evidence, audit, and the relevant verifier
+   can reconstruct it.
+
+### Final Product Surfaces
+
+The open-source project ships five surfaces and refuses to make any single edge
+special:
+
+| Surface | Final responsibility | Must stay replaceable |
+|---|---|---|
+| `rdev` | operator CLI, diagnostics, local demos, service lifecycle, evidence and release verification | deployment brand and agent runtime |
+| `rdev-gateway` | tickets, hosts, jobs, policy, approvals, leases, artifacts, audit, revocation, signing, MCP/API | storage backend and hosting provider |
+| `rdev-host` | attended temporary and explicit managed host runtime | transport, adapter set, and OS service manager |
+| Skillkit bundle | portable instructions and MCP schemas for agents | Hermes, Codex, Claude Code, OpenCode, and future agent surfaces |
+| Adapter SDK | safe extension path for Codex, Claude Code, ACP, shell, PowerShell, GUI, mesh, and workspace providers | concrete execution backend |
+
+Hermes/Lucky and Lunflux are the reference deployment, not the dependency
+boundary.
+
+### The Six Closed Loops
+
+A path is complete only when its loop closes with machine-readable proof:
+
+| Loop | Opens with | Closes with |
+|---|---|---|
+| Distribution | bootstrap, install, release, or update instruction | signed release bundle verification, checksums, platform match, rollback policy |
+| Enrollment | ticket, join page, bootstrap command, or managed install | host identity, capability inventory, trust bundle, operator approval, revocation handle |
+| Authorization | agent intent or API/MCP request | policy dry-run plus signed host-bound expiring job envelope |
+| Execution | host lease or claimed job | local trust, nonce, mode, capability, approval, workspace, lock, quota, and revocation checks |
+| Proof | adapter result, denial, cancellation, or approval pause | evidence bundle, artifact index, redaction metadata, audit slice, verifier output |
+| Recovery | timeout, crash, offline host, compromise, or user stop | lease expiry, local stop, spool replay, cancellation evidence, revoke, rotate, uninstall |
+
+The perfect ending is not a demo where work succeeds. It is a product where
+success, denial, cancellation, tamper, revoke, and uninstall all have a visible
+and verifiable path.
+
+### Three Golden Paths
+
+The project should optimize for three golden paths before adding broad
+secondary adapters.
+
+#### 1. Attended Temporary Windows Repair
+
+Someone runs one visible PowerShell command. The command downloads a bootstrap
+and standalone verifier, verifies the signed release bundle, starts a foreground
+host, connects outbound to the approved gateway, accepts only host-bound signed
+jobs, asks for approval before risky effects, writes a transcript, and exits
+without leaving a service, scheduled task, Run key, startup shortcut, firewall
+change, or permanent execution-policy change.
+
+This path is for short-lived help. It must feel easy, but it cannot be magical
+or invisible.
+
+#### 2. Managed Owned-Host Development
+
+An explicitly installed managed host on Eitan-owned Mac, Windows, or Linux
+reconnects after login or reboot, refreshes trust safely, locks a workspace or
+worktree, runs Codex/Claude Code/ACP/shell/PowerShell through adapters, returns
+diff/test/log evidence, and pauses before push, merge, deploy, publish,
+credential changes, service management, GUI control, or elevation.
+
+This path is for durable personal infrastructure. It may be reliable and
+automatic; it may not become silently privileged.
+
+#### 3. Third-Party Adapter Authoring
+
+An adapter author scaffolds a lifecycle manifest, implements
+`detect -> plan -> prepare -> run -> collect -> cleanup`, runs the runtime
+lifecycle through `adapterkit.RunLifecycle`, and passes lifecycle, runtime,
+result, cancellation, redaction, cleanup, and denial conformance before the
+adapter is exposed to agents.
+
+This path makes the open-source project broad without making the safety model
+large.
+
+### Eitan Reference Deployment
+
+Eitan's personal ending is:
+
+```text
+Lucky on Hermes
+  -> Remote Dev Skillkit Skill/MCP workflow
+  -> https://api.lunflux.com/v1
+  -> rdev-gateway
+  -> https://agent.lunflux.com
+  -> attended temporary hosts and explicitly managed owned hosts
+```
+
+`https://api.lunflux.com/v1` is the authenticated operator and agent API.
+`https://agent.lunflux.com` is the human/host-facing edge for join, bootstrap,
+release metadata, and relay. Lucky remains the coordinator; it does not need
+root passwords, SSH passwords, permanent host credentials, or hidden
+persistence.
+
+### Final Close Order
+
+From here, the project should close in this order:
+
+1. Clean Windows temporary acceptance on a real Windows 10/11 machine.
+2. Service-backed managed Mac acceptance with LaunchAgent start, reconnect,
+   locked-worktree Codex job, evidence verification, stop, and uninstall.
+3. Real Linux systemd reboot/reconnect acceptance.
+4. Production host identity and trust storage with OS protection, rollback
+   rejection, authenticated refresh, revocation propagation, and emergency
+   rotation.
+5. WSS/mTLS transport while preserving HTTPS long-poll as the universal
+   fallback.
+6. Production Adapter SDK integration for built-in hostrunner adapters and
+   executable lifecycle/cancellation fixtures.
+7. Claude Code and ACP adapters.
+8. Windows Service managed mode.
+9. Optional GUI, browser, mesh, Coder, DevPod, and workspace-provider adapters.
+10. Public release only after signed releases, install verification,
+    acceptance packages, threat model, security policy, and docs match shipped
+    behavior.
+
+This order is part of the architecture. It keeps the project from optimizing
+for broad adapter demos before the safety-critical distribution, enrollment,
+execution, proof, and recovery loops are real.
+
+### Definition Of The Perfect Ending
+
+The perfect ending is reached when the safest path is also the easiest path:
+
+- Lucky can coordinate real hosts without holding host credentials.
+- Temporary machines can join fast, visibly, and without persistence.
+- Managed hosts reconnect reliably without receiving ambient authority.
+- All powerful tools are adapters behind the same signed-job and evidence
+  contract.
+- Self-hosted users can install without Hermes, Lunflux, macOS, GitHub, or
+  Codex assumptions.
+- Every important claim can be independently verified after the fact.
+
+That is the final architecture: a small permissioned delegation layer around
+powerful tools, designed so remote development becomes agent-native precisely
+because it is consented, bounded, locally verified, revocable, and provable.
 
 ## Final Kernel Specification - 2026-06-30
 
