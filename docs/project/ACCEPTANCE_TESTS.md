@@ -253,6 +253,7 @@ The local test suite currently covers:
 - structured host-side approval-required artifacts through `rdev.approval-required.v1`; unsatisfied signed approvals pause before adapter execution, and gateway-approved jobs carry signed `rdev.approval-token.v1` tokens in the re-signed job envelope.
 - durable host-side approval token consumption through in-memory and file-backed `rdev.host-approval-store.v1`, including 0600 file permissions, 0700 directory permissions, expiry pruning, and CLI `--approval-store` wiring.
 - macOS LaunchAgent plist generation through `rdev host install-service --platform macos`, including managed host arguments, `0600` plist permissions, and explicit launchctl next steps without auto-starting the service.
+- macOS LaunchAgent plist status and safe uninstall through `rdev host service-status` and `rdev host uninstall-service`, including label-mismatch refusal to avoid deleting unrelated plists.
 
 The following remain real-environment acceptance tests:
 

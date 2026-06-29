@@ -157,6 +157,108 @@ func TestHostInstallServiceDoesNotOverwriteWithoutForce(t *testing.T) {
 	}
 }
 
+func TestHostServiceStatusReadsMacOSLaunchAgentPlist(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--plist-out", plistPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	statusApp := NewApp(&stdout, &bytes.Buffer{})
+	if err := statusApp.Run(context.Background(), []string{
+		"host", "service-status",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--plist", plistPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"exists": true`,
+		`"label": "com.example.rdev-host"`,
+		`"launchctl print gui/$(id -u)/com.example.rdev-host"`,
+		`launchctl was not executed`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected status output to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
+func TestHostUninstallServiceRemovesMacOSLaunchAgentPlist(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--plist-out", plistPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	uninstallApp := NewApp(&stdout, &bytes.Buffer{})
+	if err := uninstallApp.Run(context.Background(), []string{
+		"host", "uninstall-service",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--plist", plistPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(plistPath); !os.IsNotExist(err) {
+		t.Fatalf("expected plist removal, stat err=%v", err)
+	}
+	if !strings.Contains(stdout.String(), `"removed": true`) {
+		t.Fatalf("expected removed output, got %s", stdout.String())
+	}
+}
+
+func TestHostUninstallServiceRejectsLabelMismatch(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.other.rdev-host.plist")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "macos",
+		"--label", "com.other.rdev-host",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--plist-out", plistPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := app.Run(context.Background(), []string{
+		"host", "uninstall-service",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--plist", plistPath,
+	})
+	if err == nil {
+		t.Fatal("expected label mismatch to fail")
+	}
+	if !strings.Contains(err.Error(), "refusing to remove plist") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(plistPath); err != nil {
+		t.Fatalf("plist should remain after mismatch: %v", err)
+	}
+}
+
 func TestHostServeRejectsUnknownMode(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

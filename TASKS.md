@@ -85,6 +85,7 @@
 - [x] Add installable Skillkit bundle generation with manifest checksums and framework notes.
 - [x] Add host-bound managed trust bundle update checks for trust-store refresh.
 - [x] Add macOS LaunchAgent plist generation for explicit managed host install.
+- [x] Add macOS LaunchAgent status inspection and safe plist uninstall.
 
 ## Later
 
@@ -92,7 +93,7 @@
 - [ ] Add authenticated production managed host trust lifecycle with OS-protected storage.
 - [ ] Add OS-protected managed host identity storage and registration proof.
 - [ ] Add Windows Service mode.
-- [ ] Add launchctl lifecycle commands and systemd mode.
+- [ ] Add launchctl start/stop execution and systemd mode.
 - [ ] Add acpx adapter.
 - [ ] Add Codex adapter.
 - [ ] Add Claude Code adapter.

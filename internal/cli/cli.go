@@ -204,6 +204,36 @@ func (a App) host(args []string) error {
 			PlistOut:          *plistOut,
 			Force:             *force,
 		})
+	case "service-status":
+		fs := flag.NewFlagSet("host service-status", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		platform := fs.String("platform", "macos", "service platform: macos")
+		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.hostServiceStatus(hostServiceOptions{
+			Platform: *platform,
+			Label:    *label,
+			Plist:    *plistPath,
+		})
+	case "uninstall-service":
+		fs := flag.NewFlagSet("host uninstall-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		platform := fs.String("platform", "macos", "service platform: macos")
+		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
+		force := fs.Bool("force", false, "remove plist even if the embedded label does not match --label")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.hostUninstallService(hostServiceOptions{
+			Platform: *platform,
+			Label:    *label,
+			Plist:    *plistPath,
+			Force:    *force,
+		})
 	default:
 		return fmt.Errorf("unknown host subcommand %q", args[0])
 	}
@@ -244,6 +274,13 @@ type hostInstallServiceOptions struct {
 	LogDir            string
 	PlistOut          string
 	Force             bool
+}
+
+type hostServiceOptions struct {
+	Platform string
+	Label    string
+	Plist    string
+	Force    bool
 }
 
 func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
@@ -362,7 +399,7 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 		if label == "" {
 			label = service.DefaultMacOSLaunchAgentLabel
 		}
-		plistOut = filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+		plistOut = service.DefaultMacOSLaunchAgentPath(home, label)
 	}
 	agent, err := service.NewMacOSLaunchAgent(service.LaunchAgentOptions{
 		Label:             opts.Label,
@@ -433,6 +470,109 @@ func writeServiceFile(path string, content []byte, force bool) error {
 		return err
 	}
 	return os.Chmod(path, 0o600)
+}
+
+func (a App) hostServiceStatus(opts hostServiceOptions) error {
+	if opts.Platform == "" {
+		opts.Platform = "macos"
+	}
+	if opts.Platform != "macos" {
+		return fmt.Errorf("host service-status currently supports macos only")
+	}
+	if opts.Label == "" {
+		opts.Label = service.DefaultMacOSLaunchAgentLabel
+	}
+	plistPath, err := servicePlistPath(opts)
+	if err != nil {
+		return err
+	}
+	status, err := service.InspectMacOSLaunchAgent(plistPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"platform": opts.Platform,
+		"label":    opts.Label,
+		"plist":    plistPath,
+		"status":   status,
+		"next":     macOSLaunchAgentNextSteps(opts.Label, plistPath),
+		"note":     "status reads the plist only; launchctl was not executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) hostUninstallService(opts hostServiceOptions) error {
+	if opts.Platform == "" {
+		opts.Platform = "macos"
+	}
+	if opts.Platform != "macos" {
+		return fmt.Errorf("host uninstall-service currently supports macos only")
+	}
+	if opts.Label == "" {
+		opts.Label = service.DefaultMacOSLaunchAgentLabel
+	}
+	plistPath, err := servicePlistPath(opts)
+	if err != nil {
+		return err
+	}
+	status, err := service.InspectMacOSLaunchAgent(plistPath)
+	if err != nil {
+		return err
+	}
+	if status.Exists && status.Label != opts.Label && !opts.Force {
+		return fmt.Errorf("refusing to remove plist for label %q; expected %q", status.Label, opts.Label)
+	}
+	removed := false
+	if status.Exists {
+		if err := os.Remove(plistPath); err != nil {
+			return err
+		}
+		removed = true
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"platform": opts.Platform,
+		"label":    opts.Label,
+		"plist":    plistPath,
+		"removed":  removed,
+		"previous": status,
+		"next": map[string]string{
+			"ensure_stopped": "launchctl bootout gui/$(id -u) " + plistPath,
+		},
+		"note": "plist removal only; launchctl was not executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func servicePlistPath(opts hostServiceOptions) (string, error) {
+	if opts.Label == "" {
+		opts.Label = service.DefaultMacOSLaunchAgentLabel
+	}
+	if opts.Plist != "" {
+		return opts.Plist, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return service.DefaultMacOSLaunchAgentPath(home, opts.Label), nil
+}
+
+func macOSLaunchAgentNextSteps(label, plistPath string) map[string]string {
+	if label == "" {
+		label = service.DefaultMacOSLaunchAgentLabel
+	}
+	return map[string]string{
+		"start":     "launchctl bootstrap gui/$(id -u) " + plistPath,
+		"stop":      "launchctl bootout gui/$(id -u) " + plistPath,
+		"inspect":   "launchctl print gui/$(id -u)/" + label,
+		"uninstall": "rdev host uninstall-service --platform macos --label " + label + " --plist " + plistPath,
+	}
 }
 
 func (a App) ticket(args []string) error {
@@ -971,6 +1111,8 @@ Usage:
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
+  rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
+  rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
 `))
 }
 

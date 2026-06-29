@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -32,6 +34,19 @@ type LaunchAgent struct {
 	StderrPath       string   `json:"stderr_path"`
 	KeepAlive        bool     `json:"keep_alive"`
 	RunAtLoad        bool     `json:"run_at_load"`
+}
+
+type LaunchAgentStatus struct {
+	PlistPath        string   `json:"plist_path"`
+	Exists           bool     `json:"exists"`
+	Label            string   `json:"label,omitempty"`
+	ProgramArguments []string `json:"program_arguments,omitempty"`
+	StdoutPath       string   `json:"stdout_path,omitempty"`
+	StderrPath       string   `json:"stderr_path,omitempty"`
+	KeepAlive        bool     `json:"keep_alive,omitempty"`
+	RunAtLoad        bool     `json:"run_at_load,omitempty"`
+	Mode             string   `json:"mode,omitempty"`
+	SizeBytes        int64    `json:"size_bytes,omitempty"`
 }
 
 func NewMacOSLaunchAgent(opts LaunchAgentOptions) (LaunchAgent, error) {
@@ -87,6 +102,113 @@ func NewMacOSLaunchAgent(opts LaunchAgentOptions) (LaunchAgent, error) {
 		KeepAlive:        true,
 		RunAtLoad:        true,
 	}, nil
+}
+
+func DefaultMacOSLaunchAgentPath(homeDir, label string) string {
+	if label == "" {
+		label = DefaultMacOSLaunchAgentLabel
+	}
+	return filepath.Join(homeDir, "Library", "LaunchAgents", label+".plist")
+}
+
+func InspectMacOSLaunchAgent(path string) (LaunchAgentStatus, error) {
+	if path == "" {
+		return LaunchAgentStatus{}, fmt.Errorf("plist path is required")
+	}
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return LaunchAgentStatus{PlistPath: path, Exists: false}, nil
+	}
+	if err != nil {
+		return LaunchAgentStatus{}, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return LaunchAgentStatus{}, err
+	}
+	agent, err := ParseMacOSLaunchAgent(content)
+	if err != nil {
+		return LaunchAgentStatus{}, err
+	}
+	return LaunchAgentStatus{
+		PlistPath:        path,
+		Exists:           true,
+		Label:            agent.Label,
+		ProgramArguments: agent.ProgramArguments,
+		StdoutPath:       agent.StdoutPath,
+		StderrPath:       agent.StderrPath,
+		KeepAlive:        agent.KeepAlive,
+		RunAtLoad:        agent.RunAtLoad,
+		Mode:             fmt.Sprintf("%04o", info.Mode().Perm()),
+		SizeBytes:        info.Size(),
+	}, nil
+}
+
+func ParseMacOSLaunchAgent(content []byte) (LaunchAgent, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(content))
+	var agent LaunchAgent
+	var currentElement string
+	var pendingKey string
+	var inProgramArguments bool
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return LaunchAgent{}, err
+		}
+		switch value := token.(type) {
+		case xml.StartElement:
+			currentElement = value.Name.Local
+			if value.Name.Local == "array" && pendingKey == "ProgramArguments" {
+				inProgramArguments = true
+				pendingKey = ""
+			}
+			if value.Name.Local == "true" || value.Name.Local == "false" {
+				boolValue := value.Name.Local == "true"
+				switch pendingKey {
+				case "KeepAlive":
+					agent.KeepAlive = boolValue
+				case "RunAtLoad":
+					agent.RunAtLoad = boolValue
+				}
+				pendingKey = ""
+			}
+		case xml.EndElement:
+			if value.Name.Local == "array" {
+				inProgramArguments = false
+			}
+			currentElement = ""
+		case xml.CharData:
+			text := strings.TrimSpace(string(value))
+			if text == "" {
+				continue
+			}
+			switch currentElement {
+			case "key":
+				pendingKey = text
+			case "string":
+				if inProgramArguments {
+					agent.ProgramArguments = append(agent.ProgramArguments, text)
+					continue
+				}
+				switch pendingKey {
+				case "Label":
+					agent.Label = text
+				case "StandardOutPath":
+					agent.StdoutPath = text
+				case "StandardErrorPath":
+					agent.StderrPath = text
+				}
+				pendingKey = ""
+			}
+		}
+	}
+	if agent.Label == "" {
+		return LaunchAgent{}, fmt.Errorf("launch agent label is required")
+	}
+	return agent, nil
 }
 
 func RenderMacOSLaunchAgent(agent LaunchAgent) ([]byte, error) {

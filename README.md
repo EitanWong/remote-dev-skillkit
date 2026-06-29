@@ -59,7 +59,7 @@ Implemented now:
 - Development HTTPS long-poll host job transport via `rdev host serve --transport long-poll`.
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Host-bound trust bundle update checks for managed host trust-store refresh.
-- macOS LaunchAgent plist generation via `rdev host install-service --platform macos`.
+- macOS LaunchAgent plist generation, status inspection, and safe plist removal via `rdev host install-service`, `rdev host service-status`, and `rdev host uninstall-service`.
 - Persistent development gateway signing key files plus host trust pin checks.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
@@ -92,7 +92,7 @@ Not implemented yet:
 - OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
 - Windows service installation.
-- launchctl/systemd service lifecycle commands beyond macOS plist generation.
+- launchctl start/stop execution and systemd service lifecycle commands.
 - Tailscale/headscale adapter.
 - GUI adapter.
 
@@ -119,6 +119,8 @@ go run ./cmd/rdev-verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.r
 go run ./cmd/rdev host serve --mode temporary
 go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll
 go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
+go run ./cmd/rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
+go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
 ```
 
 ## Design Invariants

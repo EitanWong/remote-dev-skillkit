@@ -91,3 +91,18 @@ rdev host install-service \
 ```
 
 On macOS, the current command writes a LaunchAgent plist and prints the explicit `launchctl bootstrap`, `launchctl bootout`, and `launchctl print` commands. It does not run `launchctl` automatically. This command is not used for third-party temporary sessions.
+
+Inspect or remove the LaunchAgent plist without executing `launchctl`:
+
+```bash
+rdev host service-status \
+  --platform macos \
+  --plist ~/Library/LaunchAgents/com.remote-dev-skillkit.host.plist
+
+rdev host uninstall-service \
+  --platform macos \
+  --label com.remote-dev-skillkit.host \
+  --plist ~/Library/LaunchAgents/com.remote-dev-skillkit.host.plist
+```
+
+`uninstall-service` removes only the plist file. It refuses to remove a plist whose embedded label does not match `--label` unless `--force` is explicitly set.

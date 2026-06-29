@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,6 +84,47 @@ func TestRenderMacOSLaunchAgentEscapesXML(t *testing.T) {
 	}
 	if decoder.InputOffset() == 0 {
 		t.Fatalf("rendered plist should be XML: %s", string(content))
+	}
+}
+
+func TestInspectMacOSLaunchAgentReadsRenderedPlist(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
+	agent, err := NewMacOSLaunchAgent(LaunchAgentOptions{
+		Label:      "com.example.rdev-host",
+		BinaryPath: "/opt/rdev/bin/rdev",
+		GatewayURL: "https://api.example.com/v1",
+		TicketCode: "ABCD-1234",
+		LogDir:     filepath.Join(dir, "logs"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := RenderMacOSLaunchAgent(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plistPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, err := InspectMacOSLaunchAgent(plistPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Exists {
+		t.Fatal("expected plist to exist")
+	}
+	if status.Label != "com.example.rdev-host" {
+		t.Fatalf("unexpected label %q", status.Label)
+	}
+	if !status.KeepAlive || !status.RunAtLoad {
+		t.Fatalf("expected keepalive and runatload, got %#v", status)
+	}
+	if len(status.ProgramArguments) == 0 || status.ProgramArguments[0] != "/opt/rdev/bin/rdev" {
+		t.Fatalf("unexpected program arguments %#v", status.ProgramArguments)
+	}
+	if status.Mode != "0600" {
+		t.Fatalf("expected 0600 mode, got %q", status.Mode)
 	}
 }
 
