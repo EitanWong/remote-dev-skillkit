@@ -224,6 +224,7 @@ Audit export must prove:
 The local test suite currently covers:
 
 - signed job envelope creation and host verification;
+- signed trust bundle rotation, rollback rejection, previous-hash validation, and key revocation checks;
 - tamper and expiry rejection;
 - host-bound job execution;
 - scoped shell execution;
@@ -243,4 +244,3 @@ The following remain real-environment acceptance tests:
 - managed Mac LaunchAgent install/uninstall;
 - Codex adapter execution in a locked worktree;
 - WSS/mTLS transport under NAT.
-

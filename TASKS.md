@@ -53,11 +53,13 @@
 - [x] Add real scoped shell adapter execution.
 - [x] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
 - [x] Add durable shell adapter audit schema and redaction rules.
+- [x] Add signed trust bundle rotation/revocation primitive.
 
 ## Later
 
 - [ ] Add WSS/mTLS transport.
 - [ ] Add host identity key storage.
+- [ ] Add durable managed host trust bundle storage and update endpoint.
 - [ ] Add Windows Service mode.
 - [ ] Add systemd and launchd modes.
 - [ ] Add acpx adapter.

@@ -105,6 +105,30 @@ Rotation steps:
 
 Managed hosts receive trust-bundle updates through signed managed-host policy updates. Temporary hosts receive trust material through the signed join/bootstrap manifest for that session.
 
+The trust update primitive is `rdev.trust-bundle.v1`. A trust bundle contains:
+
+- bundle id;
+- monotonically increasing sequence;
+- validity window;
+- previous bundle hash;
+- key id, public key, algorithm, status, and key validity;
+- bundle signing key id;
+- Ed25519 signature.
+
+Key statuses are:
+
+- `active`: may verify new jobs or manifests for its authority scope;
+- `retired`: retained for historical verification but not new jobs;
+- `revoked`: must be rejected for new verification and treated as an incident signal.
+
+Managed hosts should accept an update only when:
+
+- the signature verifies against an already trusted active root;
+- the sequence increases;
+- `previous_bundle_hash` matches the current bundle hash;
+- the bundle is inside its validity window;
+- the signing key has not been revoked.
+
 ## Revocation
 
 Revocation is required when a key is lost, exposed, misused, or suspected compromised.
@@ -152,4 +176,3 @@ This policy is implemented when:
 - managed hosts can receive signed trust-bundle updates;
 - revoked keys stop new jobs, tickets, or release verification according to authority scope;
 - release evidence is stored with the release artifacts.
-
