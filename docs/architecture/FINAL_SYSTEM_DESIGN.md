@@ -32,6 +32,127 @@ The highest-level rule is:
 
 That rule resolves the tension between remote repair convenience and safety. Temporary third-party machines get visible, time-limited, foreground sessions. Eitan-owned or formally managed machines can opt into durable service mode.
 
+## Endgame Solution Layer
+
+This section is the final scorecard for the "perfect ending." Later sections explain the mechanics; this section decides whether a feature belongs in the product.
+
+The endgame is a remote-development control plane where agents can cause useful work on real machines without ever receiving ambient ownership of those machines. The complete system is therefore a set of locked boundaries:
+
+| Boundary | Final decision | Regression if violated |
+|---|---|---|
+| User consent | temporary sessions are visible, foreground, TTL-bound; managed service is explicit | support tool becomes hidden remote admin |
+| Agent authority | agents request typed work through Skills/MCP/API | agent receives raw SSH/RDP/VNC or unrestricted shell by default |
+| Gateway authority | gateway owns policy, signing, approvals, artifacts, audit, revocation | a transport or adapter becomes the security root |
+| Host authority | host independently verifies every signed job before execution | gateway/client compromise directly runs code on hosts |
+| Adapter authority | adapters execute inside bounded workspace, capability, approval, and evidence rules | Codex/shell/GUI/mesh bypasses the safety kernel |
+| Evidence authority | completion requires artifacts and audit, not narration | agent claims success without reviewable proof |
+| Release authority | bootstrap verifies signed manifests and artifacts before running host code | one-command install becomes supply-chain blind trust |
+| Revocation authority | tickets, hosts, jobs, approvals, and keys can be stopped and audited | mistakes or compromise keep running after stop |
+
+The product is correct only when all boundaries hold at the same time.
+
+### Final Reference Architecture
+
+```text
+Agent Runtime
+  Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor-style agents
+        |
+        v
+Skillkit + MCP/API Surface
+  typed tools, safe workflows, policy dry-runs, evidence review
+        |
+        v
+rdev Gateway
+  tickets, host registry, policy, signing, approvals, leases,
+  artifacts, audit, trust bundles, revocation
+        |
+        v
+Outbound Host Channel
+  HTTPS polling fallback, WSS production path, optional mesh for owned hosts
+        |
+        v
+rdev Host Runtime
+  local identity, trust store, policy verifier, nonce/approval stores,
+  workspace locks, adapter runner, local audit spool
+        |
+        v
+Adapters
+  shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI,
+  Coder, DevPod, SSH, Tailscale/headscale
+```
+
+The gateway may coordinate, but the host must remain sovereign over local execution. The host's default answer to anything ambiguous is deny or approval-required.
+
+### Final Operating Modes
+
+The same kernel supports four modes. Modes must stay visibly separate in CLI, policy, audit, and install UX.
+
+| Mode | Target | Persistence | Who consents | Typical work | Hard stop |
+|---|---|---:|---|---|---|
+| `attended-temporary` | third-party or short-lived machine | none | local user plus operator | repair, diagnostics, scoped fix | TTL, stop, ticket revoke |
+| `managed` | Eitan-owned or formally managed device | explicit service | operator during install and policy approval | durable coding, tests, scheduled maintenance | host revoke, policy revoke, service uninstall |
+| `break-glass` | emergency repair | no hidden persistence; short-lived | stronger local/operator approval | urgent recovery | short TTL and dense audit |
+| `workspace-provider` | Coder/DevPod/cloud workspace | provider-managed | operator and workspace policy | disposable coding environment | workspace destroy/revoke |
+
+Temporary mode never upgrades itself into managed mode. Managed mode never inherits approval to push, merge, deploy, publish, change credentials, or control GUI without a scoped approval.
+
+### Final Authority Map
+
+No single actor receives all powers.
+
+| Actor | Can do | Cannot do |
+|---|---|---|
+| Agent runtime | request tickets/jobs, explain approvals, review evidence | approve its own dangerous action, bypass policy, receive raw host credentials |
+| Operator | approve hosts, approvals, revocations, policies | bypass host-side verification |
+| Gateway | sign bounded jobs and approval tokens | execute locally on a host without host validation |
+| Host runtime | verify and execute bounded work | broaden its own policy or trust roots |
+| Adapter | run a declared operation | create private persistence, widen workspace, skip evidence |
+| Release system | bless binaries and scripts | authorize jobs or approvals |
+
+This separation is the core defense against both prompt injection and ordinary operational mistakes.
+
+### Final Golden Paths
+
+The project is finished when these paths work without special pleading.
+
+| Path | Final user experience | Required proof |
+|---|---|---|
+| Temporary Windows repair | Eitan sends a join link/command; the user runs a visible verified bootstrap; Lucky triages and repairs through signed jobs | no persistence, outbound only, release verification, approval pauses, denials, artifacts, audit, revoke |
+| Managed Mac coding | Lucky selects Eitan's Mac, locks a Git worktree, runs Codex, runs tests, returns diff/evidence | host identity, workspace lock, Codex adapter result, diff/tests, audit slice, approval before push/merge |
+| Public Skillkit install | another agent user installs skills and MCP contracts without Hermes assumptions | exported Skillkit bundle, stable schemas, self-host docs, signed releases, threat model |
+| Adapter extension | contributor adds a new adapter | conformance tests prove capability mapping, workspace enforcement, cancellation, redaction, evidence, and audit |
+
+### Final Architecture Test
+
+Before adding or accepting any feature, answer these questions:
+
+1. Does the agent request a typed operation instead of raw access?
+2. Does the gateway sign only a bounded, host-specific, expiring envelope?
+3. Can the host independently reject the job if the gateway, client, or transport behaves badly?
+4. Are capabilities, workspace, limits, approvals, and redaction explicit?
+5. Does the action produce evidence and audit events sufficient for another reviewer?
+6. Can the operator revoke the ticket, host, job, approval, or key and see the result?
+7. Does temporary mode remain visible, foreground, outbound-only, and non-persistent?
+8. Does managed mode remain explicitly installed with health/status/uninstall paths?
+
+If any answer is no, the feature is outside the final architecture until redesigned.
+
+### Final Release Definition
+
+`v1.0` is not "all adapters exist." `v1.0` is the first public release where the safety kernel, protocol contracts, and install story are stable enough for other agent ecosystems.
+
+`v1.0` requires:
+
+- signed and verifiable release artifacts for supported platforms;
+- stable schema versions for tickets, join manifests, trust bundles, jobs, approvals, denials, artifacts, evidence bundles, and audit events;
+- MCP tools and Agent Skills that expose typed workflows, not raw shells;
+- local demo, self-host deployment, temporary Windows repair, and managed coding documentation;
+- conformance tests for every built-in adapter;
+- threat model, release key lifecycle, security policy, and emergency revocation process;
+- acceptance evidence for Temporary Windows Repair and Managed Mac Coding.
+
+The perfect ending is reached when Eitan can say "Lucky, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
+
 ## Endgame Operating Model
 
 The final product should be understood as one operating model rather than a pile of integrations:
