@@ -68,6 +68,7 @@
 - [x] Add public adapterkit result-artifact conformance verifier for built-in and third-party adapters.
 - [x] Add `rdev adapter verify-result` CLI for result-artifact conformance reports.
 - [x] Add `rdev.adapter.verify_result` MCP tool for agent-side result-artifact conformance.
+- [x] Add final product constitution for the perfect-ending architecture, including planes, adapter lifecycle, permission lattice, storage, API/MCP contract, Eitan deployment, v1.0 definition, and build order.
 
 ## Next
 

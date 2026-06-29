@@ -33,6 +33,235 @@ The system responds with typed intent, signed bounded execution, host-side
 verification, approval gates, workspace isolation, evidence, audit, and
 revocation.
 
+## Final Product Constitution - 2026-06-30
+
+This is the final architecture constitution. It does not replace the detailed
+sections below; it makes them executable as one product contract. When future
+features are proposed, they should be accepted only if they preserve this
+constitution.
+
+### Final Decision
+
+Remote Dev Skillkit is an agent work delegation kernel. It is not remote
+administration software, not a tunnel product, not a coding CLI, and not a
+general computer-control framework.
+
+The product exists to turn natural-language agent requests into bounded,
+host-verified, approval-aware, evidence-producing work on real machines.
+
+```text
+intent
+  -> typed plan
+  -> policy dry-run
+  -> signed host-bound envelope
+  -> outbound host lease
+  -> host sovereignty validation
+  -> adapter lifecycle
+  -> structured evidence
+  -> audit and review
+  -> continuation, approval, cancellation, or revocation
+```
+
+The "perfect ending" is reached when the safest path is also the easiest path
+for agents, operators, temporary users, managed-host owners, and adapter
+authors.
+
+### Four Planes
+
+The final system is separated into four planes. A feature that collapses these
+planes is outside the core product.
+
+| Plane | Owns | Primary artifacts | Hard boundary |
+|---|---|---|---|
+| Control plane | tickets, hosts, jobs, policy, approvals, leases, revocation | `rdev.ticket.v1`, `rdev.job-envelope.v1`, `rdev.approval-token.v1` | never executes local host work |
+| Execution plane | host identity, trust, local validation, locks, adapter supervision | `rdev.host-denial.v1`, `rdev.approval-required.v1`, adapter result artifacts | never invents authority |
+| Proof plane | evidence, audit, acceptance, redaction, verification | `rdev.evidence-bundle.v1`, `rdev.audit-chain.v1`, `rdev.acceptance-package.*.v1` | never relies on agent narration |
+| Distribution plane | releases, bootstraps, checksums, bundle verification | `rdev.release-bundle.v1`, `rdev.release-candidate.v1`, verifier output | never authorizes runtime jobs |
+
+This is the smallest stable kernel. Everything else attaches through adapters,
+MCP tools, API clients, or deployment packaging.
+
+### Reference Architecture
+
+```text
+Agent runtime
+  Hermes/Lucky, Codex, Claude Code, OpenCode, generic MCP agent
+        |
+        v
+Skillkit and MCP/API client
+  typed intent, policy planning, approval request, evidence review
+        |
+        v
+Gateway control plane
+  auth, tickets, hosts, jobs, approvals, leases, signing, audit, artifacts
+        |
+        v
+Outbound relay
+  HTTPS long-poll fallback, WSS/mTLS production path
+        |
+        v
+Host execution plane
+  identity, trust bundle, nonce store, local policy, locks, local stop
+        |
+        v
+Adapter lifecycle
+  detect -> plan -> prepare -> run -> collect -> cleanup
+        |
+        v
+Proof plane
+  result artifact, evidence bundle, audit chain, verifier output
+```
+
+The gateway may be hosted by Lunflux, self-hosted by another user, or run
+locally for development. The host rules do not change when the deployment
+changes.
+
+### Adapter Lifecycle Contract
+
+The result-artifact verifier is the first public Adapter SDK slice. The final
+SDK must extend that into a lifecycle contract:
+
+| Phase | Adapter must provide | Kernel must enforce |
+|---|---|---|
+| `detect` | installed tool, version, OS support, declared capabilities | capability approval and host inventory freshness |
+| `plan` | intended commands, files, external consequences, expected evidence | policy dry-run and approval calculation |
+| `prepare` | workspace, worktree, session, temp files, dependency checks | canonical paths, locks, TTL, storage quotas |
+| `run` | bounded execution with cancellation and timeout support | context cancellation, output caps, no privilege widening |
+| `collect` | schema-versioned result, diff/test/log evidence, redaction metadata | conformance verification and artifact indexing |
+| `cleanup` | lock release, temp cleanup, process cleanup, spool state | idempotent retry and visible failure evidence |
+
+An adapter can be powerful, but it cannot authorize itself. Claude Code, Codex,
+ACP, shell, PowerShell, Git, GUI, browser, mesh, Coder, DevPod, and future
+execution backends all pass through this same lifecycle.
+
+### Permission Lattice
+
+The final permission model is not "all or nothing." It is a lattice with
+monotonic escalation and revocation:
+
+| Level | Meaning | Examples | Approval rule |
+|---|---|---|---|
+| L0 observe | read-only fact gathering | capability inventory, `git status`, logs | host approval is enough |
+| L1 workspace | scoped project changes | edits, tests, builds, local generated files | workspace approval and lock required |
+| L2 repair | machine-local repair | package repair, process cleanup, cache reset | scoped approval unless pre-granted managed policy |
+| L3 privileged/visual | OS-level or GUI interaction | elevation, service changes, screen/GUI control | fresh per-operation approval |
+| L4 external consequence | effects outside the host | push, merge, deploy, publish, paid action, credentials | approval after evidence review |
+
+Managed mode may remember a host and reconnect it. Managed mode does not grant
+L3 or L4 by default.
+
+### Mode Invariants
+
+| Mode | Non-negotiable invariant |
+|---|---|
+| `attended-temporary` | foreground, visible, outbound-only, TTL-bound, no service, no autorun, local stop wins |
+| `managed` | explicit install, status/logs/start/stop/uninstall, durable reconnect, host-side validation unchanged |
+| `workspace-provider` | provider lifecycle is bounded by signed jobs and destroyable workspaces |
+| `break-glass` | shorter TTL, narrower scope, stronger approval, denser audit, no permanent weakening |
+
+The same binary can support multiple modes, but the CLI, policy, audit, and UX
+must keep them visibly distinct.
+
+### Data And Storage Contract
+
+The production system needs durable stores, but no store is allowed to become a
+hidden authority.
+
+| Store | Contents | Required property |
+|---|---|---|
+| Gateway relational store | tickets, hosts, jobs, approvals, leases, artifact indexes | idempotent transitions and recovery after restart |
+| Gateway audit store | append-only events and hash-chain exports | tamper-evident export and verifier support |
+| Object store | evidence, transcripts, diffs, release and acceptance packages | checksum-addressed, quota-bound, redacted |
+| Gateway key store | job signing, approval signing, trust-bundle signing references | rotation, revocation, separation from release signing |
+| Host protected store | host identity, trust bundle, nonce cache, approval consumption | rollback rejection and OS protection in production |
+| Host spool | not-yet-uploaded evidence and cancellation artifacts | retryable upload without false success |
+
+Development may use local files. Production must harden the same logical stores
+without changing protocol semantics.
+
+### API And MCP Contract
+
+The public API and MCP surface should stay small:
+
+1. `plan` before `run`.
+2. structured approval requests before dangerous effects.
+3. signed envelopes rather than raw commands.
+4. host-side denials as first-class results.
+5. evidence export before completion claims.
+6. verifier tools for releases, Skillkits, adapter results, acceptance, and
+   audit.
+
+Agents get tools for intent, planning, approval, execution, evidence review, and
+verification. They do not get standing host credentials or self-approval power.
+
+### Eitan Reference Ending
+
+The personal deployment is:
+
+```text
+Hermes/Lucky
+  -> Remote Dev Skillkit
+  -> https://api.lunflux.com/v1
+  -> rdev-gateway
+  -> https://agent.lunflux.com
+  -> managed Eitan hosts and attended temporary hosts
+```
+
+`https://api.lunflux.com/v1` is the authenticated agent/operator API. It owns
+typed jobs, policy planning, approval, evidence, audit, and MCP-compatible
+access.
+
+`https://agent.lunflux.com` is the human and host-facing edge. It owns join
+pages, release metadata, verified bootstrap downloads, and outbound host relay.
+
+Lucky remains the coordinator. It should never need root passwords, SSH
+passwords, permanent host credentials, or hidden persistence on someone else's
+machine.
+
+### v1.0 Definition
+
+The public v1.0 release is allowed only when all of the following are true:
+
+1. A clean Windows 10/11 temporary host joins from one visible verified command,
+   connects outbound only, enforces approvals, revokes cleanly, and leaves no
+   service or autorun persistence.
+2. A managed Mac runs a real service-backed coding acceptance: start, inspect,
+   reconnect, locked-worktree Codex job, evidence verification, stop, and
+   uninstall.
+3. A managed Linux host proves systemd user-unit reboot/reconnect acceptance.
+4. Host identity and trust storage have production OS protection and rollback
+   rejection.
+5. WSS/mTLS exists while HTTPS long-poll remains the universal fallback.
+6. The full Adapter SDK verifies lifecycle, result artifacts, cancellation,
+   redaction, cleanup, and denial behavior.
+7. Signed releases, release candidates, post-release install verification,
+   Skillkit verification, acceptance packages, and audit-chain verification all
+   produce machine-readable `ok=true` evidence.
+8. The public threat model and security policy match shipped behavior.
+9. Self-hosted users can install gateway, host, MCP tools, Skillkit, and
+   adapters without Hermes or Lunflux assumptions.
+10. The easiest documented workflow is also the safest workflow.
+
+### Final Build Order
+
+The remaining work should follow this order:
+
+1. Real clean Windows temporary acceptance.
+2. Real service-backed managed Mac acceptance.
+3. Real Linux systemd reboot/reconnect acceptance.
+4. Production host identity/trust storage and authenticated trust refresh.
+5. WSS/mTLS transport with long-poll fallback preserved.
+6. Full Adapter SDK lifecycle and cancellation conformance.
+7. Claude Code and ACP adapters.
+8. Windows Service managed mode.
+9. Optional GUI, mesh, Coder, DevPod, and browser adapters.
+10. Approved public release with signed artifacts, verified Skillkit, acceptance
+    packages, security docs, and release notes.
+
+This order is the final answer because it prevents the project from optimizing
+for demos before it proves the safety-critical host, release, and evidence
+loops.
+
 ## Final 2026-06-30 Refinement
 
 This section is the final architecture decision layer. It resolves the last
