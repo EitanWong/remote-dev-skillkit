@@ -94,6 +94,7 @@
 - [x] Add Codex adapter MVP with locked-workspace execution, Git diff/status evidence, optional verification command evidence, output caps, and redaction.
 - [x] Add Codex adapter implicit approval preflight for push, merge, deploy, publish, credential, and service intents before adapter execution.
 - [x] Add Codex adapter `go test -json` parsing into `rdev.test-report.v1` verification summaries.
+- [x] Add Codex adapter conformance coverage for workspace canonicalization, write-scope escapes, failure evidence, redaction, truncation, and timeout cancellation evidence.
 
 ## Later
 
@@ -103,7 +104,7 @@
 - [ ] Add Windows Service mode.
 - [ ] Add launchctl start/stop execution and systemd mode.
 - [ ] Add acpx adapter.
-- [ ] Harden Codex adapter with conformance tests and cancellation.
+- [ ] Add Codex adapter cooperative cancellation API beyond duration timeout cancellation.
 - [ ] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
 - [ ] Add RustDesk/MeshCentral adapter.

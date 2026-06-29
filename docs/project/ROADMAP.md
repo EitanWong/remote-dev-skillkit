@@ -70,6 +70,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Workspace lock manager and Git worktree preparation foundation.
 - Workspace locks wired into hostrunner, host serve, and managed LaunchAgent arguments.
 - Codex adapter MVP with hostrunner integration, `codex.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, and redaction.
+- Codex adapter conformance coverage for workspace canonicalization, write-scope escape rejection before execution, nonzero-exit evidence, host-side redaction, output truncation, and timeout cancellation evidence.
 - Git diff and test evidence bundles.
 - Approval before push, merge, deploy, credential changes, or service changes.
 - Managed install, health, stop, and uninstall commands.

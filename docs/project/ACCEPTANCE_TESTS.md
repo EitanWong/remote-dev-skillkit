@@ -257,6 +257,7 @@ The local test suite currently covers:
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.
 - workspace lock enforcement during host execution through `rdev host serve --workspace-lock-store`, including hostrunner lock acquire/release, `workspace_locked` structured denial artifacts, lock release after adapter denial, and managed LaunchAgent `--workspace-lock-store` argument generation.
 - Codex adapter MVP through `adapter=codex`, including `codex.run` and `git.diff` capability checks, locked-workspace hostrunner execution, implicit approval preflight for push/merge/deploy/publish/credential/service intents, `rdev.codex-result.v1` artifacts, Git status/diff evidence, optional allowlisted verification command evidence, `rdev.test-report.v1` parsing for `go test -json`, output caps, redaction, and lock release after execution.
+- Codex adapter conformance tests through `internal/codexadapter/conformance_test.go`, covering canonical workspace roots, write-scope escape rejection before execution, nonzero Codex exits that still produce evidence, prompt/argv/stdout/stderr/diff redaction, output truncation flags, and duration-timeout cancellation evidence.
 
 The following remain real-environment acceptance tests:
 
@@ -264,6 +265,6 @@ The following remain real-environment acceptance tests:
 - Windows Authenticode verification against a real code-signing certificate;
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall;
-- production-hardened Codex adapter conformance and cancellation;
+- Codex adapter cooperative cancellation beyond duration timeout cancellation;
 - OS-protected managed host trust and identity storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.
