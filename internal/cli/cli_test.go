@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -376,6 +377,34 @@ func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "trust pin mismatch") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFetchHostTrustFallsBackToLegacyTrustEndpoint(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	legacy := gw.TrustBundle()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/trust":
+			_ = json.NewEncoder(w).Encode(map[string]any{"trust": legacy})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	trust, err := fetchHostTrust(context.Background(), server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trust.Legacy == nil {
+		t.Fatal("expected legacy trust fallback")
+	}
+	if trust.SignedBundle != nil {
+		t.Fatal("did not expect signed trust bundle")
+	}
+	if trust.Legacy.SigningKeyID != legacy.SigningKeyID {
+		t.Fatalf("expected legacy key %q, got %q", legacy.SigningKeyID, trust.Legacy.SigningKeyID)
 	}
 }
 

@@ -592,7 +592,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	if interval <= 0 {
 		interval = time.Second
 	}
-	trust, err := fetchTrustBundle(ctx, opts.GatewayURL, opts.TrustPin)
+	trust, err := fetchHostTrust(ctx, opts.GatewayURL, opts.TrustPin)
 	if err != nil {
 		return 0, err
 	}
@@ -612,7 +612,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 			}
 			continue
 		}
-		result, err := hostrunner.RunDevJob(hostID, trust, job, time.Now())
+		result, err := trust.RunDevJob(hostID, job, time.Now())
 		if err != nil {
 			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
 				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
@@ -667,12 +667,76 @@ func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootP
 	return payload.Manifest, nil
 }
 
+type hostTrust struct {
+	Legacy       *model.TrustBundle
+	SignedBundle *model.SignedTrustBundle
+}
+
+func (t hostTrust) RunDevJob(hostID string, job model.Job, now time.Time) (hostrunner.Result, error) {
+	if t.SignedBundle != nil {
+		return hostrunner.RunDevJobWithTrustBundle(hostID, *t.SignedBundle, job, now)
+	}
+	if t.Legacy != nil {
+		return hostrunner.RunDevJob(hostID, *t.Legacy, job, now)
+	}
+	return hostrunner.Result{}, fmt.Errorf("host trust is not configured")
+}
+
+func fetchHostTrust(ctx context.Context, gatewayURL, trustPin string) (hostTrust, error) {
+	signed, err := fetchSignedTrustBundle(ctx, gatewayURL, trustPin)
+	if err == nil {
+		return hostTrust{SignedBundle: &signed}, nil
+	}
+	legacy, legacyErr := fetchTrustBundle(ctx, gatewayURL, trustPin)
+	if legacyErr != nil {
+		return hostTrust{}, fmt.Errorf("fetch signed trust bundle failed: %v; fallback legacy trust failed: %w", err, legacyErr)
+	}
+	return hostTrust{Legacy: &legacy}, nil
+}
+
 func encodeRootPublicKey(keyID string, publicKey ed25519.PublicKey) string {
 	return trustref.Encode(keyID, publicKey)
 }
 
 func parseRootPublicKey(value string) (model.TrustBundle, error) {
 	return trustref.Parse(value)
+}
+
+func fetchSignedTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.SignedTrustBundle, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/trust-bundle", nil)
+	if err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		TrustBundle model.SignedTrustBundle `json:"trust_bundle"`
+		Error       string                  `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.SignedTrustBundle{}, fmt.Errorf("fetch signed trust bundle failed: %s", payload.Error)
+	}
+	key, ok := payload.TrustBundle.Key(payload.TrustBundle.SigningKeyID)
+	if !ok {
+		return model.SignedTrustBundle{}, fmt.Errorf("signed trust bundle missing signing key %q", payload.TrustBundle.SigningKeyID)
+	}
+	root := key.TrustBundle()
+	if err := payload.TrustBundle.Verify(root, time.Now()); err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	if err := root.VerifyPin(trustPin); err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	return payload.TrustBundle, nil
 }
 
 func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.TrustBundle, error) {

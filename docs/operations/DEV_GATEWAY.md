@@ -122,7 +122,7 @@ rdev policy explain-shell \
 
 Agents can call the same policy engine through MCP tool `rdev.policy.explain_shell`.
 
-When `--once=false`, `rdev host serve` fetches the gateway trust bundle, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`.
+When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
 
 If the host runner rejects a job, the host reports the failure to `POST /v1/jobs/{job_id}/fail`. The gateway marks the job `failed`, stores `failure_reason`, and writes a `job.fail` audit event.
 

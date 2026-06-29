@@ -236,6 +236,7 @@ The local test suite currently covers:
 - Windows bootstrap verifier handoff logic;
 - shell artifact schema and redaction metadata.
 - signed trust bundle HTTP read/update flow with rollback rejection.
+- host-side job verification through signed trust bundle active keys, with legacy trust fallback.
 
 The following remain real-environment acceptance tests:
 

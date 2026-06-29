@@ -13,6 +13,21 @@ type Result struct {
 }
 
 func RunDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
+	return runDevJob(hostID, trust, job, now)
+}
+
+func RunDevJobWithTrustBundle(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
+	if job.Envelope == nil {
+		return Result{}, fmt.Errorf("job envelope is required")
+	}
+	trust, err := trustBundle.ActiveTrustBundle(job.Envelope.SigningKeyID, now)
+	if err != nil {
+		return Result{}, err
+	}
+	return runDevJob(hostID, trust, job, now)
+}
+
+func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
 	if job.Envelope == nil {
 		return Result{}, fmt.Errorf("job envelope is required")
 	}
