@@ -20,6 +20,12 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Development signed job envelopes.
 - Demonstrable local temporary session.
 - Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, output caps, and failure reporting.
+- Host identity storage wired into registration and job binding.
+- Durable host trust bundle store.
+- Trust-bundle key rotation/revocation flow.
+- Host-side artifact redaction.
+- Hash-chained audit export verifier.
+- Evidence bundle export.
 
 ## v0.2.0 Windows Temporary Host
 
@@ -30,26 +36,38 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Durable signing key storage and rotation.
 - Shell and file scoped jobs.
 - Host local audit spool and revocation handling.
+- Authenticode verification policy.
+- No-persistence inspection script.
+- Local-user approval prompt for elevation, GUI, service, and destructive requests.
+- Clean Windows acceptance run.
 
-## v0.3.0 Managed Device
+## v0.3.0 Managed Mac Coding
+
+- macOS LaunchAgent managed mode.
+- Host identity protected storage.
+- Workspace locks and Git worktrees.
+- Codex adapter.
+- Git diff and test evidence bundles.
+- Approval before push, merge, deploy, credential changes, or service changes.
+- Managed install, health, stop, and uninstall commands.
+
+## v0.4.0 Managed Device Generalization
 
 - Windows Service.
 - systemd and launchd support.
 - Restart/recovery.
 - Auto-update/rollback.
-
-## v0.4.0 Coding Adapters
-
-- acpx adapter.
-- Codex adapter.
-- Claude Code adapter.
-- Workspace locks and Git worktrees.
+- Claude Code and ACP adapters.
+- Artifact streaming.
+- Durable hosted storage.
+- WSS transport with HTTPS polling fallback.
 
 ## v0.5.0 Mesh and GUI
 
 - Tailscale/headscale adapter.
 - RustDesk/MeshCentral optional GUI adapters.
 - GUI consent/audit.
+- Browser E2E adapter.
 
 ## v1.0.0
 

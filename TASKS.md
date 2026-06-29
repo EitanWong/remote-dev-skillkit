@@ -25,6 +25,7 @@
 - [x] Add host-reported job failure endpoint and audit event.
 - [x] Add perfect end-state architecture blueprint.
 - [x] Refine final system design for implementation, deployment, and open-source packaging.
+- [x] Lock final system design state machines, trust protocols, discovery model, capability vocabulary, adapter contract, and release gates.
 - [x] Add persistent dev gateway signing key and host trust pin checks.
 - [x] Add signed dev join manifest endpoint and manifest-driven host registration.
 - [x] Add initial release/bootstrap trust root verification for join manifests.
