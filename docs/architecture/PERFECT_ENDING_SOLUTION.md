@@ -162,6 +162,55 @@ Required closure:
 This is the final product standard: connect deliberately, execute narrowly, and
 prove independently.
 
+## Final Control Plane Blueprint
+
+The perfect ending has one control plane and many execution planes. The control
+plane owns intent, consent, policy, signing, scheduling, approvals, evidence,
+audit, and revocation. Execution planes own local facts: files, tools, OS
+prompts, credentials, build caches, GUI state, and developer CLIs.
+
+```text
+agent intent
+  -> typed workflow
+  -> gateway governance
+  -> host-bound signed work
+  -> local host sovereignty
+  -> adapter-specific execution
+  -> evidence verifier
+  -> operator or agent review
+```
+
+The separation is the architecture. If a feature collapses these planes, it is
+not part of the final system.
+
+| Plane | Owns | Must expose | Must never become |
+|---|---|---|---|
+| Agent workflow | intent, planning, explanation | typed tool calls and evidence review | standing host credential holder |
+| Gateway governance | policy, tickets, jobs, approvals, audit | signed envelopes, leases, revocation, artifact indexes | remote shell |
+| Host sovereignty | local verification and execution bounds | denials, approval pauses, evidence, local stop | blind gateway executor |
+| Adapter edge | Codex, Claude, shell, GUI, mesh, workspace providers | conformance-tested plan/run/collect/cleanup | authorization root |
+| Proof layer | release, acceptance, evidence, audit verification | machine-checkable pass/fail output | screenshot-only trust story |
+
+This is why the system can stay general. New agents and new adapters attach to
+stable protocol edges without receiving the power to rewrite the safety kernel.
+
+## Final Product Cuts
+
+The final design is allowed to be opinionated. It deliberately excludes several
+tempting shortcuts:
+
+- no internet-wide host discovery or network scanning;
+- no hidden unattended mode for third-party temporary machines;
+- no raw unrestricted shell as the agent-facing primitive;
+- no gateway-only authorization without host-side verification;
+- no service install that lacks status, stop, logs, uninstall, and revocation;
+- no release artifact that cannot be independently verified before execution;
+- no completion claim that cannot be reconstructed from evidence and audit;
+- no Hermes-only assumption in public Skillkit, MCP contracts, or docs.
+
+The open-source project should feel useful because it is narrow. It is a remote
+work safety kernel, not another monolithic remote administration suite.
+
 ## Non-Negotiable Closure Contract
 
 Every feature must preserve all of these statements:
@@ -666,12 +715,26 @@ release key
   -> host binary execution
 ```
 
+Release candidates add one more local gate before any external publication:
+
+```text
+built artifacts
+  -> signed artifact manifests
+  -> signed release bundle
+  -> verified Skillkit bundle
+  -> checksums
+  -> rdev.release-candidate.v1 summary
+  -> human or CI decision to publish
+```
+
 Rules:
 
 - the bootstrap must fail closed on missing verifier, missing required artifact,
   bad hash, bad signature, wrong platform, revoked release key, or rollback;
 - the standalone verifier must be small enough to audit and hash-pin in
   bootstrap scripts;
+- a release candidate is local evidence, not publication; GitHub Release,
+  package registries, and public downloads require a separate operator decision;
 - public Windows releases should add Authenticode, but Authenticode does not
   replace the `rdev` release bundle verification contract;
 - release keys, gateway job-signing keys, trust-bundle keys, and approval-token
@@ -709,6 +772,23 @@ The open-source project ships five deliverables:
 
 Hermes/Lucky is the reference environment, not a required dependency.
 
+## Final Release Ladder
+
+The project should advance through release ladders rather than broad rewrites.
+Each rung has one proof artifact that can be archived and independently checked.
+
+| Rung | Release promise | Required proof |
+|---|---|---|
+| `v0.1` Local safety kernel | typed jobs, signed envelopes, host validation, denials, approvals, evidence, audit, Skillkit, release candidates | `go test ./...`, `rdev skillkit verify`, `rdev release prepare-candidate`, audit/evidence verifier output |
+| `v0.2` Temporary Windows help | one visible command, outbound-only, verified binary, approval pauses, no persistence | clean Windows 10/11 transcript plus `rdev.acceptance-package.windows-temporary.v1` |
+| `v0.3` Managed Mac coding | explicit LaunchAgent, reconnect, locked-worktree Codex run, diff/tests, approvals | service-backed `rdev.acceptance.managed-mac.v1` plus `rdev acceptance verify` |
+| `v0.4` Managed device generalization | macOS, Windows Service, systemd, trust storage, reconnect, adapter SDK | multi-OS acceptance matrix and adapter conformance reports |
+| `v1.0` Public self-hosted Skillkit | stable schemas, self-host docs, signed releases, installer trust, threat model match | release candidate, signed downloads, acceptance transcripts, security checklist, verifier logs |
+
+This ladder prevents the project from declaring "universal remote development"
+before the boring parts are proven: installers, revocation, evidence, and
+failure behavior.
+
 ## v1.0 Evidence Gates
 
 `v1.0` is reached when these gates pass with saved transcripts:
@@ -733,13 +813,29 @@ Hermes/Lucky is the reference environment, not a required dependency.
 8. Threat model, release key lifecycle, security policy, public docs, and
    acceptance transcripts match shipped behavior.
 
+## Remaining Gap Ledger
+
+The architecture is locked, but the implementation is not finished. These are
+the remaining gaps that matter before public confidence:
+
+| Gap | Why it matters | Finish line |
+|---|---|---|
+| Candidate verification after download | publishers can prepare candidates, but consumers and CI need a single candidate verifier | `rdev release verify-candidate --candidate <dir|json>` validates summary, checksums, signed bundle, manifests, artifacts, and Skillkit |
+| Real Windows temporary run | the plan, verifier, bootstrap, and packaging exist; the user-facing promise needs a clean VM transcript | clean Windows 10/11 run archived as `rdev.acceptance-package.windows-temporary.v1` |
+| Real managed Mac service run | LaunchAgent planning/control exists; durable reconnect must be proven outside a dry-run | service-backed run survives logout/reboot, completes Codex job, verifies evidence, stops and uninstalls |
+| Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
+| Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
+| Adapter SDK extraction | adapters are still mostly internal implementations | public SDK, fixtures, conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
+| Public release automation | local release candidates exist; publication still needs safe automation | dry-run GitHub release script first, explicit approval before external mutation, archived release evidence |
+
+Anything not in this ledger is secondary until these are closed.
+
 ## Final Implementation Order
 
 Finish in this order:
 
-1. Package Windows temporary acceptance evidence so real clean-VM transcripts,
-   release verifier output, audit, approval probes, and no-persistence checks
-   can become release-ready artifacts.
+1. Add standalone release candidate verification so downloaded or staged
+   candidates can be checked without trusting the preparer.
 2. Prove temporary Windows acceptance end-to-end: signed release, foreground
    console, outbound-only host loop, no-persistence inspection, approval probes,
    revoke.

@@ -10,6 +10,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 ## Rules
 
 - Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
+- Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Prefer ACP/acpx adapters over raw PTY scraping when available.
 - Lock a workspace before starting a coding job.
 - Use a branch or worktree for code changes.

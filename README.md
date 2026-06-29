@@ -106,6 +106,7 @@ Not implemented yet:
 - Production signing key storage and rotation.
 - Production key rotation/revocation authentication and durable managed host trust lifecycle.
 - Full production bootstrap trust root lifecycle and release signing policy.
+- Standalone release candidate verification after staging or download.
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.

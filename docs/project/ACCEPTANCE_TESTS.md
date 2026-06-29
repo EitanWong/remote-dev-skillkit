@@ -281,6 +281,7 @@ The local test suite currently covers:
 
 ## Next Automation Targets
 
+- Release candidate verification: add `rdev release verify-candidate --candidate <dir|json>` so staged or downloaded candidates can be checked independently before publication or installation.
 - Real managed Mac LaunchAgent acceptance execution: review generated plan, start/inspect/stop with `rdev host service-control --execute`, reconnect after reboot, run locked-worktree Codex, verify evidence, and uninstall.
 - Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, approval-required probes, and revocation transcript.
 - Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and evidence bundle checksums for each release candidate.
