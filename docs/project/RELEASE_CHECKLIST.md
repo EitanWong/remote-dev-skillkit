@@ -14,7 +14,8 @@
 - [ ] Authenticode-sign Windows binaries and scripts.
 - [ ] Verify Windows Authenticode signatures in CI.
 - [ ] Confirm release key ids are active and not revoked.
-- [ ] Archive release evidence: checksums, manifests, signatures, SBOM, verification logs.
+- [ ] Package Windows temporary acceptance evidence with `rdev acceptance package-windows-temporary` when Windows support is in scope.
+- [ ] Archive release evidence: checksums, manifests, signatures, SBOM, verification logs, redacted acceptance packages, and audit-chain exports.
 - [ ] Update `CHANGELOG.md`.
 - [ ] Update install docs.
 - [ ] Review `SECURITY.md` and threat model.

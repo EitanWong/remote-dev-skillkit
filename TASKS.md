@@ -111,6 +111,7 @@
 - [x] Add signed release bundle index creation and verification for release artifacts, manifests, hashes, sizes, and required artifact presence.
 - [x] Add standalone `rdev-verify --bundle` support for bootstrap-side signed release bundle verification.
 - [x] Wire signed release bundle verification into Windows temporary bootstrap and acceptance-plan verification.
+- [x] Add Windows temporary acceptance evidence packaging for release archival.
 
 ## Later
 
@@ -149,6 +150,7 @@
 - [x] Release bundle indexes can be signed and verified before publishing, including every listed artifact manifest and binary checksum.
 - [x] Standalone `rdev-verify` can verify signed release bundles before target-host execution.
 - [x] Windows bootstrap can verify signed release bundles before target-host execution through a hash-pinned standalone verifier.
+- [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, approval probes, no-persistence checks, redaction, and checksums.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 
 ## Definition Of Done For v0.1.0

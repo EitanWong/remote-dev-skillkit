@@ -50,6 +50,7 @@ Exit gate: local demo proves ticket, host registration, outbound host job wait t
 - Signed Windows binary.
 - PowerShell bootstrap.
 - Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, including reviewed launcher generation, signed release manifest or release bundle verification requirements, launcher safety checks, approval probes, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
+- Windows temporary acceptance evidence packaging through `rdev acceptance package-windows-temporary`, turning real clean-VM transcripts, release verifier output, audit, approval probes, and no-persistence checks into a redacted checksummed release artifact.
 - Visible foreground support window or console UI.
 - Outbound-only connection to gateway.
 - Durable signing key storage and rotation.
@@ -61,7 +62,7 @@ Exit gate: local demo proves ticket, host registration, outbound host job wait t
 - Local-user approval prompt for elevation, GUI, service, and destructive requests.
 - Clean Windows acceptance run.
 
-Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signed artifacts before host execution, connects outbound only, enforces approvals, revokes cleanly, and leaves no service or autorun persistence.
+Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signed artifacts before host execution, connects outbound only, enforces approvals, revokes cleanly, leaves no service or autorun persistence, and exports a passing Windows temporary acceptance package.
 
 ## v0.3.0 Managed Mac Coding
 

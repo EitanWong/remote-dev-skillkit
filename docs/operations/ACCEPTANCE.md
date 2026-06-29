@@ -183,6 +183,36 @@ and exits nonzero if any preflight check fails. It validates:
 - foreground run command, transcript commands, no-persistence checks, approval
   probes, and required evidence checklist.
 
+After the real Windows VM or support-host run, package the collected evidence:
+
+```bash
+rdev acceptance package-windows-temporary \
+  --plan .rdev/acceptance/windows-temporary/windows-temporary-plan.json \
+  --out .rdev/acceptance/windows-temporary-evidence \
+  --transcript transcript.txt \
+  --release-verification rdev-verify.json \
+  --audit audit.jsonl \
+  --no-persistence-dir no-persistence \
+  --approval-probes-dir approval-probes
+```
+
+The package command emits `rdev.acceptance-package.windows-temporary.v1` JSON,
+writes `package.json` and `checksums.txt`, copies the plan and launcher, redacts
+transcripts and verifier output, and fails closed until all required release
+evidence is present:
+
+- PowerShell transcript from bootstrap and foreground host startup;
+- standalone `rdev-verify` output with `"ok": true`;
+- host registration, approval, job, approval-required, revoke, and cancellation
+  audit evidence;
+- one no-persistence evidence file for services, scheduled tasks, HKCU/HKLM Run
+  keys, startup folders, and firewall rules;
+- one approval-probe evidence file for package install, elevation, service
+  management, GUI control, and credential change.
+
+Use the packaged directory as the release-candidate artifact. Do not publish a
+Windows temporary acceptance claim from screenshots or raw transcripts alone.
+
 ## Current Boundary
 
 This harness proves the managed test-process path. It does not yet prove:

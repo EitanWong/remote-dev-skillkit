@@ -202,6 +202,162 @@ func TestVerifyWindowsTemporaryPlanWithRemoteBootstrapPin(t *testing.T) {
 	}
 }
 
+func TestPackageWindowsTemporaryEvidencePackagesAndRedacts(t *testing.T) {
+	fixture := writeWindowsTemporaryPackageFixture(t, `{"ok": true, "token": "sk-abcdefghijklmnop"}`)
+
+	pkg, err := PackageWindowsTemporaryEvidence(WindowsTemporaryPackageOptions{
+		PlanPath:                fixture.planPath,
+		OutDir:                  filepath.Join(fixture.root, "package"),
+		TranscriptPath:          fixture.transcriptPath,
+		ReleaseVerificationPath: fixture.releaseVerificationPath,
+		AuditPath:               fixture.auditPath,
+		NoPersistenceDir:        fixture.noPersistenceDir,
+		ApprovalProbesDir:       fixture.approvalProbesDir,
+		Now:                     time.Date(2026, 6, 29, 13, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected package checks to pass: %#v", pkg.Checks)
+	}
+	if pkg.SchemaVersion != WindowsTemporaryPackageSchemaVersion {
+		t.Fatalf("unexpected schema %q", pkg.SchemaVersion)
+	}
+	for _, path := range []string{
+		filepath.Join(pkg.OutDir, "package.json"),
+		filepath.Join(pkg.OutDir, "checksums.txt"),
+		filepath.Join(pkg.OutDir, "plan", "windows-temporary-plan.json"),
+		filepath.Join(pkg.OutDir, "plan", "run-windows-temporary.ps1"),
+		filepath.Join(pkg.OutDir, "evidence", "no-persistence", "scheduled-tasks.txt"),
+		filepath.Join(pkg.OutDir, "evidence", "approval-probes", "package-install.txt"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected packaged file %s: %v", path, err)
+		}
+	}
+	releaseEvidence, err := os.ReadFile(filepath.Join(pkg.OutDir, "evidence", "release-verification.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(releaseEvidence), "sk-abcdefghijklmnop") || !strings.Contains(string(releaseEvidence), "[REDACTED:") {
+		t.Fatalf("expected release verification evidence to be redacted, got %s", string(releaseEvidence))
+	}
+	if len(pkg.RedactionRuleCounts) == 0 {
+		t.Fatalf("expected redaction counts, got %#v", pkg.RedactionRuleCounts)
+	}
+}
+
+func TestPackageWindowsTemporaryEvidenceRejectsFailedReleaseVerification(t *testing.T) {
+	fixture := writeWindowsTemporaryPackageFixture(t, `{"ok": false}`)
+
+	pkg, err := PackageWindowsTemporaryEvidence(WindowsTemporaryPackageOptions{
+		PlanPath:                fixture.planPath,
+		OutDir:                  filepath.Join(fixture.root, "package"),
+		TranscriptPath:          fixture.transcriptPath,
+		ReleaseVerificationPath: fixture.releaseVerificationPath,
+		AuditPath:               fixture.auditPath,
+		NoPersistenceDir:        fixture.noPersistenceDir,
+		ApprovalProbesDir:       fixture.approvalProbesDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatalf("expected failed release verification to fail package checks")
+	}
+	if !strings.Contains(failedCheckNames(pkg.Checks), "release_verification_ok") {
+		t.Fatalf("expected release_verification_ok failure: %#v", pkg.Checks)
+	}
+	if len(pkg.RecommendedActions) == 0 {
+		t.Fatalf("expected recommended actions for failed package")
+	}
+}
+
+type windowsTemporaryPackageFixture struct {
+	root                    string
+	planPath                string
+	transcriptPath          string
+	releaseVerificationPath string
+	auditPath               string
+	noPersistenceDir        string
+	approvalProbesDir       string
+}
+
+func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification string) windowsTemporaryPackageFixture {
+	t.Helper()
+	root := t.TempDir()
+	script := filepath.Join(root, "windows-temporary.ps1")
+	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	planOut := filepath.Join(root, "plan")
+	if _, err := RunWindowsTemporaryPlan(WindowsTemporaryOptions{
+		OutDir:                 planOut,
+		GatewayURL:             "https://api.example.com/v1",
+		TicketCode:             "ABCD-1234",
+		DownloadURL:            "https://agent.example.com/rdev-host.exe",
+		ExpectedSHA256:         strings.Repeat("a", 64),
+		BootstrapScriptPath:    script,
+		ReleaseBundleURL:       "https://agent.example.com/release-bundle.json",
+		ReleaseRootPublicKey:   "release-root:abc",
+		VerifierDownloadURL:    "https://agent.example.com/rdev-verify.exe",
+		VerifierExpectedSHA256: strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(root, "transcript.txt")
+	releaseVerificationPath := filepath.Join(root, "rdev-verify.json")
+	auditPath := filepath.Join(root, "audit.jsonl")
+	noPersistenceDir := filepath.Join(root, "no-persistence")
+	approvalProbesDir := filepath.Join(root, "approval-probes")
+	if err := os.WriteFile(transcriptPath, []byte("temporary host transcript\nAuthorization: Bearer abcdefghijklmnop\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(releaseVerificationPath, []byte(releaseVerification+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(auditPath, []byte(`{"event":"host.registered"}`+"\n"+`{"event":"job.completed"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeEvidenceFiles(t, noPersistenceDir, []string{
+		"services.txt",
+		"scheduled_tasks.txt",
+		"hkcu_run_key.txt",
+		"hklm_run_key.txt",
+		"startup_folders.txt",
+		"firewall_rules.txt",
+	})
+	writeEvidenceFiles(t, approvalProbesDir, []string{
+		"package.install.txt",
+		"elevation.request.txt",
+		"service.manage.txt",
+		"gui.control.txt",
+		"credential.change.txt",
+	})
+	return windowsTemporaryPackageFixture{
+		root:                    root,
+		planPath:                filepath.Join(planOut, "windows-temporary-plan.json"),
+		transcriptPath:          transcriptPath,
+		releaseVerificationPath: releaseVerificationPath,
+		auditPath:               auditPath,
+		noPersistenceDir:        noPersistenceDir,
+		approvalProbesDir:       approvalProbesDir,
+	}
+}
+
+func writeEvidenceFiles(t *testing.T, dir string, names []string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name+" ok\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func joinedWindowsCommands(commands []WindowsAcceptanceCommand) string {
 	var builder strings.Builder
 	for _, command := range commands {

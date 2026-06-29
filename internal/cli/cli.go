@@ -238,6 +238,30 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyWindowsTemporary(*plan)
+	case "package-windows-temporary":
+		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "Windows temporary acceptance plan path")
+		out := fs.String("out", "", "empty output directory for the packaged Windows acceptance evidence")
+		transcript := fs.String("transcript", "", "PowerShell transcript from the Windows temporary run")
+		releaseVerification := fs.String("release-verification", "", "rdev-verify release manifest or bundle verification output")
+		auditPath := fs.String("audit", "", "audit export or transcript for host registration, jobs, approvals, revocation, and cancellation")
+		noPersistenceDir := fs.String("no-persistence-dir", "", "directory containing one evidence file per no-persistence check")
+		approvalProbesDir := fs.String("approval-probes-dir", "", "directory containing one evidence file per approval probe")
+		notes := fs.String("notes", "", "optional operator notes file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptancePackageWindowsTemporary(acceptance.WindowsTemporaryPackageOptions{
+			PlanPath:                *plan,
+			OutDir:                  *out,
+			TranscriptPath:          *transcript,
+			ReleaseVerificationPath: *releaseVerification,
+			AuditPath:               *auditPath,
+			NoPersistenceDir:        *noPersistenceDir,
+			ApprovalProbesDir:       *approvalProbesDir,
+			NotesPath:               *notes,
+		})
 	default:
 		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
 	}
@@ -363,6 +387,33 @@ func (a App) acceptanceVerifyWindowsTemporary(planPath string) error {
 	}
 	if !verification.OK() {
 		return fmt.Errorf("windows temporary acceptance plan verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptancePackageWindowsTemporary(opts acceptance.WindowsTemporaryPackageOptions) error {
+	pkg, err := acceptance.PackageWindowsTemporaryEvidence(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    pkg.OK(),
+		"schema":                pkg.SchemaVersion,
+		"out":                   pkg.OutDir,
+		"package":               filepath.Join(pkg.OutDir, "package.json"),
+		"checksums":             filepath.Join(pkg.OutDir, "checksums.txt"),
+		"checks":                pkg.Checks,
+		"files":                 pkg.Files,
+		"redaction_rule_counts": pkg.RedactionRuleCounts,
+		"recommended_actions":   pkg.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("windows temporary acceptance package verification failed")
 	}
 	return nil
 }
@@ -1823,6 +1874,7 @@ Usage:
   rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example/rdev-verify.exe --verifier-sha256 <sha256>
   rdev acceptance verify --report acceptance-run/report.json
   rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
+  rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json

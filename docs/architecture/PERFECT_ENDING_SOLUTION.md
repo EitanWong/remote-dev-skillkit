@@ -100,6 +100,68 @@ The product boundary is deliberately narrow:
 The "perfect ending" is therefore not a bigger remote shell. It is the smallest
 general kernel that makes many remote-development tools safe for agents to use.
 
+## Final Closure Loops
+
+The final architecture closes three loops. A release is incomplete if any loop
+depends on agent narration instead of a verifier, artifact, or local host
+decision.
+
+| Loop | Question answered | Primary verifier |
+|---|---|---|
+| Connect | Is this host intentionally enrolled and reachable without exposing it? | ticket, join manifest, host identity, trust bundle |
+| Execute | Is this specific action bounded, approved, and locally safe? | signed job envelope, host policy, workspace lock, approval token |
+| Prove | Can another person or agent reconstruct what happened? | evidence package, checksums, audit chain, release verifier output |
+
+### Connect Loop
+
+Connect begins with an operator intent and ends with a host that can only receive
+bounded work from a trusted gateway.
+
+Required closure:
+
+- temporary hosts enroll through short-lived, visible, outbound-only sessions;
+- managed hosts enroll through explicit service install with stop and uninstall
+  paths;
+- join manifests and release metadata are signed by the correct trust roots;
+- host identity and trust stores are local, rollback-protected, and revocable;
+- no target host needs an inbound public listener to be useful.
+
+### Execute Loop
+
+Execute begins with a typed job request and ends with a structured terminal
+state.
+
+Required closure:
+
+- agents submit typed intent through Skills, MCP tools, or the CLI bridge;
+- the gateway performs a policy dry-run before signing;
+- the job envelope is host-bound, expiring, nonce-protected, capability-scoped,
+  workspace-scoped, and output-limited;
+- the host repeats validation locally and can deny even if the agent or gateway
+  made a bad request;
+- adapters receive only prepared work and cannot authorize themselves;
+- dangerous actions produce `rdev.approval-required.v1` before side effects.
+
+### Prove Loop
+
+Prove begins when work finishes or is refused and ends with exportable release
+evidence.
+
+Required closure:
+
+- every success, denial, approval pause, failure, timeout, and cancellation has a
+  schema-versioned artifact;
+- transcripts, diffs, command output, release verifier output, no-persistence
+  checks, and approval probes are redacted before archival;
+- evidence manifests and checksums can be verified without trusting the agent;
+- audit exports are hash-chained;
+- release claims use package commands such as `rdev acceptance verify`,
+  `rdev acceptance verify-windows-temporary`, and
+  `rdev acceptance package-windows-temporary`.
+
+This is the final product standard: connect deliberately, execute narrowly, and
+prove independently.
+
 ## Non-Negotiable Closure Contract
 
 Every feature must preserve all of these statements:
@@ -370,6 +432,7 @@ rules are part of the contract.
 | `rdev.approval-required.v1` | host | pause before side effect | adapter side effect before token is a failure |
 | `rdev.adapter-result.v1` | adapter | raw bounded outcome | missing schema, over limit, missing redaction metadata |
 | `rdev.evidence-bundle.v1` | host/gateway | completion proof | checksum mismatch, missing manifest, unverifiable audit slice |
+| `rdev.acceptance-package.*.v1` | acceptance tooling | release-ready real-environment evidence package | failed verifier, missing transcript, missing approval/no-persistence evidence, redaction gaps |
 | `rdev.audit-chain.v1` | gateway/exporter | tamper-evident event history | broken chain, missing required event, changed event hash |
 | `rdev.release-bundle.v1` | release system | signed artifact index | unsigned index, wrong digest, missing required artifact |
 
@@ -614,8 +677,8 @@ Rules:
 - release keys, gateway job-signing keys, trust-bundle keys, and approval-token
   keys are separate authorities;
 - every public release should archive verifier output, checksums, signed
-  manifests, signed bundle index, SBOM when available, and acceptance
-  transcripts.
+  manifests, signed bundle index, SBOM when available, redacted acceptance
+  packages, and verifier transcripts.
 
 ## Data And Storage
 
@@ -652,7 +715,8 @@ Hermes/Lucky is the reference environment, not a required dependency.
 
 1. Clean Windows 10/11 temporary host joins from one visible verified command,
    connects outbound only, runs bounded repair, enforces approvals, revokes
-   cleanly, and leaves no persistence.
+   cleanly, leaves no persistence, and exports
+   `rdev.acceptance-package.windows-temporary.v1` evidence.
 2. Eitan's managed Mac reconnects after reboot, receives a Lucky-requested Codex
    job, locks a Git worktree, returns diff/test/cancellation evidence, and
    requires approval before push, merge, deploy, credentials, or service changes.
@@ -673,8 +737,9 @@ Hermes/Lucky is the reference environment, not a required dependency.
 
 Finish in this order:
 
-1. Finish release-bundle verification in Windows bootstrap and acceptance
-   planning.
+1. Package Windows temporary acceptance evidence so real clean-VM transcripts,
+   release verifier output, audit, approval probes, and no-persistence checks
+   can become release-ready artifacts.
 2. Prove temporary Windows acceptance end-to-end: signed release, foreground
    console, outbound-only host loop, no-persistence inspection, approval probes,
    revoke.

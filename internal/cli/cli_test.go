@@ -2322,6 +2322,79 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 	}
 }
 
+func TestAcceptancePackageWindowsTemporary(t *testing.T) {
+	root := t.TempDir()
+	planOut := filepath.Join(root, "windows-temporary")
+	script := filepath.Join(root, "windows-temporary.ps1")
+	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var planStdout bytes.Buffer
+	planApp := NewApp(&planStdout, &bytes.Buffer{})
+	if err := planApp.Run(context.Background(), []string{
+		"acceptance", "windows-temporary",
+		"--out", planOut,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--download-url", "https://agent.example.com/rdev-host.exe",
+		"--expected-sha256", strings.Repeat("a", 64),
+		"--bootstrap-script", script,
+		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
+		"--release-root-public-key", "release-root:abc",
+		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
+		"--verifier-sha256", strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var planPayload struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(planStdout.Bytes(), &planPayload); err != nil {
+		t.Fatalf("invalid plan json: %v\n%s", err, planStdout.String())
+	}
+	transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, approvalProbesDir := writeWindowsPackageEvidenceForCLITest(t, root, `{"ok": true, "token": "ghp_abcdefghijklmnopqrstuvwx"}`)
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-windows-temporary",
+		"--plan", planPayload.Plan,
+		"--out", filepath.Join(root, "windows-evidence"),
+		"--transcript", transcriptPath,
+		"--release-verification", releaseVerificationPath,
+		"--audit", auditPath,
+		"--no-persistence-dir", noPersistenceDir,
+		"--approval-probes-dir", approvalProbesDir,
+	}); err != nil {
+		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+	}
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Schema  string `json:"schema"`
+		Package string `json:"package"`
+		Files   []struct {
+			Path string `json:"path"`
+			Kind string `json:"kind"`
+		} `json:"files"`
+		RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected package ok, got %s", stdout.String())
+	}
+	if payload.Schema != "rdev.acceptance-package.windows-temporary.v1" {
+		t.Fatalf("unexpected schema %q", payload.Schema)
+	}
+	if _, err := os.Stat(payload.Package); err != nil {
+		t.Fatalf("expected package manifest: %v", err)
+	}
+	if payload.RedactionRuleCounts["github_token"] != 1 {
+		t.Fatalf("expected github_token redaction count, got %#v", payload.RedactionRuleCounts)
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
 }
@@ -2372,6 +2445,52 @@ func readFileForTest(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(content)
+}
+
+func writeWindowsPackageEvidenceForCLITest(t *testing.T, root, releaseVerification string) (string, string, string, string, string) {
+	t.Helper()
+	transcriptPath := filepath.Join(root, "transcript.txt")
+	releaseVerificationPath := filepath.Join(root, "rdev-verify.json")
+	auditPath := filepath.Join(root, "audit.jsonl")
+	noPersistenceDir := filepath.Join(root, "no-persistence")
+	approvalProbesDir := filepath.Join(root, "approval-probes")
+	if err := os.WriteFile(transcriptPath, []byte("temporary host transcript\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(releaseVerificationPath, []byte(releaseVerification+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(auditPath, []byte(`{"event":"host.registered"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeNamedFilesForTest(t, noPersistenceDir, []string{
+		"services.txt",
+		"scheduled_tasks.txt",
+		"hkcu_run_key.txt",
+		"hklm_run_key.txt",
+		"startup_folders.txt",
+		"firewall_rules.txt",
+	})
+	writeNamedFilesForTest(t, approvalProbesDir, []string{
+		"package.install.txt",
+		"elevation.request.txt",
+		"service.manage.txt",
+		"gui.control.txt",
+		"credential.change.txt",
+	})
+	return transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, approvalProbesDir
+}
+
+func writeNamedFilesForTest(t *testing.T, dir string, names []string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name+" ok\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func runHostServeWithIdentityStore(t *testing.T, gatewayURL, ticketCode, identityPath, name string) string {
