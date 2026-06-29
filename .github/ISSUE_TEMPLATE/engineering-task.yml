@@ -1,0 +1,45 @@
+name: Engineering Task
+description: Track implementation work for Remote Dev Skillkit
+title: "[Task]: "
+labels: ["kind:feature"]
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What user-visible or safety-critical outcome should this issue deliver?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Link architecture docs, acceptance gates, or related issues.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Concrete evidence required before closing.
+      placeholder: |
+        - [ ] Tests cover ...
+        - [ ] CLI/API returns ...
+        - [ ] Docs updated ...
+        - [ ] ./scripts/check.sh passes
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification Plan
+      description: Commands, real-environment checks, or evidence bundles required.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security Notes
+      description: Trust, policy, approval, persistence, secret, or audit implications.
+    validations:
+      required: true
