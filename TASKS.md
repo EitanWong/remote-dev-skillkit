@@ -36,6 +36,7 @@
 - [x] Add host identity key storage and signed job identity binding.
 - [x] Add host-side nonce replay cache.
 - [x] Add hash-chained audit export verifier.
+- [x] Reconcile final architecture into one canonical product contract.
 
 ## Next
 
@@ -64,6 +65,11 @@
 - [x] Add durable host identity key store.
 - [x] Add durable host nonce replay store.
 - [x] Add hash-chained audit export and verification.
+- [x] Add final buy-vs-build boundary for MCP, Tailscale/headscale, SSH, Coder, DevPod, VS Code Remote Tunnels, RustDesk/MeshCentral, and Sigstore-style release trust.
+- [x] Add explicit exit criteria for v0.1 through v1.0 gates.
+- [ ] Add stronger workspace and symlink escape tests.
+- [ ] Add local evidence bundle export.
+- [ ] Add policy explanation for every host-side denial and approval-required result.
 
 ## Later
 
@@ -77,6 +83,9 @@
 - [ ] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
 - [ ] Add RustDesk/MeshCentral adapter.
+- [ ] Add Coder workspace adapter.
+- [ ] Add DevPod/devcontainer workspace adapter.
+- [ ] Add adapter SDK and conformance tests.
 
 ## Final End-State Gates
 

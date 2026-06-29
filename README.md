@@ -16,6 +16,28 @@ Remote Dev Skillkit is not a hidden remote-control tool. It is consent-first inf
 
 Temporary third-party machines use foreground, time-limited support sessions. Long-lived unattended service mode is reserved for Eitan-owned or formally managed devices.
 
+## Final Shape
+
+The finished project is a universal safety layer for agents working on real machines:
+
+```text
+Agent Skills + MCP tools
+        |
+        v
+rdev-gateway: tickets, hosts, jobs, approvals, artifacts, audit
+        |
+        v
+outbound HTTPS/WSS host channels
+        |
+        v
+rdev-host: identity, trust bundle, local policy, adapters
+        |
+        v
+shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevPod
+```
+
+The project intentionally reuses mature ecosystems where they fit: MCP for agent tools, Tailscale/headscale or SSH for owned-host connectivity, Coder/DevPod for governed workspaces, RustDesk/MeshCentral for explicit GUI sessions, and platform/Sigstore-style signing for release trust. What `rdev` owns is the missing agent safety kernel: signed job envelopes, host-side policy, approval gates, workspace locks, redaction, evidence bundles, audit chains, and revocation.
+
 ## Current Status
 
 This repository is in Phase 1: project foundation and safe MVP.
@@ -97,8 +119,8 @@ go run ./cmd/rdev host serve --mode temporary
 
 - [Architecture](docs/architecture/ARCHITECTURE.md)
 - [Perfect End-State Architecture](docs/architecture/PERFECT_END_STATE.md)
+- [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) — canonical product contract
 - [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
-- [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md)
 - [Project Plan](docs/project/PLAN.md)
 - [Acceptance Tests](docs/project/ACCEPTANCE_TESTS.md)
 - [Roadmap](docs/project/ROADMAP.md)

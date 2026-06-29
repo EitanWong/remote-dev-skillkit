@@ -11,7 +11,7 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Agent Skills drafts.
 - Architecture and security docs.
 
-## v0.1.0 Local Demo
+## v0.1.0 Local Safety Kernel
 
 - Local gateway process.
 - Local host process.
@@ -26,6 +26,10 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Host-side artifact redaction.
 - Hash-chained audit export verifier.
 - Evidence bundle export.
+- Strong symlink/workspace escape regression tests.
+- Explainable denial and approval decisions.
+
+Exit gate: local demo proves ticket, host registration, signed job execution, artifact storage, audit export, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
 
 ## v0.2.0 Windows Temporary Host
 
@@ -41,6 +45,8 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Local-user approval prompt for elevation, GUI, service, and destructive requests.
 - Clean Windows acceptance run.
 
+Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signed artifacts before host execution, connects outbound only, enforces approvals, revokes cleanly, and leaves no service or autorun persistence.
+
 ## v0.3.0 Managed Mac Coding
 
 - macOS LaunchAgent managed mode.
@@ -50,6 +56,8 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Git diff and test evidence bundles.
 - Approval before push, merge, deploy, credential changes, or service changes.
 - Managed install, health, stop, and uninstall commands.
+
+Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through MCP, Codex runs in a locked worktree, and the result includes diff, tests, artifacts, audit slice, and residual risk.
 
 ## v0.4.0 Managed Device Generalization
 
@@ -61,6 +69,8 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Artifact streaming.
 - Durable hosted storage.
 - WSS transport with HTTPS polling fallback.
+
+Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, and a new adapter can be added without bypassing policy.
 
 ## v0.5.0 Mesh and GUI
 
@@ -77,3 +87,5 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Signed releases.
 - Installation docs for Hermes, Codex, Claude Code, and OpenCode.
 - End-to-end acceptance demos for temporary Windows repair and managed coding.
+
+Exit gate: external users can self-host or install the Skillkit without Hermes-specific assumptions, release artifacts verify, and the public threat model/security policy match the shipped behavior.

@@ -32,6 +32,63 @@ The highest-level rule is:
 
 That rule resolves the tension between remote repair convenience and safety. Temporary third-party machines get visible, time-limited, foreground sessions. Eitan-owned or formally managed machines can opt into durable service mode.
 
+## Ultimate End-State Solution
+
+The final product is a universal remote-work safety layer for agents. It lets an operator say "use that machine to solve this problem" without handing the agent SSH credentials, a raw desktop session, or broad terminal ownership.
+
+The end state is made of five cooperating products:
+
+1. **Skillkit**: small Agent Skills that teach Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor Agent, and similar systems to create tickets, request jobs, ask for approvals, read evidence, and revoke sessions.
+2. **MCP/API Gateway**: a control plane that exposes typed tools, owns tickets, host registry, policies, approvals, signing, artifacts, audit, and revocation.
+3. **Host Runtime**: a cross-platform binary that runs on Mac, Windows, and Linux in either visible temporary mode or explicit managed service mode.
+4. **Adapter SDK**: a stable way to plug in shell, PowerShell, Git, Codex, Claude Code, ACP, browser, mesh, SSH, GUI, Coder, DevPod, or future coding environments without weakening the core safety model.
+5. **Evidence System**: hash-chained audit plus per-job evidence bundles that make remote work reviewable by a human or another agent.
+
+The "perfect ending" is not that rdev controls every machine in every possible way. The perfect ending is that every supported path is consented, bounded, replay-safe, revocable, and reviewable.
+
+### Final Architecture Contract
+
+The system is complete only when all of these statements are true:
+
+1. An agent can create an attended temporary ticket without learning host credentials.
+2. A Windows user can join from one visible command that verifies signed bootstrap and release artifacts before running the host.
+3. Temporary hosts connect outbound only, run in the foreground, have a visible stop path, and leave no service or autorun persistence.
+4. Managed hosts install through a separate explicit command, persist host identity and trust safely, reconnect after reboot, and have health/stop/uninstall commands.
+5. Every executable action is represented as a canonical signed job envelope with host binding, nonce, expiry, capabilities, workspace scope, limits, and approvals.
+6. The gateway refuses unsafe jobs before signing, and the host independently refuses unsafe jobs before execution.
+7. Dangerous operations become approval requests, not side effects. Agents may request and explain approvals but cannot grant them.
+8. Coding jobs run through a locked workspace or worktree and return diff, test output, logs, artifacts, and residual risk before push, merge, deploy, or publish.
+9. Audit export proves ticket, host, policy, approval, job, artifact, trust update, revocation, and release-verification events without trusting mutable logs.
+10. Other users can self-host the same stack with safe defaults, stable MCP schemas, installable skills, signed releases, and documented threat boundaries.
+
+### Personal Perfect Ending For Eitan
+
+Eitan's finished personal system should work like this:
+
+```text
+Lucky on Hermes
+  -> rdev MCP tools at https://api.lunflux.com/v1
+  -> rdev-gateway signs bounded jobs
+  -> Eitan approves scoped host/session/workspace policy
+  -> target host connects outbound to https://agent.lunflux.com
+  -> rdev-host executes through a typed adapter
+  -> Lucky reads evidence and summarizes next decisions
+```
+
+For Eitan-owned machines, Lucky should be able to select a managed Mac, Windows host, or Linux host by capability, repository root, current load, and last heartbeat. For third-party machines, Lucky should create a short-lived join link and wait for explicit operator approval before the first job.
+
+### Public Perfect Ending For The Open-Source Project
+
+The open-source package should give a new user three install paths:
+
+| Path | User | Outcome |
+|---|---|---|
+| `rdev local` | one developer | local MCP stdio and local host/gateway demo |
+| `rdev self-host` | power user or small team | gateway, join page, artifacts, audit, signed host runtime |
+| `rdev skillkit` | agent ecosystem user | Agent Skills plus MCP tool contracts for an existing gateway |
+
+The public package should not require adopting Hermes. Hermes/Lucky is the first-class personal deployment, but the project succeeds only if Codex, Claude Code, OpenCode, and other agent stacks can use the same tools.
+
 ## Perfect Ending
 
 The perfect ending is not a single feature. It is a stable operating model:
@@ -81,17 +138,60 @@ The final design intentionally aligns with public platform behavior instead of i
 | Linux managed service | systemd restart and watchdog behavior | only managed mode may use restart-on-failure semantics |
 | macOS managed service | launchd LaunchAgents/LaunchDaemons | install only after explicit managed enrollment with uninstall instructions |
 | SSH fallback | OpenSSH certificates and principals can scope access | SSH is an adapter/transport for owned hosts, not the primary temporary path |
+| Cloud dev environments | Coder and DevPod solve governed or reproducible workspaces | integrate as workspace/adapters instead of rebuilding cloud IDE platforms |
+| Remote tunnels | VS Code Remote Tunnels shows the value of outbound tunnel UX | rdev keeps the outbound shape but adds agent policy, signing, approvals, and audit |
+| GUI remote support | RustDesk/MeshCentral can provide screen-level control | use as explicit GUI adapters, never as default agent authority |
+| Supply-chain signing | Sigstore/Cosign-style verification and platform code signing | signed manifests, checksums, Authenticode/notarization policy, and release roots |
 
 Useful references:
 
 - MCP Tools: https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+- MCP Authorization: https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
 - PowerShell execution policies: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies
 - Get-AuthenticodeSignature: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature
 - Tailscale auth keys: https://tailscale.com/docs/features/access-control/auth-keys
 - Tailscale ephemeral nodes: https://tailscale.com/docs/features/ephemeral-nodes
+- Sigstore Cosign verification: https://docs.sigstore.dev/cosign/verifying/verify/
+- Coder Agents: https://coder.com/docs/ai-coder/agents
+- DevPod devcontainers: https://devpod.sh/docs/developing-in-workspaces/devcontainer-json
+- VS Code Remote Tunnels: https://code.visualstudio.com/docs/remote/tunnels
+- RustDesk self-host: https://rustdesk.com/docs/en/self-host/
 - systemd service units: https://www.freedesktop.org/software/systemd/man/systemd.service.html
 - Apple launchd jobs: https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html
 - OpenSSH sshd_config: https://man.openbsd.org/sshd_config
+
+## Buy Versus Build Boundary
+
+The project should reuse mature transport, workspace, GUI, and signing ecosystems where they are strong. It must build the agent-specific safety kernel because that is the missing layer.
+
+### Build In rdev
+
+| Area | Why rdev owns it |
+|---|---|
+| ticket and enrollment model | agents need consented, scoped, revocable sessions rather than ambient access |
+| canonical signed job envelopes | existing remote tools do not bind agent intent, host identity, policy, nonce, expiry, and approvals into one execution contract |
+| host-side policy engine | gateway approval alone is not enough when prompts, clients, or transports fail |
+| approval gates | dangerous operations need human decisions that agents cannot self-grant |
+| evidence bundles | remote coding needs diff/test/artifact/audit evidence, not only terminal output |
+| adapter contract | Codex, Claude Code, shell, PowerShell, Git, GUI, and workspace platforms need one safety wrapper |
+| audit hash chain | users need independent verification of what happened after a remote session |
+| safe bootstrap | one-command convenience must still verify release trust and avoid hidden persistence |
+
+### Reuse Or Integrate
+
+| Existing layer | Use it for | Do not use it as |
+|---|---|---|
+| MCP | agent-facing tool invocation and schema contracts | the authorization model for host execution |
+| OAuth/OIDC | HTTP MCP and operator/client authentication | a substitute for host-bound job signatures |
+| Tailscale/headscale | managed-device reachability and inventory hints | job authorization |
+| SSH/OpenSSH certs | owned-host fallback and admin diagnostics | temporary third-party default |
+| Coder | governed cloud workspaces and agent workspaces | the entire rdev control/audit/approval model |
+| DevPod/devcontainers | reproducible disposable workspaces | host enrollment or approvals |
+| VS Code Remote Tunnels | inspiration for outbound tunnel UX | an agent job protocol |
+| RustDesk/MeshCentral | explicit GUI view/control adapter | hidden default control channel |
+| Sigstore/Cosign/platform signing | release verification and supply-chain trust | runtime job approval |
+
+This boundary prevents the project from rebuilding every remote development product while still solving the part those products do not solve: safe delegation from autonomous agents to real machines.
 
 ## Reference Deployment
 
@@ -743,6 +843,20 @@ Adapter priority:
 
 The safe shell adapter is necessary, but it is not the final abstraction. Coding work should prefer agent-native adapters or structured protocols wherever possible.
 
+### Adapter Taxonomy
+
+Adapters fall into five families. The family determines default approvals, expected evidence, and how much ambient authority the adapter may hold.
+
+| Family | Adapters | Primary use | Default authority |
+|---|---|---|---|
+| diagnostic | `host.inspect`, `shell`, `powershell`, `logs` | understand the machine before changing it | observe and bounded commands |
+| workspace | `git`, `filesystem`, `tests`, `browser-e2e` | change and verify project workspaces | scoped write with locks |
+| coding-agent | `codex`, `claude-code`, `opencode`, `acp` | delegate implementation to a local coding CLI/protocol | scoped workspace plus evidence |
+| infrastructure | `coder`, `devpod`, `ssh`, `mesh` | reach or provision owned development environments | transport/workspace only |
+| interactive | `gui`, `rustdesk`, `meshcentral`, native screen APIs | last-resort visual repair and support | explicit view/control approval |
+
+Adding an adapter means implementing the adapter contract and mapping its actions to capabilities. It must not add a private side channel around policy, approvals, workspace locks, redaction, or audit.
+
 ### Adapter Execution Rules
 
 All adapters must implement the same safety shell:
@@ -770,6 +884,23 @@ Adapter-specific policy:
 | `browser-e2e` | browser evidence and tests | scoped URLs and artifact redaction |
 | `gui` | last-resort support | visible consent, separate view/control approvals |
 | `mesh` | connectivity helper | never authorizes execution by itself |
+| `coder` | governed remote workspace integration | workspace provider only; rdev still signs jobs and audits evidence |
+| `devpod` | disposable devcontainer workspace integration | provision/run workspace, not host enrollment authority |
+
+### Third-Party Runtime Integration
+
+Existing products should be integrated as runtimes behind rdev, not made the security root.
+
+| Runtime | Integration shape | Why |
+|---|---|---|
+| Coder | `workspace` adapter that creates/selects a Coder workspace, then runs an rdev host or agent adapter inside it | Coder is strong at governed workspaces and agent infrastructure |
+| DevPod | `workspace` adapter that provisions a devcontainer and exposes it as a bounded workspace | DevPod is strong at reproducible disposable environments |
+| VS Code Remote Tunnels | optional operator/developer access path for owned hosts | useful tunnel UX, but not an agent execution contract |
+| DesktopCommanderMCP-like tools | local-host adapter for filesystem/process primitives | useful capability backend, but must sit behind rdev policy |
+| SSH MCP tools | managed-host fallback transport | useful for owned hosts; unsafe as temporary third-party default |
+| RustDesk/MeshCentral | GUI adapter | use only with visible consent and separate approvals |
+
+The integration rule is simple: rdev can call other systems, but other systems do not get to bypass rdev's signed jobs, capability rings, approval gates, and audit.
 
 ### Coding Adapter Contract
 
@@ -1277,15 +1408,22 @@ Done or nearly done:
 - host-side shell artifact redaction;
 - revocation canceling queued/running jobs;
 - acceptance-test checklist.
+- host identity storage wired into registration and job binding;
+- nonce replay cache;
+- hash-chained audit export verifier.
 
 Still required:
 
-- host identity storage wired into registration and job binding;
-- nonce replay cache;
-- hash-chained audit export verifier;
 - stronger workspace and symlink escape tests;
 - policy explanation for every denial/approval;
 - local evidence bundle export.
+
+Exit criteria:
+
+- `./scripts/check.sh` passes;
+- local demo creates ticket, registers host, signs job, executes allowlisted job, stores artifact, exports verifiable audit chain;
+- host rejects tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, and workspace-escaping jobs;
+- README quick start can be followed by a fresh developer.
 
 ### Gate 2: Build the Temporary Windows MVP (`v0.2`)
 
@@ -1299,6 +1437,15 @@ Still required:
 - no-persistence inspection script;
 - local-user approval prompt for elevation/GUI/service requests.
 
+Exit criteria:
+
+- clean Windows 10/11 VM joins from one visible command;
+- bootstrap verifies verifier and host binary before execution;
+- host connects outbound only over HTTPS/WSS or polling fallback;
+- package install/elevation/GUI/service requests pause for approval;
+- host revoke cancels work;
+- no Windows Service, scheduled task, Run key, startup shortcut, or firewall rule is left by temporary mode.
+
 ### Gate 3: Build Managed Mac Coding (`v0.3`)
 
 - host identity protected storage;
@@ -1310,6 +1457,14 @@ Still required:
 - managed host health and uninstall command;
 - artifact bundle review flow.
 
+Exit criteria:
+
+- Eitan's managed Mac reconnects after reboot;
+- Lucky can select the host through MCP;
+- Codex runs in a locked Git worktree;
+- result includes changed files, diff, tests, adapter artifact, audit slice, and residual risk;
+- push, merge, deploy, credential changes, and service changes require approval.
+
 ### Gate 4: Generalize To Multi-Host (`v0.4`)
 
 - durable gateway storage;
@@ -1319,6 +1474,14 @@ Still required:
 - Claude Code and ACP adapters;
 - artifact streaming;
 - mesh transport adapter.
+
+Exit criteria:
+
+- one gateway manages multiple Mac/Windows/Linux hosts;
+- service install/uninstall works per OS;
+- trust-bundle rotation reaches managed hosts and rejects rollback;
+- artifact streaming and audit spool survive reconnects;
+- adapter SDK can add a new adapter without changing the safety kernel.
 
 ### Gate 5: Public v1.0 Skillkit (`v1.0`)
 
@@ -1330,6 +1493,14 @@ Still required:
 - deployment guide;
 - acceptance demos;
 - disclosure policy.
+
+Exit criteria:
+
+- external user can install skills and MCP server without Hermes-specific assumptions;
+- hosted and self-hosted docs are complete;
+- release artifacts are signed and verifiable;
+- golden path videos or transcripts exist for Temporary Windows Repair and Managed Coding;
+- security policy, threat model, and release process are public and current.
 
 ## Final Architecture Decisions
 
