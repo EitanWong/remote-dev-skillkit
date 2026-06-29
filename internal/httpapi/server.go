@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -194,8 +197,16 @@ func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case resource == "jobs" && action == "next":
-		job, ok, err := s.Gateway.NextJobForHost(hostID)
+		wait, err := parseLongPollWait(r)
 		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		job, ok, err := s.nextJobForHost(r.Context(), hostID, wait)
+		if err != nil {
+			if err == context.Canceled {
+				return
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -206,6 +217,29 @@ func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	default:
 		writeError(w, http.StatusNotFound, "unknown host subresource")
+	}
+}
+
+func (s Server) nextJobForHost(ctx context.Context, hostID string, wait time.Duration) (model.Job, bool, error) {
+	if wait <= 0 {
+		return s.Gateway.NextJobForHost(hostID)
+	}
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		job, ok, err := s.Gateway.NextJobForHost(hostID)
+		if err != nil || ok {
+			return job, ok, err
+		}
+		select {
+		case <-ctx.Done():
+			return model.Job{}, false, ctx.Err()
+		case <-deadline.C:
+			return model.Job{}, false, nil
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -358,6 +392,25 @@ func (s Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": s.Gateway.AuditEvents(),
 	})
+}
+
+func parseLongPollWait(r *http.Request) (time.Duration, error) {
+	query := r.URL.Query()
+	if raw := query.Get("wait_ms"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 || value > 60000 {
+			return 0, fmt.Errorf("wait_ms must be between 0 and 60000")
+		}
+		return time.Duration(value) * time.Millisecond, nil
+	}
+	if raw := query.Get("wait_seconds"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 || value > 60 {
+			return 0, fmt.Errorf("wait_seconds must be between 0 and 60")
+		}
+		return time.Duration(value) * time.Second, nil
+	}
+	return 0, nil
 }
 
 func splitHostAction(path string) (hostID string, action string, ok bool) {

@@ -381,6 +381,81 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	}
 }
 
+func TestHostServeLongPollWaitsAndCompletesDevJob(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+
+	go func() {
+		processed, err := app.pollAndRunDevJobs(ctx, hostServeOptions{
+			GatewayURL:      server.URL,
+			Transport:       "long-poll",
+			LongPollTimeout: time.Second,
+			MaxJobs:         1,
+		}, host.ID, "")
+		if err != nil {
+			done <- err
+			return
+		}
+		if processed != 1 {
+			done <- errors.New("expected one processed long-poll job")
+			return
+		}
+		done <- nil
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	completed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected job succeeded, got %s", completed.Status)
+	}
+}
+
 func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())

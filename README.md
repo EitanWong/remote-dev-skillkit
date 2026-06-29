@@ -56,6 +56,7 @@ Implemented now:
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
 - Local dev host registration, job polling, and job completion loop.
+- Development HTTPS long-poll host job transport via `rdev host serve --transport long-poll`.
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Persistent development gateway signing key files plus host trust pin checks.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
@@ -111,6 +112,7 @@ go run ./cmd/rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_.
 go run ./cmd/rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev-verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
 go run ./cmd/rdev host serve --mode temporary
+go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll
 ```
 
 ## Design Invariants

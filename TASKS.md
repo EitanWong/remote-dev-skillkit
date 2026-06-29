@@ -42,6 +42,7 @@
 - [x] Add signed approval token model for gateway-approved job operations.
 - [x] Add durable host-side approval token consumption store.
 - [x] Finalize endgame operating model, authority separation, maturity gates, and failure conditions in the canonical design.
+- [x] Add development HTTPS long-poll host job transport prototype.
 
 ## Next
 
@@ -79,6 +80,7 @@
 - [x] Add signed approval tokens for package install, elevation, GUI, service changes, push, merge, and deploy operations.
 - [x] Add durable approval-token consumption and persistence.
 - [x] Add gateway/API evidence bundle export directly from job ids.
+- [x] Add HTTPS long-poll fallback before WSS/mTLS transport.
 
 ## Later
 

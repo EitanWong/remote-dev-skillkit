@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -130,7 +131,9 @@ func (a App) host(args []string) error {
 		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
 		name := fs.String("name", "", "host display name; defaults to detected hostname")
 		once := fs.Bool("once", true, "register once and exit after printing status")
+		transport := fs.String("transport", "poll", "host job transport: poll or long-poll")
 		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
+		longPollTimeout := fs.Duration("long-poll-timeout", 25*time.Second, "long-poll wait duration when --transport=long-poll")
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
 		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
 		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
@@ -150,7 +153,9 @@ func (a App) host(args []string) error {
 			ManifestURL:           *manifestURL,
 			Name:                  *name,
 			Once:                  *once,
+			Transport:             *transport,
 			PollInterval:          *pollInterval,
+			LongPollTimeout:       *longPollTimeout,
 			MaxJobs:               *maxJobs,
 			ApprovalTimeout:       *approvalTimeout,
 			TrustPin:              *trustPin,
@@ -173,7 +178,9 @@ type hostServeOptions struct {
 	ManifestURL           string
 	Name                  string
 	Once                  bool
+	Transport             string
 	PollInterval          time.Duration
+	LongPollTimeout       time.Duration
 	MaxJobs               int
 	ApprovalTimeout       time.Duration
 	TrustPin              string
@@ -190,6 +197,14 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	case "temporary", "managed", "break-glass":
 	default:
 		return fmt.Errorf("unsupported host mode %q", opts.Mode)
+	}
+	if opts.Transport == "" {
+		opts.Transport = "poll"
+	}
+	switch opts.Transport {
+	case "poll", "long-poll":
+	default:
+		return fmt.Errorf("unsupported host transport %q", opts.Transport)
 	}
 	if opts.ManifestURL != "" {
 		manifest, err := fetchJoinManifest(ctx, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
@@ -828,6 +843,22 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	if interval <= 0 {
 		interval = time.Second
 	}
+	transport := opts.Transport
+	if transport == "" {
+		transport = "poll"
+	}
+	switch transport {
+	case "poll", "long-poll":
+	default:
+		return 0, fmt.Errorf("unsupported host transport %q", transport)
+	}
+	longPollTimeout := opts.LongPollTimeout
+	if longPollTimeout <= 0 {
+		longPollTimeout = 25 * time.Second
+	}
+	if longPollTimeout > 60*time.Second {
+		longPollTimeout = 60 * time.Second
+	}
 	trust, err := fetchHostTrust(ctx, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
 	if err != nil {
 		return 0, err
@@ -836,11 +867,18 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	trust.ApprovalStore = hostApprovalStore(opts.ApprovalStorePath)
 	processed := 0
 	for processed < maxJobs {
-		job, found, err := fetchNextJob(ctx, opts.GatewayURL, hostID)
+		wait := time.Duration(0)
+		if transport == "long-poll" {
+			wait = longPollTimeout
+		}
+		job, found, err := fetchNextJob(ctx, opts.GatewayURL, hostID, wait)
 		if err != nil {
 			return processed, err
 		}
 		if !found {
+			if transport == "long-poll" {
+				continue
+			}
 			timer := time.NewTimer(interval)
 			select {
 			case <-ctx.Done():
@@ -1052,8 +1090,18 @@ func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.T
 	return payload.Trust, nil
 }
 
-func fetchNextJob(ctx context.Context, gatewayURL, hostID string) (model.Job, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/hosts/"+hostID+"/jobs/next", nil)
+func fetchNextJob(ctx context.Context, gatewayURL, hostID string, wait time.Duration) (model.Job, bool, error) {
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/hosts/" + url.PathEscape(hostID) + "/jobs/next"
+	if wait > 0 {
+		waitMS := wait.Milliseconds()
+		if waitMS < 1 {
+			waitMS = 1
+		}
+		values := url.Values{}
+		values.Set("wait_ms", strconv.FormatInt(waitMS, 10))
+		endpoint += "?" + values.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return model.Job{}, false, err
 	}

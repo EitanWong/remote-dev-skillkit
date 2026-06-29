@@ -63,6 +63,7 @@ rdev host serve \
 - `GET /v1/jobs/{job_id}/artifacts`
 - `GET /v1/jobs/{job_id}/evidence-bundle?out=<directory>`
 - `GET /v1/hosts/{host_id}/jobs/next`
+- `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=<1-60>`
 - `POST /v1/jobs/{job_id}/complete`
 - `POST /v1/jobs/{job_id}/fail`
 - `GET /v1/artifacts/{artifact_id}`
@@ -127,6 +128,7 @@ rdev host serve \
   --gateway http://127.0.0.1:8787 \
   --ticket-code ABCD-1234 \
   --once=false \
+  --transport long-poll \
   --max-jobs=1 \
   --approval-timeout=30s
 ```
@@ -145,6 +147,20 @@ Agents can call the same policy engine through MCP tool `rdev.policy.explain_she
 `rdev host serve` keeps a nonce replay cache for signed job envelopes. By default, this cache is in-memory for the process. When `--nonce-store <path>` is set, used nonces are persisted to a local `0600` JSON file using schema `rdev.host-nonce-store.v1`; the parent directory is created with `0700` permissions. Expired nonce entries are pruned before new entries are written.
 
 When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle, the local host identity fingerprint, and the nonce replay cache, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
+
+For a more realistic outbound host channel during local development, use HTTPS long-poll:
+
+```bash
+rdev host serve \
+  --mode temporary \
+  --gateway http://127.0.0.1:8787 \
+  --ticket-code ABCD-1234 \
+  --once=false \
+  --transport long-poll \
+  --long-poll-timeout=25s
+```
+
+Long-poll uses the same safety path as short polling but holds the host's outbound `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=<n>` request open until a job is available or the wait timeout elapses. This is a development bridge toward WSS/mTLS transport; it is not a production transport by itself.
 
 When `--trust-store <path>` is set, the host persists verified signed trust bundles to a local `0600` JSON file. Future updates must verify against the stored bundle's active signing key, increase sequence, and match `previous_bundle_hash`. If the gateway trust-bundle endpoint is unavailable, the host can use the stored bundle for job verification.
 
@@ -230,7 +246,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed host
 ## Limitations
 
 - In-memory state.
-- No WSS host transport.
+- No production WSS/mTLS host transport. Development HTTPS long-poll is available for local outbound-channel testing.
 - No authentication.
 - No production TLS.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.

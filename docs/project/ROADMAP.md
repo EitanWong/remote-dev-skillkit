@@ -29,6 +29,7 @@ The roadmap implements the canonical [Final System Design](../architecture/FINAL
 - MCP stdio server for tool calls.
 - Development signed job envelopes.
 - Demonstrable local temporary session.
+- Development HTTPS long-poll host job transport.
 - Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, output caps, and failure reporting.
 - Host identity storage wired into registration and job binding.
 - Durable host trust bundle store.
@@ -40,7 +41,7 @@ The roadmap implements the canonical [Final System Design](../architecture/FINAL
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 
-Exit gate: local demo proves ticket, host registration, signed job execution, artifact storage, evidence export, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
+Exit gate: local demo proves ticket, host registration, outbound host job wait through short-poll or long-poll, signed job execution, artifact storage, evidence export, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
 
 ## v0.2.0 Windows Temporary Host
 

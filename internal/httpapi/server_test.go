@@ -460,6 +460,92 @@ func TestJobCreateClaimAndComplete(t *testing.T) {
 	}
 }
 
+func TestHostJobsNextLongPollWaitsForJob(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+	result := make(chan struct {
+		job model.Job
+		err error
+	}, 1)
+
+	go func() {
+		resp, err := http.Get(httpServer.URL + "/v1/hosts/" + host.ID + "/jobs/next?wait_ms=1000")
+		if err != nil {
+			result <- struct {
+				job model.Job
+				err error
+			}{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		var payload struct {
+			Job *model.Job `json:"job"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			result <- struct {
+				job model.Job
+				err error
+			}{err: err}
+			return
+		}
+		if payload.Job == nil {
+			result <- struct {
+				job model.Job
+				err error
+			}{err: nil}
+			return
+		}
+		result <- struct {
+			job model.Job
+			err error
+		}{job: *payload.Job}
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	created, err := gw.CreateJob(host.ID, "shell", "long-poll demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if got.job.ID != created.ID {
+			t.Fatalf("expected job %q, got %q", created.ID, got.job.ID)
+		}
+		if got.job.Status != model.JobStatusRunning {
+			t.Fatalf("expected long-polled job to be running, got %s", got.job.Status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for long-poll result")
+	}
+}
+
+func TestHostJobsNextLongPollTimeoutReturnsNoJob(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next?wait_ms=1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"job":null`)) {
+		t.Fatalf("expected null job after timeout, got %s", rec.Body.String())
+	}
+}
+
 func TestJobEvidenceBundleEndpointExportsBundleFromJobID(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
