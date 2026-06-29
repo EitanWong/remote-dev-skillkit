@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1574,6 +1575,97 @@ func TestReleaseVerifyRejectsTamperedArtifact(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLockStatusAndUnlock(t *testing.T) {
+	repo := t.TempDir()
+	store := filepath.Join(t.TempDir(), "locks")
+	var lockStdout bytes.Buffer
+	app := NewApp(&lockStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"workspace", "lock",
+		"--repo", repo,
+		"--store", store,
+		"--host-id", "hst_cli",
+		"--job-id", "job_cli",
+		"--adapter", "codex",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(lockStdout.String(), `"owner_adapter": "codex"`) {
+		t.Fatalf("expected lock output, got %s", lockStdout.String())
+	}
+
+	var statusStdout bytes.Buffer
+	statusApp := NewApp(&statusStdout, &bytes.Buffer{})
+	if err := statusApp.Run(context.Background(), []string{
+		"workspace", "status",
+		"--repo", repo,
+		"--store", store,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(statusStdout.String(), `"exists": true`) {
+		t.Fatalf("expected existing status, got %s", statusStdout.String())
+	}
+
+	var unlockStdout bytes.Buffer
+	unlockApp := NewApp(&unlockStdout, &bytes.Buffer{})
+	if err := unlockApp.Run(context.Background(), []string{
+		"workspace", "unlock",
+		"--repo", repo,
+		"--store", store,
+		"--job-id", "job_cli",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(unlockStdout.String(), `"removed": true`) {
+		t.Fatalf("expected removal output, got %s", unlockStdout.String())
+	}
+}
+
+func TestWorkspacePrepareWorktreeCreatesGitWorktree(t *testing.T) {
+	requireGitForCLITest(t)
+	repo := initGitRepoForCLITest(t)
+	store := filepath.Join(t.TempDir(), "locks")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"workspace", "prepare-worktree",
+		"--repo", repo,
+		"--store", store,
+		"--host-id", "hst_cli",
+		"--job-id", "job_cli",
+		"--adapter", "codex",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Worktree struct {
+			SchemaVersion string `json:"schema_version"`
+			WorktreePath  string `json:"worktree_path"`
+			Branch        string `json:"branch"`
+			Lock          struct {
+				JobID        string `json:"job_id"`
+				OwnerAdapter string `json:"owner_adapter"`
+			} `json:"lock"`
+		} `json:"worktree"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if payload.Worktree.SchemaVersion != "rdev.git-worktree-plan.v1" {
+		t.Fatalf("unexpected schema %q", payload.Worktree.SchemaVersion)
+	}
+	if payload.Worktree.Branch != "rdev/job_job_cli" {
+		t.Fatalf("unexpected branch %q", payload.Worktree.Branch)
+	}
+	if payload.Worktree.Lock.JobID != "job_cli" || payload.Worktree.Lock.OwnerAdapter != "codex" {
+		t.Fatalf("unexpected lock %#v", payload.Worktree.Lock)
+	}
+	if _, err := os.Stat(filepath.Join(payload.Worktree.WorktreePath, "README.md")); err != nil {
+		t.Fatalf("expected checked out worktree: %v", err)
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 }
@@ -1637,4 +1729,35 @@ func runHostServeWithIdentityStore(t *testing.T, gatewayURL, ticketCode, identit
 		t.Fatalf("expected host identity fingerprint %q, got %q", payload.Identity.Fingerprint, payload.Host.IdentityFingerprint)
 	}
 	return payload.Identity.Fingerprint
+}
+
+func requireGitForCLITest(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+}
+
+func initGitRepoForCLITest(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runGitForCLITest(t, repo, "init")
+	runGitForCLITest(t, repo, "config", "user.email", "rdev-test@example.com")
+	runGitForCLITest(t, repo, "config", "user.name", "Rdev Test")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForCLITest(t, repo, "add", "README.md")
+	runGitForCLITest(t, repo, "commit", "-m", "initial")
+	return repo
+}
+
+func runGitForCLITest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
 }

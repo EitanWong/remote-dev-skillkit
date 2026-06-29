@@ -67,6 +67,7 @@ Implemented now:
 - Local evidence bundle export via `rdev evidence export`.
 - Gateway-backed evidence bundle export from a job id via `rdev evidence export --gateway ... --job-id ...`.
 - Skillkit bundle export via `rdev skillkit export` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
+- Workspace lock and Git worktree foundation via `rdev workspace lock`, `rdev workspace status`, `rdev workspace unlock`, and `rdev workspace prepare-worktree`.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Durable host-side approval token consumption stores with in-memory and file-backed development modes, exposed through `rdev host serve --approval-store`.
@@ -114,6 +115,10 @@ go run ./cmd/rdev audit verify --input .rdev/audit/audit-chain.json
 go run ./cmd/rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl .rdev/audit/events.jsonl --out job_evidence
 go run ./cmd/rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
 go run ./cmd/rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
+go run ./cmd/rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
+go run ./cmd/rdev workspace status --repo .
+go run ./cmd/rdev workspace unlock --repo . --job-id job_...
+go run ./cmd/rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
 go run ./cmd/rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev-verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
 go run ./cmd/rdev host serve --mode temporary

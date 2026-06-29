@@ -87,6 +87,7 @@
 - [x] Add host-bound managed trust bundle update checks for trust-store refresh.
 - [x] Add macOS LaunchAgent plist generation for explicit managed host install.
 - [x] Add macOS LaunchAgent status inspection and safe plist uninstall.
+- [x] Add workspace lock manager and Git worktree preparation foundation.
 
 ## Later
 
@@ -95,6 +96,7 @@
 - [ ] Add OS-protected managed host identity storage and registration proof.
 - [ ] Add Windows Service mode.
 - [ ] Add launchctl start/stop execution and systemd mode.
+- [ ] Wire workspace locks into managed host jobs and adapter execution.
 - [ ] Add acpx adapter.
 - [ ] Add Codex adapter.
 - [ ] Add Claude Code adapter.

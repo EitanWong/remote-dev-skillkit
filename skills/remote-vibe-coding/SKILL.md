@@ -20,7 +20,8 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 1. List hosts with `rdev.hosts.list`.
 2. Inspect capabilities with `rdev.hosts.capabilities`.
 3. Select an adapter: `acpx`, `codex`, `claude`, `shell`, or `powershell`.
-4. Create a job with workspace policy.
-5. Stream status until completion.
-6. Inspect artifacts and audit events.
-7. Request approval before push/merge/deploy.
+4. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
+5. Create a job with workspace policy.
+6. Stream status until completion.
+7. Inspect artifacts and audit events.
+8. Request approval before push/merge/deploy.

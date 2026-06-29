@@ -67,7 +67,8 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - LaunchAgent plist generation with explicit launchctl next steps.
 - LaunchAgent plist status and safe uninstall commands.
 - Host identity protected storage.
-- Workspace locks and Git worktrees.
+- Workspace lock manager and Git worktree preparation foundation.
+- Workspace locks wired into managed host job execution.
 - Codex adapter.
 - Git diff and test evidence bundles.
 - Approval before push, merge, deploy, credential changes, or service changes.

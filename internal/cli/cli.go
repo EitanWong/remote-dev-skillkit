@@ -37,6 +37,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 type App struct {
@@ -79,6 +80,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.evidence(ctx, args[1:])
 	case "skillkit":
 		return a.skillkit(args[1:])
+	case "workspace":
+		return a.workspace(ctx, args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -825,6 +828,90 @@ func (a App) skillkit(args []string) error {
 	}
 }
 
+func (a App) workspace(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing workspace subcommand")
+	}
+	switch args[0] {
+	case "lock":
+		fs := flag.NewFlagSet("workspace lock", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", "", "repository root to lock")
+		store := fs.String("store", "", "workspace lock store directory; defaults to <repo>/.rdev/workspace-locks")
+		hostID := fs.String("host-id", "", "host id acquiring the lock")
+		jobID := fs.String("job-id", "", "job id acquiring the lock")
+		adapter := fs.String("adapter", "", "adapter that owns the lock")
+		worktreePath := fs.String("worktree-path", "", "planned worktree path")
+		baseRef := fs.String("base-ref", "", "planned base ref")
+		branch := fs.String("branch", "", "planned branch")
+		ttl := fs.Duration("ttl", workspace.DefaultLockTTL, "lock TTL")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.workspaceLock(workspace.LockOptions{
+			StoreDir:     *store,
+			RepoRoot:     *repo,
+			HostID:       *hostID,
+			JobID:        *jobID,
+			OwnerAdapter: *adapter,
+			WorktreePath: *worktreePath,
+			BaseRef:      *baseRef,
+			Branch:       *branch,
+			TTL:          *ttl,
+		})
+	case "status":
+		fs := flag.NewFlagSet("workspace status", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", "", "repository root to inspect")
+		store := fs.String("store", "", "workspace lock store directory; defaults to <repo>/.rdev/workspace-locks")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.workspaceStatus(*repo, *store)
+	case "unlock":
+		fs := flag.NewFlagSet("workspace unlock", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", "", "repository root to unlock")
+		store := fs.String("store", "", "workspace lock store directory; defaults to <repo>/.rdev/workspace-locks")
+		jobID := fs.String("job-id", "", "job id that owns the lock")
+		force := fs.Bool("force", false, "remove the lock even if job id does not match")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.workspaceUnlock(*repo, *store, *jobID, *force)
+	case "prepare-worktree":
+		fs := flag.NewFlagSet("workspace prepare-worktree", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", "", "git repository root")
+		store := fs.String("store", "", "workspace lock store directory; defaults to <repo>/.rdev/workspace-locks")
+		hostID := fs.String("host-id", "", "host id preparing the worktree")
+		jobID := fs.String("job-id", "", "job id preparing the worktree")
+		adapter := fs.String("adapter", "codex", "adapter that will own the worktree")
+		baseRef := fs.String("base-ref", "HEAD", "git base ref")
+		branch := fs.String("branch", "", "git branch to create; defaults to rdev/job_<job-id>")
+		worktreeRoot := fs.String("worktree-root", "", "directory for generated worktrees; defaults to <repo>/.rdev/worktrees")
+		worktreePath := fs.String("worktree-path", "", "explicit worktree path")
+		ttl := fs.Duration("ttl", workspace.DefaultLockTTL, "lock TTL")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.workspacePrepareWorktree(ctx, workspace.GitWorktreeOptions{
+			StoreDir:     *store,
+			RepoRoot:     *repo,
+			HostID:       *hostID,
+			JobID:        *jobID,
+			OwnerAdapter: *adapter,
+			BaseRef:      *baseRef,
+			Branch:       *branch,
+			WorktreeRoot: *worktreeRoot,
+			WorktreePath: *worktreePath,
+			TTL:          *ttl,
+		})
+	default:
+		return fmt.Errorf("unknown workspace subcommand %q", args[0])
+	}
+}
+
 func (a App) release(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing release subcommand")
@@ -1089,6 +1176,63 @@ func (a App) skillkitExport(sourceRoot, outPath, gatewayURL string) error {
 	return enc.Encode(payload)
 }
 
+func (a App) workspaceLock(opts workspace.LockOptions) error {
+	lock, err := workspace.NewFileLockStore(opts.StoreDir).Acquire(opts, time.Now())
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":   true,
+		"lock": lock,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) workspaceStatus(repoRoot, storeDir string) error {
+	status, err := workspace.NewFileLockStore(storeDir).Status(repoRoot, time.Now())
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":     true,
+		"status": status,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) workspaceUnlock(repoRoot, storeDir, jobID string, force bool) error {
+	lock, removed, err := workspace.NewFileLockStore(storeDir).Release(repoRoot, jobID, force)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":      true,
+		"removed": removed,
+		"lock":    lock,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) workspacePrepareWorktree(ctx context.Context, opts workspace.GitWorktreeOptions) error {
+	result, err := workspace.PrepareGitWorktree(ctx, opts, time.Now())
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"worktree": result,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev - remote development skillkit
 
@@ -1107,6 +1251,8 @@ Usage:
   rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence
   rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
   rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
+  rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
+  rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234

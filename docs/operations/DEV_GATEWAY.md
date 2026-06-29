@@ -177,6 +177,42 @@ If the host runner rejects a job, the host reports the failure to `POST /v1/jobs
 
 The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, truncation state, duration, redaction rules, and redaction counts.
 
+## Workspace Locks And Git Worktrees
+
+Managed coding jobs should not mutate the primary checkout directly. The development CLI now includes the workspace foundation that future Codex, Claude Code, ACP, and Git adapters will share.
+
+Acquire a one-writer lock for a repository:
+
+```bash
+rdev workspace lock \
+  --repo . \
+  --host-id hst_... \
+  --job-id job_... \
+  --adapter codex
+```
+
+The lock file uses schema `rdev.workspace-lock.v1`, is stored under `<repo>/.rdev/workspace-locks` by default, and is written with `0600` permissions. A second writer for the same canonical repo root is rejected until the lock expires or is released by the owning job.
+
+Inspect or release the lock:
+
+```bash
+rdev workspace status --repo .
+rdev workspace unlock --repo . --job-id job_...
+```
+
+Prepare a Git worktree for a coding adapter:
+
+```bash
+rdev workspace prepare-worktree \
+  --repo . \
+  --host-id hst_... \
+  --job-id job_... \
+  --adapter codex \
+  --base-ref HEAD
+```
+
+The response uses schema `rdev.git-worktree-plan.v1`, records the lock, branch, worktree path, and command evidence for `git rev-parse` and `git worktree add`. If `git worktree add` fails, the CLI releases the lock so another job is not blocked by a failed preparation step.
+
 The host redacts common secret patterns before artifact upload:
 
 - `sk-...` API keys
