@@ -56,12 +56,13 @@
 - [x] Add signed trust bundle rotation/revocation primitive.
 - [x] Add development trust bundle read/update endpoint.
 - [x] Wire host-side job verification to signed trust bundle active keys.
+- [x] Add durable host trust bundle file store.
 
 ## Later
 
 - [ ] Add WSS/mTLS transport.
 - [ ] Add host identity key storage.
-- [ ] Add durable managed host trust bundle storage and update endpoint.
+- [ ] Add production managed host trust bundle update policy endpoint.
 - [ ] Add Windows Service mode.
 - [ ] Add systemd and launchd modes.
 - [ ] Add acpx adapter.

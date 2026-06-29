@@ -237,6 +237,7 @@ The local test suite currently covers:
 - shell artifact schema and redaction metadata.
 - signed trust bundle HTTP read/update flow with rollback rejection.
 - host-side job verification through signed trust bundle active keys, with legacy trust fallback.
+- durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.
 
 The following remain real-environment acceptance tests:
 
@@ -245,5 +246,5 @@ The following remain real-environment acceptance tests:
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall;
 - Codex adapter execution in a locked worktree;
-- durable host trust bundle storage across restart;
+- OS-protected managed host trust storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.

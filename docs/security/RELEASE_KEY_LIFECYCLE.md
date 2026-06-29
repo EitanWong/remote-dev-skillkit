@@ -129,6 +129,8 @@ Managed hosts should accept an update only when:
 - the bundle is inside its validity window;
 - the signing key has not been revoked.
 
+The development host store writes verified trust bundles to a local `0600` JSON file using schema `rdev.host-trust-store.v1`. Production managed hosts should use OS-protected storage where available, but must keep the same update rules.
+
 ## Revocation
 
 Revocation is required when a key is lost, exposed, misused, or suspected compromised.

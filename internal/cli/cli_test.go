@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
@@ -393,7 +394,7 @@ func TestFetchHostTrustFallsBackToLegacyTrustEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	trust, err := fetchHostTrust(context.Background(), server.URL, "")
+	trust, err := fetchHostTrust(context.Background(), server.URL, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,6 +406,48 @@ func TestFetchHostTrustFallsBackToLegacyTrustEndpoint(t *testing.T) {
 	}
 	if trust.Legacy.SigningKeyID != legacy.SigningKeyID {
 		t.Fatalf("expected legacy key %q, got %q", legacy.SigningKeyID, trust.Legacy.SigningKeyID)
+	}
+}
+
+func TestFetchHostTrustPersistsSignedBundle(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	storePath := filepath.Join(t.TempDir(), "trust", "bundle.json")
+
+	trust, err := fetchHostTrust(context.Background(), server.URL, "", storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trust.SignedBundle == nil {
+		t.Fatal("expected signed trust bundle")
+	}
+	if _, err := os.Stat(storePath); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFetchHostTrustUsesStoredBundleWhenGatewayTrustBundleUnavailable(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	storePath := filepath.Join(t.TempDir(), "trust", "bundle.json")
+	store := hosttrust.FileStore{Path: storePath}
+	if err := store.Save(gw.SignedTrustBundle()); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	trust, err := fetchHostTrust(context.Background(), server.URL, "", storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trust.SignedBundle == nil {
+		t.Fatal("expected stored signed trust bundle")
+	}
+	if trust.SignedBundle.Sequence != gw.SignedTrustBundle().Sequence {
+		t.Fatalf("expected stored sequence %d, got %d", gw.SignedTrustBundle().Sequence, trust.SignedBundle.Sequence)
 	}
 }
 

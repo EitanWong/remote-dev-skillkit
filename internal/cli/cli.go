@@ -20,6 +20,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -123,6 +124,7 @@ func (a App) host(args []string) error {
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
 		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
 		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
+		trustStore := fs.String("trust-store", "", "optional local signed trust bundle store path for managed hosts")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -138,6 +140,7 @@ func (a App) host(args []string) error {
 			MaxJobs:               *maxJobs,
 			ApprovalTimeout:       *approvalTimeout,
 			TrustPin:              *trustPin,
+			TrustStorePath:        *trustStore,
 			ManifestRootPublicKey: *manifestRootPublicKey,
 		})
 	default:
@@ -156,6 +159,7 @@ type hostServeOptions struct {
 	MaxJobs               int
 	ApprovalTimeout       time.Duration
 	TrustPin              string
+	TrustStorePath        string
 	ManifestRootPublicKey string
 }
 
@@ -592,7 +596,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	if interval <= 0 {
 		interval = time.Second
 	}
-	trust, err := fetchHostTrust(ctx, opts.GatewayURL, opts.TrustPin)
+	trust, err := fetchHostTrust(ctx, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
 	if err != nil {
 		return 0, err
 	}
@@ -682,16 +686,39 @@ func (t hostTrust) RunDevJob(hostID string, job model.Job, now time.Time) (hostr
 	return hostrunner.Result{}, fmt.Errorf("host trust is not configured")
 }
 
-func fetchHostTrust(ctx context.Context, gatewayURL, trustPin string) (hostTrust, error) {
+func fetchHostTrust(ctx context.Context, gatewayURL, trustPin, trustStorePath string) (hostTrust, error) {
+	store := hosttrust.FileStore{Path: trustStorePath}
 	signed, err := fetchSignedTrustBundle(ctx, gatewayURL, trustPin)
 	if err == nil {
+		if trustStorePath != "" {
+			root, rootErr := activeSigningRoot(signed)
+			if rootErr != nil {
+				return hostTrust{}, rootErr
+			}
+			if storeErr := store.VerifyAndSaveUpdate(signed, root, time.Now()); storeErr != nil {
+				return hostTrust{}, storeErr
+			}
+		}
 		return hostTrust{SignedBundle: &signed}, nil
+	}
+	if stored, ok, storeErr := store.Load(); storeErr != nil {
+		return hostTrust{}, storeErr
+	} else if ok {
+		return hostTrust{SignedBundle: &stored}, nil
 	}
 	legacy, legacyErr := fetchTrustBundle(ctx, gatewayURL, trustPin)
 	if legacyErr != nil {
 		return hostTrust{}, fmt.Errorf("fetch signed trust bundle failed: %v; fallback legacy trust failed: %w", err, legacyErr)
 	}
 	return hostTrust{Legacy: &legacy}, nil
+}
+
+func activeSigningRoot(bundle model.SignedTrustBundle) (model.TrustBundle, error) {
+	key, ok := bundle.Key(bundle.SigningKeyID)
+	if !ok {
+		return model.TrustBundle{}, fmt.Errorf("signed trust bundle missing signing key %q", bundle.SigningKeyID)
+	}
+	return key.TrustBundle(), nil
 }
 
 func encodeRootPublicKey(keyID string, publicKey ed25519.PublicKey) string {
@@ -725,11 +752,10 @@ func fetchSignedTrustBundle(ctx context.Context, gatewayURL, trustPin string) (m
 		}
 		return model.SignedTrustBundle{}, fmt.Errorf("fetch signed trust bundle failed: %s", payload.Error)
 	}
-	key, ok := payload.TrustBundle.Key(payload.TrustBundle.SigningKeyID)
-	if !ok {
-		return model.SignedTrustBundle{}, fmt.Errorf("signed trust bundle missing signing key %q", payload.TrustBundle.SigningKeyID)
+	root, err := activeSigningRoot(payload.TrustBundle)
+	if err != nil {
+		return model.SignedTrustBundle{}, err
 	}
-	root := key.TrustBundle()
 	if err := payload.TrustBundle.Verify(root, time.Now()); err != nil {
 		return model.SignedTrustBundle{}, err
 	}
