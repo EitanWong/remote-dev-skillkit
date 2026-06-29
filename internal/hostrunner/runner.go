@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -183,7 +184,7 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 	if len(missing) > 0 {
 		return requireApproval(job, missing, approved, tokenIDs)
 	}
-	if envelope.Adapter != "shell" {
+	if envelope.Adapter != "shell" && envelope.Adapter != "codex" {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
 			Summary:   "Requested adapter is not supported by this host runner.",
@@ -192,24 +193,24 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 			Retryable: true,
 		}, fmt.Errorf("unsupported dev adapter %q", envelope.Adapter))
 	}
-	if !hasCapability(envelope.Capabilities, "shell.user") {
-		return deny(job, denialSpec{
-			Code:       "missing_capability",
-			Summary:    "Job is missing the shell.user capability.",
-			Detail:     "The host requires shell.user before running the shell adapter.",
-			Adapter:    envelope.Adapter,
-			Capability: "shell.user",
-			Retryable:  true,
-		}, fmt.Errorf("missing shell.user capability"))
-	}
 	if envelope.Workspace.Root == "" {
 		return deny(job, denialSpec{
 			Code:      "workspace_required",
-			Summary:   "Workspace root is required for shell execution.",
-			Detail:    "The shell adapter only runs inside an explicit workspace root.",
+			Summary:   "Workspace root is required for adapter execution.",
+			Detail:    "Host adapters only run inside an explicit workspace root.",
 			Adapter:   envelope.Adapter,
 			Retryable: true,
 		}, fmt.Errorf("workspace root is required"))
+	}
+	if missing := missingAdapterCapability(envelope); missing != "" {
+		return deny(job, denialSpec{
+			Code:       "missing_capability",
+			Summary:    fmt.Sprintf("Job is missing the %s capability.", missing),
+			Detail:     fmt.Sprintf("The host requires %s before running the %s adapter.", missing, envelope.Adapter),
+			Adapter:    envelope.Adapter,
+			Capability: missing,
+			Retryable:  true,
+		}, fmt.Errorf("missing %s capability", missing))
 	}
 	releaseWorkspaceLock, err := acquireWorkspaceLock(hostID, envelope, opts, now)
 	if err != nil {
@@ -220,6 +221,27 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 		if err := consumeApprovalTokens(opts.ApprovalStore, envelope.ApprovalTokens, now); err != nil {
 			return deny(job, approvalTokenDenial(job, err), err)
 		}
+	}
+	if envelope.Adapter == "codex" {
+		execution, err := codexadapter.Execute(codexadapter.Spec{
+			WorkspaceRoot:             envelope.Workspace.Root,
+			WriteScope:                envelope.Workspace.WriteScope,
+			Prompt:                    stringValue(envelope.Payload, "prompt", envelope.Intent),
+			CodexCommand:              stringValue(envelope.Payload, "codex_command", ""),
+			CodexArgs:                 stringSliceValue(envelope.Payload, "codex_args"),
+			VerificationCommands:      stringMatrixValue(envelope.Payload, "verification_commands"),
+			AllowVerificationCommands: stringSliceValue(envelope.Payload, "allow_verification_commands"),
+			MaxDurationSeconds:        envelope.Limits.MaxDurationSeconds,
+			MaxOutputBytes:            envelope.Limits.MaxOutputBytes,
+		})
+		result := Result{ArtifactContent: execution.ArtifactContent()}
+		if err != nil {
+			if denial, ok := codexDenial(job, err); ok {
+				return deny(job, denial, err)
+			}
+			return result, err
+		}
+		return result, nil
 	}
 	execution, err := shelladapter.Execute(shelladapter.Spec{
 		WorkspaceRoot:      envelope.Workspace.Root,
@@ -237,6 +259,23 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 		return result, err
 	}
 	return result, nil
+}
+
+func missingAdapterCapability(envelope model.JobEnvelope) string {
+	switch envelope.Adapter {
+	case "shell":
+		if !hasCapability(envelope.Capabilities, "shell.user") {
+			return "shell.user"
+		}
+	case "codex":
+		if !hasCapability(envelope.Capabilities, "codex.run") {
+			return "codex.run"
+		}
+		if !hasCapability(envelope.Capabilities, "git.diff") {
+			return "git.diff"
+		}
+	}
+	return ""
 }
 
 func acquireWorkspaceLock(hostID string, envelope model.JobEnvelope, opts Options, now time.Time) (func(), error) {
@@ -360,6 +399,53 @@ func stringSliceValue(values map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func stringMatrixValue(values map[string]any, key string) [][]string {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case [][]string:
+		result := make([][]string, 0, len(typed))
+		for _, row := range typed {
+			result = append(result, append([]string(nil), row...))
+		}
+		return result
+	case []any:
+		result := make([][]string, 0, len(typed))
+		for _, item := range typed {
+			switch row := item.(type) {
+			case []string:
+				result = append(result, append([]string(nil), row...))
+			case []any:
+				var values []string
+				for _, cell := range row {
+					if text, ok := cell.(string); ok && text != "" {
+						values = append(values, text)
+					}
+				}
+				if len(values) > 0 {
+					result = append(result, values)
+				}
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func stringValue(values map[string]any, key, fallback string) string {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+		return text
+	}
+	return fallback
 }
 
 type denialSpec struct {
@@ -513,7 +599,6 @@ func workspaceLockDenial(err error) denialSpec {
 			Code:      "workspace_locked",
 			Summary:   "Workspace is already locked by another job.",
 			Detail:    err.Error(),
-			Adapter:   "shell",
 			Retryable: true,
 		}
 	}
@@ -521,8 +606,47 @@ func workspaceLockDenial(err error) denialSpec {
 		Code:      "workspace_invalid",
 		Summary:   "Workspace lock could not be acquired.",
 		Detail:    err.Error(),
-		Adapter:   "shell",
 		Retryable: true,
+	}
+}
+
+func codexDenial(job model.Job, err error) (denialSpec, bool) {
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "not allowlisted"):
+		return denialSpec{
+			Code:      "command_not_allowlisted",
+			Summary:   "Codex verification command is not allowlisted.",
+			Detail:    err.Error(),
+			Adapter:   "codex",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "escapes workspace root"):
+		return denialSpec{
+			Code:      "workspace_escape",
+			Summary:   "Requested write scope escapes the workspace root.",
+			Detail:    err.Error(),
+			Adapter:   "codex",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "prompt is required"):
+		return denialSpec{
+			Code:      "adapter_payload_invalid",
+			Summary:   "Codex prompt is required.",
+			Detail:    err.Error(),
+			Adapter:   "codex",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "path is required") || strings.Contains(text, "resolve path") || strings.Contains(text, "stat path") || strings.Contains(text, "path must be a directory"):
+		return denialSpec{
+			Code:      "workspace_invalid",
+			Summary:   "Workspace root is invalid.",
+			Detail:    err.Error(),
+			Adapter:   "codex",
+			Retryable: true,
+		}, true
+	default:
+		return denialSpec{}, false
 	}
 }
 

@@ -55,8 +55,16 @@ type redactor struct {
 	counts map[string]int
 }
 
+type ArtifactRedactor struct {
+	redactor *redactor
+}
+
 func newRedactor() *redactor {
 	return &redactor{counts: map[string]int{}}
+}
+
+func NewArtifactRedactor() *ArtifactRedactor {
+	return &ArtifactRedactor{redactor: newRedactor()}
 }
 
 func RedactionRuleNames() []string {
@@ -65,6 +73,27 @@ func RedactionRuleNames() []string {
 		names = append(names, rule.name)
 	}
 	return names
+}
+
+func (r *ArtifactRedactor) Redact(input string) string {
+	if r == nil || r.redactor == nil {
+		return input
+	}
+	return r.redactor.Redact(input)
+}
+
+func (r *ArtifactRedactor) Redacted() bool {
+	if r == nil || r.redactor == nil {
+		return false
+	}
+	return r.redactor.Redacted()
+}
+
+func (r *ArtifactRedactor) Counts() map[string]int {
+	if r == nil || r.redactor == nil {
+		return nil
+	}
+	return r.redactor.Counts()
 }
 
 func (r *redactor) Redact(input string) string {

@@ -90,6 +90,7 @@
 - [x] Add macOS LaunchAgent status inspection and safe plist uninstall.
 - [x] Add workspace lock manager and Git worktree preparation foundation.
 - [x] Wire workspace locks into hostrunner, host serve, and managed LaunchAgent arguments.
+- [x] Add Codex adapter MVP with locked-workspace execution, Git diff/status evidence, optional verification command evidence, output caps, and redaction.
 
 ## Later
 
@@ -99,7 +100,7 @@
 - [ ] Add Windows Service mode.
 - [ ] Add launchctl start/stop execution and systemd mode.
 - [ ] Add acpx adapter.
-- [ ] Add Codex adapter.
+- [ ] Harden Codex adapter with conformance tests, cancellation, richer test report parsing, and push/merge/deploy approval enforcement.
 - [ ] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
 - [ ] Add RustDesk/MeshCentral adapter.
@@ -120,6 +121,7 @@
 - [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.
 - [x] Agent Skillkit can be exported as a checksummed bundle for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
+- [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 
 ## Definition Of Done For v0.1.0

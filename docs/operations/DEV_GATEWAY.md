@@ -177,6 +177,35 @@ If the host runner rejects a job, the host reports the failure to `POST /v1/jobs
 
 The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, truncation state, duration, redaction rules, and redaction counts.
 
+The development Codex adapter uses the same host safety path. Create an `adapter=codex` job with `codex.run` and `git.diff` capabilities:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+  -H 'content-type: application/json' \
+  -d '{
+    "host_id": "hst_...",
+    "adapter": "codex",
+    "intent": "update README",
+    "policy": {
+      "workspace_root": ".",
+      "capabilities": ["codex.run", "git.diff"],
+      "prompt": "Update README and keep the change scoped to this repository.",
+      "verification_commands": [["git", "status", "--short"]],
+      "allow_verification_commands": ["git"],
+      "max_duration_seconds": 1800,
+      "max_output_bytes": 1048576
+    }
+  }'
+```
+
+By default the adapter runs:
+
+```bash
+codex exec -C <workspace_root> --sandbox workspace-write --json <prompt>
+```
+
+For deterministic local tests, signed job payloads may override `codex_command` and `codex_args`. The result artifact uses schema `rdev.codex-result.v1` and includes Codex command output, Git status, Git diff/stat, optional verification command results, output truncation flags, duration, redaction rules, and redaction counts. Verification commands must be allowlisted through `allow_verification_commands`.
+
 ## Workspace Locks And Git Worktrees
 
 Managed coding jobs should not mutate the primary checkout directly. The development CLI now includes the workspace foundation that future Codex, Claude Code, ACP, and Git adapters will share.

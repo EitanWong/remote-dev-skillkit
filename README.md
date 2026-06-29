@@ -71,6 +71,7 @@ Implemented now:
 - Skillkit bundle export via `rdev skillkit export` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Workspace lock and Git worktree foundation via `rdev workspace lock`, `rdev workspace status`, `rdev workspace unlock`, and `rdev workspace prepare-worktree`.
 - Host job execution can enforce one-writer workspace locks through `rdev host serve --workspace-lock-store`.
+- Codex adapter MVP through `adapter=codex`: runs `codex exec` or a signed payload-provided command inside the validated workspace, requires `codex.run` and `git.diff`, captures `rdev.codex-result.v1` evidence with Codex output, Git status, Git diff/stat, optional verification command results, output caps, and redaction.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Durable host-side approval token consumption stores with in-memory and file-backed development modes, exposed through `rdev host serve --approval-store`.
@@ -122,6 +123,7 @@ go run ./cmd/rdev workspace lock --repo . --host-id hst_... --job-id job_... --a
 go run ./cmd/rdev workspace status --repo .
 go run ./cmd/rdev workspace unlock --repo . --job-id job_...
 go run ./cmd/rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
+curl -s -X POST http://127.0.0.1:8787/v1/jobs -H 'content-type: application/json' -d '{"host_id":"hst_...","adapter":"codex","intent":"update README","policy":{"workspace_root":".","capabilities":["codex.run","git.diff"],"prompt":"Update README and run checks.","verification_commands":[["git","status","--short"]],"allow_verification_commands":["git"],"max_duration_seconds":1800,"max_output_bytes":1048576}}'
 go run ./cmd/rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev-verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
 go run ./cmd/rdev host serve --mode temporary

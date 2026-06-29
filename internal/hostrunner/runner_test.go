@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -401,6 +402,81 @@ func TestRunDevJobReleasesWorkspaceLockAfterAdapterDenial(t *testing.T) {
 	}
 }
 
+func TestRunDevJobExecutesCodexAdapterWithWorkspaceLock(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeCodex := writeHostrunnerFakeCodex(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nchanged by hostrunner codex\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake codex wrote README")
+}
+`)
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	job, err := gw.CreateJob(host.ID, "codex", "update README", map[string]any{
+		"workspace_root":              repo,
+		"capabilities":                []string{"codex.run", "git.diff"},
+		"prompt":                      "update README",
+		"codex_command":               "go",
+		"codex_args":                  []string{"run", fakeCodex},
+		"verification_commands":       [][]string{{"git", "status", "--short"}},
+		"allow_verification_commands": []string{"git"},
+		"max_duration_seconds":        30,
+		"max_output_bytes":            64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore: lockStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.codex-result.v1"`) {
+		t.Fatalf("expected codex result artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, "changed by hostrunner codex") {
+		t.Fatalf("expected diff evidence in codex artifact, got %s", result.ArtifactContent)
+	}
+	status, err := workspace.NewFileLockStore(lockStore).Status(repo, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Exists {
+		t.Fatalf("expected workspace lock release after codex execution, got %#v", status)
+	}
+}
+
+func TestRunDevJobRejectsCodexWithoutCapability(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	job, err := gw.CreateJob(host.ID, "codex", "demo", map[string]any{
+		"workspace_root": repo,
+		"capabilities":   []string{"git.diff"},
+		"prompt":         "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "missing_capability")
+	if !strings.Contains(result.ArtifactContent, `"capability": "codex.run"`) {
+		t.Fatalf("expected missing codex.run capability, got %s", result.ArtifactContent)
+	}
+}
+
 func TestRunDevJobRejectsWrongHost(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -554,7 +630,7 @@ func TestRunDevJobRejectsUnsupportedAdapterWithDenial(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
 	host := activeHost(t, gw)
-	job, err := gw.CreateJob(host.ID, "codex", "demo", map[string]any{
+	job, err := gw.CreateJob(host.ID, "powershell", "demo", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user"},
 	})
@@ -661,6 +737,42 @@ func hostrunnerTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey)
 		t.Fatal(err)
 	}
 	return publicKey, privateKey
+}
+
+func initHostrunnerGitRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for hostrunner codex adapter tests")
+	}
+	repo := t.TempDir()
+	runHostrunnerGit(t, repo, "init")
+	runHostrunnerGit(t, repo, "config", "user.email", "test@example.com")
+	runHostrunnerGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runHostrunnerGit(t, repo, "add", "README.md")
+	runHostrunnerGit(t, repo, "commit", "-m", "initial")
+	return repo
+}
+
+func runHostrunnerGit(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repo
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
+	}
+}
+
+func writeHostrunnerFakeCodex(t *testing.T, source string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fakecodex.go")
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func assertDenial(t *testing.T, result Result, err error, wantCode string) {

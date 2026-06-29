@@ -256,6 +256,7 @@ The local test suite currently covers:
 - macOS LaunchAgent plist status and safe uninstall through `rdev host service-status` and `rdev host uninstall-service`, including label-mismatch refusal to avoid deleting unrelated plists.
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.
 - workspace lock enforcement during host execution through `rdev host serve --workspace-lock-store`, including hostrunner lock acquire/release, `workspace_locked` structured denial artifacts, lock release after adapter denial, and managed LaunchAgent `--workspace-lock-store` argument generation.
+- Codex adapter MVP through `adapter=codex`, including `codex.run` and `git.diff` capability checks, locked-workspace hostrunner execution, `rdev.codex-result.v1` artifacts, Git status/diff evidence, optional allowlisted verification command evidence, output caps, redaction, and lock release after execution.
 
 The following remain real-environment acceptance tests:
 
@@ -263,6 +264,6 @@ The following remain real-environment acceptance tests:
 - Windows Authenticode verification against a real code-signing certificate;
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall;
-- Codex adapter execution in a locked worktree;
+- production-hardened Codex adapter conformance, cancellation, richer test report parsing, and approval enforcement for push/merge/deploy;
 - OS-protected managed host trust and identity storage beyond file-backed dev mode;
 - WSS/mTLS transport under NAT.
