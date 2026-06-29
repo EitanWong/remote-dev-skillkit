@@ -10,7 +10,7 @@
 - [ ] Sign and verify the release manifest index.
 - [ ] Export and verify the Skillkit bundle with `rdev skillkit export` and `rdev skillkit verify`.
 - [ ] Prepare a local release candidate with `rdev release prepare-candidate`.
-- [ ] Verify the local release candidate with `rdev release verify-candidate` once implemented.
+- [ ] Verify the local release candidate with `rdev release verify-candidate`.
 - [ ] Create signed release bundle index with `rdev release create-bundle`.
 - [ ] Verify signed release bundle index with `rdev release verify-bundle`.
 - [ ] Verify the same signed bundle with standalone `rdev-verify --bundle`.

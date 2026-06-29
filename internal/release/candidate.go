@@ -1,6 +1,7 @@
 package release
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 )
 
 const CandidateSchemaVersion = "rdev.release-candidate.v1"
+const CandidateVerificationSchemaVersion = "rdev.release-candidate-verification.v1"
 
 type CandidateOptions struct {
 	SourceRoot        string
@@ -68,6 +70,59 @@ type CandidateFile struct {
 	SHA256    string `json:"sha256"`
 	SizeBytes int64  `json:"size_bytes"`
 	Kind      string `json:"kind"`
+}
+
+type CandidateVerifyOptions struct {
+	CandidatePath     string
+	RequiredArtifacts []string
+	GeneratedAt       time.Time
+}
+
+type CandidateVerification struct {
+	SchemaVersion        string                      `json:"schema_version"`
+	CandidatePath        string                      `json:"candidate_path"`
+	CandidateDir         string                      `json:"candidate_dir"`
+	Version              string                      `json:"version,omitempty"`
+	GeneratedAt          time.Time                   `json:"generated_at"`
+	RootPublicKey        string                      `json:"root_public_key,omitempty"`
+	RequiredArtifacts    []string                    `json:"required_artifacts,omitempty"`
+	Checks               []CandidateCheck            `json:"checks"`
+	Files                []CandidateFileVerification `json:"files"`
+	BundleVerification   BundleVerification          `json:"bundle_verification"`
+	SkillkitVerification skillkit.VerificationReport `json:"skillkit_verification"`
+	RecommendedActions   []string                    `json:"recommended_actions,omitempty"`
+}
+
+type CandidateFileVerification struct {
+	Path           string           `json:"path"`
+	Kind           string           `json:"kind,omitempty"`
+	ExpectedSHA256 string           `json:"expected_sha256,omitempty"`
+	ActualSHA256   string           `json:"actual_sha256,omitempty"`
+	ExpectedSize   int64            `json:"expected_size,omitempty"`
+	ActualSize     int64            `json:"actual_size,omitempty"`
+	Checks         []CandidateCheck `json:"checks"`
+}
+
+func (v CandidateVerification) OK() bool {
+	if len(v.Checks) == 0 || len(v.Files) == 0 {
+		return false
+	}
+	for _, check := range v.Checks {
+		if !check.Passed {
+			return false
+		}
+	}
+	for _, file := range v.Files {
+		if len(file.Checks) == 0 {
+			return false
+		}
+		for _, check := range file.Checks {
+			if !check.Passed {
+				return false
+			}
+		}
+	}
+	return v.BundleVerification.OK() && v.SkillkitVerification.OK()
 }
 
 func (c Candidate) OK() bool {
@@ -210,6 +265,99 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 		return Candidate{}, err
 	}
 	return candidate, nil
+}
+
+func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error) {
+	candidatePath, candidateDir, err := resolveCandidateInput(opts.CandidatePath)
+	if err != nil {
+		return CandidateVerification{}, err
+	}
+	now := opts.GeneratedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	verification := CandidateVerification{
+		SchemaVersion:     CandidateVerificationSchemaVersion,
+		CandidatePath:     candidatePath,
+		CandidateDir:      candidateDir,
+		GeneratedAt:       now.UTC(),
+		RequiredArtifacts: cleanStringList(opts.RequiredArtifacts),
+	}
+	add := func(name string, passed bool, detail string) {
+		verification.Checks = append(verification.Checks, CandidateCheck{Name: name, Passed: passed, Detail: detail})
+	}
+
+	content, err := os.ReadFile(candidatePath)
+	add("candidate_file_exists", err == nil, candidatePath)
+	if err != nil {
+		verification.RecommendedActions = failedCandidateVerificationActions()
+		return verification, nil
+	}
+	var candidate Candidate
+	err = json.Unmarshal(content, &candidate)
+	add("candidate_json_valid", err == nil, errorDetail(err))
+	if err != nil {
+		verification.RecommendedActions = failedCandidateVerificationActions()
+		return verification, nil
+	}
+	verification.Version = candidate.Version
+	verification.RootPublicKey = candidate.RootPublicKey
+	add("candidate_schema", candidate.SchemaVersion == CandidateSchemaVersion, candidate.SchemaVersion)
+	add("candidate_version_present", strings.TrimSpace(candidate.Version) != "", candidate.Version)
+	add("candidate_files_present", len(candidate.Files) > 0, fmt.Sprintf("%d", len(candidate.Files)))
+	add("candidate_artifacts_present", len(candidate.Artifacts) > 0, fmt.Sprintf("%d", len(candidate.Artifacts)))
+
+	root, rootErr := parseCandidateRootPublicKey(candidate.RootPublicKey)
+	add("candidate_root_public_key_valid", rootErr == nil, errorDetail(rootErr))
+	if rootErr == nil {
+		releaseBundlePath := filepath.Join(candidateDir, "release-bundle.json")
+		add("release_bundle_exists", pathExists(releaseBundlePath), "release-bundle.json")
+		bundleVerification, err := VerifyBundle(releaseBundlePath, root, opts.RequiredArtifacts)
+		if err != nil {
+			add("release_bundle_readable", false, err.Error())
+		} else {
+			verification.BundleVerification = bundleVerification
+			add("release_bundle_verified", bundleVerification.OK(), failedBundleCheckNames(bundleVerification))
+		}
+	}
+
+	skillkitDir := filepath.Join(candidateDir, "skillkit")
+	add("skillkit_dir_exists", dirExists(skillkitDir), "skillkit")
+	skillkitVerification, err := skillkit.Verify(skillkit.VerifyOptions{
+		BundleDir:   skillkitDir,
+		GeneratedAt: now,
+	})
+	if err != nil {
+		add("skillkit_readable", false, err.Error())
+	} else {
+		verification.SkillkitVerification = skillkitVerification
+		add("skillkit_verified", skillkitVerification.OK(), failedSkillkitCheckNames(skillkitVerification))
+	}
+
+	fileVerification, fileChecks := verifyCandidateFiles(candidateDir, candidate.Files)
+	verification.Files = fileVerification
+	for _, check := range fileChecks {
+		verification.Checks = append(verification.Checks, check)
+	}
+
+	checksumChecks := verifyCandidateChecksumFile(candidateDir, candidate.Files)
+	for _, check := range checksumChecks {
+		verification.Checks = append(verification.Checks, check)
+	}
+
+	unlisted, unlistedErr := findUnlistedCandidateFiles(candidateDir, candidate.Files)
+	add("candidate_has_no_unlisted_files", unlistedErr == nil && len(unlisted) == 0, firstNonEmpty(errorDetail(unlistedErr), strings.Join(unlisted, ",")))
+
+	if missing := missingCandidateRequiredArtifacts(candidate, opts.RequiredArtifacts); missing != "" {
+		add("candidate_required_artifacts_present", false, missing)
+	} else {
+		add("candidate_required_artifacts_present", true, strings.Join(cleanStringList(opts.RequiredArtifacts), ","))
+	}
+
+	if !verification.OK() {
+		verification.RecommendedActions = failedCandidateVerificationActions()
+	}
+	return verification, nil
 }
 
 func stageAndSignCandidateArtifacts(outDir string, sources []string, key signing.Key, now time.Time) ([]CandidateArtifact, []string, error) {
@@ -414,4 +562,219 @@ func encodeReleaseRoot(key signing.Key) string {
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func resolveCandidateInput(path string) (string, string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", "", fmt.Errorf("candidate is required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", "", err
+	}
+	if info.IsDir() {
+		return filepath.Join(abs, "release-candidate.json"), abs, nil
+	}
+	return abs, filepath.Dir(abs), nil
+}
+
+func parseCandidateRootPublicKey(value string) (model.TrustBundle, error) {
+	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return model.TrustBundle{}, fmt.Errorf("root public key must be key_id:base64url_public_key")
+	}
+	key, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return model.TrustBundle{}, err
+	}
+	if len(key) != ed25519.PublicKeySize {
+		return model.TrustBundle{}, fmt.Errorf("root public key must be %d bytes", ed25519.PublicKeySize)
+	}
+	return model.NewTrustBundle(parts[0], ed25519.PublicKey(key)), nil
+}
+
+func verifyCandidateFiles(candidateDir string, files []CandidateFile) ([]CandidateFileVerification, []CandidateCheck) {
+	seen := map[string]bool{}
+	var duplicate []string
+	var unsafe []string
+	var verified []CandidateFileVerification
+	for _, file := range files {
+		result := CandidateFileVerification{
+			Path:           file.Path,
+			Kind:           file.Kind,
+			ExpectedSHA256: file.SHA256,
+			ExpectedSize:   file.SizeBytes,
+		}
+		add := func(name string, passed bool, detail string) {
+			result.Checks = append(result.Checks, CandidateCheck{Name: name, Passed: passed, Detail: detail})
+		}
+		if seen[file.Path] {
+			duplicate = append(duplicate, file.Path)
+		}
+		seen[file.Path] = true
+		safe := safeCandidatePath(file.Path)
+		if !safe {
+			unsafe = append(unsafe, file.Path)
+		}
+		add("file_path_safe", safe, file.Path)
+		add("expected_sha256_format", strings.HasPrefix(file.SHA256, "sha256:") && isHexSHA256String(strings.TrimPrefix(file.SHA256, "sha256:")), file.SHA256)
+		add("expected_size_valid", file.SizeBytes >= 0, fmt.Sprintf("%d", file.SizeBytes))
+		if safe {
+			path := filepath.Join(candidateDir, filepath.FromSlash(file.Path))
+			sha, size, err := fileDigest(path)
+			if err == nil {
+				result.ActualSHA256 = "sha256:" + sha
+				result.ActualSize = size
+			}
+			add("file_exists", err == nil, errorDetail(err))
+			add("file_sha256_matches", err == nil && result.ActualSHA256 == file.SHA256, file.SHA256)
+			add("file_size_matches", err == nil && size == file.SizeBytes, fmt.Sprintf("%d", file.SizeBytes))
+		}
+		verified = append(verified, result)
+	}
+	sort.Strings(duplicate)
+	sort.Strings(unsafe)
+	checks := []CandidateCheck{
+		{Name: "candidate_file_paths_unique", Passed: len(duplicate) == 0, Detail: strings.Join(duplicate, ",")},
+		{Name: "candidate_file_paths_safe", Passed: len(unsafe) == 0, Detail: strings.Join(unsafe, ",")},
+	}
+	return verified, checks
+}
+
+func verifyCandidateChecksumFile(candidateDir string, files []CandidateFile) []CandidateCheck {
+	checksumsPath := filepath.Join(candidateDir, "checksums.txt")
+	content, err := os.ReadFile(checksumsPath)
+	checks := []CandidateCheck{{Name: "checksums_file_exists", Passed: err == nil, Detail: "checksums.txt"}}
+	if err != nil {
+		return checks
+	}
+	expected := map[string]string{}
+	for _, file := range files {
+		if file.Path == "checksums.txt" {
+			continue
+		}
+		expected[file.Path] = strings.TrimPrefix(file.SHA256, "sha256:")
+	}
+	listed := map[string]string{}
+	var malformed []string
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "  ", 2)
+		if len(parts) != 2 || !isHexSHA256String(parts[0]) || !safeCandidatePath(parts[1]) {
+			malformed = append(malformed, line)
+			continue
+		}
+		listed[parts[1]] = parts[0]
+	}
+	var missing []string
+	var mismatch []string
+	for path, sha := range expected {
+		got, ok := listed[path]
+		if !ok {
+			missing = append(missing, path)
+			continue
+		}
+		if got != sha {
+			mismatch = append(mismatch, path)
+		}
+	}
+	var unexpected []string
+	for path := range listed {
+		if _, ok := expected[path]; !ok {
+			unexpected = append(unexpected, path)
+		}
+	}
+	sort.Strings(malformed)
+	sort.Strings(missing)
+	sort.Strings(mismatch)
+	sort.Strings(unexpected)
+	checks = append(checks,
+		CandidateCheck{Name: "checksums_lines_valid", Passed: len(malformed) == 0, Detail: strings.Join(malformed, ",")},
+		CandidateCheck{Name: "checksums_cover_candidate_files", Passed: len(missing) == 0, Detail: strings.Join(missing, ",")},
+		CandidateCheck{Name: "checksums_match_candidate_files", Passed: len(mismatch) == 0, Detail: strings.Join(mismatch, ",")},
+		CandidateCheck{Name: "checksums_have_no_unexpected_files", Passed: len(unexpected) == 0, Detail: strings.Join(unexpected, ",")},
+	)
+	return checks
+}
+
+func findUnlistedCandidateFiles(candidateDir string, files []CandidateFile) ([]string, error) {
+	listed := map[string]bool{"release-candidate.json": true}
+	for _, file := range files {
+		listed[file.Path] = true
+	}
+	var unlisted []string
+	err := filepath.WalkDir(candidateDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(candidateDir, path)
+		if err != nil {
+			return err
+		}
+		candidatePath := filepath.ToSlash(rel)
+		if !listed[candidatePath] {
+			unlisted = append(unlisted, candidatePath)
+		}
+		return nil
+	})
+	sort.Strings(unlisted)
+	return unlisted, err
+}
+
+func safeCandidatePath(path string) bool {
+	if strings.TrimSpace(path) == "" || strings.Contains(path, `\`) {
+		return false
+	}
+	clean := filepath.Clean(filepath.FromSlash(path))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return !filepath.IsAbs(clean) && filepath.VolumeName(clean) == ""
+}
+
+func missingCandidateRequiredArtifacts(candidate Candidate, required []string) string {
+	required = cleanStringList(required)
+	if len(required) == 0 {
+		return ""
+	}
+	seen := map[string]bool{}
+	for _, artifact := range candidate.Artifacts {
+		for _, id := range []string{artifact.Name, artifact.ArtifactPath, filepath.Base(artifact.ArtifactPath)} {
+			if strings.TrimSpace(id) != "" {
+				seen[id] = true
+			}
+		}
+	}
+	var missing []string
+	for _, value := range required {
+		if !seen[value] {
+			missing = append(missing, value)
+		}
+	}
+	sort.Strings(missing)
+	return strings.Join(missing, ",")
+}
+
+func failedCandidateVerificationActions() []string {
+	return []string{
+		"Discard the release candidate and fetch it again from a trusted release source.",
+		"Re-run rdev release prepare-candidate from a clean output directory if you produced this candidate locally.",
+		"Do not publish, install, or use bootstrap artifacts from this candidate until verification passes.",
+	}
 }

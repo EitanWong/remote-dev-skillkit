@@ -261,6 +261,7 @@ The local test suite currently covers:
 - gateway/API evidence bundle export from job ids through `GET /v1/jobs/{job_id}/evidence-bundle` and `rdev evidence export --gateway ... --job-id ...`.
 - Skillkit bundle export and verification through `rdev skillkit export` and `rdev skillkit verify`, including manifest checksums, required skills, MCP contracts, framework install notes, safe bundle paths, listed file SHA-256/size checks, and unlisted-file detection.
 - Release candidate packaging through `rdev release prepare-candidate`, covering staged built artifacts, signed artifact manifests, signed release bundle verification, Skillkit export/verify, checksums, and `rdev.release-candidate.v1` summary generation without publishing to GitHub.
+- release candidate verification through `rdev release verify-candidate`, covering relocated candidates, summary schema, root public key, checksums, signed release bundle verification, required artifacts, Skillkit verification, listed file hashes/sizes, and unlisted-file rejection.
 - structured host-side denial artifacts through `rdev.host-denial.v1`, covering missing envelope, wrong host, identity mismatch, expired/tampered envelopes, replayed nonce, unsupported adapter, missing capability, missing workspace, non-allowlisted command, and workspace escape.
 - CLI host polling reports host-side denials to the dev gateway as failed-job artifacts.
 - development HTTPS long-poll host job transport through `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=...` and `rdev host serve --transport long-poll`.
@@ -281,7 +282,6 @@ The local test suite currently covers:
 
 ## Next Automation Targets
 
-- Release candidate verification: add `rdev release verify-candidate --candidate <dir|json>` so staged or downloaded candidates can be checked independently before publication or installation.
 - Real managed Mac LaunchAgent acceptance execution: review generated plan, start/inspect/stop with `rdev host service-control --execute`, reconnect after reboot, run locked-worktree Codex, verify evidence, and uninstall.
 - Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, approval-required probes, and revocation transcript.
 - Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and evidence bundle checksums for each release candidate.

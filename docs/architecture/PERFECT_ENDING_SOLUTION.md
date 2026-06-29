@@ -779,7 +779,7 @@ Each rung has one proof artifact that can be archived and independently checked.
 
 | Rung | Release promise | Required proof |
 |---|---|---|
-| `v0.1` Local safety kernel | typed jobs, signed envelopes, host validation, denials, approvals, evidence, audit, Skillkit, release candidates | `go test ./...`, `rdev skillkit verify`, `rdev release prepare-candidate`, audit/evidence verifier output |
+| `v0.1` Local safety kernel | typed jobs, signed envelopes, host validation, denials, approvals, evidence, audit, Skillkit, release candidates | `go test ./...`, `rdev skillkit verify`, `rdev release prepare-candidate`, `rdev release verify-candidate`, audit/evidence verifier output |
 | `v0.2` Temporary Windows help | one visible command, outbound-only, verified binary, approval pauses, no persistence | clean Windows 10/11 transcript plus `rdev.acceptance-package.windows-temporary.v1` |
 | `v0.3` Managed Mac coding | explicit LaunchAgent, reconnect, locked-worktree Codex run, diff/tests, approvals | service-backed `rdev.acceptance.managed-mac.v1` plus `rdev acceptance verify` |
 | `v0.4` Managed device generalization | macOS, Windows Service, systemd, trust storage, reconnect, adapter SDK | multi-OS acceptance matrix and adapter conformance reports |
@@ -820,7 +820,6 @@ the remaining gaps that matter before public confidence:
 
 | Gap | Why it matters | Finish line |
 |---|---|---|
-| Candidate verification after download | publishers can prepare candidates, but consumers and CI need a single candidate verifier | `rdev release verify-candidate --candidate <dir|json>` validates summary, checksums, signed bundle, manifests, artifacts, and Skillkit |
 | Real Windows temporary run | the plan, verifier, bootstrap, and packaging exist; the user-facing promise needs a clean VM transcript | clean Windows 10/11 run archived as `rdev.acceptance-package.windows-temporary.v1` |
 | Real managed Mac service run | LaunchAgent planning/control exists; durable reconnect must be proven outside a dry-run | service-backed run survives logout/reboot, completes Codex job, verifies evidence, stops and uninstalls |
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
@@ -834,21 +833,19 @@ Anything not in this ledger is secondary until these are closed.
 
 Finish in this order:
 
-1. Add standalone release candidate verification so downloaded or staged
-   candidates can be checked without trusting the preparer.
-2. Prove temporary Windows acceptance end-to-end: signed release, foreground
+1. Prove temporary Windows acceptance end-to-end: signed release, foreground
    console, outbound-only host loop, no-persistence inspection, approval probes,
    revoke.
-3. Prove real service-backed managed Mac acceptance: plan, start, inspect,
+2. Prove real service-backed managed Mac acceptance: plan, start, inspect,
    login/reboot reconnect, locked-worktree Codex run, verify evidence, stop,
    uninstall.
-4. Production trust lifecycle: authenticated trust updates, revocation
+3. Production trust lifecycle: authenticated trust updates, revocation
    propagation, OS-protected host identity and trust storage.
-5. WSS host channel with HTTPS long-poll fallback and clear lease semantics.
-6. Adapter SDK extraction and public conformance fixtures.
-7. Claude Code and ACP adapters.
-8. Windows Service, systemd managed modes, auto-update, and rollback.
-9. Signed public releases, platform signing, security policy, release transcript
+4. WSS host channel with HTTPS long-poll fallback and clear lease semantics.
+5. Adapter SDK extraction and public conformance fixtures.
+6. Claude Code and ACP adapters.
+7. Windows Service, systemd managed modes, auto-update, and rollback.
+8. Signed public releases, platform signing, security policy, release transcript
    packaging, and open-source launch.
 
 ## Architecture Acceptance Test

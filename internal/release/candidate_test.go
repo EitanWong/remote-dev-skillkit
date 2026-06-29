@@ -66,6 +66,136 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	}
 }
 
+func TestVerifyCandidatePassesAfterDirectoryMove(t *testing.T) {
+	input := t.TempDir()
+	root := t.TempDir()
+	out := filepath.Join(root, "candidate")
+	moved := filepath.Join(root, "downloaded-candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCandidateArtifactForTest(t, input, "rdev", "cli-binary")
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "host-binary")
+	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+
+	_, err = PrepareCandidate(CandidateOptions{
+		SourceRoot:        filepath.Join("..", ".."),
+		OutDir:            out,
+		Version:           "v0.1.0",
+		GatewayURL:        "https://api.example.com/v1",
+		ArtifactPaths:     []string{rdev, host, verify},
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		Key:               key,
+		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(out, moved); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{
+		CandidatePath:     moved,
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		GeneratedAt:       time.Date(2026, 6, 30, 12, 5, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected moved release candidate to verify: %#v", verification.Checks)
+	}
+	if verification.SchemaVersion != CandidateVerificationSchemaVersion {
+		t.Fatalf("unexpected verification schema %q", verification.SchemaVersion)
+	}
+}
+
+func TestVerifyCandidateDetectsTamperedArtifact(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCandidateArtifactForTest(t, input, "rdev", "cli-binary")
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "host-binary")
+	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+
+	_, err = PrepareCandidate(CandidateOptions{
+		SourceRoot:        filepath.Join("..", ".."),
+		OutDir:            out,
+		Version:           "v0.1.0",
+		GatewayURL:        "https://api.example.com/v1",
+		ArtifactPaths:     []string{rdev, host, verify},
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		Key:               key,
+		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "rdev-host.exe"), []byte("tampered"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{
+		CandidatePath:     filepath.Join(out, "release-candidate.json"),
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected tampered release candidate verification to fail")
+	}
+	if !strings.Contains(failedCandidateVerificationNames(verification), "rdev-host.exe:file_sha256_matches") ||
+		!strings.Contains(failedCandidateVerificationNames(verification), "rdev-host.exe:signed_manifest_verifies_artifact") {
+		t.Fatalf("expected artifact and bundle failures, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
+func TestVerifyCandidateRejectsUnlistedFiles(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCandidateArtifactForTest(t, input, "rdev", "cli-binary")
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "host-binary")
+	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+
+	_, err = PrepareCandidate(CandidateOptions{
+		SourceRoot:        filepath.Join("..", ".."),
+		OutDir:            out,
+		Version:           "v0.1.0",
+		GatewayURL:        "https://api.example.com/v1",
+		ArtifactPaths:     []string{rdev, host, verify},
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		Key:               key,
+		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "unexpected.txt"), []byte("extra"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected unlisted release candidate file to fail verification")
+	}
+	if !strings.Contains(failedCandidateVerificationNames(verification), "candidate_has_no_unlisted_files") {
+		t.Fatalf("expected unlisted file failure, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
 func TestPrepareCandidateRejectsDuplicateArtifactNames(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
@@ -89,6 +219,30 @@ func TestPrepareCandidateRejectsDuplicateArtifactNames(t *testing.T) {
 	if !strings.Contains(err.Error(), "duplicate artifact name") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func failedCandidateVerificationNames(verification CandidateVerification) string {
+	var failed []string
+	for _, check := range verification.Checks {
+		if !check.Passed {
+			failed = append(failed, check.Name)
+		}
+	}
+	for _, file := range verification.Files {
+		for _, check := range file.Checks {
+			if !check.Passed {
+				failed = append(failed, file.Path+":"+check.Name)
+			}
+		}
+	}
+	for _, artifact := range verification.BundleVerification.Artifacts {
+		for _, check := range artifact.Checks {
+			if !check.Passed {
+				failed = append(failed, artifact.Name+":"+check.Name)
+			}
+		}
+	}
+	return strings.Join(failed, ",")
 }
 
 func writeCandidateArtifactForTest(t *testing.T, dir, name, content string) string {

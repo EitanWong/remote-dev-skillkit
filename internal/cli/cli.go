@@ -1490,6 +1490,15 @@ func (a App) release(args []string) error {
 			return err
 		}
 		return a.releasePrepareCandidate(*sourceRoot, *out, *version, *gatewayURL, splitCapabilities(*artifacts), splitCapabilities(*requiredArtifacts), *keyPath, *keyID)
+	case "verify-candidate":
+		fs := flag.NewFlagSet("release verify-candidate", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		candidatePath := fs.String("candidate", "", "release candidate directory or release-candidate.json path")
+		requiredArtifacts := fs.String("require-artifacts", "", "comma-separated artifact ids that must be present in the release bundle and candidate summary")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.releaseVerifyCandidate(*candidatePath, splitCapabilities(*requiredArtifacts))
 	default:
 		return fmt.Errorf("unknown release subcommand %q", args[0])
 	}
@@ -1730,6 +1739,43 @@ func (a App) releasePrepareCandidate(sourceRoot, outPath, version, gatewayURL st
 	}
 	if !candidate.OK() {
 		return fmt.Errorf("release candidate preparation failed")
+	}
+	return nil
+}
+
+func (a App) releaseVerifyCandidate(candidatePath string, requiredArtifacts []string) error {
+	if candidatePath == "" {
+		return fmt.Errorf("candidate is required")
+	}
+	verification, err := release.VerifyCandidate(release.CandidateVerifyOptions{
+		CandidatePath:     candidatePath,
+		RequiredArtifacts: requiredArtifacts,
+		GeneratedAt:       time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    verification.OK(),
+		"schema":                verification.SchemaVersion,
+		"candidate":             verification.CandidatePath,
+		"candidate_dir":         verification.CandidateDir,
+		"version":               verification.Version,
+		"root_public_key":       verification.RootPublicKey,
+		"required_artifacts":    verification.RequiredArtifacts,
+		"checks":                verification.Checks,
+		"files":                 verification.Files,
+		"bundle_verification":   verification.BundleVerification,
+		"skillkit_verification": verification.SkillkitVerification,
+		"recommended_actions":   verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("release candidate verification failed")
 	}
 	return nil
 }
@@ -1991,6 +2037,7 @@ Usage:
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
   rdev release verify-bundle --bundle dist/release-bundle.json --root-public-key release-root:...
   rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --key .rdev/keys/release-root.json
+  rdev release verify-candidate --candidate dist/release-candidate --require-artifacts rdev-host.exe,rdev-verify.exe
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist

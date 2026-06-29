@@ -1982,6 +1982,67 @@ func TestReleasePrepareCandidateStagesBundleAndSkillkit(t *testing.T) {
 	}
 }
 
+func TestReleaseVerifyCandidateChecksPreparedCandidate(t *testing.T) {
+	dir := t.TempDir()
+	artifactsDir := filepath.Join(dir, "artifacts")
+	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCLIArtifactForTest(t, artifactsDir, "rdev", "cli-binary")
+	host := writeCLIArtifactForTest(t, artifactsDir, "rdev-host.exe", "host-binary")
+	verifier := writeCLIArtifactForTest(t, artifactsDir, "rdev-verify.exe", "verify-binary")
+	out := filepath.Join(dir, "candidate")
+	keyPath := filepath.Join(dir, "release-root.json")
+	prepareApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := prepareApp.Run(context.Background(), []string{
+		"release", "prepare-candidate",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", out,
+		"--version", "v0.1.0",
+		"--gateway-url", "https://api.example.com/v1",
+		"--artifacts", strings.Join([]string{rdev, host, verifier}, ","),
+		"--require-artifacts", "rdev-host.exe,rdev-verify.exe",
+		"--key", keyPath,
+		"--key-id", "release-root",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"release", "verify-candidate",
+		"--candidate", out,
+		"--require-artifacts", "rdev-host.exe,rdev-verify.exe",
+	}); err != nil {
+		t.Fatalf("expected release candidate verification to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) ||
+		!strings.Contains(verifyStdout.String(), `"schema": "rdev.release-candidate-verification.v1"`) ||
+		!strings.Contains(verifyStdout.String(), "bundle_verification") {
+		t.Fatalf("expected structured candidate verification, got %s", verifyStdout.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(out, "rdev-host.exe"), []byte("tampered"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var tamperedStdout bytes.Buffer
+	tamperedApp := NewApp(&tamperedStdout, &bytes.Buffer{})
+	err := tamperedApp.Run(context.Background(), []string{
+		"release", "verify-candidate",
+		"--candidate", filepath.Join(out, "release-candidate.json"),
+		"--require-artifacts", "rdev-host.exe,rdev-verify.exe",
+	})
+	if err == nil {
+		t.Fatalf("expected tampered release candidate verification to fail: %s", tamperedStdout.String())
+	}
+	if !strings.Contains(tamperedStdout.String(), `"ok": false`) ||
+		!strings.Contains(tamperedStdout.String(), "file_sha256_matches") ||
+		!strings.Contains(tamperedStdout.String(), "signed_manifest_verifies_artifact") {
+		t.Fatalf("expected structured tamper output, got %s", tamperedStdout.String())
+	}
+}
+
 func writeCLIArtifactForTest(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)

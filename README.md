@@ -93,6 +93,7 @@ Implemented now:
 - Signed release bundle indexes via `rdev release create-bundle` / `rdev release verify-bundle`, checking the signed index, every artifact manifest, artifact and manifest SHA-256/size, and required artifact presence before publishing.
 - The standalone `rdev-verify` helper can verify either a single signed artifact manifest or a full signed release bundle before host execution.
 - Release candidate packaging via `rdev release prepare-candidate`, staging built artifacts, signed manifests, a signed release bundle, a verified Skillkit bundle, checksums, and `release-candidate.json`.
+- Release candidate verification via `rdev release verify-candidate`, checking a staged or downloaded candidate's summary, checksums, signed bundle, manifests, artifacts, Skillkit bundle, required artifacts, and unlisted files.
 - Windows bootstrap can hash-pin `rdev-verify.exe` and use it to verify either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host.
 - Host-reported failed jobs with audit events.
 - Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, output caps, schema-versioned redacted evidence, and failure artifacts.
@@ -106,7 +107,6 @@ Not implemented yet:
 - Production signing key storage and rotation.
 - Production key rotation/revocation authentication and durable managed host trust lifecycle.
 - Full production bootstrap trust root lifecycle and release signing policy.
-- Standalone release candidate verification after staging or download.
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
@@ -153,6 +153,7 @@ go run ./cmd/rdev release create-bundle --dir dist --artifacts rdev,rdev-host.ex
 go run ./cmd/rdev release verify-bundle --bundle dist/release-bundle.json --root-public-key release-root:...
 go run ./cmd/rdev-verify --bundle dist/release-bundle.json --root-public-key release-root:... --require-artifacts rdev-host.exe,rdev-verify.exe
 go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json --gateway-url https://api.example.com/v1
+go run ./cmd/rdev release verify-candidate --candidate dist/release-candidate --require-artifacts rdev-host.exe,rdev-verify.exe
 go run ./cmd/rdev host serve --mode temporary
 go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll --workspace-lock-store .rdev/workspace-locks
 go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --plist-out ./com.remote-dev-skillkit.host.plist

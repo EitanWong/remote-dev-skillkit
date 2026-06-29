@@ -117,7 +117,7 @@
 - [x] Wire signed release bundle verification into Windows temporary bootstrap and acceptance-plan verification.
 - [x] Add Windows temporary acceptance evidence packaging for release archival.
 - [x] Add release candidate packaging with staged artifacts, signed manifests, signed release bundle, verified Skillkit, checksums, and summary JSON.
-- [ ] Add standalone release candidate verification for downloaded or staged candidates.
+- [x] Add standalone release candidate verification for downloaded or staged candidates.
 
 ## Later
 
@@ -152,7 +152,7 @@
 - [x] Agent Skillkit can be exported as a checksummed bundle for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Agent Skillkit bundles can be independently verified before installation into Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Release candidates can be packaged locally before GitHub Release publication.
-- [ ] Release candidates can be independently verified after staging or download.
+- [x] Release candidates can be independently verified after staging or download.
 - [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
 - [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.
 - [x] Managed Mac acceptance reports can be independently verified through `rdev acceptance verify`, including checksum and audit-chain validation.
