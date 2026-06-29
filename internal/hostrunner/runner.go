@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
@@ -24,6 +25,7 @@ type Result struct {
 type Options struct {
 	IdentityFingerprint string
 	NonceStore          hostnonce.Store
+	ApprovalStore       hostapproval.Store
 }
 
 type ApprovalRequired struct {
@@ -178,6 +180,11 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 	if len(missing) > 0 {
 		return requireApproval(job, missing, approved, tokenIDs)
 	}
+	if opts.ApprovalStore != nil {
+		if err := consumeApprovalTokens(opts.ApprovalStore, envelope.ApprovalTokens, now); err != nil {
+			return deny(job, approvalTokenDenial(job, err), err)
+		}
+	}
 	if envelope.Adapter != "shell" {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
@@ -222,6 +229,15 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 		return result, err
 	}
 	return result, nil
+}
+
+func consumeApprovalTokens(store hostapproval.Store, tokens []model.ApprovalToken, now time.Time) error {
+	for _, token := range tokens {
+		if err := store.Consume(token, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func hasCapability(values []string, want string) bool {

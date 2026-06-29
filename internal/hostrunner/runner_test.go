@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
@@ -227,6 +228,35 @@ func TestRunDevJobRejectsTamperedApprovalToken(t *testing.T) {
 	job.Envelope = &envelope
 	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
 	assertDenial(t, result, err, "approval_token_signature_invalid")
+}
+
+func TestRunDevJobRejectsConsumedApprovalToken(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "env", "GOOS"},
+		"allow_commands":       []string{"go"},
+		"approvals_required":   []string{"git.push"},
+		"max_output_bytes":     4096,
+		"max_duration_seconds": 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = gw.ApproveJob(job.ID, "git.push", "approved", "test approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := hostapproval.NewMemoryStore()
+	opts := Options{ApprovalStore: store}
+	if _, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts); err != nil {
+		t.Fatalf("expected first approved execution to pass: %v", err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts)
+	assertDenial(t, result, err, "approval_token_consumed")
 }
 
 func TestRunDevJobRejectsWrongHost(t *testing.T) {

@@ -1561,7 +1561,7 @@ Done or nearly done:
 
 Still required:
 
-- durable approval-token consumption and persistence.
+- gateway/API evidence bundle export directly from job ids.
 
 Exit criteria:
 
