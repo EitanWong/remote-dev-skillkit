@@ -5,6 +5,11 @@ substitute for the real Windows VM and managed Mac release gates in
 `docs/project/ACCEPTANCE_TESTS.md`, but they give contributors a deterministic way to
 exercise the same safety loop before a real-environment run.
 
+The target behavior is defined in
+`docs/architecture/ULTIMATE_CLOSURE_DESIGN.md`: typed intent, signed host-bound
+envelopes, host-side validation, workspace locks, approval gates, evidence, audit,
+and revocation.
+
 ## Managed Mac Coding Harness
 
 Run:
@@ -80,3 +85,8 @@ This harness proves the managed test-process path. It does not yet prove:
 - production gateway authentication.
 
 Those remain real-environment acceptance gates.
+
+The next managed Mac acceptance command should prove the LaunchAgent path: generate
+the plist, start it with the documented `launchctl` command, confirm reconnect after
+login or reboot, run the same locked-worktree Codex job, export service-backed
+evidence, and uninstall the service without touching unrelated plists.

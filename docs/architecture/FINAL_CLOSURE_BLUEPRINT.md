@@ -2,7 +2,8 @@
 
 This is the concise closure architecture for Remote Dev Skillkit. It does not replace
 the deeper [Final System Design](FINAL_SYSTEM_DESIGN.md); it turns that design into the
-final product contract that release work should converge on.
+final product contract that release work should converge on. The expanded
+implementation-grade closure target is [Ultimate Closure Design](ULTIMATE_CLOSURE_DESIGN.md).
 
 ## North Star
 

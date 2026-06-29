@@ -5,7 +5,7 @@ This document defines the acceptance gates for the two golden paths in Remote De
 - temporary Windows repair;
 - managed Mac coding.
 
-It also defines the shared security evidence that must be collected before a release can claim support for either path.
+It also defines the shared security evidence that must be collected before a release can claim support for either path. The acceptance model follows [Ultimate Closure Design](../architecture/ULTIMATE_CLOSURE_DESIGN.md): every successful path must prove typed intent, signed host-bound envelopes, host-side validation, approval gates, evidence bundles, audit, and revocation.
 
 ## Evidence Rules
 
@@ -131,6 +131,19 @@ Purpose: prove that an Eitan-owned Mac can run a Lucky-requested coding job thro
 10. Attempt write outside the workspace and confirm rejection.
 11. Attempt `git push`, merge, deploy, or credential change and confirm approval is required.
 12. Cancel or complete the job and confirm the lock is released.
+
+### Real LaunchAgent Extension
+
+The local `rdev acceptance managed-mac` harness proves the safety loop without requiring service installation. The production managed Mac gate additionally requires:
+
+1. Install the host with `rdev host install-service --platform macos`.
+2. Review the generated plist, service label, logs path, trust root, workspace lock store, stop command, and uninstall command.
+3. Start it through the documented `launchctl` command.
+4. Confirm the host reconnects after logout/login or reboot.
+5. Run the same Codex locked-worktree job through the managed service.
+6. Export the evidence bundle and audit slice from the service-backed run.
+7. Stop and uninstall the LaunchAgent.
+8. Confirm no unrelated plist or service entry is modified.
 
 ### Required Evidence
 
@@ -258,6 +271,12 @@ The local test suite currently covers:
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.
 - workspace lock enforcement during host execution through `rdev host serve --workspace-lock-store`, including hostrunner lock acquire/release, `workspace_locked` structured denial artifacts, lock release after adapter denial, and managed LaunchAgent `--workspace-lock-store` argument generation.
 - managed Mac coding harness through `rdev acceptance managed-mac`, covering managed host registration, Git worktree creation, Codex adapter execution with workspace locking, diff/test evidence export, approval-required probe for `git.push`, workspace lock release, and evidence bundle creation.
+
+## Next Automation Targets
+
+- Real managed Mac LaunchAgent acceptance: install, start, reconnect after reboot, run locked-worktree Codex, export evidence, stop, and uninstall.
+- Windows temporary host acceptance: signed release verification, visible foreground bootstrap, outbound-only host loop, no-persistence inspection, approval-required probes, and revocation transcript.
+- Evidence bundle verifier: validate manifest checksums, schema versions, required artifacts, redaction metadata, and audit-chain coverage for acceptance reports.
 - Codex adapter MVP through `adapter=codex`, including `codex.run` and `git.diff` capability checks, locked-workspace hostrunner execution, implicit approval preflight for push/merge/deploy/publish/credential/service intents, `rdev.codex-result.v1` artifacts, Git status/diff evidence, optional allowlisted verification command evidence, `rdev.test-report.v1` parsing for `go test -json`, output caps, redaction, and lock release after execution.
 - Codex adapter conformance tests through `internal/codexadapter/conformance_test.go`, covering canonical workspace roots, write-scope escape rejection before execution, nonzero Codex exits that still produce evidence, prompt/argv/stdout/stderr/diff redaction, output truncation flags, and duration-timeout cancellation evidence.
 - Codex adapter cooperative cancellation through `ExecuteContext`, hostrunner context propagation, and `rdev host serve` gateway job status monitoring that stops a running Codex process when the job becomes `canceled`.

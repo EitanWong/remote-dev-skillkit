@@ -40,6 +40,8 @@ The project intentionally reuses mature ecosystems where they fit: MCP for agent
 
 The canonical endgame is locked in [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md): a small safety microkernel with replaceable adapters. The concise release-facing contract lives in [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md). The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
 
+The most implementation-focused endgame target is [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md), which refines the final architecture into concrete protocol objects, capability rings, host/runtime boundaries, golden paths, and v1.0 closure gates.
+
 ## Current Status
 
 This repository is in Phase 1: project foundation and safe MVP.
@@ -154,6 +156,7 @@ go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-d
 - [Perfect End-State Architecture](docs/architecture/PERFECT_END_STATE.md)
 - [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) — canonical product contract
 - [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md) — concise release-facing closure contract
+- [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md) — implementation-grade final target
 - [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
 - [Project Plan](docs/project/PLAN.md)
 - [Acceptance Tests](docs/project/ACCEPTANCE_TESTS.md)

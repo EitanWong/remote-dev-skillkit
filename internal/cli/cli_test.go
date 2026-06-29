@@ -1914,7 +1914,7 @@ func main() {
 }
 
 func timeNowForTest() time.Time {
-	return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	return time.Now().UTC().Add(-time.Minute)
 }
 
 func writeJSONForTest(t *testing.T, path string, value any) {
