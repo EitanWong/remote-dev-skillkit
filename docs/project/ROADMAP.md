@@ -41,10 +41,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Gateway/API evidence bundle export directly from job ids.
 - Skillkit bundle export for agent runtimes and mainstream framework notes.
 - Skillkit bundle verification for required skills, required framework notes, file checksums, safe paths, and unlisted-file detection.
+- Release candidate packaging that stages built artifacts, signed manifests, signed release bundle, verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 
-Exit gate: local demo proves ticket, host registration, outbound host job wait through short-poll or long-poll, signed job execution, artifact storage, evidence export, Skillkit export/verify, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
+Exit gate: local demo proves ticket, host registration, outbound host job wait through short-poll or long-poll, signed job execution, artifact storage, evidence export, Skillkit export/verify, release candidate package generation, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
 
 ## v0.2.0 Windows Temporary Host
 
@@ -114,6 +115,7 @@ Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation 
 - Stable `rdev skillkit export` and `rdev skillkit verify` package for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Full audit trail.
 - Signed releases.
+- Local release candidate packaging before GitHub Release publication.
 - Installation docs for Hermes, Codex, Claude Code, and OpenCode.
 - End-to-end acceptance demos for temporary Windows repair and managed coding.
 

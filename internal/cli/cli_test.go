@@ -1939,6 +1939,58 @@ func TestReleaseCreateBundleRejectsOutOutsideReleaseDir(t *testing.T) {
 	}
 }
 
+func TestReleasePrepareCandidateStagesBundleAndSkillkit(t *testing.T) {
+	dir := t.TempDir()
+	artifactsDir := filepath.Join(dir, "artifacts")
+	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCLIArtifactForTest(t, artifactsDir, "rdev", "cli-binary")
+	host := writeCLIArtifactForTest(t, artifactsDir, "rdev-host.exe", "host-binary")
+	verifier := writeCLIArtifactForTest(t, artifactsDir, "rdev-verify.exe", "verify-binary")
+	out := filepath.Join(dir, "candidate")
+	keyPath := filepath.Join(dir, "release-root.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	if err := app.Run(context.Background(), []string{
+		"release", "prepare-candidate",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", out,
+		"--version", "v0.1.0",
+		"--gateway-url", "https://api.example.com/v1",
+		"--artifacts", strings.Join([]string{rdev, host, verifier}, ","),
+		"--require-artifacts", "rdev-host.exe,rdev-verify.exe",
+		"--key", keyPath,
+		"--key-id", "release-root",
+	}); err != nil {
+		t.Fatalf("expected release candidate preparation to pass: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) || !strings.Contains(stdout.String(), `"schema": "rdev.release-candidate.v1"`) {
+		t.Fatalf("expected release candidate output, got %s", stdout.String())
+	}
+	for _, path := range []string{
+		"release-candidate.json",
+		"release-bundle.json",
+		"checksums.txt",
+		"skillkit/manifest.json",
+		"rdev-host.exe.rdev-release.json",
+	} {
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected release candidate file %s: %v", path, err)
+		}
+	}
+}
+
+func writeCLIArtifactForTest(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestWorkspaceLockStatusAndUnlock(t *testing.T) {
 	repo := t.TempDir()
 	store := filepath.Join(t.TempDir(), "locks")

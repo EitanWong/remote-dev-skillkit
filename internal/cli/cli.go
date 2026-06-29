@@ -1475,6 +1475,21 @@ func (a App) release(args []string) error {
 			return err
 		}
 		return a.releaseVerifyBundle(*bundlePath, *root, splitCapabilities(*requiredArtifacts))
+	case "prepare-candidate":
+		fs := flag.NewFlagSet("release prepare-candidate", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		sourceRoot := fs.String("source-root", ".", "repository source root containing skills/ and mcp/tools.json")
+		out := fs.String("out", "", "empty output directory for the release candidate")
+		version := fs.String("version", "", "release version, for example v0.1.0")
+		gatewayURL := fs.String("gateway-url", "", "default gateway URL to include in Skillkit install docs")
+		artifacts := fs.String("artifacts", "", "comma-separated built artifact paths to stage, sign, and include")
+		requiredArtifacts := fs.String("require-artifacts", "", "comma-separated artifact ids that must be present in the release bundle")
+		keyPath := fs.String("key", "", "Ed25519 release signing key file")
+		keyID := fs.String("key-id", "release-root", "release signing key id")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.releasePrepareCandidate(*sourceRoot, *out, *version, *gatewayURL, splitCapabilities(*artifacts), splitCapabilities(*requiredArtifacts), *keyPath, *keyID)
 	default:
 		return fmt.Errorf("unknown release subcommand %q", args[0])
 	}
@@ -1659,6 +1674,62 @@ func (a App) releaseVerifyBundle(bundlePath, rootPublicKey string, requiredArtif
 	}
 	if !verification.OK() {
 		return fmt.Errorf("release bundle verification failed")
+	}
+	return nil
+}
+
+func (a App) releasePrepareCandidate(sourceRoot, outPath, version, gatewayURL string, artifactPaths, requiredArtifacts []string, keyPath, keyID string) error {
+	if outPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if version == "" {
+		return fmt.Errorf("version is required")
+	}
+	if len(artifactPaths) == 0 {
+		return fmt.Errorf("artifacts are required")
+	}
+	if keyPath == "" {
+		return fmt.Errorf("key is required")
+	}
+	key, _, err := signing.LoadOrCreate(keyPath, keyID)
+	if err != nil {
+		return err
+	}
+	candidate, err := release.PrepareCandidate(release.CandidateOptions{
+		SourceRoot:        sourceRoot,
+		OutDir:            outPath,
+		Version:           version,
+		GatewayURL:        gatewayURL,
+		ArtifactPaths:     artifactPaths,
+		RequiredArtifacts: requiredArtifacts,
+		Key:               key,
+		Now:               time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  candidate.OK(),
+		"schema":              candidate.SchemaVersion,
+		"version":             candidate.Version,
+		"out":                 candidate.OutDir,
+		"release_candidate":   filepath.Join(candidate.OutDir, "release-candidate.json"),
+		"release_bundle":      candidate.ReleaseBundlePath,
+		"skillkit":            candidate.SkillkitPath,
+		"checksums":           candidate.ChecksumsPath,
+		"artifact_count":      len(candidate.Artifacts),
+		"file_count":          len(candidate.Files),
+		"root_public_key":     candidate.RootPublicKey,
+		"checks":              candidate.Checks,
+		"recommended_actions": candidate.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !candidate.OK() {
+		return fmt.Errorf("release candidate preparation failed")
 	}
 	return nil
 }
@@ -1919,6 +1990,7 @@ Usage:
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
   rdev release verify-bundle --bundle dist/release-bundle.json --root-public-key release-root:...
+  rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --key .rdev/keys/release-root.json
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist

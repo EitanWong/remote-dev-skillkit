@@ -267,6 +267,7 @@ create_issue_if_missing "Prepare signed release pipeline and public acceptance t
 
 Acceptance:
 - build artifacts for macOS, Linux, Windows
+- run rdev release prepare-candidate and archive rdev.release-candidate.v1
 - generate checksums, signed artifact manifests, and signed release manifest index
 - include SBOM or documented equivalent
 - package redacted acceptance transcripts, report JSON, audit verification, and evidence checksums

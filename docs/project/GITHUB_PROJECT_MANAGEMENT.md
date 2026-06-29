@@ -93,7 +93,8 @@ These should not be opened as new GitHub issues unless regression work is needed
 - host-side structured denials and approval-required artifacts;
 - gateway-backed evidence bundle export;
 - hash-chained audit export and verification;
-- portable Skillkit bundle export;
+- portable Skillkit bundle export and verification;
+- local release candidate packaging with signed artifacts, release bundle, verified Skillkit, checksums, and summary JSON;
 - HTTPS long-poll host job transport prototype;
 - host trust-bundle update checks;
 - macOS LaunchAgent plist generation, status, safe uninstall, and service-control;
@@ -179,6 +180,7 @@ The current bootstrap script creates the following seed backlog.
    - Labels: `area:release`, `area:evidence`, `kind:ops`, `kind:security`, `priority:p1`
    - Acceptance:
      - staged artifacts exist for macOS, Linux, and Windows;
+     - `rdev release prepare-candidate` produces `rdev.release-candidate.v1`;
      - checksums, signed artifact manifests, and signed release index verify;
      - redacted acceptance transcripts, report JSON, audit verification, and evidence checksums are packaged.
 
