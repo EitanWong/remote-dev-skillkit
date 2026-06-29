@@ -62,6 +62,7 @@
 - [x] Refine the canonical perfect ending into a final delivery architecture with sealed contracts, component boundaries, host kernel layers, API surfaces, reliability rules, and close plan.
 - [x] Add post-release install verification planning from local GitHub Release dry-run plans.
 - [x] Add post-release install plan verification and tamper smoke coverage.
+- [x] Add trust lifecycle CLI for root/gateway key initialization, rotation, revocation, and bundle verification.
 
 ## Next
 
@@ -75,7 +76,7 @@
 - [x] Add Windows capability detector.
 - [x] Add dev gateway job create/status/claim/complete endpoints.
 - [x] Add policy explain engine.
-- [ ] Add production key rotation/revocation and host trust update flow.
+- [x] Add production key rotation/revocation and host trust update flow.
 - [x] Add production release/bootstrap trust root for join manifests.
 - [x] Add release artifact signature verification primitive.
 - [x] Add production release key lifecycle policy.

@@ -34,6 +34,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Host identity storage wired into registration and job binding.
 - Durable host trust bundle store.
 - Trust-bundle key rotation/revocation flow.
+- Trust lifecycle operator workflow through `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed trust bundles with sequence, previous-hash, key rotation, key retirement, revocation, and pinned-root verification.
 - Host-bound trust bundle update checks for managed host refresh.
 - Host-side artifact redaction.
 - Hash-chained audit export verifier.

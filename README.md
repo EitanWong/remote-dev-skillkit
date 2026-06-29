@@ -66,6 +66,7 @@ Implemented now:
 - macOS LaunchAgent plist generation, status inspection, and safe plist removal via `rdev host install-service`, `rdev host service-status`, and `rdev host uninstall-service`.
 - macOS LaunchAgent dry-run and opt-in lifecycle control via `rdev host service-control --action start|inspect|stop`, with `--execute` required before running `launchctl`.
 - Persistent development gateway signing key files plus host trust pin checks.
+- Trust lifecycle operator commands via `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed `rdev.trust-bundle.v1` bundles with sequence, previous-hash, key rotation, key retirement, key revocation, and pinned-root verification.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
 - Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
@@ -111,8 +112,8 @@ Not implemented yet:
 
 - Real gateway networking.
 - Production host enrollment certificates and registration proofs.
-- Production signing key storage and rotation.
-- Production key rotation/revocation authentication and durable managed host trust lifecycle.
+- Production signing key storage beyond local key files.
+- Authenticated durable managed host trust distribution and OS-protected trust storage.
 - Full production bootstrap trust root lifecycle and release signing policy.
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.
@@ -143,6 +144,10 @@ go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' | go run ./cmd/rdev mcp serve
 go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787
+go run ./cmd/rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
+go run ./cmd/rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
+go run ./cmd/rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"
+go run ./cmd/rdev trust verify --bundle .rdev/trust/trust-bundle-revoked.json --root-public-key trust-root:...
 go run ./cmd/rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/audit-chain.json
 go run ./cmd/rdev audit verify --input .rdev/audit/audit-chain.json
 go run ./cmd/rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl .rdev/audit/events.jsonl --out job_evidence

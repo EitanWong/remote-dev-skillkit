@@ -138,6 +138,18 @@ Managed hosts should accept an update only when:
 
 The development host store writes verified trust bundles to a local `0600` JSON file using schema `rdev.host-trust-store.v1`. Production managed hosts should use OS-protected storage where available, but must keep the same update rules.
 
+Operator-side bundle creation and drills are available through:
+
+```bash
+rdev trust init --out trust-bundle.json --root-key trust-root.json --gateway-key gateway-prod.json
+rdev trust rotate --current trust-bundle.json --out trust-bundle-next.json --root-key trust-root.json --gateway-key gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
+rdev trust revoke --current trust-bundle-next.json --out trust-bundle-revoked.json --root-key trust-root.json --key-id gateway-next --reason "key compromise drill"
+rdev trust verify --bundle trust-bundle-revoked.json --root-public-key trust-root:...
+```
+
+These commands are local-only. They generate and verify trust material, but do
+not distribute it to managed hosts by themselves.
+
 ## Revocation
 
 Revocation is required when a key is lost, exposed, misused, or suspected compromised.

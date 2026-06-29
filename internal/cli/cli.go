@@ -77,6 +77,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.gateway(args[1:])
 	case "release":
 		return a.release(args[1:])
+	case "trust":
+		return a.trust(args[1:])
 	case "audit":
 		return a.audit(args[1:])
 	case "evidence":
@@ -93,6 +95,127 @@ func (a App) Run(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func (a App) trust(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing trust subcommand")
+	}
+	switch args[0] {
+	case "init":
+		fs := flag.NewFlagSet("trust init", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "output signed trust bundle path")
+		bundleID := fs.String("bundle-id", "managed-hosts", "trust bundle id")
+		rootKey := fs.String("root-key", "", "Ed25519 root signing key file")
+		rootKeyID := fs.String("root-key-id", "trust-root", "root signing key id")
+		gatewayKey := fs.String("gateway-key", "", "Ed25519 gateway job-signing key file")
+		gatewayKeyID := fs.String("gateway-key-id", "gateway-prod", "gateway job-signing key id")
+		validHours := fs.Int("valid-hours", 8760, "bundle validity window in hours")
+		force := fs.Bool("force", false, "overwrite output bundle")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.trustInit(trustInitOptions{
+			OutPath:      *out,
+			BundleID:     *bundleID,
+			RootKeyPath:  *rootKey,
+			RootKeyID:    *rootKeyID,
+			GatewayPath:  *gatewayKey,
+			GatewayKeyID: *gatewayKeyID,
+			ValidHours:   *validHours,
+			Force:        *force,
+		})
+	case "rotate":
+		fs := flag.NewFlagSet("trust rotate", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		current := fs.String("current", "", "current signed trust bundle path")
+		out := fs.String("out", "", "output updated signed trust bundle path")
+		rootKey := fs.String("root-key", "", "Ed25519 root signing key file matching the current signing key id")
+		gatewayKey := fs.String("gateway-key", "", "new Ed25519 gateway job-signing key file")
+		gatewayKeyID := fs.String("gateway-key-id", "", "new gateway job-signing key id")
+		retireKey := fs.String("retire-key", "", "comma-separated existing key ids to mark retired")
+		validHours := fs.Int("valid-hours", 8760, "updated bundle validity window in hours")
+		force := fs.Bool("force", false, "overwrite output bundle")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.trustRotate(trustRotateOptions{
+			CurrentPath:  *current,
+			OutPath:      *out,
+			RootKeyPath:  *rootKey,
+			GatewayPath:  *gatewayKey,
+			GatewayKeyID: *gatewayKeyID,
+			RetireKeyIDs: splitCapabilities(*retireKey),
+			ValidHours:   *validHours,
+			Force:        *force,
+		})
+	case "revoke":
+		fs := flag.NewFlagSet("trust revoke", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		current := fs.String("current", "", "current signed trust bundle path")
+		out := fs.String("out", "", "output updated signed trust bundle path")
+		rootKey := fs.String("root-key", "", "Ed25519 root signing key file matching the current signing key id")
+		keyID := fs.String("key-id", "", "key id to revoke")
+		reason := fs.String("reason", "", "revocation reason")
+		validHours := fs.Int("valid-hours", 8760, "updated bundle validity window in hours")
+		force := fs.Bool("force", false, "overwrite output bundle")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.trustRevoke(trustRevokeOptions{
+			CurrentPath: *current,
+			OutPath:     *out,
+			RootKeyPath: *rootKey,
+			KeyID:       *keyID,
+			Reason:      *reason,
+			ValidHours:  *validHours,
+			Force:       *force,
+		})
+	case "verify":
+		fs := flag.NewFlagSet("trust verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		bundle := fs.String("bundle", "", "signed trust bundle path")
+		rootPublicKey := fs.String("root-public-key", "", "pinned trust root, formatted key_id:base64url_public_key")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.trustVerify(*bundle, *rootPublicKey)
+	default:
+		return fmt.Errorf("unknown trust subcommand %q", args[0])
+	}
+}
+
+type trustInitOptions struct {
+	OutPath      string
+	BundleID     string
+	RootKeyPath  string
+	RootKeyID    string
+	GatewayPath  string
+	GatewayKeyID string
+	ValidHours   int
+	Force        bool
+}
+
+type trustRotateOptions struct {
+	CurrentPath  string
+	OutPath      string
+	RootKeyPath  string
+	GatewayPath  string
+	GatewayKeyID string
+	RetireKeyIDs []string
+	ValidHours   int
+	Force        bool
+}
+
+type trustRevokeOptions struct {
+	CurrentPath string
+	OutPath     string
+	RootKeyPath string
+	KeyID       string
+	Reason      string
+	ValidHours  int
+	Force       bool
 }
 
 func (a App) acceptance(ctx context.Context, args []string) error {
@@ -1780,6 +1903,386 @@ func (a App) releaseVerifyCandidate(candidatePath string, requiredArtifacts []st
 	return nil
 }
 
+func (a App) trustInit(opts trustInitOptions) error {
+	if opts.OutPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if opts.RootKeyPath == "" {
+		return fmt.Errorf("root-key is required")
+	}
+	if opts.GatewayPath == "" {
+		return fmt.Errorf("gateway-key is required")
+	}
+	if opts.ValidHours <= 0 {
+		return fmt.Errorf("valid-hours must be positive")
+	}
+	rootKey, _, err := signing.LoadOrCreate(opts.RootKeyPath, opts.RootKeyID)
+	if err != nil {
+		return err
+	}
+	gatewayKey, _, err := signing.LoadOrCreate(opts.GatewayPath, opts.GatewayKeyID)
+	if err != nil {
+		return err
+	}
+	if rootKey.ID == gatewayKey.ID {
+		return fmt.Errorf("root key id and gateway key id must be different")
+	}
+	now := time.Now().UTC()
+	bundle, err := model.NewSignedTrustBundle(model.SignedTrustBundleSpec{
+		BundleID:     opts.BundleID,
+		Sequence:     1,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Duration(opts.ValidHours) * time.Hour),
+		SigningKeyID: rootKey.ID,
+		Keys: []model.TrustKey{
+			model.NewTrustKey(rootKey.ID, rootKey.PublicKey, model.TrustKeyStatusActive, now),
+			model.NewTrustKey(gatewayKey.ID, gatewayKey.PublicKey, model.TrustKeyStatusActive, now),
+		},
+	}, now)
+	if err != nil {
+		return err
+	}
+	bundle, err = bundle.Sign(rootKey.PrivateKey)
+	if err != nil {
+		return err
+	}
+	if err := bundle.Verify(model.NewTrustBundle(rootKey.ID, rootKey.PublicKey), now); err != nil {
+		return err
+	}
+	if err := writeTrustBundleFile(opts.OutPath, bundle, opts.Force); err != nil {
+		return err
+	}
+	return a.printTrustBundleSummary(bundle, opts.OutPath, model.NewTrustBundle(rootKey.ID, rootKey.PublicKey), map[string]any{
+		"action":             "init",
+		"gateway_public_key": encodeRootPublicKey(gatewayKey.ID, gatewayKey.PublicKey),
+	})
+}
+
+func (a App) trustRotate(opts trustRotateOptions) error {
+	if opts.CurrentPath == "" {
+		return fmt.Errorf("current is required")
+	}
+	if opts.OutPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if opts.RootKeyPath == "" {
+		return fmt.Errorf("root-key is required")
+	}
+	if opts.GatewayPath == "" {
+		return fmt.Errorf("gateway-key is required")
+	}
+	if opts.ValidHours <= 0 {
+		return fmt.Errorf("valid-hours must be positive")
+	}
+	current, err := readTrustBundleFile(opts.CurrentPath)
+	if err != nil {
+		return err
+	}
+	rootKey, _, err := signing.LoadOrCreate(opts.RootKeyPath, current.SigningKeyID)
+	if err != nil {
+		return err
+	}
+	root := model.NewTrustBundle(rootKey.ID, rootKey.PublicKey)
+	now := time.Now().UTC()
+	if err := current.Verify(root, now); err != nil {
+		return err
+	}
+	if opts.GatewayKeyID == "" {
+		opts.GatewayKeyID = "gateway-" + strconv.Itoa(current.Sequence+1)
+	}
+	gatewayKey, _, err := signing.LoadOrCreate(opts.GatewayPath, opts.GatewayKeyID)
+	if err != nil {
+		return err
+	}
+	if _, ok := current.Key(gatewayKey.ID); ok {
+		return fmt.Errorf("gateway key id %q already exists in current trust bundle", gatewayKey.ID)
+	}
+	keys := copyTrustKeysForCLI(current.Keys)
+	retired := map[string]bool{}
+	for _, keyID := range opts.RetireKeyIDs {
+		retired[keyID] = true
+	}
+	for i := range keys {
+		if retired[keys[i].KeyID] {
+			if keys[i].KeyID == current.SigningKeyID {
+				return fmt.Errorf("cannot retire current signing key %q with trust rotate", keys[i].KeyID)
+			}
+			keys[i].Status = model.TrustKeyStatusRetired
+			until := now
+			keys[i].NotAfter = &until
+		}
+	}
+	for keyID := range retired {
+		if _, ok := current.Key(keyID); !ok {
+			return fmt.Errorf("retire key %q not found in current trust bundle", keyID)
+		}
+	}
+	keys = append(keys, model.NewTrustKey(gatewayKey.ID, gatewayKey.PublicKey, model.TrustKeyStatusActive, now))
+	next, err := buildNextTrustBundle(current, keys, current.SigningKeyID, opts.ValidHours, now)
+	if err != nil {
+		return err
+	}
+	next, err = next.Sign(rootKey.PrivateKey)
+	if err != nil {
+		return err
+	}
+	if err := next.VerifyUpdate(current, root, now); err != nil {
+		return err
+	}
+	if err := writeTrustBundleFile(opts.OutPath, next, opts.Force); err != nil {
+		return err
+	}
+	return a.printTrustBundleSummary(next, opts.OutPath, root, map[string]any{
+		"action":             "rotate",
+		"previous":           opts.CurrentPath,
+		"retired_keys":       opts.RetireKeyIDs,
+		"gateway_public_key": encodeRootPublicKey(gatewayKey.ID, gatewayKey.PublicKey),
+	})
+}
+
+func (a App) trustRevoke(opts trustRevokeOptions) error {
+	if opts.CurrentPath == "" {
+		return fmt.Errorf("current is required")
+	}
+	if opts.OutPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if opts.RootKeyPath == "" {
+		return fmt.Errorf("root-key is required")
+	}
+	if opts.KeyID == "" {
+		return fmt.Errorf("key-id is required")
+	}
+	if opts.ValidHours <= 0 {
+		return fmt.Errorf("valid-hours must be positive")
+	}
+	current, err := readTrustBundleFile(opts.CurrentPath)
+	if err != nil {
+		return err
+	}
+	if opts.KeyID == current.SigningKeyID {
+		return fmt.Errorf("cannot revoke current signing key %q with trust revoke; publish a new pinned root out-of-band", opts.KeyID)
+	}
+	rootKey, _, err := signing.LoadOrCreate(opts.RootKeyPath, current.SigningKeyID)
+	if err != nil {
+		return err
+	}
+	root := model.NewTrustBundle(rootKey.ID, rootKey.PublicKey)
+	now := time.Now().UTC()
+	if err := current.Verify(root, now); err != nil {
+		return err
+	}
+	keys := copyTrustKeysForCLI(current.Keys)
+	found := false
+	for i := range keys {
+		if keys[i].KeyID == opts.KeyID {
+			found = true
+			keys[i].Status = model.TrustKeyStatusRevoked
+			keys[i].RevokedReason = opts.Reason
+			revokedAt := now
+			keys[i].RevokedAt = &revokedAt
+			keys[i].NotAfter = &revokedAt
+		}
+	}
+	if !found {
+		return fmt.Errorf("key id %q not found in current trust bundle", opts.KeyID)
+	}
+	next, err := buildNextTrustBundle(current, keys, current.SigningKeyID, opts.ValidHours, now)
+	if err != nil {
+		return err
+	}
+	next, err = next.Sign(rootKey.PrivateKey)
+	if err != nil {
+		return err
+	}
+	if err := next.VerifyUpdate(current, root, now); err != nil {
+		return err
+	}
+	if err := writeTrustBundleFile(opts.OutPath, next, opts.Force); err != nil {
+		return err
+	}
+	return a.printTrustBundleSummary(next, opts.OutPath, root, map[string]any{
+		"action":      "revoke",
+		"previous":    opts.CurrentPath,
+		"revoked_key": opts.KeyID,
+		"reason":      opts.Reason,
+	})
+}
+
+func (a App) trustVerify(bundlePath, rootPublicKey string) error {
+	if bundlePath == "" {
+		return fmt.Errorf("bundle is required")
+	}
+	root, err := parseRootPublicKey(rootPublicKey)
+	if err != nil {
+		return err
+	}
+	bundle, err := readTrustBundleFile(bundlePath)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	verifyErr := bundle.Verify(root, now)
+	hash, hashErr := bundle.Hash()
+	if hashErr != nil {
+		return hashErr
+	}
+	payload := map[string]any{
+		"ok":              verifyErr == nil,
+		"schema":          bundle.SchemaVersion,
+		"bundle":          bundlePath,
+		"bundle_id":       bundle.BundleID,
+		"sequence":        bundle.Sequence,
+		"hash":            hash,
+		"signing_key_id":  bundle.SigningKeyID,
+		"root_public_key": rootPublicKey,
+		"keys":            trustKeySummary(bundle),
+	}
+	if verifyErr != nil {
+		payload["error"] = verifyErr.Error()
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	return verifyErr
+}
+
+func buildNextTrustBundle(current model.SignedTrustBundle, keys []model.TrustKey, signingKeyID string, validHours int, now time.Time) (model.SignedTrustBundle, error) {
+	hash, err := current.Hash()
+	if err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	return model.NewSignedTrustBundle(model.SignedTrustBundleSpec{
+		BundleID:           current.BundleID,
+		Sequence:           current.Sequence + 1,
+		NotBefore:          now,
+		NotAfter:           now.Add(time.Duration(validHours) * time.Hour),
+		PreviousBundleHash: hash,
+		SigningKeyID:       signingKeyID,
+		Keys:               keys,
+	}, now)
+}
+
+func readTrustBundleFile(path string) (model.SignedTrustBundle, error) {
+	if path == "" {
+		return model.SignedTrustBundle{}, fmt.Errorf("trust bundle path is required")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	var bundle model.SignedTrustBundle
+	if err := json.Unmarshal(content, &bundle); err == nil && bundle.SchemaVersion == model.SignedTrustBundleSchemaVersion {
+		return bundle, nil
+	}
+	var wrapped struct {
+		TrustBundle model.SignedTrustBundle `json:"trust_bundle"`
+	}
+	if err := json.Unmarshal(content, &wrapped); err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	if wrapped.TrustBundle.SchemaVersion != model.SignedTrustBundleSchemaVersion {
+		return model.SignedTrustBundle{}, fmt.Errorf("unsupported trust bundle schema %q", wrapped.TrustBundle.SchemaVersion)
+	}
+	return wrapped.TrustBundle, nil
+}
+
+func writeTrustBundleFile(path string, bundle model.SignedTrustBundle, force bool) error {
+	if path == "" {
+		return fmt.Errorf("out is required")
+	}
+	content, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	flag := os.O_CREATE | os.O_WRONLY
+	if force {
+		flag |= os.O_TRUNC
+	} else {
+		flag |= os.O_EXCL
+	}
+	file, err := os.OpenFile(path, flag, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
+func (a App) printTrustBundleSummary(bundle model.SignedTrustBundle, path string, root model.TrustBundle, extra map[string]any) error {
+	hash, err := bundle.Hash()
+	if err != nil {
+		return err
+	}
+	if err := bundle.Verify(root, time.Now().UTC()); err != nil {
+		return err
+	}
+	rootPublicKey, err := root.Ed25519PublicKey()
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":              true,
+		"schema":          bundle.SchemaVersion,
+		"bundle":          path,
+		"bundle_id":       bundle.BundleID,
+		"sequence":        bundle.Sequence,
+		"hash":            hash,
+		"signing_key_id":  bundle.SigningKeyID,
+		"root_public_key": encodeRootPublicKey(root.SigningKeyID, rootPublicKey),
+		"keys":            trustKeySummary(bundle),
+	}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func trustKeySummary(bundle model.SignedTrustBundle) []map[string]any {
+	keys := make([]map[string]any, 0, len(bundle.Keys))
+	for _, key := range bundle.Keys {
+		keys = append(keys, map[string]any{
+			"key_id":         key.KeyID,
+			"status":         key.Status,
+			"not_before":     key.NotBefore,
+			"not_after":      key.NotAfter,
+			"revoked_at":     key.RevokedAt,
+			"revoked_reason": key.RevokedReason,
+		})
+	}
+	return keys
+}
+
+func copyTrustKeysForCLI(keys []model.TrustKey) []model.TrustKey {
+	copied := make([]model.TrustKey, len(keys))
+	copy(copied, keys)
+	for i := range copied {
+		if copied[i].NotAfter != nil {
+			value := copied[i].NotAfter.UTC()
+			copied[i].NotAfter = &value
+		}
+		if copied[i].RevokedAt != nil {
+			value := copied[i].RevokedAt.UTC()
+			copied[i].RevokedAt = &value
+		}
+	}
+	return copied
+}
+
 func (a App) auditExport(inputPath, outputPath string) error {
 	if inputPath == "" {
 		return fmt.Errorf("input is required")
@@ -2024,6 +2527,10 @@ Usage:
   rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
   rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
   rdev skillkit verify --bundle dist/remote-dev-skillkit
+  rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
+  rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
+  rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"
+  rdev trust verify --bundle .rdev/trust/trust-bundle-revoked.json --root-public-key trust-root:...
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev acceptance managed-mac --out acceptance-run --repo .

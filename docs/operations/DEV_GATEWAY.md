@@ -115,6 +115,38 @@ curl -s 'http://127.0.0.1:8787/v1/hosts/<host_id>/trust-bundle/update?current_se
 
 The response uses schema `rdev.trust-bundle-update.v1`. If the host is current, the response status is `current` and omits a bundle. If the gateway has a newer bundle, the response status is `update_available` and includes the candidate `rdev.trust-bundle.v1`; the host still verifies sequence, `previous_bundle_hash`, signature, and validity locally before persisting it.
 
+Create and maintain operator-side trust bundles locally:
+
+```bash
+rdev trust init \
+  --out .rdev/trust/trust-bundle.json \
+  --root-key .rdev/keys/trust-root.json \
+  --gateway-key .rdev/keys/gateway-prod.json
+
+rdev trust rotate \
+  --current .rdev/trust/trust-bundle.json \
+  --out .rdev/trust/trust-bundle-next.json \
+  --root-key .rdev/keys/trust-root.json \
+  --gateway-key .rdev/keys/gateway-next.json \
+  --gateway-key-id gateway-next \
+  --retire-key gateway-prod
+
+rdev trust revoke \
+  --current .rdev/trust/trust-bundle-next.json \
+  --out .rdev/trust/trust-bundle-revoked.json \
+  --root-key .rdev/keys/trust-root.json \
+  --key-id gateway-next \
+  --reason "key compromise drill"
+
+rdev trust verify \
+  --bundle .rdev/trust/trust-bundle-revoked.json \
+  --root-public-key trust-root:...
+```
+
+The trust CLI writes local `rdev.trust-bundle.v1` files only. It does not push
+updates to a gateway. Use the dev `POST /v1/trust-bundle` endpoint or future
+production trust distribution after the bundle has been reviewed and verified.
+
 Register a foreground temporary host:
 
 ```bash

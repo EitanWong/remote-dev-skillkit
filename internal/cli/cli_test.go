@@ -1119,6 +1119,155 @@ func TestGatewayServeDevReusesSigningKeyFile(t *testing.T) {
 	}
 }
 
+func TestTrustInitRotateRevokeAndVerify(t *testing.T) {
+	dir := t.TempDir()
+	rootKey := filepath.Join(dir, "trust-root.json")
+	gatewayOne := filepath.Join(dir, "gateway-one.json")
+	gatewayTwo := filepath.Join(dir, "gateway-two.json")
+	firstPath := filepath.Join(dir, "trust-1.json")
+	secondPath := filepath.Join(dir, "trust-2.json")
+	thirdPath := filepath.Join(dir, "trust-3.json")
+
+	var initStdout bytes.Buffer
+	app := NewApp(&initStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"trust", "init",
+		"--out", firstPath,
+		"--root-key", rootKey,
+		"--root-key-id", "trust-root",
+		"--gateway-key", gatewayOne,
+		"--gateway-key-id", "gateway-one",
+		"--bundle-id", "managed-hosts",
+		"--valid-hours", "24",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var initPayload struct {
+		OK            bool   `json:"ok"`
+		RootPublicKey string `json:"root_public_key"`
+		Sequence      int    `json:"sequence"`
+	}
+	if err := json.Unmarshal(initStdout.Bytes(), &initPayload); err != nil {
+		t.Fatalf("invalid trust init output: %v\n%s", err, initStdout.String())
+	}
+	if !initPayload.OK || initPayload.Sequence != 1 || initPayload.RootPublicKey == "" {
+		t.Fatalf("unexpected trust init output: %s", initStdout.String())
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"trust", "verify",
+		"--bundle", firstPath,
+		"--root-public-key", initPayload.RootPublicKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertTrustVerifyOK(t, verifyStdout.Bytes(), 1)
+
+	var rotateStdout bytes.Buffer
+	app = NewApp(&rotateStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"trust", "rotate",
+		"--current", firstPath,
+		"--out", secondPath,
+		"--root-key", rootKey,
+		"--gateway-key", gatewayTwo,
+		"--gateway-key-id", "gateway-two",
+		"--retire-key", "gateway-one",
+		"--valid-hours", "24",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var rotatePayload struct {
+		OK       bool `json:"ok"`
+		Sequence int  `json:"sequence"`
+	}
+	if err := json.Unmarshal(rotateStdout.Bytes(), &rotatePayload); err != nil {
+		t.Fatalf("invalid trust rotate output: %v\n%s", err, rotateStdout.String())
+	}
+	if !rotatePayload.OK || rotatePayload.Sequence != 2 {
+		t.Fatalf("unexpected trust rotate output: %s", rotateStdout.String())
+	}
+	firstBundle := readTrustBundleForTest(t, firstPath)
+	secondBundle := readTrustBundleForTest(t, secondPath)
+	firstHash, err := firstBundle.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondBundle.Sequence != 2 || secondBundle.PreviousBundleHash != firstHash {
+		t.Fatalf("unexpected rotated bundle: seq=%d previous=%q want %q", secondBundle.Sequence, secondBundle.PreviousBundleHash, firstHash)
+	}
+	if key, ok := secondBundle.Key("gateway-one"); !ok || key.Status != model.TrustKeyStatusRetired {
+		t.Fatalf("expected gateway-one retired, got ok=%v key=%#v", ok, key)
+	}
+	if key, ok := secondBundle.Key("gateway-two"); !ok || key.Status != model.TrustKeyStatusActive {
+		t.Fatalf("expected gateway-two active, got ok=%v key=%#v", ok, key)
+	}
+
+	var revokeStdout bytes.Buffer
+	app = NewApp(&revokeStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"trust", "revoke",
+		"--current", secondPath,
+		"--out", thirdPath,
+		"--root-key", rootKey,
+		"--key-id", "gateway-two",
+		"--reason", "test compromise",
+		"--valid-hours", "24",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	thirdBundle := readTrustBundleForTest(t, thirdPath)
+	if thirdBundle.Sequence != 3 {
+		t.Fatalf("expected sequence 3, got %d", thirdBundle.Sequence)
+	}
+	if key, ok := thirdBundle.Key("gateway-two"); !ok || key.Status != model.TrustKeyStatusRevoked || key.RevokedReason != "test compromise" || key.RevokedAt == nil {
+		t.Fatalf("expected gateway-two revoked with reason, got ok=%v key=%#v", ok, key)
+	}
+	verifyStdout.Reset()
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"trust", "verify",
+		"--bundle", thirdPath,
+		"--root-public-key", initPayload.RootPublicKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertTrustVerifyOK(t, verifyStdout.Bytes(), 3)
+}
+
+func TestTrustRevokeRefusesCurrentSigningKey(t *testing.T) {
+	dir := t.TempDir()
+	rootKey := filepath.Join(dir, "trust-root.json")
+	gatewayKey := filepath.Join(dir, "gateway.json")
+	bundlePath := filepath.Join(dir, "trust.json")
+	outPath := filepath.Join(dir, "trust-revoked.json")
+
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"trust", "init",
+		"--out", bundlePath,
+		"--root-key", rootKey,
+		"--root-key-id", "trust-root",
+		"--gateway-key", gatewayKey,
+		"--gateway-key-id", "gateway",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := app.Run(context.Background(), []string{
+		"trust", "revoke",
+		"--current", bundlePath,
+		"--out", outPath,
+		"--root-key", rootKey,
+		"--key-id", "trust-root",
+		"--reason", "root compromise",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot revoke current signing key") {
+		t.Fatalf("expected current signing key revoke to fail, got %v", err)
+	}
+}
+
 func TestHostServeReportsFailedDevJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -2589,6 +2738,33 @@ func writeJSONForTest(t *testing.T, path string, value any) {
 	}
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func readTrustBundleForTest(t *testing.T, path string) model.SignedTrustBundle {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle model.SignedTrustBundle
+	if err := json.Unmarshal(content, &bundle); err != nil {
+		t.Fatalf("invalid trust bundle: %v\n%s", err, string(content))
+	}
+	return bundle
+}
+
+func assertTrustVerifyOK(t *testing.T, content []byte, wantSequence int) {
+	t.Helper()
+	var payload struct {
+		OK       bool `json:"ok"`
+		Sequence int  `json:"sequence"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf("invalid trust verify output: %v\n%s", err, string(content))
+	}
+	if !payload.OK || payload.Sequence != wantSequence {
+		t.Fatalf("unexpected trust verify output: %s", string(content))
 	}
 }
 
