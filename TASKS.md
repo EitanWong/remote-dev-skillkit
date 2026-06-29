@@ -37,6 +37,7 @@
 - [x] Add host-side nonce replay cache.
 - [x] Add hash-chained audit export verifier.
 - [x] Reconcile final architecture into one canonical product contract.
+- [x] Add structured host-side denial explanations for failed job validation.
 
 ## Next
 
@@ -69,7 +70,8 @@
 - [x] Add explicit exit criteria for v0.1 through v1.0 gates.
 - [x] Add stronger workspace and symlink escape tests.
 - [x] Add local evidence bundle export.
-- [ ] Add policy explanation for every host-side denial and approval-required result.
+- [x] Add policy explanation for every host-side denial result.
+- [ ] Add approval-required results for package install, elevation, GUI, service changes, push, merge, and deploy.
 
 ## Later
 
@@ -93,6 +95,7 @@
 - [ ] Managed Mac runs a Codex coding job in a locked worktree and returns diff/test evidence.
 - [x] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
 - [x] Workspace escape and non-allowlisted command attempts are rejected host-side.
+- [x] Host-side denials return structured `rdev.host-denial.v1` artifacts.
 - [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.
 - [ ] Production releases verify signed manifests and binaries before host execution.

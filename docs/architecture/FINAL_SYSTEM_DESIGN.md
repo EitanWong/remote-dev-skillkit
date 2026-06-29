@@ -1561,7 +1561,8 @@ Done or nearly done:
 
 Still required:
 
-- policy explanation for every denial/approval;
+- approval-required results for package install, elevation, GUI, service changes, push, merge, and deploy;
+- production approval-token flow.
 
 Exit criteria:
 

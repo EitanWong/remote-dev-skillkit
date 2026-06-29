@@ -634,6 +634,72 @@ func TestHostServeReportsFailedDevJob(t *testing.T) {
 	}
 }
 
+func TestHostServeReportsHostDenialArtifact(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"capabilities": []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:   server.URL,
+		PollInterval: 1,
+		MaxJobs:      1,
+	}, host.ID, "")
+	if err == nil {
+		t.Fatal("expected host runner denial")
+	}
+	if processed != 0 {
+		t.Fatalf("expected 0 processed jobs, got %d", processed)
+	}
+	failed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != model.JobStatusFailed {
+		t.Fatalf("expected failed job, got %s", failed.Status)
+	}
+	if !strings.Contains(failed.FailureReason, "Workspace root is required") {
+		t.Fatalf("expected denial summary as failure reason, got %q", failed.FailureReason)
+	}
+	artifacts := gw.Artifacts(job.ID)
+	if len(artifacts) != 1 {
+		t.Fatalf("expected 1 failure artifact, got %d", len(artifacts))
+	}
+	if !strings.Contains(artifacts[0].Content, `"schema_version": "rdev.host-denial.v1"`) {
+		t.Fatalf("expected denial artifact, got %s", artifacts[0].Content)
+	}
+	if !strings.Contains(artifacts[0].Content, `"code": "workspace_required"`) {
+		t.Fatalf("expected workspace_required denial artifact, got %s", artifacts[0].Content)
+	}
+}
+
 func TestTicketCreateOutputsJoinURL(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

@@ -152,9 +152,8 @@ func TestRunDevJobRejectsWrongHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunDevJob("hst_other", gw.TrustBundle(), job, now); err == nil {
-		t.Fatal("expected wrong host to fail")
-	}
+	result, err := RunDevJob("hst_other", gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "wrong_host")
 }
 
 func TestRunDevJobRejectsWrongHostIdentityFingerprint(t *testing.T) {
@@ -170,9 +169,8 @@ func TestRunDevJobRejectsWrongHostIdentityFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunDevJobForIdentity(host.ID, "sha256:wrong", gw.TrustBundle(), job, now); err == nil {
-		t.Fatal("expected identity fingerprint mismatch")
-	}
+	result, err := RunDevJobForIdentity(host.ID, "sha256:wrong", gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "host_identity_mismatch")
 }
 
 func TestRunDevJobAcceptsMatchingHostIdentityFingerprint(t *testing.T) {
@@ -217,9 +215,8 @@ func TestRunDevJobRejectsReplayedNonce(t *testing.T) {
 	if _, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts); err != nil {
 		t.Fatalf("expected first execution to pass: %v", err)
 	}
-	if _, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts); err == nil {
-		t.Fatal("expected replayed nonce to fail")
-	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, opts)
+	assertDenial(t, result, err, "nonce_replay")
 }
 
 func TestRunDevJobRejectsMissingWorkspace(t *testing.T) {
@@ -232,9 +229,8 @@ func TestRunDevJobRejectsMissingWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunDevJob(host.ID, gw.TrustBundle(), job, now); err == nil {
-		t.Fatal("expected missing workspace to fail")
-	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "workspace_required")
 }
 
 func TestRunDevJobRejectsCommandNotAllowlisted(t *testing.T) {
@@ -250,9 +246,8 @@ func TestRunDevJobRejectsCommandNotAllowlisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunDevJob(host.ID, gw.TrustBundle(), job, now); err == nil {
-		t.Fatal("expected non-allowlisted command to fail")
-	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "command_not_allowlisted")
 }
 
 func TestRunDevJobRejectsSymlinkWriteScopeEscape(t *testing.T) {
@@ -275,9 +270,8 @@ func TestRunDevJobRejectsSymlinkWriteScopeEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunDevJob(host.ID, gw.TrustBundle(), job, now); err == nil {
-		t.Fatal("expected symlink write scope escape to fail")
-	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "workspace_escape")
 }
 
 func TestRunDevJobRejectsTamperedEnvelope(t *testing.T) {
@@ -292,9 +286,61 @@ func TestRunDevJobRejectsTamperedEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	job.Envelope.Intent = "tampered"
-	if _, err := RunDevJob(host.ID, gw.TrustBundle(), job, now); err == nil {
-		t.Fatal("expected tampered envelope to fail")
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "envelope_signature_invalid")
+}
+
+func TestRunDevJobRejectsUnsupportedAdapterWithDenial(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "codex", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "unsupported_adapter")
+}
+
+func TestRunDevJobRejectsMissingCapabilityWithDenial(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"fs.read.scoped"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "missing_capability")
+}
+
+func TestRunDevJobRejectsExpiredEnvelopeWithDenial(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now.Add(2*time.Hour))
+	assertDenial(t, result, err, "envelope_expired")
+}
+
+func TestRunDevJobRequiresEnvelopeWithDenial(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	result, err := RunDevJob("hst_1", model.TrustBundle{}, model.Job{ID: "job_1", HostID: "hst_1"}, now)
+	assertDenial(t, result, err, "job_envelope_required")
 }
 
 func activeHost(t *testing.T, gw *gateway.MemoryGateway) model.Host {
@@ -355,4 +401,33 @@ func hostrunnerTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey)
 		t.Fatal(err)
 	}
 	return publicKey, privateKey
+}
+
+func assertDenial(t *testing.T, result Result, err error, wantCode string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected denial %q, got nil error", wantCode)
+	}
+	var denial DenialError
+	if !errors.As(err, &denial) {
+		t.Fatalf("expected DenialError, got %T %v", err, err)
+	}
+	if denial.Explanation.SchemaVersion != DenialSchemaVersion {
+		t.Fatalf("expected denial schema %q, got %q", DenialSchemaVersion, denial.Explanation.SchemaVersion)
+	}
+	if denial.Explanation.Code != wantCode {
+		t.Fatalf("expected denial code %q, got %q", wantCode, denial.Explanation.Code)
+	}
+	if denial.Explanation.Summary == "" {
+		t.Fatal("denial summary must be set")
+	}
+	if result.ArtifactContent == "" {
+		t.Fatal("denial artifact content must be set")
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "`+DenialSchemaVersion+`"`) {
+		t.Fatalf("expected denial artifact schema, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, `"code": "`+wantCode+`"`) {
+		t.Fatalf("expected denial artifact code %q, got %s", wantCode, result.ArtifactContent)
+	}
 }

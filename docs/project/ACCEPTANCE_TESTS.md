@@ -244,6 +244,8 @@ The local test suite currently covers:
 - host-side nonce replay rejection with in-memory and file-backed stores.
 - hash-chained audit export and verification through `rdev audit export` / `rdev audit verify`.
 - local evidence bundle export through `rdev evidence export`, including manifest, checksums, signed envelope, policy decision, artifacts, audit slice, and audit chain.
+- structured host-side denial artifacts through `rdev.host-denial.v1`, covering missing envelope, wrong host, identity mismatch, expired/tampered envelopes, replayed nonce, unsupported adapter, missing capability, missing workspace, non-allowlisted command, and workspace escape.
+- CLI host polling reports host-side denials to the dev gateway as failed-job artifacts.
 
 The following remain real-environment acceptance tests:
 
