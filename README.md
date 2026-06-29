@@ -94,6 +94,7 @@ go run ./cmd/rdev host serve --mode temporary
 - [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
 - [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md)
 - [Project Plan](docs/project/PLAN.md)
+- [Acceptance Tests](docs/project/ACCEPTANCE_TESTS.md)
 - [Roadmap](docs/project/ROADMAP.md)
 - [Versioning](docs/project/VERSIONING.md)
 - [Threat Model](docs/security/THREAT_MODEL.md)

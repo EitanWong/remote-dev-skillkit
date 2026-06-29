@@ -51,7 +51,7 @@
 - [x] Add production release key lifecycle policy.
 - [x] Add platform-native Windows Authenticode verification policy.
 - [x] Add real scoped shell adapter execution.
-- [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
+- [x] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
 - [x] Add durable shell adapter audit schema and redaction rules.
 
 ## Later

@@ -15,6 +15,7 @@
 - [ ] Update `CHANGELOG.md`.
 - [ ] Update install docs.
 - [ ] Review `SECURITY.md` and threat model.
+- [ ] Run the acceptance checklist for the release target.
 
 ## Security Gates
 
@@ -26,6 +27,7 @@
 - [ ] Dangerous actions require approval gates.
 - [ ] Bootstrap does not weaken PowerShell execution policy or Group Policy.
 - [ ] Temporary Windows bootstrap verifies signed manifests and binaries before execution.
+- [ ] Acceptance evidence has been collected and redacted.
 
 ## Post-Release
 
