@@ -1,6 +1,6 @@
 package buildinfo
 
-const (
+var (
 	Name    = "rdev"
 	Version = "0.0.1-dev"
 )

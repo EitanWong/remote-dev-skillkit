@@ -7,7 +7,8 @@
 - [ ] `./scripts/check.sh`
 - [ ] `./scripts/ci/release-smoke.sh`
 - [ ] GitHub Actions CI passes for the release commit.
-- [ ] Build binaries for macOS, Linux, and Windows.
+- [ ] Build binaries for macOS, Linux, and Windows with `scripts/release/build-artifacts.sh`.
+- [ ] Review `rdev.build-artifacts.v1` and `checksums.txt`.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.

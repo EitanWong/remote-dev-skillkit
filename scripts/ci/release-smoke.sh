@@ -10,20 +10,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$work_dir/artifacts"
-printf 'cli-binary\n' > "$work_dir/artifacts/rdev"
-printf 'host-binary\n' > "$work_dir/artifacts/rdev-host.exe"
-printf 'verify-binary\n' > "$work_dir/artifacts/rdev-verify.exe"
+scripts/release/build-artifacts.sh \
+  --out "$work_dir/artifacts" \
+  --version "$version" \
+  --targets windows/amd64 \
+  --commands rdev,rdev-host,rdev-verify \
+  > "$work_dir/build.json"
 
 candidate_dir="$work_dir/candidate"
 plan_dir="$work_dir/github-release-plan"
+artifact_dir="$work_dir/artifacts/windows-amd64"
 
 go run ./cmd/rdev release prepare-candidate \
   --source-root . \
   --out "$candidate_dir" \
   --version "$version" \
   --gateway-url https://api.example.com/v1 \
-  --artifacts "$work_dir/artifacts/rdev,$work_dir/artifacts/rdev-host.exe,$work_dir/artifacts/rdev-verify.exe" \
+  --artifacts "$artifact_dir/rdev.exe,$artifact_dir/rdev-host.exe,$artifact_dir/rdev-verify.exe" \
   --require-artifacts rdev-host.exe,rdev-verify.exe \
   --key "$work_dir/release-root.json" \
   > "$work_dir/prepare.json"
@@ -46,12 +49,18 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
+build = json.loads((root / "build.json").read_text())
 prepare = json.loads((root / "prepare.json").read_text())
 verify = json.loads((root / "verify.json").read_text())
 plan_output = json.loads((root / "plan-output.json").read_text())
 plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
+assert build["ok"] is True, build
+build_manifest = json.loads(pathlib.Path(build["manifest"]).read_text())
+assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_manifest
+assert len(build_manifest["artifacts"]) == 3, build_manifest["artifacts"]
+assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert prepare["ok"] is True, prepare
 assert verify["ok"] is True, verify
 assert plan_output["ok"] is True, plan_output
@@ -64,6 +73,8 @@ assert "gh release upload" in commands, commands
 
 print(json.dumps({
     "ok": True,
+    "build_schema": build_manifest["schema_version"],
+    "built_artifacts": len(build_manifest["artifacts"]),
     "candidate_schema": prepare["schema"],
     "verification_schema": verify["schema"],
     "plan_schema": plan["schema_version"],

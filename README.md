@@ -49,7 +49,7 @@ This repository is in Phase 1: project foundation and safe MVP.
 Implemented now:
 
 - Project plan, architecture, security model, and versioning docs.
-- Initial `rdev` CLI.
+- Initial `rdev` CLI plus thin `rdev-host`, `rdev-gateway`, and `rdev-mcp` entrypoints that route into the same command surface.
 - `rdev doctor` capability detection.
 - `rdev ticket create` local ticket preview.
 - `rdev policy explain` local policy simulation.
@@ -94,6 +94,7 @@ Implemented now:
 - The standalone `rdev-verify` helper can verify either a single signed artifact manifest or a full signed release bundle before host execution.
 - Release candidate packaging via `rdev release prepare-candidate`, staging built artifacts, signed manifests, a signed release bundle, a verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Release candidate verification via `rdev release verify-candidate`, checking a staged or downloaded candidate's summary, checksums, signed bundle, manifests, artifacts, Skillkit bundle, required artifacts, and unlisted files.
+- Real release artifact builds via `scripts/release/build-artifacts.sh`, producing target directories, `rdev.build-artifacts.v1`, and checksums for `rdev`, `rdev-host`, `rdev-gateway`, `rdev-mcp`, and `rdev-verify`.
 - GitHub Release dry-run planning via `scripts/github/plan-release.sh`, producing a local release plan, commands preview, generated release notes, Skillkit tarball, and candidate verification output without mutating GitHub.
 - GitHub Actions CI for tests, vet, shell syntax, release candidate verification, and GitHub Release dry-run planning.
 - Windows bootstrap can hash-pin `rdev-verify.exe` and use it to verify either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host.
@@ -125,7 +126,10 @@ Not implemented yet:
 go test ./...
 ./scripts/check.sh
 ./scripts/ci/release-smoke.sh
+scripts/release/build-artifacts.sh --out dist/artifacts --version v0.1.0 --targets darwin/arm64,linux/amd64,windows/amd64
 go run ./cmd/rdev version
+go run ./cmd/rdev-host --mode temporary
+go run ./cmd/rdev-mcp tools
 go run ./cmd/rdev doctor
 go run ./cmd/rdev ticket create --ttl-seconds 7200 --reason "repair Windows dev environment"
 go run ./cmd/rdev policy explain --mode attended-temporary --capability shell.user
@@ -151,12 +155,12 @@ go run ./cmd/rdev workspace status --repo .
 go run ./cmd/rdev workspace unlock --repo . --job-id job_...
 go run ./cmd/rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
 curl -s -X POST http://127.0.0.1:8787/v1/jobs -H 'content-type: application/json' -d '{"host_id":"hst_...","adapter":"codex","intent":"update README","policy":{"workspace_root":".","capabilities":["codex.run","git.diff"],"prompt":"Update README and run checks.","verification_commands":[["git","status","--short"]],"allow_verification_commands":["git"],"max_duration_seconds":1800,"max_output_bytes":1048576}}'
-go run ./cmd/rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
-go run ./cmd/rdev-verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
-go run ./cmd/rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
-go run ./cmd/rdev release verify-bundle --bundle dist/release-bundle.json --root-public-key release-root:...
-go run ./cmd/rdev-verify --bundle dist/release-bundle.json --root-public-key release-root:... --require-artifacts rdev-host.exe,rdev-verify.exe
-go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json --gateway-url https://api.example.com/v1
+go run ./cmd/rdev release sign --artifact dist/artifacts/windows-amd64/rdev-host.exe --key .rdev/keys/release-root.json
+go run ./cmd/rdev-verify --artifact dist/artifacts/windows-amd64/rdev-host.exe --manifest dist/artifacts/windows-amd64/rdev-host.exe.rdev-release.json --root-public-key release-root:...
+go run ./cmd/rdev release create-bundle --dir dist/artifacts/windows-amd64 --artifacts rdev.exe,rdev-host.exe,rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
+go run ./cmd/rdev release verify-bundle --bundle dist/artifacts/windows-amd64/release-bundle.json --root-public-key release-root:...
+go run ./cmd/rdev-verify --bundle dist/artifacts/windows-amd64/release-bundle.json --root-public-key release-root:... --require-artifacts rdev-host.exe,rdev-verify.exe
+go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts dist/artifacts/windows-amd64/rdev.exe,dist/artifacts/windows-amd64/rdev-host.exe,dist/artifacts/windows-amd64/rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json --gateway-url https://api.example.com/v1
 go run ./cmd/rdev release verify-candidate --candidate dist/release-candidate --require-artifacts rdev-host.exe,rdev-verify.exe
 scripts/github/plan-release.sh --candidate dist/release-candidate --repo EitanWong/remote-dev-skillkit --require-artifacts rdev-host.exe,rdev-verify.exe
 go run ./cmd/rdev host serve --mode temporary

@@ -28,7 +28,7 @@ jobs:
         run: ./scripts/check.sh
 
   release-smoke:
-    name: Release candidate and GitHub plan smoke
+    name: Real artifact, release candidate, and GitHub plan smoke
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -43,4 +43,3 @@ jobs:
 
       - name: Run release smoke
         run: ./scripts/ci/release-smoke.sh
-

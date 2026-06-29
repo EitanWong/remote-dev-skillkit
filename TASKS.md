@@ -56,6 +56,7 @@
 - [x] Refine the canonical perfect ending into a final control-plane blueprint, product cuts, release ladder, and remaining gap ledger.
 - [x] Add GitHub Release dry-run planning from verified release candidates.
 - [x] Add GitHub Actions CI for tests, shell syntax, release candidate verification, and release-plan smoke.
+- [x] Add real release artifact builder and thin `rdev-host`, `rdev-gateway`, and `rdev-mcp` entrypoints.
 
 ## Next
 
@@ -122,6 +123,7 @@
 - [x] Add standalone release candidate verification for downloaded or staged candidates.
 - [x] Add GitHub Release dry-run plan generation with assets, commands, notes, Skillkit archive, and no external mutation.
 - [x] Add CI release smoke for prepare-candidate, verify-candidate, and plan-release.
+- [x] Switch CI release smoke to real Go-built Windows artifacts instead of placeholder files.
 
 ## Later
 

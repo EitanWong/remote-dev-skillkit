@@ -772,6 +772,40 @@ The open-source project ships five deliverables:
 
 Hermes/Lucky is the reference environment, not a required dependency.
 
+## Release Artifact Reality Contract
+
+Public artifacts must reflect executable reality. A release is not allowed to
+ship text placeholders for bootstrap-critical binaries or describe a production
+capability that the artifact cannot start.
+
+Current executable split:
+
+| Binary | Current role | Boundary |
+|---|---|---|
+| `rdev` | full operator CLI and local development surface | canonical command surface |
+| `rdev-host` | thin host entrypoint over `rdev host ...`, defaulting to `host serve` | production transport still follows the host runtime maturity gates |
+| `rdev-gateway` | thin gateway entrypoint over `rdev gateway ...`, defaulting to `gateway serve` | production persistence/auth/WSS remain explicit gaps |
+| `rdev-mcp` | thin MCP entrypoint over `rdev mcp ...`, defaulting to `mcp serve` | inherits the same tool contracts as `rdev mcp` |
+| `rdev-verify` | standalone release verifier for bootstrap paths | intentionally small and hash-pinnable |
+
+Build output is a verifiable pre-release artifact, not a publication decision:
+
+```text
+scripts/release/build-artifacts.sh
+  -> rdev.build-artifacts.v1
+  -> target directories such as windows-amd64/
+  -> checksums.txt
+  -> release prepare-candidate
+  -> release verify-candidate
+  -> GitHub Release dry-run plan
+```
+
+Until multi-target release-candidate layout is added, release candidates should
+be treated as platform slices or carefully reviewed asset sets with unique
+artifact basenames. The Windows temporary bootstrap slice must include real
+`rdev-host.exe` and `rdev-verify.exe` binaries built from the repository before
+bundle signing and candidate verification.
+
 ## Final Release Ladder
 
 The project should advance through release ladders rather than broad rewrites.
@@ -825,7 +859,8 @@ the remaining gaps that matter before public confidence:
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
 | Adapter SDK extraction | adapters are still mostly internal implementations | public SDK, fixtures, conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
-| Public release execution | release candidates and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
+| Multi-target release layout | real build artifacts exist, but release candidates are still safest as platform slices because flat candidates reject duplicate basenames | platform-qualified release assets or per-platform verified candidates with documented installer selection |
+| Public release execution | real build artifacts, release candidates, and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 
 Anything not in this ledger is secondary until these are closed.
 

@@ -43,6 +43,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Skillkit bundle verification for required skills, required framework notes, file checksums, safe paths, and unlisted-file detection.
 - Release candidate packaging that stages built artifacts, signed manifests, signed release bundle, verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Release candidate verification that checks staged or downloaded candidates before publication or installation.
+- Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, and checksums before candidate packaging.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 
@@ -118,7 +119,7 @@ Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation 
 - Signed releases.
 - Local release candidate packaging before GitHub Release publication.
 - Local GitHub Release dry-run planning from verified release candidates.
-- GitHub Actions CI for tests, shell syntax, release candidate verification, and release-plan smoke.
+- GitHub Actions CI for tests, shell syntax, real build artifact smoke, release candidate verification, and release-plan smoke.
 - Installation docs for Hermes, Codex, Claude Code, and OpenCode.
 - End-to-end acceptance demos for temporary Windows repair and managed coding.
 
