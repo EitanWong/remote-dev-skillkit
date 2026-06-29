@@ -58,6 +58,7 @@ rdev host serve \
 - `POST /v1/hosts/register`
 - `POST /v1/hosts/{host_id}/approve`
 - `POST /v1/hosts/{host_id}/revoke`
+- `GET /v1/hosts/{host_id}/trust-bundle/update?current_sequence=<n>&current_hash=<sha256:...>`
 - `POST /v1/jobs`
 - `GET /v1/jobs/{job_id}`
 - `GET /v1/jobs/{job_id}/artifacts`
@@ -106,6 +107,14 @@ curl -s -X POST http://127.0.0.1:8787/v1/trust-bundle \
 
 Trust bundle updates must use schema `rdev.trust-bundle.v1`, verify against the current active signing key, increase the sequence, and include the current bundle hash as `previous_bundle_hash`.
 
+Managed-host trust refresh can use the host-bound update check:
+
+```bash
+curl -s 'http://127.0.0.1:8787/v1/hosts/<host_id>/trust-bundle/update?current_sequence=1&current_hash=sha256:...'
+```
+
+The response uses schema `rdev.trust-bundle-update.v1`. If the host is current, the response status is `current` and omits a bundle. If the gateway has a newer bundle, the response status is `update_available` and includes the candidate `rdev.trust-bundle.v1`; the host still verifies sequence, `previous_bundle_hash`, signature, and validity locally before persisting it.
+
 Register a foreground temporary host:
 
 ```bash
@@ -146,7 +155,7 @@ Agents can call the same policy engine through MCP tool `rdev.policy.explain_she
 
 `rdev host serve` keeps a nonce replay cache for signed job envelopes. By default, this cache is in-memory for the process. When `--nonce-store <path>` is set, used nonces are persisted to a local `0600` JSON file using schema `rdev.host-nonce-store.v1`; the parent directory is created with `0700` permissions. Expired nonce entries are pruned before new entries are written.
 
-When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle, the local host identity fingerprint, and the nonce replay cache, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
+When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, refreshes the local trust store through `GET /v1/hosts/{host_id}/trust-bundle/update` when `--trust-store` is configured, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle, the local host identity fingerprint, and the nonce replay cache, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
 
 For a more realistic outbound host channel during local development, use HTTPS long-poll:
 

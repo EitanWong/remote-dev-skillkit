@@ -130,6 +130,7 @@ The end state is complete only when these schemas are stable, versioned, documen
 | `rdev.join-manifest.v1` | bootstrap trust, downloads, release roots, and ticket binding |
 | `rdev.release-artifact.v1` | signed artifact digest, size, platform policy, and verification metadata |
 | `rdev.trust-bundle.v1` | gateway job-signing key set, rotation sequence, and revocation state |
+| `rdev.trust-bundle-update.v1` | host-bound trust-store refresh check for managed hosts |
 | `rdev.host-policy.v1` | approved capabilities, adapters, workspaces, limits, and approval gates |
 | `rdev.job.v1` | canonical signed executable intent |
 | `rdev.approval-token.v1` | scoped human decision for one high-risk operation |

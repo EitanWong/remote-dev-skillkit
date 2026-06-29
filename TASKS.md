@@ -83,11 +83,12 @@
 - [x] Add gateway/API evidence bundle export directly from job ids.
 - [x] Add HTTPS long-poll fallback before WSS/mTLS transport.
 - [x] Add installable Skillkit bundle generation with manifest checksums and framework notes.
+- [x] Add host-bound managed trust bundle update checks for trust-store refresh.
 
 ## Later
 
 - [ ] Add WSS/mTLS transport.
-- [ ] Add production managed host trust bundle update policy endpoint.
+- [ ] Add authenticated production managed host trust lifecycle with OS-protected storage.
 - [ ] Add OS-protected managed host identity storage and registration proof.
 - [ ] Add Windows Service mode.
 - [ ] Add systemd and launchd modes.

@@ -238,6 +238,7 @@ The local test suite currently covers:
 - Windows bootstrap verifier handoff logic;
 - shell artifact schema and redaction metadata;
 - signed trust bundle HTTP read/update flow with rollback rejection;
+- host-bound trust bundle update checks through `rdev.trust-bundle-update.v1`, including current/update-available responses and CLI trust-store persistence;
 - host-side job verification through signed trust bundle active keys, with legacy trust fallback.
 - durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.
 - durable host identity key file storage with 0600 permissions, registration identity preservation, signed job envelope identity binding, and host-side fingerprint mismatch rejection.

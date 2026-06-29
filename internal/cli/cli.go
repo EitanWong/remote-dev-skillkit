@@ -922,6 +922,12 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		if transport == "long-poll" {
 			wait = longPollTimeout
 		}
+		if opts.TrustStorePath != "" {
+			trust, err = refreshHostTrustUpdate(ctx, opts.GatewayURL, hostID, opts.TrustStorePath, trust)
+			if err != nil {
+				return processed, err
+			}
+		}
 		job, found, err := fetchNextJob(ctx, opts.GatewayURL, hostID, wait)
 		if err != nil {
 			return processed, err
@@ -1043,6 +1049,47 @@ func fetchHostTrust(ctx context.Context, gatewayURL, trustPin, trustStorePath st
 	return hostTrust{Legacy: &legacy}, nil
 }
 
+func refreshHostTrustUpdate(ctx context.Context, gatewayURL, hostID, trustStorePath string, current hostTrust) (hostTrust, error) {
+	store := hosttrust.FileStore{Path: trustStorePath}
+	stored, ok, err := store.Load()
+	if err != nil {
+		return hostTrust{}, err
+	}
+	if !ok {
+		return current, nil
+	}
+	hash, err := stored.Hash()
+	if err != nil {
+		return hostTrust{}, err
+	}
+	update, err := fetchTrustBundleUpdate(ctx, gatewayURL, hostID, stored.Sequence, hash)
+	if err != nil {
+		return hostTrust{}, err
+	}
+	if update.Status == model.TrustBundleUpdateStatusCurrent {
+		return current, nil
+	}
+	if update.Status != model.TrustBundleUpdateStatusAvailable {
+		return hostTrust{}, fmt.Errorf("unsupported trust bundle update status %q", update.Status)
+	}
+	if update.TrustBundle == nil {
+		return hostTrust{}, fmt.Errorf("trust bundle update missing bundle")
+	}
+	if err := store.VerifyAndSaveUpdate(*update.TrustBundle, model.TrustBundle{}, time.Now()); err != nil {
+		return hostTrust{}, err
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		return hostTrust{}, err
+	}
+	if !ok {
+		return hostTrust{}, fmt.Errorf("trust bundle update was not persisted")
+	}
+	current.SignedBundle = &loaded
+	current.Legacy = nil
+	return current, nil
+}
+
 func hostNonceStore(path string) hostnonce.Store {
 	if path != "" {
 		return hostnonce.FileStore{Path: path}
@@ -1107,6 +1154,41 @@ func fetchSignedTrustBundle(ctx context.Context, gatewayURL, trustPin string) (m
 		return model.SignedTrustBundle{}, err
 	}
 	return payload.TrustBundle, nil
+}
+
+func fetchTrustBundleUpdate(ctx context.Context, gatewayURL, hostID string, currentSequence int, currentHash string) (model.TrustBundleUpdate, error) {
+	values := url.Values{}
+	values.Set("current_sequence", strconv.Itoa(currentSequence))
+	if currentHash != "" {
+		values.Set("current_hash", currentHash)
+	}
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/hosts/" + url.PathEscape(hostID) + "/trust-bundle/update?" + values.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return model.TrustBundleUpdate{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.TrustBundleUpdate{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		TrustBundleUpdate model.TrustBundleUpdate `json:"trust_bundle_update"`
+		Error             string                  `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.TrustBundleUpdate{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.TrustBundleUpdate{}, fmt.Errorf("fetch trust bundle update failed: %s", payload.Error)
+	}
+	if payload.TrustBundleUpdate.SchemaVersion != model.TrustBundleUpdateSchemaVersion {
+		return model.TrustBundleUpdate{}, fmt.Errorf("unsupported trust bundle update schema %q", payload.TrustBundleUpdate.SchemaVersion)
+	}
+	return payload.TrustBundleUpdate, nil
 }
 
 func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.TrustBundle, error) {

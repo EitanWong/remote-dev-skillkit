@@ -58,6 +58,7 @@ Implemented now:
 - Local dev host registration, job polling, and job completion loop.
 - Development HTTPS long-poll host job transport via `rdev host serve --transport long-poll`.
 - Development trust bundle endpoint for host-side envelope signature verification.
+- Host-bound trust bundle update checks for managed host trust-store refresh.
 - Persistent development gateway signing key files plus host trust pin checks.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
@@ -82,7 +83,7 @@ Not implemented yet:
 - Real gateway networking.
 - Production host enrollment certificates and registration proofs.
 - Production signing key storage and rotation.
-- Production key rotation/revocation and managed host trust bundle update flow.
+- Production key rotation/revocation authentication and durable managed host trust lifecycle.
 - Full production bootstrap trust root lifecycle and release signing policy.
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.

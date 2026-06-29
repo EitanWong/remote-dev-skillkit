@@ -202,6 +202,81 @@ func TestTrustBundleEndpointRejectsRollback(t *testing.T) {
 	}
 }
 
+func TestHostTrustBundleUpdateEndpointReportsCurrentAndAvailableUpdate(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := httpTestKeyPair(t)
+	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
+	server := NewServer(gw)
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	current := gw.SignedTrustBundle()
+	currentHash, err := current.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentURL := "/v1/hosts/" + host.ID + "/trust-bundle/update?current_sequence=1&current_hash=" + url.QueryEscape(currentHash)
+	currentReq := httptest.NewRequest(http.MethodGet, currentURL, nil)
+	currentRec := httptest.NewRecorder()
+	handler.ServeHTTP(currentRec, currentReq)
+	if currentRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", currentRec.Code, currentRec.Body.String())
+	}
+	var currentPayload struct {
+		TrustBundleUpdate model.TrustBundleUpdate `json:"trust_bundle_update"`
+	}
+	if err := json.Unmarshal(currentRec.Body.Bytes(), &currentPayload); err != nil {
+		t.Fatal(err)
+	}
+	if currentPayload.TrustBundleUpdate.Status != model.TrustBundleUpdateStatusCurrent {
+		t.Fatalf("expected current status, got %#v", currentPayload.TrustBundleUpdate)
+	}
+	if currentPayload.TrustBundleUpdate.TrustBundle != nil {
+		t.Fatal("current response should not include a bundle")
+	}
+
+	next, err := model.NewSignedTrustBundle(model.SignedTrustBundleSpec{
+		BundleID:           current.BundleID,
+		Sequence:           2,
+		NotBefore:          now,
+		NotAfter:           now.Add(time.Hour),
+		PreviousBundleHash: currentHash,
+		SigningKeyID:       "gateway-dev",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway-dev", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err = next.Sign(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.UpdateSignedTrustBundle(next); err != nil {
+		t.Fatal(err)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodGet, currentURL, nil)
+	updateRec := httptest.NewRecorder()
+	handler.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+	var updatePayload struct {
+		TrustBundleUpdate model.TrustBundleUpdate `json:"trust_bundle_update"`
+	}
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updatePayload); err != nil {
+		t.Fatal(err)
+	}
+	if updatePayload.TrustBundleUpdate.Status != model.TrustBundleUpdateStatusAvailable {
+		t.Fatalf("expected update_available status, got %#v", updatePayload.TrustBundleUpdate)
+	}
+	if updatePayload.TrustBundleUpdate.TrustBundle == nil || updatePayload.TrustBundleUpdate.TrustBundle.Sequence != 2 {
+		t.Fatalf("expected sequence 2 bundle, got %#v", updatePayload.TrustBundleUpdate.TrustBundle)
+	}
+}
+
 func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)

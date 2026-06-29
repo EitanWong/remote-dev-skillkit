@@ -567,6 +567,83 @@ func TestFetchHostTrustUsesStoredBundleWhenGatewayTrustBundleUnavailable(t *test
 	}
 }
 
+func TestRefreshHostTrustUpdatePersistsGatewayUpdate(t *testing.T) {
+	now := time.Now().Add(-time.Minute).UTC()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "managed-mac",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePath := filepath.Join(t.TempDir(), "trust", "bundle.json")
+	store := hosttrust.FileStore{Path: storePath}
+	first := gw.SignedTrustBundle()
+	if err := store.Save(first); err != nil {
+		t.Fatal(err)
+	}
+	firstHash, err := first.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := model.NewSignedTrustBundle(model.SignedTrustBundleSpec{
+		BundleID:           first.BundleID,
+		Sequence:           2,
+		NotBefore:          now,
+		NotAfter:           now.Add(time.Hour),
+		PreviousBundleHash: firstHash,
+		SigningKeyID:       "gateway-dev",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway-dev", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err = next.Sign(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.UpdateSignedTrustBundle(next); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	current := hostTrust{SignedBundle: &first}
+
+	updated, err := refreshHostTrustUpdate(context.Background(), server.URL, host.ID, storePath, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.SignedBundle == nil || updated.SignedBundle.Sequence != 2 {
+		t.Fatalf("expected in-memory trust to update to sequence 2, got %#v", updated.SignedBundle)
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || loaded.Sequence != 2 {
+		t.Fatalf("expected persisted sequence 2, ok=%v bundle=%#v", ok, loaded)
+	}
+}
+
 func TestHostTrustRejectsReplayWithNonceStore(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())

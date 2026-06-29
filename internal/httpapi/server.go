@@ -215,6 +215,18 @@ func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
+	case resource == "trust-bundle" && action == "update":
+		currentSequence, err := parseOptionalInt(r.URL.Query().Get("current_sequence"), "current_sequence")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		update, err := s.Gateway.TrustBundleUpdateForHost(hostID, currentSequence, r.URL.Query().Get("current_hash"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"trust_bundle_update": update})
 	default:
 		writeError(w, http.StatusNotFound, "unknown host subresource")
 	}
@@ -411,6 +423,17 @@ func parseLongPollWait(r *http.Request) (time.Duration, error) {
 		return time.Duration(value) * time.Second, nil
 	}
 	return 0, nil
+}
+
+func parseOptionalInt(raw, name string) (int, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	return value, nil
 }
 
 func splitHostAction(path string) (hostID string, action string, ok bool) {

@@ -34,6 +34,7 @@ The roadmap implements the canonical [Final System Design](../architecture/FINAL
 - Host identity storage wired into registration and job binding.
 - Durable host trust bundle store.
 - Trust-bundle key rotation/revocation flow.
+- Host-bound trust bundle update checks for managed host refresh.
 - Host-side artifact redaction.
 - Hash-chained audit export verifier.
 - Evidence bundle export.

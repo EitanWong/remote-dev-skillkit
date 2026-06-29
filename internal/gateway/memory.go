@@ -350,6 +350,36 @@ func (g *MemoryGateway) UpdateSignedTrustBundle(next model.SignedTrustBundle) (m
 	return g.trustBundle, nil
 }
 
+func (g *MemoryGateway) TrustBundleUpdateForHost(hostID string, currentSequence int, currentHash string) (model.TrustBundleUpdate, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.TrustBundleUpdate{}, fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status != model.HostStatusActive {
+		return model.TrustBundleUpdate{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
+	}
+	if currentSequence < 0 {
+		return model.TrustBundleUpdate{}, fmt.Errorf("%w: current sequence must be non-negative", ErrInvalidState)
+	}
+	hash, err := g.trustBundle.Hash()
+	if err != nil {
+		return model.TrustBundleUpdate{}, err
+	}
+	if currentSequence > g.trustBundle.Sequence {
+		return model.TrustBundleUpdate{}, fmt.Errorf("%w: host trust sequence is newer than gateway", ErrInvalidState)
+	}
+	if currentSequence == g.trustBundle.Sequence {
+		if currentHash != "" && currentHash != hash {
+			return model.TrustBundleUpdate{}, fmt.Errorf("%w: current trust hash mismatch", ErrInvalidState)
+		}
+		return model.NewCurrentTrustBundleUpdate(hostID, g.trustBundle, hash), nil
+	}
+	return model.NewAvailableTrustBundleUpdate(hostID, g.trustBundle, hash), nil
+}
+
 func (g *MemoryGateway) JoinManifest(ticketCode, gatewayURL, joinURL string) (model.JoinManifest, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
