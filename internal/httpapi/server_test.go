@@ -152,6 +152,56 @@ func TestRegisterAndApproveHost(t *testing.T) {
 	}
 }
 
+func TestRevokeHostCancelsQueuedJobs(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
+	jobRec := httptest.NewRecorder()
+	handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+	var jobPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	revokeReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/"+host.ID+"/revoke", bytes.NewBufferString(`{"reason":"done"}`))
+	revokeRec := httptest.NewRecorder()
+	handler.ServeHTTP(revokeRec, revokeReq)
+	if revokeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", revokeRec.Code, revokeRec.Body.String())
+	}
+	var revokePayload struct {
+		Host model.Host `json:"host"`
+	}
+	if err := json.Unmarshal(revokeRec.Body.Bytes(), &revokePayload); err != nil {
+		t.Fatal(err)
+	}
+	if revokePayload.Host.Status != model.HostStatusRevoked {
+		t.Fatalf("expected revoked host, got %s", revokePayload.Host.Status)
+	}
+	job, err := gw.Job(jobPayload.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != model.JobStatusCanceled {
+		t.Fatalf("expected canceled job, got %s", job.Status)
+	}
+	auditReq := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
+	auditRec := httptest.NewRecorder()
+	handler.ServeHTTP(auditRec, auditReq)
+	if !bytes.Contains(auditRec.Body.Bytes(), []byte("job.cancel")) {
+		t.Fatalf("expected audit response to include job.cancel, got %s", auditRec.Body.String())
+	}
+}
+
 func TestJobCreateClaimAndComplete(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()

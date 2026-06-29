@@ -256,6 +256,56 @@ func TestMemoryGatewayRejectsJobForPendingHost(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayRevokeHostCancelsQueuedAndRunningJobs(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	queued, err := gw.CreateJob(host.ID, "shell", "queued", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := gw.CreateJob(host.ID, "shell", "running", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := gw.NextJobForHost(host.ID); err != nil || !ok {
+		t.Fatalf("expected running job claim, ok=%v err=%v", ok, err)
+	}
+	if _, err := gw.RevokeHost(host.ID, "operator stop"); err != nil {
+		t.Fatal(err)
+	}
+	queued, err = gw.Job(queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Status != model.JobStatusCanceled {
+		t.Fatalf("expected queued job canceled, got %s", queued.Status)
+	}
+	running, err = gw.Job(running.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.Status != model.JobStatusCanceled {
+		t.Fatalf("expected running job canceled, got %s", running.Status)
+	}
+	if _, ok, err := gw.NextJobForHost(host.ID); err == nil || ok {
+		t.Fatalf("expected revoked host to be unable to claim jobs, ok=%v err=%v", ok, err)
+	}
+	events := gw.AuditEvents()
+	if !hasAuditAction(events, "host.revoke") {
+		t.Fatalf("expected host.revoke audit event: %#v", events)
+	}
+	if got := countAuditAction(events, "job.cancel"); got != 2 {
+		t.Fatalf("expected 2 job.cancel audit events, got %d: %#v", got, events)
+	}
+}
+
 func TestMemoryGatewayRevokeTicketPreventsRegistration(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -293,6 +343,20 @@ func TestMemoryGatewayWritesAuditSink(t *testing.T) {
 	if len(content) == 0 {
 		t.Fatal("expected audit file to contain an event")
 	}
+}
+
+func countAuditAction(events []model.AuditEvent, action string) int {
+	count := 0
+	for _, event := range events {
+		if event.Action == action {
+			count++
+		}
+	}
+	return count
+}
+
+func hasAuditAction(events []model.AuditEvent, action string) bool {
+	return countAuditAction(events, action) > 0
 }
 
 func activeHost(t *testing.T, gw *MemoryGateway) model.Host {

@@ -211,10 +211,12 @@ func (g *MemoryGateway) RevokeHost(hostID, reason string) (model.Host, error) {
 	if host.Status == model.HostStatusRevoked {
 		return model.Host{}, fmt.Errorf("%w: host already revoked", ErrInvalidState)
 	}
+	now := g.now().UTC()
 	host.Status = model.HostStatusRevoked
-	host.LastSeenAt = g.now().UTC()
+	host.LastSeenAt = now
 	g.hosts[host.ID] = host
 	g.appendAuditLocked("operator", "host.revoke", host.ID, reasonOrDefault(reason, "revoked host"))
+	g.cancelJobsForHostLocked(host.ID, now, "canceled because host was revoked")
 	return host, nil
 }
 
@@ -501,6 +503,21 @@ func (g *MemoryGateway) CancelJob(jobID, reason string) (model.Job, error) {
 	g.jobs[job.ID] = job
 	g.appendAuditLocked("operator", "job.cancel", job.ID, reasonOrDefault(reason, "canceled job"))
 	return job, nil
+}
+
+func (g *MemoryGateway) cancelJobsForHostLocked(hostID string, now time.Time, reason string) {
+	for _, job := range g.jobs {
+		if job.HostID != hostID {
+			continue
+		}
+		if job.Status != model.JobStatusQueued && job.Status != model.JobStatusRunning {
+			continue
+		}
+		job.Status = model.JobStatusCanceled
+		job.EndedAt = &now
+		g.jobs[job.ID] = job
+		g.appendAuditLocked("operator", "job.cancel", job.ID, reasonOrDefault(reason, "canceled job"))
+	}
 }
 
 func (g *MemoryGateway) ApproveJob(jobID, approvalID, decision, reason string) (model.Job, error) {

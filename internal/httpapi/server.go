@@ -132,6 +132,22 @@ func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"host": host})
+	case "revoke":
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid JSON body")
+				return
+			}
+		}
+		host, err := s.Gateway.RevokeHost(hostID, req.Reason)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"host": host})
 	default:
 		writeError(w, http.StatusNotFound, "unknown host action")
 	}

@@ -52,6 +52,7 @@ rdev host serve \
 - `GET /v1/hosts`
 - `POST /v1/hosts/register`
 - `POST /v1/hosts/{host_id}/approve`
+- `POST /v1/hosts/{host_id}/revoke`
 - `POST /v1/jobs`
 - `GET /v1/jobs/{job_id}`
 - `GET /v1/jobs/{job_id}/artifacts`
@@ -119,6 +120,14 @@ Read execution evidence:
 ```bash
 curl -s http://127.0.0.1:8787/v1/jobs/<job_id>/artifacts
 curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
+```
+
+Revoke a host and cancel its pending/running jobs:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/hosts/<host_id>/revoke \
+  -H 'content-type: application/json' \
+  -d '{"reason":"support session complete"}'
 ```
 
 ## Release Artifact Verification

@@ -30,6 +30,7 @@
 - [x] Add release artifact signature manifest and CLI verifier.
 - [x] Wire release artifact signature verification into Windows bootstrap via hash-pinned verifier.
 - [x] Add shell job policy explain engine and MCP tool.
+- [x] Make host revocation cancel queued/running jobs and audit the stop.
 
 ## Next
 
@@ -71,7 +72,7 @@
 - [ ] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
 - [ ] Workspace escape and non-allowlisted command attempts are rejected host-side.
 - [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
-- [ ] Revocation stops future jobs and is recorded in audit.
+- [x] Revocation stops future jobs and is recorded in audit.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 
 ## Definition Of Done For v0.1.0
