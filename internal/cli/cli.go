@@ -33,6 +33,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/release"
+	"github.com/EitanWong/remote-dev-skillkit/internal/service"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
@@ -169,6 +170,40 @@ func (a App) host(args []string) error {
 			ApprovalStorePath:     *approvalStore,
 			ManifestRootPublicKey: *manifestRootPublicKey,
 		})
+	case "install-service":
+		fs := flag.NewFlagSet("host install-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		platform := fs.String("platform", "macos", "service platform: macos")
+		label := fs.String("label", service.DefaultMacOSLaunchAgentLabel, "managed host service label")
+		binaryPath := fs.String("binary", "", "absolute path to rdev binary; defaults to current executable")
+		gatewayURL := fs.String("gateway", "", "gateway URL")
+		ticketCode := fs.String("ticket-code", "", "managed enrollment ticket code")
+		manifestURL := fs.String("manifest-url", "", "signed managed enrollment manifest URL")
+		identityStore := fs.String("identity-store", "", "managed host identity store path")
+		trustStore := fs.String("trust-store", "", "managed host trust bundle store path")
+		nonceStore := fs.String("nonce-store", "", "managed host nonce store path")
+		approvalStore := fs.String("approval-store", "", "managed host approval store path")
+		logDir := fs.String("log-dir", "", "managed host log directory")
+		plistOut := fs.String("plist-out", "", "LaunchAgent plist output path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
+		force := fs.Bool("force", false, "overwrite an existing plist output path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.hostInstallService(hostInstallServiceOptions{
+			Platform:          *platform,
+			Label:             *label,
+			BinaryPath:        *binaryPath,
+			GatewayURL:        *gatewayURL,
+			TicketCode:        *ticketCode,
+			ManifestURL:       *manifestURL,
+			IdentityStorePath: *identityStore,
+			TrustStorePath:    *trustStore,
+			NonceStorePath:    *nonceStore,
+			ApprovalStorePath: *approvalStore,
+			LogDir:            *logDir,
+			PlistOut:          *plistOut,
+			Force:             *force,
+		})
 	default:
 		return fmt.Errorf("unknown host subcommand %q", args[0])
 	}
@@ -193,6 +228,22 @@ type hostServeOptions struct {
 	NonceStorePath        string
 	ApprovalStorePath     string
 	ManifestRootPublicKey string
+}
+
+type hostInstallServiceOptions struct {
+	Platform          string
+	Label             string
+	BinaryPath        string
+	GatewayURL        string
+	TicketCode        string
+	ManifestURL       string
+	IdentityStorePath string
+	TrustStorePath    string
+	NonceStorePath    string
+	ApprovalStorePath string
+	LogDir            string
+	PlistOut          string
+	Force             bool
 }
 
 func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
@@ -281,6 +332,107 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	payload["processed_jobs"] = processed
 	payload["status"] = "polling-complete"
 	return enc.Encode(payload)
+}
+
+func (a App) hostInstallService(opts hostInstallServiceOptions) error {
+	if opts.Platform == "" {
+		opts.Platform = "macos"
+	}
+	if opts.Platform != "macos" {
+		return fmt.Errorf("host install-service currently supports macos only")
+	}
+	binaryPath := opts.BinaryPath
+	if binaryPath == "" {
+		current, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		binaryPath = current
+	}
+	if !filepath.IsAbs(binaryPath) {
+		return fmt.Errorf("binary path must be absolute")
+	}
+	plistOut := opts.PlistOut
+	if plistOut == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		label := opts.Label
+		if label == "" {
+			label = service.DefaultMacOSLaunchAgentLabel
+		}
+		plistOut = filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+	}
+	agent, err := service.NewMacOSLaunchAgent(service.LaunchAgentOptions{
+		Label:             opts.Label,
+		BinaryPath:        binaryPath,
+		GatewayURL:        opts.GatewayURL,
+		TicketCode:        opts.TicketCode,
+		ManifestURL:       opts.ManifestURL,
+		IdentityStorePath: opts.IdentityStorePath,
+		TrustStorePath:    opts.TrustStorePath,
+		NonceStorePath:    opts.NonceStorePath,
+		ApprovalStorePath: opts.ApprovalStorePath,
+		LogDir:            opts.LogDir,
+		Transport:         "long-poll",
+		LongPollTimeout:   "25s",
+	})
+	if err != nil {
+		return err
+	}
+	content, err := service.RenderMacOSLaunchAgent(agent)
+	if err != nil {
+		return err
+	}
+	if err := writeServiceFile(plistOut, content, opts.Force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                true,
+		"platform":          opts.Platform,
+		"label":             agent.Label,
+		"plist":             plistOut,
+		"program_arguments": agent.ProgramArguments,
+		"stdout":            agent.StdoutPath,
+		"stderr":            agent.StderrPath,
+		"next": map[string]string{
+			"start":   "launchctl bootstrap gui/$(id -u) " + plistOut,
+			"stop":    "launchctl bootout gui/$(id -u) " + plistOut,
+			"inspect": "launchctl print gui/$(id -u)/" + agent.Label,
+		},
+		"note": "plist written only; launchctl was not executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func writeServiceFile(path string, content []byte, force bool) error {
+	if path == "" {
+		return fmt.Errorf("service output path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	flag := os.O_CREATE | os.O_WRONLY
+	if force {
+		flag |= os.O_TRUNC
+	} else {
+		flag |= os.O_EXCL
+	}
+	file, err := os.OpenFile(path, flag, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 func (a App) ticket(args []string) error {
@@ -818,6 +970,7 @@ Usage:
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
+  rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
 `))
 }
 

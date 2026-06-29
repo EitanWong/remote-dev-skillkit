@@ -252,6 +252,7 @@ The local test suite currently covers:
 - development HTTPS long-poll host job transport through `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=...` and `rdev host serve --transport long-poll`.
 - structured host-side approval-required artifacts through `rdev.approval-required.v1`; unsatisfied signed approvals pause before adapter execution, and gateway-approved jobs carry signed `rdev.approval-token.v1` tokens in the re-signed job envelope.
 - durable host-side approval token consumption through in-memory and file-backed `rdev.host-approval-store.v1`, including 0600 file permissions, 0700 directory permissions, expiry pruning, and CLI `--approval-store` wiring.
+- macOS LaunchAgent plist generation through `rdev host install-service --platform macos`, including managed host arguments, `0600` plist permissions, and explicit launchctl next steps without auto-starting the service.
 
 The following remain real-environment acceptance tests:
 

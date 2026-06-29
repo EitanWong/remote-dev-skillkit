@@ -81,6 +81,82 @@ func TestMCPServeProcessesInitialize(t *testing.T) {
 	}
 }
 
+func TestHostInstallServiceWritesMacOSLaunchAgentPlist(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "LaunchAgents", "com.example.rdev-host.plist")
+	binaryPath := filepath.Join(dir, "bin", "rdev")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--binary", binaryPath,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--identity-store", filepath.Join(dir, "identity.json"),
+		"--trust-store", filepath.Join(dir, "trust.json"),
+		"--nonce-store", filepath.Join(dir, "nonces.json"),
+		"--approval-store", filepath.Join(dir, "approvals.json"),
+		"--log-dir", filepath.Join(dir, "logs"),
+		"--plist-out", plistPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := readFileForTest(t, plistPath)
+	for _, expected := range []string{
+		"<key>Label</key>",
+		"<string>com.example.rdev-host</string>",
+		"<string>host</string>",
+		"<string>serve</string>",
+		"<string>managed</string>",
+		"<string>https://api.example.com/v1</string>",
+		"<string>ABCD-1234</string>",
+		"<key>KeepAlive</key>",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("expected plist to contain %q, got %s", expected, content)
+		}
+	}
+	info, err := os.Stat(plistPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("expected plist permissions 0600, got %#o", got)
+	}
+	if !strings.Contains(stdout.String(), `"launchctl bootstrap gui/$(id -u) `+plistPath+`"`) {
+		t.Fatalf("expected launchctl next step in stdout, got %s", stdout.String())
+	}
+}
+
+func TestHostInstallServiceDoesNotOverwriteWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
+	if err := os.WriteFile(plistPath, []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "macos",
+		"--label", "com.example.rdev-host",
+		"--binary", filepath.Join(dir, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--plist-out", plistPath,
+	})
+	if err == nil {
+		t.Fatal("expected existing plist to fail without --force")
+	}
+	if got := readFileForTest(t, plistPath); got != "existing" {
+		t.Fatalf("expected existing plist to remain unchanged, got %q", got)
+	}
+}
+
 func TestHostServeRejectsUnknownMode(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

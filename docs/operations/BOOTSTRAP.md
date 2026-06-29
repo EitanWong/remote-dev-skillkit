@@ -83,7 +83,11 @@ When it is present, `rdev-host` verifies the join manifest with that pinned root
 Managed service installation is a separate explicit step:
 
 ```bash
-rdev host install-service --mode managed
+rdev host install-service \
+  --platform macos \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --plist-out ~/Library/LaunchAgents/com.remote-dev-skillkit.host.plist
 ```
 
-This command is not used for third-party temporary sessions.
+On macOS, the current command writes a LaunchAgent plist and prints the explicit `launchctl bootstrap`, `launchctl bootout`, and `launchctl print` commands. It does not run `launchctl` automatically. This command is not used for third-party temporary sessions.

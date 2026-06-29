@@ -64,6 +64,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 ## v0.3.0 Managed Mac Coding
 
 - macOS LaunchAgent managed mode.
+- LaunchAgent plist generation with explicit launchctl next steps.
 - Host identity protected storage.
 - Workspace locks and Git worktrees.
 - Codex adapter.
