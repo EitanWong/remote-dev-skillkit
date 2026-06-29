@@ -58,6 +58,7 @@
 - [x] Add GitHub Actions CI for tests, shell syntax, release candidate verification, and release-plan smoke.
 - [x] Add real release artifact builder and thin `rdev-host`, `rdev-gateway`, and `rdev-mcp` entrypoints.
 - [x] Add per-platform release candidate automation from real build artifacts.
+- [x] Add multi-platform GitHub Release dry-run planning from verified platform candidates.
 
 ## Next
 
@@ -126,6 +127,7 @@
 - [x] Add CI release smoke for prepare-candidate, verify-candidate, and plan-release.
 - [x] Switch CI release smoke to real Go-built Windows artifacts instead of placeholder files.
 - [x] Switch CI release smoke to per-platform candidate generation from real Linux and Windows artifacts.
+- [x] Switch CI release smoke to aggregate multi-platform GitHub Release planning.
 
 ## Later
 

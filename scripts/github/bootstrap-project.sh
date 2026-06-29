@@ -269,7 +269,8 @@ Acceptance:
 - build artifacts for macOS, Linux, Windows
 - run rdev release prepare-candidate and archive rdev.release-candidate.v1
 - run rdev release verify-candidate and require ok=true
-- run scripts/github/plan-release.sh and review rdev.github-release-plan.v1 before any GitHub mutation
+- run scripts/release/prepare-platform-candidates.sh and review rdev.platform-release-candidates.v1
+- run scripts/github/plan-platform-release.sh and review rdev.github-platform-release-plan.v1 before any GitHub mutation
 - generate checksums, signed artifact manifests, and signed release manifest index
 - include SBOM or documented equivalent
 - package redacted acceptance transcripts, report JSON, audit verification, and evidence checksums

@@ -15,6 +15,8 @@
 - [ ] Export and verify the Skillkit bundle with `rdev skillkit export` and `rdev skillkit verify`.
 - [ ] Prepare and verify per-platform candidates with `scripts/release/prepare-platform-candidates.sh`.
 - [ ] Review `rdev.platform-release-candidates.v1`.
+- [ ] Generate and review a multi-platform GitHub Release dry-run plan with `scripts/github/plan-platform-release.sh`.
+- [ ] Review `rdev.github-platform-release-plan.v1`, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, and `INSTALL_PLATFORMS.md`.
 - [ ] Prepare a local release candidate with `rdev release prepare-candidate`.
 - [ ] Verify the local release candidate with `rdev release verify-candidate`.
 - [ ] Generate and review a GitHub Release dry-run plan with `scripts/github/plan-release.sh`.

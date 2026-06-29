@@ -28,25 +28,9 @@ scripts/release/prepare-platform-candidates.sh \
   --key "$work_dir/release-root.json" \
   > "$work_dir/platform-candidates-output.json"
 
-windows_candidate="$(python3 - "$work_dir/platform-candidates/platform-candidates.json" <<'PY'
-import json
-import pathlib
-import sys
-
-manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
-for candidate in manifest["candidates"]:
-    if candidate["target"] == "windows/amd64":
-        print(candidate["candidate_dir"])
-        break
-else:
-    raise SystemExit("windows/amd64 candidate missing")
-PY
-)"
-
-scripts/github/plan-release.sh \
-  --candidate "$windows_candidate" \
+scripts/github/plan-platform-release.sh \
+  --platform-candidates "$work_dir/platform-candidates/platform-candidates.json" \
   --repo "$repo" \
-  --require-artifacts rdev-host.exe,rdev-verify.exe \
   --out "$plan_dir" \
   > "$work_dir/plan-output.json"
 
@@ -76,8 +60,13 @@ assert {candidate["target"] for candidate in platform_manifest["candidates"]} ==
 assert all(candidate["candidate_schema"] == "rdev.release-candidate.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
 assert all(candidate["verification_schema"] == "rdev.release-candidate-verification.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
 assert plan_output["ok"] is True, plan_output
-assert plan["schema_version"] == "rdev.github-release-plan.v1", plan
+assert plan["schema_version"] == "rdev.github-platform-release-plan.v1", plan
 assert plan["external_mutation"] is False, plan
+assert plan_output["platform_count"] == 2, plan_output
+assert any(asset["kind"] == "platform-candidate-archive" and "linux-amd64" in asset["name"] for asset in plan["assets"]), plan["assets"]
+assert any(asset["kind"] == "platform-candidate-archive" and "windows-amd64" in asset["name"] for asset in plan["assets"]), plan["assets"]
+assert any(asset["kind"] == "platform-release-index" for asset in plan["assets"]), plan["assets"]
+assert any(asset["kind"] == "install-guide" for asset in plan["assets"]), plan["assets"]
 assert any(asset["kind"] == "skillkit-archive" for asset in plan["assets"]), plan["assets"]
 assert len({asset["name"] for asset in plan["assets"]}) == len(plan["assets"]), plan["assets"]
 assert "gh release create" in commands, commands
@@ -90,6 +79,7 @@ print(json.dumps({
     "platform_candidates_schema": platform_manifest["schema_version"],
     "platform_candidate_count": len(platform_manifest["candidates"]),
     "plan_schema": plan["schema_version"],
+    "planned_platforms": plan_output["platform_count"],
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))

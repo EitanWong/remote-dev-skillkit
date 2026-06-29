@@ -98,7 +98,8 @@ These should not be opened as new GitHub issues unless regression work is needed
 - local GitHub Release dry-run planning from verified candidates with generated release notes, Skillkit archive, asset manifest, and commands preview;
 - real build artifact generation with `rdev.build-artifacts.v1` and checksums;
 - per-platform release candidate automation with `rdev.platform-release-candidates.v1`;
-- GitHub Actions CI for `./scripts/check.sh` and real build artifact / per-platform release candidate / GitHub release-plan smoke;
+- multi-platform GitHub Release dry-run planning with platform archives, release index, install guide, verification summary, and command previews;
+- GitHub Actions CI for `./scripts/check.sh` and real build artifact / per-platform release candidate / multi-platform GitHub release-plan smoke;
 - HTTPS long-poll host job transport prototype;
 - host trust-bundle update checks;
 - macOS LaunchAgent plist generation, status, safe uninstall, and service-control;
@@ -186,7 +187,7 @@ The current bootstrap script creates the following seed backlog.
      - staged artifacts exist for macOS, Linux, and Windows;
      - `rdev release prepare-candidate` produces `rdev.release-candidate.v1`;
      - `rdev release verify-candidate` returns `ok=true`;
-     - `scripts/github/plan-release.sh` produces `rdev.github-release-plan.v1` without external mutation;
+     - `scripts/github/plan-platform-release.sh` produces `rdev.github-platform-release-plan.v1` without external mutation;
      - checksums, signed artifact manifests, and signed release index verify;
      - redacted acceptance transcripts, report JSON, audit verification, and evidence checksums are packaged.
 
@@ -209,6 +210,19 @@ scripts/github/plan-release.sh \
 
 This generates a local plan, release notes, verification JSON, and command
 preview. It does not create a release or upload assets.
+
+Preview a multi-platform GitHub Release publication from verified platform
+candidates:
+
+```bash
+scripts/github/plan-platform-release.sh \
+  --platform-candidates dist/release-candidates/platform-candidates.json \
+  --repo EitanWong/remote-dev-skillkit
+```
+
+This generates platform archives, `platform-release-index.json`,
+`platform-release-verification.json`, `INSTALL_PLATFORMS.md`, release notes, and
+command previews. It does not create a release or upload assets.
 
 Recommended sequence after explicit approval:
 

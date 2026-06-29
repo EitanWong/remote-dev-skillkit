@@ -798,7 +798,8 @@ scripts/release/build-artifacts.sh
   -> scripts/release/prepare-platform-candidates.sh
   -> per-target release prepare-candidate
   -> per-target release verify-candidate
-  -> GitHub Release dry-run plan
+  -> scripts/github/plan-platform-release.sh
+  -> GitHub Release dry-run plan with platform archives and install guide
 ```
 
 The current multi-platform layout is explicit platform slicing: one verified
@@ -808,6 +809,13 @@ release candidate per `GOOS/GOARCH` target, summarized by
 verifiable. The Windows temporary bootstrap slice must include real
 `rdev-host.exe` and `rdev-verify.exe` binaries built from the repository before
 bundle signing and candidate verification.
+
+The aggregate multi-platform release plan is also local evidence, not
+publication. It packages each verified platform candidate into a uniquely named
+archive, writes `rdev.platform-release-index.v1`, writes
+`rdev.github-platform-release-verification.v1`, generates
+`INSTALL_PLATFORMS.md`, and produces `gh release` command previews. Executing
+those commands remains a separate operator-approved external mutation.
 
 ## Final Release Ladder
 
@@ -862,7 +870,7 @@ the remaining gaps that matter before public confidence:
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
 | Adapter SDK extraction | adapters are still mostly internal implementations | public SDK, fixtures, conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
-| Multi-platform release UX | per-target verified candidates exist, but public release still needs aggregate asset selection and installer guidance | aggregate GitHub release plan, platform-selecting install docs, and verified download commands |
+| Multi-platform release UX | aggregate dry-run plan, platform archives, index, and install guide exist; public release still needs real download verification after publication | verified public download commands and post-release install transcript |
 | Public release execution | real build artifacts, release candidates, and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 
 Anything not in this ledger is secondary until these are closed.
