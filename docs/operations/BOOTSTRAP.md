@@ -32,6 +32,10 @@ It accepts:
 - `ExpectedSha256`
 - optional `ManifestUrl`
 - optional `ManifestRootPublicKey`
+- optional `ReleaseManifestUrl`
+- optional `ReleaseRootPublicKey`
+- optional `VerifierDownloadUrl`
+- optional `VerifierExpectedSha256`
 - optional `TrustPin`
 - optional `HostName`
 
@@ -47,10 +51,14 @@ The repository also includes release artifact signature primitives:
 
 ```bash
 rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
-rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:<base64url_ed25519_public_key>
+rdev-verify.exe --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:<base64url_ed25519_public_key>
 ```
 
-This signs a manifest containing the artifact name, SHA-256, size, signing key id and Ed25519 signature. The current Windows draft still performs SHA-256 verification directly in PowerShell; wiring the signed release manifest into bootstrap is the next step.
+This signs a manifest containing the artifact name, SHA-256, size, signing key id and Ed25519 signature.
+
+When `ReleaseManifestUrl` is provided, the Windows bootstrap requires `ReleaseRootPublicKey`, `VerifierDownloadUrl`, and `VerifierExpectedSha256`. It downloads `rdev-verify.exe`, checks the verifier SHA-256 first, then uses that verifier to validate the signed `rdev-host.exe` release manifest before starting the host.
+
+This avoids asking the untrusted host binary to verify itself. Production still needs a release-key lifecycle policy and platform-native Windows code signing / Authenticode policy.
 
 When `ManifestUrl` is provided, the host fetches a signed `rdev.join-manifest.v1`, verifies it, then uses the manifest-provided gateway URL, ticket code and trust fingerprint. In production, the manifest should be rooted in a release/bootstrap trust root rather than only the gateway key advertised by the manifest.
 

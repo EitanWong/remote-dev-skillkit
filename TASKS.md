@@ -28,6 +28,7 @@
 - [x] Add signed dev join manifest endpoint and manifest-driven host registration.
 - [x] Add initial release/bootstrap trust root verification for join manifests.
 - [x] Add release artifact signature manifest and CLI verifier.
+- [x] Wire release artifact signature verification into Windows bootstrap via hash-pinned verifier.
 
 ## Next
 
@@ -44,8 +45,8 @@
 - [ ] Add production key rotation/revocation and host trust update flow.
 - [x] Add production release/bootstrap trust root for join manifests.
 - [x] Add release artifact signature verification primitive.
-- [ ] Wire release artifact signature verification into Windows bootstrap.
 - [ ] Add production release key lifecycle policy.
+- [ ] Add platform-native Windows Authenticode verification policy.
 - [x] Add real scoped shell adapter execution.
 - [ ] Add acceptance-test checklist for temporary Windows repair and managed Mac coding.
 - [ ] Add durable shell adapter audit schema and redaction rules.

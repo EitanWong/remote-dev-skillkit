@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,6 +26,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
+	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 )
 
 type App struct {
@@ -648,22 +648,11 @@ func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootP
 }
 
 func encodeRootPublicKey(keyID string, publicKey ed25519.PublicKey) string {
-	return keyID + ":" + base64.RawURLEncoding.EncodeToString(publicKey)
+	return trustref.Encode(keyID, publicKey)
 }
 
 func parseRootPublicKey(value string) (model.TrustBundle, error) {
-	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return model.TrustBundle{}, fmt.Errorf("manifest root public key must be formatted key_id:base64url_public_key")
-	}
-	publicKey, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return model.TrustBundle{}, fmt.Errorf("decode manifest root public key: %w", err)
-	}
-	if len(publicKey) != ed25519.PublicKeySize {
-		return model.TrustBundle{}, fmt.Errorf("invalid manifest root public key length %d", len(publicKey))
-	}
-	return model.NewTrustBundle(parts[0], ed25519.PublicKey(publicKey)), nil
+	return trustref.Parse(value)
 }
 
 func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.TrustBundle, error) {

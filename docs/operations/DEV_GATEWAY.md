@@ -128,7 +128,23 @@ rdev release verify \
   --root-public-key release-root:<base64url_ed25519_public_key>
 ```
 
-The release manifest is a signed `rdev.release-artifact.v1` JSON document. It is not yet wired into the Windows bootstrap script.
+The release manifest is a signed `rdev.release-artifact.v1` JSON document.
+
+For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
+
+```powershell
+.\windows-temporary.ps1 `
+  -GatewayUrl https://agent.lunflux.com `
+  -TicketCode ABCD-1234 `
+  -DownloadUrl https://example/rdev-host.exe `
+  -ExpectedSha256 <host_sha256> `
+  -ReleaseManifestUrl https://example/rdev-host.exe.rdev-release.json `
+  -ReleaseRootPublicKey release-root:<base64url_ed25519_public_key> `
+  -VerifierDownloadUrl https://example/rdev-verify.exe `
+  -VerifierExpectedSha256 <verifier_sha256>
+```
+
+The script hash-pins `rdev-verify.exe` before using it to verify the signed host release manifest.
 
 ## Limitations
 
@@ -139,5 +155,5 @@ The release manifest is a signed `rdev.release-artifact.v1` JSON document. It is
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
-- If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and Windows bootstrap integration for release artifact signatures.
+- If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, no production redaction schema yet, and no OS-specific sandboxing beyond workspace boundary checks.
