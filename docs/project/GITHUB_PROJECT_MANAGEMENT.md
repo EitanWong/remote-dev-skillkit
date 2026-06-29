@@ -108,7 +108,7 @@ These should not be opened as new GitHub issues unless regression work is needed
 - shared risky-action approval preflight for shell and Codex;
 - managed Mac local acceptance harness and independent evidence verifier;
 - managed Mac LaunchAgent service acceptance plan;
-- public `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_cancellation`, and `rdev.adapter.verify_runtime` onboarding/conformance flow for lifecycle manifests, runtime fixtures, result artifacts, and cancellation artifacts; shell, PowerShell, and Codex tests use the result and cancellation checks.
+- public `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_cancellation`, and `rdev.adapter.verify_runtime` onboarding/conformance flow for lifecycle manifests, runtime fixtures, result artifacts, and cancellation artifacts; shell, PowerShell, and Codex tests use the result and cancellation checks, and hostrunner can append built-in adapter runtime fixtures with `--capture-runtime-fixture`.
 
 ## Seed Issues To Create After Approval
 
@@ -156,7 +156,8 @@ The current bootstrap script creates the following seed backlog.
    - Labels: `area:adapter`, `area:policy`, `area:evidence`, `kind:feature`, `kind:test`, `priority:p1`
    - Acceptance:
      - shared adapter interface covers detect, plan, prepare, run, collect, cleanup;
-     - shell, PowerShell, and Codex pass shared lifecycle, runtime fixture, result, cancellation artifact, and runtime cancellation conformance fixtures;
+     - shell, PowerShell, and Codex keep passing shared lifecycle, runtime fixture, result, cancellation artifact, and runtime cancellation conformance fixtures;
+     - future adapters use the same hostrunner runtime fixture capture path instead of bespoke evidence formats;
      - new adapter authors can run local conformance tests.
 
 6. **Implement Claude Code and ACP adapters behind the safety kernel**

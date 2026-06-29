@@ -8,12 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
-	"github.com/EitanWong/remote-dev-skillkit/internal/powershelladapter"
-	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
@@ -23,15 +20,17 @@ const (
 )
 
 type Result struct {
-	ArtifactContent string `json:"artifact_content"`
+	ArtifactContent       string `json:"artifact_content"`
+	RuntimeFixtureContent string `json:"runtime_fixture_content,omitempty"`
 }
 
 type Options struct {
-	IdentityFingerprint string
-	NonceStore          hostnonce.Store
-	ApprovalStore       hostapproval.Store
-	WorkspaceLockStore  string
-	WorkspaceLockTTL    time.Duration
+	IdentityFingerprint   string
+	NonceStore            hostnonce.Store
+	ApprovalStore         hostapproval.Store
+	WorkspaceLockStore    string
+	WorkspaceLockTTL      time.Duration
+	CaptureRuntimeFixture bool
 }
 
 type ApprovalRequired struct {
@@ -232,63 +231,27 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 	if err != nil {
 		return deny(job, workspaceLockDenial(err), err)
 	}
-	defer releaseWorkspaceLock()
+	releasedWorkspaceLock := false
+	releaseWorkspaceLockOnce := func() {
+		if releasedWorkspaceLock {
+			return
+		}
+		releasedWorkspaceLock = true
+		releaseWorkspaceLock()
+	}
+	defer releaseWorkspaceLockOnce()
 	if opts.ApprovalStore != nil {
 		if err := consumeApprovalTokens(opts.ApprovalStore, envelope.ApprovalTokens, now); err != nil {
 			return deny(job, approvalTokenDenial(job, err), err)
 		}
 	}
-	if envelope.Adapter == "codex" {
-		execution, err := codexadapter.ExecuteContext(ctx, codexadapter.Spec{
-			WorkspaceRoot:             envelope.Workspace.Root,
-			WriteScope:                envelope.Workspace.WriteScope,
-			Prompt:                    stringValue(envelope.Payload, "prompt", envelope.Intent),
-			CodexCommand:              stringValue(envelope.Payload, "codex_command", ""),
-			CodexArgs:                 stringSliceValue(envelope.Payload, "codex_args"),
-			VerificationCommands:      stringMatrixValue(envelope.Payload, "verification_commands"),
-			AllowVerificationCommands: stringSliceValue(envelope.Payload, "allow_verification_commands"),
-			MaxDurationSeconds:        envelope.Limits.MaxDurationSeconds,
-			MaxOutputBytes:            envelope.Limits.MaxOutputBytes,
-		})
-		result := Result{ArtifactContent: execution.ArtifactContent()}
-		if err != nil {
-			if denial, ok := codexDenial(job, err); ok {
-				return deny(job, denial, err)
-			}
-			return result, err
-		}
-		return result, nil
+	execution, err := executeJobAdapter(ctx, envelope, opts.CaptureRuntimeFixture, releaseWorkspaceLockOnce)
+	result := Result{
+		ArtifactContent:       execution.ArtifactContent,
+		RuntimeFixtureContent: execution.RuntimeFixtureContent,
 	}
-	if envelope.Adapter == "powershell" {
-		execution, err := powershelladapter.ExecuteContext(ctx, powershelladapter.Spec{
-			WorkspaceRoot:      envelope.Workspace.Root,
-			WriteScope:         envelope.Workspace.WriteScope,
-			Command:            stringValue(envelope.Payload, "command", stringValue(envelope.Payload, "script", "")),
-			PowerShellCommand:  stringValue(envelope.Payload, "powershell_command", ""),
-			AllowCommands:      stringSliceValue(envelope.Payload, "allow_commands"),
-			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
-			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
-		})
-		result := Result{ArtifactContent: execution.ArtifactContent()}
-		if err != nil {
-			if denial, ok := powershellDenial(job, err); ok {
-				return deny(job, denial, err)
-			}
-			return result, err
-		}
-		return result, nil
-	}
-	execution, err := shelladapter.ExecuteContext(ctx, shelladapter.Spec{
-		WorkspaceRoot:      envelope.Workspace.Root,
-		WriteScope:         envelope.Workspace.WriteScope,
-		Argv:               stringSliceValue(envelope.Payload, "argv"),
-		AllowCommands:      stringSliceValue(envelope.Payload, "allow_commands"),
-		MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
-		MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
-	})
-	result := Result{ArtifactContent: execution.ArtifactContent()}
 	if err != nil {
-		if denial, ok := shellDenial(job, err); ok {
+		if denial, ok := adapterDenial(job, envelope.Adapter, err); ok {
 			return deny(job, denial, err)
 		}
 		return result, err

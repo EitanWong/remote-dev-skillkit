@@ -21,6 +21,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
+	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
 func TestRunDevJobAcceptsScopedShellJob(t *testing.T) {
@@ -296,6 +297,54 @@ func TestRunDevJobAcquiresAndReleasesWorkspaceLock(t *testing.T) {
 	}
 }
 
+func TestRunDevJobCapturesShellRuntimeFixture(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	job, err := gw.CreateJob(host.ID, "shell", "capture shell runtime fixture", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "env", "GOOS"},
+		"allow_commands":       []string{"go"},
+		"max_duration_seconds": 30,
+		"max_output_bytes":     4096,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore:    lockStore,
+		CaptureRuntimeFixture: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.shell-result.v1"`) {
+		t.Fatalf("expected primary shell artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.RuntimeFixtureContent, `"schema_version": "rdev.adapter-runtime-fixture.v1"`) {
+		t.Fatalf("expected runtime fixture, got %s", result.RuntimeFixtureContent)
+	}
+	report := adapterkit.VerifyRuntimeFixtureJSON([]byte(result.RuntimeFixtureContent), adapterkit.RuntimeFixtureContract{
+		Adapter:               "shell",
+		RequireSuccessful:     true,
+		RequireCleanup:        true,
+		RequireResultArtifact: true,
+	})
+	if !report.OK {
+		t.Fatalf("shell runtime fixture failed conformance: %#v\n%s", report, result.RuntimeFixtureContent)
+	}
+	status, err := workspace.NewFileLockStore(lockStore).Status(repo, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Exists {
+		t.Fatalf("expected runtime cleanup to release workspace lock, got %#v", status)
+	}
+}
+
 func TestRunDevJobRejectsLockedWorkspace(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -546,6 +595,66 @@ func main() {
 	}
 }
 
+func TestRunDevJobCapturesCanceledShellRuntimeFixture(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	sleeper := buildHostrunnerFakeCodexBinary(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	job, err := gw.CreateJob(host.ID, "shell", "sleep until canceled with runtime fixture", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{sleeper},
+		"allow_commands":       []string{sleeper},
+		"max_duration_seconds": 30,
+		"max_output_bytes":     64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	result, err := RunDevJobWithOptionsContext(ctx, host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore:    lockStore,
+		CaptureRuntimeFixture: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"canceled": true`) {
+		t.Fatalf("expected primary canceled artifact, got %s", result.ArtifactContent)
+	}
+	report := adapterkit.VerifyRuntimeFixtureJSON([]byte(result.RuntimeFixtureContent), adapterkit.RuntimeFixtureContract{
+		Adapter:               "shell",
+		RequiredPhases:        []string{adapterkit.PhaseDetect, adapterkit.PhasePlan, adapterkit.PhasePrepare, adapterkit.PhaseRun, adapterkit.PhaseCleanup},
+		RequireCleanup:        true,
+		RequireResultArtifact: true,
+		RequireCancellation:   true,
+	})
+	if !report.OK {
+		t.Fatalf("canceled shell runtime fixture failed conformance: %#v\n%s", report, result.RuntimeFixtureContent)
+	}
+	status, err := workspace.NewFileLockStore(lockStore).Status(repo, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Exists {
+		t.Fatalf("expected runtime cleanup after cancel to release workspace lock, got %#v", status)
+	}
+}
+
 func TestRunDevJobExecutesPowerShellAdapterWithWorkspaceLock(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -607,6 +716,61 @@ func main() {
 	}
 	if status.Exists {
 		t.Fatalf("expected workspace lock release after PowerShell execution, got %#v", status)
+	}
+}
+
+func TestRunDevJobCapturesPowerShellRuntimeFixture(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := t.TempDir()
+	fakePowerShell := buildHostrunnerFakeCodexBinary(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Println("fake powershell runtime")
+	if err := os.WriteFile("powershell-runtime.txt", []byte("runtime fixture"), 0o644); err != nil {
+		panic(err)
+	}
+}
+`)
+	job, err := gw.CreateJob(host.ID, "powershell", "capture PowerShell runtime fixture", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"powershell.user"},
+		"command":              `Write-Output "runtime"`,
+		"powershell_command":   fakePowerShell,
+		"allow_commands":       []string{fakePowerShell},
+		"max_duration_seconds": 30,
+		"max_output_bytes":     64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore:    filepath.Join(t.TempDir(), "locks"),
+		CaptureRuntimeFixture: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.powershell-result.v1"`) {
+		t.Fatalf("expected primary PowerShell artifact, got %s", result.ArtifactContent)
+	}
+	report := adapterkit.VerifyRuntimeFixtureJSON([]byte(result.RuntimeFixtureContent), adapterkit.RuntimeFixtureContract{
+		Adapter:               "powershell",
+		RequireSuccessful:     true,
+		RequireCleanup:        true,
+		RequireResultArtifact: true,
+	})
+	if !report.OK {
+		t.Fatalf("PowerShell runtime fixture failed conformance: %#v\n%s", report, result.RuntimeFixtureContent)
+	}
+	if !strings.Contains(result.RuntimeFixtureContent, `"result_artifact_schema": "rdev.powershell-result.v1"`) {
+		t.Fatalf("expected PowerShell result schema in runtime fixture, got %s", result.RuntimeFixtureContent)
 	}
 }
 
@@ -769,6 +933,63 @@ func main() {
 	}
 	if strings.Contains(string(content), "this must not run without approval") {
 		t.Fatalf("codex adapter executed before git.push approval: %s", string(content))
+	}
+}
+
+func TestRunDevJobCapturesCodexRuntimeFixture(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeCodex := writeHostrunnerFakeCodex(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nruntime fixture codex\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake codex wrote README")
+}
+`)
+	job, err := gw.CreateJob(host.ID, "codex", "capture codex runtime fixture", map[string]any{
+		"workspace_root":              repo,
+		"capabilities":                []string{"codex.run", "git.diff"},
+		"prompt":                      "update README",
+		"codex_command":               "go",
+		"codex_args":                  []string{"run", fakeCodex},
+		"verification_commands":       [][]string{{"git", "status", "--short"}},
+		"allow_verification_commands": []string{"git"},
+		"max_duration_seconds":        30,
+		"max_output_bytes":            64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore:    filepath.Join(t.TempDir(), "locks"),
+		CaptureRuntimeFixture: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.codex-result.v1"`) {
+		t.Fatalf("expected primary codex artifact, got %s", result.ArtifactContent)
+	}
+	report := adapterkit.VerifyRuntimeFixtureJSON([]byte(result.RuntimeFixtureContent), adapterkit.RuntimeFixtureContract{
+		Adapter:               "codex",
+		RequireSuccessful:     true,
+		RequireCleanup:        true,
+		RequireResultArtifact: true,
+	})
+	if !report.OK {
+		t.Fatalf("codex runtime fixture failed conformance: %#v\n%s", report, result.RuntimeFixtureContent)
+	}
+	if !strings.Contains(result.RuntimeFixtureContent, `"result_artifact_schema": "rdev.codex-result.v1"`) {
+		t.Fatalf("expected codex result schema in runtime fixture, got %s", result.RuntimeFixtureContent)
 	}
 }
 

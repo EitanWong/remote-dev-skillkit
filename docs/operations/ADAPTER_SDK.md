@@ -58,6 +58,27 @@ rdev adapter verify-runtime \
 MCP clients can call `rdev.adapter.verify_runtime` with `artifact_json` or
 `artifact_id`. The verifier returns `rdev.adapter-conformance-report.v1`.
 
+Built-in hostrunner adapters can also emit runtime fixtures in real host jobs.
+Run `rdev host serve` with `--capture-runtime-fixture` to keep the normal
+adapter result as the primary job artifact and append a second
+`rdev.adapter-runtime-fixture.v1` artifact for shell, PowerShell, or Codex jobs:
+
+```bash
+rdev host serve \
+  --mode managed \
+  --gateway https://agent.example.com \
+  --once=false \
+  --transport long-poll \
+  --workspace-lock-store .rdev/workspace-locks \
+  --capture-runtime-fixture
+```
+
+The runtime fixture is opt-in so existing evidence consumers keep receiving the
+same top-level adapter result artifact. When enabled, the fixture records
+hostrunner phases, cleanup, cancellation/timeout state, and the embedded
+adapter result artifact. This is the first hostrunner-integrated runtime
+fixture path for built-in adapters.
+
 ## Lifecycle Manifest Conformance
 
 Use `adapterkit.VerifyLifecycleManifestJSON` before treating a new adapter as a
@@ -242,10 +263,11 @@ verifiers.
 
 ## Current Scope
 
-The current runtime lifecycle runner is the first executable SDK slice, not the
-complete production Adapter SDK. Adapter authors still need hostrunner
-integration, policy planning, workspace/session preparation, and adapter-specific
-execution wrappers. The current package provides shared runtime fixture
-generation plus conformance layers for lifecycle declarations, runtime fixtures,
-result evidence, and cancellation evidence. Built-in shell, PowerShell, and
-Codex tests use these checks as fixtures for future third-party adapters.
+The current runtime lifecycle runner plus hostrunner opt-in capture are still
+not the complete production Adapter SDK. Built-in shell, PowerShell, and Codex
+now have hostrunner-integrated runtime fixtures, but new adapter authors still
+need production wrappers for policy planning, workspace/session preparation,
+adapter-specific execution, and shared runtime cancellation fixtures. The
+current package provides shared runtime fixture generation plus conformance
+layers for lifecycle declarations, runtime fixtures, result evidence, and
+cancellation evidence.

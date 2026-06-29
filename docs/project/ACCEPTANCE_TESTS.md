@@ -289,13 +289,14 @@ The local test suite currently covers:
 - PowerShell adapter MVP through `adapter=powershell`, covering `powershell.user` capability enforcement, allowlisted PowerShell executable execution, no `-ExecutionPolicy Bypass`, `rdev.powershell-result.v1` evidence, redaction, workspace-lock release, approval-required service-management detection, and context cancellation.
 - canceled-job artifact reporting for built-in shell, PowerShell, and Codex adapters, preserving the gateway job's `canceled` terminal state while adding reviewable cancellation evidence.
 - public adapterkit lifecycle-manifest, runtime-fixture, result-artifact, and cancellation-artifact conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-lifecycle`, `rdev adapter verify-runtime`, `rdev adapter verify-result`, `rdev adapter verify-cancellation`, and MCP tools `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_runtime` / `rdev.adapter.verify_result` / `rdev.adapter.verify_cancellation`, covering generated adapter templates, executable adapter phase fixtures, adapter phases, safety boundaries, cancellation, cleanup, result schemas, and built-in shell, PowerShell, and Codex artifacts for schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
+- hostrunner runtime fixture capture through `rdev host serve --capture-runtime-fixture`, including primary adapter result preservation plus appended `rdev.adapter-runtime-fixture.v1` artifacts for shell, PowerShell, Codex, and canceled shell cleanup.
 
 ## Next Automation Targets
 
 - Real managed Mac LaunchAgent acceptance execution: review generated plan, start/inspect/stop with `rdev host service-control --execute`, reconnect after reboot, run locked-worktree Codex, verify evidence, and uninstall.
 - Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, approval-required probes, and revocation transcript.
 - Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and evidence bundle checksums for each release candidate.
-- Full production Adapter SDK integration and executable lifecycle/cancellation fixtures for future third-party adapters.
+- Full production Adapter SDK integration and executable lifecycle/cancellation fixtures for future third-party adapters beyond the built-in hostrunner fixture path.
 
 The following remain real-environment acceptance tests:
 

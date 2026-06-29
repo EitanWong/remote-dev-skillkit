@@ -74,6 +74,7 @@
 - [x] Add adapter cancellation artifact conformance through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
 - [x] Add first runtime Adapter SDK lifecycle runner and runtime fixture verifier through `adapterkit.RunLifecycle`, `rdev adapter verify-runtime`, and MCP tool `rdev.adapter.verify_runtime`.
 - [x] Add final architecture closure that makes `PERFECT_ENDING_SOLUTION.md` the single decision header for product boundaries, golden paths, closed loops, and implementation order.
+- [x] Add hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, and Codex adapters through `--capture-runtime-fixture`.
 
 ## Next
 
@@ -162,7 +163,7 @@
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
-- [ ] Add full production Adapter SDK integration for hostrunner adapters beyond the first public runtime lifecycle runner and fixture verifier.
+- [ ] Complete production Adapter SDK integration for future adapters beyond built-in hostrunner runtime fixture capture.
 
 ## Final End-State Gates
 
@@ -198,6 +199,7 @@
 - [x] Third-party adapter authors can scaffold a lifecycle manifest and verify it before runtime integration.
 - [x] Adapter cancellation artifacts can be verified through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
 - [x] Adapter runtime lifecycle fixtures can be generated through `adapterkit.RunLifecycle` and verified through `pkg/adapterkit`, `rdev adapter verify-runtime`, and MCP tool `rdev.adapter.verify_runtime`.
+- [x] Built-in shell, PowerShell, and Codex hostrunner jobs can append `rdev.adapter-runtime-fixture.v1` artifacts with `--capture-runtime-fixture`.
 
 ## Definition Of Done For v0.1.0
 

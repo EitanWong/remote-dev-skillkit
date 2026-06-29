@@ -554,6 +554,40 @@ func (g *MemoryGateway) AppendCanceledJobArtifactForHost(hostID, jobID, artifact
 	return job, artifact, nil
 }
 
+func (g *MemoryGateway) AppendJobArtifactForHost(hostID, jobID, artifactContent string) (model.Job, model.Artifact, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status != model.HostStatusActive {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
+	}
+	job, ok := g.jobs[jobID]
+	if !ok {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job", ErrNotFound)
+	}
+	if job.HostID != hostID {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job is not assigned to host", ErrPolicyDenied)
+	}
+	if job.Status == model.JobStatusQueued {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job must have been claimed before artifact append", ErrInvalidState)
+	}
+	if artifactContent == "" {
+		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: artifact_content is required", ErrPolicyDenied)
+	}
+	now := g.now().UTC()
+	artifact, err := model.NewArtifact(job.ID, "text", appendedArtifactName(artifactContent), artifactContent, now)
+	if err != nil {
+		return model.Job{}, model.Artifact{}, err
+	}
+	g.artifacts[job.ID] = append(g.artifacts[job.ID], artifact)
+	g.appendAuditLocked("host", "job.artifact", job.ID, "host appended artifact")
+	return job, artifact, nil
+}
+
 func (g *MemoryGateway) NextJobForHost(hostID string) (model.Job, bool, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -584,6 +618,13 @@ func (g *MemoryGateway) NextJobForHost(hostID string) (model.Job, bool, error) {
 	g.jobs[job.ID] = job
 	g.appendAuditLocked("host", "job.claim", job.ID, "host claimed queued job")
 	return job, true, nil
+}
+
+func appendedArtifactName(content string) string {
+	if strings.Contains(content, `"schema_version": "rdev.adapter-runtime-fixture.v1"`) || strings.Contains(content, `"schema_version":"rdev.adapter-runtime-fixture.v1"`) {
+		return "adapter-runtime-fixture.json"
+	}
+	return "host-artifact.txt"
 }
 
 func (g *MemoryGateway) Job(jobID string) (model.Job, error) {

@@ -50,6 +50,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Post-release install verification planning through `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification commands from a local GitHub Release dry-run plan without external mutation.
 - Post-release install plan verification through `scripts/github/verify-post-release-install-plan.sh`, checking the generated plan and scripts before they are archived as release evidence and rejecting tampered verification scripts in CI smoke.
 - Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, and Codex result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
+- Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, and Codex adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled jobs.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 
@@ -107,7 +108,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - launchd support.
 - Restart/recovery.
 - Auto-update/rollback.
-- Full production adapter SDK beyond the first runtime lifecycle runner and lifecycle/result/cancellation/runtime-fixture conformance.
+- Full production adapter SDK beyond the first runtime lifecycle runner, built-in hostrunner runtime fixture capture, and lifecycle/result/cancellation/runtime-fixture conformance.
 - Claude Code and ACP adapters.
 - Artifact streaming.
 - Durable hosted storage.

@@ -845,6 +845,69 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	}
 }
 
+func TestHostServeCapturesRuntimeFixtureArtifact(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:            server.URL,
+		PollInterval:          1,
+		MaxJobs:               1,
+		CaptureRuntimeFixture: true,
+	}, host.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
+	}
+	artifacts := gw.Artifacts(job.ID)
+	if len(artifacts) != 2 {
+		t.Fatalf("expected result artifact and runtime fixture, got %d", len(artifacts))
+	}
+	if !strings.Contains(artifacts[0].Content, `"schema_version": "rdev.shell-result.v1"`) {
+		t.Fatalf("expected primary shell result artifact, got %s", artifacts[0].Content)
+	}
+	if artifacts[1].Name != "adapter-runtime-fixture.json" {
+		t.Fatalf("expected runtime fixture artifact name, got %q", artifacts[1].Name)
+	}
+	if !strings.Contains(artifacts[1].Content, `"schema_version": "rdev.adapter-runtime-fixture.v1"`) {
+		t.Fatalf("expected runtime fixture content, got %s", artifacts[1].Content)
+	}
+}
+
 func TestHostServeLongPollWaitsAndCompletesDevJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())

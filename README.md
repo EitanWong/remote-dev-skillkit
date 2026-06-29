@@ -86,6 +86,7 @@ Implemented now:
 - Codex, shell, and PowerShell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
 - Canceled Codex, shell, and PowerShell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
 - Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, covering generated lifecycle manifest templates, runtime lifecycle fixtures, result artifacts, cancellation artifacts, required phases, safety boundaries, cleanup, result schemas, timing, redaction, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
+- Built-in shell, PowerShell, and Codex hostrunner adapters can opt into runtime fixture capture with `rdev host serve --capture-runtime-fixture`, preserving the primary adapter result while appending a verified `rdev.adapter-runtime-fixture.v1` artifact for completed, failed, or canceled jobs.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Built-in shell, PowerShell, and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, credential changes, and execution-policy changes.
@@ -187,7 +188,7 @@ scripts/github/plan-platform-release.sh --platform-candidates dist/release-candi
 scripts/github/plan-post-release-install.sh --release-plan dist/release-candidates/github-platform-release-plan/plan.json
 scripts/github/verify-post-release-install-plan.sh --plan dist/release-candidates/github-platform-release-plan/post-release-install/post-release-install-plan.json
 go run ./cmd/rdev host serve --mode temporary
-go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll --workspace-lock-store .rdev/workspace-locks
+go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll --workspace-lock-store .rdev/workspace-locks --capture-runtime-fixture
 go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --plist-out ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist

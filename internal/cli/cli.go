@@ -604,6 +604,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
 		approvalStore := fs.String("approval-store", "", "optional local host approval token consumption store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
+		captureRuntimeFixture := fs.Bool("capture-runtime-fixture", false, "append an adapter runtime fixture artifact for completed, failed, or canceled jobs")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -627,6 +628,7 @@ func (a App) host(ctx context.Context, args []string) error {
 			NonceStorePath:        *nonceStore,
 			ApprovalStorePath:     *approvalStore,
 			WorkspaceLockStore:    *workspaceLockStore,
+			CaptureRuntimeFixture: *captureRuntimeFixture,
 			ManifestRootPublicKey: *manifestRootPublicKey,
 		})
 	case "install-service":
@@ -747,6 +749,7 @@ type hostServeOptions struct {
 	NonceStorePath        string
 	ApprovalStorePath     string
 	WorkspaceLockStore    string
+	CaptureRuntimeFixture bool
 	ManifestRootPublicKey string
 }
 
@@ -3431,6 +3434,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	trust.NonceStore = hostNonceStore(opts.NonceStorePath)
 	trust.ApprovalStore = hostApprovalStore(opts.ApprovalStorePath)
 	trust.WorkspaceLockStore = opts.WorkspaceLockStore
+	trust.CaptureRuntimeFixture = opts.CaptureRuntimeFixture
 	processed := 0
 	for processed < maxJobs {
 		wait := time.Duration(0)
@@ -3482,6 +3486,11 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 						return processed, appendErr
 					}
 				}
+				if result.RuntimeFixtureContent != "" {
+					if _, appendErr := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
+						return processed, appendErr
+					}
+				}
 				processed++
 				continue
 			}
@@ -3491,10 +3500,20 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
 				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
 			}
+			if result.RuntimeFixtureContent != "" {
+				if _, appendErr := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
+					return processed, fmt.Errorf("%v; additionally failed to append runtime fixture: %w", err, appendErr)
+				}
+			}
 			return processed, err
 		}
 		if _, err := completeJob(ctx, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); err != nil {
 			return processed, err
+		}
+		if result.RuntimeFixtureContent != "" {
+			if _, err := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); err != nil {
+				return processed, err
+			}
 		}
 		processed++
 	}
@@ -3575,19 +3594,21 @@ func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootP
 }
 
 type hostTrust struct {
-	Legacy             *model.TrustBundle
-	SignedBundle       *model.SignedTrustBundle
-	NonceStore         hostnonce.Store
-	ApprovalStore      hostapproval.Store
-	WorkspaceLockStore string
+	Legacy                *model.TrustBundle
+	SignedBundle          *model.SignedTrustBundle
+	NonceStore            hostnonce.Store
+	ApprovalStore         hostapproval.Store
+	WorkspaceLockStore    string
+	CaptureRuntimeFixture bool
 }
 
 func (t hostTrust) RunDevJob(ctx context.Context, hostID, identityFingerprint string, job model.Job, now time.Time) (hostrunner.Result, error) {
 	opts := hostrunner.Options{
-		IdentityFingerprint: identityFingerprint,
-		NonceStore:          t.NonceStore,
-		ApprovalStore:       t.ApprovalStore,
-		WorkspaceLockStore:  t.WorkspaceLockStore,
+		IdentityFingerprint:   identityFingerprint,
+		NonceStore:            t.NonceStore,
+		ApprovalStore:         t.ApprovalStore,
+		WorkspaceLockStore:    t.WorkspaceLockStore,
+		CaptureRuntimeFixture: t.CaptureRuntimeFixture,
 	}
 	if t.SignedBundle != nil {
 		return hostrunner.RunDevJobWithTrustBundleOptionsContext(ctx, hostID, *t.SignedBundle, job, now, opts)

@@ -408,7 +408,7 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "host_id is required")
 			return
 		}
-		job, artifact, err := s.Gateway.AppendCanceledJobArtifactForHost(req.HostID, jobID, req.ArtifactContent)
+		job, artifact, err := s.Gateway.AppendJobArtifactForHost(req.HostID, jobID, req.ArtifactContent)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

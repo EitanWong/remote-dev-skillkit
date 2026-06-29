@@ -418,6 +418,36 @@ func TestMemoryGatewayRejectsCanceledArtifactForNonCanceledJob(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayAppendsRuntimeFixtureAfterJobCompletion(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteJobForHost(host.ID, job.ID, `{"schema_version":"rdev.shell-result.v1"}`); err != nil {
+		t.Fatal(err)
+	}
+	completed, artifact, err := gw.AppendJobArtifactForHost(host.ID, job.ID, `{"schema_version":"rdev.adapter-runtime-fixture.v1"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected succeeded status to be preserved, got %s", completed.Status)
+	}
+	if artifact.Name != "adapter-runtime-fixture.json" {
+		t.Fatalf("unexpected artifact name %q", artifact.Name)
+	}
+	if got := gw.Artifacts(job.ID); len(got) != 2 {
+		t.Fatalf("expected primary result and runtime fixture artifacts, got %d", len(got))
+	}
+}
+
 func TestMemoryGatewayRejectsJobForPendingHost(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
