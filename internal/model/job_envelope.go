@@ -64,6 +64,7 @@ type JobEnvelope struct {
 	Capabilities            []string       `json:"capabilities"`
 	Limits                  JobLimits      `json:"limits"`
 	ApprovalsRequired       []string       `json:"approvals_required,omitempty"`
+	ApprovalsGranted        []string       `json:"approvals_granted,omitempty"`
 	Payload                 map[string]any `json:"payload,omitempty"`
 	SigningAlg              string         `json:"signing_alg"`
 	SigningKeyID            string         `json:"signing_key_id"`

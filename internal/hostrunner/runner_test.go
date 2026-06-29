@@ -141,6 +141,58 @@ func main() {
 	}
 }
 
+func TestRunDevJobRequiresApprovalBeforeExecution(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "env", "GOOS"},
+		"allow_commands":       []string{"go"},
+		"approvals_required":   []string{"pkg.install"},
+		"max_output_bytes":     4096,
+		"max_duration_seconds": 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "pkg.install")
+	if strings.Contains(result.ArtifactContent, `"schema_version": "rdev.shell-result.v1"`) {
+		t.Fatalf("approval-required job must not execute shell adapter, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobExecutesAfterApprovalSatisfied(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"shell.user"},
+		"argv":                 []string{"go", "env", "GOOS"},
+		"allow_commands":       []string{"go"},
+		"approvals_required":   []string{"pkg.install"},
+		"max_output_bytes":     4096,
+		"max_duration_seconds": 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = gw.ApproveJob(job.ID, "pkg.install", "approved", "test approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.shell-result.v1"`) {
+		t.Fatalf("expected shell result after approval satisfied, got %s", result.ArtifactContent)
+	}
+}
+
 func TestRunDevJobRejectsWrongHost(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -430,4 +482,42 @@ func assertDenial(t *testing.T, result Result, err error, wantCode string) {
 	if !strings.Contains(result.ArtifactContent, `"code": "`+wantCode+`"`) {
 		t.Fatalf("expected denial artifact code %q, got %s", wantCode, result.ArtifactContent)
 	}
+}
+
+func assertApprovalRequired(t *testing.T, result Result, err error, wantApproval string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected approval requirement %q, got nil error", wantApproval)
+	}
+	var approval ApprovalRequiredError
+	if !errors.As(err, &approval) {
+		t.Fatalf("expected ApprovalRequiredError, got %T %v", err, err)
+	}
+	if approval.Explanation.SchemaVersion != ApprovalRequiredSchemaVersion {
+		t.Fatalf("expected approval schema %q, got %q", ApprovalRequiredSchemaVersion, approval.Explanation.SchemaVersion)
+	}
+	if approval.Explanation.Code != "approval_required" {
+		t.Fatalf("expected approval_required code, got %q", approval.Explanation.Code)
+	}
+	if !containsString(approval.Explanation.RequiredApprovals, wantApproval) {
+		t.Fatalf("expected approval %q, got %#v", wantApproval, approval.Explanation.RequiredApprovals)
+	}
+	if result.ArtifactContent == "" {
+		t.Fatal("approval-required artifact content must be set")
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "`+ApprovalRequiredSchemaVersion+`"`) {
+		t.Fatalf("expected approval artifact schema, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, wantApproval) {
+		t.Fatalf("expected approval artifact to mention %q, got %s", wantApproval, result.ArtifactContent)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

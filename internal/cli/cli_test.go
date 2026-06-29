@@ -700,6 +700,76 @@ func TestHostServeReportsHostDenialArtifact(t *testing.T) {
 	}
 }
 
+func TestHostServeReportsApprovalRequiredArtifact(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root":     ".",
+		"capabilities":       []string{"shell.user"},
+		"argv":               []string{"go", "env", "GOOS"},
+		"allow_commands":     []string{"go"},
+		"approvals_required": []string{"git.push"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:   server.URL,
+		PollInterval: 1,
+		MaxJobs:      1,
+	}, host.ID, "")
+	if err == nil {
+		t.Fatal("expected approval requirement")
+	}
+	if processed != 0 {
+		t.Fatalf("expected 0 processed jobs, got %d", processed)
+	}
+	failed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != model.JobStatusFailed {
+		t.Fatalf("expected failed job, got %s", failed.Status)
+	}
+	if !strings.Contains(failed.FailureReason, "requires approval") {
+		t.Fatalf("expected approval summary as failure reason, got %q", failed.FailureReason)
+	}
+	artifacts := gw.Artifacts(job.ID)
+	if len(artifacts) != 1 {
+		t.Fatalf("expected 1 failure artifact, got %d", len(artifacts))
+	}
+	if !strings.Contains(artifacts[0].Content, `"schema_version": "rdev.approval-required.v1"`) {
+		t.Fatalf("expected approval-required artifact, got %s", artifacts[0].Content)
+	}
+	if !strings.Contains(artifacts[0].Content, `"git.push"`) {
+		t.Fatalf("expected git.push approval requirement, got %s", artifacts[0].Content)
+	}
+}
+
 func TestTicketCreateOutputsJoinURL(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

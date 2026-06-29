@@ -126,6 +126,35 @@ func TestMemoryGatewayUsesProvidedSigningKey(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayApproveJobSignsGrantedApproval(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root":     ".",
+		"capabilities":       []string{"shell.user"},
+		"argv":               []string{"go", "env", "GOOS"},
+		"allow_commands":     []string{"go"},
+		"approvals_required": []string{"git.push"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := gw.ApproveJob(job.ID, "git.push", "approved", "operator approved push")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.Envelope == nil {
+		t.Fatal("approved job envelope must be present")
+	}
+	if len(approved.Envelope.ApprovalsGranted) != 1 || approved.Envelope.ApprovalsGranted[0] != "git.push" {
+		t.Fatalf("unexpected granted approvals: %#v", approved.Envelope.ApprovalsGranted)
+	}
+	if err := gw.VerifyJobEnvelope(*approved.Envelope, host.ID); err != nil {
+		t.Fatalf("expected re-signed approved envelope to verify: %v", err)
+	}
+}
+
 func TestMemoryGatewayCreatesSignedJoinManifest(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

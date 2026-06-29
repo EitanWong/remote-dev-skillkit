@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -577,6 +578,23 @@ func (g *MemoryGateway) ApproveJob(jobID, approvalID, decision, reason string) (
 	if decision != "approved" && decision != "denied" {
 		return model.Job{}, fmt.Errorf("%w: decision must be approved or denied", ErrPolicyDenied)
 	}
+	if decision == "approved" {
+		if strings.TrimSpace(approvalID) == "" {
+			return model.Job{}, fmt.Errorf("%w: approval id is required", ErrPolicyDenied)
+		}
+		if job.Envelope == nil {
+			return model.Job{}, fmt.Errorf("%w: job envelope is required", ErrInvalidState)
+		}
+		envelope := *job.Envelope
+		envelope.ApprovalsGranted = appendUniqueString(envelope.ApprovalsGranted, approvalID)
+		envelope.Signature = ""
+		signed, err := envelope.Sign(g.privateKey)
+		if err != nil {
+			return model.Job{}, err
+		}
+		job.Envelope = &signed
+		g.jobs[job.ID] = job
+	}
 	g.appendAuditLocked("operator", "job.approve", job.ID, fmt.Sprintf("%s approval %s: %s", decision, approvalID, reason))
 	return job, nil
 }
@@ -724,4 +742,18 @@ func stringSliceValue(values map[string]any, key string, fallback []string) []st
 	default:
 		return append([]string(nil), fallback...)
 	}
+}
+
+func appendUniqueString(values []string, next string) []string {
+	next = strings.TrimSpace(next)
+	result := append([]string(nil), values...)
+	if next == "" {
+		return result
+	}
+	for _, value := range result {
+		if value == next {
+			return result
+		}
+	}
+	return append(result, next)
 }

@@ -246,6 +246,7 @@ The local test suite currently covers:
 - local evidence bundle export through `rdev evidence export`, including manifest, checksums, signed envelope, policy decision, artifacts, audit slice, and audit chain.
 - structured host-side denial artifacts through `rdev.host-denial.v1`, covering missing envelope, wrong host, identity mismatch, expired/tampered envelopes, replayed nonce, unsupported adapter, missing capability, missing workspace, non-allowlisted command, and workspace escape.
 - CLI host polling reports host-side denials to the dev gateway as failed-job artifacts.
+- structured host-side approval-required artifacts through `rdev.approval-required.v1`; unsatisfied signed approvals pause before adapter execution, and gateway-approved jobs are re-signed with `approvals_granted`.
 
 The following remain real-environment acceptance tests:
 

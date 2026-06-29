@@ -12,7 +12,10 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 )
 
-const DenialSchemaVersion = "rdev.host-denial.v1"
+const (
+	DenialSchemaVersion           = "rdev.host-denial.v1"
+	ApprovalRequiredSchemaVersion = "rdev.approval-required.v1"
+)
 
 type Result struct {
 	ArtifactContent string `json:"artifact_content"`
@@ -21,6 +24,30 @@ type Result struct {
 type Options struct {
 	IdentityFingerprint string
 	NonceStore          hostnonce.Store
+}
+
+type ApprovalRequired struct {
+	SchemaVersion     string   `json:"schema_version"`
+	Code              string   `json:"code"`
+	Summary           string   `json:"summary"`
+	Detail            string   `json:"detail,omitempty"`
+	JobID             string   `json:"job_id,omitempty"`
+	HostID            string   `json:"host_id,omitempty"`
+	Adapter           string   `json:"adapter,omitempty"`
+	RequiredApprovals []string `json:"required_approvals"`
+	ApprovedApprovals []string `json:"approved_approvals,omitempty"`
+	Retryable         bool     `json:"retryable"`
+}
+
+type ApprovalRequiredError struct {
+	Explanation ApprovalRequired
+}
+
+func (e ApprovalRequiredError) Error() string {
+	if e.Explanation.Summary != "" {
+		return e.Explanation.Summary
+	}
+	return e.Explanation.Code
 }
 
 type DenialExplanation struct {
@@ -143,6 +170,9 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 			return deny(job, nonceDenial(job, err), err)
 		}
 	}
+	if missing := missingApprovals(envelope.ApprovalsRequired, envelope.ApprovalsGranted); len(missing) > 0 {
+		return requireApproval(job, missing, envelope.ApprovalsGranted)
+	}
 	if envelope.Adapter != "shell" {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
@@ -196,6 +226,52 @@ func hasCapability(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func missingApprovals(required, approved []string) []string {
+	approvedSet := make(map[string]struct{}, len(approved))
+	for _, value := range approved {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			approvedSet[value] = struct{}{}
+		}
+	}
+	var missing []string
+	for _, value := range required {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := approvedSet[value]; !ok {
+			missing = append(missing, value)
+		}
+	}
+	return missing
+}
+
+func requireApproval(job model.Job, missing, approved []string) (Result, error) {
+	explanation := ApprovalRequired{
+		SchemaVersion:     ApprovalRequiredSchemaVersion,
+		Code:              "approval_required",
+		Summary:           "Job requires approval before host execution.",
+		Detail:            "The signed job envelope lists required approvals that have not been satisfied.",
+		JobID:             job.ID,
+		HostID:            job.HostID,
+		RequiredApprovals: append([]string(nil), missing...),
+		ApprovedApprovals: append([]string(nil), approved...),
+		Retryable:         true,
+	}
+	if job.Envelope != nil {
+		if explanation.JobID == "" {
+			explanation.JobID = job.Envelope.JobID
+		}
+		if explanation.HostID == "" {
+			explanation.HostID = job.Envelope.HostID
+		}
+		explanation.Adapter = job.Envelope.Adapter
+	}
+	content, _ := json.MarshalIndent(explanation, "", "  ")
+	return Result{ArtifactContent: string(content)}, ApprovalRequiredError{Explanation: explanation}
 }
 
 func stringSliceValue(values map[string]any, key string) []string {

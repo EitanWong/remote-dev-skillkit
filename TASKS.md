@@ -38,6 +38,7 @@
 - [x] Add hash-chained audit export verifier.
 - [x] Reconcile final architecture into one canonical product contract.
 - [x] Add structured host-side denial explanations for failed job validation.
+- [x] Add structured host-side approval-required results for gated jobs.
 
 ## Next
 
@@ -71,7 +72,8 @@
 - [x] Add stronger workspace and symlink escape tests.
 - [x] Add local evidence bundle export.
 - [x] Add policy explanation for every host-side denial result.
-- [ ] Add approval-required results for package install, elevation, GUI, service changes, push, merge, and deploy.
+- [x] Add approval-required results for signed jobs with unsatisfied approval requirements.
+- [ ] Add production approval-token flow for package install, elevation, GUI, service changes, push, merge, and deploy.
 
 ## Later
 
@@ -96,6 +98,7 @@
 - [x] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
 - [x] Workspace escape and non-allowlisted command attempts are rejected host-side.
 - [x] Host-side denials return structured `rdev.host-denial.v1` artifacts.
+- [x] Unsatisfied job approvals return structured `rdev.approval-required.v1` artifacts before adapter execution.
 - [ ] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
 - [x] Revocation stops future jobs and is recorded in audit.
 - [ ] Production releases verify signed manifests and binaries before host execution.
