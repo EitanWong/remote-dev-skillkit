@@ -13,6 +13,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - For Windows temporary acceptance, prefer `rdev acceptance windows-temporary --release-bundle-url <url> --out <empty-dir> ...`, then verify it with `rdev acceptance verify-windows-temporary --plan <out>/windows-temporary-plan.json` before sending a one-command bootstrap to a target user.
 - After a real Windows temporary run, package release evidence with `rdev acceptance package-windows-temporary --plan <plan> --out <empty-dir> --transcript <file> --release-verification <file> --audit <file> --no-persistence-dir <dir> --approval-probes-dir <dir>`.
 - For published Windows bootstrap artifacts, hash-pin `rdev-verify.exe` and prefer signed release bundle verification; use single host release manifests only for compatibility.
+- For PowerShell jobs, require `powershell.user`, use scoped commands with `allow_commands`, and do not bypass the target host's PowerShell execution policy.
 - Do not create hidden persistence.
 - Do not bypass UAC, sudo, or OS security controls.
 - Do not request secrets in chat.

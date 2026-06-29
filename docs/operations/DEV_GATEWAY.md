@@ -209,7 +209,31 @@ If the host runner rejects a job, the host reports the failure to `POST /v1/jobs
 
 The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Before execution, the host also runs the shared implicit approval preflight. Shell jobs that request package installation, elevation, GUI control, service management, push, merge, deploy, publish, or credential changes return `rdev.approval-required.v1` unless a matching signed approval token is present. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, cancellation state, truncation state, duration, redaction rules, and redaction counts.
 
-When the gateway job status becomes `canceled`, `rdev host serve` cancels the local job context. Built-in shell and Codex adapters receive that context and stop the running child process cooperatively. The host may append cancellation evidence through `POST /v1/jobs/{job_id}/artifact` while preserving the gateway job's `canceled` terminal state.
+When the gateway job status becomes `canceled`, `rdev host serve` cancels the local job context. Built-in shell, PowerShell, and Codex adapters receive that context and stop the running child process cooperatively. The host may append cancellation evidence through `POST /v1/jobs/{job_id}/artifact` while preserving the gateway job's `canceled` terminal state.
+
+The development PowerShell adapter uses the same host safety path. Create an `adapter=powershell` job with `powershell.user` capability:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+  -H 'content-type: application/json' \
+  -d '{
+    "host_id": "hst_...",
+    "adapter": "powershell",
+    "intent": "diagnose Windows user environment",
+    "policy": {
+      "workspace_root": ".",
+      "capabilities": ["powershell.user"],
+      "command": "Get-ChildItem Env:",
+      "allow_commands": ["pwsh", "powershell", "powershell.exe"],
+      "max_duration_seconds": 120,
+      "max_output_bytes": 65536
+    }
+  }'
+```
+
+The adapter runs the selected executable as `-NoProfile -NonInteractive -Command <command>`. It does not add `-ExecutionPolicy Bypass` or install persistence. For deterministic tests or custom hosts, signed payloads may override `powershell_command`; if that value contains a path separator, `allow_commands` must contain the exact same path. Result artifacts use schema `rdev.powershell-result.v1` and include redacted command, argv, stdout/stderr, timeout state, cancellation state, truncation state, duration, redaction rules, and redaction counts.
+
+PowerShell jobs also run the shared implicit approval preflight before workspace lock acquisition and adapter execution. Commands that request service management, package installation, elevation, GUI control, push, merge, deploy, publish, credential changes, or execution-policy changes return `rdev.approval-required.v1` unless a matching approval token is present.
 
 The development Codex adapter uses the same host safety path. Create an `adapter=codex` job with `codex.run` and `git.diff` capabilities:
 

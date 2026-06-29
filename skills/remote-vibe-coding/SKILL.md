@@ -1,6 +1,6 @@
 ---
 name: remote-vibe-coding
-description: Use when an agent needs to delegate coding work to an enrolled host running Codex, Claude Code, OpenCode, acpx, tmux, or shell adapters.
+description: Use when an agent needs to delegate coding work to an enrolled host running Codex, Claude Code, OpenCode, acpx, tmux, shell, or PowerShell adapters.
 ---
 
 # Remote Vibe Coding
@@ -18,8 +18,9 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Treat Codex, Claude Code, ACP, shell, and PowerShell as adapters behind the signed-job/evidence/approval contract.
 - For Codex MVP jobs, require `codex.run` and `git.diff`, use a locked workspace/worktree, and expect `rdev.codex-result.v1` artifacts with Git status, diff/stat, and verification command evidence.
 - Prefer `go test -json` when verifying Go projects so Codex artifacts include `rdev.test-report.v1` summaries.
-- For shell or Codex jobs that may install packages, request elevation, control GUI, manage services, push, merge, deploy, publish, or change credentials, expect `rdev.approval-required.v1` before execution unless a matching approval token is present.
-- When canceling a running Codex job, expect the host to cooperatively cancel the local Codex process, keep the gateway job in `canceled` state, and append cancellation evidence when available.
+- For shell, PowerShell, or Codex jobs that may install packages, request elevation, control GUI, manage services, push, merge, deploy, publish, change credentials, or change execution policy, expect `rdev.approval-required.v1` before execution unless a matching approval token is present.
+- For PowerShell MVP jobs, require `powershell.user`, provide an explicit `command`, allowlist `pwsh`, `powershell`, `powershell.exe`, or the exact signed payload `powershell_command`, and expect `rdev.powershell-result.v1` evidence. Do not ask the adapter to bypass execution policy.
+- When canceling a running Codex, shell, or PowerShell job, expect the host to cooperatively cancel the local process, keep the gateway job in `canceled` state, and append cancellation evidence when available.
 - Use `rdev acceptance managed-mac --out <empty-dir> --repo <repo>` before claiming the managed Mac coding golden path; review both `evidence/` and `approval-evidence/`.
 - Verify acceptance output with `rdev acceptance verify --report <out>/report.json` before treating it as release evidence.
 - Before publishing release artifacts or bootstrap download instructions, create and verify a signed release bundle with `rdev release create-bundle ...`, `rdev release verify-bundle --bundle <bundle> --root-public-key <root>`, and standalone `rdev-verify --bundle <bundle> --root-public-key <root>` when target-host bootstrap verification matters.

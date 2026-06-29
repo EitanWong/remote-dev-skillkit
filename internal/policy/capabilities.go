@@ -6,6 +6,7 @@ type Capability string
 
 const (
 	CapabilityShellUser              Capability = "shell.user"
+	CapabilityPowerShellUser         Capability = "powershell.user"
 	CapabilityShellAdminJIT          Capability = "shell.admin.jit"
 	CapabilityFSRead                 Capability = "fs.read"
 	CapabilityFSWriteScoped          Capability = "fs.write.scoped"

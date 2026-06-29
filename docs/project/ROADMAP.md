@@ -58,6 +58,7 @@ Exit gate: local demo proves ticket, host registration, outbound host job wait t
 
 - Signed Windows binary.
 - PowerShell bootstrap.
+- PowerShell adapter MVP with `powershell.user` capability, allowlisted executable execution, no execution-policy bypass, approval preflight, redacted `rdev.powershell-result.v1` evidence, and cooperative cancellation.
 - Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, including reviewed launcher generation, signed release manifest or release bundle verification requirements, launcher safety checks, approval probes, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
 - Windows temporary acceptance evidence packaging through `rdev acceptance package-windows-temporary`, turning real clean-VM transcripts, release verifier output, audit, approval probes, and no-persistence checks into a redacted checksummed release artifact.
 - Visible foreground support window or console UI.
@@ -85,7 +86,8 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Codex adapter conformance coverage for workspace canonicalization, write-scope escape rejection before execution, nonzero-exit evidence, host-side redaction, output truncation, and timeout cancellation evidence.
 - Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
 - Shell adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and `rdev.shell-result.v1` artifacts with explicit `canceled` state.
-- Canceled shell and Codex jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
+- PowerShell adapter cooperative cancellation through context-aware hostrunner execution and `rdev.powershell-result.v1` artifacts with explicit `canceled` state.
+- Canceled shell, PowerShell, and Codex jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
 - Managed Mac coding acceptance harness through `rdev acceptance managed-mac`, producing a managed-mode report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification through `rdev acceptance verify`, including evidence bundle checksum validation, artifact index validation, audit-chain verification, approval-gate checks, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning through `rdev acceptance managed-mac-service`, producing a verified plist, launchctl start/inspect/stop commands, service-backed coding acceptance commands, verification command, and safe uninstall guidance without auto-starting launchd.

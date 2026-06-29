@@ -82,11 +82,12 @@ Implemented now:
 - Host job execution can enforce one-writer workspace locks through `rdev host serve --workspace-lock-store`.
 - Codex adapter MVP through `adapter=codex`: runs `codex exec` or a signed payload-provided command inside the validated workspace, requires `codex.run` and `git.diff`, gates push/merge/deploy/publish/credential/service intents on approval, and captures `rdev.codex-result.v1` evidence with Codex output, Git status, Git diff/stat, optional verification command results, `go test -json` test reports, output caps, and redaction.
 - Codex adapter conformance coverage for canonical workspace roots, write-scope escape rejection before execution, failure evidence, redaction, output truncation, and timeout cancellation evidence.
-- Codex and shell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
-- Canceled Codex and shell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
+- PowerShell adapter MVP through `adapter=powershell`: runs an explicit PowerShell command through an allowlisted `pwsh`, `powershell`, `powershell.exe`, or payload-provided executable, requires `powershell.user`, never adds `-ExecutionPolicy Bypass`, gates high-risk commands on approval, and captures `rdev.powershell-result.v1` evidence with redaction.
+- Codex, shell, and PowerShell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
+- Canceled Codex, shell, and PowerShell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
-- Built-in shell and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, and credential changes.
+- Built-in shell, PowerShell, and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, credential changes, and execution-policy changes.
 - Durable host-side approval token consumption stores with in-memory and file-backed development modes, exposed through `rdev host serve --approval-store`.
 - Signed development join manifest endpoint for manifest-driven temporary host registration.
 - Join manifests can be signed by a separate bootstrap/release trust root and verified by hosts with a pinned root public key.
@@ -105,6 +106,7 @@ Implemented now:
 - Windows bootstrap can hash-pin `rdev-verify.exe` and use it to verify either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host.
 - Host-reported failed jobs with audit events.
 - Real development scoped shell adapter execution with allowlisted argv, workspace checks, timeouts, cooperative cancellation, output caps, schema-versioned redacted evidence, and failure artifacts.
+- Real development scoped PowerShell adapter execution with allowlisted PowerShell executable, workspace checks, timeouts, cooperative cancellation, output caps, schema-versioned redacted evidence, and failure artifacts.
 - Foreground `rdev host serve --mode temporary` placeholder.
 - Agent Skills drafts.
 
@@ -165,6 +167,7 @@ go run ./cmd/rdev workspace status --repo .
 go run ./cmd/rdev workspace unlock --repo . --job-id job_...
 go run ./cmd/rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
 curl -s -X POST http://127.0.0.1:8787/v1/jobs -H 'content-type: application/json' -d '{"host_id":"hst_...","adapter":"codex","intent":"update README","policy":{"workspace_root":".","capabilities":["codex.run","git.diff"],"prompt":"Update README and run checks.","verification_commands":[["git","status","--short"]],"allow_verification_commands":["git"],"max_duration_seconds":1800,"max_output_bytes":1048576}}'
+curl -s -X POST http://127.0.0.1:8787/v1/jobs -H 'content-type: application/json' -d '{"host_id":"hst_...","adapter":"powershell","intent":"diagnose Windows user environment","policy":{"workspace_root":".","capabilities":["powershell.user"],"command":"Get-ChildItem Env:","allow_commands":["pwsh","powershell","powershell.exe"],"max_duration_seconds":120,"max_output_bytes":65536}}'
 go run ./cmd/rdev release sign --artifact dist/artifacts/windows-amd64/rdev-host.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev-verify --artifact dist/artifacts/windows-amd64/rdev-host.exe --manifest dist/artifacts/windows-amd64/rdev-host.exe.rdev-release.json --root-public-key release-root:...
 go run ./cmd/rdev release create-bundle --dir dist/artifacts/windows-amd64 --artifacts rdev.exe,rdev-host.exe,rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json

@@ -12,6 +12,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/powershelladapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
@@ -199,7 +200,7 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 	if implicitMissing := missingImplicitApprovals(envelope, approved); len(implicitMissing) > 0 {
 		return requireApproval(job, implicitMissing, approved, tokenIDs)
 	}
-	if envelope.Adapter != "shell" && envelope.Adapter != "codex" {
+	if envelope.Adapter != "shell" && envelope.Adapter != "codex" && envelope.Adapter != "powershell" {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
 			Summary:   "Requested adapter is not supported by this host runner.",
@@ -258,6 +259,25 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 		}
 		return result, nil
 	}
+	if envelope.Adapter == "powershell" {
+		execution, err := powershelladapter.ExecuteContext(ctx, powershelladapter.Spec{
+			WorkspaceRoot:      envelope.Workspace.Root,
+			WriteScope:         envelope.Workspace.WriteScope,
+			Command:            stringValue(envelope.Payload, "command", stringValue(envelope.Payload, "script", "")),
+			PowerShellCommand:  stringValue(envelope.Payload, "powershell_command", ""),
+			AllowCommands:      stringSliceValue(envelope.Payload, "allow_commands"),
+			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
+			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
+		})
+		result := Result{ArtifactContent: execution.ArtifactContent()}
+		if err != nil {
+			if denial, ok := powershellDenial(job, err); ok {
+				return deny(job, denial, err)
+			}
+			return result, err
+		}
+		return result, nil
+	}
 	execution, err := shelladapter.ExecuteContext(ctx, shelladapter.Spec{
 		WorkspaceRoot:      envelope.Workspace.Root,
 		WriteScope:         envelope.Workspace.WriteScope,
@@ -281,6 +301,10 @@ func missingAdapterCapability(envelope model.JobEnvelope) string {
 	case "shell":
 		if !hasCapability(envelope.Capabilities, "shell.user") {
 			return "shell.user"
+		}
+	case "powershell":
+		if !hasCapability(envelope.Capabilities, "powershell.user") {
+			return "powershell.user"
 		}
 	case "codex":
 		if !hasCapability(envelope.Capabilities, "codex.run") {
@@ -410,8 +434,8 @@ func implicitRiskApprovals(envelope model.JobEnvelope) []string {
 	switch envelope.Adapter {
 	case "codex":
 		textValues = codexRiskText(envelope)
-	case "shell":
-		textValues = shellRiskText(envelope)
+	case "shell", "powershell":
+		textValues = commandRiskText(envelope)
 	default:
 		return operations
 	}
@@ -442,7 +466,7 @@ func implicitRiskApprovals(envelope model.JobEnvelope) []string {
 		},
 		{
 			operation: "service.manage",
-			needles:   []string{"systemctl", "launchctl", "install service", "restart service", "modify service", "set-service", "service restart", "service stop", "service start"},
+			needles:   []string{"systemctl", "launchctl", "install service", "restart service", "modify service", "set-service", "new-service", "start-service", "stop-service", "restart-service", "register-scheduledtask", "service restart", "service stop", "service start"},
 		},
 		{
 			operation: "package.install",
@@ -455,6 +479,10 @@ func implicitRiskApprovals(envelope model.JobEnvelope) []string {
 		{
 			operation: "gui.control",
 			needles:   []string{"xdotool", "cliclick", "system events", "sendkeys", "setcursorpos", "gui control", "control gui"},
+		},
+		{
+			operation: "elevation.request",
+			needles:   []string{"set-executionpolicy"},
 		},
 	} {
 		for _, needle := range rule.needles {
@@ -476,12 +504,15 @@ func codexRiskText(envelope model.JobEnvelope) []string {
 	return values
 }
 
-func shellRiskText(envelope model.JobEnvelope) []string {
+func commandRiskText(envelope model.JobEnvelope) []string {
 	values := []string{envelope.Intent}
 	argv := stringSliceValue(envelope.Payload, "argv")
 	if len(argv) > 0 {
 		values = append(values, strings.Join(argv, " "))
 	}
+	values = append(values, stringValue(envelope.Payload, "command", ""))
+	values = append(values, stringValue(envelope.Payload, "script", ""))
+	values = append(values, stringValue(envelope.Payload, "powershell_command", ""))
 	return values
 }
 
@@ -842,6 +873,54 @@ func shellDenial(job model.Job, err error) (denialSpec, bool) {
 			Summary:   "Workspace root is invalid.",
 			Detail:    err.Error(),
 			Adapter:   "shell",
+			Retryable: true,
+		}, true
+	default:
+		return denialSpec{}, false
+	}
+}
+
+func powershellDenial(job model.Job, err error) (denialSpec, bool) {
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "not allowlisted"):
+		return denialSpec{
+			Code:      "command_not_allowlisted",
+			Summary:   "PowerShell executable is not allowlisted.",
+			Detail:    err.Error(),
+			Adapter:   "powershell",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "escapes workspace root"):
+		return denialSpec{
+			Code:      "workspace_escape",
+			Summary:   "Requested write scope escapes the workspace root.",
+			Detail:    err.Error(),
+			Adapter:   "powershell",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "workspace root is required"):
+		return denialSpec{
+			Code:      "workspace_required",
+			Summary:   "Workspace root is required for PowerShell execution.",
+			Detail:    err.Error(),
+			Adapter:   "powershell",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "workspace root must"):
+		return denialSpec{
+			Code:      "workspace_invalid",
+			Summary:   "Workspace root is invalid.",
+			Detail:    err.Error(),
+			Adapter:   "powershell",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "powershell command is required") || strings.Contains(text, "powershell executable is required"):
+		return denialSpec{
+			Code:      "adapter_payload_invalid",
+			Summary:   "PowerShell command payload is invalid.",
+			Detail:    err.Error(),
+			Adapter:   "powershell",
 			Retryable: true,
 		}, true
 	default:
