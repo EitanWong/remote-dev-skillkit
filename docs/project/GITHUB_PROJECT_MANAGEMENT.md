@@ -95,6 +95,7 @@ These should not be opened as new GitHub issues unless regression work is needed
 - hash-chained audit export and verification;
 - portable Skillkit bundle export and verification;
 - local release candidate packaging with signed artifacts, release bundle, verified Skillkit, checksums, and summary JSON;
+- local GitHub Release dry-run planning from verified candidates with generated release notes, Skillkit archive, asset manifest, and commands preview;
 - HTTPS long-poll host job transport prototype;
 - host trust-bundle update checks;
 - macOS LaunchAgent plist generation, status, safe uninstall, and service-control;
@@ -181,6 +182,8 @@ The current bootstrap script creates the following seed backlog.
    - Acceptance:
      - staged artifacts exist for macOS, Linux, and Windows;
      - `rdev release prepare-candidate` produces `rdev.release-candidate.v1`;
+     - `rdev release verify-candidate` returns `ok=true`;
+     - `scripts/github/plan-release.sh` produces `rdev.github-release-plan.v1` without external mutation;
      - checksums, signed artifact manifests, and signed release index verify;
      - redacted acceptance transcripts, report JSON, audit verification, and evidence checksums are packaged.
 
@@ -191,6 +194,18 @@ Preview the GitHub changes locally:
 ```bash
 scripts/github/bootstrap-project.sh --dry-run EitanWong/remote-dev-skillkit
 ```
+
+Preview GitHub Release publication from a verified local candidate:
+
+```bash
+scripts/github/plan-release.sh \
+  --candidate dist/release-candidate \
+  --repo EitanWong/remote-dev-skillkit \
+  --require-artifacts rdev-host.exe,rdev-verify.exe
+```
+
+This generates a local plan, release notes, verification JSON, and command
+preview. It does not create a release or upload assets.
 
 Recommended sequence after explicit approval:
 

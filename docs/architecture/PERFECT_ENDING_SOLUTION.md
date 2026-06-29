@@ -825,7 +825,7 @@ the remaining gaps that matter before public confidence:
 | Production host trust lifecycle | development trust stores exist; managed fleets need authenticated updates and rollback-safe storage | OS-protected host identity/trust stores, authenticated trust refresh, revocation propagation |
 | Production transport | long-poll works as fallback; WSS/mTLS is the durable production channel | WSS host channel with lease semantics and HTTPS fallback |
 | Adapter SDK extraction | adapters are still mostly internal implementations | public SDK, fixtures, conformance tests, and docs for Codex, Claude Code, ACP, shell, PowerShell |
-| Public release automation | local release candidates exist; publication still needs safe automation | dry-run GitHub release script first, explicit approval before external mutation, archived release evidence |
+| Public release execution | release candidates and dry-run GitHub release plans exist; actual publication still needs explicit approval and release evidence | approved GitHub Release execution, verified downloads, archived release evidence |
 
 Anything not in this ledger is secondary until these are closed.
 
@@ -845,7 +845,7 @@ Finish in this order:
 5. Adapter SDK extraction and public conformance fixtures.
 6. Claude Code and ACP adapters.
 7. Windows Service, systemd managed modes, auto-update, and rollback.
-8. Signed public releases, platform signing, security policy, release transcript
+8. Approved signed public releases, platform signing, security policy, release transcript
    packaging, and open-source launch.
 
 ## Architecture Acceptance Test

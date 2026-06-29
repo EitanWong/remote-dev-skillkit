@@ -54,6 +54,7 @@
 - [x] Add Skillkit bundle verification for mainstream framework installation.
 - [x] Add local release candidate packaging for open-source publication.
 - [x] Refine the canonical perfect ending into a final control-plane blueprint, product cuts, release ladder, and remaining gap ledger.
+- [x] Add GitHub Release dry-run planning from verified release candidates.
 
 ## Next
 
@@ -118,6 +119,7 @@
 - [x] Add Windows temporary acceptance evidence packaging for release archival.
 - [x] Add release candidate packaging with staged artifacts, signed manifests, signed release bundle, verified Skillkit, checksums, and summary JSON.
 - [x] Add standalone release candidate verification for downloaded or staged candidates.
+- [x] Add GitHub Release dry-run plan generation with assets, commands, notes, Skillkit archive, and no external mutation.
 
 ## Later
 

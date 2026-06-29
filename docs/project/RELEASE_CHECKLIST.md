@@ -11,6 +11,7 @@
 - [ ] Export and verify the Skillkit bundle with `rdev skillkit export` and `rdev skillkit verify`.
 - [ ] Prepare a local release candidate with `rdev release prepare-candidate`.
 - [ ] Verify the local release candidate with `rdev release verify-candidate`.
+- [ ] Generate and review a GitHub Release dry-run plan with `scripts/github/plan-release.sh`.
 - [ ] Create signed release bundle index with `rdev release create-bundle`.
 - [ ] Verify signed release bundle index with `rdev release verify-bundle`.
 - [ ] Verify the same signed bundle with standalone `rdev-verify --bundle`.
@@ -35,6 +36,7 @@
 - [ ] Bootstrap does not weaken PowerShell execution policy or Group Policy.
 - [ ] Temporary Windows bootstrap verifies signed manifests and binaries before execution.
 - [ ] Acceptance evidence has been collected and redacted.
+- [ ] GitHub Release commands were reviewed from a dry-run plan before any external mutation.
 
 ## Post-Release
 

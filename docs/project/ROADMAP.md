@@ -117,6 +117,7 @@ Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation 
 - Full audit trail.
 - Signed releases.
 - Local release candidate packaging before GitHub Release publication.
+- Local GitHub Release dry-run planning from verified release candidates.
 - Installation docs for Hermes, Codex, Claude Code, and OpenCode.
 - End-to-end acceptance demos for temporary Windows repair and managed coding.
 
