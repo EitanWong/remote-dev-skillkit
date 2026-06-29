@@ -5,8 +5,7 @@ substitute for the real Windows VM and managed Mac release gates in
 `docs/project/ACCEPTANCE_TESTS.md`, but they give contributors a deterministic way to
 exercise the same safety loop before a real-environment run.
 
-The target behavior is defined in `docs/architecture/ULTIMATE_CLOSURE_DESIGN.md`
-and sharpened into the execution-ready closure spec in
+The target behavior is defined in the canonical final architecture lock,
 `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound
 envelopes, host-side validation, workspace locks, approval gates, evidence,
 audit, and revocation.

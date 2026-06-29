@@ -42,6 +42,7 @@
 - approval decisions;
 - start/end timestamps.
 
-## Perfect End-State References
+## Final Architecture Reference
 
-The complete end-state trust model, protocol design, threat matrix, and acceptance tests live in `docs/architecture/PERFECT_END_STATE.md`.
+The complete final trust model, protocol design, threat matrix, and acceptance
+gates live in `docs/architecture/PERFECT_ENDING_SOLUTION.md`.

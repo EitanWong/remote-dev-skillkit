@@ -5,7 +5,7 @@ This document defines the acceptance gates for the two golden paths in Remote De
 - temporary Windows repair;
 - managed Mac coding.
 
-It also defines the shared security evidence that must be collected before a release can claim support for either path. The acceptance model follows [Ultimate Closure Design](../architecture/ULTIMATE_CLOSURE_DESIGN.md) and [Perfect Ending Solution](../architecture/PERFECT_ENDING_SOLUTION.md): every successful path must prove typed intent, signed host-bound envelopes, host-side validation, approval gates, evidence bundles, audit, and revocation.
+It also defines the shared security evidence that must be collected before a release can claim support for either path. The acceptance model follows the canonical [Perfect Ending Solution](../architecture/PERFECT_ENDING_SOLUTION.md): every successful path must prove typed intent, signed host-bound envelopes, host-side validation, approval gates, evidence bundles, audit, and revocation.
 
 ## Evidence Rules
 

@@ -1,6 +1,9 @@
 # Final System Design
 
-This is the final implementation decision for Remote Dev Skillkit. It refines the broader end-state architecture into a product-grade design that can guide implementation, release, self-hosted deployment, and future open-source packaging. For the concise release-facing contract, see [Final Closure Blueprint](FINAL_CLOSURE_BLUEPRINT.md).
+This is a broad product reasoning record for Remote Dev Skillkit. The canonical
+final architecture lock is [Perfect Ending Solution](PERFECT_ENDING_SOLUTION.md).
+For the concise release-facing summary, see
+[Final Closure Blueprint](FINAL_CLOSURE_BLUEPRINT.md).
 
 ## Final Verdict
 
@@ -55,7 +58,10 @@ The "perfect ending" is not maximum remote control. It is maximum useful delegat
 
 ## Final Reference Blueprint
 
-This section is the canonical endgame blueprint. The rest of this document gives rationale, examples, and implementation detail. If a later feature conflicts with this blueprint, the feature must be redesigned or a new architecture decision must explicitly replace this section.
+This section is the earlier endgame blueprint. The rest of this document gives
+rationale, examples, and implementation detail. If it conflicts with
+[Perfect Ending Solution](PERFECT_ENDING_SOLUTION.md), the canonical final
+architecture lock wins until a new architecture decision explicitly replaces it.
 
 ### Product Constitution
 

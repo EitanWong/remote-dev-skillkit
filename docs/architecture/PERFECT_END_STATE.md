@@ -1,6 +1,6 @@
 # Perfect End-State Architecture
 
-This document is the canonical end-state blueprint for Remote Dev Skillkit. It describes the product we are trying to finish, the safety boundaries that must never regress, and the phased path from the current local development gateway to a public open-source agent skillkit.
+This document is supporting end-state background for Remote Dev Skillkit. The canonical final architecture lock is [Perfect Ending Solution](PERFECT_ENDING_SOLUTION.md). This file describes the product we are trying to finish, the safety boundaries that must never regress, and the phased path from the current local development gateway to a public open-source agent skillkit.
 
 ## One-Sentence Outcome
 

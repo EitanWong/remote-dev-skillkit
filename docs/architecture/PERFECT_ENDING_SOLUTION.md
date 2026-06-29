@@ -2,10 +2,21 @@
 
 Date: 2026-06-29
 
-This document is the final architecture closure solution for Remote Dev
-Skillkit. It does not replace [Ultimate Closure Design](ULTIMATE_CLOSURE_DESIGN.md);
-it turns that design into an execution spec for the product, the open-source
-project, and Eitan's Hermes/Lucky deployment.
+This document is the canonical final architecture lock and execution spec for
+Remote Dev Skillkit. If another architecture document conflicts with this file,
+this file wins until a new architecture decision explicitly replaces it.
+
+Supporting documents have narrower jobs:
+
+- [Final Closure Blueprint](FINAL_CLOSURE_BLUEPRINT.md) is the concise release
+  summary.
+- [Ultimate Closure Design](ULTIMATE_CLOSURE_DESIGN.md) is historical
+  implementation detail and rationale.
+- [Final System Design](FINAL_SYSTEM_DESIGN.md) is the broad product reasoning
+  record.
+
+This file defines the product, the open-source project, and Eitan's
+Hermes/Lucky deployment.
 
 The goal is not "remote control." The goal is safe, useful agent delegation to
 real machines.
@@ -55,6 +66,40 @@ Adapters
 The gateway coordinates. The host decides whether a job is safe to run locally.
 Adapters are powerful tools, but they are never trust roots.
 
+## Final Architecture Lock
+
+The final system is a consent-first remote work control plane, not remote
+control software. It must make useful remote action easy only after the action
+has been converted into a typed, signed, policy-checked, locally verified,
+auditable job.
+
+```text
+human/operator intent
+  -> agent Skill/MCP workflow
+  -> gateway policy dry-run
+  -> signed host-bound job envelope
+  -> outbound host lease
+  -> host sovereignty guard
+  -> adapter sandbox or visible session
+  -> redacted evidence bundle
+  -> hash-chained audit
+  -> review, approval, continuation, cancellation, or revocation
+```
+
+The product boundary is deliberately narrow:
+
+- `rdev` owns identity, consent, policy, signing, approval, execution bounds,
+  evidence, audit, and revocation.
+- Mature tools own their domains: Codex/Claude/ACP for coding, shell and
+  PowerShell for bounded repair, Tailscale/headscale or SSH for optional owned
+  host transport, RustDesk/MeshCentral or browser automation for explicit GUI,
+  Coder/DevPod/devcontainers for disposable workspaces.
+- Every mature tool is wrapped as an adapter. None of them becomes the
+  authorization root.
+
+The "perfect ending" is therefore not a bigger remote shell. It is the smallest
+general kernel that makes many remote-development tools safe for agents to use.
+
 ## Non-Negotiable Closure Contract
 
 Every feature must preserve all of these statements:
@@ -94,6 +139,84 @@ No single actor receives all powers.
 
 This is the main defense against prompt injection, compromised clients, buggy
 adapters, and ordinary operator mistakes.
+
+## Subsystem Blueprint
+
+The implementation should stay modular even if early deployments run as one
+binary.
+
+### Agent Package
+
+Responsibilities:
+
+- portable Skills for Hermes, Codex, Claude Code, OpenCode, and generic agents;
+- MCP stdio and HTTP tool contracts;
+- policy planning prompts and evidence-review workflows;
+- local CLI bridge for environments that cannot host an HTTP MCP server.
+
+Must not own:
+
+- host credentials;
+- standing approval authority;
+- raw unrestricted terminal access.
+
+### Gateway
+
+Responsibilities:
+
+- auth and operator sessions;
+- ticket creation, join manifests, and host registry;
+- policy dry-runs and capability planning;
+- job envelope signing and key rotation;
+- host leases, cancellation, and reconnect handling;
+- approval ledger and one-use scoped approval tokens;
+- artifact store, audit chain, evidence export, and redaction metadata;
+- release catalog, signed bundle references, and bootstrap metadata;
+- MCP/API surface for agent runtimes.
+
+Must not own:
+
+- local host execution;
+- release signing keys by default;
+- the ability to bypass host-side validation.
+
+### Host Runtime
+
+Responsibilities:
+
+- local host key generation and protected identity storage;
+- trust bundle storage, sequence checks, rollback rejection, and revocation;
+- outbound HTTPS/WSS transport with long-poll fallback;
+- local policy validation, nonce replay cache, and approval-token consumption;
+- workspace locks, worktree preparation, and visible temporary-session stop;
+- adapter supervisor, cancellation propagation, output caps, and timeouts;
+- evidence collection, redaction, local spool, upload, and cleanup;
+- managed-mode watchdog only when explicitly installed.
+
+Must not own:
+
+- broader authority than the approved gateway policy and local policy grant;
+- hidden persistence in temporary mode;
+- silent privilege escalation.
+
+### Adapter SDK
+
+Responsibilities:
+
+- make one domain useful while obeying the kernel contract;
+- expose deterministic capability detection and plan output;
+- produce structured evidence for success, failure, denial, timeout, and
+  cancellation.
+
+Must not own:
+
+- authorization;
+- persistence;
+- approval decisions;
+- trust roots.
+
+This split gives the project its open-source shape: anyone can add an adapter
+without weakening the remote work safety kernel.
 
 ## Operating Modes
 
@@ -206,6 +329,53 @@ adapter planning, Skills, and evidence.
 
 Ring 4 is never granted by "managed" status alone.
 
+## Permission Model
+
+"Maximum permission" means maximum permission that can be obtained safely and
+explicitly, not maximum ambient authority.
+
+The final permission model is:
+
+1. Start with no execution permission.
+2. Grant a ticket or managed policy only for a mode, reason, TTL, host, adapter,
+   capability set, workspace/session boundary, and output limits.
+3. Let the host independently narrow or reject the gateway grant.
+4. Require approval tokens for privileged or externally consequential actions.
+5. Let the local OS still show its normal prompts for elevation, TCC,
+   credentials, screen control, firewall, service changes, or enterprise policy.
+6. Record the approval, the side effect, and the evidence.
+
+For temporary third-party machines, this means powerful repair is possible only
+inside a visible foreground session. For managed Eitan-owned machines, durable
+reconnect is possible, but push, merge, deploy, publish, paid actions,
+credential changes, GUI control, service mutation, and elevation still require
+fresh scoped approval.
+
+## Protocol Objects
+
+The stable v1 protocol family should be schema-versioned and behavior-versioned.
+The JSON shape is not enough; expiry, replay, redaction, revocation, and audit
+rules are part of the contract.
+
+| Object | Owner | Purpose | Required rejection checks |
+|---|---|---|---|
+| `rdev.ticket.v1` | gateway | one enrollment intent | expired, revoked, wrong mode, reused when one-time |
+| `rdev.join-manifest.v1` | gateway/release trust | signed bootstrap metadata | bad signature, wrong audience, stale sequence, wrong gateway |
+| `rdev.host-registration.v1` | host | host key and capability inventory | missing ticket, duplicate misuse, unsupported mode |
+| `rdev.trust-bundle.v1` | gateway trust authority | active keys and revocations | rollback, expired bundle, revoked key, wrong previous hash |
+| `rdev.job-envelope.v1` | gateway | executable signed intent | tamper, wrong host, replay, expiry, missing capability |
+| `rdev.job-lease.v1` | gateway/host | bounded claim of queued work | expired lease, wrong host, stale generation |
+| `rdev.approval-token.v1` | gateway/operator | one scoped exception | wrong subject, expired, reused, broader scope |
+| `rdev.host-denial.v1` | host | safe refusal with reason | never treated as an unstructured crash |
+| `rdev.approval-required.v1` | host | pause before side effect | adapter side effect before token is a failure |
+| `rdev.adapter-result.v1` | adapter | raw bounded outcome | missing schema, over limit, missing redaction metadata |
+| `rdev.evidence-bundle.v1` | host/gateway | completion proof | checksum mismatch, missing manifest, unverifiable audit slice |
+| `rdev.audit-chain.v1` | gateway/exporter | tamper-evident event history | broken chain, missing required event, changed event hash |
+| `rdev.release-bundle.v1` | release system | signed artifact index | unsigned index, wrong digest, missing required artifact |
+
+Every protocol object needs an owner, signer when applicable, expiry behavior,
+revocation behavior, audit event, verifier command, and conformance fixture.
+
 ## Eitan Reference Deployment
 
 Eitan's deployment is the golden reference, not a private fork.
@@ -233,6 +403,18 @@ Responsibilities:
   revocation.
 - `rdev-host`: local verification, execution, stop control, and audit/evidence
   spool.
+
+The production boundary is:
+
+| Surface | Public role | Authentication | Notes |
+|---|---|---|---|
+| `https://api.lunflux.com/v1` | agent/operator API and MCP-compatible HTTP | operator/session/OAuth-style tokens | no human bootstrap scripts here |
+| `https://agent.lunflux.com` | join page, downloads, relay, release metadata | ticket, host identity, channel auth | no unrestricted admin API here |
+| local MCP stdio | single-machine development bridge | local process boundary | useful for Codex/Claude local installs |
+| `rdev` CLI | diagnostics, release/evidence verification, service lifecycle | local operator auth where needed | should prove every release claim |
+
+`api.lunflux.com` and `agent.lunflux.com` may share infrastructure at first, but
+their responsibilities must stay separable for later hardening.
 
 ## Discovery And Connection Model
 
@@ -275,6 +457,24 @@ The final Windows temporary support path should feel like this:
 The one command may be convenient, but the script must be inspectable and the
 binary must be verified before execution.
 
+Implementation constraints:
+
+- Windows bootstrap targets PowerShell 5.1 and .NET already present on Windows
+  10/11; it must not require Node, Python, Go, Git, package managers, or
+  permanent execution-policy changes.
+- The bootstrap downloads to a temporary directory, verifies the pinned
+  `rdev-verify.exe`, verifies the signed release bundle or host release
+  manifest, then starts `rdev-host.exe`.
+- Dependency installation for repair work is a job-level action, not a
+  bootstrap prerequisite, and therefore goes through policy and approvals.
+- Temporary reconnect is bounded by ticket/session TTL and visible foreground
+  process lifetime. If a user closes the session, local stop wins.
+- No inbound ports are opened on the target. The host connects outbound to the
+  relay over 443 and authenticates with its generated host key.
+- "Only my server can access" is achieved by avoiding target inbound listeners,
+  using host-bound signed envelopes, checking gateway trust bundles locally, and
+  rejecting jobs from any untrusted gateway key.
+
 ## Managed Coding Experience
 
 The final managed Mac/Linux/Windows coding path should feel like this:
@@ -293,6 +493,17 @@ The final managed Mac/Linux/Windows coding path should feel like this:
    control, and elevation require separate scoped approvals.
 8. Operator or agent reviews evidence and decides continue, approve, cancel, or
    revoke.
+
+Managed mode adds reliability, not invisibility:
+
+- install, status, logs, stop, restart, and uninstall commands are generated and
+  reviewable;
+- macOS uses LaunchAgent first, Linux uses systemd, Windows uses Windows
+  Service only after explicit managed enrollment;
+- restart/watchdog behavior is allowed only for managed hosts;
+- managed services reconnect with backoff, refresh trust bundles, flush local
+  evidence/audit spools, and honor revocation;
+- auto-update must verify signed release bundles and keep a rollback path.
 
 ## Skillkit And MCP Surface
 
@@ -377,6 +588,35 @@ Adapter priority:
 Robustness is allowed to restart managed services. It is not allowed to create
 hidden persistence on temporary machines.
 
+## Release And Bootstrap Trust
+
+The release path is part of the architecture, not packaging polish.
+
+Required chain:
+
+```text
+release key
+  -> signed release bundle index
+  -> signed artifact manifests
+  -> SHA-256 and size for every artifact
+  -> pinned standalone verifier
+  -> host binary execution
+```
+
+Rules:
+
+- the bootstrap must fail closed on missing verifier, missing required artifact,
+  bad hash, bad signature, wrong platform, revoked release key, or rollback;
+- the standalone verifier must be small enough to audit and hash-pin in
+  bootstrap scripts;
+- public Windows releases should add Authenticode, but Authenticode does not
+  replace the `rdev` release bundle verification contract;
+- release keys, gateway job-signing keys, trust-bundle keys, and approval-token
+  keys are separate authorities;
+- every public release should archive verifier output, checksums, signed
+  manifests, signed bundle index, SBOM when available, and acceptance
+  transcripts.
+
 ## Data And Storage
 
 | Data | First production | Scale target |
@@ -433,17 +673,21 @@ Hermes/Lucky is the reference environment, not a required dependency.
 
 Finish in this order:
 
-1. Real service-backed managed Mac acceptance: plan, start, inspect, reboot or
-   login reconnect, locked-worktree Codex run, verify evidence, stop, uninstall.
-2. Windows temporary bootstrap acceptance: signed release, foreground console,
-   outbound-only host loop, no-persistence inspection, approval probes, revoke.
-3. Production trust lifecycle: authenticated trust updates, revocation
+1. Finish release-bundle verification in Windows bootstrap and acceptance
+   planning.
+2. Prove temporary Windows acceptance end-to-end: signed release, foreground
+   console, outbound-only host loop, no-persistence inspection, approval probes,
+   revoke.
+3. Prove real service-backed managed Mac acceptance: plan, start, inspect,
+   login/reboot reconnect, locked-worktree Codex run, verify evidence, stop,
+   uninstall.
+4. Production trust lifecycle: authenticated trust updates, revocation
    propagation, OS-protected host identity and trust storage.
-4. WSS/mTLS host channel with HTTPS long-poll fallback.
-5. Adapter SDK extraction and public conformance fixtures.
-6. Claude Code and ACP adapters.
-7. Windows Service and systemd managed modes.
-8. Signed public releases, platform signing, security policy, release transcript
+5. WSS host channel with HTTPS long-poll fallback and clear lease semantics.
+6. Adapter SDK extraction and public conformance fixtures.
+7. Claude Code and ACP adapters.
+8. Windows Service, systemd managed modes, auto-update, and rollback.
+9. Signed public releases, platform signing, security policy, release transcript
    packaging, and open-source launch.
 
 ## Architecture Acceptance Test

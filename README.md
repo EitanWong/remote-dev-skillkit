@@ -38,9 +38,9 @@ shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevP
 
 The project intentionally reuses mature ecosystems where they fit: MCP for agent tools, Tailscale/headscale or SSH for owned-host connectivity, Coder/DevPod for governed workspaces, RustDesk/MeshCentral for explicit GUI sessions, and platform/Sigstore-style signing for release trust. What `rdev` owns is the missing agent safety kernel: signed job envelopes, host-side policy, approval gates, workspace locks, redaction, evidence bundles, audit chains, and revocation.
 
-The canonical endgame is locked in [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md): a small safety microkernel with replaceable adapters. The concise release-facing contract lives in [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md). The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
+The canonical endgame is locked in [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md): the final architecture lock, subsystem blueprint, authority map, protocol objects, operating modes, permission model, discovery model, evidence gates, and implementation order. The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
 
-The most implementation-focused endgame target is [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md), which refines the final architecture into concrete protocol objects, capability rings, host/runtime boundaries, golden paths, and v1.0 closure gates. The execution-ready final solution is [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md): the state machines, authority map, discovery model, operating modes, evidence gates, and implementation order that define the project's final closure.
+[Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md) is the concise release-facing summary. [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md) and [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) remain supporting rationale and implementation detail.
 
 ## Current Status
 
@@ -167,11 +167,11 @@ go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-d
 ## Documentation
 
 - [Architecture](docs/architecture/ARCHITECTURE.md)
+- [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md) — canonical final architecture lock and execution spec
+- [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md) — concise release-facing closure summary
+- [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md) — supporting implementation detail and rationale
+- [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) — broad product reasoning record
 - [Perfect End-State Architecture](docs/architecture/PERFECT_END_STATE.md)
-- [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) — canonical product contract
-- [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md) — concise release-facing closure contract
-- [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md) — implementation-grade final target
-- [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md) — execution-ready final closure spec
 - [Final Architecture](docs/architecture/FINAL_ARCHITECTURE.md)
 - [Project Plan](docs/project/PLAN.md)
 - [Acceptance Tests](docs/project/ACCEPTANCE_TESTS.md)

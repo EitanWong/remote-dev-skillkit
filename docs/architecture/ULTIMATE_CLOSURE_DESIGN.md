@@ -2,14 +2,13 @@
 
 Date: 2026-06-29
 
-This document is the final refined closure design for Remote Dev Skillkit. It does
-not replace [Final System Design](FINAL_SYSTEM_DESIGN.md) or
-[Final Closure Blueprint](FINAL_CLOSURE_BLUEPRINT.md). It turns them into one
-implementation-grade target that can guide the remaining engineering work, the
-public open-source release, and Eitan's Hermes/Lucky production deployment.
-For the execution-ready version of this closure, including state machines,
-authority map, discovery model, evidence gates, and final implementation order,
-see [Perfect Ending Solution](PERFECT_ENDING_SOLUTION.md).
+This document is supporting implementation detail for Remote Dev Skillkit. The
+canonical final architecture lock is
+[Perfect Ending Solution](PERFECT_ENDING_SOLUTION.md), which defines the state
+machines, subsystem blueprint, authority map, protocol objects, discovery model,
+evidence gates, and final implementation order. Keep this file as rationale and
+detail unless a new architecture decision explicitly replaces the canonical
+lock.
 
 ## Final Outcome
 

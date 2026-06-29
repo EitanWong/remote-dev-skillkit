@@ -2,7 +2,7 @@
 
 Remote Dev Skillkit is an agent-native remote development and support system. Its final form is not a remote shell wrapper. It is a consent-first control plane that lets Hermes/Lucky, Codex, Claude Code, OpenCode, and similar agents delegate work to enrolled machines through signed, policy-bound, auditable jobs.
 
-For the canonical end-state blueprint, including trust boundaries, protocols, acceptance tests, and the open-source package shape, see [Perfect End-State Architecture](PERFECT_END_STATE.md). For the refined product-grade architecture decision that should guide implementation order, deployment, and open-source packaging, see [Final System Design](FINAL_SYSTEM_DESIGN.md). This file remains the implementation-oriented v1 architecture narrative.
+For the canonical final architecture lock, including trust boundaries, protocols, acceptance tests, and the open-source package shape, see [Perfect Ending Solution](PERFECT_ENDING_SOLUTION.md). [Perfect End-State Architecture](PERFECT_END_STATE.md) and [Final System Design](FINAL_SYSTEM_DESIGN.md) remain supporting background. This file remains the implementation-oriented v1 architecture narrative.
 
 ## End State
 
