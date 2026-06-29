@@ -15,6 +15,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Prefer hosts started with `--workspace-lock-store` for coding jobs.
 - Treat Codex, Claude Code, ACP, shell, and PowerShell as adapters behind the signed-job/evidence/approval contract.
 - For Codex MVP jobs, require `codex.run` and `git.diff`, use a locked workspace/worktree, and expect `rdev.codex-result.v1` artifacts with Git status, diff/stat, and verification command evidence.
+- For Codex jobs that may push, merge, deploy, publish, change credentials, or manage services, expect `rdev.approval-required.v1` before execution unless a matching approval token is present.
 - Do not push, merge, deploy, or modify credentials without approval.
 - Return evidence: diff summary, tests run, exit codes, and artifacts.
 

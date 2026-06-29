@@ -184,6 +184,9 @@ func runDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.T
 	if len(missing) > 0 {
 		return requireApproval(job, missing, approved, tokenIDs)
 	}
+	if implicitMissing := missingImplicitApprovals(envelope, approved); len(implicitMissing) > 0 {
+		return requireApproval(job, implicitMissing, approved, tokenIDs)
+	}
 	if envelope.Adapter != "shell" && envelope.Adapter != "codex" {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
@@ -352,6 +355,117 @@ func verifyApprovalTokens(trust model.TrustBundle, envelope model.JobEnvelope, n
 		}
 	}
 	return approved, tokenIDs, missing, nil
+}
+
+func missingImplicitApprovals(envelope model.JobEnvelope, approved []string) []string {
+	if envelope.Adapter != "codex" {
+		return nil
+	}
+	approvedSet := make(map[string]struct{}, len(approved))
+	for _, value := range approved {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			approvedSet[value] = struct{}{}
+		}
+	}
+	var missing []string
+	for _, operation := range implicitCodexApprovals(envelope) {
+		if _, ok := approvedSet[operation]; ok {
+			continue
+		}
+		missing = append(missing, operation)
+	}
+	return missing
+}
+
+func implicitCodexApprovals(envelope model.JobEnvelope) []string {
+	seen := map[string]struct{}{}
+	var operations []string
+	add := func(operation string) {
+		operation = normalizeRiskOperation(operation)
+		if operation == "" {
+			return
+		}
+		if _, ok := seen[operation]; ok {
+			return
+		}
+		seen[operation] = struct{}{}
+		operations = append(operations, operation)
+	}
+	for _, key := range []string{"external_actions", "dangerous_actions", "approval_actions", "requested_approvals"} {
+		for _, action := range stringSliceValue(envelope.Payload, key) {
+			add(action)
+		}
+	}
+	text := strings.ToLower(strings.Join(codexRiskText(envelope), "\n"))
+	for _, rule := range []struct {
+		operation string
+		needles   []string
+	}{
+		{
+			operation: "git.push",
+			needles:   []string{"git push", "push to origin", "push changes", "push branch"},
+		},
+		{
+			operation: "git.merge",
+			needles:   []string{"git merge", "merge into main", "merge into master", "merge branch"},
+		},
+		{
+			operation: "deploy.run",
+			needles:   []string{"deploy", "deployment", "vercel --prod", "wrangler deploy", "fly deploy", "railway up"},
+		},
+		{
+			operation: "publish.run",
+			needles:   []string{"npm publish", "cargo publish", "publish package", "publish release"},
+		},
+		{
+			operation: "credential.change",
+			needles:   []string{"rotate credential", "change credential", "update secret", "modify secret", "write api key"},
+		},
+		{
+			operation: "service.manage",
+			needles:   []string{"systemctl", "launchctl", "install service", "restart service", "modify service"},
+		},
+	} {
+		for _, needle := range rule.needles {
+			if strings.Contains(text, needle) {
+				add(rule.operation)
+				break
+			}
+		}
+	}
+	return operations
+}
+
+func codexRiskText(envelope model.JobEnvelope) []string {
+	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
+	values = append(values, stringSliceValue(envelope.Payload, "codex_args")...)
+	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
+		values = append(values, strings.Join(command, " "))
+	}
+	return values
+}
+
+func normalizeRiskOperation(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "_", ".")
+	value = strings.ReplaceAll(value, "-", ".")
+	switch value {
+	case "git.push", "push", "git push":
+		return "git.push"
+	case "git.merge", "merge", "git merge":
+		return "git.merge"
+	case "deploy", "deployment", "deploy.run", "run.deploy":
+		return "deploy.run"
+	case "publish", "publish.run", "run.publish":
+		return "publish.run"
+	case "credential", "credentials", "credential.change", "credentials.change", "secret", "secret.change":
+		return "credential.change"
+	case "service", "service.manage", "manage.service", "service.change":
+		return "service.manage"
+	default:
+		return value
+	}
 }
 
 func requireApproval(job model.Job, missing, approved, tokenIDs []string) (Result, error) {

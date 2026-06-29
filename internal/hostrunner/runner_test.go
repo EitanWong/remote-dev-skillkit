@@ -457,6 +457,109 @@ func main() {
 	}
 }
 
+func TestRunDevJobRequiresApprovalForCodexGitPushIntent(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeCodex := writeHostrunnerFakeCodex(t, `package main
+
+import "os"
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nthis must not run without approval\n"), 0o644); err != nil {
+		panic(err)
+	}
+}
+`)
+	job, err := gw.CreateJob(host.ID, "codex", "update README and git push to origin", map[string]any{
+		"workspace_root": repo,
+		"capabilities":   []string{"codex.run", "git.diff"},
+		"prompt":         "Update README, then run git push to origin.",
+		"codex_command":  "go",
+		"codex_args":     []string{"run", fakeCodex},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "git.push")
+	content, readErr := os.ReadFile(filepath.Join(repo, "README.md"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(content), "this must not run without approval") {
+		t.Fatalf("codex adapter executed before git.push approval: %s", string(content))
+	}
+}
+
+func TestRunDevJobExecutesCodexAfterImplicitApprovalSatisfied(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeCodex := writeHostrunnerFakeCodex(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\napproved push intent\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("approved codex run")
+}
+`)
+	job, err := gw.CreateJob(host.ID, "codex", "update README and git push to origin", map[string]any{
+		"workspace_root":              repo,
+		"capabilities":                []string{"codex.run", "git.diff"},
+		"prompt":                      "Update README, then run git push to origin.",
+		"codex_command":               "go",
+		"codex_args":                  []string{"run", fakeCodex},
+		"verification_commands":       [][]string{{"git", "status", "--short"}},
+		"allow_verification_commands": []string{"git"},
+		"max_duration_seconds":        30,
+		"max_output_bytes":            64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err = gw.ApproveJob(job.ID, "git.push", "approved", "test approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, "approved push intent") {
+		t.Fatalf("expected codex artifact after approval, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobRequiresApprovalForCodexExternalActionsPayload(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "codex", "ship release", map[string]any{
+		"workspace_root":    t.TempDir(),
+		"capabilities":      []string{"codex.run", "git.diff"},
+		"prompt":            "Prepare release notes.",
+		"external_actions":  []string{"deploy"},
+		"dangerous_actions": []string{"publish"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "deploy.run")
+	if !strings.Contains(result.ArtifactContent, "publish.run") {
+		t.Fatalf("expected publish.run to be included in approval artifact, got %s", result.ArtifactContent)
+	}
+}
+
 func TestRunDevJobRejectsCodexWithoutCapability(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
