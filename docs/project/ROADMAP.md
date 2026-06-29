@@ -1,6 +1,16 @@
 # Roadmap
 
-The roadmap implements the canonical [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, approval gates, audit evidence, and agent-native MCP/Skill packaging.
+The roadmap implements the canonical [Final System Design](../architecture/FINAL_SYSTEM_DESIGN.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, approval gates, audit evidence, and agent-native MCP/Skill packaging. [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md) remains the broader blueprint; `FINAL_SYSTEM_DESIGN.md` is the implementation contract.
+
+## Maturity Gates
+
+| Gate | Proves | Does not claim |
+|---|---|---|
+| `v0.1` Local Safety Kernel | signed jobs, host-side verification, denials, approvals, evidence, audit | production networking or OS service behavior |
+| `v0.2` Windows Temporary Host | visible one-command enrollment, release verification, outbound-only repair | unattended managed-device operations |
+| `v0.3` Managed Mac Coding | durable owned-host Codex workflow with workspace evidence | general multi-tenant fleet management |
+| `v0.4` Managed Device Generalization | multi-OS services, durable storage, adapter SDK, reconnects | public protocol stability |
+| `v1.0` Public Skillkit | stable schemas, safe defaults, signed releases, self-host docs | every possible adapter or remote-access product |
 
 ## v0.0.1 Foundation
 
@@ -26,10 +36,11 @@ The roadmap implements the canonical [Perfect End-State Architecture](../archite
 - Host-side artifact redaction.
 - Hash-chained audit export verifier.
 - Evidence bundle export.
+- Gateway/API evidence bundle export directly from job ids.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 
-Exit gate: local demo proves ticket, host registration, signed job execution, artifact storage, audit export, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
+Exit gate: local demo proves ticket, host registration, signed job execution, artifact storage, evidence export, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
 
 ## v0.2.0 Windows Temporary Host
 

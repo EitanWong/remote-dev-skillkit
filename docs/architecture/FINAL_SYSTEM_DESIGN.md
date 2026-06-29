@@ -32,6 +32,84 @@ The highest-level rule is:
 
 That rule resolves the tension between remote repair convenience and safety. Temporary third-party machines get visible, time-limited, foreground sessions. Eitan-owned or formally managed machines can opt into durable service mode.
 
+## Endgame Operating Model
+
+The final product should be understood as one operating model rather than a pile of integrations:
+
+```text
+agent intent
+  -> typed MCP/CLI request
+  -> gateway policy decision
+  -> signed job envelope
+  -> host lease over outbound channel
+  -> host-side verification
+  -> adapter execution
+  -> redacted artifacts
+  -> hash-chained audit
+  -> human or agent review
+  -> approval, continuation, or revocation
+```
+
+This loop is the product. Everything else is implementation detail.
+
+### Endgame Thesis
+
+Remote Dev Skillkit wins only if it becomes the safety and orchestration layer agents use before touching real machines. It should not compete with every remote access, mesh, coding CLI, or cloud workspace tool. Instead, it should make those tools safe to delegate to:
+
+- MCP exposes structured external actions to agents.
+- The gateway turns allowed actions into signed intent.
+- The host proves local identity and enforces local policy.
+- Adapters execute useful work without owning trust.
+- Evidence lets another agent or human review the result.
+
+The final system therefore has one stable core and many replaceable edges. The core is identity, policy, envelope signing, host validation, approvals, revocation, audit, and evidence. The edges are transports, coding CLIs, GUI tools, mesh networks, hosted workspaces, and future agent runtimes.
+
+### Final Product Form
+
+The complete open-source product should ship as four installable surfaces and one shared protocol:
+
+| Surface | Primary user | Final responsibility |
+|---|---|---|
+| Agent Skills | Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor-style agents | teach safe workflows: invite, triage, job, approval, evidence, revoke |
+| MCP/API gateway | operator or self-hosted service | own tickets, host registry, policy, signing, approvals, artifacts, audit, revocation |
+| Host runtime | target Mac, Windows, Linux machine | connect outbound, validate every job, run adapters, spool evidence |
+| Operator CLI | human operator and developer | bootstrap, debug, inspect, export evidence, verify releases |
+| Protocol contracts | all components | schema-versioned tickets, manifests, envelopes, tokens, artifacts, audit events |
+
+The protocol is more important than any single binary. If another gateway, hosted service, or agent runtime implements the same contracts without weakening the safety kernel, it is part of the ecosystem rather than a fork in spirit.
+
+### Authority Separation
+
+No final deployment may collapse all authority into one bearer token, one SSH credential, or one remote desktop session.
+
+| Authority | Grants | Does not grant |
+|---|---|---|
+| Agent client auth | permission to request tools | permission to execute on hosts or approve danger |
+| Operator session | permission to approve scoped actions | permission to bypass host validation |
+| Gateway job signing key | executable intent for a bounded job | release trust or host identity |
+| Host identity key | proof of the enrolled machine | permission to broaden policy |
+| Approval token key | one scoped exception | reusable standing privilege |
+| Release signing key | software artifact trust | job execution authority |
+| Audit chain | tamper evidence | authorization by itself |
+
+This separation is the reason the system can be useful without becoming ambient machine ownership.
+
+### The Perfect Ending In One Sentence
+
+An agent can safely say "use that machine to solve this" because the machine only accepts signed, scoped, reviewable work that a human can approve, stop, audit, and revoke.
+
+### Failure Conditions
+
+The architecture is considered to have failed if any of these become normal behavior:
+
+- an agent receives raw long-lived SSH/RDP/VNC credentials as the default path;
+- a temporary third-party host installs a background service or autorun entry;
+- a mesh ACL, hostname, IP address, or remote desktop session authorizes job execution without a signed envelope;
+- an adapter runs outside workspace policy, approval gates, artifact redaction, or audit;
+- package install, elevation, GUI control, service mutation, push, merge, deploy, publish, paid action, or credential change happens without scoped approval;
+- evidence is replaced by a natural-language summary without artifacts and audit proof;
+- release/bootstrap verification is treated as optional for one-command installation.
+
 ## Final Safety Kernel
 
 The final architecture is intentionally split into a small non-negotiable kernel and a large replaceable adapter surface.
@@ -1539,6 +1617,18 @@ Go remains the right implementation language for the host/gateway core because i
 
 ## Implementation Order To Finish The Product
 
+Implementation should follow maturity gates, not feature excitement. Each gate proves one layer of the operating model and leaves the next layer as an explicit integration problem.
+
+| Gate | What it proves | What it must not pretend to prove |
+|---|---|---|
+| `v0.1` local safety kernel | signed jobs, host validation, denials, approval tokens, evidence, audit | production networking or OS service behavior |
+| `v0.2` temporary Windows | one-command visible enrollment, release verification, outbound-only repair | unattended managed-device operations |
+| `v0.3` managed Mac coding | durable owned-host workflow with Codex and workspace evidence | general multi-tenant fleet management |
+| `v0.4` managed device generalization | multi-OS service managers, durable storage, adapter SDK, reconnects | public protocol stability |
+| `v1.0` public Skillkit | stable schemas, safe defaults, signed releases, self-host docs | every possible adapter or remote-access product |
+
+The implementation order deliberately brings the safety kernel before rich transports and GUI control. If a later feature requires weakening the kernel, the feature is wrong.
+
 ### Gate 1: Complete the Local Safety Kernel (`v0.1`)
 
 Goal: local gateway and local host prove the core policy model.
@@ -1568,6 +1658,9 @@ Exit criteria:
 - `./scripts/check.sh` passes;
 - local demo creates ticket, registers host, signs job, executes allowlisted job, stores artifact, exports verifiable audit chain;
 - host rejects tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, and workspace-escaping jobs;
+- host returns structured denials and approval-required artifacts instead of opaque failures;
+- approval tokens are signed, scoped, expiring, and consumed once by the host;
+- evidence can be exported from both local files and gateway job ids;
 - README quick start can be followed by a fresh developer.
 
 ### Gate 2: Build the Temporary Windows MVP (`v0.2`)
@@ -1577,6 +1670,7 @@ Exit criteria:
 - signed Windows bootstrap;
 - outbound HTTPS polling then WSS;
 - foreground console/UI with stop;
+- session-scoped host identity and trust bundle;
 - local audit spool;
 - E2E temporary repair acceptance test;
 - no-persistence inspection script;
@@ -1590,6 +1684,7 @@ Exit criteria:
 - package install/elevation/GUI/service requests pause for approval;
 - host revoke cancels work;
 - no Windows Service, scheduled task, Run key, startup shortcut, or firewall rule is left by temporary mode.
+- a third-party user can inspect the script and stop the session without understanding rdev internals.
 
 ### Gate 3: Build Managed Mac Coding (`v0.3`)
 
@@ -1597,6 +1692,7 @@ Exit criteria:
 - LaunchAgent managed mode;
 - workspace locks and worktrees;
 - Codex adapter;
+- optional Claude Code or ACP adapter spike only if it does not delay Codex evidence flow;
 - git diff/test evidence;
 - approval before push/merge;
 - managed host health and uninstall command;
@@ -1609,11 +1705,13 @@ Exit criteria:
 - Codex runs in a locked Git worktree;
 - result includes changed files, diff, tests, adapter artifact, audit slice, and residual risk;
 - push, merge, deploy, credential changes, and service changes require approval.
+- a failed coding job still produces enough evidence for Lucky or another reviewer to continue safely.
 
 ### Gate 4: Generalize To Multi-Host (`v0.4`)
 
 - durable gateway storage;
 - key rotation and trust-bundle update;
+- OS-protected managed host identity and trust storage;
 - Linux systemd;
 - Windows Service;
 - Claude Code and ACP adapters;
@@ -1627,12 +1725,14 @@ Exit criteria:
 - trust-bundle rotation reaches managed hosts and rejects rollback;
 - artifact streaming and audit spool survive reconnects;
 - adapter SDK can add a new adapter without changing the safety kernel.
+- temporary and managed host modes remain visibly separate in commands, policies, and audit.
 
 ### Gate 5: Public v1.0 Skillkit (`v1.0`)
 
 - stable MCP schemas;
 - stable protocol versions;
 - installable Agent Skills;
+- adapter conformance tests;
 - signed multi-platform releases;
 - security review;
 - deployment guide;
@@ -1646,6 +1746,7 @@ Exit criteria:
 - release artifacts are signed and verifiable;
 - golden path videos or transcripts exist for Temporary Windows Repair and Managed Coding;
 - security policy, threat model, and release process are public and current.
+- project users can bring Hermes, Codex, Claude Code, OpenCode, or another agent runtime without changing the trust model.
 
 ## Final Architecture Decisions
 

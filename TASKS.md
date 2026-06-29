@@ -41,6 +41,7 @@
 - [x] Add structured host-side approval-required results for gated jobs.
 - [x] Add signed approval token model for gateway-approved job operations.
 - [x] Add durable host-side approval token consumption store.
+- [x] Finalize endgame operating model, authority separation, maturity gates, and failure conditions in the canonical design.
 
 ## Next
 
@@ -116,5 +117,8 @@
 - All jobs produce audit records.
 - Audit records can be exported as a verifiable hash chain.
 - Jobs can be exported as local evidence bundles with manifest, checksums, artifacts, envelope, policy decision, audit slice, and audit chain.
+- Gateway/API can export the same evidence bundle directly from a job id.
+- Host-side denials and approval-required pauses are structured artifacts, not opaque errors.
+- Signed approval tokens are scoped, expiring, and consumed once by the host.
 - Tests cover policy gates and command contracts.
 - README has a working local demo.
