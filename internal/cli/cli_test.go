@@ -2201,6 +2201,73 @@ func TestAdapterVerifyResultRejectsMissingCommandEvidence(t *testing.T) {
 	}
 }
 
+func TestAdapterScaffoldCreatesVerifiableLifecycleManifest(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "claude-code-lifecycle.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	if err := app.Run(context.Background(), []string{
+		"adapter", "scaffold",
+		"--adapter", "claude-code",
+		"--out", artifactPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Schema       string `json:"schema"`
+		OK           bool   `json:"ok"`
+		Adapter      string `json:"adapter"`
+		Manifest     string `json:"manifest"`
+		ResultSchema string `json:"result_schema"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid scaffold output: %v\n%s", err, stdout.String())
+	}
+	if payload.Schema != "rdev.adapter-scaffold.v1" || !payload.OK || payload.Adapter != "claude-code" || payload.Manifest != artifactPath || payload.ResultSchema != "rdev.claude-code-result.v1" {
+		t.Fatalf("unexpected scaffold output: %s", stdout.String())
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"adapter", "verify-lifecycle",
+		"--artifact", artifactPath,
+		"--adapter", "claude-code",
+	}); err != nil {
+		t.Fatalf("generated lifecycle manifest should verify: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected generated lifecycle manifest verification to pass, got %s", verifyStdout.String())
+	}
+}
+
+func TestAdapterScaffoldRefusesOverwriteWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	artifactPath := filepath.Join(dir, "adapter.json")
+	if err := os.WriteFile(artifactPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"adapter", "scaffold",
+		"--adapter", "claude-code",
+		"--out", artifactPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected overwrite refusal, got %v", err)
+	}
+	content, err := os.ReadFile(artifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "{}\n" {
+		t.Fatalf("scaffold should not overwrite without --force, got %s", string(content))
+	}
+}
+
 func TestAdapterVerifyLifecycleAcceptsManifest(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "claude-code-lifecycle.json")

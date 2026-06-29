@@ -1327,16 +1327,16 @@ cleanup(job, result) -> cleanup_status
 ```
 
 The first public SDK slices are already narrower and intentionally boring:
-`pkg/adapterkit`, `rdev adapter verify-lifecycle`, `rdev adapter verify-result`,
-and MCP tools `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_result`
-verify lifecycle manifests and result-artifact JSON. Lifecycle conformance checks
-required phases, safety boundaries, cancellation, cleanup, and result schema
-declarations. Result conformance checks adapter/schema identity, timing,
-redaction metadata, command evidence, cancellation/timeout exclusivity, and
-common secret-pattern rejection. Shell, PowerShell, and Codex use the shared
-result verifier in tests, so third-party adapter authors have concrete
-declaration and evidence contracts before the full runtime lifecycle interface
-is extracted.
+`pkg/adapterkit`, `rdev adapter scaffold`, `rdev adapter verify-lifecycle`,
+`rdev adapter verify-result`, and MCP tools `rdev.adapter.verify_lifecycle` /
+`rdev.adapter.verify_result` generate and verify lifecycle manifests and
+result-artifact JSON. Lifecycle conformance checks required phases, safety
+boundaries, cancellation, cleanup, and result schema declarations. Result
+conformance checks adapter/schema identity, timing, redaction metadata, command
+evidence, cancellation/timeout exclusivity, and common secret-pattern rejection.
+Shell, PowerShell, and Codex use the shared result verifier in tests, so
+third-party adapter authors have concrete declaration and evidence contracts
+before the full runtime lifecycle interface is extracted.
 
 Conformance tests must prove:
 

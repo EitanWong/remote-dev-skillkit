@@ -70,6 +70,7 @@
 - [x] Add `rdev.adapter.verify_result` MCP tool for agent-side result-artifact conformance.
 - [x] Add final product constitution for the perfect-ending architecture, including planes, adapter lifecycle, permission lattice, storage, API/MCP contract, Eitan deployment, v1.0 definition, and build order.
 - [x] Add adapter lifecycle manifest conformance through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
+- [x] Add `rdev adapter scaffold` for copyable third-party adapter lifecycle manifest templates.
 
 ## Next
 
@@ -190,6 +191,7 @@
 - [x] Built-in shell, PowerShell, and Codex adapters pass public adapterkit result-artifact conformance checks.
 - [x] MCP stdio exposes adapter result-artifact conformance as `rdev.adapter.verify_result`.
 - [x] Adapter lifecycle manifests can be verified through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
+- [x] Third-party adapter authors can scaffold a lifecycle manifest and verify it before runtime integration.
 
 ## Definition Of Done For v0.1.0
 

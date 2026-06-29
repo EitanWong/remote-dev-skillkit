@@ -47,13 +47,23 @@ The verifier checks that:
   exclusivity, and cleanup-on-cancel behavior;
 - common unredacted secret patterns are absent when requested.
 
-Adapter authors can run the same check through the CLI:
+Adapter authors can start from a generated manifest and then run the same check
+through the CLI:
 
 ```bash
+rdev adapter scaffold \
+  --adapter claude-code \
+  --out examples/adapters/claude-code-lifecycle.json
+
 rdev adapter verify-lifecycle \
   --artifact examples/adapters/claude-code-lifecycle.json \
   --adapter claude-code
 ```
+
+`scaffold` writes a copyable `rdev.adapter-lifecycle.v1` template, derives the
+default result schema as `rdev.<adapter>-result.v1`, refuses to overwrite
+existing files unless `--force` is passed, and immediately verifies the
+generated manifest before returning `ok=true`.
 
 Agent runtimes can call MCP tool `rdev.adapter.verify_lifecycle` with
 `artifact_json` or `artifact_id`.

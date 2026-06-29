@@ -85,7 +85,7 @@ Implemented now:
 - PowerShell adapter MVP through `adapter=powershell`: runs an explicit PowerShell command through an allowlisted `pwsh`, `powershell`, `powershell.exe`, or payload-provided executable, requires `powershell.user`, never adds `-ExecutionPolicy Bypass`, gates high-risk commands on approval, and captures `rdev.powershell-result.v1` evidence with redaction.
 - Codex, shell, and PowerShell adapter cooperative cancellation through context-aware hostrunner execution and host-side gateway job status monitoring.
 - Canceled Codex, shell, and PowerShell jobs can append cancellation evidence artifacts while preserving the gateway job's `canceled` terminal state.
-- Public adapter conformance verifiers through `pkg/adapterkit`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle`, covering result artifacts plus lifecycle manifests for required phases, safety boundaries, cancellation, cleanup, result schemas, timing, redaction, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
+- Public adapter onboarding and conformance through `pkg/adapterkit`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle`, covering generated lifecycle manifest templates, result artifacts, required phases, safety boundaries, cancellation, cleanup, result schemas, timing, redaction, command evidence, cancellation/timeout exclusivity, and secret-pattern rejection.
 - Structured host-side denial artifacts via `rdev.host-denial.v1` for missing envelopes, wrong host, identity mismatch, expired/tampered/replayed envelopes, unsupported adapters, missing capabilities, missing workspaces, non-allowlisted commands, and workspace escapes.
 - Structured host-side approval-required artifacts via `rdev.approval-required.v1`; jobs with unsatisfied signed approval requirements pause before adapter execution, and gateway-approved jobs receive signed `rdev.approval-token.v1` tokens.
 - Built-in shell, PowerShell, and Codex jobs run an implicit approval preflight before adapter execution for package installation, elevation, GUI control, service management, push, merge, deploy, publish, credential changes, and execution-policy changes.
@@ -158,6 +158,7 @@ go run ./cmd/rdev evidence export --job-json job.json --artifacts-json artifacts
 go run ./cmd/rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
 go run ./cmd/rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
 go run ./cmd/rdev skillkit verify --bundle dist/remote-dev-skillkit
+go run ./cmd/rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json --force
 go run ./cmd/rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
 go run ./cmd/rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
 go run ./cmd/rdev acceptance managed-mac --out .rdev/acceptance/managed-mac --repo .

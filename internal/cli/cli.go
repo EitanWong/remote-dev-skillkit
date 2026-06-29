@@ -1756,6 +1756,22 @@ func (a App) adapter(args []string) error {
 		return fmt.Errorf("missing adapter subcommand")
 	}
 	switch args[0] {
+	case "scaffold":
+		fs := flag.NewFlagSet("adapter scaffold", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		adapterName := fs.String("adapter", "", "adapter name, for example claude-code")
+		out := fs.String("out", "", "output lifecycle manifest path")
+		resultSchema := fs.String("result-schema", "", "adapter result artifact schema; defaults to rdev.<adapter>-result.v1")
+		force := fs.Bool("force", false, "overwrite an existing output file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.adapterScaffold(adapterScaffoldOptions{
+			Adapter:      *adapterName,
+			OutPath:      *out,
+			ResultSchema: *resultSchema,
+			Force:        *force,
+		})
 	case "verify-result":
 		fs := flag.NewFlagSet("adapter verify-result", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1820,6 +1836,13 @@ type adapterVerifyResultOptions struct {
 	RejectUnredactedPatterns bool
 }
 
+type adapterScaffoldOptions struct {
+	Adapter      string
+	OutPath      string
+	ResultSchema string
+	Force        bool
+}
+
 type adapterVerifyLifecycleOptions struct {
 	ArtifactPath             string
 	Adapter                  string
@@ -1829,6 +1852,53 @@ type adapterVerifyLifecycleOptions struct {
 	RequireCancellation      bool
 	RequireResultSchema      bool
 	RejectUnredactedPatterns bool
+}
+
+type adapterLifecycleManifest struct {
+	SchemaVersion string                       `json:"schema_version"`
+	Adapter       string                       `json:"adapter"`
+	Phases        adapterLifecyclePhases       `json:"phases"`
+	Safety        adapterLifecycleSafety       `json:"safety"`
+	Cancellation  adapterLifecycleCancellation `json:"cancellation"`
+}
+
+type adapterLifecyclePhases struct {
+	Detect  adapterPhase `json:"detect"`
+	Plan    adapterPhase `json:"plan"`
+	Prepare adapterPhase `json:"prepare"`
+	Run     adapterPhase `json:"run"`
+	Collect adapterPhase `json:"collect"`
+	Cleanup adapterPhase `json:"cleanup"`
+}
+
+type adapterPhase struct {
+	Implemented                  bool     `json:"implemented"`
+	Evidence                     []string `json:"evidence"`
+	DeclaresExternalConsequences bool     `json:"declares_external_consequences,omitempty"`
+	DeclaresRequiredApprovals    bool     `json:"declares_required_approvals,omitempty"`
+	EnforcesWorkspaceBoundary    bool     `json:"enforces_workspace_boundary,omitempty"`
+	UsesWorkspaceLock            bool     `json:"uses_workspace_lock,omitempty"`
+	SupportsTimeout              bool     `json:"supports_timeout,omitempty"`
+	SupportsCancellation         bool     `json:"supports_cancellation,omitempty"`
+	EmitsResultArtifact          bool     `json:"emits_result_artifact,omitempty"`
+	ResultSchema                 string   `json:"result_schema,omitempty"`
+	Idempotent                   bool     `json:"idempotent,omitempty"`
+	ReleasesLocks                bool     `json:"releases_locks,omitempty"`
+}
+
+type adapterLifecycleSafety struct {
+	AdapterAuthorizesJobs           bool `json:"adapter_authorizes_jobs"`
+	AdapterApprovesDangerousActions bool `json:"adapter_approves_dangerous_actions"`
+	AdapterInstallsPersistence      bool `json:"adapter_installs_persistence"`
+	HostValidatesBeforeRun          bool `json:"host_validates_before_run"`
+	RedactsOutputs                  bool `json:"redacts_outputs"`
+}
+
+type adapterLifecycleCancellation struct {
+	Supported        bool   `json:"supported"`
+	EvidenceField    string `json:"evidence_field"`
+	TimeoutExclusive bool   `json:"timeout_exclusive"`
+	CleanupOnCancel  bool   `json:"cleanup_on_cancel"`
 }
 
 func (a App) workspace(ctx context.Context, args []string) error {
@@ -2269,6 +2339,64 @@ func (a App) releaseVerifyCandidate(candidatePath string, requiredArtifacts []st
 	return nil
 }
 
+func (a App) adapterScaffold(opts adapterScaffoldOptions) error {
+	adapterName := strings.TrimSpace(opts.Adapter)
+	if adapterName == "" {
+		return fmt.Errorf("adapter is required")
+	}
+	outPath := strings.TrimSpace(opts.OutPath)
+	if outPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if !opts.Force {
+		if _, err := os.Stat(outPath); err == nil {
+			return fmt.Errorf("out already exists: %s", outPath)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	resultSchema := strings.TrimSpace(opts.ResultSchema)
+	if resultSchema == "" {
+		resultSchema = "rdev." + adapterName + "-result.v1"
+	}
+	manifest := adapterLifecycleTemplate(adapterName, resultSchema)
+	content, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(outPath, content, 0o644); err != nil {
+		return err
+	}
+	report := adapterkit.VerifyLifecycleManifestJSON(content, adapterkit.LifecycleContract{
+		Adapter:                 adapterName,
+		RequireSafety:           true,
+		RequireCancellation:     true,
+		RequireResultSchema:     true,
+		RejectUnredactedSecrets: true,
+	})
+	payload := map[string]any{
+		"schema":        "rdev.adapter-scaffold.v1",
+		"ok":            report.OK,
+		"adapter":       adapterName,
+		"manifest":      outPath,
+		"result_schema": resultSchema,
+		"verification":  report,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !report.OK {
+		return fmt.Errorf("generated adapter lifecycle manifest failed conformance")
+	}
+	return nil
+}
+
 func (a App) adapterVerifyResult(opts adapterVerifyResultOptions) error {
 	if strings.TrimSpace(opts.ArtifactPath) == "" {
 		return fmt.Errorf("artifact is required")
@@ -2347,6 +2475,62 @@ func (a App) adapterVerifyLifecycle(opts adapterVerifyLifecycleOptions) error {
 		return fmt.Errorf("adapter lifecycle conformance failed")
 	}
 	return nil
+}
+
+func adapterLifecycleTemplate(adapterName, resultSchema string) adapterLifecycleManifest {
+	return adapterLifecycleManifest{
+		SchemaVersion: adapterkit.LifecycleManifestSchemaVersion,
+		Adapter:       adapterName,
+		Phases: adapterLifecyclePhases{
+			Detect: adapterPhase{
+				Implemented: true,
+				Evidence:    []string{"binary_path", "version", "capabilities"},
+			},
+			Plan: adapterPhase{
+				Implemented:                  true,
+				Evidence:                     []string{"prompt_summary", "planned_commands", "expected_artifacts"},
+				DeclaresExternalConsequences: true,
+				DeclaresRequiredApprovals:    true,
+			},
+			Prepare: adapterPhase{
+				Implemented:               true,
+				Evidence:                  []string{"workspace_root", "worktree_path", "lock_id"},
+				EnforcesWorkspaceBoundary: true,
+				UsesWorkspaceLock:         true,
+			},
+			Run: adapterPhase{
+				Implemented:          true,
+				Evidence:             []string{"argv", "started_at", "exit_code"},
+				SupportsTimeout:      true,
+				SupportsCancellation: true,
+			},
+			Collect: adapterPhase{
+				Implemented:         true,
+				Evidence:            []string{"stdout", "stderr", "git_status", "git_diff", "verification_commands"},
+				EmitsResultArtifact: true,
+				ResultSchema:        resultSchema,
+			},
+			Cleanup: adapterPhase{
+				Implemented:   true,
+				Evidence:      []string{"lock_released", "temp_files_removed", "processes_stopped"},
+				Idempotent:    true,
+				ReleasesLocks: true,
+			},
+		},
+		Safety: adapterLifecycleSafety{
+			AdapterAuthorizesJobs:           false,
+			AdapterApprovesDangerousActions: false,
+			AdapterInstallsPersistence:      false,
+			HostValidatesBeforeRun:          true,
+			RedactsOutputs:                  true,
+		},
+		Cancellation: adapterLifecycleCancellation{
+			Supported:        true,
+			EvidenceField:    "canceled",
+			TimeoutExclusive: true,
+			CleanupOnCancel:  true,
+		},
+	}
 }
 
 func (a App) trustInit(opts trustInitOptions) error {
@@ -2973,6 +3157,7 @@ Usage:
   rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
   rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
   rdev skillkit verify --bundle dist/remote-dev-skillkit
+  rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
   rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json

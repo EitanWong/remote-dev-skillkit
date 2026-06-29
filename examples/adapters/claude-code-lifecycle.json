@@ -4,35 +4,61 @@
   "phases": {
     "detect": {
       "implemented": true,
-      "evidence": ["binary_path", "version", "capabilities"]
+      "evidence": [
+        "binary_path",
+        "version",
+        "capabilities"
+      ]
     },
     "plan": {
       "implemented": true,
-      "evidence": ["prompt_summary", "planned_commands", "expected_artifacts"],
+      "evidence": [
+        "prompt_summary",
+        "planned_commands",
+        "expected_artifacts"
+      ],
       "declares_external_consequences": true,
       "declares_required_approvals": true
     },
     "prepare": {
       "implemented": true,
-      "evidence": ["workspace_root", "worktree_path", "lock_id"],
+      "evidence": [
+        "workspace_root",
+        "worktree_path",
+        "lock_id"
+      ],
       "enforces_workspace_boundary": true,
       "uses_workspace_lock": true
     },
     "run": {
       "implemented": true,
-      "evidence": ["argv", "started_at", "exit_code"],
+      "evidence": [
+        "argv",
+        "started_at",
+        "exit_code"
+      ],
       "supports_timeout": true,
       "supports_cancellation": true
     },
     "collect": {
       "implemented": true,
-      "evidence": ["stdout", "stderr", "git_status", "git_diff", "verification_commands"],
+      "evidence": [
+        "stdout",
+        "stderr",
+        "git_status",
+        "git_diff",
+        "verification_commands"
+      ],
       "emits_result_artifact": true,
       "result_schema": "rdev.claude-code-result.v1"
     },
     "cleanup": {
       "implemented": true,
-      "evidence": ["lock_released", "temp_files_removed", "processes_stopped"],
+      "evidence": [
+        "lock_released",
+        "temp_files_removed",
+        "processes_stopped"
+      ],
       "idempotent": true,
       "releases_locks": true
     }
