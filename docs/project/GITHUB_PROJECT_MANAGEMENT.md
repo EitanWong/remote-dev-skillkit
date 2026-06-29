@@ -232,6 +232,14 @@ This writes `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, one
 platform verification script per archive, and a Skillkit verification script. It
 does not publish or download anything during planning.
 
+Verify that the generated post-release install plan and scripts are internally
+consistent before archiving them as release evidence:
+
+```bash
+scripts/github/verify-post-release-install-plan.sh \
+  --plan dist/release-candidates/github-platform-release-plan/post-release-install/post-release-install-plan.json
+```
+
 This generates platform archives, `platform-release-index.json`,
 `platform-release-verification.json`, `INSTALL_PLATFORMS.md`, release notes, and
 command previews. It does not create a release or upload assets.

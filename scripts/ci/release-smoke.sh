@@ -40,6 +40,19 @@ scripts/github/plan-post-release-install.sh \
   --out "$post_release_dir" \
   > "$work_dir/post-release-output.json"
 
+scripts/github/verify-post-release-install-plan.sh \
+  --plan "$post_release_dir/post-release-install-plan.json" \
+  > "$work_dir/post-release-verification.json"
+
+cp -R "$post_release_dir" "$work_dir/post-release-install-tampered"
+printf '\nNew-Service rdev\n' >> "$work_dir/post-release-install-tampered/verify-windows-amd64.ps1"
+if scripts/github/verify-post-release-install-plan.sh \
+  --plan "$work_dir/post-release-install-tampered/post-release-install-plan.json" \
+  > "$work_dir/post-release-tampered-verification.json"; then
+  echo "tampered post-release install plan unexpectedly verified" >&2
+  exit 1
+fi
+
 python3 - "$work_dir" <<'PY'
 import json
 import pathlib
@@ -53,6 +66,8 @@ plan_output = json.loads((root / "plan-output.json").read_text())
 plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 post_release_output = json.loads((root / "post-release-output.json").read_text())
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
+post_release_verification = json.loads((root / "post-release-verification.json").read_text())
+post_release_tampered = json.loads((root / "post-release-tampered-verification.json").read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
 assert build["ok"] is True, build
@@ -87,8 +102,16 @@ assert {platform["target"] for platform in post_release_plan["platforms"]} == {"
 assert all(platform["archive"]["download_url"].startswith("https://github.com/") for platform in post_release_plan["platforms"]), post_release_plan["platforms"]
 assert any("rdev release verify-candidate" in "\n".join(platform["commands"]) for platform in post_release_plan["platforms"]), post_release_plan["platforms"]
 assert any("rdev-verify" in "\n".join(platform["commands"]) for platform in post_release_plan["platforms"]), post_release_plan["platforms"]
-assert pathlib.Path(post_release_plan["documents"]["verify_install"]).is_file(), post_release_plan["documents"]
-assert pathlib.Path(post_release_plan["skillkit"]["verification_script"]).is_file(), post_release_plan["skillkit"]
+post_release_plan_dir = pathlib.Path(post_release_output["plan"]).parent
+assert (post_release_plan_dir / post_release_plan["documents"]["verify_install"]).is_file(), post_release_plan["documents"]
+assert (post_release_plan_dir / post_release_plan["skillkit"]["verification_script"]).is_file(), post_release_plan["skillkit"]
+assert post_release_verification["schema_version"] == "rdev.post-release-install-verification.v1", post_release_verification
+assert post_release_verification["ok"] is True, post_release_verification
+assert post_release_verification["external_mutation"] is False, post_release_verification
+assert post_release_tampered["schema_version"] == "rdev.post-release-install-verification.v1", post_release_tampered
+assert post_release_tampered["ok"] is False, post_release_tampered
+assert any(check["name"].endswith("script_matches_commands") for check in post_release_tampered["failed_checks"]), post_release_tampered
+assert any(check["name"].endswith("script_no_forbidden_side_effects") for check in post_release_tampered["failed_checks"]), post_release_tampered
 
 print(json.dumps({
     "ok": True,
@@ -98,6 +121,7 @@ print(json.dumps({
     "platform_candidate_count": len(platform_manifest["candidates"]),
     "plan_schema": plan["schema_version"],
     "post_release_schema": post_release_plan["schema_version"],
+    "post_release_verification_schema": post_release_verification["schema_version"],
     "planned_platforms": plan_output["platform_count"],
     "post_release_platforms": post_release_output["platform_count"],
     "asset_count": len(plan["assets"]),

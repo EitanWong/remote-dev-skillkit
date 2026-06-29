@@ -47,6 +47,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Per-platform release candidate automation through `scripts/release/prepare-platform-candidates.sh`, grouping real build artifacts by `GOOS/GOARCH`, producing one verified candidate per target, and writing `rdev.platform-release-candidates.v1`.
 - Multi-platform GitHub Release dry-run planning through `scripts/github/plan-platform-release.sh`, producing unique platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and command previews without external mutation.
 - Post-release install verification planning through `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification commands from a local GitHub Release dry-run plan without external mutation.
+- Post-release install plan verification through `scripts/github/verify-post-release-install-plan.sh`, checking the generated plan and scripts before they are archived as release evidence and rejecting tampered verification scripts in CI smoke.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 

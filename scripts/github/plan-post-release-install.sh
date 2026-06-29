@@ -251,7 +251,7 @@ for entry in release_index.get("platforms") or []:
         "archive": asset_entry(asset),
         "root_public_key": entry.get("root_public_key", ""),
         "required_artifacts": entry.get("required_artifacts") or [],
-        "verification_script": str(command_file.resolve()),
+        "verification_script": command_file.name,
         "verification_language": command_language,
         "commands": commands,
     })
@@ -329,9 +329,9 @@ install_doc.write_text("\n".join(lines), encoding="utf-8")
 commands_file = out_dir / "commands.txt"
 commands_file.write_text(
     "# Post-release verification scripts. Download assets only after the GitHub Release exists.\n"
-    + "\n".join(str(pathlib.Path(item["verification_script"]).resolve()) for item in platforms)
+    + "\n".join(item["verification_script"] for item in platforms)
     + "\n"
-    + str(skillkit_script.resolve())
+    + skillkit_script.name
     + "\n",
     encoding="utf-8",
 )
@@ -349,13 +349,13 @@ post_plan = {
     "platforms": platforms,
     "skillkit": {
         "archive": asset_entry(skillkit_asset),
-        "verification_script": str(skillkit_script.resolve()),
+        "verification_script": skillkit_script.name,
         "verification_language": "bash",
         "commands": skillkit_lines,
     },
     "documents": {
-        "verify_install": str(install_doc.resolve()),
-        "commands": str(commands_file.resolve()),
+        "verify_install": install_doc.name,
+        "commands": commands_file.name,
     },
     "release_plan_schema": plan.get("schema_version", ""),
     "release_index_schema": release_index.get("schema_version", ""),

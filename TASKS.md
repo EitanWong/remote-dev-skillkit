@@ -61,6 +61,7 @@
 - [x] Add multi-platform GitHub Release dry-run planning from verified platform candidates.
 - [x] Refine the canonical perfect ending into a final delivery architecture with sealed contracts, component boundaries, host kernel layers, API surfaces, reliability rules, and close plan.
 - [x] Add post-release install verification planning from local GitHub Release dry-run plans.
+- [x] Add post-release install plan verification and tamper smoke coverage.
 
 ## Next
 
@@ -174,6 +175,7 @@
 - [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, approval probes, no-persistence checks, redaction, and checksums.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
+- [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.
 
 ## Definition Of Done For v0.1.0
 
