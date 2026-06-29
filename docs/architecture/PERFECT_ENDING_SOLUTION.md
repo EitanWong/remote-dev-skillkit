@@ -33,6 +33,203 @@ The system responds with typed intent, signed bounded execution, host-side
 verification, approval gates, workspace isolation, evidence, audit, and
 revocation.
 
+## Final 2026-06-30 Refinement
+
+This section is the final architecture decision layer. It resolves the last
+product ambiguity: Remote Dev Skillkit is not a remote administration suite,
+not a tunnel manager, and not a coding CLI replacement. It is the safety layer
+that lets agents use real machines through explicit consent, bounded authority,
+local verification, and reviewable proof.
+
+### Final Thesis
+
+The perfect ending is a permissioned delegation fabric:
+
+```text
+operator intent
+  -> agent Skill or MCP workflow
+  -> gateway policy dry-run
+  -> host-bound signed job
+  -> outbound host lease
+  -> local host sovereignty guard
+  -> adapter execution
+  -> evidence and audit
+  -> review, continuation, approval, cancellation, or revocation
+```
+
+The core product owns the part mature tools do not solve for agents:
+
+- consent and enrollment;
+- typed intent instead of raw access;
+- host-bound authorization;
+- host-side validation;
+- approval pauses before high-risk effects;
+- workspace and session isolation;
+- redaction, evidence, and audit;
+- release trust and bootstrap verification;
+- revocation across tickets, hosts, jobs, approvals, and keys.
+
+Everything else is an adapter. Codex, Claude Code, ACP, shell, PowerShell, Git,
+Tailscale, SSH, Coder, DevPod, browser automation, RustDesk, MeshCentral, and
+future tools are useful execution edges. None of them becomes the trust root.
+
+### Golden Path
+
+The stable golden path has four actors and one proof trail:
+
+| Actor | Final role | Must never become |
+|---|---|---|
+| Agent | plan, request, explain, review evidence | holder of standing host credentials or self-approval power |
+| Gateway | govern tickets, hosts, jobs, approvals, leases, artifacts, audit, and signing | remote shell or hidden executor |
+| Host | verify local facts and execute bounded jobs | blind worker that trusts agent narration |
+| Adapter | run one domain tool under limits | authorization, persistence, or approval authority |
+| Proof trail | make every claim reconstructable | screenshot-only or log-only trust story |
+
+This is the final product shape: agents ask, gateways sign, hosts decide, adapters
+run, evidence proves.
+
+### Product Lines
+
+The open-source release should remain five installable surfaces:
+
+| Surface | Purpose | First-class user |
+|---|---|---|
+| `rdev` | operator CLI, local demos, diagnostics, evidence/release verification, service lifecycle | human operator and project maintainer |
+| `rdev-gateway` | self-hosted API, MCP, tickets, hosts, jobs, approvals, relay, artifacts, audit, revocation | self-hoster or Lunflux deployment |
+| `rdev-host` | target-machine runtime for attended temporary and explicit managed modes | local machine owner or managed-device operator |
+| Skillkit bundle | portable agent instructions and MCP tool contracts for Hermes, Codex, Claude Code, OpenCode, and generic agents | agent runtime maintainer |
+| Adapter SDK | conformance-tested extension point for execution backends | tool/adaptor author |
+
+Hermes/Lucky is the reference deployment. The public project must not require
+Hermes, Lunflux, macOS, GitHub, or any single coding CLI.
+
+### Mode Separation
+
+Modes are separate safety products sharing one kernel. They must not blur.
+
+| Mode | Who it is for | Persistence | Strongest allowed promise |
+|---|---|---:|---|
+| `attended-temporary` | third-party or short-lived repair machine | none | visible, outbound-only, TTL-bound help |
+| `managed` | Eitan-owned or formally managed machine | explicit service | durable reconnect and governed coding |
+| `workspace-provider` | disposable cloud or devcontainer workspace | provider-owned | lifecycle-wrapped ephemeral workspace |
+| `break-glass` | urgent recovery under pressure | short-lived only | narrower TTL, stronger approvals, denser audit |
+
+Temporary mode never installs hidden persistence, never opens public inbound
+ports, and never upgrades itself into managed mode. Managed mode adds recovery
+and reconnect behavior, not automatic permission to push, merge, deploy,
+publish, mutate services, control GUI, change credentials, or elevate.
+
+### Final Trust Boundary
+
+No feature may collapse these authorities:
+
+| Authority | Signs or proves | Cannot grant |
+|---|---|---|
+| Release key | software artifacts and release bundles | runtime job authorization |
+| Gateway job key | host-bound job envelopes | release trust, host identity, or operator approval |
+| Trust-bundle key | active gateway keys and revocations | adapter execution by itself |
+| Approval key | one-use scoped exceptions | broad host access or future approvals |
+| Host identity key | local machine identity and registration continuity | gateway authority |
+| Audit chain | event integrity | permission to act |
+
+The system stays safe because compromise of one authority does not grant all
+three powers of publishing software, enrolling hosts, and authorizing execution.
+
+### Protocol Closure
+
+Every supported path must close six loops:
+
+| Loop | Opens with | Closes only when |
+|---|---|---|
+| Distribution | bootstrap or install instruction | release verifier accepts signed bundle, hashes, platform, and rollback policy |
+| Enrollment | ticket or managed install | host identity, capability inventory, trust bundle, and operator approval are recorded |
+| Authorization | typed agent job request | gateway signs a host-bound, expiring, scoped envelope after policy dry-run |
+| Execution | host lease | host independently validates trust, nonce, approvals, workspace, capabilities, mode, and revocation |
+| Proof | adapter result or denial | evidence bundle and audit slice verify without trusting narration |
+| Recovery | failure, cancel, offline, or compromise | lease expiry, local stop, spool replay, revoke, rotation, or uninstall is visible and auditable |
+
+A feature that demonstrates only the happy path is not complete. A feature is
+complete when its denial, revocation, timeout, cancellation, tamper, and
+redaction behavior can also be verified.
+
+### One-Command Host Rule
+
+The one-command host experience must be fast, but never magical. For Windows,
+the target baseline is PowerShell 5.1 on clean Windows 10/11 with no Node, Go,
+Git, Python, package manager, permanent execution-policy change, firewall
+change, service install, scheduled task, Run key, or startup shortcut in
+temporary mode.
+
+The command may download a small bootstrap and a standalone verifier. It must
+then verify the release bundle or host manifest before starting the host. Any
+dependency installation needed for repair work is a job-level action and must
+go through policy and approval gates.
+
+This is how "only my server can access" is achieved:
+
+- the target opens no public inbound listener;
+- the host connects outbound to the relay over 443;
+- the host accepts only trusted gateway keys from a signed trust bundle;
+- every job is bound to the host identity and short expiry;
+- replayed, tampered, wrong-host, wrong-key, stale, revoked, or broader-scope
+  jobs are denied locally.
+
+### Managed Coding Rule
+
+Managed coding is the durable form of the same kernel. The service may reconnect
+after login or reboot, but it still runs jobs only after signed-envelope and
+host-side validation. Coding adapters must use workspace locks or prepared
+worktrees, collect diffs and verification output, and pause before external
+consequences.
+
+The managed-host experience is complete only when install, status, logs, start,
+stop, restart, trust refresh, evidence spool, and uninstall are inspectable.
+
+### Final Implementation Spine
+
+From this point, implementation should follow one spine rather than many broad
+parallel ambitions:
+
+1. Prove the real clean Windows temporary path from one visible verified
+   command through no-persistence evidence.
+2. Prove the real service-backed managed Mac path through LaunchAgent reconnect,
+   locked-worktree Codex execution, evidence verification, stop, and uninstall.
+3. Harden production host identity and trust with OS-protected storage,
+   authenticated refresh, rollback rejection, revocation propagation, and
+   emergency rotation.
+4. Add WSS/mTLS transport while preserving HTTPS long-poll as the universal
+   fallback.
+5. Extract the Adapter SDK and make built-in adapters pass shared conformance
+   fixtures.
+6. Add Claude Code, ACP, PowerShell, Windows Service, systemd, workspace
+   provider, mesh, and GUI adapters behind the same kernel.
+7. Publish only after release artifacts, install verification, acceptance
+   packages, threat model, security policy, and public docs match reality.
+
+This order keeps the project honest: first prove the two golden paths, then
+generalize.
+
+### Perfect Ending Definition
+
+The perfect ending is reached when the easiest documented path is also the safe
+path:
+
+- Lucky can use `https://api.lunflux.com/v1` and `https://agent.lunflux.com`
+  without holding host credentials.
+- A temporary Windows machine can join quickly, visibly, and without hidden
+  persistence.
+- Eitan-owned hosts can reconnect reliably without gaining ambient authority.
+- Codex, Claude Code, ACP, shell, PowerShell, Git, GUI, mesh, Coder, and DevPod
+  all operate as adapters, not roots.
+- Other agent users can self-host and install the Skillkit without adopting
+  Hermes or Lunflux.
+- Every success, denial, approval pause, cancellation, failure, release, and
+  revoke claim is backed by evidence, audit, and verifier output.
+
+That is the final answer: a small safety microkernel around powerful tools,
+where remote development becomes agent-native because every action is consented,
+bounded, locally verified, revocable, and provable.
+
 ## Final Product Shape
 
 Remote Dev Skillkit ships one small safety kernel and many replaceable edges.

@@ -63,6 +63,7 @@
 - [x] Add post-release install verification planning from local GitHub Release dry-run plans.
 - [x] Add post-release install plan verification and tamper smoke coverage.
 - [x] Add trust lifecycle CLI for root/gateway key initialization, rotation, revocation, and bundle verification.
+- [x] Add final 2026-06-30 perfect-ending architecture refinement with product lines, mode separation, trust boundaries, protocol closure, and implementation spine.
 
 ## Next
 
