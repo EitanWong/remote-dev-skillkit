@@ -47,6 +47,8 @@ rdev host serve \
 
 - `GET /healthz`
 - `GET /v1/trust`
+- `GET /v1/trust-bundle`
+- `POST /v1/trust-bundle`
 - `POST /v1/tickets`
 - `GET /v1/tickets/{ticket_code}/manifest`
 - `GET /v1/hosts`
@@ -74,6 +76,17 @@ curl -s -X POST http://127.0.0.1:8787/v1/tickets \
 curl -s http://127.0.0.1:8787/v1/tickets/<ticket_code>/manifest
 curl -s http://127.0.0.1:8787/v1/audit
 ```
+
+Read or update the development signed trust bundle:
+
+```bash
+curl -s http://127.0.0.1:8787/v1/trust-bundle
+curl -s -X POST http://127.0.0.1:8787/v1/trust-bundle \
+  -H 'content-type: application/json' \
+  -d '{"trust_bundle":{...}}'
+```
+
+Trust bundle updates must use schema `rdev.trust-bundle.v1`, verify against the current active signing key, increase the sequence, and include the current bundle hash as `previous_bundle_hash`.
 
 Register a foreground temporary host:
 
@@ -183,4 +196,5 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed host
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
 - If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
+- `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode and are not durable across process restarts.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

@@ -235,6 +235,7 @@ The local test suite currently covers:
 - release artifact signing and verification primitives;
 - Windows bootstrap verifier handoff logic;
 - shell artifact schema and redaction metadata.
+- signed trust bundle HTTP read/update flow with rollback rejection.
 
 The following remain real-environment acceptance tests:
 
@@ -243,4 +244,5 @@ The following remain real-environment acceptance tests:
 - no-persistence inspection on Windows;
 - managed Mac LaunchAgent install/uninstall;
 - Codex adapter execution in a locked worktree;
+- durable host trust bundle storage across restart;
 - WSS/mTLS transport under NAT.

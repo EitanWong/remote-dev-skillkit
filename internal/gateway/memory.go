@@ -36,6 +36,7 @@ type MemoryGateway struct {
 	manifestSigningID  string
 	manifestPublicKey  ed25519.PublicKey
 	manifestPrivateKey ed25519.PrivateKey
+	trustBundle        model.SignedTrustBundle
 }
 
 type AuditSink interface {
@@ -59,6 +60,10 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 		signingID = "gateway-dev"
 	}
 	validateSigningKey("gateway", publicKey, privateKey)
+	trustBundle, err := initialSignedTrustBundle(signingID, publicKey, privateKey, now())
+	if err != nil {
+		panic(fmt.Sprintf("create initial trust bundle: %v", err))
+	}
 	return &MemoryGateway{
 		now:                now,
 		tickets:            map[string]model.Ticket{},
@@ -72,7 +77,25 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 		manifestSigningID:  signingID,
 		manifestPublicKey:  append(ed25519.PublicKey(nil), publicKey...),
 		manifestPrivateKey: append(ed25519.PrivateKey(nil), privateKey...),
+		trustBundle:        trustBundle,
 	}
+}
+
+func initialSignedTrustBundle(signingID string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, now time.Time) (model.SignedTrustBundle, error) {
+	bundle, err := model.NewSignedTrustBundle(model.SignedTrustBundleSpec{
+		BundleID:     "dev-gateway",
+		Sequence:     1,
+		NotBefore:    now.UTC(),
+		NotAfter:     now.UTC().Add(24 * time.Hour),
+		SigningKeyID: signingID,
+		Keys: []model.TrustKey{
+			model.NewTrustKey(signingID, publicKey, model.TrustKeyStatusActive, now.UTC()),
+		},
+	}, now.UTC())
+	if err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	return bundle.Sign(privateKey)
 }
 
 func validateSigningKey(label string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey) {
@@ -301,6 +324,29 @@ func (g *MemoryGateway) TrustBundle() model.TrustBundle {
 	defer g.mu.Unlock()
 
 	return model.NewTrustBundle(g.signingID, g.publicKey)
+}
+
+func (g *MemoryGateway) SignedTrustBundle() model.SignedTrustBundle {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return g.trustBundle
+}
+
+func (g *MemoryGateway) UpdateSignedTrustBundle(next model.SignedTrustBundle) (model.SignedTrustBundle, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	root, err := g.trustBundle.ActiveTrustBundle(next.SigningKeyID, g.now())
+	if err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	if err := next.VerifyUpdate(g.trustBundle, root, g.now()); err != nil {
+		return model.SignedTrustBundle{}, err
+	}
+	g.trustBundle = next
+	g.appendAuditLocked("operator", "trust_bundle.update", next.BundleID, fmt.Sprintf("updated trust bundle to sequence %d", next.Sequence))
+	return g.trustBundle, nil
 }
 
 func (g *MemoryGateway) JoinManifest(ticketCode, gatewayURL, joinURL string) (model.JoinManifest, error) {

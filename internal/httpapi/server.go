@@ -21,6 +21,8 @@ func (s Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /v1/trust", s.trust)
+	mux.HandleFunc("GET /v1/trust-bundle", s.getTrustBundle)
+	mux.HandleFunc("POST /v1/trust-bundle", s.updateTrustBundle)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
@@ -41,6 +43,26 @@ func (s Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s Server) trust(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"trust": s.Gateway.TrustBundle()})
+}
+
+func (s Server) getTrustBundle(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": s.Gateway.SignedTrustBundle()})
+}
+
+func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TrustBundle model.SignedTrustBundle `json:"trust_bundle"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	bundle, err := s.Gateway.UpdateSignedTrustBundle(req.TrustBundle)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": bundle})
 }
 
 func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
