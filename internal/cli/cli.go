@@ -78,6 +78,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.gateway(args[1:])
 	case "release":
 		return a.release(args[1:])
+	case "enrollment":
+		return a.enrollment(args[1:])
 	case "trust":
 		return a.trust(args[1:])
 	case "audit":
@@ -98,6 +100,78 @@ func (a App) Run(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func (a App) enrollment(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing enrollment subcommand")
+	}
+	switch args[0] {
+	case "sign-certificate":
+		fs := flag.NewFlagSet("enrollment sign-certificate", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "output enrollment certificate path")
+		keyPath := fs.String("key", "", "Ed25519 enrollment root signing key file")
+		keyID := fs.String("key-id", "enrollment-root", "enrollment root signing key id")
+		ticketCode := fs.String("ticket-code", "", "ticket code authorized by this certificate")
+		mode := fs.String("mode", "managed", "host mode: attended-temporary, temporary, managed, or break-glass")
+		name := fs.String("name", "", "host name authorized by this certificate")
+		osName := fs.String("os", "", "host operating system authorized by this certificate")
+		arch := fs.String("arch", "", "host architecture authorized by this certificate")
+		identityKeyID := fs.String("identity-key-id", "", "host identity key id")
+		identityPublicKey := fs.String("identity-public-key", "", "host identity public key")
+		identityFingerprint := fs.String("identity-fingerprint", "", "host identity fingerprint")
+		capabilities := fs.String("capabilities", "", "comma-separated authorized capabilities")
+		validMinutes := fs.Int("valid-minutes", 60, "certificate validity window in minutes")
+		force := fs.Bool("force", false, "overwrite output certificate")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentSignCertificate(enrollmentSignCertificateOptions{
+			OutPath:             *out,
+			KeyPath:             *keyPath,
+			KeyID:               *keyID,
+			TicketCode:          *ticketCode,
+			Mode:                *mode,
+			Name:                *name,
+			OS:                  *osName,
+			Arch:                *arch,
+			IdentityKeyID:       *identityKeyID,
+			IdentityPublicKey:   *identityPublicKey,
+			IdentityFingerprint: *identityFingerprint,
+			Capabilities:        splitCapabilities(*capabilities),
+			ValidMinutes:        *validMinutes,
+			Force:               *force,
+		})
+	case "verify-certificate":
+		fs := flag.NewFlagSet("enrollment verify-certificate", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		certificatePath := fs.String("certificate", "", "enrollment certificate JSON path")
+		rootPublicKey := fs.String("root-public-key", "", "enrollment root public key, formatted key_id:base64url_public_key")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentVerifyCertificate(*certificatePath, *rootPublicKey)
+	default:
+		return fmt.Errorf("unknown enrollment subcommand %q", args[0])
+	}
+}
+
+type enrollmentSignCertificateOptions struct {
+	OutPath             string
+	KeyPath             string
+	KeyID               string
+	TicketCode          string
+	Mode                string
+	Name                string
+	OS                  string
+	Arch                string
+	IdentityKeyID       string
+	IdentityPublicKey   string
+	IdentityFingerprint string
+	Capabilities        []string
+	ValidMinutes        int
+	Force               bool
 }
 
 func (a App) trust(args []string) error {
@@ -959,6 +1033,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		trustStore := fs.String("trust-store", "", "optional local signed trust bundle store path for managed hosts")
 		identityStore := fs.String("identity-store", "", "optional local host identity key store path")
 		identityKeyID := fs.String("identity-key-id", hostidentity.DefaultKeyID, "host identity key id")
+		enrollmentCertificate := fs.String("enrollment-certificate", "", "optional host enrollment certificate JSON path")
 		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
 		approvalStore := fs.String("approval-store", "", "optional local host approval token consumption store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
@@ -971,29 +1046,30 @@ func (a App) host(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.hostServe(ctx, hostServeOptions{
-			Mode:                     *mode,
-			GatewayURL:               *gateway,
-			TicketCode:               *ticketCode,
-			ManifestURL:              *manifestURL,
-			Name:                     *name,
-			Once:                     *once,
-			Transport:                *transport,
-			PollInterval:             *pollInterval,
-			LongPollTimeout:          *longPollTimeout,
-			MaxJobs:                  *maxJobs,
-			ApprovalTimeout:          *approvalTimeout,
-			TrustPin:                 *trustPin,
-			TrustStorePath:           *trustStore,
-			IdentityStorePath:        *identityStore,
-			IdentityKeyID:            *identityKeyID,
-			NonceStorePath:           *nonceStore,
-			ApprovalStorePath:        *approvalStore,
-			WorkspaceLockStore:       *workspaceLockStore,
-			CaptureRuntimeFixture:    *captureRuntimeFixture,
-			ManifestRootPublicKey:    *manifestRootPublicKey,
-			ReleaseBundlePath:        *releaseBundle,
-			ReleaseRootPublicKey:     *releaseRootPublicKey,
-			ReleaseRequiredArtifacts: splitCapabilities(*releaseRequiredArtifacts),
+			Mode:                      *mode,
+			GatewayURL:                *gateway,
+			TicketCode:                *ticketCode,
+			ManifestURL:               *manifestURL,
+			Name:                      *name,
+			Once:                      *once,
+			Transport:                 *transport,
+			PollInterval:              *pollInterval,
+			LongPollTimeout:           *longPollTimeout,
+			MaxJobs:                   *maxJobs,
+			ApprovalTimeout:           *approvalTimeout,
+			TrustPin:                  *trustPin,
+			TrustStorePath:            *trustStore,
+			IdentityStorePath:         *identityStore,
+			IdentityKeyID:             *identityKeyID,
+			EnrollmentCertificatePath: *enrollmentCertificate,
+			NonceStorePath:            *nonceStore,
+			ApprovalStorePath:         *approvalStore,
+			WorkspaceLockStore:        *workspaceLockStore,
+			CaptureRuntimeFixture:     *captureRuntimeFixture,
+			ManifestRootPublicKey:     *manifestRootPublicKey,
+			ReleaseBundlePath:         *releaseBundle,
+			ReleaseRootPublicKey:      *releaseRootPublicKey,
+			ReleaseRequiredArtifacts:  splitCapabilities(*releaseRequiredArtifacts),
 		})
 	case "install-service":
 		fs := flag.NewFlagSet("host install-service", flag.ContinueOnError)
@@ -1101,29 +1177,30 @@ func (a App) host(ctx context.Context, args []string) error {
 }
 
 type hostServeOptions struct {
-	Mode                     string
-	GatewayURL               string
-	TicketCode               string
-	ManifestURL              string
-	Name                     string
-	Once                     bool
-	Transport                string
-	PollInterval             time.Duration
-	LongPollTimeout          time.Duration
-	MaxJobs                  int
-	ApprovalTimeout          time.Duration
-	TrustPin                 string
-	TrustStorePath           string
-	IdentityStorePath        string
-	IdentityKeyID            string
-	NonceStorePath           string
-	ApprovalStorePath        string
-	WorkspaceLockStore       string
-	CaptureRuntimeFixture    bool
-	ManifestRootPublicKey    string
-	ReleaseBundlePath        string
-	ReleaseRootPublicKey     string
-	ReleaseRequiredArtifacts []string
+	Mode                      string
+	GatewayURL                string
+	TicketCode                string
+	ManifestURL               string
+	Name                      string
+	Once                      bool
+	Transport                 string
+	PollInterval              time.Duration
+	LongPollTimeout           time.Duration
+	MaxJobs                   int
+	ApprovalTimeout           time.Duration
+	TrustPin                  string
+	TrustStorePath            string
+	IdentityStorePath         string
+	IdentityKeyID             string
+	EnrollmentCertificatePath string
+	NonceStorePath            string
+	ApprovalStorePath         string
+	WorkspaceLockStore        string
+	CaptureRuntimeFixture     bool
+	ManifestRootPublicKey     string
+	ReleaseBundlePath         string
+	ReleaseRootPublicKey      string
+	ReleaseRequiredArtifacts  []string
 }
 
 type hostInstallServiceOptions struct {
@@ -1237,6 +1314,13 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		return err
 	}
 	registration.IdentityProof = &proof
+	if opts.EnrollmentCertificatePath != "" {
+		certificate, err := readEnrollmentCertificateFile(opts.EnrollmentCertificatePath)
+		if err != nil {
+			return err
+		}
+		registration.EnrollmentCertificate = &certificate
+	}
 	host, err := registerHost(ctx, opts.GatewayURL, registration)
 	if err != nil {
 		return err
@@ -1257,6 +1341,13 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		},
 		"status": "registered-pending-approval",
 		"note":   "local development registration only; WSS transport is not implemented yet",
+	}
+	if registration.EnrollmentCertificate != nil {
+		payload["enrollment_certificate"] = map[string]any{
+			"schema":        registration.EnrollmentCertificate.SchemaVersion,
+			"issuer_key_id": registration.EnrollmentCertificate.IssuerKeyID,
+			"not_after":     registration.EnrollmentCertificate.NotAfter,
+		}
 	}
 	if releaseGate != nil {
 		payload["release_gate"] = releaseGate
@@ -2276,13 +2367,14 @@ func (a App) gateway(args []string) error {
 		signingKeyID := fs.String("signing-key-id", signing.DefaultKeyID, "signing key id for new or existing signing key file")
 		manifestSigningKey := fs.String("manifest-signing-key", "", "optional Ed25519 key file for signing join manifests")
 		manifestSigningKeyID := fs.String("manifest-signing-key-id", "manifest-dev", "signing key id for join manifests")
+		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key; when set, host registration requires rdev.host-enrollment-certificate.v1")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if !*dev {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
-		return a.gatewayServeDev(*addr, *auditLog, *statePath, *signingKey, *signingKeyID, *manifestSigningKey, *manifestSigningKeyID)
+		return a.gatewayServeDev(*addr, *auditLog, *statePath, *signingKey, *signingKeyID, *manifestSigningKey, *manifestSigningKeyID, *enrollmentRootPublicKey)
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
 	}
@@ -2776,7 +2868,7 @@ func (a App) release(args []string) error {
 	}
 }
 
-func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingKeyID, manifestSigningKeyPath, manifestSigningKeyID string) error {
+func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingKeyID, manifestSigningKeyPath, manifestSigningKeyID, enrollmentRootPublicKey string) error {
 	if statePath != "" && signingKeyPath == "" {
 		return fmt.Errorf("gateway serve --state requires --signing-key so restored job envelopes keep the same trust root")
 	}
@@ -2785,6 +2877,18 @@ func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingK
 		return err
 	}
 	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
+	if enrollmentRootPublicKey != "" {
+		root, err := parseRootPublicKey(enrollmentRootPublicKey)
+		if err != nil {
+			return err
+		}
+		gw.WithEnrollmentRoot(root)
+		fingerprint, err := root.Fingerprint()
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment root id=%s fingerprint=%s\n", root.SigningKeyID, fingerprint)
+	}
 	if statePath != "" {
 		snapshot, loaded, err := gw.LoadSnapshotIfExists(statePath)
 		if err != nil {
@@ -2824,6 +2928,109 @@ func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingK
 	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway signing key id=%s fingerprint=%s\n", key.ID, signing.Fingerprint(key.PublicKey))
 	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev listening on http://%s\n", addr)
 	return http.ListenAndServe(addr, server.Handler())
+}
+
+func (a App) enrollmentSignCertificate(opts enrollmentSignCertificateOptions) error {
+	if opts.KeyPath == "" {
+		return fmt.Errorf("key is required")
+	}
+	if opts.TicketCode == "" {
+		return fmt.Errorf("ticket-code is required")
+	}
+	if opts.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if opts.OS == "" {
+		return fmt.Errorf("os is required")
+	}
+	if opts.Arch == "" {
+		return fmt.Errorf("arch is required")
+	}
+	if opts.IdentityKeyID == "" || opts.IdentityPublicKey == "" || opts.IdentityFingerprint == "" {
+		return fmt.Errorf("identity-key-id, identity-public-key, and identity-fingerprint are required")
+	}
+	if len(opts.Capabilities) == 0 {
+		return fmt.Errorf("capabilities are required")
+	}
+	if opts.ValidMinutes <= 0 {
+		return fmt.Errorf("valid-minutes must be positive")
+	}
+	mode, err := parseEnrollmentHostMode(opts.Mode)
+	if err != nil {
+		return err
+	}
+	key, _, err := signing.LoadOrCreate(opts.KeyPath, opts.KeyID)
+	if err != nil {
+		return err
+	}
+	registration := model.HostRegistration{
+		TicketCode:          opts.TicketCode,
+		Name:                opts.Name,
+		OS:                  opts.OS,
+		Arch:                opts.Arch,
+		Capabilities:        opts.Capabilities,
+		IdentityKeyID:       opts.IdentityKeyID,
+		IdentityPublicKey:   opts.IdentityPublicKey,
+		IdentityFingerprint: opts.IdentityFingerprint,
+	}
+	ticket := model.Ticket{
+		Code:         opts.TicketCode,
+		Mode:         mode,
+		Capabilities: opts.Capabilities,
+	}
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, key.ID, key.PrivateKey, time.Now(), time.Duration(opts.ValidMinutes)*time.Minute)
+	if err != nil {
+		return err
+	}
+	if opts.OutPath != "" {
+		if err := writeEnrollmentCertificateFile(opts.OutPath, certificate, opts.Force); err != nil {
+			return err
+		}
+	}
+	payload := map[string]any{
+		"ok":                  true,
+		"schema":              certificate.SchemaVersion,
+		"certificate":         certificate,
+		"root_public_key":     encodeRootPublicKey(key.ID, key.PublicKey),
+		"valid_until":         certificate.NotAfter,
+		"authorized_mode":     certificate.Mode,
+		"authorized_host":     certificate.HostName,
+		"authorized_identity": certificate.SubjectIdentityFingerprint,
+	}
+	if opts.OutPath != "" {
+		payload["certificate_path"] = opts.OutPath
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) enrollmentVerifyCertificate(certificatePath, rootPublicKey string) error {
+	certificate, err := readEnrollmentCertificateFile(certificatePath)
+	if err != nil {
+		return err
+	}
+	root, err := parseRootPublicKey(rootPublicKey)
+	if err != nil {
+		return err
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(certificate, root, time.Now()); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                       true,
+		"schema":                   certificate.SchemaVersion,
+		"certificate":              certificatePath,
+		"issuer_key_id":            certificate.IssuerKeyID,
+		"subject_identity":         certificate.SubjectIdentityFingerprint,
+		"ticket_code":              certificate.TicketCode,
+		"mode":                     certificate.Mode,
+		"not_after":                certificate.NotAfter,
+		"root_public_key_verified": root.SigningKeyID,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
 func (a App) releaseSign(artifactPath, keyPath, keyID, outPath string) error {
@@ -3622,6 +3829,79 @@ func readTrustBundleFile(path string) (model.SignedTrustBundle, error) {
 	return wrapped.TrustBundle, nil
 }
 
+func readEnrollmentCertificateFile(path string) (model.HostEnrollmentCertificate, error) {
+	if path == "" {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("certificate is required")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return model.HostEnrollmentCertificate{}, err
+	}
+	var certificate model.HostEnrollmentCertificate
+	if err := json.Unmarshal(content, &certificate); err == nil && certificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion {
+		return certificate, nil
+	}
+	var wrapped struct {
+		Certificate           model.HostEnrollmentCertificate `json:"certificate"`
+		EnrollmentCertificate model.HostEnrollmentCertificate `json:"enrollment_certificate"`
+	}
+	if err := json.Unmarshal(content, &wrapped); err != nil {
+		return model.HostEnrollmentCertificate{}, err
+	}
+	if wrapped.Certificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion {
+		return wrapped.Certificate, nil
+	}
+	if wrapped.EnrollmentCertificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion {
+		return wrapped.EnrollmentCertificate, nil
+	}
+	return model.HostEnrollmentCertificate{}, fmt.Errorf("unsupported enrollment certificate schema")
+}
+
+func writeEnrollmentCertificateFile(path string, certificate model.HostEnrollmentCertificate, force bool) error {
+	if path == "" {
+		return fmt.Errorf("out is required")
+	}
+	content, err := json.MarshalIndent(certificate, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	flag := os.O_CREATE | os.O_WRONLY
+	if force {
+		flag |= os.O_TRUNC
+	} else {
+		flag |= os.O_EXCL
+	}
+	file, err := os.OpenFile(path, flag, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
+func parseEnrollmentHostMode(value string) (model.HostMode, error) {
+	switch strings.TrimSpace(value) {
+	case "", "managed":
+		return model.HostModeManaged, nil
+	case "temporary", "attended-temporary":
+		return model.HostModeAttendedTemporary, nil
+	case "break-glass":
+		return model.HostModeBreakGlass, nil
+	default:
+		return "", fmt.Errorf("unsupported host mode %q", value)
+	}
+}
+
 func writeTrustBundleFile(path string, bundle model.SignedTrustBundle, force bool) error {
 	if path == "" {
 		return fmt.Errorf("out is required")
@@ -4078,7 +4358,7 @@ Usage:
   rdev demo local
   rdev mcp tools
   rdev mcp serve
-  rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json
+  rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json --enrollment-root-public-key enrollment-root:...
   rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/chain.json
   rdev audit verify --input .rdev/audit/chain.json
   rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence
@@ -4094,6 +4374,8 @@ Usage:
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
   rdev adapter verify-cancellation --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
+  rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
+  rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
   rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
   rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
   rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"
@@ -4120,7 +4402,7 @@ Usage:
   rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --key .rdev/keys/release-root.json
   rdev release verify-candidate --candidate dist/release-candidate --require-artifacts rdev-host.exe,rdev-verify.exe
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
-  rdev host serve --mode managed --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
+  rdev host serve --mode managed --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --enrollment-certificate host-enrollment.json --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
   rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist

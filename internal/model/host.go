@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -36,20 +38,24 @@ type Host struct {
 }
 
 type HostRegistration struct {
-	TicketCode          string                 `json:"ticket_code"`
-	Name                string                 `json:"name"`
-	OS                  string                 `json:"os"`
-	Arch                string                 `json:"arch"`
-	Capabilities        []string               `json:"capabilities"`
-	IdentityKeyID       string                 `json:"identity_key_id,omitempty"`
-	IdentityPublicKey   string                 `json:"identity_public_key,omitempty"`
-	IdentityFingerprint string                 `json:"identity_fingerprint,omitempty"`
-	IdentityProof       *HostRegistrationProof `json:"identity_proof,omitempty"`
+	TicketCode            string                     `json:"ticket_code"`
+	Name                  string                     `json:"name"`
+	OS                    string                     `json:"os"`
+	Arch                  string                     `json:"arch"`
+	Capabilities          []string                   `json:"capabilities"`
+	IdentityKeyID         string                     `json:"identity_key_id,omitempty"`
+	IdentityPublicKey     string                     `json:"identity_public_key,omitempty"`
+	IdentityFingerprint   string                     `json:"identity_fingerprint,omitempty"`
+	IdentityProof         *HostRegistrationProof     `json:"identity_proof,omitempty"`
+	EnrollmentCertificate *HostEnrollmentCertificate `json:"enrollment_certificate,omitempty"`
 }
 
 const (
-	HostRegistrationProofSchemaVersion  = "rdev.host-registration-proof.v1"
-	hostRegistrationProofPayloadVersion = "rdev.host-registration-proof-payload.v1"
+	HostRegistrationProofSchemaVersion         = "rdev.host-registration-proof.v1"
+	HostEnrollmentCertificateSchemaVersion     = "rdev.host-enrollment-certificate.v1"
+	hostRegistrationProofPayloadVersion        = "rdev.host-registration-proof-payload.v1"
+	hostEnrollmentCertificatePayloadSchema     = "rdev.host-enrollment-certificate-payload.v1"
+	defaultHostEnrollmentCertificateMaxBackoff = 30 * time.Second
 )
 
 type HostRegistrationProof struct {
@@ -57,6 +63,22 @@ type HostRegistrationProof struct {
 	SigningAlg    string `json:"signing_alg"`
 	KeyID         string `json:"key_id"`
 	Signature     string `json:"signature"`
+}
+
+type HostEnrollmentCertificate struct {
+	SchemaVersion              string    `json:"schema_version"`
+	SigningAlg                 string    `json:"signing_alg"`
+	IssuerKeyID                string    `json:"issuer_key_id"`
+	SubjectIdentityFingerprint string    `json:"subject_identity_fingerprint"`
+	TicketCode                 string    `json:"ticket_code"`
+	HostName                   string    `json:"host_name"`
+	OS                         string    `json:"os"`
+	Arch                       string    `json:"arch"`
+	Mode                       HostMode  `json:"mode"`
+	Capabilities               []string  `json:"capabilities"`
+	NotBefore                  time.Time `json:"not_before"`
+	NotAfter                   time.Time `json:"not_after"`
+	Signature                  string    `json:"signature"`
 }
 
 type hostRegistrationProofPayload struct {
@@ -68,6 +90,20 @@ type hostRegistrationProofPayload struct {
 	IdentityKeyID       string `json:"identity_key_id"`
 	IdentityPublicKey   string `json:"identity_public_key"`
 	IdentityFingerprint string `json:"identity_fingerprint"`
+}
+
+type hostEnrollmentCertificatePayload struct {
+	SchemaVersion              string    `json:"schema_version"`
+	IssuerKeyID                string    `json:"issuer_key_id"`
+	SubjectIdentityFingerprint string    `json:"subject_identity_fingerprint"`
+	TicketCode                 string    `json:"ticket_code"`
+	HostName                   string    `json:"host_name"`
+	OS                         string    `json:"os"`
+	Arch                       string    `json:"arch"`
+	Mode                       HostMode  `json:"mode"`
+	Capabilities               []string  `json:"capabilities"`
+	NotBefore                  time.Time `json:"not_before"`
+	NotAfter                   time.Time `json:"not_after"`
 }
 
 func NewHost(ticket Ticket, registration HostRegistration, now time.Time) (Host, error) {
@@ -188,4 +224,199 @@ func hostRegistrationProofPayloadBytes(registration HostRegistration) ([]byte, e
 		IdentityFingerprint: registration.IdentityFingerprint,
 	}
 	return json.Marshal(payload)
+}
+
+func SignHostEnrollmentCertificate(registration HostRegistration, ticket Ticket, issuerKeyID string, issuerPrivateKey ed25519.PrivateKey, now time.Time, ttl time.Duration) (HostEnrollmentCertificate, error) {
+	if _, err := validateHostRegistrationIdentityFields(registration); err != nil {
+		return HostEnrollmentCertificate{}, err
+	}
+	if issuerKeyID == "" {
+		return HostEnrollmentCertificate{}, fmt.Errorf("enrollment issuer key id is required")
+	}
+	if len(issuerPrivateKey) != ed25519.PrivateKeySize {
+		return HostEnrollmentCertificate{}, fmt.Errorf("invalid enrollment issuer private key length %d", len(issuerPrivateKey))
+	}
+	if ticket.Code == "" {
+		return HostEnrollmentCertificate{}, fmt.Errorf("ticket code is required")
+	}
+	if registration.TicketCode != ticket.Code {
+		return HostEnrollmentCertificate{}, fmt.Errorf("registration ticket code does not match ticket")
+	}
+	if !ticket.Mode.Valid() {
+		return HostEnrollmentCertificate{}, fmt.Errorf("unsupported host mode %q", ticket.Mode)
+	}
+	if registration.Name == "" || registration.OS == "" || registration.Arch == "" {
+		return HostEnrollmentCertificate{}, fmt.Errorf("host name, os, and arch are required")
+	}
+	if ttl <= 0 {
+		return HostEnrollmentCertificate{}, fmt.Errorf("enrollment certificate ttl must be positive")
+	}
+	capabilities := normalizedCapabilities(registration.Capabilities)
+	if len(capabilities) == 0 {
+		capabilities = normalizedCapabilities(ticket.Capabilities)
+	}
+	if len(capabilities) == 0 {
+		return HostEnrollmentCertificate{}, fmt.Errorf("host enrollment certificate capabilities are required")
+	}
+	now = now.UTC()
+	certificate := HostEnrollmentCertificate{
+		SchemaVersion:              HostEnrollmentCertificateSchemaVersion,
+		SigningAlg:                 JobEnvelopeSigningAlg,
+		IssuerKeyID:                issuerKeyID,
+		SubjectIdentityFingerprint: registration.IdentityFingerprint,
+		TicketCode:                 registration.TicketCode,
+		HostName:                   registration.Name,
+		OS:                         registration.OS,
+		Arch:                       registration.Arch,
+		Mode:                       ticket.Mode,
+		Capabilities:               capabilities,
+		NotBefore:                  now,
+		NotAfter:                   now.Add(ttl).UTC(),
+	}
+	payload, err := hostEnrollmentCertificatePayloadBytes(certificate)
+	if err != nil {
+		return HostEnrollmentCertificate{}, err
+	}
+	certificate.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(issuerPrivateKey, payload))
+	return certificate, nil
+}
+
+func VerifyHostEnrollmentCertificate(registration HostRegistration, ticket Ticket, root TrustBundle, now time.Time) error {
+	if registration.EnrollmentCertificate == nil {
+		return fmt.Errorf("host enrollment certificate is required")
+	}
+	if _, err := validateHostRegistrationIdentityFields(registration); err != nil {
+		return err
+	}
+	certificate := *registration.EnrollmentCertificate
+	if err := VerifyHostEnrollmentCertificateSignature(certificate, root, now); err != nil {
+		return err
+	}
+	if certificate.TicketCode != ticket.Code || certificate.TicketCode != registration.TicketCode {
+		return fmt.Errorf("host enrollment certificate ticket code mismatch")
+	}
+	if certificate.Mode != ticket.Mode {
+		return fmt.Errorf("host enrollment certificate mode mismatch")
+	}
+	if certificate.SubjectIdentityFingerprint != registration.IdentityFingerprint {
+		return fmt.Errorf("host enrollment certificate identity fingerprint mismatch")
+	}
+	if certificate.HostName != registration.Name {
+		return fmt.Errorf("host enrollment certificate host name mismatch")
+	}
+	if certificate.OS != registration.OS {
+		return fmt.Errorf("host enrollment certificate os mismatch")
+	}
+	if certificate.Arch != registration.Arch {
+		return fmt.Errorf("host enrollment certificate arch mismatch")
+	}
+	if !sameCapabilities(certificate.Capabilities, registration.Capabilities) {
+		return fmt.Errorf("host enrollment certificate capabilities mismatch")
+	}
+	return nil
+}
+
+func VerifyHostEnrollmentCertificateSignature(certificate HostEnrollmentCertificate, root TrustBundle, now time.Time) error {
+	if certificate.SchemaVersion != HostEnrollmentCertificateSchemaVersion {
+		return fmt.Errorf("unsupported host enrollment certificate schema %q", certificate.SchemaVersion)
+	}
+	if certificate.SigningAlg != JobEnvelopeSigningAlg {
+		return fmt.Errorf("unsupported host enrollment certificate signing algorithm %q", certificate.SigningAlg)
+	}
+	if certificate.IssuerKeyID == "" {
+		return fmt.Errorf("host enrollment certificate issuer key id is required")
+	}
+	if root.SigningKeyID != certificate.IssuerKeyID {
+		return fmt.Errorf("host enrollment certificate issuer key id mismatch")
+	}
+	if certificate.SubjectIdentityFingerprint == "" {
+		return fmt.Errorf("host enrollment certificate subject identity fingerprint is required")
+	}
+	if certificate.TicketCode == "" || certificate.HostName == "" || certificate.OS == "" || certificate.Arch == "" {
+		return fmt.Errorf("host enrollment certificate ticket, host name, os, and arch are required")
+	}
+	if !certificate.Mode.Valid() {
+		return fmt.Errorf("unsupported host enrollment certificate mode %q", certificate.Mode)
+	}
+	if len(normalizedCapabilities(certificate.Capabilities)) == 0 {
+		return fmt.Errorf("host enrollment certificate capabilities are required")
+	}
+	now = now.UTC()
+	if certificate.NotBefore.IsZero() || certificate.NotAfter.IsZero() || !certificate.NotBefore.Before(certificate.NotAfter) {
+		return fmt.Errorf("host enrollment certificate validity window is invalid")
+	}
+	if now.Add(defaultHostEnrollmentCertificateMaxBackoff).Before(certificate.NotBefore.UTC()) {
+		return fmt.Errorf("host enrollment certificate is not valid yet")
+	}
+	if now.After(certificate.NotAfter.UTC()) {
+		return fmt.Errorf("host enrollment certificate expired")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(certificate.Signature)
+	if err != nil {
+		return fmt.Errorf("decode host enrollment certificate signature: %w", err)
+	}
+	publicKey, err := root.Ed25519PublicKey()
+	if err != nil {
+		return err
+	}
+	payload, err := hostEnrollmentCertificatePayloadBytes(certificate)
+	if err != nil {
+		return err
+	}
+	if !ed25519.Verify(publicKey, payload, signature) {
+		return fmt.Errorf("host enrollment certificate signature mismatch")
+	}
+	return nil
+}
+
+func hostEnrollmentCertificatePayloadBytes(certificate HostEnrollmentCertificate) ([]byte, error) {
+	payload := hostEnrollmentCertificatePayload{
+		SchemaVersion:              hostEnrollmentCertificatePayloadSchema,
+		IssuerKeyID:                certificate.IssuerKeyID,
+		SubjectIdentityFingerprint: certificate.SubjectIdentityFingerprint,
+		TicketCode:                 certificate.TicketCode,
+		HostName:                   certificate.HostName,
+		OS:                         certificate.OS,
+		Arch:                       certificate.Arch,
+		Mode:                       certificate.Mode,
+		Capabilities:               normalizedCapabilities(certificate.Capabilities),
+		NotBefore:                  certificate.NotBefore.UTC(),
+		NotAfter:                   certificate.NotAfter.UTC(),
+	}
+	return json.Marshal(payload)
+}
+
+func normalizedCapabilities(capabilities []string) []string {
+	if len(capabilities) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(capabilities))
+	seen := map[string]struct{}{}
+	for _, capability := range capabilities {
+		capability = strings.TrimSpace(capability)
+		if capability == "" {
+			continue
+		}
+		if _, ok := seen[capability]; ok {
+			continue
+		}
+		seen[capability] = struct{}{}
+		normalized = append(normalized, capability)
+	}
+	sort.Strings(normalized)
+	return normalized
+}
+
+func sameCapabilities(a, b []string) bool {
+	left := normalizedCapabilities(a)
+	right := normalizedCapabilities(b)
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }

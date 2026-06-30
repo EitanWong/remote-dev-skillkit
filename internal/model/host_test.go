@@ -111,6 +111,82 @@ func TestSignHostRegistrationRejectsWrongPrivateKey(t *testing.T) {
 	}
 }
 
+func TestHostEnrollmentCertificateVerifiesRegistrationAuthorization(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.EnrollmentCertificate = &certificate
+	if err := VerifyHostEnrollmentCertificate(registration, ticket, NewTrustBundle("enrollment-root", issuerPublicKey), now.Add(time.Minute)); err != nil {
+		t.Fatalf("expected enrollment certificate to verify: %v", err)
+	}
+}
+
+func TestHostEnrollmentCertificateRejectsWrongRoot(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	_, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.EnrollmentCertificate = &certificate
+	err = VerifyHostEnrollmentCertificate(registration, ticket, NewTrustBundle("enrollment-root", wrongPublicKey), now)
+	if err == nil || !strings.Contains(err.Error(), "signature mismatch") {
+		t.Fatalf("expected signature mismatch, got %v", err)
+	}
+}
+
+func TestHostEnrollmentCertificateRejectsTamperedRegistration(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.Name = "tampered-host"
+	registration.EnrollmentCertificate = &certificate
+	err = VerifyHostEnrollmentCertificate(registration, ticket, NewTrustBundle("enrollment-root", issuerPublicKey), now)
+	if err == nil || !strings.Contains(err.Error(), "host name mismatch") {
+		t.Fatalf("expected host name mismatch, got %v", err)
+	}
+}
+
+func TestHostEnrollmentCertificateRejectsExpiredCertificate(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.EnrollmentCertificate = &certificate
+	err = VerifyHostEnrollmentCertificate(registration, ticket, NewTrustBundle("enrollment-root", issuerPublicKey), now.Add(2*time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired certificate, got %v", err)
+	}
+}
+
 func hostRegistrationTestTicket(t *testing.T) Ticket {
 	t.Helper()
 	ticket, err := NewTicket(HostModeManaged, 600, []string{"shell.user"}, "test", time.Now())
@@ -118,6 +194,31 @@ func hostRegistrationTestTicket(t *testing.T) Ticket {
 		t.Fatal(err)
 	}
 	return ticket
+}
+
+func signedHostRegistrationForEnrollmentTest(t *testing.T) (HostRegistration, Ticket, ed25519.PrivateKey) {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket := hostRegistrationTestTicket(t)
+	registration := HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                "managed-mac",
+		OS:                  "darwin",
+		Arch:                "arm64",
+		Capabilities:        []string{"git.diff", "codex.run"},
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   hostRegistrationPublicKey(publicKey),
+		IdentityFingerprint: hostRegistrationFingerprint(publicKey),
+	}
+	proof, err := SignHostRegistration(registration, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.IdentityProof = &proof
+	return registration, ticket, privateKey
 }
 
 func hostRegistrationPublicKey(publicKey ed25519.PublicKey) string {

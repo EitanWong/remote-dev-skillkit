@@ -75,6 +75,7 @@ Implemented now:
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - macOS Keychain, Windows DPAPI, and Linux libsecret protected-store references for managed host identity and trust bundle persistence via `--identity-store keychain:<service>/<account>` / `--trust-store keychain:<service>/<account>` on macOS, `--identity-store dpapi:<service>/<account>` / `--trust-store dpapi:<service>/<account>` on Windows, and `--identity-store libsecret:<service>/<account>` / `--trust-store libsecret:<service>/<account>` on Linux hosts with `secret-tool` and a reachable Secret Service, preserving the same identity fingerprint, trust-bundle sequence, rollback checks, and host-bound update rules as file-backed development stores.
 - Signed host registration proofs via `rdev.host-registration-proof.v1`; hosts that present identity keys must prove possession of the matching private key before the gateway preserves the identity fingerprint and binds future job envelopes to it.
+- Host enrollment certificates via `rdev.host-enrollment-certificate.v1`; `rdev enrollment sign-certificate` / `rdev enrollment verify-certificate` sign and verify certificate files that bind ticket code, mode, host name, OS/arch, capabilities, validity window, and host identity fingerprint to an enrollment root. `rdev gateway serve --dev --enrollment-root-public-key <key_id>:<base64url_public_key>` requires that certificate during host registration, and `rdev host serve --enrollment-certificate <file>` attaches it to the registration payload.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
 - Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
 - Local evidence bundle export via `rdev evidence export`.
@@ -126,7 +127,7 @@ Implemented now:
 Not implemented yet:
 
 - Production gateway networking, authentication, and storage beyond the development HTTP gateway and JSON snapshot path.
-- Production host enrollment certificates beyond the current signed registration proof.
+- Full production host enrollment authority lifecycle beyond the current local certificate primitive: operator roles, CA/key custody, renewal, revocation distribution, emergency drills, and hosted enrollment API.
 - Production signing key storage beyond local key files.
 - Authenticated durable managed host trust distribution beyond the current development endpoints and macOS Keychain-backed local store.
 - Full production bootstrap trust root lifecycle and release signing policy.
@@ -159,7 +160,9 @@ go run ./cmd/rdev policy explain-shell --policy-json '{"workspace_root":".","cap
 go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' | go run ./cmd/rdev mcp serve
-go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json
+go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json --enrollment-root-public-key enrollment-root:...
+go run ./cmd/rdev enrollment sign-certificate --out .rdev/enrollment/host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
+go run ./cmd/rdev enrollment verify-certificate --certificate .rdev/enrollment/host-enrollment.json --root-public-key enrollment-root:...
 go run ./cmd/rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
 go run ./cmd/rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
 go run ./cmd/rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"

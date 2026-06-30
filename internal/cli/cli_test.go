@@ -20,6 +20,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -884,6 +885,112 @@ func TestHostServeRegistersWithIdentityStore(t *testing.T) {
 	secondFingerprint := runHostServeWithIdentityStore(t, server.URL, secondTicket.Code, identityPath, "test-host-2")
 	if secondFingerprint != firstFingerprint {
 		t.Fatalf("expected identity fingerprint reuse, got %s then %s", firstFingerprint, secondFingerprint)
+	}
+}
+
+func TestHostServeRegistersWithEnrollmentCertificate(t *testing.T) {
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "certified temporary host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "keys", "enrollment-root.json")
+	certificatePath := filepath.Join(dir, "certs", "host-enrollment.json")
+	var signStdout bytes.Buffer
+	signApp := NewApp(&signStdout, &bytes.Buffer{})
+	err = signApp.Run(context.Background(), []string{
+		"enrollment", "sign-certificate",
+		"--out", certificatePath,
+		"--key", keyPath,
+		"--key-id", "enrollment-root",
+		"--ticket-code", ticket.Code,
+		"--mode", "attended-temporary",
+		"--name", "cert-host",
+		"--os", runtime.GOOS,
+		"--arch", runtime.GOARCH,
+		"--identity-key-id", identity.KeyID,
+		"--identity-public-key", identity.EncodedPublicKey(),
+		"--identity-fingerprint", identity.Fingerprint(),
+		"--capabilities", strings.Join(capabilities, ","),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var signPayload struct {
+		RootPublicKey string `json:"root_public_key"`
+		Schema        string `json:"schema"`
+	}
+	if err := json.Unmarshal(signStdout.Bytes(), &signPayload); err != nil {
+		t.Fatalf("invalid sign output: %v\n%s", err, signStdout.String())
+	}
+	if signPayload.Schema != model.HostEnrollmentCertificateSchemaVersion {
+		t.Fatalf("expected enrollment certificate schema, got %s", signStdout.String())
+	}
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	err = verifyApp.Run(context.Background(), []string{
+		"enrollment", "verify-certificate",
+		"--certificate", certificatePath,
+		"--root-public-key", signPayload.RootPublicKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected verify output ok=true, got %s", verifyStdout.String())
+	}
+	root, err := parseRootPublicKey(signPayload.RootPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw.WithEnrollmentRoot(root)
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--identity-store", identityPath,
+		"--identity-key-id", "host-test",
+		"--enrollment-certificate", certificatePath,
+		"--name", "cert-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Status                string `json:"status"`
+		EnrollmentCertificate struct {
+			Schema      string `json:"schema"`
+			IssuerKeyID string `json:"issuer_key_id"`
+		} `json:"enrollment_certificate"`
+		Host struct {
+			Status              string `json:"status"`
+			IdentityFingerprint string `json:"identity_fingerprint"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid host output: %v\n%s", err, stdout.String())
+	}
+	if payload.Status != "registered-pending-approval" || payload.Host.Status != "pending" {
+		t.Fatalf("unexpected host registration output: %s", stdout.String())
+	}
+	if payload.EnrollmentCertificate.Schema != model.HostEnrollmentCertificateSchemaVersion || payload.EnrollmentCertificate.IssuerKeyID != "enrollment-root" {
+		t.Fatalf("expected enrollment certificate summary, got %s", stdout.String())
+	}
+	if payload.Host.IdentityFingerprint != identity.Fingerprint() {
+		t.Fatalf("expected host identity fingerprint %q, got %q", identity.Fingerprint(), payload.Host.IdentityFingerprint)
 	}
 }
 

@@ -35,6 +35,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Host identity storage wired into registration and job binding.
 - Durable host trust bundle store.
 - Signed host registration proofs for identity-bearing registrations.
+- Host enrollment certificate primitive through `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`, binding ticket code, mode, host metadata, capabilities, identity fingerprint, validity window, and enrollment root signature before registration when configured.
 - Trust-bundle key rotation/revocation flow.
 - Trust lifecycle operator workflow through `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed trust bundles with sequence, previous-hash, key rotation, key retirement, revocation, and pinned-root verification.
 - Host-bound trust bundle update checks for managed host refresh.
@@ -126,7 +127,8 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Full production adapter SDK beyond the first runtime lifecycle runner, built-in hostrunner runtime fixture capture, and lifecycle/result/cancellation/runtime-fixture conformance.
 - Windows DPAPI protected-store references for managed host identity/trust persistence, preserving the same host fingerprint, trust sequence, rollback rejection, and host-bound update semantics as file-backed and macOS Keychain stores.
 - Linux libsecret protected-store references for managed host identity/trust persistence on hosts with `secret-tool` and a reachable Secret Service.
-- Linux keyctl or other non-Secret-Service protected stores plus enrollment certificates beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, file-backed paths, and signed registration proof.
+- Linux keyctl or other non-Secret-Service protected stores beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, and file-backed paths.
+- Full production enrollment authority lifecycle beyond the local certificate primitive, including hosted issuance, operator roles, renewal, revocation distribution, and emergency drills.
 - ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable hosted storage.

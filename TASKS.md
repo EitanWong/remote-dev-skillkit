@@ -84,6 +84,7 @@
 - [x] Add hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `--capture-runtime-fixture`.
 - [x] Add verifiable Skillkit install planning for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
 - [x] Add dry-run-by-default direct Skillkit installer for mainstream Agent frameworks through `rdev skillkit install`.
+- [x] Add host enrollment certificate primitive with `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`.
 
 ## Next
 
@@ -111,6 +112,7 @@
 - [x] Add durable host trust bundle file store.
 - [x] Add durable host identity key store.
 - [x] Add signed host registration proof for identity-bearing registrations.
+- [x] Add production host enrollment certificate primitive beyond signed registration proof, binding ticket code, mode, host identity fingerprint, host metadata, capabilities, validity window, and enrollment root signature.
 - [x] Add durable host nonce replay store.
 - [x] Add hash-chained audit export and verification.
 - [x] Add final buy-vs-build boundary for MCP, Tailscale/headscale, SSH, Coder, DevPod, VS Code Remote Tunnels, RustDesk/MeshCentral, and Sigstore-style release trust.
@@ -169,7 +171,8 @@
 
 - [ ] Add WSS/mTLS transport.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
-- [ ] Add Linux keyctl or non-Secret-Service protected host identity/trust storage plus production enrollment certificates.
+- [ ] Add Linux keyctl or non-Secret-Service protected host identity/trust storage.
+- [ ] Add full production enrollment authority lifecycle beyond the local certificate primitive: operator roles, hosted issuance API, certificate renewal/revocation distribution, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.
@@ -216,6 +219,7 @@
 - [x] Linux managed-service acceptance can generate and verify a preflight plan with a written systemd user unit, service start/status/stop commands, hardening flags, release gate, required evidence, and explicit no-execution semantics.
 - [x] Linux managed-service acceptance evidence can be packaged with plan/unit/verifier output, start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence, redaction, and checksums.
 - [x] Host serve can verify a signed release bundle before host registration or job polling.
+- [x] Gateway can require a signed `rdev.host-enrollment-certificate.v1` before host registration when an enrollment root is configured.
 - [x] Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.

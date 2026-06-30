@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -258,6 +259,57 @@ func TestMemoryGatewayRejectsHostIdentityFingerprintMismatch(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected identity fingerprint mismatch")
+	}
+}
+
+func TestMemoryGatewayEnrollmentRootRequiresCertificate(t *testing.T) {
+	issuerPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentRoot(model.NewTrustBundle("enrollment-root", issuerPublicKey))
+	capabilities := []string{"shell.user"}
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := signedGatewayHostRegistration(t, ticket, capabilities)
+	_, err = gw.RegisterHost(registration)
+	if err == nil || !strings.Contains(err.Error(), "enrollment certificate is required") {
+		t.Fatalf("expected enrollment certificate requirement, got %v", err)
+	}
+}
+
+func TestMemoryGatewayEnrollmentRootAcceptsValidCertificate(t *testing.T) {
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentRoot(model.NewTrustBundle("enrollment-root", issuerPublicKey))
+	capabilities := []string{"shell.user"}
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := signedGatewayHostRegistration(t, ticket, capabilities)
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.EnrollmentCertificate = &certificate
+	host, err := gw.RegisterHost(registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Status != model.HostStatusPending {
+		t.Fatalf("expected pending host, got %s", host.Status)
+	}
+	if host.IdentityFingerprint != registration.IdentityFingerprint {
+		t.Fatalf("expected fingerprint %q, got %q", registration.IdentityFingerprint, host.IdentityFingerprint)
 	}
 }
 
@@ -608,4 +660,28 @@ func activeHost(t *testing.T, gw *MemoryGateway) model.Host {
 		t.Fatal(err)
 	}
 	return host
+}
+
+func signedGatewayHostRegistration(t *testing.T, ticket model.Ticket, capabilities []string) model.HostRegistration {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := model.HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                "managed-host",
+		OS:                  "darwin",
+		Arch:                "arm64",
+		Capabilities:        capabilities,
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   encodeHostIdentityPublicKey(publicKey),
+		IdentityFingerprint: hostIdentityFingerprint(publicKey),
+	}
+	proof, err := model.SignHostRegistration(registration, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.IdentityProof = &proof
+	return registration
 }

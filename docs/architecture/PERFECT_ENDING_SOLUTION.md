@@ -179,7 +179,8 @@ The supported system revolves around a small protocol family:
 - distribution: `rdev.release-bundle.v1`, `rdev.release-candidate.v1`,
   `rdev.skillkit-manifest.v1`;
 - enrollment: `rdev.ticket.v1`, `rdev.join-manifest.v1`,
-  `rdev.host-registration.v1`, `rdev.trust-bundle.v1`;
+  `rdev.host-registration.v1`, `rdev.host-enrollment-certificate.v1`,
+  `rdev.trust-bundle.v1`;
 - authorization: `rdev.job-envelope.v1`, `rdev.approval-token.v1`;
 - execution: `rdev.host-denial.v1`, `rdev.approval-required.v1`, adapter result
   and runtime fixture artifacts;
@@ -622,7 +623,7 @@ supported capability:
 | Stage | Object | Authority | Required verifier or rejection |
 |---|---|---|---|
 | Distribution | `rdev.release-bundle.v1`, `rdev.release-candidate.v1`, `rdev.skillkit-manifest.v1` | release key and bundle checksums | unverified, incomplete, wrong-platform, or unlisted artifacts cannot execute or install |
-| Enrollment | `rdev.ticket.v1`, `rdev.join-manifest.v1`, `rdev.host-registration.v1`, `rdev.trust-bundle.v1` | operator ticket, host identity, trust root | expired, reused, revoked, wrong-root, stale, or rollback state cannot enroll or receive work |
+| Enrollment | `rdev.ticket.v1`, `rdev.join-manifest.v1`, `rdev.host-registration.v1`, `rdev.host-enrollment-certificate.v1`, `rdev.trust-bundle.v1` | operator ticket, authorized host identity, trust root | expired, reused, revoked, wrong-root, stale, missing certificate, mismatched identity, or rollback state cannot enroll or receive work |
 | Authorization | `rdev.job-envelope.v1`, `rdev.approval-token.v1` | gateway job key and approval key | tamper, replay, wrong-host, expiry, missing capability, missing approval, or token reuse denies execution |
 | Execution | `rdev.host-denial.v1`, `rdev.approval-required.v1`, adapter artifacts | host validator and adapter supervisor | unsafe work becomes structured denial or approval pause before side effects |
 | Proof | `rdev.evidence-bundle.v1`, `rdev.audit-chain.v1`, `rdev.acceptance-package.*.v1` | checksums, redaction, audit chain | incomplete checksums, missing audit, redaction gaps, or failed conformance block success claims |
@@ -968,7 +969,7 @@ Every shipped feature should attach to this object spine:
 | Stage | Object | Completion proof |
 |---|---|---|
 | distribution | `rdev.release-bundle.v1`, `rdev.release-candidate.v1`, `rdev.skillkit-manifest.v1` | signed bundle verification, checksums, required artifacts, unlisted-file rejection |
-| enrollment | `rdev.ticket.v1`, `rdev.host-registration.v1`, `rdev.trust-bundle.v1` | approved host identity, mode, capabilities, trust pins, revocation handle |
+| enrollment | `rdev.ticket.v1`, `rdev.host-registration.v1`, `rdev.host-enrollment-certificate.v1`, `rdev.trust-bundle.v1` | approved host identity, enrollment authorization, mode, capabilities, trust pins, revocation handle |
 | authorization | `rdev.job-envelope.v1`, `rdev.approval-token.v1` | host-bound signature, expiry, nonce, capability scope, approval scope |
 | execution | `rdev.host-denial.v1`, `rdev.approval-required.v1`, `rdev.adapter-*.v1` | local validation result, adapter lifecycle/result/cancellation evidence |
 | proof | `rdev.evidence-bundle.v1`, `rdev.audit-chain.v1`, `rdev.acceptance-package.*.v1` | manifest checksums, redaction metadata, audit slice, verifier report |
@@ -1207,6 +1208,7 @@ to these objects before inventing a new authority path:
 | `rdev.skillkit-manifest.v1` | portable agent workflow bundle | agent installs cannot copy unlisted or tampered files |
 | `rdev.ticket.v1` | enrollment intent with mode, TTL, reason, and capability scope | expired, reused, revoked, or overbroad tickets cannot enroll hosts |
 | `rdev.host-registration.v1` | host identity, mode, capabilities, stop contract, and trust pins | unapproved or mismatched hosts cannot receive work |
+| `rdev.host-enrollment-certificate.v1` | ticket code, mode, host identity fingerprint, host metadata, capabilities, validity window, and enrollment root signature | configured gateways can reject hosts that were not authorized by the enrollment authority |
 | `rdev.trust-bundle.v1` | gateway keys, sequence, previous hash, and revocations | rollback, revoked key, wrong root, or stale trust denies jobs |
 | `rdev.job-envelope.v1` | host-bound executable intent with workspace, capabilities, limits, nonce, expiry, and approvals | tamper, replay, wrong host, missing capability, missing approval, or workspace escape denies execution |
 | `rdev.approval-token.v1` | one scoped exception for a dangerous operation | reuse, wrong subject, broader scope, or expiry denies the operation |

@@ -193,6 +193,49 @@ Agents can call the same policy engine through MCP tool `rdev.policy.explain_she
 
 `rdev host serve` generates an Ed25519 host identity for the session. When `--identity-store <path>` is set, the identity is persisted to a local `0600` JSON file using schema `rdev.host-identity.v1`; the parent directory is created with `0700` permissions. On macOS, `--identity-store keychain:<service>/<account>` stores the same `rdev.host-identity.v1` payload in the user's Keychain instead of a JSON file. On Windows, `--identity-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. On Linux, `--identity-store libsecret:<service>/<account>` stores the same payload through `secret-tool` and the user's Secret Service when available. The host registration includes the identity key id, public key, fingerprint, and signed `rdev.host-registration-proof.v1` proof. The gateway verifies that proof before preserving the identity fingerprint. Signed job envelopes include the registered host identity fingerprint, and a host with a local identity rejects jobs bound to a different fingerprint.
 
+For a stricter development enrollment path, issue a signed host enrollment
+certificate and configure the dev gateway to require it:
+
+```bash
+rdev enrollment sign-certificate \
+  --out .rdev/enrollment/host-enrollment.json \
+  --key .rdev/keys/enrollment-root.json \
+  --key-id enrollment-root \
+  --ticket-code ABCD-1234 \
+  --mode managed \
+  --name managed-mac \
+  --os darwin \
+  --arch arm64 \
+  --identity-key-id host \
+  --identity-public-key <base64url_ed25519_public_key> \
+  --identity-fingerprint sha256:<hex> \
+  --capabilities codex.run,git.diff \
+  --valid-minutes 60
+
+rdev enrollment verify-certificate \
+  --certificate .rdev/enrollment/host-enrollment.json \
+  --root-public-key enrollment-root:<base64url_ed25519_public_key>
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --enrollment-root-public-key enrollment-root:<base64url_ed25519_public_key>
+
+rdev host serve \
+  --mode managed \
+  --gateway http://127.0.0.1:8787 \
+  --ticket-code ABCD-1234 \
+  --identity-store .rdev/host/identity.json \
+  --enrollment-certificate .rdev/enrollment/host-enrollment.json
+```
+
+The certificate uses schema `rdev.host-enrollment-certificate.v1` and binds the
+ticket code, host mode, host name, OS/arch, capabilities, validity window, and
+host identity fingerprint to the enrollment root signature. Signed registration
+proof still proves private-key possession; the enrollment certificate proves the
+operator authorized this host to join under the stated scope.
+
 `rdev host serve` keeps a nonce replay cache for signed job envelopes. By default, this cache is in-memory for the process. When `--nonce-store <path>` is set, used nonces are persisted to a local `0600` JSON file using schema `rdev.host-nonce-store.v1`; the parent directory is created with `0700` permissions. Expired nonce entries are pruned before new entries are written.
 
 When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, refreshes the local trust store through `GET /v1/hosts/{host_id}/trust-bundle/update` when `--trust-store` is configured, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle, the local host identity fingerprint, and the nonce replay cache, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
@@ -731,7 +774,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 - If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
 - `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode. They are durable across process restarts only when `--state` is enabled with the matching persistent `--signing-key`.
 - `--trust-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, and Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available.
-- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, and Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; production managed hosts still need enrollment certificates.
+- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, and Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; when `--enrollment-root-public-key` is configured, registrations must also include `rdev.host-enrollment-certificate.v1`. Full production enrollment authority lifecycle, hosted issuance, renewal, and revocation distribution remain future production gates.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
 - Linux systemd support currently writes and controls user units, `rdev acceptance linux-managed-service` can verify a release-evidence plan, and `rdev acceptance package-linux-managed-service` can archive real run evidence. Real managed Linux acceptance still needs reboot/reconnect evidence from a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

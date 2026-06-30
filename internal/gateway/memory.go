@@ -37,6 +37,8 @@ type MemoryGateway struct {
 	manifestSigningID  string
 	manifestPublicKey  ed25519.PublicKey
 	manifestPrivateKey ed25519.PrivateKey
+	enrollmentRoot     model.TrustBundle
+	requireEnrollment  bool
 	trustBundle        model.SignedTrustBundle
 }
 
@@ -125,6 +127,14 @@ func (g *MemoryGateway) WithManifestSigningKey(signingID string, publicKey ed255
 	return g
 }
 
+func (g *MemoryGateway) WithEnrollmentRoot(root model.TrustBundle) *MemoryGateway {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.enrollmentRoot = root
+	g.requireEnrollment = true
+	return g
+}
+
 func (g *MemoryGateway) WithAuditSink(sink AuditSink) *MemoryGateway {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -173,6 +183,11 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 	}
 	if len(registration.Capabilities) == 0 {
 		registration.Capabilities = ticket.Capabilities
+	}
+	if g.requireEnrollment {
+		if err := model.VerifyHostEnrollmentCertificate(registration, ticket, g.enrollmentRoot, g.now()); err != nil {
+			return model.Host{}, err
+		}
 	}
 
 	host, err := model.NewHost(ticket, registration, g.now())
