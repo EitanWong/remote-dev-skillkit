@@ -24,6 +24,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
@@ -886,6 +887,35 @@ func TestHostServeRegistersWithIdentityStore(t *testing.T) {
 	}
 }
 
+func TestHostServeRegistersWithProtectedIdentityStore(t *testing.T) {
+	backend := &cliMemoryKeychainBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetKeychainBackendForTest(backend)
+	defer restore()
+
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	identityRef := "keychain:remote-dev-skillkit/cli-managed-host"
+
+	firstFingerprint := runHostServeWithIdentityStore(t, server.URL, ticket.Code, identityRef, "test-host-1")
+	if len(backend.items) != 1 {
+		t.Fatalf("expected one protected identity item, got %d", len(backend.items))
+	}
+	secondTicket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondFingerprint := runHostServeWithIdentityStore(t, server.URL, secondTicket.Code, identityRef, "test-host-2")
+	if secondFingerprint != firstFingerprint {
+		t.Fatalf("expected protected identity fingerprint reuse, got %s then %s", firstFingerprint, secondFingerprint)
+	}
+}
+
 func TestHostServeRegistersWithJoinManifest(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -1400,6 +1430,35 @@ func TestFetchHostTrustPersistsSignedBundle(t *testing.T) {
 	}
 }
 
+func TestFetchHostTrustPersistsSignedBundleToProtectedStore(t *testing.T) {
+	backend := &cliMemoryKeychainBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetKeychainBackendForTest(backend)
+	defer restore()
+
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	storeRef := "keychain:remote-dev-skillkit/cli-managed-trust"
+
+	trust, err := fetchHostTrust(context.Background(), server.URL, "", storeRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trust.SignedBundle == nil {
+		t.Fatal("expected signed trust bundle")
+	}
+	if len(backend.items) != 1 {
+		t.Fatalf("expected one protected trust item, got %d", len(backend.items))
+	}
+	stored, ok, err := hosttrust.ProtectedStore{Ref: storeRef}.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || stored.Sequence != gw.SignedTrustBundle().Sequence {
+		t.Fatalf("expected stored protected sequence %d, got ok=%v bundle=%#v", gw.SignedTrustBundle().Sequence, ok, stored)
+	}
+}
+
 func TestFetchHostTrustUsesStoredBundleWhenGatewayTrustBundleUnavailable(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	storePath := filepath.Join(t.TempDir(), "trust", "bundle.json")
@@ -1422,6 +1481,23 @@ func TestFetchHostTrustUsesStoredBundleWhenGatewayTrustBundleUnavailable(t *test
 	if trust.SignedBundle.Sequence != gw.SignedTrustBundle().Sequence {
 		t.Fatalf("expected stored sequence %d, got %d", gw.SignedTrustBundle().Sequence, trust.SignedBundle.Sequence)
 	}
+}
+
+type cliMemoryKeychainBackend struct {
+	items map[string][]byte
+}
+
+func (b *cliMemoryKeychainBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *cliMemoryKeychainBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
 }
 
 func TestRefreshHostTrustUpdatePersistsGatewayUpdate(t *testing.T) {

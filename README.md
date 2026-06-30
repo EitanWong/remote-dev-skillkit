@@ -73,6 +73,7 @@ Implemented now:
 - Persistent development gateway signing key files plus host trust pin checks.
 - Trust lifecycle operator commands via `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed `rdev.trust-bundle.v1` bundles with sequence, previous-hash, key rotation, key retirement, key revocation, and pinned-root verification.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
+- macOS Keychain protected-store references for managed host identity and trust bundle persistence via `--identity-store keychain:<service>/<account>` and `--trust-store keychain:<service>/<account>`, preserving the same identity fingerprint, trust-bundle sequence, rollback checks, and host-bound update rules as file-backed development stores.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
 - Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
 - Local evidence bundle export via `rdev evidence export`.
@@ -126,13 +127,13 @@ Not implemented yet:
 - Production gateway networking, authentication, and storage beyond the development HTTP gateway and JSON snapshot path.
 - Production host enrollment certificates and registration proofs.
 - Production signing key storage beyond local key files.
-- Authenticated durable managed host trust distribution and OS-protected trust storage.
+- Authenticated durable managed host trust distribution beyond the current development endpoints and macOS Keychain-backed local store.
 - Full production bootstrap trust root lifecycle and release signing policy.
 - Platform-native code signing / Authenticode policy for Windows releases.
 - Production WSS host transport.
 - Production-grade shell adapter hardening beyond the development scoped executor.
 - Full production adapter SDK beyond the current lifecycle runner and lifecycle/result/cancellation/runtime-fixture conformance verifiers.
-- OS-protected managed host identity and trust storage beyond file-backed dev mode.
+- Windows DPAPI and Linux libsecret/keyctl managed host identity and trust storage, plus signed registration proofs beyond the current macOS Keychain/file-backed store paths.
 - Artifact streaming.
 - Real Windows Service managed-host acceptance execution and reconnect proof beyond dry-run `sc.exe` plans and verified acceptance-plan generation.
 - Real Linux systemd managed-host acceptance execution and reboot/reconnect proof beyond verified acceptance-plan and evidence-package generation.

@@ -48,7 +48,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Release candidate packaging that stages built artifacts, signed manifests, signed release bundle, verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Release candidate verification that checks staged or downloaded candidates before publication or installation.
 - Host startup release gates through `rdev host serve --release-bundle --release-root-public-key --release-require-artifacts`, verifying signed release bundles before host registration or job polling.
-- Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, and checksums before candidate packaging.
+- Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, per-artifact `cgo_enabled` metadata, and checksums before candidate packaging.
 - Per-platform release candidate automation through `scripts/release/prepare-platform-candidates.sh`, grouping real build artifacts by `GOOS/GOARCH`, producing one verified candidate per target, and writing `rdev.platform-release-candidates.v1`.
 - Multi-platform GitHub Release dry-run planning through `scripts/github/plan-platform-release.sh`, producing unique platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and command previews without external mutation.
 - Post-release install verification planning through `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification commands from a local GitHub Release dry-run plan without external mutation.
@@ -86,7 +86,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - macOS LaunchAgent managed mode.
 - LaunchAgent plist generation with explicit launchctl next steps.
 - LaunchAgent plist status and safe uninstall commands.
-- Host identity protected storage.
+- macOS Keychain protected-store references for managed host identity and trust bundle persistence.
 - Workspace lock manager and Git worktree preparation foundation.
 - Workspace locks wired into hostrunner, host serve, and managed LaunchAgent arguments.
 - Codex adapter MVP with hostrunner integration, `codex.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, and redaction.
@@ -123,6 +123,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Restart/recovery.
 - Auto-update/rollback.
 - Full production adapter SDK beyond the first runtime lifecycle runner, built-in hostrunner runtime fixture capture, and lifecycle/result/cancellation/runtime-fixture conformance.
+- Windows DPAPI and Linux libsecret/keyctl protected stores plus signed registration proofs beyond the current macOS Keychain/file-backed paths.
 - ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable hosted storage.

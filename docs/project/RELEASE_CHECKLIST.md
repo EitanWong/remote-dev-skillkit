@@ -11,6 +11,7 @@
 - [ ] GitHub Actions CI passes for the release commit.
 - [ ] Build binaries for macOS, Linux, and Windows with `scripts/release/build-artifacts.sh`.
 - [ ] Review `rdev.build-artifacts.v1` and `checksums.txt`.
+- [ ] Confirm macOS artifacts that claim Keychain-backed managed host identity/trust support were built natively with `cgo_enabled=true`, or explicitly document that `keychain:` stores are unavailable in that artifact.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.

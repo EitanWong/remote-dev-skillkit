@@ -4410,7 +4410,10 @@ func (t hostTrust) RunDevJob(ctx context.Context, hostID, identityFingerprint st
 }
 
 func fetchHostTrust(ctx context.Context, gatewayURL, trustPin, trustStorePath string) (hostTrust, error) {
-	store := hosttrust.FileStore{Path: trustStorePath}
+	store, err := hosttrust.OpenStore(trustStorePath)
+	if err != nil {
+		return hostTrust{}, err
+	}
 	signed, err := fetchSignedTrustBundle(ctx, gatewayURL, trustPin)
 	if err == nil {
 		if trustStorePath != "" {
@@ -4437,7 +4440,10 @@ func fetchHostTrust(ctx context.Context, gatewayURL, trustPin, trustStorePath st
 }
 
 func refreshHostTrustUpdate(ctx context.Context, gatewayURL, hostID, trustStorePath string, current hostTrust) (hostTrust, error) {
-	store := hosttrust.FileStore{Path: trustStorePath}
+	store, err := hosttrust.OpenStore(trustStorePath)
+	if err != nil {
+		return hostTrust{}, err
+	}
 	stored, ok, err := store.Load()
 	if err != nil {
 		return hostTrust{}, err

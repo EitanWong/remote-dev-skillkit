@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
 )
 
 func TestLoadOrCreateCreates0600Identity(t *testing.T) {
@@ -66,4 +68,49 @@ func TestLoadOrCreateRejectsKeyIDMismatch(t *testing.T) {
 	if _, _, err := LoadOrCreate(path, "second"); err == nil {
 		t.Fatal("expected key id mismatch")
 	}
+}
+
+func TestLoadOrCreateUsesProtectedStoreRef(t *testing.T) {
+	backend := &identityMemoryKeychainBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetKeychainBackendForTest(backend)
+	defer restore()
+
+	ref := "keychain:remote-dev-skillkit/managed-mac"
+	first, created, err := LoadOrCreate(ref, "host-keychain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected protected identity to be created")
+	}
+	second, created, err := LoadOrCreate(ref, "host-keychain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("expected protected identity to be reused")
+	}
+	if !second.PrivateKey.Equal(first.PrivateKey) {
+		t.Fatal("expected protected private key to be reused")
+	}
+	if _, _, err := LoadOrCreate(ref, "other-key"); err == nil {
+		t.Fatal("expected protected key id mismatch")
+	}
+}
+
+type identityMemoryKeychainBackend struct {
+	items map[string][]byte
+}
+
+func (b *identityMemoryKeychainBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *identityMemoryKeychainBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
 }

@@ -20,6 +20,9 @@ Options:
   --commands LIST       Comma-separated command list. Default: rdev,rdev-host,rdev-gateway,rdev-mcp,rdev-verify
   --clean               Remove output directory before building
   -h, --help            Show this help
+
+Environment:
+  RDEV_CGO_ENABLED      Override CGO_ENABLED for all targets. By default, native darwin builds use cgo so macOS Keychain support is compiled in; cross-target builds use CGO_ENABLED=0.
 EOF
 }
 
@@ -70,6 +73,8 @@ tsv_path="$out_dir/.build-artifacts.tsv"
 
 IFS=',' read -r -a target_list <<< "$targets"
 IFS=',' read -r -a command_list <<< "$commands"
+host_goos="$(go env GOOS)"
+host_goarch="$(go env GOARCH)"
 
 for target in "${target_list[@]}"; do
   target="${target//[[:space:]]/}"
@@ -79,6 +84,10 @@ for target in "${target_list[@]}"; do
   if [[ "$goos" == "$target" || -z "$goos" || -z "$goarch" ]]; then
     echo "target must be formatted as GOOS/GOARCH: $target" >&2
     exit 2
+  fi
+  cgo_enabled="${RDEV_CGO_ENABLED:-0}"
+  if [[ -z "${RDEV_CGO_ENABLED:-}" && "$goos" == "darwin" && "$goos" == "$host_goos" && "$goarch" == "$host_goarch" ]]; then
+    cgo_enabled=1
   fi
   suffix=""
   if [[ "$goos" == "windows" ]]; then
@@ -95,8 +104,8 @@ for target in "${target_list[@]}"; do
       exit 2
     fi
     artifact="$target_dir/$command$suffix"
-    echo "building $command for $goos/$goarch -> $artifact" >&2
-    CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build \
+    echo "building $command for $goos/$goarch cgo=$cgo_enabled -> $artifact" >&2
+    CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" go build \
       -trimpath \
       -ldflags "-s -w -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version" \
       -o "$artifact" "$package"
@@ -104,7 +113,7 @@ for target in "${target_list[@]}"; do
     size="$(wc -c < "$artifact" | tr -d ' ')"
     rel="${artifact#"$out_dir"/}"
     printf '%s  %s\n' "$sha" "$rel" >> "$checksums_path"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$command" "$target" "$goos" "$goarch" "$rel" "$sha" "$size" >> "$tsv_path"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$command" "$target" "$goos" "$goarch" "$rel" "$sha" "$size" "$cgo_enabled" >> "$tsv_path"
   done
 done
 
@@ -117,7 +126,7 @@ import sys
 out_dir, version, generated_at, targets, commands, tsv_path = sys.argv[1:]
 artifacts = []
 for line in pathlib.Path(tsv_path).read_text().splitlines():
-    command, target, goos, goarch, rel, sha, size = line.split("\t")
+    command, target, goos, goarch, rel, sha, size, cgo_enabled = line.split("\t")
     artifacts.append({
         "name": pathlib.Path(rel).name,
         "command": command,
@@ -127,6 +136,7 @@ for line in pathlib.Path(tsv_path).read_text().splitlines():
         "path": rel,
         "sha256": sha,
         "size_bytes": int(size),
+        "cgo_enabled": cgo_enabled == "1",
     })
 
 payload = {

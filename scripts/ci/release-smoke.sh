@@ -113,6 +113,7 @@ build_manifest = json.loads(pathlib.Path(build["manifest"]).read_text())
 assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_manifest
 assert len(build_manifest["artifacts"]) == 6, build_manifest["artifacts"]
 assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
+assert all(artifact["cgo_enabled"] is False for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert platform_output["ok"] is True, platform_output
 assert platform_manifest["schema_version"] == "rdev.platform-release-candidates.v1", platform_manifest
 assert platform_manifest["external_mutation"] is False, platform_manifest

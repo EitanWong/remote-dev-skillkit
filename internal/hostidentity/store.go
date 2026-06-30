@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
 )
 
 const (
@@ -41,6 +42,9 @@ func LoadOrCreate(path, keyID string) (Identity, bool, error) {
 		identity, err := Generate(keyID)
 		return identity, false, err
 	}
+	if protectedstore.IsRef(path) {
+		return loadOrCreateProtected(path, keyID)
+	}
 	content, err := os.ReadFile(path)
 	if err == nil {
 		identity, err := Decode(content)
@@ -60,6 +64,39 @@ func LoadOrCreate(path, keyID string) (Identity, bool, error) {
 		return Identity{}, false, err
 	}
 	if err := writeNew(path, identity); err != nil {
+		return Identity{}, false, err
+	}
+	return identity, true, nil
+}
+
+func loadOrCreateProtected(ref, keyID string) (Identity, bool, error) {
+	store, err := protectedstore.Open(ref)
+	if err != nil {
+		return Identity{}, false, err
+	}
+	content, ok, err := store.Load()
+	if err != nil {
+		return Identity{}, false, err
+	}
+	if ok {
+		identity, err := Decode(content)
+		if err != nil {
+			return Identity{}, false, err
+		}
+		if identity.KeyID != keyID {
+			return Identity{}, false, fmt.Errorf("host identity key id mismatch: protected store has %q, requested %q", identity.KeyID, keyID)
+		}
+		return identity, false, nil
+	}
+	identity, err := Generate(keyID)
+	if err != nil {
+		return Identity{}, false, err
+	}
+	content, err = encode(identity)
+	if err != nil {
+		return Identity{}, false, err
+	}
+	if err := store.Save(content); err != nil {
 		return Identity{}, false, err
 	}
 	return identity, true, nil

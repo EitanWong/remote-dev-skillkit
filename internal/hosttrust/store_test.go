@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
 )
 
 func TestFileStoreSavesAndLoadsTrustBundle(t *testing.T) {
@@ -187,6 +188,104 @@ func TestFileStoreVerifyAndSaveUpdateUsesStoredRoot(t *testing.T) {
 	if err := store.VerifyAndSaveUpdate(forged, model.NewTrustBundle("gateway", newPublic), now); !errors.Is(err, model.ErrTrustBundleSignature) {
 		t.Fatalf("expected signature error from stored root, got %v", err)
 	}
+}
+
+func TestProtectedStoreSavesAndLoadsTrustBundle(t *testing.T) {
+	backend := &trustMemoryKeychainBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetKeychainBackendForTest(backend)
+	defer restore()
+
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := testKeyPair(t)
+	store, err := OpenStore("keychain:remote-dev-skillkit/managed-mac-trust")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:     "managed-host",
+		Sequence:     1,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		SigningKeyID: "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+
+	if err := store.Save(bundle); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected protected trust bundle")
+	}
+	if loaded.Sequence != bundle.Sequence || loaded.BundleID != bundle.BundleID {
+		t.Fatalf("loaded wrong protected bundle: %#v", loaded)
+	}
+}
+
+func TestProtectedStoreVerifyAndSaveUpdateRejectsRollback(t *testing.T) {
+	backend := &trustMemoryKeychainBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetKeychainBackendForTest(backend)
+	defer restore()
+
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := testKeyPair(t)
+	store, err := OpenStore("keychain:remote-dev-skillkit/managed-mac-trust")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:     "managed-host",
+		Sequence:     2,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		SigningKeyID: "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+	if err := store.Save(first); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := first.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollback := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:           "managed-host",
+		Sequence:           1,
+		NotBefore:          now,
+		NotAfter:           now.Add(time.Hour),
+		PreviousBundleHash: hash,
+		SigningKeyID:       "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+	if err := store.VerifyAndSaveUpdate(rollback, model.NewTrustBundle("gateway", publicKey), now); err == nil {
+		t.Fatal("expected protected rollback to fail")
+	}
+}
+
+type trustMemoryKeychainBackend struct {
+	items map[string][]byte
+}
+
+func (b *trustMemoryKeychainBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *trustMemoryKeychainBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
 }
 
 func signedBundle(t *testing.T, spec model.SignedTrustBundleSpec, privateKey ed25519.PrivateKey, now time.Time) model.SignedTrustBundle {
