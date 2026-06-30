@@ -345,6 +345,43 @@ func TestLibsecretProtectedStoreSavesAndLoadsTrustBundle(t *testing.T) {
 	}
 }
 
+func TestKeyctlProtectedStoreSavesAndLoadsTrustBundle(t *testing.T) {
+	backend := &trustMemoryKeyctlBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetKeyctlBackendForTest(backend)
+	defer restore()
+
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := testKeyPair(t)
+	store, err := OpenStore("keyctl:remote-dev-skillkit/managed-linux-trust")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:     "managed-host",
+		Sequence:     1,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		SigningKeyID: "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+
+	if err := store.Save(bundle); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected keyctl protected trust bundle")
+	}
+	if loaded.Sequence != bundle.Sequence || loaded.BundleID != bundle.BundleID {
+		t.Fatalf("loaded wrong keyctl protected bundle: %#v", loaded)
+	}
+}
+
 type trustMemoryKeychainBackend struct {
 	items map[string][]byte
 }
@@ -392,6 +429,23 @@ func (b *trustMemoryLibsecretBackend) Load(service, account string) ([]byte, boo
 }
 
 func (b *trustMemoryLibsecretBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type trustMemoryKeyctlBackend struct {
+	items map[string][]byte
+}
+
+func (b *trustMemoryKeyctlBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *trustMemoryKeyctlBackend) Save(service, account string, content []byte) error {
 	b.items[service+"/"+account] = append([]byte(nil), content...)
 	return nil
 }

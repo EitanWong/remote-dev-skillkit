@@ -10,6 +10,7 @@ const (
 	KeychainPrefix  = "keychain:"
 	DPAPIPrefix     = "dpapi:"
 	LibsecretPrefix = "libsecret:"
+	KeyctlPrefix    = "keyctl:"
 )
 
 var ErrNotFound = errors.New("protected store item not found")
@@ -40,14 +41,21 @@ type libsecretBackend interface {
 	Save(service, account string, content []byte) error
 }
 
+type keyctlBackend interface {
+	Load(service, account string) ([]byte, bool, error)
+	Save(service, account string, content []byte) error
+}
+
 var activeKeychainBackend keychainBackend = platformKeychainBackend()
 var activeDPAPIBackend dpapiBackend = platformDPAPIBackend()
 var activeLibsecretBackend libsecretBackend = platformLibsecretBackend()
+var activeKeyctlBackend keyctlBackend = platformKeyctlBackend()
 
 func IsRef(value string) bool {
 	return strings.HasPrefix(value, KeychainPrefix) ||
 		strings.HasPrefix(value, DPAPIPrefix) ||
-		strings.HasPrefix(value, LibsecretPrefix)
+		strings.HasPrefix(value, LibsecretPrefix) ||
+		strings.HasPrefix(value, KeyctlPrefix)
 }
 
 func ParseRef(value string) (Ref, error) {
@@ -82,6 +90,16 @@ func ParseRef(value string) (Ref, error) {
 			Service: service,
 			Account: account,
 		}, nil
+	case strings.HasPrefix(value, KeyctlPrefix):
+		service, account, err := parseServiceAccount(value, KeyctlPrefix)
+		if err != nil {
+			return Ref{}, fmt.Errorf("keyctl ref must be formatted keyctl:<service>/<account>")
+		}
+		return Ref{
+			Backend: "keyctl",
+			Service: service,
+			Account: account,
+		}, nil
 	default:
 		return Ref{}, fmt.Errorf("unsupported protected store ref %q", value)
 	}
@@ -109,6 +127,8 @@ func Open(value string) (Store, error) {
 		return DPAPIStore{Service: ref.Service, Account: ref.Account}, nil
 	case "libsecret":
 		return LibsecretStore{Service: ref.Service, Account: ref.Account}, nil
+	case "keyctl":
+		return KeyctlStore{Service: ref.Service, Account: ref.Account}, nil
 	default:
 		return nil, fmt.Errorf("unsupported protected store backend %q", ref.Backend)
 	}
@@ -171,6 +191,25 @@ func (s LibsecretStore) Save(content []byte) error {
 	return activeLibsecretBackend.Save(s.Service, s.Account, content)
 }
 
+type KeyctlStore struct {
+	Service string
+	Account string
+}
+
+func (s KeyctlStore) Load() ([]byte, bool, error) {
+	if s.Service == "" || s.Account == "" {
+		return nil, false, fmt.Errorf("keyctl service and account are required")
+	}
+	return activeKeyctlBackend.Load(s.Service, s.Account)
+}
+
+func (s KeyctlStore) Save(content []byte) error {
+	if s.Service == "" || s.Account == "" {
+		return fmt.Errorf("keyctl service and account are required")
+	}
+	return activeKeyctlBackend.Save(s.Service, s.Account, content)
+}
+
 func SetKeychainBackendForTest(next keychainBackend) func() {
 	previous := activeKeychainBackend
 	activeKeychainBackend = next
@@ -192,5 +231,13 @@ func SetLibsecretBackendForTest(next libsecretBackend) func() {
 	activeLibsecretBackend = next
 	return func() {
 		activeLibsecretBackend = previous
+	}
+}
+
+func SetKeyctlBackendForTest(next keyctlBackend) func() {
+	previous := activeKeyctlBackend
+	activeKeyctlBackend = next
+	return func() {
+		activeKeyctlBackend = previous
 	}
 }

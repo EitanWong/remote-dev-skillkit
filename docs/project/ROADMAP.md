@@ -131,7 +131,8 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Full production adapter SDK beyond the first runtime lifecycle runner, built-in hostrunner runtime fixture capture, and lifecycle/result/cancellation/runtime-fixture conformance.
 - Windows DPAPI protected-store references for managed host identity/trust persistence, preserving the same host fingerprint, trust sequence, rollback rejection, and host-bound update semantics as file-backed and macOS Keychain stores.
 - Linux libsecret protected-store references for managed host identity/trust persistence on hosts with `secret-tool` and a reachable Secret Service.
-- Linux keyctl or other non-Secret-Service protected stores beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, and file-backed paths.
+- Linux keyctl protected-store references for headless managed host identity/trust runtime storage on hosts with a user keyring; real reboot persistence/reconnect proof remains a separate acceptance gate.
+- Hardware-backed or fleet-managed protected stores beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, Linux keyctl, and file-backed paths.
 - Full production enrollment authority lifecycle beyond the local certificate and dev revocation-list distribution primitives, including hosted issuance, operator roles, renewal, authenticated hosted revocation refresh, and emergency drills.
 - ACP/acpx adapter MVP.
 - Artifact streaming.

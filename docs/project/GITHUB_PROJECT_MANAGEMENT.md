@@ -183,7 +183,7 @@ The current bootstrap script creates the following seed backlog.
 4. **Add OS-protected managed host identity and trust storage**
    - Labels: `area:host`, `area:policy`, `kind:security`, `priority:p1`
    - Acceptance:
-     - Keychain, DPAPI, and libsecret or documented fallback are supported;
+     - Keychain, DPAPI, libsecret, and keyctl or documented fallback are supported;
      - file-backed dev stores remain available for tests;
      - rollback and revocation checks still pass.
 

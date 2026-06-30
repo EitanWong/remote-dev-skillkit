@@ -154,6 +154,34 @@ func TestLoadOrCreateUsesLibsecretProtectedStoreRef(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateUsesKeyctlProtectedStoreRef(t *testing.T) {
+	backend := &identityMemoryKeyctlBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetKeyctlBackendForTest(backend)
+	defer restore()
+
+	ref := "keyctl:remote-dev-skillkit/managed-linux"
+	first, created, err := LoadOrCreate(ref, "host-keyctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected keyctl identity to be created")
+	}
+	second, created, err := LoadOrCreate(ref, "host-keyctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("expected keyctl identity to be reused")
+	}
+	if !second.PrivateKey.Equal(first.PrivateKey) {
+		t.Fatal("expected keyctl private key to be reused")
+	}
+	if _, _, err := LoadOrCreate(ref, "other-key"); err == nil {
+		t.Fatal("expected keyctl key id mismatch")
+	}
+}
+
 type identityMemoryKeychainBackend struct {
 	items map[string][]byte
 }
@@ -201,6 +229,23 @@ func (b *identityMemoryLibsecretBackend) Load(service, account string) ([]byte, 
 }
 
 func (b *identityMemoryLibsecretBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type identityMemoryKeyctlBackend struct {
+	items map[string][]byte
+}
+
+func (b *identityMemoryKeyctlBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *identityMemoryKeyctlBackend) Save(service, account string, content []byte) error {
 	b.items[service+"/"+account] = append([]byte(nil), content...)
 	return nil
 }

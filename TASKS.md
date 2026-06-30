@@ -135,6 +135,7 @@
 - [x] Add macOS Keychain protected-store references for managed host identity and trust persistence.
 - [x] Add Windows DPAPI protected-store references for managed host identity and trust persistence.
 - [x] Add Linux libsecret protected-store references for managed host identity and trust persistence.
+- [x] Add Linux keyctl protected-store references for headless managed host identity and trust runtime storage.
 - [x] Add macOS LaunchAgent plist generation for explicit managed host install.
 - [x] Add macOS LaunchAgent status inspection and safe plist uninstall.
 - [x] Add workspace lock manager and Git worktree preparation foundation.
@@ -175,7 +176,7 @@
 
 - [ ] Add WSS/mTLS transport.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
-- [ ] Add Linux keyctl or non-Secret-Service protected host identity/trust storage.
+- [ ] Add hardware-backed or fleet-managed protected host identity/trust storage beyond Keychain, DPAPI, libsecret, keyctl, and local files.
 - [ ] Add full production enrollment authority lifecycle beyond the local certificate and dev revocation-list distribution primitives: operator roles, hosted issuance API, certificate renewal, authenticated hosted revocation refresh, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
