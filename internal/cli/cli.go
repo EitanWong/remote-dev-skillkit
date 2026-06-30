@@ -390,6 +390,48 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			ReleaseRequiredArtifacts: splitCapabilities(*releaseRequiredArtifacts),
 			Force:                    *force,
 		})
+	case "linux-managed-service":
+		fs := flag.NewFlagSet("acceptance linux-managed-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "empty output directory for the Linux managed service acceptance plan")
+		binaryPath := fs.String("binary", "", "absolute Linux path to rdev on the target host")
+		gatewayURL := fs.String("gateway", "", "gateway URL for managed ticket enrollment")
+		ticketCode := fs.String("ticket-code", "", "managed enrollment ticket code")
+		manifestURL := fs.String("manifest-url", "", "signed managed enrollment manifest URL")
+		label := fs.String("label", service.DefaultLinuxSystemdUnitName, "systemd user unit name")
+		unitOut := fs.String("unit-out", "", "systemd user unit output path; defaults to <out>/<label>")
+		identityStore := fs.String("identity-store", "", "managed host identity store path")
+		trustStore := fs.String("trust-store", "", "managed host trust bundle store path")
+		nonceStore := fs.String("nonce-store", "", "managed host nonce store path")
+		approvalStore := fs.String("approval-store", "", "managed host approval store path")
+		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
+		logDir := fs.String("log-dir", "", "managed host log directory")
+		releaseBundle := fs.String("release-bundle", "", "signed release bundle path on the Linux host, verified by the managed host before registration")
+		releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle, formatted key_id:base64url_public_key")
+		releaseRequiredArtifacts := fs.String("release-require-artifacts", "rdev,rdev-host,rdev-verify", "comma-separated artifact ids required in --release-bundle")
+		force := fs.Bool("force", false, "overwrite generated unit if it already exists")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceLinuxManagedService(acceptance.LinuxManagedServiceOptions{
+			OutDir:                   *out,
+			BinaryPath:               *binaryPath,
+			GatewayURL:               *gatewayURL,
+			TicketCode:               *ticketCode,
+			ManifestURL:              *manifestURL,
+			UnitName:                 *label,
+			UnitOut:                  *unitOut,
+			IdentityStore:            *identityStore,
+			TrustStore:               *trustStore,
+			NonceStore:               *nonceStore,
+			ApprovalStore:            *approvalStore,
+			WorkspaceLockStore:       *workspaceLockStore,
+			LogDir:                   *logDir,
+			ReleaseBundle:            *releaseBundle,
+			ReleaseRootPublicKey:     *releaseRootPublicKey,
+			ReleaseRequiredArtifacts: splitCapabilities(*releaseRequiredArtifacts),
+			Force:                    *force,
+		})
 	case "verify":
 		fs := flag.NewFlagSet("acceptance verify", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -414,6 +456,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyWindowsManagedService(*plan)
+	case "verify-linux-managed-service":
+		fs := flag.NewFlagSet("acceptance verify-linux-managed-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "Linux managed service acceptance plan path, for example <out>/linux-managed-service-plan.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerifyLinuxManagedService(*plan)
 	case "package-windows-temporary":
 		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -542,6 +592,32 @@ func (a App) acceptanceWindowsManagedService(opts acceptance.WindowsManagedServi
 	return enc.Encode(payload)
 }
 
+func (a App) acceptanceLinuxManagedService(opts acceptance.LinuxManagedServiceOptions) error {
+	plan, err := acceptance.RunLinuxManagedServicePlan(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  allAcceptanceChecksPassed(plan.Checks),
+		"schema":              plan.SchemaVersion,
+		"out":                 plan.OutDir,
+		"plan":                filepath.Join(plan.OutDir, "linux-managed-service-plan.json"),
+		"unit":                plan.UnitPath,
+		"unit_name":           plan.Unit.UnitName,
+		"exec_start":          plan.Unit.ExecStart,
+		"restart":             plan.Unit.Restart,
+		"restart_sec":         plan.Unit.RestartSec,
+		"checks":              plan.Checks,
+		"commands":            plan.Commands,
+		"required_evidence":   plan.RequiredEvidence,
+		"recommended_actions": plan.RecommendedActions,
+		"note":                "unit and plan written only; no systemctl command was executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) acceptanceVerify(reportPath string) error {
 	verification, err := acceptance.VerifyManagedMacReport(reportPath)
 	if err != nil {
@@ -613,6 +689,30 @@ func (a App) acceptanceVerifyWindowsManagedService(planPath string) error {
 	}
 	if !verification.OK() {
 		return fmt.Errorf("windows managed service acceptance plan verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptanceVerifyLinuxManagedService(planPath string) error {
+	verification, err := acceptance.VerifyLinuxManagedServicePlan(planPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"plan":                verification.PlanPath,
+		"plan_schema":         verification.PlanSchema,
+		"checks":              verification.Checks,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("linux managed service acceptance plan verification failed")
 	}
 	return nil
 }
@@ -3823,9 +3923,11 @@ Usage:
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
   rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example/rdev-verify.exe --verifier-sha256 <sha256>
   rdev acceptance windows-managed-service --out windows-service-plan --binary 'C:\Program Files\rdev\rdev.exe' --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle 'C:\Program Files\rdev\release-bundle.json' --release-root-public-key release-root:... --release-require-artifacts rdev.exe,rdev-host.exe,rdev-verify.exe
+  rdev acceptance linux-managed-service --out linux-service-plan --binary /opt/rdev/rdev --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
   rdev acceptance verify --report acceptance-run/report.json
   rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
   rdev acceptance verify-windows-managed-service --plan windows-service-plan/windows-managed-service-plan.json
+  rdev acceptance verify-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...

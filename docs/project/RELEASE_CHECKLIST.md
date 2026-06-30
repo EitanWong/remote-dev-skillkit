@@ -34,6 +34,7 @@
 - [ ] Smoke `rdev host serve --release-bundle ... --release-root-public-key ...` before release publication.
 - [ ] Confirm generated managed LaunchAgent/systemd definitions and Windows Service command plans include the release bundle gate when managed hosts are in scope.
 - [ ] Generate and verify Windows managed-service acceptance plans with `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service` before any Windows Service support claim.
+- [ ] Generate and verify Linux managed-service acceptance plans with `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service` before any Linux systemd managed-service support claim.
 - [ ] Authenticode-sign Windows binaries and scripts.
 - [ ] Verify Windows Authenticode signatures in CI.
 - [ ] Confirm release key ids are active and not revoked.

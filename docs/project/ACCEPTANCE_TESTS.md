@@ -289,6 +289,69 @@ These commands generate and verify a plan only. They do not run PowerShell,
 - The service silently grants L3/L4 operations or external consequences.
 - Temporary-mode evidence is reused to claim managed Windows Service support.
 
+## Gate E: Managed Linux systemd User Service
+
+Purpose: prove that an owned or formally managed Linux host can run `rdev` as
+an explicit systemd user service without borrowing the attended-temporary
+contract.
+
+The local planning gate is:
+
+```bash
+rdev acceptance linux-managed-service \
+  --out .rdev/acceptance/linux-managed-service \
+  --binary /opt/rdev/rdev \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --release-bundle /opt/rdev/release-bundle.json \
+  --release-root-public-key release-root:... \
+  --release-require-artifacts rdev,rdev-host,rdev-verify
+
+rdev acceptance verify-linux-managed-service \
+  --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json
+```
+
+These commands generate and verify a plan only. They write a local reviewed
+unit file in the acceptance output directory, but they do not run `systemctl`,
+enable a service, start a service, stop a service, or remove a service.
+
+### Required Evidence
+
+- Verified `rdev.acceptance.linux-managed-service-plan.v1` output.
+- Written `0600` systemd user unit reviewed before execution.
+- `systemctl --user daemon-reload` transcript.
+- `systemctl --user enable --now <unit>` transcript.
+- `systemctl --user status <unit>` transcript after start.
+- `journalctl --user -u <unit>` service log excerpt.
+- Release-bundle startup gate output before host registration.
+- Gateway host registration, approval, trust refresh, and managed-host audit
+  events.
+- Reconnect evidence after logout or reboot, including any separately approved
+  linger/setup transcript if required.
+- Managed coding or repair evidence bundle with approval-required artifacts.
+- `systemctl --user disable --now <unit>` and uninstall transcript.
+
+### Pass Criteria
+
+- The unit runs `rdev host serve --mode managed --once=false`.
+- Identity, trust, nonce, approval, workspace-lock, and release-bundle gate
+  arguments are present.
+- The unit uses systemd user service scope, `Restart=on-failure`,
+  `NoNewPrivileges=true`, and `PrivateTmp=true`.
+- The host reconnects after the documented logout/reboot acceptance step and
+  rejects out-of-policy work locally.
+- Stop and uninstall are explicit, transcripted, and auditable.
+
+### Fail Criteria
+
+- The plan or transcript writes to `/etc/systemd/system`, requires unreviewed
+  `sudo`, weakens firewall policy, installs cron persistence, or changes login
+  linger policy without a separate approval transcript.
+- A Linux managed-service claim is made from a plan without real Linux host
+  start/status/reboot/reconnect/stop/uninstall transcripts.
+- The service silently grants L3/L4 operations or external consequences.
+- Temporary-mode evidence is reused to claim managed Linux systemd support.
+
 ## Current Automation Coverage
 
 The local test suite currently covers:
@@ -334,6 +397,7 @@ The local test suite currently covers:
 - macOS LaunchAgent plist generation through `rdev host install-service --platform macos`, including managed host arguments, `0600` plist permissions, and explicit launchctl next steps without auto-starting the service.
 - macOS LaunchAgent plist status and safe uninstall through `rdev host service-status` and `rdev host uninstall-service`, including label-mismatch refusal to avoid deleting unrelated plists.
 - Linux systemd user-unit generation through `rdev host install-service --platform linux`, including managed host arguments, `0600` unit permissions, basic hardening flags, explicit `systemctl --user` next steps, status inspection, dry-run service-control planning, unit mismatch refusal, and safe uninstall without auto-starting the service.
+- Linux managed-service acceptance planning and verification through `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, covering written `0600` systemd user units, managed args, hardening flags, release-bundle gate requirements, required evidence checklist, forbidden policy-weakening command rejection, missing-unit rejection, and no `systemctl` execution.
 - Windows Service managed-host planning through `rdev host install-service --platform windows`, including managed host arguments, release-bundle gate arguments, `start= demand`, reviewed `sc.exe create` / `description` command plans, dry-run status/control/uninstall command planning, explicit `service-control --execute` before invoking `sc.exe`, and no claim of real Windows Service acceptance yet.
 - Windows managed-service acceptance planning and verification through `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, covering reviewed `sc.exe` create/description/query/qc/start/stop/delete plans, managed args, `start= demand`, release-bundle gate requirements, required evidence checklist, forbidden policy-weakening command rejection, and no PowerShell or `sc.exe` execution.
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.

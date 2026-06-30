@@ -511,6 +511,29 @@ For macOS and Linux, `service-control` is a dry-run by default. It prints the
 planned `launchctl` or `systemctl --user` commands and requires `--execute`
 before invoking the OS service manager.
 
+For release-evidence planning, generate and verify a Linux managed-service
+acceptance plan before running the reviewed commands on a real Linux host:
+
+```bash
+rdev acceptance linux-managed-service \
+  --out .rdev/acceptance/linux-managed-service \
+  --binary /opt/rdev/rdev \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --release-bundle /opt/rdev/release-bundle.json \
+  --release-root-public-key release-root:... \
+  --release-require-artifacts rdev,rdev-host,rdev-verify
+
+rdev acceptance verify-linux-managed-service \
+  --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json
+```
+
+These acceptance commands write a reviewed systemd user unit and plan only.
+They do not execute `systemctl`, enable the unit, start it, stop it, or uninstall
+it. Real Linux managed support still requires a Linux host transcript proving
+start, status, release-gated registration, reconnect after logout or reboot,
+managed job evidence, stop, and uninstall.
+
 Windows uses reviewed `sc.exe` command plans:
 
 ```powershell
@@ -635,5 +658,5 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 - `--trust-store` is a file-backed development store. Production managed hosts should move this to OS-protected storage where available.
 - `--identity-store` is a file-backed development host identity store. Production managed hosts should move identity keys to OS-protected storage and add signed registration proofs.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
-- Linux systemd support currently writes and controls user units. Real managed Linux acceptance still needs reboot/reconnect evidence on a Linux host.
+- Linux systemd support currently writes and controls user units, and `rdev acceptance linux-managed-service` can verify a release-evidence plan. Real managed Linux acceptance still needs reboot/reconnect evidence on a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

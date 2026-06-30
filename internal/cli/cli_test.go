@@ -3674,6 +3674,128 @@ func TestAcceptanceVerifyWindowsManagedServicePlanRejectsTampering(t *testing.T)
 	}
 }
 
+func TestAcceptanceLinuxManagedServicePlan(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "linux-managed-service")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "linux-managed-service",
+		"--out", out,
+		"--binary", "/opt/rdev/rdev",
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--label", "rdev-host.service",
+		"--workspace-lock-store", "/var/lib/rdev/workspace-locks",
+		"--release-bundle", "/opt/rdev/release-bundle.json",
+		"--release-root-public-key", "release-root:abc123",
+		"--release-require-artifacts", "rdev,rdev-host,rdev-verify",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK       bool   `json:"ok"`
+		Schema   string `json:"schema"`
+		Plan     string `json:"plan"`
+		Unit     string `json:"unit"`
+		UnitName string `json:"unit_name"`
+		Commands []struct {
+			Name  string `json:"name"`
+			Shell string `json:"shell"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected linux managed service plan ok, got %s", stdout.String())
+	}
+	if payload.Schema != "rdev.acceptance.linux-managed-service-plan.v1" {
+		t.Fatalf("unexpected schema %q", payload.Schema)
+	}
+	if payload.UnitName != "rdev-host.service" {
+		t.Fatalf("unexpected unit name %#v", payload)
+	}
+	for _, path := range []string{payload.Plan, payload.Unit} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected generated path %s: %v", path, err)
+		}
+	}
+	output := stdout.String()
+	for _, expected := range []string{
+		"systemctl --user daemon-reload",
+		"systemctl --user enable --now rdev-host.service",
+		"systemctl --user disable --now rdev-host.service",
+		"verify-linux-managed-service",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected output containing %q, got %s", expected, output)
+		}
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"acceptance", "verify-linux-managed-service",
+		"--plan", payload.Plan,
+	}); err != nil {
+		t.Fatalf("expected verification to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected ok verification, got %s", verifyStdout.String())
+	}
+}
+
+func TestAcceptanceVerifyLinuxManagedServicePlanRejectsTampering(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "linux-managed-service")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "linux-managed-service",
+		"--out", out,
+		"--binary", "/opt/rdev/rdev",
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--release-bundle", "/opt/rdev/release-bundle.json",
+		"--release-root-public-key", "release-root:abc123",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	var planDoc map[string]any
+	if err := json.Unmarshal([]byte(readFileForTest(t, payload.Plan)), &planDoc); err != nil {
+		t.Fatal(err)
+	}
+	start, ok := planDoc["start"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected start object in plan")
+	}
+	start["commands"] = []any{[]any{"sudo", "systemctl", "enable", "--now", "remote-dev-skillkit-host.service"}}
+	tampered, err := json.MarshalIndent(planDoc, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(payload.Plan, append(tampered, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	err = verifyApp.Run(context.Background(), []string{
+		"acceptance", "verify-linux-managed-service",
+		"--plan", payload.Plan,
+	})
+	if err == nil {
+		t.Fatalf("expected tampered verification to fail: %s", verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": false`) || !strings.Contains(verifyStdout.String(), "systemctl_daemon_reload_present") {
+		t.Fatalf("expected structured tampered failure, got %s", verifyStdout.String())
+	}
+}
+
 func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
 	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")

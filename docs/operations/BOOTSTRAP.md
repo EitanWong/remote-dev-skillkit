@@ -54,6 +54,12 @@ Managed Windows Service onboarding is separate from temporary bootstrap. Use
 `rdev acceptance verify-windows-managed-service` to generate and check reviewed
 `sc.exe` command plans before any owned-host Windows Service acceptance run.
 
+Managed Linux systemd onboarding is also separate from temporary bootstrap. Use
+`rdev acceptance linux-managed-service` and
+`rdev acceptance verify-linux-managed-service` to generate and check a reviewed
+systemd user-unit plan before any owned-host Linux acceptance run. These
+commands write and verify the plan only; they do not run `systemctl`.
+
 The repository also includes release artifact signature primitives:
 
 ```bash
