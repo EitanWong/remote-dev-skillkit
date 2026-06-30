@@ -57,6 +57,32 @@ func TestParseDPAPIRefRejectsMissingAccount(t *testing.T) {
 	}
 }
 
+func TestParseLibsecretRef(t *testing.T) {
+	ref, err := ParseRef("libsecret:remote-dev-skillkit/managed-linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Backend != "libsecret" || ref.Service != "remote-dev-skillkit" || ref.Account != "managed-linux" {
+		t.Fatalf("unexpected ref: %#v", ref)
+	}
+}
+
+func TestParseLibsecretURLLikeRef(t *testing.T) {
+	ref, err := ParseRef("libsecret://remote-dev-skillkit/managed-linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Backend != "libsecret" || ref.Service != "remote-dev-skillkit" || ref.Account != "managed-linux" {
+		t.Fatalf("unexpected ref: %#v", ref)
+	}
+}
+
+func TestParseLibsecretRefRejectsMissingAccount(t *testing.T) {
+	if _, err := ParseRef("libsecret:remote-dev-skillkit"); err == nil {
+		t.Fatal("expected missing account to fail")
+	}
+}
+
 func TestKeychainStoreUsesBackend(t *testing.T) {
 	backend := &memoryKeychainBackend{items: map[string][]byte{}}
 	restore := SetKeychainBackendForTest(backend)
@@ -107,6 +133,31 @@ func TestDPAPIStoreUsesBackend(t *testing.T) {
 	}
 }
 
+func TestLibsecretStoreUsesBackend(t *testing.T) {
+	backend := &memoryLibsecretBackend{items: map[string][]byte{}}
+	restore := SetLibsecretBackendForTest(backend)
+	defer restore()
+
+	store, err := Open("libsecret:remote-dev-skillkit/managed-linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.Load(); err != nil || ok {
+		t.Fatalf("expected empty store, ok=%v err=%v", ok, err)
+	}
+	content := []byte("protected linux content")
+	if err := store.Save(content); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !bytes.Equal(loaded, content) {
+		t.Fatalf("unexpected loaded content ok=%v content=%q", ok, loaded)
+	}
+}
+
 type memoryKeychainBackend struct {
 	items map[string][]byte
 }
@@ -137,6 +188,23 @@ func (b *memoryDPAPIBackend) Load(service, account string) ([]byte, bool, error)
 }
 
 func (b *memoryDPAPIBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type memoryLibsecretBackend struct {
+	items map[string][]byte
+}
+
+func (b *memoryLibsecretBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *memoryLibsecretBackend) Save(service, account string, content []byte) error {
 	b.items[service+"/"+account] = append([]byte(nil), content...)
 	return nil
 }

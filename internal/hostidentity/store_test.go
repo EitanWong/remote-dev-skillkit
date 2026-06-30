@@ -126,6 +126,34 @@ func TestLoadOrCreateUsesDPAPIProtectedStoreRef(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateUsesLibsecretProtectedStoreRef(t *testing.T) {
+	backend := &identityMemoryLibsecretBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetLibsecretBackendForTest(backend)
+	defer restore()
+
+	ref := "libsecret:remote-dev-skillkit/managed-linux"
+	first, created, err := LoadOrCreate(ref, "host-libsecret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected libsecret identity to be created")
+	}
+	second, created, err := LoadOrCreate(ref, "host-libsecret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("expected libsecret identity to be reused")
+	}
+	if !second.PrivateKey.Equal(first.PrivateKey) {
+		t.Fatal("expected libsecret private key to be reused")
+	}
+	if _, _, err := LoadOrCreate(ref, "other-key"); err == nil {
+		t.Fatal("expected libsecret key id mismatch")
+	}
+}
+
 type identityMemoryKeychainBackend struct {
 	items map[string][]byte
 }
@@ -156,6 +184,23 @@ func (b *identityMemoryDPAPIBackend) Load(service, account string) ([]byte, bool
 }
 
 func (b *identityMemoryDPAPIBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type identityMemoryLibsecretBackend struct {
+	items map[string][]byte
+}
+
+func (b *identityMemoryLibsecretBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *identityMemoryLibsecretBackend) Save(service, account string, content []byte) error {
 	b.items[service+"/"+account] = append([]byte(nil), content...)
 	return nil
 }

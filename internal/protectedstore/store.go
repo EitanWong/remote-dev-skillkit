@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	KeychainPrefix = "keychain:"
-	DPAPIPrefix    = "dpapi:"
+	KeychainPrefix  = "keychain:"
+	DPAPIPrefix     = "dpapi:"
+	LibsecretPrefix = "libsecret:"
 )
 
 var ErrNotFound = errors.New("protected store item not found")
@@ -34,11 +35,19 @@ type dpapiBackend interface {
 	Save(service, account string, content []byte) error
 }
 
+type libsecretBackend interface {
+	Load(service, account string) ([]byte, bool, error)
+	Save(service, account string, content []byte) error
+}
+
 var activeKeychainBackend keychainBackend = platformKeychainBackend()
 var activeDPAPIBackend dpapiBackend = platformDPAPIBackend()
+var activeLibsecretBackend libsecretBackend = platformLibsecretBackend()
 
 func IsRef(value string) bool {
-	return strings.HasPrefix(value, KeychainPrefix) || strings.HasPrefix(value, DPAPIPrefix)
+	return strings.HasPrefix(value, KeychainPrefix) ||
+		strings.HasPrefix(value, DPAPIPrefix) ||
+		strings.HasPrefix(value, LibsecretPrefix)
 }
 
 func ParseRef(value string) (Ref, error) {
@@ -60,6 +69,16 @@ func ParseRef(value string) (Ref, error) {
 		}
 		return Ref{
 			Backend: "dpapi",
+			Service: service,
+			Account: account,
+		}, nil
+	case strings.HasPrefix(value, LibsecretPrefix):
+		service, account, err := parseServiceAccount(value, LibsecretPrefix)
+		if err != nil {
+			return Ref{}, fmt.Errorf("libsecret ref must be formatted libsecret:<service>/<account>")
+		}
+		return Ref{
+			Backend: "libsecret",
 			Service: service,
 			Account: account,
 		}, nil
@@ -88,6 +107,8 @@ func Open(value string) (Store, error) {
 		return KeychainStore{Service: ref.Service, Account: ref.Account}, nil
 	case "dpapi":
 		return DPAPIStore{Service: ref.Service, Account: ref.Account}, nil
+	case "libsecret":
+		return LibsecretStore{Service: ref.Service, Account: ref.Account}, nil
 	default:
 		return nil, fmt.Errorf("unsupported protected store backend %q", ref.Backend)
 	}
@@ -131,6 +152,25 @@ func (s DPAPIStore) Save(content []byte) error {
 	return activeDPAPIBackend.Save(s.Service, s.Account, content)
 }
 
+type LibsecretStore struct {
+	Service string
+	Account string
+}
+
+func (s LibsecretStore) Load() ([]byte, bool, error) {
+	if s.Service == "" || s.Account == "" {
+		return nil, false, fmt.Errorf("libsecret service and account are required")
+	}
+	return activeLibsecretBackend.Load(s.Service, s.Account)
+}
+
+func (s LibsecretStore) Save(content []byte) error {
+	if s.Service == "" || s.Account == "" {
+		return fmt.Errorf("libsecret service and account are required")
+	}
+	return activeLibsecretBackend.Save(s.Service, s.Account, content)
+}
+
 func SetKeychainBackendForTest(next keychainBackend) func() {
 	previous := activeKeychainBackend
 	activeKeychainBackend = next
@@ -144,5 +184,13 @@ func SetDPAPIBackendForTest(next dpapiBackend) func() {
 	activeDPAPIBackend = next
 	return func() {
 		activeDPAPIBackend = previous
+	}
+}
+
+func SetLibsecretBackendForTest(next libsecretBackend) func() {
+	previous := activeLibsecretBackend
+	activeLibsecretBackend = next
+	return func() {
+		activeLibsecretBackend = previous
 	}
 }
