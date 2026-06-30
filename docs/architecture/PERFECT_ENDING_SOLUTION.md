@@ -70,6 +70,24 @@ Only two edges may cross a network boundary by default: agent to gateway, and
 host to gateway or host-facing edge. Temporary hosts never expose inbound
 listeners.
 
+### Final Closure Contract
+
+The perfect ending is a closed operating contract, not a collection of useful
+remote-development tricks. Every supported capability must answer the same
+questions before it can ship:
+
+| Question | Required answer |
+|---|---|
+| Who asked? | an authenticated operator or agent client produced typed intent through Skillkit, MCP, or API |
+| Who governs? | the gateway performed policy dry-run, approval calculation, signing, lease, audit, and revocation |
+| Who decides local safety? | the host verified release trust, host identity, trust bundle, nonce, capability, workspace/session scope, approval tokens, and local policy before side effects |
+| Who executes? | exactly one adapter lifecycle ran inside a bounded workspace/session with cancellation, cleanup, redaction, and result schemas |
+| Who proves it? | verifiers can replay artifacts, checksums, audit chain, release bundle, acceptance package, and adapter conformance without trusting the agent narrative |
+| Who can stop it? | the operator and local host can cancel, revoke, expire, rotate, stop, or uninstall through documented paths |
+
+If any answer is unclear, the feature remains design-only or adapter-local. It
+does not become a supported kernel claim.
+
 ### Six Closure Loops
 
 The project is complete only when these loops are closed end to end:
@@ -138,6 +156,9 @@ The production gateway should use durable storage for tickets, hosts,
 capabilities, jobs, leases, approvals, artifacts, audit events, trust bundles,
 revocations, and release records. SQLite plus filesystem storage is acceptable
 for single-user and development deployments if the same logical model is kept.
+Development JSON snapshots may close the single-process restart loop, but they
+are not a production database, distributed lock manager, backup policy, or
+multi-node storage layer.
 
 Managed hosts should use OS-protected storage where available:
 

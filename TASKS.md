@@ -17,6 +17,7 @@
 - [x] Add foreground temporary host local loop.
 - [x] Add JSONL audit store.
 - [x] Add local HTTP development gateway.
+- [x] Add development gateway state snapshots for restart-safe tickets, hosts, jobs, artifacts, audit, and trust bundles.
 - [x] Add signed job envelope model.
 - [x] Add foreground temporary host local registration loop.
 - [x] Add local dev job polling and completion loop.

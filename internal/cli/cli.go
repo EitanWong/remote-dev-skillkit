@@ -2164,6 +2164,7 @@ func (a App) gateway(args []string) error {
 		dev := fs.Bool("dev", false, "run local development gateway")
 		addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 		auditLog := fs.String("audit-log", "", "optional JSONL audit log path")
+		statePath := fs.String("state", "", "optional development gateway JSON snapshot path; requires --signing-key")
 		signingKey := fs.String("signing-key", "", "optional persistent Ed25519 signing key file")
 		signingKeyID := fs.String("signing-key-id", signing.DefaultKeyID, "signing key id for new or existing signing key file")
 		manifestSigningKey := fs.String("manifest-signing-key", "", "optional Ed25519 key file for signing join manifests")
@@ -2174,7 +2175,7 @@ func (a App) gateway(args []string) error {
 		if !*dev {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
-		return a.gatewayServeDev(*addr, *auditLog, *signingKey, *signingKeyID, *manifestSigningKey, *manifestSigningKeyID)
+		return a.gatewayServeDev(*addr, *auditLog, *statePath, *signingKey, *signingKeyID, *manifestSigningKey, *manifestSigningKeyID)
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
 	}
@@ -2668,12 +2669,26 @@ func (a App) release(args []string) error {
 	}
 }
 
-func (a App) gatewayServeDev(addr, auditLog, signingKeyPath, signingKeyID, manifestSigningKeyPath, manifestSigningKeyID string) error {
+func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingKeyID, manifestSigningKeyPath, manifestSigningKeyID string) error {
+	if statePath != "" && signingKeyPath == "" {
+		return fmt.Errorf("gateway serve --state requires --signing-key so restored job envelopes keep the same trust root")
+	}
 	key, created, err := signing.LoadOrCreate(signingKeyPath, signingKeyID)
 	if err != nil {
 		return err
 	}
 	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
+	if statePath != "" {
+		snapshot, loaded, err := gw.LoadSnapshotIfExists(statePath)
+		if err != nil {
+			return err
+		}
+		if loaded {
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot loaded from %s tickets=%d hosts=%d jobs=%d audit=%d\n", statePath, len(snapshot.Tickets), len(snapshot.Hosts), len(snapshot.Jobs), len(snapshot.Audit))
+		} else {
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot will be created at %s\n", statePath)
+		}
+	}
 	if manifestSigningKeyPath != "" {
 		manifestKey, manifestCreated, err := signing.LoadOrCreate(manifestSigningKeyPath, manifestSigningKeyID)
 		if err != nil {
@@ -2691,7 +2706,7 @@ func (a App) gatewayServeDev(addr, auditLog, signingKeyPath, signingKeyID, manif
 		store := audit.NewJSONLStore(auditLog)
 		gw.WithAuditSink(&store)
 	}
-	server := httpapi.NewServer(gw)
+	server := httpapi.NewServerWithState(gw, statePath)
 	if signingKeyPath != "" {
 		action := "loaded"
 		if created {
@@ -3956,7 +3971,7 @@ Usage:
   rdev demo local
   rdev mcp tools
   rdev mcp serve
-  rdev gateway serve --dev --addr 127.0.0.1:8787
+  rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json
   rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/chain.json
   rdev audit verify --input .rdev/audit/chain.json
   rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence

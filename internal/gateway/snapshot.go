@@ -1,0 +1,286 @@
+package gateway
+
+import (
+	"crypto/ed25519"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+)
+
+const SnapshotSchemaVersion = "rdev.gateway-snapshot.v1"
+
+type Snapshot struct {
+	SchemaVersion string                      `json:"schema_version"`
+	GeneratedAt   time.Time                   `json:"generated_at"`
+	TrustBundle   model.SignedTrustBundle     `json:"trust_bundle"`
+	Tickets       []model.Ticket              `json:"tickets"`
+	Hosts         []model.Host                `json:"hosts"`
+	Jobs          []model.Job                 `json:"jobs"`
+	Artifacts     map[string][]model.Artifact `json:"artifacts"`
+	Audit         []model.AuditEvent          `json:"audit"`
+}
+
+func (g *MemoryGateway) Snapshot() Snapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return g.snapshotLocked(g.now())
+}
+
+func (g *MemoryGateway) SaveSnapshot(path string) (Snapshot, error) {
+	if strings.TrimSpace(path) == "" {
+		return Snapshot{}, fmt.Errorf("snapshot path is required")
+	}
+	snapshot := g.Snapshot()
+	content, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	content = append(content, '\n')
+	if err := writeSnapshotFile(path, content); err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (g *MemoryGateway) LoadSnapshot(path string) (Snapshot, error) {
+	if strings.TrimSpace(path) == "" {
+		return Snapshot{}, fmt.Errorf("snapshot path is required")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	var snapshot Snapshot
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		return Snapshot{}, err
+	}
+	if err := g.RestoreSnapshot(snapshot); err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (g *MemoryGateway) LoadSnapshotIfExists(path string) (Snapshot, bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return Snapshot{}, false, fmt.Errorf("snapshot path is required")
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return Snapshot{}, false, nil
+		}
+		return Snapshot{}, false, err
+	}
+	snapshot, err := g.LoadSnapshot(path)
+	return snapshot, true, err
+}
+
+func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
+	if err := g.validateSnapshot(snapshot); err != nil {
+		return err
+	}
+
+	tickets := make(map[string]model.Ticket, len(snapshot.Tickets))
+	codeIndex := make(map[string]string, len(snapshot.Tickets))
+	for _, ticket := range snapshot.Tickets {
+		tickets[ticket.ID] = ticket
+		codeIndex[ticket.Code] = ticket.ID
+	}
+	hosts := make(map[string]model.Host, len(snapshot.Hosts))
+	for _, host := range snapshot.Hosts {
+		hosts[host.ID] = host
+	}
+	jobs := make(map[string]model.Job, len(snapshot.Jobs))
+	for _, job := range snapshot.Jobs {
+		jobs[job.ID] = job
+	}
+	artifacts := make(map[string][]model.Artifact, len(snapshot.Artifacts))
+	for jobID, values := range snapshot.Artifacts {
+		artifacts[jobID] = append([]model.Artifact(nil), values...)
+	}
+	auditEvents := append([]model.AuditEvent(nil), snapshot.Audit...)
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.tickets = tickets
+	g.codeIndex = codeIndex
+	g.hosts = hosts
+	g.jobs = jobs
+	g.artifacts = artifacts
+	g.audit = auditEvents
+	g.trustBundle = snapshot.TrustBundle
+	return nil
+}
+
+func (g *MemoryGateway) snapshotLocked(now time.Time) Snapshot {
+	tickets := make([]model.Ticket, 0, len(g.tickets))
+	for _, ticket := range g.tickets {
+		ticket.Capabilities = append([]string(nil), ticket.Capabilities...)
+		tickets = append(tickets, ticket)
+	}
+	sort.Slice(tickets, func(i, j int) bool {
+		return tickets[i].CreatedAt.Before(tickets[j].CreatedAt)
+	})
+
+	hosts := make([]model.Host, 0, len(g.hosts))
+	for _, host := range g.hosts {
+		host.Capabilities = append([]string(nil), host.Capabilities...)
+		hosts = append(hosts, host)
+	}
+	sort.Slice(hosts, func(i, j int) bool {
+		return hosts[i].CreatedAt.Before(hosts[j].CreatedAt)
+	})
+
+	jobs := make([]model.Job, 0, len(g.jobs))
+	for _, job := range g.jobs {
+		jobs = append(jobs, job)
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
+	})
+
+	artifacts := make(map[string][]model.Artifact, len(g.artifacts))
+	for jobID, values := range g.artifacts {
+		copied := append([]model.Artifact(nil), values...)
+		sort.Slice(copied, func(i, j int) bool {
+			return copied[i].CreatedAt.Before(copied[j].CreatedAt)
+		})
+		artifacts[jobID] = copied
+	}
+
+	auditEvents := append([]model.AuditEvent(nil), g.audit...)
+	sort.Slice(auditEvents, func(i, j int) bool {
+		return auditEvents[i].Sequence < auditEvents[j].Sequence
+	})
+
+	return Snapshot{
+		SchemaVersion: SnapshotSchemaVersion,
+		GeneratedAt:   now.UTC(),
+		TrustBundle:   g.trustBundle,
+		Tickets:       tickets,
+		Hosts:         hosts,
+		Jobs:          jobs,
+		Artifacts:     artifacts,
+		Audit:         auditEvents,
+	}
+}
+
+func (g *MemoryGateway) validateSnapshot(snapshot Snapshot) error {
+	if snapshot.SchemaVersion != SnapshotSchemaVersion {
+		return fmt.Errorf("unsupported gateway snapshot schema %q", snapshot.SchemaVersion)
+	}
+	root, err := snapshot.TrustBundle.ActiveTrustBundle(g.signingID, g.now())
+	if err != nil {
+		return fmt.Errorf("snapshot trust bundle does not include active signing key %q: %w", g.signingID, err)
+	}
+	publicKey, err := root.Ed25519PublicKey()
+	if err != nil {
+		return err
+	}
+	if !ed25519.PublicKey(publicKey).Equal(g.publicKey) {
+		return fmt.Errorf("snapshot trust bundle public key does not match loaded gateway signing key")
+	}
+
+	ticketIDs := map[string]struct{}{}
+	ticketCodes := map[string]struct{}{}
+	for _, ticket := range snapshot.Tickets {
+		if ticket.ID == "" || ticket.Code == "" {
+			return fmt.Errorf("snapshot contains ticket with missing id or code")
+		}
+		if _, exists := ticketIDs[ticket.ID]; exists {
+			return fmt.Errorf("snapshot contains duplicate ticket id %q", ticket.ID)
+		}
+		if _, exists := ticketCodes[ticket.Code]; exists {
+			return fmt.Errorf("snapshot contains duplicate ticket code %q", ticket.Code)
+		}
+		ticketIDs[ticket.ID] = struct{}{}
+		ticketCodes[ticket.Code] = struct{}{}
+	}
+	hostIDs := map[string]struct{}{}
+	for _, host := range snapshot.Hosts {
+		if host.ID == "" {
+			return fmt.Errorf("snapshot contains host with missing id")
+		}
+		if _, exists := ticketIDs[host.TicketID]; !exists {
+			return fmt.Errorf("snapshot host %q references missing ticket %q", host.ID, host.TicketID)
+		}
+		if _, exists := hostIDs[host.ID]; exists {
+			return fmt.Errorf("snapshot contains duplicate host id %q", host.ID)
+		}
+		hostIDs[host.ID] = struct{}{}
+	}
+	jobIDs := map[string]struct{}{}
+	for _, job := range snapshot.Jobs {
+		if job.ID == "" {
+			return fmt.Errorf("snapshot contains job with missing id")
+		}
+		if _, exists := hostIDs[job.HostID]; !exists {
+			return fmt.Errorf("snapshot job %q references missing host %q", job.ID, job.HostID)
+		}
+		if _, exists := jobIDs[job.ID]; exists {
+			return fmt.Errorf("snapshot contains duplicate job id %q", job.ID)
+		}
+		jobIDs[job.ID] = struct{}{}
+	}
+	artifactIDs := map[string]struct{}{}
+	for jobID, artifacts := range snapshot.Artifacts {
+		if _, exists := jobIDs[jobID]; !exists {
+			return fmt.Errorf("snapshot artifacts reference missing job %q", jobID)
+		}
+		for _, artifact := range artifacts {
+			if artifact.ID == "" {
+				return fmt.Errorf("snapshot contains artifact with missing id")
+			}
+			if artifact.JobID != jobID {
+				return fmt.Errorf("snapshot artifact %q is stored under wrong job %q", artifact.ID, jobID)
+			}
+			if _, exists := artifactIDs[artifact.ID]; exists {
+				return fmt.Errorf("snapshot contains duplicate artifact id %q", artifact.ID)
+			}
+			artifactIDs[artifact.ID] = struct{}{}
+		}
+	}
+	for index, event := range snapshot.Audit {
+		if event.Sequence != index+1 {
+			return fmt.Errorf("snapshot audit sequence gap at index %d", index)
+		}
+	}
+	return nil
+}
+
+func writeSnapshotFile(path string, content []byte) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(abs)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".gateway-snapshot-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, abs)
+}

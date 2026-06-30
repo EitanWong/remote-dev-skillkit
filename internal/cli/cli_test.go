@@ -2155,6 +2155,24 @@ func TestGatewayServeRequiresDevFlag(t *testing.T) {
 	}
 }
 
+func TestGatewayServeStateRequiresSigningKey(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{
+		"gateway", "serve",
+		"--dev",
+		"--state", filepath.Join(t.TempDir(), "state.json"),
+	})
+	if err == nil {
+		t.Fatal("expected gateway serve --state without --signing-key to fail")
+	}
+	if !strings.Contains(err.Error(), "--state requires --signing-key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAuditExportAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	jsonlPath := filepath.Join(dir, "events.jsonl")

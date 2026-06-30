@@ -24,6 +24,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 ## v0.1.0 Local Safety Kernel
 
 - Local gateway process.
+- Development gateway state snapshot restore for tickets, hosts, jobs, artifacts, audit events, and trust bundles when started with a persistent signing key.
 - Local host process.
 - In-memory tickets, hosts, jobs, artifacts, and audit events.
 - MCP stdio server for tool calls.

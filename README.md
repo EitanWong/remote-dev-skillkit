@@ -57,6 +57,7 @@ Implemented now:
 - `rdev mcp tools` tool-contract listing, including `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_runtime`, and `rdev.adapter.verify_cancellation` for agent-side adapter conformance checks.
 - `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev gateway serve --dev` local HTTP development gateway.
+- Optional development gateway state snapshots through `rdev gateway serve --dev --signing-key ... --state ...`, preserving tickets, hosts, jobs, artifacts, audit events, and trust bundles across gateway restarts while keeping the same signing key.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
 - Local dev host registration, job polling, and job completion loop.
@@ -121,7 +122,7 @@ Implemented now:
 
 Not implemented yet:
 
-- Real gateway networking.
+- Production gateway networking, authentication, and storage beyond the development HTTP gateway and JSON snapshot path.
 - Production host enrollment certificates and registration proofs.
 - Production signing key storage beyond local key files.
 - Authenticated durable managed host trust distribution and OS-protected trust storage.
@@ -155,7 +156,7 @@ go run ./cmd/rdev policy explain-shell --policy-json '{"workspace_root":".","cap
 go run ./cmd/rdev demo local
 go run ./cmd/rdev mcp tools
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' | go run ./cmd/rdev mcp serve
-go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787
+go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json
 go run ./cmd/rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
 go run ./cmd/rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
 go run ./cmd/rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"

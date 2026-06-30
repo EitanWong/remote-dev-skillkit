@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
@@ -15,11 +16,17 @@ import (
 )
 
 type Server struct {
-	Gateway *gateway.MemoryGateway
+	Gateway   *gateway.MemoryGateway
+	StatePath string
+	stateMu   *sync.Mutex
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
-	return Server{Gateway: gw}
+	return Server{Gateway: gw, stateMu: &sync.Mutex{}}
+}
+
+func NewServerWithState(gw *gateway.MemoryGateway, statePath string) Server {
+	return Server{Gateway: gw, StatePath: statePath, stateMu: &sync.Mutex{}}
 }
 
 func (s Server) Handler() http.Handler {
@@ -67,6 +74,9 @@ func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !s.persistState(w) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": bundle})
 }
 
@@ -93,6 +103,9 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	ticket, err := s.Gateway.CreateTicket(req.Mode, req.TTLSeconds, req.Capabilities, req.Reason)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.persistState(w) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -133,6 +146,9 @@ func (s Server) registerHost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !s.persistState(w) {
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"host": host})
 }
 
@@ -158,6 +174,9 @@ func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if !s.persistState(w) {
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"host": host})
 	case "revoke":
 		var req struct {
@@ -172,6 +191,9 @@ func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
 		host, err := s.Gateway.RevokeHost(hostID, req.Reason)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if !s.persistState(w) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"host": host})
@@ -212,6 +234,9 @@ func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ok {
 			writeJSON(w, http.StatusOK, map[string]any{"job": nil})
+			return
+		}
+		if !s.persistState(w) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job})
@@ -269,6 +294,9 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 	job, err := s.Gateway.CreateJob(req.HostID, req.Adapter, req.Intent, req.Policy)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.persistState(w) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"job": job})
@@ -370,6 +398,9 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if !s.persistState(w) {
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
 	case "fail":
 		var req struct {
@@ -388,6 +419,9 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 		job, artifact, err := s.Gateway.FailJobForHostWithArtifact(req.HostID, jobID, req.Reason, req.ArtifactContent)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if !s.persistState(w) {
 			return
 		}
 		payload := map[string]any{"job": job}
@@ -413,6 +447,9 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if !s.persistState(w) {
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
 	default:
 		writeError(w, http.StatusNotFound, "unknown job action")
@@ -423,6 +460,21 @@ func (s Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": s.Gateway.AuditEvents(),
 	})
+}
+
+func (s Server) persistState(w http.ResponseWriter) bool {
+	if strings.TrimSpace(s.StatePath) == "" {
+		return true
+	}
+	if s.stateMu != nil {
+		s.stateMu.Lock()
+		defer s.stateMu.Unlock()
+	}
+	if _, err := s.Gateway.SaveSnapshot(s.StatePath); err != nil {
+		writeError(w, http.StatusInternalServerError, "persist gateway state: "+err.Error())
+		return false
+	}
+	return true
 }
 
 func parseLongPollWait(r *http.Request) (time.Duration, error) {

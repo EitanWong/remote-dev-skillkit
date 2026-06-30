@@ -535,6 +535,75 @@ func TestJobCreateClaimAndComplete(t *testing.T) {
 	}
 }
 
+func TestServerStateSnapshotPersistsGatewayMutations(t *testing.T) {
+	now := time.Date(2026, 6, 30, 18, 30, 0, 0, time.UTC)
+	publicKey, privateKey := httpTestKeyPair(t)
+	statePath := filepath.Join(t.TempDir(), "gateway", "state.json")
+	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
+	server := NewServerWithState(gw, statePath)
+	handler := server.Handler()
+	host := registerAndApproveHost(t, handler)
+
+	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"persistent demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
+	jobRec := httptest.NewRecorder()
+	handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+	var jobPayload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextRec := httptest.NewRecorder()
+	handler.ServeHTTP(nextRec, nextReq)
+	if nextRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
+	}
+
+	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"durable result"}`))
+	completeRec := httptest.NewRecorder()
+	handler.ServeHTTP(completeRec, completeReq)
+	if completeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", completeRec.Code, completeRec.Body.String())
+	}
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("expected state snapshot: %v", err)
+	}
+
+	restartedGateway := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
+	snapshot, err := restartedGateway.LoadSnapshot(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.SchemaVersion != gateway.SnapshotSchemaVersion {
+		t.Fatalf("unexpected snapshot schema %q", snapshot.SchemaVersion)
+	}
+	restartedJob, err := restartedGateway.Job(jobPayload.Job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restartedJob.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected persisted succeeded job, got %s", restartedJob.Status)
+	}
+	if restartedJob.Envelope == nil {
+		t.Fatal("expected persisted signed envelope")
+	}
+	if err := restartedJob.Envelope.VerifyForHost(publicKey, host.ID, now); err != nil {
+		t.Fatalf("expected persisted envelope to verify: %v", err)
+	}
+	if artifacts := restartedGateway.Artifacts(jobPayload.Job.ID); len(artifacts) != 1 || artifacts[0].Content != "durable result" {
+		t.Fatalf("expected persisted artifact, got %#v", artifacts)
+	}
+	if events := restartedGateway.AuditEvents(); len(events) == 0 || events[len(events)-1].Action != "job.complete" {
+		t.Fatalf("expected persisted job.complete audit event, got %#v", events)
+	}
+}
+
 func TestHostJobsNextLongPollWaitsForJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)

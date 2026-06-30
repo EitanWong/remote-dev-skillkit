@@ -11,6 +11,7 @@ rdev gateway serve \
   --dev \
   --addr 127.0.0.1:8787 \
   --audit-log .rdev/audit/events.jsonl \
+  --state .rdev/gateway/state.json \
   --signing-key .rdev/keys/gateway-signing-key.json \
   --manifest-signing-key .rdev/keys/manifest-root-key.json
 ```
@@ -21,6 +22,13 @@ When `--signing-key` is set, the dev gateway creates or reuses an Ed25519 signin
 rdev gateway signing key id=gateway-dev fingerprint=sha256:<hex>
 rdev gateway manifest root id=manifest-dev public_key=manifest-dev:<base64url_ed25519_public_key>
 ```
+
+When `--state` is set, the dev gateway writes `rdev.gateway-snapshot.v1` after
+successful state mutations and reloads it on restart. The snapshot preserves
+tickets, hosts, jobs, artifacts, audit events, and the signed trust bundle. It
+requires `--signing-key`; restoring a snapshot with a different signing key is
+rejected because old job envelopes and approval tokens must keep the same trust
+root.
 
 Hosts can pin that key during local development:
 
@@ -668,7 +676,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 
 ## Limitations
 
-- In-memory state.
+- In-memory state by default. `--state` adds a restart-safe development JSON snapshot, but it is not a production database, lock manager, backup policy, or multi-node storage layer.
 - No production WSS/mTLS host transport. Development HTTPS long-poll is available for local outbound-channel testing.
 - No authentication.
 - No production TLS.
@@ -676,7 +684,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
 - If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
-- `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode and are not durable across process restarts.
+- `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode. They are durable across process restarts only when `--state` is enabled with the matching persistent `--signing-key`.
 - `--trust-store` is a file-backed development store. Production managed hosts should move this to OS-protected storage where available.
 - `--identity-store` is a file-backed development host identity store. Production managed hosts should move identity keys to OS-protected storage and add signed registration proofs.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.

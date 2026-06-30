@@ -23,6 +23,37 @@ Every acceptance run must record:
 
 Secrets, host usernames, public IPs, and customer-specific paths must be redacted before evidence is shared outside the operator account.
 
+## Gate 0: Development Gateway Recovery Regression
+
+Purpose: prove the local development gateway can survive a restart without
+reissuing trust or losing already acknowledged tickets, hosts, jobs, artifacts,
+and audit events.
+
+### Steps
+
+1. Start `rdev gateway serve --dev` with both `--signing-key` and `--state`.
+2. Create a ticket, register and approve a host, create a signed job, claim it,
+   and complete it with an artifact.
+3. Stop the gateway.
+4. Restart the gateway with the same `--signing-key` and `--state`.
+5. Confirm the restored snapshot uses `rdev.gateway-snapshot.v1`.
+6. Confirm the restored job envelope still verifies against the same gateway
+   signing key and host id.
+7. Confirm artifacts and audit events are still present.
+8. Start the gateway with a different signing key against the same snapshot and
+   confirm restoration is rejected.
+
+### Pass Criteria
+
+- The snapshot file is written atomically with mode `0600` under a private
+  parent directory.
+- Restoration preserves tickets, hosts, jobs, artifacts, audit events, and the
+  signed trust bundle.
+- Restoration rejects schema mismatch, signing-key mismatch, duplicate ids,
+  broken references, and audit sequence gaps.
+- The gate is documented as development or single-user recovery only, not as
+  production gateway storage.
+
 ## Gate A: Temporary Windows Repair
 
 Purpose: prove that a third-party Windows machine can join from one visible command, run a bounded repair session, and leave no service behind.
