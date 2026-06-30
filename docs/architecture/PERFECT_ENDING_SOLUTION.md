@@ -18,13 +18,330 @@ Supporting documents have narrower jobs:
 This file defines the product, the open-source project, and Eitan's
 Hermes/Lucky deployment.
 
+## Definitive Perfect-Ending Blueprint - 2026-06-30
+
+This is the final decision layer. Everything below this section remains useful
+rationale, but this section is the acceptance rule for future work.
+
+Remote Dev Skillkit reaches the perfect ending when a human can safely delegate
+real work to an agent and a machine can safely accept that work without granting
+ambient control:
+
+```text
+operator intent
+  -> agent Skill/MCP plan
+  -> gateway policy dry-run
+  -> signed host-bound envelope
+  -> outbound host lease
+  -> host sovereignty validation
+  -> adapter lifecycle execution
+  -> evidence bundle and audit chain
+  -> review, approval, cancel, revoke, rotate, continue, or uninstall
+```
+
+The product is therefore a **permissioned agent-work operating layer**. It is
+not a remote administration product, a tunnel product, a coding CLI wrapper, a
+screen-sharing product, or a Hermes-only integration. Mature tools may be used
+as adapters. They must not become trust roots.
+
+### Architecture Axiom
+
+The system is correct only when each actor has one job and cannot silently take
+another actor's authority:
+
+| Actor | Owns | Must not own |
+|---|---|---|
+| Agent runtime | intent, planning, explanation, evidence review | standing host credentials, raw unrestricted shell, self-approval |
+| Skillkit/MCP | typed workflows, schema discovery, verifier entrypoints | hidden config mutation, persistence, deployment-specific authority |
+| Gateway | tickets, hosts, jobs, leases, policy dry-runs, signing, approvals, artifacts, audit, revocation | local host execution, host filesystem trust, release signing authority by default |
+| Host runtime | identity, trust bundle, nonce cache, local policy, workspace/session locks, adapter supervision, local stop | inventing authority, broadening approval, silent persistence in temporary mode |
+| Adapter | one bounded execution domain | approval, signing, persistence, transport authority, cross-adapter policy |
+| Proof layer | evidence bundles, audit chains, conformance reports, release and acceptance verification | narrative-only success claims |
+| Distribution layer | signed releases, release candidates, Skillkit bundles, install plans, bootstrap metadata | runtime job authorization |
+
+This separation is the design. A feature that collapses it belongs outside the
+core project until it can be wrapped behind the kernel.
+
+### Product Cut
+
+The open-source project ships five primary surfaces:
+
+1. `rdev`: operator CLI, local demos, diagnostics, service lifecycle, evidence
+   verification, release verification, and acceptance packaging.
+2. `rdev-gateway`: self-hosted control plane and MCP/API edge for tickets,
+   hosts, jobs, approvals, relay, artifacts, audit, revocation, and signing.
+3. `rdev-host`: attended temporary and explicit managed host runtime.
+4. Skillkit bundle: installable agent workflows and MCP schemas for Hermes,
+   Codex, Claude Code, OpenCode/OpenClaw, and generic MCP agents.
+5. Adapter SDK: conformance-tested extension path for shell, PowerShell, Codex,
+   Claude Code, ACP/acpx, GUI/browser, mesh, and workspace providers.
+
+Hermes/Lucky and Lunflux are the reference deployment, not the dependency
+boundary. A self-hosted user must be able to replace the domain, storage,
+gateway, agent runtime, and adapter set without replacing the safety model.
+
+### Reference Deployment
+
+Eitan's production slice is the canonical deployment example:
+
+```text
+Lucky on Hermes
+  -> Remote Dev Skillkit Skill/MCP tools
+  -> https://api.lunflux.com/v1
+  -> rdev-gateway
+  -> https://agent.lunflux.com
+  -> attended temporary hosts and explicitly managed owned hosts
+```
+
+`https://api.lunflux.com/v1` is the authenticated operator/agent API for typed
+jobs, policy planning, approvals, evidence, audit, and MCP-compatible access.
+`https://agent.lunflux.com` is the human and host-facing edge for join pages,
+release metadata, verified bootstrap downloads, and outbound relay. The two
+domains may share infrastructure early, but their responsibilities must remain
+separable.
+
+### Stable Protocol Spine
+
+Every feature must map to this small object family before it can become a
+supported capability:
+
+| Stage | Object | Authority | Required verifier or rejection |
+|---|---|---|---|
+| Distribution | `rdev.release-bundle.v1`, `rdev.release-candidate.v1`, `rdev.skillkit-manifest.v1` | release key and bundle checksums | unverified, incomplete, wrong-platform, or unlisted artifacts cannot execute or install |
+| Enrollment | `rdev.ticket.v1`, `rdev.join-manifest.v1`, `rdev.host-registration.v1`, `rdev.trust-bundle.v1` | operator ticket, host identity, trust root | expired, reused, revoked, wrong-root, stale, or rollback state cannot enroll or receive work |
+| Authorization | `rdev.job-envelope.v1`, `rdev.approval-token.v1` | gateway job key and approval key | tamper, replay, wrong-host, expiry, missing capability, missing approval, or token reuse denies execution |
+| Execution | `rdev.host-denial.v1`, `rdev.approval-required.v1`, adapter artifacts | host validator and adapter supervisor | unsafe work becomes structured denial or approval pause before side effects |
+| Proof | `rdev.evidence-bundle.v1`, `rdev.audit-chain.v1`, `rdev.acceptance-package.*.v1` | checksums, redaction, audit chain | incomplete checksums, missing audit, redaction gaps, or failed conformance block success claims |
+
+New transports, storage engines, user interfaces, and adapters may vary. Runtime
+authority must still flow through these objects.
+
+### Permission Lattice
+
+The final permission model is not maximum ambient access. It is maximum useful
+access that can be explicitly granted, locally validated, audited, and revoked.
+
+| Ring | Scope | Examples | Default decision |
+|---|---|---|---|
+| L0 observe | facts without mutation | capability inventory, logs, `git status` | allowed for approved host/workspace |
+| L1 workspace | bounded project mutation | edit, test, build, local generated files | workspace lock or prepared worktree required |
+| L2 repair | machine-local user repair | package repair, cache reset, process cleanup | scoped approval unless pre-granted by managed policy |
+| L3 privileged or visual | OS, service, GUI, elevation, screen/browser control | UAC/admin prompt, LaunchAgent/systemd/Windows Service, screenshots | fresh per-operation approval |
+| L4 external consequence | outside-host effects | push, merge, deploy, publish, paid action, credential change | approval after evidence review |
+
+Managed mode can remember a host and reconnect it. Managed mode cannot silently
+grant L3 or L4.
+
+### Mode Contracts
+
+Modes are separate products sharing one kernel:
+
+| Mode | User | Persistence | Contract |
+|---|---|---:|---|
+| `attended-temporary` | third-party or short-lived repair host | none | one visible command, outbound-only session, TTL, local stop, transcript, no service/autorun/firewall residue |
+| `managed` | Eitan-owned or formally managed host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, status/logs/start/stop/uninstall, no ambient L3/L4 authority |
+| `workspace-provider` | disposable cloud/devcontainer/workspace backend | provider lifecycle | create/use/destroy workspaces through signed jobs and provider evidence |
+| `break-glass` | emergency overlay | shorter than normal | narrower scope, shorter TTL, stronger approval, denser audit, no permanent policy weakening |
+
+Temporary mode must be easy enough for a non-technical person to run, while
+remaining visible and non-persistent. Managed mode may be durable, but it must
+remain inspectable, stoppable, uninstallable, and revocable.
+
+### Canonical State Machines
+
+Distribution:
+
+```text
+source tree -> build artifacts -> signed manifests -> signed release bundle
+  -> release candidate -> candidate verification -> platform release plan
+  -> post-release install verification -> bootstrap or Skillkit install
+```
+
+Enrollment:
+
+```text
+operator creates ticket -> user runs reviewed bootstrap/install
+  -> host generates identity -> host registers capabilities
+  -> operator approves host/capabilities -> active host lease eligibility
+  -> revoke, rotate, expire, uninstall, or re-enroll
+```
+
+Job execution:
+
+```text
+agent plan -> policy dry-run -> approval calculation
+  -> signed envelope -> host claim/lease -> host local validation
+  -> deny | approval-required | adapter run | cancel
+  -> result/cancellation/failure evidence -> audit-chain export
+  -> verifier ok -> completion claim
+```
+
+Adapter lifecycle:
+
+```text
+detect -> plan -> prepare -> run -> collect -> cleanup
+```
+
+Cleanup runs after any prepared state, including failure, timeout, cancellation,
+and restart recovery. Cleanup failure is evidence, not a hidden retry forever.
+
+### Host Sovereignty Kernel
+
+The host is the last safety boundary. It validates locally even when the gateway
+already signed a job:
+
+1. verify release/bootstrap inputs before execution;
+2. load host identity and current trust bundle;
+3. reject stale, rolled-back, wrong-root, retired, or revoked gateway keys;
+4. verify job signature, expiry, nonce, host id, host fingerprint, mode,
+   capabilities, limits, workspace/session scope, and approval tokens;
+5. acquire workspace/session lock before mutation;
+6. run the adapter with context cancellation, timeout, quota, output cap, and
+   redaction;
+7. collect result, denial, approval-required, cancellation, cleanup, and runtime
+   fixture evidence;
+8. spool evidence locally if the gateway is unavailable;
+9. honor local stop, cancel, revoke, rotate, status, and uninstall commands.
+
+The gateway may orchestrate. The host decides whether local execution is safe.
+
+### Adapter Contract
+
+Adapters are replaceable edges. Each adapter must declare capabilities,
+workspace behavior, external consequences, approval needs, cancellation support,
+cleanup behavior, result schema, redaction metadata, and verifier expectations
+before agents can use it.
+
+The correct adapter maturity path is:
+
+1. scaffold lifecycle manifest;
+2. implement `detect -> plan -> prepare -> run -> collect -> cleanup`;
+3. run through `adapterkit.RunLifecycle`;
+4. pass lifecycle, runtime, result, cancellation, redaction, cleanup, and denial
+   conformance;
+5. integrate into hostrunner only after the same envelope, capability, approval,
+   workspace, lock, cancellation, and evidence path is preserved.
+
+Shell, PowerShell, Codex, Claude Code, and ACP/acpx are reference adapters.
+GUI/browser, mesh, Coder, DevPod, and workspace providers are future adapters,
+not reasons to weaken the kernel.
+
+### Reliability Contract
+
+Reliability means failure paths are product paths:
+
+- job creation, lease, completion, cancellation, artifact upload, and audit
+  append are idempotent;
+- expired leases release work without claiming success;
+- cancel produces cancellation evidence when work had started;
+- offline managed hosts spool evidence and retry upload without rewriting
+  history;
+- temporary hosts do not auto-resurrect after TTL, local stop, or ticket revoke;
+- workspace locks survive process restart and are explicitly releasable;
+- trust rotation rejects rollback and revoked keys;
+- uninstall is tested as seriously as install.
+
+No release should claim support for a path that only has a plan. A supported
+path needs a verifier-backed transcript or acceptance package.
+
+### Security Contract
+
+No single credential should grant all powers:
+
+| Authority | Used for | Must not grant |
+|---|---|---|
+| release root key | release bundles, bootstrap verifier trust, install candidates | runtime job authorization |
+| gateway job key | host-bound job envelopes | release trust, host identity, or approval |
+| trust-bundle key | active gateway keys and revocations | adapter execution by itself |
+| approval key | one-use scoped exceptions | broad host access or future approvals |
+| host identity key | local machine identity and registration continuity | gateway authority |
+| audit hash/key state | tamper-evident event export | permission to act |
+
+This separation protects against prompt injection, compromised clients, buggy
+adapters, leaked release artifacts, and ordinary operator mistakes.
+
+### Golden Paths
+
+The project should optimize for four golden paths before broad secondary
+features:
+
+1. **Attended temporary Windows repair**: one visible verified PowerShell
+   command, release-bundle verification, outbound-only foreground host,
+   approval probes, revocation, and no service/scheduled task/Run key/startup
+   shortcut/firewall residue.
+2. **Managed owned-host development**: explicit service install, reconnect after
+   login/reboot, trust refresh, workspace lock/worktree, Codex/Claude/ACP job,
+   diff/test/log evidence, approval pauses, stop, and uninstall.
+3. **Third-party adapter authoring**: scaffold, lifecycle implementation,
+   runtime fixture, result/cancellation evidence, conformance, and hostrunner
+   integration without policy bypasses.
+4. **Self-hosted public install**: signed release artifacts, verified Skillkit,
+   framework install dry-run, no external mutation by default, and docs that do
+   not assume Hermes, Lunflux, GitHub, macOS, or Codex.
+
+### v1.0 Gate
+
+The public v1.0 release is allowed only when these proof packages exist and
+pass:
+
+| Gate | Required proof |
+|---|---|
+| local safety kernel | signed envelope tests, host-local denial tests, approval-token consumption, evidence bundle, audit-chain verification |
+| temporary Windows | clean Windows 10/11 one-command run, release verification, outbound-only foreground host, approval probes, revocation, no-persistence inspection |
+| managed Mac | LaunchAgent start/reconnect, locked-worktree Codex or Claude/ACP job, diff/test evidence, approval-required proof, stop and uninstall |
+| managed Linux | systemd user-unit install/start/reboot/reconnect/evidence spool/stop/uninstall transcript |
+| managed Windows | Windows Service plan, explicit elevated install, service status/start/stop/uninstall, release gate, reconnect evidence |
+| production trust | OS-protected host identity/trust stores, authenticated trust refresh, rollback rejection, revocation propagation |
+| transport | WSS/mTLS production channel with HTTPS long-poll fallback preserved |
+| adapter SDK | lifecycle, runtime, result, cancellation, cleanup, redaction, and secret-pattern conformance for built-ins and sample third-party adapters |
+| public release | signed release bundles, post-release download/install verification, Skillkit install verification, threat model, security policy, acceptance archive |
+
+### Definitive Close Order
+
+From the current repository state, the correct close order is:
+
+1. prove real clean Windows temporary acceptance on Windows 10/11;
+2. prove real service-backed managed Mac acceptance;
+3. prove real Linux systemd reboot/reconnect acceptance;
+4. finish Windows Service managed-mode planning and then real acceptance;
+5. replace file-backed managed trust/identity stores with OS-protected stores;
+6. add authenticated trust refresh, revocation propagation, and emergency
+   rotation drills;
+7. add WSS/mTLS while preserving HTTPS polling fallback;
+8. complete production Adapter SDK hostrunner integration for future adapters;
+9. add optional GUI/browser/mesh/Coder/DevPod/workspace-provider adapters;
+10. publish only after release, install, acceptance, security, and self-host
+    documentation match shipped behavior.
+
+This order is part of the architecture. It prevents broad adapter demos from
+outrunning distribution, enrollment, authorization, execution, proof, and
+recovery.
+
+### Merge Decision Rule
+
+A change is core-worthy only if every answer is yes:
+
+1. Does it keep agents on typed tools instead of standing host credentials?
+2. Does it preserve signed, host-bound, expiring authorization?
+3. Can the host reject the job locally if the gateway, transport, adapter, or
+   agent is wrong?
+4. Are capabilities, workspace/session boundary, limits, approvals, and
+   redaction explicit?
+5. Does it produce verifier-backed evidence and audit?
+6. Can the operator stop, cancel, revoke, rotate, uninstall, or audit it?
+7. Does temporary mode remain visible, foreground, outbound-only, TTL-bound, and
+   non-persistent?
+8. Does managed mode remain explicit, inspectable, stoppable, uninstallable, and
+   revocable?
+
+Any "no" means the feature is not part of the perfect ending yet.
+
 ## Operational Final Architecture - 2026-06-30
 
-This section is the final execution index. It turns the perfect-ending idea into
-the operating system for product, protocol, implementation, acceptance, and
-public release decisions. The rest of this document remains the detailed
-rationale; this section is the shortest path to the architecture that should be
-built.
+This historical section remains operational rationale under the Definitive
+Perfect-Ending Blueprint above. It turns the perfect-ending idea into an
+operating model for product, protocol, implementation, acceptance, and public
+release decisions.
 
 ### Final Product In One Sentence
 
@@ -289,10 +606,10 @@ is:
 
 That is the final product: the safest path is the easiest path.
 
-The **Final Architecture Closure** section below is the decision header. The
-dated layers that follow are retained as rationale and implementation detail,
-but future architecture changes should either preserve this closure or replace
-it with an explicit architecture decision.
+The **Definitive Perfect-Ending Blueprint** above is the single decision layer.
+The dated layers that follow are retained as rationale and implementation
+detail, but future architecture changes should either preserve that blueprint or
+replace it with an explicit architecture decision.
 
 The goal is not "remote control." The goal is safe, useful agent delegation to
 real machines.
