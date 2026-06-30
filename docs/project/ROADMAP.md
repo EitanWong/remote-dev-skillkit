@@ -32,6 +32,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Demonstrable local temporary session.
 - Development HTTPS long-poll host job transport.
 - Development gateway TLS/mTLS listener through `rdev gateway serve --dev --tls-cert --tls-key [--client-ca]`, requiring client certificates when a client CA is configured while preserving signed-envelope and host-local authorization semantics.
+- Host-side local dev gateway HTTPS/mTLS client support through `rdev host serve --gateway-ca [--gateway-client-cert --gateway-client-key]`, covering join manifests, registration, trust refresh, polling, completion, failure, and artifact appends over local HTTPS/mTLS.
 - Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, cooperative cancellation, output caps, and failure reporting.
 - Host identity storage wired into registration and job binding.
 - Durable host trust bundle store.
@@ -138,7 +139,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable hosted storage.
-- Production WSS transport with HTTPS polling fallback beyond the current dev TLS/mTLS listener.
+- Production WSS transport with HTTPS polling fallback beyond the current dev gateway TLS/mTLS client/listener path.
 
 Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, Windows Service has real install/start/reconnect/stop/uninstall acceptance evidence beyond dry-run plans, and a new adapter can be added without bypassing policy.
 

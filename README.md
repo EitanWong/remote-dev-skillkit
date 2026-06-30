@@ -59,9 +59,10 @@ Implemented now:
 - `rdev gateway serve --dev` local HTTP development gateway.
 - Optional development gateway state snapshots through `rdev gateway serve --dev --signing-key ... --state ...`, preserving tickets, hosts, jobs, artifacts, audit events, and trust bundles across gateway restarts while keeping the same signing key.
 - Optional development gateway TLS and mTLS listener through `rdev gateway serve --dev --tls-cert <server.pem> --tls-key <server-key.pem> [--client-ca <ca.pem>]`, requiring verified client certificates when `--client-ca` is set. This is a transport/authentication primitive for local and pre-production testing, not the full production WSS host channel.
+- Host-side dev gateway HTTPS/mTLS client support through `rdev host serve --gateway-ca <ca.pem> [--gateway-client-cert <client.pem> --gateway-client-key <client-key.pem>]` for local HTTPS registration, trust fetches, polling, completion, and join-manifest fetches. This closes the dev mTLS loop without changing the signed-envelope or host-local authorization model.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
-- Local dev host registration, job polling, and job completion loop.
+- Local dev host registration, job polling, and job completion loop over HTTP or local HTTPS.
 - Development HTTPS long-poll host job transport via `rdev host serve --transport long-poll`.
 - Development trust bundle endpoint for host-side envelope signature verification.
 - Host-bound trust bundle update checks for managed host trust-store refresh.
@@ -134,7 +135,7 @@ Not implemented yet:
 - Authenticated durable managed host trust distribution beyond the current development endpoints and local protected stores.
 - Full production bootstrap trust root lifecycle and release signing policy.
 - Platform-native code signing / Authenticode policy for Windows releases.
-- Production WSS host transport beyond the current HTTPS long-poll fallback and dev TLS/mTLS listener.
+- Production WSS host transport beyond the current HTTPS long-poll fallback and dev gateway TLS/mTLS client/listener path.
 - Production-grade shell adapter hardening beyond the development scoped executor.
 - Full production adapter SDK beyond the current lifecycle runner and lifecycle/result/cancellation/runtime-fixture conformance verifiers.
 - Hardware-backed or fleet-managed protected host identity/trust storage beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, Linux keyctl, and file-backed store paths.
@@ -219,6 +220,7 @@ go run ./cmd/rdev release create-bundle --dir dist/artifacts/windows-amd64 --art
 go run ./cmd/rdev release verify-bundle --bundle dist/artifacts/windows-amd64/release-bundle.json --root-public-key release-root:...
 go run ./cmd/rdev-verify --bundle dist/artifacts/windows-amd64/release-bundle.json --root-public-key release-root:... --require-artifacts rdev-host.exe,rdev-verify.exe
 go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --release-bundle dist/artifacts/darwin-arm64/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
+go run ./cmd/rdev host serve --mode temporary --gateway https://127.0.0.1:8787 --gateway-ca .rdev/tls/gateway-ca.pem --gateway-client-cert .rdev/tls/host-client.pem --gateway-client-key .rdev/tls/host-client-key.pem --ticket-code ABCD-1234
 go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-candidate-windows-amd64 --version v0.1.0 --artifacts dist/artifacts/windows-amd64/rdev.exe,dist/artifacts/windows-amd64/rdev-host.exe,dist/artifacts/windows-amd64/rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json --gateway-url https://api.example.com/v1
 go run ./cmd/rdev release verify-candidate --candidate dist/release-candidate-windows-amd64 --require-artifacts rdev-host.exe,rdev-verify.exe
 scripts/github/plan-release.sh --candidate dist/release-candidates/windows-amd64 --repo EitanWong/remote-dev-skillkit --require-artifacts rdev-host.exe,rdev-verify.exe

@@ -749,6 +749,117 @@ func TestHostServeRegistersWithLocalGateway(t *testing.T) {
 	}
 }
 
+func TestHostServeRegistersWithLocalMTLSGateway(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	material := writeGatewayTLSMaterial(t)
+	config, err := gatewayTLSConfig(gatewayServeOptions{
+		TLSCertPath:  material.ServerCert,
+		TLSKeyPath:   material.ServerKey,
+		ClientCAPath: material.CACert,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(httpapi.NewServer(gw).Handler())
+	server.TLS = config
+	server.StartTLS()
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--gateway-ca", material.CACert,
+		"--gateway-client-cert", material.ClientCert,
+		"--gateway-client-key", material.ClientKey,
+		"--ticket-code", ticket.Code,
+		"--name", "mtls-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Status string `json:"status"`
+		Host   struct {
+			Name string `json:"name"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid host serve output: %v\n%s", err, stdout.String())
+	}
+	if payload.Status != "registered-pending-approval" || payload.Host.Name != "mtls-host" {
+		t.Fatalf("unexpected registration payload: %s", stdout.String())
+	}
+	if len(gw.Hosts("")) != 1 {
+		t.Fatalf("expected one registered host, got %d", len(gw.Hosts("")))
+	}
+}
+
+func TestHostServeMTLSGatewayRejectsMissingClientCertificate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	material := writeGatewayTLSMaterial(t)
+	config, err := gatewayTLSConfig(gatewayServeOptions{
+		TLSCertPath:  material.ServerCert,
+		TLSKeyPath:   material.ServerKey,
+		ClientCAPath: material.CACert,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(httpapi.NewServer(gw).Handler())
+	server.TLS = config
+	server.StartTLS()
+	defer server.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--gateway-ca", material.CACert,
+		"--ticket-code", ticket.Code,
+		"--name", "missing-client-cert-host",
+	})
+	if err == nil {
+		t.Fatalf("expected mTLS registration without client certificate to fail, got output %s", stdout.String())
+	}
+	if strings.Contains(err.Error(), "local dev gateways only") {
+		t.Fatalf("https local gateway should pass the local dev URL gate: %v", err)
+	}
+	if len(gw.Hosts("")) != 0 {
+		t.Fatalf("expected no registered hosts after mTLS failure, got %d", len(gw.Hosts("")))
+	}
+}
+
+func TestHostServeRejectsNonLocalHTTPSGateway(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"host", "serve", "--mode", "temporary", "--gateway", "https://api.example.com/v1", "--ticket-code", "ABCD-1234"})
+	if err == nil {
+		t.Fatal("expected non-local gateway registration to fail")
+	}
+	if !strings.Contains(err.Error(), "local dev gateways only") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHostServeVerifiesReleaseBundleBeforeRegistration(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -1235,6 +1346,7 @@ func TestFetchJoinManifestRejectsWrongManifestRoot(t *testing.T) {
 
 	_, err = fetchJoinManifest(
 		context.Background(),
+		nil,
 		server.URL+"/v1/tickets/"+ticket.Code+"/manifest",
 		"",
 		encodeRootPublicKey("manifest-root", wrongPublicKey),
@@ -1253,7 +1365,7 @@ func TestFetchJoinManifestRejectsPinMismatch(t *testing.T) {
 	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
 	defer server.Close()
 
-	_, err = fetchJoinManifest(context.Background(), server.URL+"/v1/tickets/"+ticket.Code+"/manifest", "sha256:0000", "")
+	_, err = fetchJoinManifest(context.Background(), nil, server.URL+"/v1/tickets/"+ticket.Code+"/manifest", "sha256:0000", "")
 	if err == nil {
 		t.Fatal("expected trust pin mismatch")
 	}
@@ -1302,7 +1414,7 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, host.ID, "")
+	}, nil, host.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1322,6 +1434,81 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	}
 	if !strings.Contains(artifacts[0].Content, `"exit_code": 0`) {
 		t.Fatalf("expected shell execution evidence, got %s", artifacts[0].Content)
+	}
+}
+
+func TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "mtls-job-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	material := writeGatewayTLSMaterial(t)
+	config, err := gatewayTLSConfig(gatewayServeOptions{
+		TLSCertPath:  material.ServerCert,
+		TLSKeyPath:   material.ServerKey,
+		ClientCAPath: material.CACert,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(httpapi.NewServer(gw).Handler())
+	server.TLS = config
+	server.StartTLS()
+	defer server.Close()
+	client, err := gatewayHTTPClient(hostServeOptions{
+		GatewayCACertPath:     material.CACert,
+		GatewayClientCertPath: material.ClientCert,
+		GatewayClientKeyPath:  material.ClientKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:   server.URL,
+		PollInterval: 1,
+		MaxJobs:      1,
+	}, client, host.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
+	}
+	completed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected job succeeded, got %s", completed.Status)
 	}
 }
 
@@ -1366,7 +1553,7 @@ func TestHostServeCapturesRuntimeFixtureArtifact(t *testing.T) {
 		PollInterval:          1,
 		MaxJobs:               1,
 		CaptureRuntimeFixture: true,
-	}, host.ID, "")
+	}, nil, host.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1424,7 +1611,7 @@ func TestHostServeLongPollWaitsAndCompletesDevJob(t *testing.T) {
 			Transport:       "long-poll",
 			LongPollTimeout: time.Second,
 			MaxJobs:         1,
-		}, host.ID, "")
+		}, nil, host.ID, "")
 		if err != nil {
 			done <- err
 			return
@@ -1521,7 +1708,7 @@ func main() {
 			GatewayURL:   server.URL,
 			PollInterval: 50 * time.Millisecond,
 			MaxJobs:      1,
-		}, host.ID, "")
+		}, nil, host.ID, "")
 		done <- struct {
 			processed int
 			err       error
@@ -1590,7 +1777,7 @@ func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
 		PollInterval: 1,
 		MaxJobs:      1,
 		TrustPin:     "sha256:0000",
-	}, host.ID, "")
+	}, nil, host.ID, "")
 	if err == nil {
 		t.Fatal("expected trust pin mismatch")
 	}
@@ -1612,7 +1799,7 @@ func TestFetchHostTrustFallsBackToLegacyTrustEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	trust, err := fetchHostTrust(context.Background(), server.URL, "", "")
+	trust, err := fetchHostTrust(context.Background(), nil, server.URL, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1633,7 +1820,7 @@ func TestFetchHostTrustPersistsSignedBundle(t *testing.T) {
 	defer server.Close()
 	storePath := filepath.Join(t.TempDir(), "trust", "bundle.json")
 
-	trust, err := fetchHostTrust(context.Background(), server.URL, "", storePath)
+	trust, err := fetchHostTrust(context.Background(), nil, server.URL, "", storePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1655,7 +1842,7 @@ func TestFetchHostTrustPersistsSignedBundleToProtectedStore(t *testing.T) {
 	defer server.Close()
 	storeRef := "keychain:remote-dev-skillkit/cli-managed-trust"
 
-	trust, err := fetchHostTrust(context.Background(), server.URL, "", storeRef)
+	trust, err := fetchHostTrust(context.Background(), nil, server.URL, "", storeRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1686,7 +1873,7 @@ func TestFetchHostTrustUsesStoredBundleWhenGatewayTrustBundleUnavailable(t *test
 	}))
 	defer server.Close()
 
-	trust, err := fetchHostTrust(context.Background(), server.URL, "", storePath)
+	trust, err := fetchHostTrust(context.Background(), nil, server.URL, "", storePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1776,7 +1963,7 @@ func TestRefreshHostTrustUpdatePersistsGatewayUpdate(t *testing.T) {
 	defer server.Close()
 	current := hostTrust{SignedBundle: &first}
 
-	updated, err := refreshHostTrustUpdate(context.Background(), server.URL, host.ID, storePath, current)
+	updated, err := refreshHostTrustUpdate(context.Background(), nil, server.URL, host.ID, storePath, current)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2106,7 +2293,7 @@ func TestHostServeReportsFailedDevJob(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, host.ID, "")
+	}, nil, host.ID, "")
 	if err == nil {
 		t.Fatal("expected host runner failure")
 	}
@@ -2169,7 +2356,7 @@ func TestHostServeReportsHostDenialArtifact(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, host.ID, "")
+	}, nil, host.ID, "")
 	if err == nil {
 		t.Fatal("expected host runner denial")
 	}
@@ -2248,7 +2435,7 @@ func TestHostServeReportsWorkspaceLockedArtifact(t *testing.T) {
 		PollInterval:       1,
 		MaxJobs:            1,
 		WorkspaceLockStore: lockStore,
-	}, host.ID, "")
+	}, nil, host.ID, "")
 	if err == nil {
 		t.Fatal("expected workspace lock denial")
 	}
@@ -2312,7 +2499,7 @@ func TestHostServeReportsApprovalRequiredArtifact(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, host.ID, "")
+	}, nil, host.ID, "")
 	if err == nil {
 		t.Fatal("expected approval requirement")
 	}
@@ -2472,6 +2659,35 @@ func TestGatewayTLSConfigRequiresCompleteKeyPair(t *testing.T) {
 	_, err = gatewayTLSConfig(gatewayServeOptions{ClientCAPath: filepath.Join(t.TempDir(), "ca.pem")})
 	if err == nil || !strings.Contains(err.Error(), "--client-ca requires --tls-cert and --tls-key") {
 		t.Fatalf("expected client CA TLS requirement, got %v", err)
+	}
+}
+
+func TestGatewayHTTPClientRequiresCompleteClientKeyPair(t *testing.T) {
+	material := writeGatewayTLSMaterial(t)
+	_, err := gatewayHTTPClient(hostServeOptions{
+		GatewayCACertPath:     material.CACert,
+		GatewayClientCertPath: material.ClientCert,
+	})
+	if err == nil || !strings.Contains(err.Error(), "both --gateway-client-cert and --gateway-client-key") {
+		t.Fatalf("expected incomplete gateway client keypair error, got %v", err)
+	}
+	_, err = gatewayHTTPClient(hostServeOptions{
+		GatewayCACertPath:    material.CACert,
+		GatewayClientKeyPath: material.ClientKey,
+	})
+	if err == nil || !strings.Contains(err.Error(), "both --gateway-client-cert and --gateway-client-key") {
+		t.Fatalf("expected incomplete gateway client keypair error, got %v", err)
+	}
+}
+
+func TestGatewayHTTPClientRejectsInvalidCA(t *testing.T) {
+	caPath := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caPath, []byte("not a cert"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := gatewayHTTPClient(hostServeOptions{GatewayCACertPath: caPath})
+	if err == nil || !strings.Contains(err.Error(), "--gateway-ca does not contain a valid PEM certificate") {
+		t.Fatalf("expected invalid gateway CA error, got %v", err)
 	}
 }
 

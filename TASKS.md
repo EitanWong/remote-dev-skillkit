@@ -52,6 +52,7 @@
 - [x] Refresh GitHub project management with current milestones, seed backlog, dry-run bootstrap, and issue/PR templates.
 - [x] Add development HTTPS long-poll host job transport prototype.
 - [x] Add development gateway TLS/mTLS listener primitive with optional client certificate enforcement.
+- [x] Add host-side local dev gateway HTTPS/mTLS client flags for registration, trust fetches, polling, completion, and join-manifest fetches.
 - [x] Add portable agent Skillkit bundle export for mainstream frameworks.
 - [x] Add Skillkit bundle verification for mainstream framework installation.
 - [x] Add local release candidate packaging for open-source publication.
@@ -175,7 +176,7 @@
 
 ## Later
 
-- [ ] Add production WSS/mTLS host transport beyond the dev TLS/mTLS listener.
+- [ ] Add production WSS/mTLS host transport beyond the dev gateway TLS/mTLS client/listener path.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
 - [ ] Add hardware-backed or fleet-managed protected host identity/trust storage beyond Keychain, DPAPI, libsecret, keyctl, and local files.
 - [ ] Add full production enrollment authority lifecycle beyond the local certificate and dev revocation-list distribution primitives: operator roles, hosted issuance API, certificate renewal, authenticated hosted revocation refresh, and emergency drills.

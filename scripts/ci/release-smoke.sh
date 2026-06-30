@@ -10,6 +10,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+go test ./internal/cli \
+  -run 'TestGatewayDevMTLSHealthzRequiresClientCertificate|TestHostServeRegistersWithLocalMTLSGateway|TestHostServeMTLSGatewayRejectsMissingClientCertificate|TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway' \
+  -count=1 \
+  > "$work_dir/dev-mtls-host-smoke.txt"
+
 scripts/release/build-artifacts.sh \
   --out "$work_dir/artifacts" \
   --version "$version" \
@@ -205,6 +210,7 @@ print(json.dumps({
     "post_release_platforms": post_release_output["platform_count"],
     "skillkit_install_frameworks": skillkit_install_plan_output["framework_count"],
     "skillkit_install_executed": skillkit_install_execute["executed"],
+    "dev_mtls_host_smoke": True,
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))

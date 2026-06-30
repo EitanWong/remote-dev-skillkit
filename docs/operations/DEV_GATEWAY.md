@@ -30,6 +30,21 @@ rdev gateway serve \
 
 `--tls-cert` and `--tls-key` must be provided together. `--client-ca` requires both of them and changes the listener from server-authenticated HTTPS to mTLS by setting the gateway to require and verify client certificates. This does not replace signed job envelopes, enrollment certificates, host-local policy, or approval gates; transport authentication is not job authorization.
 
+Hosts can connect to the local HTTPS or mTLS gateway with an explicit gateway CA and, when the gateway was started with `--client-ca`, a client certificate/key pair:
+
+```bash
+rdev host serve \
+  --mode temporary \
+  --gateway https://127.0.0.1:8787 \
+  --gateway-ca .rdev/tls/gateway-ca.pem \
+  --gateway-client-cert .rdev/tls/host-client.pem \
+  --gateway-client-key .rdev/tls/host-client-key.pem \
+  --ticket-code ABCD-1234 \
+  --once=false
+```
+
+`--gateway-client-cert` and `--gateway-client-key` must be provided together. The host uses the same gateway HTTP client for join-manifest fetches, registration, host approval waits, trust-bundle fetches, trust-store refreshes, job polling, job cancellation checks, completion, failure, and artifact appends. `rdev host serve` still limits ticket-based registration to local dev gateways (`http://127.0.0.1:<port>`, `http://localhost:<port>`, `https://127.0.0.1:<port>`, or `https://localhost:<port>`); public production gateway registration remains a future transport/authentication surface.
+
 When `--signing-key` is set, the dev gateway creates or reuses an Ed25519 signing key file with `0600` permissions and prints its public-key fingerprint:
 
 ```text
@@ -57,6 +72,8 @@ rdev host serve \
   --trust-store .rdev/host/trust-bundle.json \
   --trust-pin sha256:<hex>
 ```
+
+For the same host path over local mTLS, switch the gateway URL to `https://127.0.0.1:<port>` and add `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`.
 
 Or they can consume the signed join manifest, which carries the ticket code, gateway URL, trust bundle and trust fingerprint:
 
@@ -836,9 +853,9 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 ## Limitations
 
 - In-memory state by default. `--state` adds a restart-safe development JSON snapshot, but it is not a production database, lock manager, backup policy, or multi-node storage layer.
-- No production WSS/mTLS host transport. Development HTTPS long-poll and the optional dev TLS/mTLS listener are available for local outbound-channel and certificate preflight testing.
+- No production WSS/mTLS host transport. Development HTTPS long-poll and the optional dev gateway TLS/mTLS client/listener path are available for local outbound-channel and certificate preflight testing.
 - No production application-layer authentication. Plain HTTP has no authentication; optional mTLS authenticates the client certificate at the transport layer only.
-- No production TLS lifecycle, ACME/cert rotation, public gateway auth, or WSS session protocol. The dev TLS/mTLS listener only loads local PEM files and enforces client certificates when `--client-ca` is configured.
+- No production TLS lifecycle, ACME/cert rotation, public gateway auth, or WSS session protocol. The dev TLS/mTLS path only loads local PEM files on the gateway and host, and the listener enforces client certificates when `--client-ca` is configured.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.

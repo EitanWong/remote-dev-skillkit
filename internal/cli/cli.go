@@ -1103,6 +1103,9 @@ func (a App) host(ctx context.Context, args []string) error {
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
 		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
 		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
+		gatewayCA := fs.String("gateway-ca", "", "optional PEM CA bundle for the gateway HTTPS certificate")
+		gatewayClientCert := fs.String("gateway-client-cert", "", "optional PEM client certificate for gateway mTLS")
+		gatewayClientKey := fs.String("gateway-client-key", "", "optional PEM client private key for gateway mTLS")
 		trustStore := fs.String("trust-store", "", "optional local signed trust bundle store path for managed hosts")
 		identityStore := fs.String("identity-store", "", "optional local host identity key store path")
 		identityKeyID := fs.String("identity-key-id", hostidentity.DefaultKeyID, "host identity key id")
@@ -1131,6 +1134,9 @@ func (a App) host(ctx context.Context, args []string) error {
 			MaxJobs:                   *maxJobs,
 			ApprovalTimeout:           *approvalTimeout,
 			TrustPin:                  *trustPin,
+			GatewayCACertPath:         *gatewayCA,
+			GatewayClientCertPath:     *gatewayClientCert,
+			GatewayClientKeyPath:      *gatewayClientKey,
 			TrustStorePath:            *trustStore,
 			IdentityStorePath:         *identityStore,
 			IdentityKeyID:             *identityKeyID,
@@ -1262,6 +1268,9 @@ type hostServeOptions struct {
 	MaxJobs                   int
 	ApprovalTimeout           time.Duration
 	TrustPin                  string
+	GatewayCACertPath         string
+	GatewayClientCertPath     string
+	GatewayClientKeyPath      string
 	TrustStorePath            string
 	IdentityStorePath         string
 	IdentityKeyID             string
@@ -1339,12 +1348,16 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	default:
 		return fmt.Errorf("unsupported host transport %q", opts.Transport)
 	}
+	gatewayClient, err := gatewayHTTPClient(opts)
+	if err != nil {
+		return err
+	}
 	releaseGate, err := verifyHostReleaseGate(opts)
 	if err != nil {
 		return err
 	}
 	if opts.ManifestURL != "" {
-		manifest, err := fetchJoinManifest(ctx, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
+		manifest, err := fetchJoinManifest(ctx, gatewayClient, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
 		if err != nil {
 			return err
 		}
@@ -1361,7 +1374,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		)
 		return err
 	}
-	if !strings.HasPrefix(opts.GatewayURL, "http://127.0.0.1:") && !strings.HasPrefix(opts.GatewayURL, "http://localhost:") {
+	if !isLocalDevGatewayURL(opts.GatewayURL) {
 		return fmt.Errorf("host registration currently supports local dev gateways only")
 	}
 	identity, identityCreated, err := hostidentity.LoadOrCreate(opts.IdentityStorePath, opts.IdentityKeyID)
@@ -1394,7 +1407,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		}
 		registration.EnrollmentCertificate = &certificate
 	}
-	host, err := registerHost(ctx, opts.GatewayURL, registration)
+	host, err := registerHost(ctx, gatewayClient, opts.GatewayURL, registration)
 	if err != nil {
 		return err
 	}
@@ -1430,10 +1443,10 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if opts.Once {
 		return enc.Encode(payload)
 	}
-	if _, err := waitForHostActive(ctx, opts.GatewayURL, host.ID, opts.ApprovalTimeout, opts.PollInterval); err != nil {
+	if _, err := waitForHostActive(ctx, gatewayClient, opts.GatewayURL, host.ID, opts.ApprovalTimeout, opts.PollInterval); err != nil {
 		return err
 	}
-	processed, err := a.pollAndRunDevJobs(ctx, opts, host.ID, identity.Fingerprint())
+	processed, err := a.pollAndRunDevJobs(ctx, opts, gatewayClient, host.ID, identity.Fingerprint())
 	if err != nil {
 		return err
 	}
@@ -1469,6 +1482,53 @@ func verifyHostReleaseGate(opts hostServeOptions) (*hostReleaseGateResult, error
 		VerifiedAt:        verification.GeneratedAt,
 		ArtifactCount:     len(verification.Artifacts),
 	}, nil
+}
+
+func gatewayHTTPClient(opts hostServeOptions) (*http.Client, error) {
+	if (opts.GatewayClientCertPath == "") != (opts.GatewayClientKeyPath == "") {
+		return nil, fmt.Errorf("host serve gateway mTLS requires both --gateway-client-cert and --gateway-client-key")
+	}
+	if opts.GatewayCACertPath == "" && opts.GatewayClientCertPath == "" {
+		return http.DefaultClient, nil
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if opts.GatewayCACertPath != "" {
+		content, err := os.ReadFile(opts.GatewayCACertPath)
+		if err != nil {
+			return nil, err
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(content) {
+			return nil, fmt.Errorf("host serve --gateway-ca does not contain a valid PEM certificate")
+		}
+		tlsConfig.RootCAs = pool
+	}
+	if opts.GatewayClientCertPath != "" {
+		certificate, err := tls.LoadX509KeyPair(opts.GatewayClientCertPath, opts.GatewayClientKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig.Certificates = []tls.Certificate{certificate}
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Transport: transport}, nil
+}
+
+func isLocalDevGatewayURL(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	switch parsed.Hostname() {
+	case "127.0.0.1", "localhost":
+		return parsed.Port() != ""
+	default:
+		return false
+	}
 }
 
 func (a App) hostInstallService(opts hostInstallServiceOptions) error {
@@ -4827,7 +4887,14 @@ func readArtifactsJSON(path string) ([]model.Artifact, error) {
 	return wrapped.Artifacts, nil
 }
 
-func registerHost(ctx context.Context, gatewayURL string, registration model.HostRegistration) (model.Host, error) {
+func doGatewayRequest(client *http.Client, req *http.Request) (*http.Response, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return client.Do(req)
+}
+
+func registerHost(ctx context.Context, client *http.Client, gatewayURL string, registration model.HostRegistration) (model.Host, error) {
 	body, err := json.Marshal(registration)
 	if err != nil {
 		return model.Host{}, err
@@ -4837,7 +4904,7 @@ func registerHost(ctx context.Context, gatewayURL string, registration model.Hos
 		return model.Host{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Host{}, err
 	}
@@ -4858,7 +4925,7 @@ func registerHost(ctx context.Context, gatewayURL string, registration model.Hos
 	return payload.Host, nil
 }
 
-func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostID, identityFingerprint string) (int, error) {
+func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
 	maxJobs := opts.MaxJobs
 	if maxJobs <= 0 {
 		maxJobs = 1
@@ -4883,7 +4950,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 	if longPollTimeout > 60*time.Second {
 		longPollTimeout = 60 * time.Second
 	}
-	trust, err := fetchHostTrust(ctx, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
+	trust, err := fetchHostTrust(ctx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
 	if err != nil {
 		return 0, err
 	}
@@ -4898,12 +4965,12 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 			wait = longPollTimeout
 		}
 		if opts.TrustStorePath != "" {
-			trust, err = refreshHostTrustUpdate(ctx, opts.GatewayURL, hostID, opts.TrustStorePath, trust)
+			trust, err = refreshHostTrustUpdate(ctx, client, opts.GatewayURL, hostID, opts.TrustStorePath, trust)
 			if err != nil {
 				return processed, err
 			}
 		}
-		job, found, err := fetchNextJob(ctx, opts.GatewayURL, hostID, wait)
+		job, found, err := fetchNextJob(ctx, client, opts.GatewayURL, hostID, wait)
 		if err != nil {
 			return processed, err
 		}
@@ -4926,7 +4993,7 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		monitorDone := make(chan struct{})
 		go func() {
 			defer close(monitorDone)
-			monitorJobCancellation(monitorCtx, opts.GatewayURL, job.ID, cancellationPollInterval(interval), func() {
+			monitorJobCancellation(monitorCtx, client, opts.GatewayURL, job.ID, cancellationPollInterval(interval), func() {
 				canceledByGateway.Store(true)
 				cancelJob()
 			})
@@ -4938,12 +5005,12 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 		if err != nil {
 			if canceledByGateway.Load() {
 				if result.ArtifactContent != "" {
-					if _, appendErr := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); appendErr != nil {
+					if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); appendErr != nil {
 						return processed, appendErr
 					}
 				}
 				if result.RuntimeFixtureContent != "" {
-					if _, appendErr := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
+					if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
 						return processed, appendErr
 					}
 				}
@@ -4953,21 +5020,21 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, hostI
 			if ctx.Err() != nil {
 				return processed, ctx.Err()
 			}
-			if _, failErr := failJob(ctx, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
+			if _, failErr := failJob(ctx, client, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
 				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
 			}
 			if result.RuntimeFixtureContent != "" {
-				if _, appendErr := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
+				if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
 					return processed, fmt.Errorf("%v; additionally failed to append runtime fixture: %w", err, appendErr)
 				}
 			}
 			return processed, err
 		}
-		if _, err := completeJob(ctx, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); err != nil {
+		if _, err := completeJob(ctx, client, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); err != nil {
 			return processed, err
 		}
 		if result.RuntimeFixtureContent != "" {
-			if _, err := appendJobArtifact(ctx, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); err != nil {
+			if _, err := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); err != nil {
 				return processed, err
 			}
 		}
@@ -4989,7 +5056,7 @@ func cancellationPollInterval(interval time.Duration) time.Duration {
 	return interval
 }
 
-func monitorJobCancellation(ctx context.Context, gatewayURL, jobID string, interval time.Duration, cancel func()) {
+func monitorJobCancellation(ctx context.Context, client *http.Client, gatewayURL, jobID string, interval time.Duration, cancel func()) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -4997,7 +5064,7 @@ func monitorJobCancellation(ctx context.Context, gatewayURL, jobID string, inter
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			job, err := fetchJob(ctx, gatewayURL, jobID)
+			job, err := fetchJob(ctx, client, gatewayURL, jobID)
 			if err != nil {
 				continue
 			}
@@ -5009,12 +5076,12 @@ func monitorJobCancellation(ctx context.Context, gatewayURL, jobID string, inter
 	}
 }
 
-func fetchJoinManifest(ctx context.Context, manifestURL, trustPin, manifestRootPublicKey string) (model.JoinManifest, error) {
+func fetchJoinManifest(ctx context.Context, client *http.Client, manifestURL, trustPin, manifestRootPublicKey string) (model.JoinManifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
 		return model.JoinManifest{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.JoinManifest{}, err
 	}
@@ -5075,12 +5142,12 @@ func (t hostTrust) RunDevJob(ctx context.Context, hostID, identityFingerprint st
 	return hostrunner.Result{}, fmt.Errorf("host trust is not configured")
 }
 
-func fetchHostTrust(ctx context.Context, gatewayURL, trustPin, trustStorePath string) (hostTrust, error) {
+func fetchHostTrust(ctx context.Context, client *http.Client, gatewayURL, trustPin, trustStorePath string) (hostTrust, error) {
 	store, err := hosttrust.OpenStore(trustStorePath)
 	if err != nil {
 		return hostTrust{}, err
 	}
-	signed, err := fetchSignedTrustBundle(ctx, gatewayURL, trustPin)
+	signed, err := fetchSignedTrustBundle(ctx, client, gatewayURL, trustPin)
 	if err == nil {
 		if trustStorePath != "" {
 			root, rootErr := activeSigningRoot(signed)
@@ -5098,14 +5165,14 @@ func fetchHostTrust(ctx context.Context, gatewayURL, trustPin, trustStorePath st
 	} else if ok {
 		return hostTrust{SignedBundle: &stored}, nil
 	}
-	legacy, legacyErr := fetchTrustBundle(ctx, gatewayURL, trustPin)
+	legacy, legacyErr := fetchTrustBundle(ctx, client, gatewayURL, trustPin)
 	if legacyErr != nil {
 		return hostTrust{}, fmt.Errorf("fetch signed trust bundle failed: %v; fallback legacy trust failed: %w", err, legacyErr)
 	}
 	return hostTrust{Legacy: &legacy}, nil
 }
 
-func refreshHostTrustUpdate(ctx context.Context, gatewayURL, hostID, trustStorePath string, current hostTrust) (hostTrust, error) {
+func refreshHostTrustUpdate(ctx context.Context, client *http.Client, gatewayURL, hostID, trustStorePath string, current hostTrust) (hostTrust, error) {
 	store, err := hosttrust.OpenStore(trustStorePath)
 	if err != nil {
 		return hostTrust{}, err
@@ -5121,7 +5188,7 @@ func refreshHostTrustUpdate(ctx context.Context, gatewayURL, hostID, trustStoreP
 	if err != nil {
 		return hostTrust{}, err
 	}
-	update, err := fetchTrustBundleUpdate(ctx, gatewayURL, hostID, stored.Sequence, hash)
+	update, err := fetchTrustBundleUpdate(ctx, client, gatewayURL, hostID, stored.Sequence, hash)
 	if err != nil {
 		return hostTrust{}, err
 	}
@@ -5179,12 +5246,12 @@ func parseRootPublicKey(value string) (model.TrustBundle, error) {
 	return trustref.Parse(value)
 }
 
-func fetchSignedTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.SignedTrustBundle, error) {
+func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL, trustPin string) (model.SignedTrustBundle, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/trust-bundle", nil)
 	if err != nil {
 		return model.SignedTrustBundle{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.SignedTrustBundle{}, err
 	}
@@ -5248,7 +5315,7 @@ func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey s
 	return payload.Revocations, root, nil
 }
 
-func fetchTrustBundleUpdate(ctx context.Context, gatewayURL, hostID string, currentSequence int, currentHash string) (model.TrustBundleUpdate, error) {
+func fetchTrustBundleUpdate(ctx context.Context, client *http.Client, gatewayURL, hostID string, currentSequence int, currentHash string) (model.TrustBundleUpdate, error) {
 	values := url.Values{}
 	values.Set("current_sequence", strconv.Itoa(currentSequence))
 	if currentHash != "" {
@@ -5259,7 +5326,7 @@ func fetchTrustBundleUpdate(ctx context.Context, gatewayURL, hostID string, curr
 	if err != nil {
 		return model.TrustBundleUpdate{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.TrustBundleUpdate{}, err
 	}
@@ -5283,12 +5350,12 @@ func fetchTrustBundleUpdate(ctx context.Context, gatewayURL, hostID string, curr
 	return payload.TrustBundleUpdate, nil
 }
 
-func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.TrustBundle, error) {
+func fetchTrustBundle(ctx context.Context, client *http.Client, gatewayURL, trustPin string) (model.TrustBundle, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/trust", nil)
 	if err != nil {
 		return model.TrustBundle{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.TrustBundle{}, err
 	}
@@ -5315,7 +5382,7 @@ func fetchTrustBundle(ctx context.Context, gatewayURL, trustPin string) (model.T
 	return payload.Trust, nil
 }
 
-func fetchNextJob(ctx context.Context, gatewayURL, hostID string, wait time.Duration) (model.Job, bool, error) {
+func fetchNextJob(ctx context.Context, client *http.Client, gatewayURL, hostID string, wait time.Duration) (model.Job, bool, error) {
 	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/hosts/" + url.PathEscape(hostID) + "/jobs/next"
 	if wait > 0 {
 		waitMS := wait.Milliseconds()
@@ -5330,7 +5397,7 @@ func fetchNextJob(ctx context.Context, gatewayURL, hostID string, wait time.Dura
 	if err != nil {
 		return model.Job{}, false, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, false, err
 	}
@@ -5354,7 +5421,7 @@ func fetchNextJob(ctx context.Context, gatewayURL, hostID string, wait time.Dura
 	return *payload.Job, true, nil
 }
 
-func waitForHostActive(ctx context.Context, gatewayURL, hostID string, timeout, interval time.Duration) (model.Host, error) {
+func waitForHostActive(ctx context.Context, client *http.Client, gatewayURL, hostID string, timeout, interval time.Duration) (model.Host, error) {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -5363,7 +5430,7 @@ func waitForHostActive(ctx context.Context, gatewayURL, hostID string, timeout, 
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		host, err := fetchHost(ctx, gatewayURL, hostID)
+		host, err := fetchHost(ctx, client, gatewayURL, hostID)
 		if err != nil {
 			return model.Host{}, err
 		}
@@ -5386,12 +5453,12 @@ func waitForHostActive(ctx context.Context, gatewayURL, hostID string, timeout, 
 	}
 }
 
-func fetchHost(ctx context.Context, gatewayURL, hostID string) (model.Host, error) {
+func fetchHost(ctx context.Context, client *http.Client, gatewayURL, hostID string) (model.Host, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/hosts/"+hostID, nil)
 	if err != nil {
 		return model.Host{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Host{}, err
 	}
@@ -5413,7 +5480,7 @@ func fetchHost(ctx context.Context, gatewayURL, hostID string) (model.Host, erro
 }
 
 func fetchEvidenceInput(ctx context.Context, gatewayURL, jobID string) (evidence.Input, error) {
-	job, err := fetchJob(ctx, gatewayURL, jobID)
+	job, err := fetchJob(ctx, nil, gatewayURL, jobID)
 	if err != nil {
 		return evidence.Input{}, err
 	}
@@ -5433,12 +5500,12 @@ func fetchEvidenceInput(ctx context.Context, gatewayURL, jobID string) (evidence
 	}, nil
 }
 
-func fetchJob(ctx context.Context, gatewayURL, jobID string) (model.Job, error) {
+func fetchJob(ctx context.Context, client *http.Client, gatewayURL, jobID string) (model.Job, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/jobs/"+url.PathEscape(jobID), nil)
 	if err != nil {
 		return model.Job{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, err
 	}
@@ -5511,7 +5578,7 @@ func fetchAuditEvents(ctx context.Context, gatewayURL string) ([]model.AuditEven
 	return payload.Events, nil
 }
 
-func completeJob(ctx context.Context, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
+func completeJob(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
 	body, err := json.Marshal(map[string]string{
 		"host_id":          hostID,
 		"artifact_content": artifactContent,
@@ -5524,7 +5591,7 @@ func completeJob(ctx context.Context, gatewayURL, hostID, jobID, artifactContent
 		return model.Job{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, err
 	}
@@ -5545,7 +5612,7 @@ func completeJob(ctx context.Context, gatewayURL, hostID, jobID, artifactContent
 	return payload.Job, nil
 }
 
-func failJob(ctx context.Context, gatewayURL, hostID, jobID, reason, artifactContent string) (model.Job, error) {
+func failJob(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID, reason, artifactContent string) (model.Job, error) {
 	body, err := json.Marshal(map[string]string{
 		"host_id":          hostID,
 		"reason":           reason,
@@ -5559,7 +5626,7 @@ func failJob(ctx context.Context, gatewayURL, hostID, jobID, reason, artifactCon
 		return model.Job{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, err
 	}
@@ -5580,7 +5647,7 @@ func failJob(ctx context.Context, gatewayURL, hostID, jobID, reason, artifactCon
 	return payload.Job, nil
 }
 
-func appendJobArtifact(ctx context.Context, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
+func appendJobArtifact(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
 	body, err := json.Marshal(map[string]string{
 		"host_id":          hostID,
 		"artifact_content": artifactContent,
@@ -5593,7 +5660,7 @@ func appendJobArtifact(ctx context.Context, gatewayURL, hostID, jobID, artifactC
 		return model.Job{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, err
 	}

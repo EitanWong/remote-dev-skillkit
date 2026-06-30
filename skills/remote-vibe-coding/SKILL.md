@@ -16,6 +16,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Lock a workspace before starting a coding job.
 - Use a branch or worktree for code changes.
 - Prefer hosts started with `--workspace-lock-store` for coding jobs.
+- For local/pre-production HTTPS or mTLS gateway drills, start the dev gateway with `--tls-cert --tls-key [--client-ca]` and start hosts with `--gateway-ca` plus `--gateway-client-cert --gateway-client-key` when client certificates are required; treat this only as transport authentication, not job authorization or production WSS readiness.
 - Treat Codex, Claude Code, ACP, shell, and PowerShell as adapters behind the signed-job/evidence/approval contract.
 - Before trusting a managed or temporary host registration that includes an enrollment certificate, verify it with MCP tool `rdev.enrollment.verify_certificate` or CLI `rdev enrollment verify-certificate`; when a gateway exposes signed revocations, fetch them with `rdev enrollment fetch-revocations --root-public-key ...` and include `revocations_json` / `revocations_artifact_id` or `--revocations`. Certificate and revocation verification are read-only and never grant host access by themselves.
 - For Codex MVP jobs, require `codex.run` and `git.diff`, use a locked workspace/worktree, and expect `rdev.codex-result.v1` artifacts with Git status, diff/stat, and verification command evidence.
