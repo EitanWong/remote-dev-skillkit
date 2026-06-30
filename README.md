@@ -72,7 +72,7 @@ Implemented now:
 - Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
 - Local evidence bundle export via `rdev evidence export`.
 - Gateway-backed evidence bundle export from a job id via `rdev evidence export --gateway ... --job-id ...`.
-- Skillkit bundle export and verification via `rdev skillkit export` / `rdev skillkit verify` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
+- Skillkit bundle export, verification, install-plan generation, and install-plan verification via `rdev skillkit export`, `rdev skillkit verify`, `rdev skillkit plan-install`, and `rdev skillkit verify-install-plan` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Managed Mac coding acceptance harness via `rdev acceptance managed-mac`, producing a report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification via `rdev acceptance verify --report ...`, including evidence manifest checksums, artifact index validation, audit-chain verification, approval-gate evidence, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning via `rdev acceptance managed-mac-service`, producing a checked plist, service plan, launchctl commands, service-backed acceptance commands, and uninstall steps without auto-starting launchd.
@@ -159,6 +159,8 @@ go run ./cmd/rdev evidence export --job-json job.json --artifacts-json artifacts
 go run ./cmd/rdev evidence export --gateway http://127.0.0.1:8787 --job-id job_... --out job_evidence
 go run ./cmd/rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
 go run ./cmd/rdev skillkit verify --bundle dist/remote-dev-skillkit
+go run ./cmd/rdev skillkit plan-install --bundle dist/remote-dev-skillkit --out dist/skillkit-install --frameworks codex,hermes,generic-mcp-agent
+go run ./cmd/rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 go run ./cmd/rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json --force
 go run ./cmd/rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
 go run ./cmd/rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code

@@ -108,6 +108,154 @@ func TestVerifyAcceptsExportedBundle(t *testing.T) {
 	}
 }
 
+func TestPlanInstallGeneratesVerifiableFrameworkScripts(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	if _, err := Export(ExportOptions{
+		SourceRoot:  filepath.Join("..", ".."),
+		OutDir:      bundle,
+		GatewayURL:  "https://api.example.com/v1",
+		GeneratedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "install-plan")
+
+	plan, err := PlanInstall(InstallPlanOptions{
+		BundleDir:   bundle,
+		OutDir:      out,
+		Frameworks:  []string{"codex", "hermes", "generic"},
+		RdevCommand: "rdev-test",
+		GeneratedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if plan.SchemaVersion != InstallPlanSchemaVersion {
+		t.Fatalf("unexpected schema %q", plan.SchemaVersion)
+	}
+	if plan.ExternalMutation {
+		t.Fatal("install planning must not mutate external state")
+	}
+	for _, framework := range []string{"codex", "hermes", "generic-mcp-agent"} {
+		if !hasFrameworkInstallPlan(plan, framework) {
+			t.Fatalf("missing framework install plan %q: %#v", framework, plan.Frameworks)
+		}
+	}
+	codexScript := readFile(t, filepath.Join(out, "install-codex.sh"))
+	if !strings.Contains(codexScript, "skillkit verify --bundle") || !strings.Contains(codexScript, "RDEV_SKILLKIT_FORCE") {
+		t.Fatalf("codex script should verify and refuse overwrite by default:\n%s", codexScript)
+	}
+	genericScript := readFile(t, filepath.Join(out, "install-generic-mcp-agent.sh"))
+	if !strings.Contains(genericScript, "Set RDEV_GENERIC_AGENT_SKILLS_DIR") {
+		t.Fatalf("generic script should require explicit target env:\n%s", genericScript)
+	}
+
+	report, err := VerifyInstallPlan(filepath.Join(out, "install-plan.json"), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK() {
+		t.Fatalf("expected install plan to verify: %#v", report.Checks)
+	}
+	if report.SchemaVersion != InstallPlanVerificationSchemaVersion {
+		t.Fatalf("unexpected verification schema %q", report.SchemaVersion)
+	}
+	if report.FilesVerified == 0 || report.FrameworksVerified != 3 {
+		t.Fatalf("unexpected verification counts: files=%d frameworks=%d", report.FilesVerified, report.FrameworksVerified)
+	}
+}
+
+func TestVerifyInstallPlanRejectsTamperedScript(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "install-plan")
+	if _, err := PlanInstall(InstallPlanOptions{
+		BundleDir:  bundle,
+		OutDir:     out,
+		Frameworks: []string{"codex"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(out, "install-codex.sh")
+	if err := os.WriteFile(scriptPath, []byte(readFile(t, scriptPath)+"\nrm -rf \"$HOME\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := VerifyInstallPlan(filepath.Join(out, "install-plan.json"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK() {
+		t.Fatalf("expected tampered install plan to fail")
+	}
+	if !checkDetailContains(report.Checks, "listed_files_sha256_match", "install-codex.sh") {
+		t.Fatalf("expected sha256 failure for tampered script: %#v", report.Checks)
+	}
+	if !checkDetailContains(report.Checks, "install_scripts_no_forbidden_mutation", "install-codex.sh:rm -rf") {
+		t.Fatalf("expected forbidden mutation failure: %#v", report.Checks)
+	}
+}
+
+func TestVerifyInstallPlanRejectsUnlistedFile(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "install-plan")
+	if _, err := PlanInstall(InstallPlanOptions{
+		BundleDir:  bundle,
+		OutDir:     out,
+		Frameworks: []string{"codex"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "surprise.ps1"), []byte("Write-Output surprise\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := VerifyInstallPlan(filepath.Join(out, "install-plan.json"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK() {
+		t.Fatal("expected unlisted install plan file verification to fail")
+	}
+	if !checkDetailContains(report.Checks, "install_plan_has_no_unlisted_files", "surprise.ps1") {
+		t.Fatalf("expected unlisted file failure: %#v", report.Checks)
+	}
+}
+
+func TestPlanInstallRejectsUnsupportedFramework(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := PlanInstall(InstallPlanOptions{
+		BundleDir:  bundle,
+		OutDir:     filepath.Join(t.TempDir(), "install-plan"),
+		Frameworks: []string{"unsupported-agent"},
+	})
+	if err == nil {
+		t.Fatal("expected unsupported framework to fail")
+	}
+	if !strings.Contains(err.Error(), "unsupported framework") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestVerifyRejectsTamperedBundleFile(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "bundle")
 	if _, err := Export(ExportOptions{
@@ -169,6 +317,15 @@ func hasSkill(manifest Manifest, name string) bool {
 func hasFile(manifest Manifest, path string) bool {
 	for _, file := range manifest.Files {
 		if file.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFrameworkInstallPlan(plan InstallPlan, framework string) bool {
+	for _, item := range plan.Frameworks {
+		if item.Framework == framework {
 			return true
 		}
 	}

@@ -44,6 +44,28 @@ scripts/github/verify-post-release-install-plan.sh \
   --plan "$post_release_dir/post-release-install-plan.json" \
   > "$work_dir/post-release-verification.json"
 
+first_skillkit_dir="$(python3 - "$platform_candidates_dir/platform-candidates.json" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+candidates = manifest.get("candidates") or []
+if not candidates:
+    raise SystemExit("no platform candidates")
+print(pathlib.Path(candidates[0]["candidate_dir"]) / "skillkit")
+PY
+)"
+skillkit_install_dir="$work_dir/skillkit-install-plan"
+go run ./cmd/rdev skillkit plan-install \
+  --bundle "$first_skillkit_dir" \
+  --out "$skillkit_install_dir" \
+  --frameworks codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent \
+  > "$work_dir/skillkit-install-plan-output.json"
+go run ./cmd/rdev skillkit verify-install-plan \
+  --plan "$skillkit_install_dir/install-plan.json" \
+  > "$work_dir/skillkit-install-plan-verification.json"
+
 cp -R "$post_release_dir" "$work_dir/post-release-install-tampered"
 printf '\nNew-Service rdev\n' >> "$work_dir/post-release-install-tampered/verify-windows-amd64.ps1"
 if scripts/github/verify-post-release-install-plan.sh \
@@ -68,6 +90,8 @@ post_release_output = json.loads((root / "post-release-output.json").read_text()
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
 post_release_tampered = json.loads((root / "post-release-tampered-verification.json").read_text())
+skillkit_install_plan_output = json.loads((root / "skillkit-install-plan-output.json").read_text())
+skillkit_install_plan_verification = json.loads((root / "skillkit-install-plan-verification.json").read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
 assert build["ok"] is True, build
@@ -112,6 +136,14 @@ assert post_release_tampered["schema_version"] == "rdev.post-release-install-ver
 assert post_release_tampered["ok"] is False, post_release_tampered
 assert any(check["name"].endswith("script_matches_commands") for check in post_release_tampered["failed_checks"]), post_release_tampered
 assert any(check["name"].endswith("script_no_forbidden_side_effects") for check in post_release_tampered["failed_checks"]), post_release_tampered
+assert skillkit_install_plan_output["schema"] == "rdev.skillkit-install-plan.v1", skillkit_install_plan_output
+assert skillkit_install_plan_output["ok"] is True, skillkit_install_plan_output
+assert skillkit_install_plan_output["external_mutation"] is False, skillkit_install_plan_output
+assert skillkit_install_plan_output["framework_count"] == 6, skillkit_install_plan_output
+assert skillkit_install_plan_verification["schema"] == "rdev.skillkit-install-plan-verification.v1", skillkit_install_plan_verification
+assert skillkit_install_plan_verification["ok"] is True, skillkit_install_plan_verification
+assert skillkit_install_plan_verification["bundle_verify_ok"] is True, skillkit_install_plan_verification
+assert skillkit_install_plan_verification["frameworks_verified"] == 6, skillkit_install_plan_verification
 
 print(json.dumps({
     "ok": True,
@@ -122,8 +154,11 @@ print(json.dumps({
     "plan_schema": plan["schema_version"],
     "post_release_schema": post_release_plan["schema_version"],
     "post_release_verification_schema": post_release_verification["schema_version"],
+    "skillkit_install_plan_schema": skillkit_install_plan_output["schema"],
+    "skillkit_install_plan_verification_schema": skillkit_install_plan_verification["schema"],
     "planned_platforms": plan_output["platform_count"],
     "post_release_platforms": post_release_output["platform_count"],
+    "skillkit_install_frameworks": skillkit_install_plan_output["framework_count"],
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))

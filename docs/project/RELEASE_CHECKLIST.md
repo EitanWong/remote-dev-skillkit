@@ -14,6 +14,7 @@
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.
 - [ ] Export and verify the Skillkit bundle with `rdev skillkit export` and `rdev skillkit verify`.
+- [ ] Generate and verify a framework install plan with `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`; archive `rdev.skillkit-install-plan.v1`, `rdev.skillkit-install-plan-verification.v1`, `INSTALL_COMMANDS.md`, and generated scripts.
 - [ ] Prepare and verify per-platform candidates with `scripts/release/prepare-platform-candidates.sh`.
 - [ ] Review `rdev.platform-release-candidates.v1`.
 - [ ] Generate and review a multi-platform GitHub Release dry-run plan with `scripts/github/plan-platform-release.sh`.

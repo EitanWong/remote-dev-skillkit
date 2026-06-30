@@ -12,6 +12,14 @@ rdev skillkit export \
 
 rdev skillkit verify \
   --bundle dist/remote-dev-skillkit
+
+rdev skillkit plan-install \
+  --bundle dist/remote-dev-skillkit \
+  --out dist/skillkit-install \
+  --frameworks codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent
+
+rdev skillkit verify-install-plan \
+  --plan dist/skillkit-install/install-plan.json
 ```
 
 The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
@@ -27,18 +35,34 @@ manifest schema, required skills, required framework notes, safe relative paths,
 listed file SHA-256/size, and absence of unlisted bundle files. Do not install a
 bundle into any agent runtime until verification returns `ok=true`.
 
+`rdev skillkit plan-install` adds a second, reviewable layer for mainstream
+agent runtimes. It writes `rdev.skillkit-install-plan.v1`, `INSTALL_COMMANDS.md`,
+and per-framework shell/PowerShell scripts. The command does not modify Codex,
+Claude Code, Hermes, OpenClaw, OpenCode, generic MCP agents, or user home
+configuration by itself. Generated scripts verify the bundle before copying,
+refuse to overwrite existing skill directories unless `RDEV_SKILLKIT_FORCE=1`
+is set, and leave MCP configuration as an explicit review step with
+`rdev mcp serve`.
+
+`rdev skillkit verify-install-plan` emits
+`rdev.skillkit-install-plan-verification.v1` and checks the plan schema, bundle
+verification, listed script SHA-256/size, required scripts, no forbidden
+external mutation, bundle-verification calls, and absence of unlisted files in
+the install-plan directory. Treat `ok=false` as installation-blocking.
+
 ## Generic Agent Runtime
 
 1. Install or build the `rdev` binary.
 2. Verify the exported or downloaded bundle with `rdev skillkit verify --bundle <bundle-dir>`.
-3. Copy `skills/*` into the agent runtime's skill or instruction directory.
-4. Configure MCP stdio with `rdev mcp serve`, or configure MCP HTTP/API against the deployed gateway.
-5. Keep these skills installed together:
+3. Generate and verify an install plan with `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
+4. Run only the reviewed script for the target runtime. Generic MCP agents must set `RDEV_GENERIC_AGENT_SKILLS_DIR` explicitly.
+5. Configure MCP stdio with `rdev mcp serve`, or configure MCP HTTP/API against the deployed gateway.
+6. Keep these skills installed together:
    - `safe-remote-support`;
    - `host-triage`;
    - `remote-vibe-coding`;
    - `remote-job-review`.
-6. Require the agent to export or read a `rdev.evidence-bundle.v1` bundle before claiming remote work is complete.
+7. Require the agent to export or read a `rdev.evidence-bundle.v1` bundle before claiming remote work is complete.
 
 ## Framework Notes
 
@@ -61,7 +85,7 @@ An agent runtime is compatible only if it preserves the safety contract:
 
 ## Current Limits
 
-The generated bundle is a packaging surface for the current local/dev implementation. Production hosted install still needs:
+The generated bundle and install plan are packaging surfaces for the current local/dev implementation. Production hosted install still needs:
 
 - authenticated MCP HTTP;
 - production gateway storage;

@@ -15,7 +15,7 @@ import (
 
 const ManifestSchemaVersion = "rdev.skillkit-bundle.v1"
 
-var DefaultFrameworks = []string{"codex", "claude-code", "hermes", "openclaw", "opencode"}
+var DefaultFrameworks = []string{"codex", "claude-code", "hermes", "openclaw", "opencode", "generic-mcp-agent"}
 
 type ExportOptions struct {
 	SourceRoot  string

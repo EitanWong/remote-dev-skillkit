@@ -2191,6 +2191,59 @@ func TestSkillkitVerifyChecksInstallBundle(t *testing.T) {
 	}
 }
 
+func TestSkillkitPlanInstallAndVerifyInstallPlan(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "skillkit")
+	exportApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := exportApp.Run(context.Background(), []string{
+		"skillkit", "export",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", bundle,
+		"--gateway-url", "https://api.example.com/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	planDir := filepath.Join(t.TempDir(), "install-plan")
+	var planStdout bytes.Buffer
+	planApp := NewApp(&planStdout, &bytes.Buffer{})
+	if err := planApp.Run(context.Background(), []string{
+		"skillkit", "plan-install",
+		"--bundle", bundle,
+		"--out", planDir,
+		"--frameworks", "codex,generic",
+		"--rdev-command", "rdev-test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(planStdout.String(), `"schema": "rdev.skillkit-install-plan.v1"`) || !strings.Contains(planStdout.String(), `"external_mutation": false`) {
+		t.Fatalf("expected structured install plan output, got %s", planStdout.String())
+	}
+	for _, path := range []string{
+		"install-plan.json",
+		"INSTALL_COMMANDS.md",
+		"install-codex.sh",
+		"install-codex.ps1",
+		"install-generic-mcp-agent.sh",
+		"install-generic-mcp-agent.ps1",
+	} {
+		if _, err := os.Stat(filepath.Join(planDir, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected install plan file %s: %v", path, err)
+		}
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"skillkit", "verify-install-plan",
+		"--plan", filepath.Join(planDir, "install-plan.json"),
+	}); err != nil {
+		t.Fatalf("expected verify-install-plan to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) || !strings.Contains(verifyStdout.String(), `"schema": "rdev.skillkit-install-plan-verification.v1"`) {
+		t.Fatalf("expected install plan verification output, got %s", verifyStdout.String())
+	}
+}
+
 func TestAdapterVerifyResultAcceptsShellArtifact(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "shell-result.json")

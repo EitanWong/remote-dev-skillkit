@@ -62,6 +62,22 @@ Recommended fields:
 | `v0.4 Managed Device Generalization` | generalize managed runtime across Mac, Windows, Linux | Windows Service, systemd, WSS/mTLS, OS-protected storage, adapter SDK |
 | `v1.0 Public Skillkit` | stable open-source release for mainstream agent frameworks | signed releases, stable schemas, install docs, threat model, security policy, public acceptance transcripts |
 
+## Local Release Evidence Before External GitHub Mutation
+
+Before creating or updating GitHub releases, archive local evidence for the
+agent-framework install path:
+
+1. `rdev skillkit export --source-root . --out <empty-skillkit-dir> --gateway-url <url>`
+2. `rdev skillkit verify --bundle <skillkit-dir>`
+3. `rdev skillkit plan-install --bundle <skillkit-dir> --out <empty-install-plan-dir>`
+4. `rdev skillkit verify-install-plan --plan <install-plan-dir>/install-plan.json`
+
+The install plan evidence must include `rdev.skillkit-install-plan.v1`,
+`rdev.skillkit-install-plan-verification.v1`, `INSTALL_COMMANDS.md`, all
+generated framework scripts, and the verification output proving
+`external_mutation=false`. This is a release gate for the `area:skillkit` and
+`area:release` surfaces.
+
 ## Labels
 
 | Label | Color | Description |

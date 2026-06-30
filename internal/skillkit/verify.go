@@ -115,6 +115,7 @@ func Verify(opts VerifyOptions) (VerificationReport, error) {
 	add("listed_files_sha256_match", !strings.Contains(fileFailures, "sha256:"), fileFailures)
 	add("listed_files_size_match", !strings.Contains(fileFailures, "size:"), fileFailures)
 
+	seenFiles["manifest.json"] = true
 	unlisted, err := findUnlistedFiles(bundleDir, seenFiles)
 	add("bundle_has_no_unlisted_files", err == nil && len(unlisted) == 0, firstNonEmpty(errorString(err), strings.Join(unlisted, ",")))
 
@@ -177,9 +178,6 @@ func findUnlistedFiles(root string, listed map[string]bool) ([]string, error) {
 			return err
 		}
 		bundlePath := filepath.ToSlash(rel)
-		if bundlePath == "manifest.json" {
-			return nil
-		}
 		if !listed[bundlePath] {
 			unlisted = append(unlisted, bundlePath)
 		}
