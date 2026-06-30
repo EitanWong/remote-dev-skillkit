@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1150,6 +1151,188 @@ func TestHostServeRegistersWithEnrollmentCertificate(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "revoked") {
 		t.Fatalf("expected revoked certificate verification failure, got %v", err)
 	}
+}
+
+func TestHostServeFetchesEnrollmentRevocationsBeforeRegistration(t *testing.T) {
+	dir := t.TempDir()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := model.NewTicket(model.HostModeAttendedTemporary, 600, capabilities, "revoked temporary host", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath, rootPublicKey, _, certificate, issuerPrivateKey := writeHostServeEnrollmentCertificateFixture(t, dir, ticket, "revoked-host")
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Add(-time.Minute)
+	revocations, err := model.SignHostEnrollmentRevocationList([]model.HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: fingerprint,
+			Reason:                 "host retired",
+			RevokedAt:              now,
+		},
+	}, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registerCalled atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/enrollment/revocations":
+			_ = json.NewEncoder(w).Encode(map[string]any{"revocations": revocations})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/hosts/register":
+			registerCalled.Store(true)
+			http.Error(w, "registration should not be attempted", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--identity-store", filepath.Join(dir, "identity", "host.json"),
+		"--identity-key-id", "host-test",
+		"--enrollment-certificate", certificatePath,
+		"--fetch-enrollment-revocations",
+		"--enrollment-root-public-key", rootPublicKey,
+		"--name", "revoked-host",
+	})
+	if err == nil || !strings.Contains(err.Error(), "revoked") {
+		t.Fatalf("expected local revocation rejection, got %v\nstdout=%s", err, stdout.String())
+	}
+	if registerCalled.Load() {
+		t.Fatalf("registration endpoint was called after local revocation rejection")
+	}
+}
+
+func TestHostServeReportsFetchedEnrollmentRevocations(t *testing.T) {
+	dir := t.TempDir()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	now := time.Now().UTC().Add(-time.Minute)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now.Add(time.Minute) })
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "certified temporary host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath, rootPublicKey, root, _, issuerPrivateKey := writeHostServeEnrollmentCertificateFixture(t, dir, ticket, "cert-host")
+	revocations, err := model.SignHostEnrollmentRevocationList([]model.HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: "sha256:unrelated-enrollment-certificate",
+			Reason:                 "other host retired",
+			RevokedAt:              now,
+		},
+	}, root.SigningKeyID, issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw.WithEnrollmentRoot(root).WithEnrollmentRevocations(revocations)
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--identity-store", filepath.Join(dir, "identity", "host.json"),
+		"--identity-key-id", "host-test",
+		"--enrollment-certificate", certificatePath,
+		"--fetch-enrollment-revocations",
+		"--enrollment-root-public-key", rootPublicKey,
+		"--name", "cert-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Status                string `json:"status"`
+		EnrollmentCertificate struct {
+			Schema                  string `json:"schema"`
+			RevocationsFetched      bool   `json:"revocations_fetched"`
+			RevokedCertificateCount int    `json:"revoked_certificate_count"`
+			RevocationRootKeyID     string `json:"revocation_root_key_id"`
+		} `json:"enrollment_certificate"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid host output: %v\n%s", err, stdout.String())
+	}
+	if payload.Status != "registered-pending-approval" {
+		t.Fatalf("expected registration success, got %s", stdout.String())
+	}
+	if !payload.EnrollmentCertificate.RevocationsFetched ||
+		payload.EnrollmentCertificate.RevokedCertificateCount != 1 ||
+		payload.EnrollmentCertificate.RevocationRootKeyID != root.SigningKeyID ||
+		payload.EnrollmentCertificate.Schema != model.HostEnrollmentCertificateSchemaVersion {
+		t.Fatalf("expected fetched revocation summary, got %s", stdout.String())
+	}
+}
+
+func TestHostServeRequiresExplicitEnrollmentRevocationFetch(t *testing.T) {
+	dir := t.TempDir()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := model.NewTicket(model.HostModeAttendedTemporary, 600, capabilities, "certified temporary host", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath, rootPublicKey, _, _, _ := writeHostServeEnrollmentCertificateFixture(t, dir, ticket, "cert-host")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", "http://127.0.0.1:8787",
+		"--ticket-code", ticket.Code,
+		"--identity-store", filepath.Join(dir, "identity", "host.json"),
+		"--identity-key-id", "host-test",
+		"--enrollment-certificate", certificatePath,
+		"--enrollment-root-public-key", rootPublicKey,
+		"--name", "cert-host",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--fetch-enrollment-revocations") {
+		t.Fatalf("expected explicit fetch flag requirement, got %v", err)
+	}
+}
+
+func writeHostServeEnrollmentCertificateFixture(t *testing.T, dir string, ticket model.Ticket, name string) (string, string, model.TrustBundle, model.HostEnrollmentCertificate, ed25519.PrivateKey) {
+	t.Helper()
+	identityPath := filepath.Join(dir, "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	registration := model.HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                name,
+		OS:                  runtime.GOOS,
+		Arch:                runtime.GOARCH,
+		Capabilities:        ticket.Capabilities,
+		IdentityKeyID:       identity.KeyID,
+		IdentityPublicKey:   identity.EncodedPublicKey(),
+		IdentityFingerprint: identity.Fingerprint(),
+	}
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, root.SigningKeyID, issuerPrivateKey, time.Now().UTC().Add(-time.Minute), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath := filepath.Join(dir, "certs", "host-enrollment.json")
+	if err := writeEnrollmentCertificateFile(certificatePath, certificate, false); err != nil {
+		t.Fatal(err)
+	}
+	return certificatePath, encodeRootPublicKey(root.SigningKeyID, issuerPublicKey), root, certificate, issuerPrivateKey
 }
 
 func TestEnrollmentFetchRevocationsWritesVerifiedList(t *testing.T) {

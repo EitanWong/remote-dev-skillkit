@@ -299,12 +299,20 @@ rdev enrollment verify-certificate \
   --root-public-key enrollment-root:<base64url_ed25519_public_key> \
   --revocations .rdev/enrollment/revocations.json
 
+rdev enrollment fetch-revocations \
+  --gateway http://127.0.0.1:8787 \
+  --root-public-key enrollment-root:<base64url_ed25519_public_key> \
+  --out .rdev/enrollment/fetched-revocations.json \
+  --force
+
 rdev host serve \
   --mode managed \
   --gateway http://127.0.0.1:8787 \
   --ticket-code ABCD-1234 \
   --identity-store .rdev/host/identity.json \
-  --enrollment-certificate .rdev/enrollment/host-enrollment-renewed.json
+  --enrollment-certificate .rdev/enrollment/host-enrollment-renewed.json \
+  --fetch-enrollment-revocations \
+  --enrollment-root-public-key enrollment-root:<base64url_ed25519_public_key>
 ```
 
 The certificate uses schema `rdev.host-enrollment-certificate.v1` and binds the
@@ -335,6 +343,11 @@ The revocation list uses schema `rdev.host-enrollment-revocations.v1` and binds
 revoked enrollment certificate fingerprints to the same enrollment root. When
 `--enrollment-revocations` is configured, the dev gateway verifies the list
 signature and freshness before registration and rejects revoked certificates.
+Hosts can also set `--fetch-enrollment-revocations --enrollment-root-public-key`
+with their `--enrollment-certificate`; before registration, the host fetches
+`GET /v1/enrollment/revocations`, verifies the signed list and local certificate
+against the pinned enrollment root, then refuses a locally revoked certificate
+without sending the registration payload.
 Use `rdev enrollment init-revocations` to publish a signed empty baseline before
 any certificate has been revoked, pass that baseline to `renew-certificate`
 before extending a certificate, then append retired or compromised certificates

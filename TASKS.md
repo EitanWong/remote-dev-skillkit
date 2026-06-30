@@ -95,6 +95,7 @@
 - [x] Add optional bearer-token protection for dev hosted enrollment issuance with `--enrollment-issuer-token-file` and `rdev enrollment issue-certificate --issuer-token-file`.
 - [x] Add local enrollment certificate renewal with `rdev enrollment renew-certificate`, preserving scope, extending validity, and rejecting revoked current certificates when a signed revocation list is supplied.
 - [x] Add dev hosted enrollment certificate renewal with `POST /v1/enrollment/certificates/renew` and `rdev enrollment renew-certificate --gateway --root-public-key`, including previous-fingerprint and pinned-root verification.
+- [x] Add host-side hosted enrollment revocation refresh with `rdev host serve --fetch-enrollment-revocations --enrollment-root-public-key`, including local certificate signature verification and pre-registration revoked-certificate rejection.
 - [x] Add local GitHub project readiness audit with `rdev.github-project-readiness.v1` and wire it into release smoke without external mutation.
 
 ## Next

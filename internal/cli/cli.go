@@ -1233,6 +1233,8 @@ func (a App) host(ctx context.Context, args []string) error {
 		identityStore := fs.String("identity-store", "", "optional local host identity key store path")
 		identityKeyID := fs.String("identity-key-id", hostidentity.DefaultKeyID, "host identity key id")
 		enrollmentCertificate := fs.String("enrollment-certificate", "", "optional host enrollment certificate JSON path")
+		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key for host-side enrollment revocation refresh, formatted key_id:base64url_public_key")
+		fetchEnrollmentRevocations := fs.Bool("fetch-enrollment-revocations", false, "fetch and verify signed enrollment revocations from the gateway before registration")
 		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
 		approvalStore := fs.String("approval-store", "", "optional local host approval token consumption store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
@@ -1245,33 +1247,35 @@ func (a App) host(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.hostServe(ctx, hostServeOptions{
-			Mode:                      *mode,
-			GatewayURL:                *gateway,
-			TicketCode:                *ticketCode,
-			ManifestURL:               *manifestURL,
-			Name:                      *name,
-			Once:                      *once,
-			Transport:                 *transport,
-			PollInterval:              *pollInterval,
-			LongPollTimeout:           *longPollTimeout,
-			MaxJobs:                   *maxJobs,
-			ApprovalTimeout:           *approvalTimeout,
-			TrustPin:                  *trustPin,
-			GatewayCACertPath:         *gatewayCA,
-			GatewayClientCertPath:     *gatewayClientCert,
-			GatewayClientKeyPath:      *gatewayClientKey,
-			TrustStorePath:            *trustStore,
-			IdentityStorePath:         *identityStore,
-			IdentityKeyID:             *identityKeyID,
-			EnrollmentCertificatePath: *enrollmentCertificate,
-			NonceStorePath:            *nonceStore,
-			ApprovalStorePath:         *approvalStore,
-			WorkspaceLockStore:        *workspaceLockStore,
-			CaptureRuntimeFixture:     *captureRuntimeFixture,
-			ManifestRootPublicKey:     *manifestRootPublicKey,
-			ReleaseBundlePath:         *releaseBundle,
-			ReleaseRootPublicKey:      *releaseRootPublicKey,
-			ReleaseRequiredArtifacts:  splitCapabilities(*releaseRequiredArtifacts),
+			Mode:                       *mode,
+			GatewayURL:                 *gateway,
+			TicketCode:                 *ticketCode,
+			ManifestURL:                *manifestURL,
+			Name:                       *name,
+			Once:                       *once,
+			Transport:                  *transport,
+			PollInterval:               *pollInterval,
+			LongPollTimeout:            *longPollTimeout,
+			MaxJobs:                    *maxJobs,
+			ApprovalTimeout:            *approvalTimeout,
+			TrustPin:                   *trustPin,
+			GatewayCACertPath:          *gatewayCA,
+			GatewayClientCertPath:      *gatewayClientCert,
+			GatewayClientKeyPath:       *gatewayClientKey,
+			TrustStorePath:             *trustStore,
+			IdentityStorePath:          *identityStore,
+			IdentityKeyID:              *identityKeyID,
+			EnrollmentCertificatePath:  *enrollmentCertificate,
+			EnrollmentRootPublicKey:    *enrollmentRootPublicKey,
+			FetchEnrollmentRevocations: *fetchEnrollmentRevocations,
+			NonceStorePath:             *nonceStore,
+			ApprovalStorePath:          *approvalStore,
+			WorkspaceLockStore:         *workspaceLockStore,
+			CaptureRuntimeFixture:      *captureRuntimeFixture,
+			ManifestRootPublicKey:      *manifestRootPublicKey,
+			ReleaseBundlePath:          *releaseBundle,
+			ReleaseRootPublicKey:       *releaseRootPublicKey,
+			ReleaseRequiredArtifacts:   splitCapabilities(*releaseRequiredArtifacts),
 		})
 	case "install-service":
 		fs := flag.NewFlagSet("host install-service", flag.ContinueOnError)
@@ -1379,33 +1383,35 @@ func (a App) host(ctx context.Context, args []string) error {
 }
 
 type hostServeOptions struct {
-	Mode                      string
-	GatewayURL                string
-	TicketCode                string
-	ManifestURL               string
-	Name                      string
-	Once                      bool
-	Transport                 string
-	PollInterval              time.Duration
-	LongPollTimeout           time.Duration
-	MaxJobs                   int
-	ApprovalTimeout           time.Duration
-	TrustPin                  string
-	GatewayCACertPath         string
-	GatewayClientCertPath     string
-	GatewayClientKeyPath      string
-	TrustStorePath            string
-	IdentityStorePath         string
-	IdentityKeyID             string
-	EnrollmentCertificatePath string
-	NonceStorePath            string
-	ApprovalStorePath         string
-	WorkspaceLockStore        string
-	CaptureRuntimeFixture     bool
-	ManifestRootPublicKey     string
-	ReleaseBundlePath         string
-	ReleaseRootPublicKey      string
-	ReleaseRequiredArtifacts  []string
+	Mode                       string
+	GatewayURL                 string
+	TicketCode                 string
+	ManifestURL                string
+	Name                       string
+	Once                       bool
+	Transport                  string
+	PollInterval               time.Duration
+	LongPollTimeout            time.Duration
+	MaxJobs                    int
+	ApprovalTimeout            time.Duration
+	TrustPin                   string
+	GatewayCACertPath          string
+	GatewayClientCertPath      string
+	GatewayClientKeyPath       string
+	TrustStorePath             string
+	IdentityStorePath          string
+	IdentityKeyID              string
+	EnrollmentCertificatePath  string
+	EnrollmentRootPublicKey    string
+	FetchEnrollmentRevocations bool
+	NonceStorePath             string
+	ApprovalStorePath          string
+	WorkspaceLockStore         string
+	CaptureRuntimeFixture      bool
+	ManifestRootPublicKey      string
+	ReleaseBundlePath          string
+	ReleaseRootPublicKey       string
+	ReleaseRequiredArtifacts   []string
 }
 
 type hostInstallServiceOptions struct {
@@ -1462,6 +1468,16 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	case "temporary", "managed", "break-glass":
 	default:
 		return fmt.Errorf("unsupported host mode %q", opts.Mode)
+	}
+	if opts.FetchEnrollmentRevocations {
+		if strings.TrimSpace(opts.EnrollmentCertificatePath) == "" {
+			return fmt.Errorf("enrollment certificate is required when --fetch-enrollment-revocations is set")
+		}
+		if strings.TrimSpace(opts.EnrollmentRootPublicKey) == "" {
+			return fmt.Errorf("enrollment-root-public-key is required when --fetch-enrollment-revocations is set")
+		}
+	} else if strings.TrimSpace(opts.EnrollmentRootPublicKey) != "" {
+		return fmt.Errorf("--fetch-enrollment-revocations is required when --enrollment-root-public-key is provided")
 	}
 	if opts.Transport == "" {
 		opts.Transport = "poll"
@@ -1523,10 +1539,29 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		return err
 	}
 	registration.IdentityProof = &proof
+	enrollmentRevocationCount := 0
+	enrollmentRevocationsFetched := false
+	enrollmentRevocationRoot := ""
 	if opts.EnrollmentCertificatePath != "" {
 		certificate, err := readEnrollmentCertificateFile(opts.EnrollmentCertificatePath)
 		if err != nil {
 			return err
+		}
+		if opts.FetchEnrollmentRevocations {
+			revocations, root, err := fetchEnrollmentRevocationsWithClient(ctx, gatewayClient, opts.GatewayURL, opts.EnrollmentRootPublicKey)
+			if err != nil {
+				return err
+			}
+			now := time.Now()
+			if err := model.VerifyHostEnrollmentCertificateSignature(certificate, root, now); err != nil {
+				return err
+			}
+			if err := model.VerifyHostEnrollmentCertificateNotRevoked(certificate, revocations); err != nil {
+				return err
+			}
+			enrollmentRevocationCount = len(revocations.RevokedCertificates)
+			enrollmentRevocationsFetched = true
+			enrollmentRevocationRoot = root.SigningKeyID
 		}
 		registration.EnrollmentCertificate = &certificate
 	}
@@ -1552,11 +1587,17 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		"note":   "local development registration only; WSS transport is not implemented yet",
 	}
 	if registration.EnrollmentCertificate != nil {
-		payload["enrollment_certificate"] = map[string]any{
+		enrollmentSummary := map[string]any{
 			"schema":        registration.EnrollmentCertificate.SchemaVersion,
 			"issuer_key_id": registration.EnrollmentCertificate.IssuerKeyID,
 			"not_after":     registration.EnrollmentCertificate.NotAfter,
 		}
+		if enrollmentRevocationsFetched {
+			enrollmentSummary["revocations_fetched"] = true
+			enrollmentSummary["revoked_certificate_count"] = enrollmentRevocationCount
+			enrollmentSummary["revocation_root_key_id"] = enrollmentRevocationRoot
+		}
+		payload["enrollment_certificate"] = enrollmentSummary
 	}
 	if releaseGate != nil {
 		payload["release_gate"] = releaseGate
@@ -5241,6 +5282,7 @@ Usage:
   rdev enrollment revoke-certificate --out revocations.json --key .rdev/keys/enrollment-root.json --certificate host-enrollment.json --reason "host retired"
   rdev enrollment verify-revocations --revocations revocations.json --root-public-key enrollment-root:...
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:... --revocations revocations.json
+  rdev enrollment fetch-revocations --gateway http://127.0.0.1:8787 --root-public-key enrollment-root:... --out revocations.json
   rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
   rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod
   rdev trust revoke --current .rdev/trust/trust-bundle-next.json --out .rdev/trust/trust-bundle-revoked.json --root-key .rdev/keys/trust-root.json --key-id gateway-next --reason "key compromise drill"
@@ -5267,7 +5309,7 @@ Usage:
   rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --key .rdev/keys/release-root.json
   rdev release verify-candidate --candidate dist/release-candidate --require-artifacts rdev-host.exe,rdev-verify.exe
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
-  rdev host serve --mode managed --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --enrollment-certificate host-enrollment.json --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
+  rdev host serve --mode managed --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --enrollment-certificate host-enrollment.json --fetch-enrollment-revocations --enrollment-root-public-key enrollment-root:... --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
   rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
@@ -5712,15 +5754,22 @@ func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL
 }
 
 func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
+	return fetchEnrollmentRevocationsWithClient(ctx, http.DefaultClient, gatewayURL, rootPublicKey)
+}
+
+func fetchEnrollmentRevocationsWithClient(ctx context.Context, client *http.Client, gatewayURL, rootPublicKey string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
 	root, err := parseRootPublicKey(rootPublicKey)
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
+	}
+	if client == nil {
+		client = http.DefaultClient
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/enrollment/revocations", nil)
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
 	}

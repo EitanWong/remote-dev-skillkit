@@ -20,6 +20,11 @@ go test ./internal/model ./internal/cli ./internal/httpapi \
   -count=1 \
   > "$work_dir/enrollment-revocation-baseline-smoke.txt"
 
+go test ./internal/cli \
+  -run 'TestHostServeFetchesEnrollmentRevocationsBeforeRegistration|TestHostServeReportsFetchedEnrollmentRevocations|TestHostServeRequiresExplicitEnrollmentRevocationFetch' \
+  -count=1 \
+  > "$work_dir/enrollment-host-revocation-refresh-smoke.txt"
+
 go test ./internal/model ./internal/gateway ./internal/httpapi ./internal/cli \
   -run 'TestHostEnrollmentCertificateRenewal|TestMemoryGatewayRenewsEnrollmentCertificate|TestEnrollmentCertificatesRenewEndpoint|TestEnrollmentRenewCertificate' \
   -count=1 \
@@ -227,6 +232,7 @@ print(json.dumps({
     "skillkit_install_executed": skillkit_install_execute["executed"],
     "dev_mtls_host_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
+    "enrollment_host_revocation_refresh_smoke": True,
     "enrollment_renewal_smoke": True,
     "enrollment_hosted_renewal_smoke": True,
     "enrollment_issuance_smoke": True,
