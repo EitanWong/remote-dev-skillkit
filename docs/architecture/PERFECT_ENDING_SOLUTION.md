@@ -88,6 +88,45 @@ questions before it can ship:
 If any answer is unclear, the feature remains design-only or adapter-local. It
 does not become a supported kernel claim.
 
+### Final Operating Decision
+
+The final architecture is intentionally smaller than the complete remote-access
+universe. It chooses one control protocol, two host products, three separated
+trust roots, four non-bypassable runtime paths, and five proof packages.
+
+| Decision | Final choice | Rejected shortcut |
+|---|---|---|
+| Control protocol | signed, typed, host-bound work envelopes plus approval tokens and evidence schemas | raw remote shell, agent-owned credentials, or transport-level authority |
+| Host products | attended temporary foreground sessions and explicit managed services | a hidden hybrid mode that starts temporary and becomes persistent |
+| Trust roots | release/bootstrap trust, gateway job-signing trust, and host identity/trust-bundle continuity stay separate | one master key or one server credential that can publish, enroll, and execute |
+| Runtime paths | join, run, approve, and prove/revoke each have their own state machine and verifier | a single happy-path session transcript as the definition of support |
+| Proof packages | release candidate, Skillkit install, platform acceptance, audit/evidence bundle, and adapter conformance | natural-language success claims or screenshots without replayable artifacts |
+
+This decision makes the product maximally useful without becoming ambient
+remote administration. Quick connection is allowed; hidden authority is not.
+Broad repair capability is allowed after explicit grant; silent privilege or
+external consequence is not. Adapter breadth is allowed; every adapter must pass
+through the same kernel.
+
+The concrete end state is:
+
+1. **Lucky can coordinate**: Hermes/Lucky calls Skillkit or MCP tools against
+   `https://api.lunflux.com/v1`, receives policy previews, creates jobs, reviews
+   evidence, and requests approvals without receiving standing host secrets.
+2. **Hosts can veto**: every target machine independently checks release trust,
+   host identity, trust sequence, nonce, expiry, capability, workspace/session
+   scope, approval tokens, and local policy before side effects.
+3. **Temporary help is clean**: a third-party machine runs one visible,
+   outbound-only, TTL-bound command and leaves no service, autorun, firewall, or
+   hidden restart path.
+4. **Managed development is durable**: owned hosts use inspectable OS service
+   managers, protected identity/trust storage, release gates, reconnect,
+   evidence spool, workspace locks, status/logs, stop, uninstall, and revocation.
+5. **Open-source users can replace everything except the contract**: domain,
+   storage, auth provider, agent runtime, transport assist, and adapters are
+   replaceable, but the signed-job, host-veto, approval, evidence, audit, and
+   release-verification contract is not.
+
 ### Six Closure Loops
 
 The project is complete only when these loops are closed end to end:

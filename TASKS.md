@@ -80,6 +80,7 @@
 - [x] Add definitive perfect-ending blueprint as the single architecture decision layer for product surfaces, protocol spine, mode contracts, state machines, host sovereignty, adapter lifecycle, reliability, security, golden paths, v1.0 proof gates, and close order.
 - [x] Add final closure specification with kernel/plugin boundaries, gateway data model, host kernel layers, API/MCP surface, deployment profiles, acceptance matrix, release shape, and final build order.
 - [x] Add converged perfect-ending decision lens so future architecture changes patch the canonical layer instead of appending more dated final sections.
+- [x] Add final operating decision that compresses the endgame into one signed control protocol, two host products, separated trust roots, join/run/approve/prove paths, and release/Skillkit/acceptance/evidence/conformance proof packages.
 - [x] Add hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `--capture-runtime-fixture`.
 - [x] Add verifiable Skillkit install planning for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
 - [x] Add dry-run-by-default direct Skillkit installer for mainstream Agent frameworks through `rdev skillkit install`.
