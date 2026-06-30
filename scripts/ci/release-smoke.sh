@@ -34,6 +34,11 @@ scripts/github/plan-platform-release.sh \
   --out "$plan_dir" \
   > "$work_dir/plan-output.json"
 
+scripts/github/audit-project-readiness.sh \
+  --repo "$repo" \
+  --out "$work_dir/github-project-readiness.json" \
+  > "$work_dir/github-project-readiness-output.json"
+
 post_release_dir="$work_dir/post-release-install"
 scripts/github/plan-post-release-install.sh \
   --release-plan "$plan_dir/plan.json" \
@@ -98,6 +103,7 @@ platform_output = json.loads((root / "platform-candidates-output.json").read_tex
 platform_manifest = json.loads(pathlib.Path(platform_output["manifest"]).read_text())
 plan_output = json.loads((root / "plan-output.json").read_text())
 plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
+github_project_readiness = json.loads((root / "github-project-readiness.json").read_text())
 post_release_output = json.loads((root / "post-release-output.json").read_text())
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
@@ -133,6 +139,12 @@ assert any(asset["kind"] == "skillkit-archive" for asset in plan["assets"]), pla
 assert len({asset["name"] for asset in plan["assets"]}) == len(plan["assets"]), plan["assets"]
 assert "gh release create" in commands, commands
 assert "gh release upload" in commands, commands
+assert github_project_readiness["schema_version"] == "rdev.github-project-readiness.v1", github_project_readiness
+assert github_project_readiness["ok"] is True, github_project_readiness
+assert github_project_readiness["external_mutation"] is False, github_project_readiness
+assert github_project_readiness["bootstrap_dry_run"]["labels"] >= 19, github_project_readiness
+assert github_project_readiness["bootstrap_dry_run"]["milestones"] >= 5, github_project_readiness
+assert github_project_readiness["bootstrap_dry_run"]["seed_issues"] >= 9, github_project_readiness
 assert post_release_output["ok"] is True, post_release_output
 assert post_release_plan["schema_version"] == "rdev.post-release-install-plan.v1", post_release_plan
 assert post_release_plan["external_mutation"] is False, post_release_plan
@@ -182,12 +194,14 @@ print(json.dumps({
     "platform_candidates_schema": platform_manifest["schema_version"],
     "platform_candidate_count": len(platform_manifest["candidates"]),
     "plan_schema": plan["schema_version"],
+    "github_project_readiness_schema": github_project_readiness["schema_version"],
     "post_release_schema": post_release_plan["schema_version"],
     "post_release_verification_schema": post_release_verification["schema_version"],
     "skillkit_install_plan_schema": skillkit_install_plan_output["schema"],
     "skillkit_install_plan_verification_schema": skillkit_install_plan_verification["schema"],
     "skillkit_install_report_schema": skillkit_install_execute["schema"],
     "planned_platforms": plan_output["platform_count"],
+    "github_project_seed_issues": github_project_readiness["bootstrap_dry_run"]["seed_issues"],
     "post_release_platforms": post_release_output["platform_count"],
     "skillkit_install_frameworks": skillkit_install_plan_output["framework_count"],
     "skillkit_install_executed": skillkit_install_execute["executed"],

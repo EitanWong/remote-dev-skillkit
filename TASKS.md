@@ -88,6 +88,7 @@
 - [x] Add `rdev.enrollment.verify_certificate` MCP tool so agents can verify host enrollment certificates against pinned roots before trusting registrations.
 - [x] Add signed host enrollment certificate revocation-list primitive with `rdev.host-enrollment-revocations.v1`, `rdev enrollment revoke-certificate`, `rdev enrollment verify-revocations`, MCP revocation checks, and gateway registration rejection for revoked certificates.
 - [x] Add dev enrollment revocation-list distribution with `GET /v1/enrollment/revocations` and `rdev enrollment fetch-revocations` pinned-root verification.
+- [x] Add local GitHub project readiness audit with `rdev.github-project-readiness.v1` and wire it into release smoke without external mutation.
 
 ## Next
 
@@ -230,6 +231,7 @@
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 - [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.
+- [x] GitHub labels, milestones, issue templates, project-management docs, CI, and release planning scripts can be audited locally before external GitHub mutation.
 - [x] Built-in shell, PowerShell, Codex, Claude Code, and acpx adapters pass public adapterkit result-artifact conformance checks.
 - [x] MCP stdio exposes adapter result-artifact conformance as `rdev.adapter.verify_result`.
 - [x] Adapter lifecycle manifests can be verified through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.

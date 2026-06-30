@@ -5,18 +5,31 @@ kept local until Eitan explicitly approves external GitHub mutations.
 
 ## Current State
 
-As of 2026-06-29:
+As of 2026-06-30:
 
 - local repository path: `/Users/eitan/Documents/Codex/2026-06-28/pe/work/remote-dev-skillkit`
 - current branch: `main`
-- latest audited local baseline before this project-management update:
-  `f5bedc6 docs: add perfect ending solution`
+- latest audited local baseline before this project-readiness audit:
+  `c542c5b feat: distribute enrollment revocations`
 - GitHub CLI account: `EitanWong`
 - local git remote: none configured
 - `gh repo view EitanWong/remote-dev-skillkit`: no repository found at audit time
 
 No GitHub repository, issues, labels, milestones, project board, release, or push
 should be created until Eitan explicitly approves that external change.
+
+Local project readiness is machine-checkable:
+
+```bash
+scripts/github/audit-project-readiness.sh \
+  --repo EitanWong/remote-dev-skillkit \
+  --out dist/github-project-readiness.json
+```
+
+The report uses schema `rdev.github-project-readiness.v1`, runs
+`scripts/github/bootstrap-project.sh --dry-run`, checks the local docs,
+templates, CI workflow, and GitHub/release planning scripts, and preserves
+`external_mutation=false`.
 
 Recommended remote repository:
 
@@ -223,6 +236,15 @@ Preview the GitHub changes locally:
 
 ```bash
 scripts/github/bootstrap-project.sh --dry-run EitanWong/remote-dev-skillkit
+```
+
+Audit the local GitHub project-management surface before opening or mutating
+anything on GitHub:
+
+```bash
+scripts/github/audit-project-readiness.sh \
+  --repo EitanWong/remote-dev-skillkit \
+  --out dist/github-project-readiness.json
 ```
 
 Preview GitHub Release publication from a verified local candidate:

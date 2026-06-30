@@ -56,6 +56,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, per-artifact `cgo_enabled` metadata, and checksums before candidate packaging.
 - Per-platform release candidate automation through `scripts/release/prepare-platform-candidates.sh`, grouping real build artifacts by `GOOS/GOARCH`, producing one verified candidate per target, and writing `rdev.platform-release-candidates.v1`.
 - Multi-platform GitHub Release dry-run planning through `scripts/github/plan-platform-release.sh`, producing unique platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and command previews without external mutation.
+- GitHub project readiness auditing through `scripts/github/audit-project-readiness.sh`, producing `rdev.github-project-readiness.v1` from local docs, templates, CI, release scripts, and `bootstrap-project.sh --dry-run` without external mutation.
 - Post-release install verification planning through `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification commands from a local GitHub Release dry-run plan without external mutation.
 - Post-release install plan verification through `scripts/github/verify-post-release-install-plan.sh`, checking the generated plan and scripts before they are archived as release evidence and rejecting tampered verification scripts in CI smoke.
 - Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, Codex, Claude Code, and acpx result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
@@ -156,6 +157,7 @@ Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation 
 - Local release candidate packaging before GitHub Release publication.
 - Local GitHub Release dry-run planning from verified release candidates.
 - GitHub Actions CI for tests, shell syntax, real build artifact smoke, per-platform release candidate verification, multi-platform release-plan smoke, and no-mutation command previews.
+- Local GitHub project readiness audit for labels, milestones, seed issues, issue templates, PR template, CI, and release planning scripts.
 - Installation docs for Hermes, Codex, Claude Code, and OpenCode.
 - End-to-end acceptance demos for temporary Windows repair and managed coding.
 

@@ -113,6 +113,7 @@ Implemented now:
 - Real release artifact builds via `scripts/release/build-artifacts.sh`, producing target directories, `rdev.build-artifacts.v1`, and checksums for `rdev`, `rdev-host`, `rdev-gateway`, `rdev-mcp`, and `rdev-verify`.
 - Per-platform release candidate preparation via `scripts/release/prepare-platform-candidates.sh`, grouping `rdev.build-artifacts.v1` by `GOOS/GOARCH`, generating one verified candidate per target, and writing `rdev.platform-release-candidates.v1` without external mutation.
 - Multi-platform GitHub Release dry-run planning via `scripts/github/plan-platform-release.sh`, producing unique platform archives, a platform release index, verification summary, install guide, release notes, and command previews without mutating GitHub.
+- Local GitHub project readiness auditing via `scripts/github/audit-project-readiness.sh`, producing `rdev.github-project-readiness.v1` from docs, issue/PR templates, CI, release planning scripts, and bootstrap-project dry-run output without mutating GitHub.
 - Post-release install verification planning via `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, platform verification scripts, and a Skillkit verification script from a local GitHub Release dry-run plan without mutating GitHub.
 - Post-release install plan verification via `scripts/github/verify-post-release-install-plan.sh`, checking generated scripts, download URLs, checksum commands, candidate verification, bundle verification, Skillkit verification, and no-mutation constraints.
 - GitHub Release dry-run planning via `scripts/github/plan-release.sh`, producing a local release plan, commands preview, generated release notes, Skillkit tarball, and candidate verification output without mutating GitHub.
@@ -221,6 +222,7 @@ go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-c
 go run ./cmd/rdev release verify-candidate --candidate dist/release-candidate-windows-amd64 --require-artifacts rdev-host.exe,rdev-verify.exe
 scripts/github/plan-release.sh --candidate dist/release-candidates/windows-amd64 --repo EitanWong/remote-dev-skillkit --require-artifacts rdev-host.exe,rdev-verify.exe
 scripts/github/plan-platform-release.sh --platform-candidates dist/release-candidates/platform-candidates.json --repo EitanWong/remote-dev-skillkit
+scripts/github/audit-project-readiness.sh --repo EitanWong/remote-dev-skillkit --out dist/github-project-readiness.json
 scripts/github/plan-post-release-install.sh --release-plan dist/release-candidates/github-platform-release-plan/plan.json
 scripts/github/verify-post-release-install-plan.sh --plan dist/release-candidates/github-platform-release-plan/post-release-install/post-release-install-plan.json
 go run ./cmd/rdev host serve --mode temporary
