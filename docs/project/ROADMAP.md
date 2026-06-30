@@ -36,6 +36,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Durable host trust bundle store.
 - Signed host registration proofs for identity-bearing registrations.
 - Host enrollment certificate primitive through `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`, binding ticket code, mode, host metadata, capabilities, identity fingerprint, validity window, and enrollment root signature before registration when configured.
+- Agent-side enrollment certificate verification through MCP tool `rdev.enrollment.verify_certificate`, returning `rdev.enrollment-certificate-verification.v1` reports so Skillkit workflows can reject missing, expired, wrong-root, or tampered certificates before trusting a host registration.
 - Trust-bundle key rotation/revocation flow.
 - Trust lifecycle operator workflow through `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed trust bundles with sequence, previous-hash, key rotation, key retirement, revocation, and pinned-root verification.
 - Host-bound trust bundle update checks for managed host refresh.

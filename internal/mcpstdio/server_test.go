@@ -3,12 +3,19 @@ package mcpstdio
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 )
 
 func TestServerInitializeAndToolsList(t *testing.T) {
@@ -145,6 +152,72 @@ func TestServerToolCallVerifyAdapterResult(t *testing.T) {
 	structured := result["structuredContent"].(map[string]any)
 	if structured["schema_version"] != "rdev.adapter-conformance-report.v1" || structured["ok"] != true {
 		t.Fatalf("expected adapter conformance success, got %#v", structured)
+	}
+}
+
+func TestServerToolCallVerifyEnrollmentCertificate(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	certificate, root := enrollmentCertificateForMCPTest(t, now)
+	content, err := json.Marshal(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.enrollment.verify_certificate", map[string]any{
+		"certificate_json": string(content),
+		"root_public_key":  root,
+		"verify_at":        now.Add(time.Minute).Format(time.RFC3339),
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != EnrollmentCertificateVerificationSchemaVersion || structured["ok"] != true {
+		t.Fatalf("expected enrollment certificate verification success, got %#v", structured)
+	}
+	if structured["ticket_code"] != "ABCD-1234" || structured["issuer_key_id"] != "enrollment-root" {
+		t.Fatalf("unexpected certificate identity in report: %#v", structured)
+	}
+}
+
+func TestServerToolCallVerifyEnrollmentCertificateReportsFailure(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	certificate, _ := enrollmentCertificateForMCPTest(t, now)
+	wrongPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := json.Marshal(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.enrollment.verify_certificate", map[string]any{
+		"certificate_json": string(content),
+		"root_public_key":  trustref.Encode("enrollment-root", wrongPublicKey),
+		"verify_at":        now.Add(time.Minute).Format(time.RFC3339),
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	if lines[0]["error"] != nil {
+		t.Fatalf("verification failure should be structured content, got RPC error: %#v", lines[0]["error"])
+	}
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["ok"] != false {
+		t.Fatalf("expected enrollment certificate failure report, got %#v", structured)
+	}
+	errors, ok := structured["errors"].([]any)
+	if !ok || len(errors) == 0 || !strings.Contains(errors[0].(string), "signature mismatch") {
+		t.Fatalf("expected signature mismatch report, got %#v", structured)
 	}
 }
 
@@ -295,6 +368,43 @@ func TestServerToolCallVerifyAdapterRuntime(t *testing.T) {
 	if structured["schema_version"] != "rdev.adapter-conformance-report.v1" || structured["artifact_schema"] != "rdev.adapter-runtime-fixture.v1" || structured["ok"] != true {
 		t.Fatalf("expected adapter runtime conformance success, got %#v", structured)
 	}
+}
+
+func enrollmentCertificateForMCPTest(t *testing.T, now time.Time) (model.HostEnrollmentCertificate, string) {
+	t.Helper()
+	hostPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := model.HostRegistration{
+		TicketCode:          "ABCD-1234",
+		Name:                "managed-mac",
+		OS:                  "darwin",
+		Arch:                "arm64",
+		Capabilities:        []string{"codex.run", "git.diff"},
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   base64.RawURLEncoding.EncodeToString(hostPublicKey),
+		IdentityFingerprint: enrollmentFingerprintForMCPTest(hostPublicKey),
+	}
+	ticket := model.Ticket{
+		Code:         registration.TicketCode,
+		Mode:         model.HostModeManaged,
+		Capabilities: registration.Capabilities,
+	}
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certificate, trustref.Encode("enrollment-root", issuerPublicKey)
+}
+
+func enrollmentFingerprintForMCPTest(publicKey ed25519.PublicKey) string {
+	sum := sha256.Sum256(publicKey)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func mcpRequestLine(t *testing.T, tool string, arguments map[string]any) string {

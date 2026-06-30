@@ -155,6 +155,17 @@ func Tools() []Tool {
 			}, []string{"mode", "policy"}),
 		},
 		{
+			Name:        "rdev.enrollment.verify_certificate",
+			Description: "Verify a host enrollment certificate against a pinned enrollment root before trusting a host registration.",
+			Safety:      "Read-only certificate validation; does not issue certificates or grant host access.",
+			InputSchema: object(map[string]any{
+				"certificate_json": stringField(),
+				"artifact_id":      stringField(),
+				"root_public_key":  stringField(),
+				"verify_at":        stringField(),
+			}, []string{"root_public_key"}),
+		},
+		{
 			Name:        "rdev.adapter.verify_result",
 			Description: "Verify an adapter result artifact against the public result-artifact conformance contract.",
 			Safety:      "Read-only artifact validation; does not execute on a host.",

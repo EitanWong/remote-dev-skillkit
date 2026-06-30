@@ -425,6 +425,7 @@ The local test suite currently covers:
 - host-bound trust bundle update checks through `rdev.trust-bundle-update.v1`, including current/update-available responses and CLI trust-store persistence;
 - signed host registration proof through `rdev.host-registration-proof.v1` for registrations that present identity keys;
 - signed host enrollment certificate checks through `rdev.host-enrollment-certificate.v1`, including CLI signing/verification, gateway enforcement when an enrollment root is configured, host registration attachment, and rejection of missing, expired, wrong-root, or tampered host metadata/capability bindings;
+- MCP enrollment certificate verification through `rdev.enrollment.verify_certificate`, including structured `rdev.enrollment-certificate-verification.v1` success/failure reports and wrong-root failure evidence before an agent trusts a host registration;
 - host-side job verification through signed trust bundle active keys, with legacy trust fallback.
 - durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.
 - durable host identity key file storage with 0600 permissions, registration identity preservation, signed job envelope identity binding, and host-side fingerprint mismatch rejection.

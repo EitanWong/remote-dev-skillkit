@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
@@ -146,6 +148,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.explainPolicy(params.Arguments)
 	case "rdev.policy.explain_shell":
 		data, err = s.explainShellPolicy(params.Arguments)
+	case "rdev.enrollment.verify_certificate":
+		data, err = s.verifyEnrollmentCertificate(params.Arguments)
 	case "rdev.adapter.verify_result":
 		data, err = s.verifyAdapterResult(params.Arguments)
 	case "rdev.adapter.verify_lifecycle":
@@ -268,6 +272,107 @@ func (s Server) explainShellPolicy(args map[string]any) (any, error) {
 		model.HostMode(requiredString(args, "mode")),
 		objectArg(args, "policy"),
 	), nil
+}
+
+const EnrollmentCertificateVerificationSchemaVersion = "rdev.enrollment-certificate-verification.v1"
+
+type enrollmentCertificateVerificationReport struct {
+	SchemaVersion              string         `json:"schema_version"`
+	OK                         bool           `json:"ok"`
+	CertificateSchema          string         `json:"certificate_schema,omitempty"`
+	IssuerKeyID                string         `json:"issuer_key_id,omitempty"`
+	RootKeyID                  string         `json:"root_key_id,omitempty"`
+	SubjectIdentityFingerprint string         `json:"subject_identity_fingerprint,omitempty"`
+	TicketCode                 string         `json:"ticket_code,omitempty"`
+	Mode                       model.HostMode `json:"mode,omitempty"`
+	NotBefore                  *time.Time     `json:"not_before,omitempty"`
+	NotAfter                   *time.Time     `json:"not_after,omitempty"`
+	VerifiedAt                 time.Time      `json:"verified_at"`
+	Checks                     []string       `json:"checks"`
+	Errors                     []string       `json:"errors,omitempty"`
+	RecommendedActions         []string       `json:"recommended_actions,omitempty"`
+}
+
+func (s Server) verifyEnrollmentCertificate(args map[string]any) (any, error) {
+	certificateJSON := stringArg(args, "certificate_json", "")
+	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
+		artifact, err := s.Gateway.Artifact(artifactID)
+		if err != nil {
+			return nil, err
+		}
+		certificateJSON = artifact.Content
+	}
+	if certificateJSON == "" {
+		return nil, fmt.Errorf("certificate_json or artifact_id is required")
+	}
+	rootPublicKey := requiredString(args, "root_public_key")
+	verifyAt := time.Now().UTC()
+	if value := stringArg(args, "verify_at", ""); value != "" {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return nil, fmt.Errorf("verify_at must be RFC3339: %w", err)
+		}
+		verifyAt = parsed.UTC()
+	}
+	report := enrollmentCertificateVerificationReport{
+		SchemaVersion: EnrollmentCertificateVerificationSchemaVersion,
+		VerifiedAt:    verifyAt,
+		Checks:        []string{},
+	}
+	certificate, err := decodeEnrollmentCertificateJSON([]byte(certificateJSON))
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		report.RecommendedActions = append(report.RecommendedActions, "provide a JSON object using schema rdev.host-enrollment-certificate.v1 or a wrapper with certificate/enrollment_certificate")
+		return report, nil
+	}
+	report.CertificateSchema = certificate.SchemaVersion
+	report.IssuerKeyID = certificate.IssuerKeyID
+	report.SubjectIdentityFingerprint = certificate.SubjectIdentityFingerprint
+	report.TicketCode = certificate.TicketCode
+	report.Mode = certificate.Mode
+	notBefore := certificate.NotBefore.UTC()
+	notAfter := certificate.NotAfter.UTC()
+	report.NotBefore = &notBefore
+	report.NotAfter = &notAfter
+	report.Checks = append(report.Checks, "certificate_json_decoded")
+	root, err := trustref.Parse(rootPublicKey)
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		report.RecommendedActions = append(report.RecommendedActions, "pin the enrollment root as key_id:base64url_ed25519_public_key")
+		return report, nil
+	}
+	report.RootKeyID = root.SigningKeyID
+	report.Checks = append(report.Checks, "root_public_key_decoded")
+	if err := model.VerifyHostEnrollmentCertificateSignature(certificate, root, verifyAt); err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		report.RecommendedActions = append(report.RecommendedActions, "reject this host registration until a valid enrollment certificate is presented")
+		return report, nil
+	}
+	report.OK = true
+	report.Checks = append(report.Checks, "signature_valid", "validity_window_active", "issuer_matches_root")
+	return report, nil
+}
+
+func decodeEnrollmentCertificateJSON(content []byte) (model.HostEnrollmentCertificate, error) {
+	var certificate model.HostEnrollmentCertificate
+	if err := json.Unmarshal(content, &certificate); err == nil && certificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion {
+		return certificate, nil
+	}
+	var wrapped struct {
+		Certificate           model.HostEnrollmentCertificate `json:"certificate"`
+		EnrollmentCertificate model.HostEnrollmentCertificate `json:"enrollment_certificate"`
+	}
+	if err := json.Unmarshal(content, &wrapped); err != nil {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("decode enrollment certificate JSON: %w", err)
+	}
+	switch {
+	case wrapped.Certificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion:
+		return wrapped.Certificate, nil
+	case wrapped.EnrollmentCertificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion:
+		return wrapped.EnrollmentCertificate, nil
+	default:
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("unsupported enrollment certificate schema")
+	}
 }
 
 func (s Server) verifyAdapterResult(args map[string]any) (any, error) {

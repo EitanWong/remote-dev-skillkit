@@ -85,6 +85,7 @@
 - [x] Add verifiable Skillkit install planning for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
 - [x] Add dry-run-by-default direct Skillkit installer for mainstream Agent frameworks through `rdev skillkit install`.
 - [x] Add host enrollment certificate primitive with `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`.
+- [x] Add `rdev.enrollment.verify_certificate` MCP tool so agents can verify host enrollment certificates against pinned roots before trusting registrations.
 
 ## Next
 
@@ -220,6 +221,7 @@
 - [x] Linux managed-service acceptance evidence can be packaged with plan/unit/verifier output, start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence, redaction, and checksums.
 - [x] Host serve can verify a signed release bundle before host registration or job polling.
 - [x] Gateway can require a signed `rdev.host-enrollment-certificate.v1` before host registration when an enrollment root is configured.
+- [x] MCP stdio exposes enrollment certificate verification as `rdev.enrollment.verify_certificate`, returning structured success/failure reports without granting access.
 - [x] Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.

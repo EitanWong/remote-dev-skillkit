@@ -15,10 +15,19 @@ Useful read-only tools include:
 
 - `rdev.policy.explain`
 - `rdev.policy.explain_shell`
+- `rdev.enrollment.verify_certificate`
 - `rdev.adapter.verify_result`
 - `rdev.adapter.verify_lifecycle`
 - `rdev.adapter.verify_cancellation`
 - `rdev.adapter.verify_runtime`
+
+`rdev.enrollment.verify_certificate` returns
+`rdev.enrollment-certificate-verification.v1` in `structuredContent`. It
+accepts either `certificate_json` or `artifact_id`, plus a required
+`root_public_key` encoded as `key_id:base64url_ed25519_public_key` and optional
+RFC3339 `verify_at`. Invalid certificates, expired windows, wrong roots, and
+signature mismatches return `ok=false` with recommended actions rather than an
+RPC failure. Missing required arguments remain RPC errors.
 
 `rdev.adapter.verify_result` returns `rdev.adapter-conformance-report.v1` in
 `structuredContent`. It accepts either `artifact_json` or `artifact_id`, plus

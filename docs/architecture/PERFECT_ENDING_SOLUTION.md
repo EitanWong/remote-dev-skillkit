@@ -36,6 +36,53 @@ It is not a remote-admin product, not a tunnel, not screen sharing, not a
 coding-CLI wrapper, and not a Hermes-only integration. Those tools can be
 plugins. The product is the safety and proof kernel around them.
 
+### Final Design Closure
+
+The perfect ending is a boringly verifiable fabric for delegated work. It is
+not finished because every possible remote-control feature exists; it is
+finished when every entrypoint, host, adapter, release, and recovery path must
+pass through the same contract:
+
+```text
+discover or invite
+  -> attest identity and release
+  -> plan typed work
+  -> sign a host-bound envelope
+  -> verify locally on the host
+  -> execute one bounded adapter lifecycle
+  -> produce replayable evidence
+  -> approve, cancel, revoke, rotate, recover, or uninstall
+```
+
+Discovery therefore means controlled inventory and invitation, not network
+scanning. Temporary hosts are discovered by ticketed join links or one visible
+command. Managed hosts are discovered by prior enrollment, signed identity,
+health leases, and trust-bundle continuity. Workspace providers and mesh tools
+may add inventory, but they do not become authorization.
+
+One-command setup is allowed only when it remains auditable and reversible.
+For temporary support it must be foreground, outbound-only, TTL-bound,
+release-verified before execution, locally stoppable, and non-persistent. For
+managed hosts it must be explicit service installation with inspectable unit or
+service files, OS-protected identity where available, release gates on startup,
+status/log/stop/uninstall commands, and revocation handling. There is no hidden
+upgrade path from temporary to managed.
+
+Maximum useful power is represented by approval rings, not ambient admin. L0
+observe and L1 workspace work can be streamlined after enrollment. L2 repair,
+L3 privileged or visual control, and L4 external consequences require fresh
+policy calculation, local host checks, human/operator approval where needed,
+and evidence before success can be claimed. Managed mode may remember the host;
+it must not remember broad consent to privileged or external actions.
+
+The open-source shape is therefore stable: the kernel owns consent, identity,
+authorization, host veto, adapter supervision, proof, and recovery. Everything
+else is replaceable: Hermes/Lucky, Codex, Claude Code, ACP/acpx, transport,
+database, object storage, release host, mesh, GUI tool, and workspace provider.
+If replacing an edge requires weakening signed jobs, host-side validation,
+approval, evidence, audit, or release verification, that edge is not compatible
+with the final architecture.
+
 ### Final Topology
 
 ```text
