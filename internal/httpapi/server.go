@@ -42,6 +42,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/trust-bundle", s.getTrustBundle)
 	mux.HandleFunc("GET /v1/enrollment/revocations", s.getEnrollmentRevocations)
 	mux.HandleFunc("POST /v1/enrollment/certificates", s.issueEnrollmentCertificate)
+	mux.HandleFunc("POST /v1/enrollment/certificates/renew", s.renewEnrollmentCertificate)
 	mux.HandleFunc("POST /v1/trust-bundle", s.updateTrustBundle)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
@@ -133,6 +134,56 @@ func (s Server) issueEnrollmentCertificate(w http.ResponseWriter, r *http.Reques
 		"certificate":             certificate,
 		"certificate_fingerprint": fingerprint,
 		"enrollment_root":         root,
+	})
+}
+
+func (s Server) renewEnrollmentCertificate(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeEnrollmentIssuer(r) {
+		writeError(w, http.StatusUnauthorized, "enrollment issuer token is required")
+		return
+	}
+	var req struct {
+		Certificate  model.HostEnrollmentCertificate `json:"certificate"`
+		ValidMinutes int                             `json:"valid_minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.ValidMinutes == 0 {
+		req.ValidMinutes = 60
+	}
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(req.Certificate)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	certificate, err := s.Gateway.RenewEnrollmentCertificate(gateway.EnrollmentCertificateRenewalRequest{
+		Certificate:  req.Certificate,
+		ValidMinutes: req.ValidMinutes,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	root, ok := s.Gateway.EnrollmentRoot()
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "enrollment root not configured")
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"certificate":                      certificate,
+		"certificate_fingerprint":          fingerprint,
+		"previous_certificate_fingerprint": previousFingerprint,
+		"enrollment_root":                  root,
 	})
 }
 

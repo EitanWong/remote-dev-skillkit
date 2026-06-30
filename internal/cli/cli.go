@@ -197,6 +197,9 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 		out := fs.String("out", "", "output renewed enrollment certificate path")
 		keyPath := fs.String("key", "", "Ed25519 enrollment root signing key file")
 		keyID := fs.String("key-id", "enrollment-root", "enrollment root signing key id")
+		gatewayURL := fs.String("gateway", "", "optional gateway base URL for hosted renewal")
+		rootPublicKey := fs.String("root-public-key", "", "expected enrollment root public key for hosted renewal, formatted key_id:base64url_public_key")
+		issuerTokenFile := fs.String("issuer-token-file", "", "optional file containing bearer token for protected hosted renewal")
 		certificatePath := fs.String("certificate", "", "current enrollment certificate JSON path to renew")
 		revocationsPath := fs.String("revocations", "", "optional signed enrollment revocation list JSON path checked before renewal")
 		validMinutes := fs.Int("valid-minutes", 60, "renewed certificate validity window in minutes")
@@ -208,6 +211,9 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 			OutPath:         *out,
 			KeyPath:         *keyPath,
 			KeyID:           *keyID,
+			GatewayURL:      *gatewayURL,
+			RootPublicKey:   *rootPublicKey,
+			IssuerTokenFile: *issuerTokenFile,
 			CertificatePath: *certificatePath,
 			RevocationsPath: *revocationsPath,
 			ValidMinutes:    *validMinutes,
@@ -329,6 +335,9 @@ type enrollmentRenewCertificateOptions struct {
 	OutPath         string
 	KeyPath         string
 	KeyID           string
+	GatewayURL      string
+	RootPublicKey   string
+	IssuerTokenFile string
 	CertificatePath string
 	RevocationsPath string
 	ValidMinutes    int
@@ -3514,14 +3523,17 @@ func (a App) enrollmentRenewCertificate(opts enrollmentRenewCertificateOptions) 
 	if opts.OutPath == "" {
 		return fmt.Errorf("out is required")
 	}
-	if opts.KeyPath == "" {
-		return fmt.Errorf("key is required")
-	}
 	if opts.CertificatePath == "" {
 		return fmt.Errorf("certificate is required")
 	}
 	if opts.ValidMinutes <= 0 {
 		return fmt.Errorf("valid-minutes must be positive")
+	}
+	if opts.GatewayURL != "" {
+		return a.enrollmentRenewCertificateFromGateway(context.Background(), opts)
+	}
+	if opts.KeyPath == "" {
+		return fmt.Errorf("key is required")
 	}
 	key, _, err := signing.LoadOrCreate(opts.KeyPath, opts.KeyID)
 	if err != nil {
@@ -3578,6 +3590,75 @@ func (a App) enrollmentRenewCertificate(opts enrollmentRenewCertificateOptions) 
 	}
 	if opts.RevocationsPath != "" {
 		payload["revocations"] = opts.RevocationsPath
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+type renewedEnrollmentCertificatePayload struct {
+	Certificate                    model.HostEnrollmentCertificate `json:"certificate"`
+	CertificateFingerprint         string                          `json:"certificate_fingerprint"`
+	PreviousCertificateFingerprint string                          `json:"previous_certificate_fingerprint"`
+	EnrollmentRoot                 model.TrustBundle               `json:"enrollment_root"`
+	Error                          string                          `json:"error,omitempty"`
+}
+
+func (a App) enrollmentRenewCertificateFromGateway(ctx context.Context, opts enrollmentRenewCertificateOptions) error {
+	if opts.RootPublicKey == "" {
+		return fmt.Errorf("root-public-key is required for hosted renewal")
+	}
+	certificate, err := readEnrollmentCertificateFile(opts.CertificatePath)
+	if err != nil {
+		return err
+	}
+	expectedRoot, err := parseRootPublicKey(opts.RootPublicKey)
+	if err != nil {
+		return err
+	}
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		return err
+	}
+	renewed, err := renewEnrollmentCertificate(ctx, opts.GatewayURL, certificate, opts)
+	if err != nil {
+		return err
+	}
+	if renewed.EnrollmentRoot.SigningKeyID != expectedRoot.SigningKeyID || renewed.EnrollmentRoot.PublicKey != expectedRoot.PublicKey {
+		return fmt.Errorf("renewed enrollment root does not match pinned root-public-key")
+	}
+	if renewed.PreviousCertificateFingerprint != previousFingerprint {
+		return fmt.Errorf("renewed enrollment certificate previous fingerprint mismatch")
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(renewed.Certificate, expectedRoot, time.Now()); err != nil {
+		return err
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(renewed.Certificate)
+	if err != nil {
+		return err
+	}
+	if fingerprint != renewed.CertificateFingerprint {
+		return fmt.Errorf("renewed enrollment certificate fingerprint mismatch")
+	}
+	if err := writeEnrollmentCertificateFile(opts.OutPath, renewed.Certificate, opts.Force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                               true,
+		"schema":                           renewed.Certificate.SchemaVersion,
+		"gateway":                          opts.GatewayURL,
+		"certificate":                      renewed.Certificate,
+		"certificate_path":                 opts.OutPath,
+		"previous_certificate":             opts.CertificatePath,
+		"previous_certificate_fingerprint": previousFingerprint,
+		"certificate_fingerprint":          fingerprint,
+		"root_public_key":                  opts.RootPublicKey,
+		"issuer_key_id":                    renewed.Certificate.IssuerKeyID,
+		"authorized_mode":                  renewed.Certificate.Mode,
+		"authorized_host":                  renewed.Certificate.HostName,
+		"authorized_identity":              renewed.Certificate.SubjectIdentityFingerprint,
+		"not_before":                       renewed.Certificate.NotBefore,
+		"not_after":                        renewed.Certificate.NotAfter,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -5155,6 +5236,7 @@ Usage:
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
   rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-renewed.json --key .rdev/keys/enrollment-root.json --revocations revocations.json
+  rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-hosted-renewed.json --gateway http://127.0.0.1:8787 --root-public-key enrollment-root:... --issuer-token-file issuer-token.txt
   rdev enrollment init-revocations --out revocations.json --key .rdev/keys/enrollment-root.json
   rdev enrollment revoke-certificate --out revocations.json --key .rdev/keys/enrollment-root.json --certificate host-enrollment.json --reason "host retired"
   rdev enrollment verify-revocations --revocations revocations.json --root-public-key enrollment-root:...
@@ -5703,6 +5785,44 @@ func issueEnrollmentCertificate(ctx context.Context, gatewayURL string, opts enr
 			payload.Error = resp.Status
 		}
 		return issuedEnrollmentCertificatePayload{}, fmt.Errorf("issue enrollment certificate failed: %s", payload.Error)
+	}
+	return payload, nil
+}
+
+func renewEnrollmentCertificate(ctx context.Context, gatewayURL string, certificate model.HostEnrollmentCertificate, opts enrollmentRenewCertificateOptions) (renewedEnrollmentCertificatePayload, error) {
+	body, err := json.Marshal(map[string]any{
+		"certificate":   certificate,
+		"valid_minutes": opts.ValidMinutes,
+	})
+	if err != nil {
+		return renewedEnrollmentCertificatePayload{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/enrollment/certificates/renew", bytes.NewReader(body))
+	if err != nil {
+		return renewedEnrollmentCertificatePayload{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if opts.IssuerTokenFile != "" {
+		token, err := readTokenFile(opts.IssuerTokenFile)
+		if err != nil {
+			return renewedEnrollmentCertificatePayload{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return renewedEnrollmentCertificatePayload{}, err
+	}
+	defer resp.Body.Close()
+	var payload renewedEnrollmentCertificatePayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return renewedEnrollmentCertificatePayload{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return renewedEnrollmentCertificatePayload{}, fmt.Errorf("renew enrollment certificate failed: %s", payload.Error)
 	}
 	return payload, nil
 }

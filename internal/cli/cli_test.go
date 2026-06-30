@@ -1598,6 +1598,114 @@ func TestEnrollmentRenewCertificateExtendsVerifiedCertificate(t *testing.T) {
 	}
 }
 
+func TestEnrollmentRenewCertificateFromGatewayWritesVerifiedCertificate(t *testing.T) {
+	now := time.Now().UTC()
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	capabilities := []string{"shell.user"}
+	ticket, err := model.NewTicket(model.HostModeManaged, 600, capabilities, "managed enrollment", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityPath := filepath.Join(t.TempDir(), "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := model.HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                "managed-mac",
+		OS:                  "darwin",
+		Arch:                "arm64",
+		Capabilities:        capabilities,
+		IdentityKeyID:       identity.KeyID,
+		IdentityPublicKey:   identity.EncodedPublicKey(),
+		IdentityFingerprint: identity.Fingerprint(),
+	}
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, root.SigningKeyID, issuerPrivateKey, now, 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewed, err := model.RenewHostEnrollmentCertificate(certificate, root, issuerPrivateKey, now, 120*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewedFingerprint, err := model.HostEnrollmentCertificateFingerprint(renewed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenAuthorization := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuthorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/enrollment/certificates/renew" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"certificate":                      renewed,
+			"certificate_fingerprint":          renewedFingerprint,
+			"previous_certificate_fingerprint": previousFingerprint,
+			"enrollment_root":                  root,
+		})
+	}))
+	defer server.Close()
+	certificatePath := filepath.Join(t.TempDir(), "certs", "host-enrollment.json")
+	if err := writeEnrollmentCertificateFile(certificatePath, certificate, false); err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(t.TempDir(), "issuer-token.txt")
+	if err := os.WriteFile(tokenPath, []byte("issuer-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(t.TempDir(), "certs", "host-enrollment-renewed.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "renew-certificate",
+		"--certificate", certificatePath,
+		"--out", outPath,
+		"--gateway", server.URL,
+		"--root-public-key", encodeRootPublicKey(root.SigningKeyID, issuerPublicKey),
+		"--issuer-token-file", tokenPath,
+		"--valid-minutes", "120",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenAuthorization != "Bearer issuer-secret" {
+		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
+	}
+	var payload struct {
+		OK                             bool   `json:"ok"`
+		Schema                         string `json:"schema"`
+		PreviousCertificateFingerprint string `json:"previous_certificate_fingerprint"`
+		CertificateFingerprint         string `json:"certificate_fingerprint"`
+		RootPublicKey                  string `json:"root_public_key"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid renew output: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != model.HostEnrollmentCertificateSchemaVersion || payload.RootPublicKey != encodeRootPublicKey(root.SigningKeyID, issuerPublicKey) {
+		t.Fatalf("unexpected renew output: %s", stdout.String())
+	}
+	if payload.PreviousCertificateFingerprint != previousFingerprint || payload.CertificateFingerprint != renewedFingerprint {
+		t.Fatalf("unexpected fingerprints in renew output: %s", stdout.String())
+	}
+	written, err := readEnrollmentCertificateFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(written, root, time.Now()); err != nil {
+		t.Fatalf("written renewed certificate should verify: %v", err)
+	}
+}
+
 func TestEnrollmentRenewCertificateRejectsRevokedCertificate(t *testing.T) {
 	dir := t.TempDir()
 	identityPath := filepath.Join(dir, "identity", "host.json")

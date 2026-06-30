@@ -58,6 +58,11 @@ type EnrollmentCertificateRequest struct {
 	ValidMinutes        int
 }
 
+type EnrollmentCertificateRenewalRequest struct {
+	Certificate  model.HostEnrollmentCertificate
+	ValidMinutes int
+}
+
 type AuditSink interface {
 	Append(model.AuditEvent) error
 }
@@ -269,6 +274,24 @@ func (g *MemoryGateway) IssueEnrollmentCertificate(req EnrollmentCertificateRequ
 	}
 	g.appendAuditLocked("operator", "enrollment.certificate.issue", ticket.ID, "issued host enrollment certificate")
 	return certificate, nil
+}
+
+func (g *MemoryGateway) RenewEnrollmentCertificate(req EnrollmentCertificateRenewalRequest) (model.HostEnrollmentCertificate, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.issueEnrollment {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: enrollment issuer not configured", ErrInvalidState)
+	}
+	if req.ValidMinutes <= 0 {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: valid_minutes must be positive", ErrPolicyDenied)
+	}
+	now := g.now().UTC()
+	renewed, err := model.RenewHostEnrollmentCertificate(req.Certificate, g.enrollmentRoot, g.enrollmentPrivate, now, time.Duration(req.ValidMinutes)*time.Minute)
+	if err != nil {
+		return model.HostEnrollmentCertificate{}, err
+	}
+	g.appendAuditLocked("operator", "enrollment.certificate.renew", req.Certificate.TicketCode, "renewed host enrollment certificate")
+	return renewed, nil
 }
 
 func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model.Host, error) {

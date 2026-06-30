@@ -372,6 +372,85 @@ func TestEnrollmentCertificatesEndpointRequiresIssuerToken(t *testing.T) {
 	}
 }
 
+func TestEnrollmentCertificatesRenewEndpointRenewsVerifiedCertificate(t *testing.T) {
+	now := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	currentNow := now
+	issuerPublicKey, issuerPrivateKey := httpTestKeyPair(t)
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return currentNow }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, []string{"shell.user"}, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := gw.IssueEnrollmentCertificate(gateway.EnrollmentCertificateRequest{
+		TicketCode:          ticket.Code,
+		Name:                "managed-mac",
+		OS:                  "darwin",
+		Arch:                "arm64",
+		Capabilities:        []string{"shell.user"},
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   base64.RawURLEncoding.EncodeToString(hostPublicKey),
+		IdentityFingerprint: httpHostIdentityFingerprint(hostPublicKey),
+		ValidMinutes:        30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentNow = now.Add(5 * time.Minute)
+	body, err := json.Marshal(map[string]any{
+		"certificate":   certificate,
+		"valid_minutes": 120,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(gw)
+	server.EnrollmentIssuerToken = "issuer-secret"
+	handler := server.Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/enrollment/certificates/renew", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer issuer-secret")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Certificate                    model.HostEnrollmentCertificate `json:"certificate"`
+		CertificateFingerprint         string                          `json:"certificate_fingerprint"`
+		PreviousCertificateFingerprint string                          `json:"previous_certificate_fingerprint"`
+		EnrollmentRoot                 model.TrustBundle               `json:"enrollment_root"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.PreviousCertificateFingerprint != previousFingerprint {
+		t.Fatalf("expected previous fingerprint %q, got %q", previousFingerprint, payload.PreviousCertificateFingerprint)
+	}
+	if payload.EnrollmentRoot.SigningKeyID != root.SigningKeyID || payload.EnrollmentRoot.PublicKey != root.PublicKey {
+		t.Fatalf("unexpected enrollment root: %#v", payload.EnrollmentRoot)
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(payload.Certificate, root, currentNow); err != nil {
+		t.Fatalf("renewed certificate should verify: %v", err)
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(payload.Certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.CertificateFingerprint != fingerprint || payload.CertificateFingerprint == previousFingerprint {
+		t.Fatalf("unexpected renewed fingerprint previous=%q payload=%q actual=%q", previousFingerprint, payload.CertificateFingerprint, fingerprint)
+	}
+}
+
 func TestTrustBundleEndpointRejectsRollback(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	publicKey, privateKey := httpTestKeyPair(t)

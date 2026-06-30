@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -383,6 +384,69 @@ func TestMemoryGatewayIssueEnrollmentCertificateRejectsCapabilityEscalation(t *t
 	})
 	if err == nil || !strings.Contains(err.Error(), "exceed ticket capabilities") {
 		t.Fatalf("expected capability escalation rejection, got %v", err)
+	}
+}
+
+func TestMemoryGatewayRenewsEnrollmentCertificate(t *testing.T) {
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	currentNow := now
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return currentNow }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	capabilities := []string{"shell.user"}
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := signedGatewayHostRegistration(t, ticket, capabilities)
+	certificate, err := gw.IssueEnrollmentCertificate(EnrollmentCertificateRequest{
+		TicketCode:          ticket.Code,
+		Name:                registration.Name,
+		OS:                  registration.OS,
+		Arch:                registration.Arch,
+		Capabilities:        capabilities,
+		IdentityKeyID:       registration.IdentityKeyID,
+		IdentityPublicKey:   registration.IdentityPublicKey,
+		IdentityFingerprint: registration.IdentityFingerprint,
+		ValidMinutes:        30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentNow = now.Add(5 * time.Minute)
+	renewed, err := gw.RenewEnrollmentCertificate(EnrollmentCertificateRenewalRequest{
+		Certificate:  certificate,
+		ValidMinutes: 120,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewedFingerprint, err := model.HostEnrollmentCertificateFingerprint(renewed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewedFingerprint == previousFingerprint {
+		t.Fatalf("expected renewed fingerprint to change, got %q", renewedFingerprint)
+	}
+	if renewed.TicketCode != certificate.TicketCode || renewed.Mode != certificate.Mode || renewed.HostName != certificate.HostName || renewed.SubjectIdentityFingerprint != certificate.SubjectIdentityFingerprint {
+		t.Fatalf("renewal changed certificate scope: before=%#v after=%#v", certificate, renewed)
+	}
+	if renewed.OS != certificate.OS || renewed.Arch != certificate.Arch || !slices.Equal(renewed.Capabilities, certificate.Capabilities) {
+		t.Fatalf("renewal changed platform/capabilities: before=%#v after=%#v", certificate, renewed)
+	}
+	if !renewed.NotAfter.After(certificate.NotAfter) {
+		t.Fatalf("expected renewed certificate to extend validity: before=%s after=%s", certificate.NotAfter, renewed.NotAfter)
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(renewed, root, currentNow); err != nil {
+		t.Fatalf("renewed certificate should verify: %v", err)
 	}
 }
 
