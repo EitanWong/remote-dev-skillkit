@@ -110,6 +110,7 @@
 - [x] Wire host-side job verification to signed trust bundle active keys.
 - [x] Add durable host trust bundle file store.
 - [x] Add durable host identity key store.
+- [x] Add signed host registration proof for identity-bearing registrations.
 - [x] Add durable host nonce replay store.
 - [x] Add hash-chained audit export and verification.
 - [x] Add final buy-vs-build boundary for MCP, Tailscale/headscale, SSH, Coder, DevPod, VS Code Remote Tunnels, RustDesk/MeshCentral, and Sigstore-style release trust.
@@ -166,7 +167,7 @@
 
 - [ ] Add WSS/mTLS transport.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
-- [ ] Add Windows DPAPI and Linux libsecret/keyctl host identity/trust storage plus signed registration proof.
+- [ ] Add Windows DPAPI and Linux libsecret/keyctl host identity/trust storage plus production enrollment certificates.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.

@@ -187,7 +187,7 @@ func TestMemoryGatewayCreatesSignedJoinManifest(t *testing.T) {
 func TestMemoryGatewayPreservesHostIdentityAndBindsEnvelope(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestMemoryGatewayPreservesHostIdentityAndBindsEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := gw.RegisterHost(model.HostRegistration{
+	registration := model.HostRegistration{
 		TicketCode:          ticket.Code,
 		Name:                "win-temp-01",
 		OS:                  "windows",
@@ -204,7 +204,13 @@ func TestMemoryGatewayPreservesHostIdentityAndBindsEnvelope(t *testing.T) {
 		IdentityKeyID:       "host-test",
 		IdentityPublicKey:   encodeHostIdentityPublicKey(publicKey),
 		IdentityFingerprint: fingerprint,
-	})
+	}
+	proof, err := model.SignHostRegistration(registration, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.IdentityProof = &proof
+	host, err := gw.RegisterHost(registration)
 	if err != nil {
 		t.Fatal(err)
 	}

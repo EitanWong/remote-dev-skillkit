@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -35,14 +36,38 @@ type Host struct {
 }
 
 type HostRegistration struct {
-	TicketCode          string   `json:"ticket_code"`
-	Name                string   `json:"name"`
-	OS                  string   `json:"os"`
-	Arch                string   `json:"arch"`
-	Capabilities        []string `json:"capabilities"`
-	IdentityKeyID       string   `json:"identity_key_id,omitempty"`
-	IdentityPublicKey   string   `json:"identity_public_key,omitempty"`
-	IdentityFingerprint string   `json:"identity_fingerprint,omitempty"`
+	TicketCode          string                 `json:"ticket_code"`
+	Name                string                 `json:"name"`
+	OS                  string                 `json:"os"`
+	Arch                string                 `json:"arch"`
+	Capabilities        []string               `json:"capabilities"`
+	IdentityKeyID       string                 `json:"identity_key_id,omitempty"`
+	IdentityPublicKey   string                 `json:"identity_public_key,omitempty"`
+	IdentityFingerprint string                 `json:"identity_fingerprint,omitempty"`
+	IdentityProof       *HostRegistrationProof `json:"identity_proof,omitempty"`
+}
+
+const (
+	HostRegistrationProofSchemaVersion  = "rdev.host-registration-proof.v1"
+	hostRegistrationProofPayloadVersion = "rdev.host-registration-proof-payload.v1"
+)
+
+type HostRegistrationProof struct {
+	SchemaVersion string `json:"schema_version"`
+	SigningAlg    string `json:"signing_alg"`
+	KeyID         string `json:"key_id"`
+	Signature     string `json:"signature"`
+}
+
+type hostRegistrationProofPayload struct {
+	SchemaVersion       string `json:"schema_version"`
+	TicketCode          string `json:"ticket_code"`
+	Name                string `json:"name"`
+	OS                  string `json:"os"`
+	Arch                string `json:"arch"`
+	IdentityKeyID       string `json:"identity_key_id"`
+	IdentityPublicKey   string `json:"identity_public_key"`
+	IdentityFingerprint string `json:"identity_fingerprint"`
 }
 
 func NewHost(ticket Ticket, registration HostRegistration, now time.Time) (Host, error) {
@@ -72,22 +97,95 @@ func NewHost(ticket Ticket, registration HostRegistration, now time.Time) (Host,
 
 func validateHostRegistrationIdentity(registration HostRegistration) error {
 	if registration.IdentityKeyID == "" && registration.IdentityPublicKey == "" && registration.IdentityFingerprint == "" {
+		if registration.IdentityProof != nil {
+			return fmt.Errorf("host identity proof requires identity fields")
+		}
 		return nil
 	}
+	publicKey, err := validateHostRegistrationIdentityFields(registration)
+	if err != nil {
+		return err
+	}
+	if registration.IdentityProof == nil {
+		return fmt.Errorf("host identity proof is required")
+	}
+	if registration.IdentityProof.SchemaVersion != HostRegistrationProofSchemaVersion {
+		return fmt.Errorf("unsupported host identity proof schema %q", registration.IdentityProof.SchemaVersion)
+	}
+	if registration.IdentityProof.SigningAlg != JobEnvelopeSigningAlg {
+		return fmt.Errorf("unsupported host identity proof signing algorithm %q", registration.IdentityProof.SigningAlg)
+	}
+	if registration.IdentityProof.KeyID != registration.IdentityKeyID {
+		return fmt.Errorf("host identity proof key id mismatch")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(registration.IdentityProof.Signature)
+	if err != nil {
+		return fmt.Errorf("decode host identity proof signature: %w", err)
+	}
+	payload, err := hostRegistrationProofPayloadBytes(registration)
+	if err != nil {
+		return err
+	}
+	if !ed25519.Verify(publicKey, payload, signature) {
+		return fmt.Errorf("host identity proof signature mismatch")
+	}
+	return nil
+}
+
+func validateHostRegistrationIdentityFields(registration HostRegistration) (ed25519.PublicKey, error) {
 	if registration.IdentityKeyID == "" || registration.IdentityPublicKey == "" || registration.IdentityFingerprint == "" {
-		return fmt.Errorf("host identity key id, public key, and fingerprint are required together")
+		return nil, fmt.Errorf("host identity key id, public key, and fingerprint are required together")
 	}
 	publicKey, err := base64.RawURLEncoding.DecodeString(registration.IdentityPublicKey)
 	if err != nil {
-		return fmt.Errorf("decode host identity public key: %w", err)
+		return nil, fmt.Errorf("decode host identity public key: %w", err)
 	}
 	if len(publicKey) != ed25519.PublicKeySize {
-		return fmt.Errorf("invalid host identity public key length %d", len(publicKey))
+		return nil, fmt.Errorf("invalid host identity public key length %d", len(publicKey))
 	}
 	sum := sha256.Sum256(publicKey)
 	expected := "sha256:" + hex.EncodeToString(sum[:])
 	if registration.IdentityFingerprint != expected {
-		return fmt.Errorf("host identity fingerprint mismatch")
+		return nil, fmt.Errorf("host identity fingerprint mismatch")
 	}
-	return nil
+	return ed25519.PublicKey(publicKey), nil
+}
+
+func SignHostRegistration(registration HostRegistration, privateKey ed25519.PrivateKey) (HostRegistrationProof, error) {
+	publicKey, err := validateHostRegistrationIdentityFields(registration)
+	if err != nil {
+		return HostRegistrationProof{}, err
+	}
+	if len(privateKey) != ed25519.PrivateKeySize {
+		return HostRegistrationProof{}, fmt.Errorf("invalid host identity private key length %d", len(privateKey))
+	}
+	derived, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok || !derived.Equal(publicKey) {
+		return HostRegistrationProof{}, fmt.Errorf("host identity private key does not match registration public key")
+	}
+	payload, err := hostRegistrationProofPayloadBytes(registration)
+	if err != nil {
+		return HostRegistrationProof{}, err
+	}
+	signature := ed25519.Sign(privateKey, payload)
+	return HostRegistrationProof{
+		SchemaVersion: HostRegistrationProofSchemaVersion,
+		SigningAlg:    JobEnvelopeSigningAlg,
+		KeyID:         registration.IdentityKeyID,
+		Signature:     base64.RawURLEncoding.EncodeToString(signature),
+	}, nil
+}
+
+func hostRegistrationProofPayloadBytes(registration HostRegistration) ([]byte, error) {
+	payload := hostRegistrationProofPayload{
+		SchemaVersion:       hostRegistrationProofPayloadVersion,
+		TicketCode:          registration.TicketCode,
+		Name:                registration.Name,
+		OS:                  registration.OS,
+		Arch:                registration.Arch,
+		IdentityKeyID:       registration.IdentityKeyID,
+		IdentityPublicKey:   registration.IdentityPublicKey,
+		IdentityFingerprint: registration.IdentityFingerprint,
+	}
+	return json.Marshal(payload)
 }

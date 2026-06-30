@@ -34,6 +34,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, cooperative cancellation, output caps, and failure reporting.
 - Host identity storage wired into registration and job binding.
 - Durable host trust bundle store.
+- Signed host registration proofs for identity-bearing registrations.
 - Trust-bundle key rotation/revocation flow.
 - Trust lifecycle operator workflow through `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed trust bundles with sequence, previous-hash, key rotation, key retirement, revocation, and pinned-root verification.
 - Host-bound trust bundle update checks for managed host refresh.
@@ -123,7 +124,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Restart/recovery.
 - Auto-update/rollback.
 - Full production adapter SDK beyond the first runtime lifecycle runner, built-in hostrunner runtime fixture capture, and lifecycle/result/cancellation/runtime-fixture conformance.
-- Windows DPAPI and Linux libsecret/keyctl protected stores plus signed registration proofs beyond the current macOS Keychain/file-backed paths.
+- Windows DPAPI and Linux libsecret/keyctl protected stores plus enrollment certificates beyond the current macOS Keychain/file-backed paths and signed registration proof.
 - ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable hosted storage.

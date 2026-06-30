@@ -121,7 +121,7 @@ func RunManagedMac(ctx context.Context, opts ManagedMacOptions) (ManagedMacRepor
 	if err != nil {
 		return ManagedMacReport{}, err
 	}
-	host, err := gw.RegisterHost(model.HostRegistration{
+	registration := model.HostRegistration{
 		TicketCode:          ticket.Code,
 		Name:                "managed-mac-acceptance",
 		OS:                  runtime.GOOS,
@@ -130,7 +130,13 @@ func RunManagedMac(ctx context.Context, opts ManagedMacOptions) (ManagedMacRepor
 		IdentityKeyID:       identity.KeyID,
 		IdentityPublicKey:   identity.EncodedPublicKey(),
 		IdentityFingerprint: identity.Fingerprint(),
-	})
+	}
+	proof, err := model.SignHostRegistration(registration, identity.PrivateKey)
+	if err != nil {
+		return ManagedMacReport{}, err
+	}
+	registration.IdentityProof = &proof
+	host, err := gw.RegisterHost(registration)
 	if err != nil {
 		return ManagedMacReport{}, err
 	}

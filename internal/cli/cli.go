@@ -1222,7 +1222,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if opts.Name != "" {
 		inventory.Name = opts.Name
 	}
-	host, err := registerHost(ctx, opts.GatewayURL, model.HostRegistration{
+	registration := model.HostRegistration{
 		TicketCode:          opts.TicketCode,
 		Name:                inventory.Name,
 		OS:                  inventory.OS,
@@ -1231,7 +1231,13 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		IdentityKeyID:       identity.KeyID,
 		IdentityPublicKey:   identity.EncodedPublicKey(),
 		IdentityFingerprint: identity.Fingerprint(),
-	})
+	}
+	proof, err := model.SignHostRegistration(registration, identity.PrivateKey)
+	if err != nil {
+		return err
+	}
+	registration.IdentityProof = &proof
+	host, err := registerHost(ctx, opts.GatewayURL, registration)
 	if err != nil {
 		return err
 	}
@@ -1242,10 +1248,12 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		"host":      host,
 		"inventory": inventory,
 		"identity": map[string]any{
-			"key_id":      identity.KeyID,
-			"fingerprint": identity.Fingerprint(),
-			"created":     identityCreated,
-			"stored":      opts.IdentityStorePath != "",
+			"key_id":             identity.KeyID,
+			"fingerprint":        identity.Fingerprint(),
+			"created":            identityCreated,
+			"stored":             opts.IdentityStorePath != "",
+			"proof_schema":       proof.SchemaVersion,
+			"registration_proof": true,
 		},
 		"status": "registered-pending-approval",
 		"note":   "local development registration only; WSS transport is not implemented yet",

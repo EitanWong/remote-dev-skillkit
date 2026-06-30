@@ -1832,11 +1832,11 @@ func activeHost(t *testing.T, gw *gateway.MemoryGateway) model.Host {
 	if err != nil {
 		t.Fatal(err)
 	}
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := gw.RegisterHost(model.HostRegistration{
+	registration := model.HostRegistration{
 		TicketCode:          ticket.Code,
 		Name:                "host",
 		OS:                  "darwin",
@@ -1844,7 +1844,13 @@ func activeHost(t *testing.T, gw *gateway.MemoryGateway) model.Host {
 		IdentityKeyID:       "host-test",
 		IdentityPublicKey:   encodeHostIdentityPublicKey(publicKey),
 		IdentityFingerprint: hostIdentityFingerprint(publicKey),
-	})
+	}
+	proof, err := model.SignHostRegistration(registration, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.IdentityProof = &proof
+	host, err := gw.RegisterHost(registration)
 	if err != nil {
 		t.Fatal(err)
 	}

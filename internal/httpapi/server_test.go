@@ -356,21 +356,27 @@ func TestRegisterHostPreservesIdentityFields(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fingerprint := httpHostIdentityFingerprint(publicKey)
-	body, err := json.Marshal(map[string]any{
-		"ticket_code":          ticket.Code,
-		"name":                 "win-temp",
-		"os":                   "windows",
-		"arch":                 "amd64",
-		"capabilities":         []string{"shell.user"},
-		"identity_key_id":      "host-test",
-		"identity_public_key":  base64.RawURLEncoding.EncodeToString(publicKey),
-		"identity_fingerprint": fingerprint,
-	})
+	registration := model.HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                "win-temp",
+		OS:                  "windows",
+		Arch:                "amd64",
+		Capabilities:        []string{"shell.user"},
+		IdentityKeyID:       "host-test",
+		IdentityPublicKey:   base64.RawURLEncoding.EncodeToString(publicKey),
+		IdentityFingerprint: fingerprint,
+	}
+	proof, err := model.SignHostRegistration(registration, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.IdentityProof = &proof
+	body, err := json.Marshal(registration)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4498,8 +4498,10 @@ func runHostServeWithIdentityStore(t *testing.T, gatewayURL, ticketCode, identit
 			IdentityFingerprint string `json:"identity_fingerprint"`
 		} `json:"host"`
 		Identity struct {
-			Fingerprint string `json:"fingerprint"`
-			Stored      bool   `json:"stored"`
+			Fingerprint       string `json:"fingerprint"`
+			Stored            bool   `json:"stored"`
+			ProofSchema       string `json:"proof_schema"`
+			RegistrationProof bool   `json:"registration_proof"`
 		} `json:"identity"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
@@ -4510,6 +4512,9 @@ func runHostServeWithIdentityStore(t *testing.T, gatewayURL, ticketCode, identit
 	}
 	if !payload.Identity.Stored {
 		t.Fatalf("expected identity to be stored, got %s", stdout.String())
+	}
+	if !payload.Identity.RegistrationProof || payload.Identity.ProofSchema != model.HostRegistrationProofSchemaVersion {
+		t.Fatalf("expected registration proof schema %q, got %s", model.HostRegistrationProofSchemaVersion, stdout.String())
 	}
 	if payload.Host.IdentityFingerprint != payload.Identity.Fingerprint {
 		t.Fatalf("expected host identity fingerprint %q, got %q", payload.Identity.Fingerprint, payload.Host.IdentityFingerprint)
