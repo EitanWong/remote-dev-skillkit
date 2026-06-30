@@ -1,6 +1,6 @@
 # Perfect Ending Solution
 
-Date: 2026-06-29
+Date: 2026-06-30
 
 This document is the canonical final architecture lock and execution spec for
 Remote Dev Skillkit. If another architecture document conflicts with this file,
@@ -47,6 +47,211 @@ or a Hermes-only private integration.
 Remote Dev Skillkit is a **permissioned delegation operating layer** for agentic
 development work. Its value is the verified space between "an agent wants
 something done" and "a real machine safely did it."
+
+### Final Perfect-Ending Blueprint
+
+This is the final blueprint. Earlier sections and supporting architecture
+documents are useful rationale, but new implementation work should be accepted
+only when it preserves this blueprint. Future changes that alter these
+boundaries need an explicit architecture decision instead of another competing
+"final" document.
+
+#### Product Definition
+
+Remote Dev Skillkit is the universal safety kernel between agent runtimes and
+real developer machines:
+
+```text
+agent intent
+  -> typed Skill/MCP request
+  -> gateway policy dry-run
+  -> signed host-bound envelope
+  -> outbound host lease
+  -> host-side sovereignty checks
+  -> adapter lifecycle execution
+  -> verifier-backed evidence
+  -> human/agent review, approval, cancel, revoke, rotate, or continue
+```
+
+It is intentionally not a remote administration suite, tunnel product, coding
+CLI replacement, screen-sharing product, or Hermes-only integration. Those
+systems can be adapters or deployments. The core project owns consent,
+authorization, local validation, bounded execution, evidence, audit, and
+revocation.
+
+#### Final Component Boundaries
+
+| Component | Owns | Must never own |
+|---|---|---|
+| Agent runtime | intent, planning, explanation, evidence review, approval requests | standing host credentials, raw unrestricted shell, self-approval |
+| Skillkit and MCP tools | typed workflow, schema discovery, verifier entrypoints, safe defaults | hidden config mutation, persistence, deployment-specific authority |
+| Gateway | tickets, host registry, jobs, leases, policy dry-runs, signing, approvals, artifacts, audit, revocation | local host execution or host filesystem trust |
+| Host runtime | identity, trust bundle, nonce cache, local policy, workspace/session locks, adapter supervision, local stop | inventing authority, broadening approval, silent persistence in temporary mode |
+| Adapter | one execution domain such as Codex, Claude Code, ACP, shell, PowerShell, GUI, Coder, or DevPod | approval, signing, persistence, transport authority, cross-adapter policy |
+| Proof layer | evidence bundles, audit chains, conformance reports, release and acceptance verification | narrative-only success claims |
+| Distribution layer | signed release bundles, release candidates, Skillkit bundles, install plans, bootstrap metadata | runtime job authorization |
+
+These boundaries are the final control-plane split: agents request, gateways
+govern, hosts verify, adapters run, proof decides whether a claim is real.
+
+#### Stable Protocol Family
+
+The public schema family should stay small and boring. New features should map
+to these objects before inventing a new authority path:
+
+| Object | Final purpose | Blocking verifier rule |
+|---|---|---|
+| `rdev.release-bundle.v1` | signed software distribution index | bootstrap cannot execute unverified or incomplete artifacts |
+| `rdev.skillkit-manifest.v1` | portable agent workflow bundle | agent installs cannot copy unlisted or tampered files |
+| `rdev.ticket.v1` | enrollment intent with mode, TTL, reason, and capability scope | expired, reused, revoked, or overbroad tickets cannot enroll hosts |
+| `rdev.host-registration.v1` | host identity, mode, capabilities, stop contract, and trust pins | unapproved or mismatched hosts cannot receive work |
+| `rdev.trust-bundle.v1` | gateway keys, sequence, previous hash, and revocations | rollback, revoked key, wrong root, or stale trust denies jobs |
+| `rdev.job-envelope.v1` | host-bound executable intent with workspace, capabilities, limits, nonce, expiry, and approvals | tamper, replay, wrong host, missing capability, missing approval, or workspace escape denies execution |
+| `rdev.approval-token.v1` | one scoped exception for a dangerous operation | reuse, wrong subject, broader scope, or expiry denies the operation |
+| `rdev.adapter-*.v1` | lifecycle, runtime, result, cancellation, denial, and redaction evidence | non-conforming artifacts are not release evidence |
+| `rdev.evidence-bundle.v1` | reconstructable job result with artifact index and audit slice | incomplete checksums or missing audit prevents completion claims |
+| `rdev.audit-chain.v1` | tamper-evident event export | missing or changed events fail verification |
+
+Everything else is transport, storage, UI, packaging, or adapter detail.
+
+#### Three Mode Products
+
+The project has three production-grade products sharing one kernel:
+
+| Mode | User | Persistence | Final behavior |
+|---|---|---:|---|
+| `attended-temporary` | third-party or short-lived repair host | none | one visible command, outbound-only session, TTL, local stop, transcript, no autorun/service/firewall residue |
+| `managed` | Eitan-owned or formally managed Mac/Windows/Linux host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, start/status/stop/uninstall, no ambient L3/L4 authority |
+| `workspace-provider` | disposable cloud/devcontainer/workspace backend | provider lifecycle only | create/use/destroy workspaces through signed jobs and provider-scoped evidence |
+
+`break-glass` is not a fourth normal mode. It is a temporary policy overlay:
+shorter TTL, narrower scope, stronger approval, denser audit, and no permanent
+weakening.
+
+#### Permission Lattice
+
+Permissions escalate monotonically and revoke independently:
+
+| Ring | Scope | Examples | Default decision |
+|---|---|---|---|
+| L0 observe | facts without mutation | capability inventory, logs, `git status` | allowed for approved host/workspace |
+| L1 workspace | bounded project mutation | edit, test, build, local generated files | workspace lock required |
+| L2 repair | machine-local user repair | package repair, cache reset, process cleanup | scoped approval unless explicitly pre-granted managed policy |
+| L3 privileged or visual | OS, service, GUI, elevation, screen | UAC/admin prompt, LaunchAgent/systemd/Windows Service, browser/GUI control | fresh per-operation approval |
+| L4 external consequence | outside-host effects | push, merge, deploy, publish, paid action, credential change | approval after evidence review |
+
+Managed mode can remember a host. It cannot silently grant L3 or L4.
+
+#### Canonical State Machines
+
+Distribution:
+
+```text
+source tree -> build artifacts -> signed manifests -> signed release bundle
+  -> release candidate -> candidate verification -> platform release plan
+  -> post-release install verification -> bootstrap or Skillkit install
+```
+
+Enrollment:
+
+```text
+operator creates ticket -> user runs reviewed bootstrap/install
+  -> host generates identity -> host registers capabilities
+  -> gateway/operator approval -> active host lease eligibility
+  -> revoke, rotate, expire, uninstall, or re-enroll
+```
+
+Job execution:
+
+```text
+agent plan -> policy dry-run -> approval calculation
+  -> signed envelope -> host claim/lease -> host local validation
+  -> deny | approval-required | adapter run | cancel
+  -> result/cancellation/failure evidence -> audit-chain export
+  -> verifier ok -> completion claim
+```
+
+Adapter lifecycle:
+
+```text
+detect -> plan -> prepare -> run -> collect -> cleanup
+```
+
+Cleanup runs after any prepared state, including cancellation, timeout, failure,
+and host restart recovery. A cleanup failure is evidence, not a hidden retry
+forever.
+
+#### Eitan Reference Deployment
+
+Eitan's personal production shape is:
+
+```text
+Lucky on Hermes
+  -> Remote Dev Skillkit Skill/MCP tools
+  -> https://api.lunflux.com/v1
+  -> rdev-gateway
+  -> https://agent.lunflux.com
+  -> attended temporary hosts and explicitly managed owned hosts
+```
+
+`https://api.lunflux.com/v1` is the authenticated operator and agent API for
+typed jobs, policy dry-runs, approvals, evidence, audit, and MCP-compatible
+tools. `https://agent.lunflux.com` is the human and host-facing edge for join
+pages, release metadata, bootstrap downloads, and host relay. Lucky remains the
+coordinator; it never needs root passwords, SSH passwords, permanent host
+credentials, or hidden persistence on another person's machine.
+
+#### Reliability Contract
+
+The final system is reliable because every non-happy path is first-class:
+
+- Leases expire automatically when hosts disappear.
+- Hosts can stop locally even when the gateway is unavailable.
+- Canceled jobs preserve cancellation evidence without rewriting history.
+- Evidence spools retry upload after reconnect without claiming false success.
+- Workspace locks survive process restart and are explicitly releasable.
+- Trust bundles reject rollback and revoked keys.
+- Approval tokens are consumed once and scoped to subject, host, operation, and
+  expiry.
+- Release and Skillkit installation are dry-run and verifier-first by default.
+- Uninstall and revocation are product features, not cleanup footnotes.
+
+#### Non-Goals
+
+The core project should not implement:
+
+- network scanning or opportunistic host discovery;
+- hidden third-party-machine persistence;
+- raw agent-facing SSH/password vault workflows;
+- gateway-only authorization without host-side verification;
+- invisible privilege escalation or execution-policy weakening;
+- screenshot-only completion claims;
+- adapter-specific bypasses around policy, approval, evidence, or audit.
+
+Mature tools such as Tailscale/headscale, SSH, Coder, DevPod, RustDesk,
+MeshCentral, Playwright, Codex, Claude Code, ACP, and platform signing systems
+are useful edges. They do not replace the kernel.
+
+#### Release Ladder
+
+The final release ladder is:
+
+1. `v0.1` local safety kernel: signed envelopes, host verification, approvals,
+   evidence, audit, release/Skillkit verification, and adapter conformance.
+2. `v0.2` attended temporary Windows: clean VM proof for visible one-command
+   join, signed bundle verification, outbound-only execution, approvals,
+   revocation, and no persistence.
+3. `v0.3` managed Mac coding: real LaunchAgent start/reconnect/locked-worktree
+   Codex job/evidence verification/stop/uninstall proof.
+4. `v0.4` managed device generalization: Linux reboot/reconnect, Windows
+   Service, OS-protected host stores, WSS/mTLS, artifact streaming, and
+   production Adapter SDK.
+5. `v1.0` public Skillkit: stable schemas, signed releases, self-host docs,
+   install verification, acceptance packages, threat model, security policy,
+   and no Hermes/Lunflux/Codex-only assumptions.
+
+No public release may promote a capability from "planned" to "supported" until
+there is a verifier-backed acceptance package for it.
 
 ### Closure Thesis
 
