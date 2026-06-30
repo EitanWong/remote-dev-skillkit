@@ -243,6 +243,80 @@ func TestEnrollmentRevocationsEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
+func TestEnrollmentCertificatesEndpointIssuesVerifiedCertificate(t *testing.T) {
+	now := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	issuerPublicKey, issuerPrivateKey := httpTestKeyPair(t)
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	handler := NewServer(gw).Handler()
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, []string{"shell.user", "git.diff"}, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"ticket_code":          ticket.Code,
+		"name":                 "managed-mac",
+		"os":                   "darwin",
+		"arch":                 "arm64",
+		"capabilities":         []string{"shell.user"},
+		"identity_key_id":      "host-test",
+		"identity_public_key":  base64.RawURLEncoding.EncodeToString(hostPublicKey),
+		"identity_fingerprint": httpHostIdentityFingerprint(hostPublicKey),
+		"valid_minutes":        30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/enrollment/certificates", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Certificate            model.HostEnrollmentCertificate `json:"certificate"`
+		CertificateFingerprint string                          `json:"certificate_fingerprint"`
+		EnrollmentRoot         model.TrustBundle               `json:"enrollment_root"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.EnrollmentRoot.SigningKeyID != root.SigningKeyID || payload.EnrollmentRoot.PublicKey != root.PublicKey {
+		t.Fatalf("unexpected enrollment root: %#v", payload.EnrollmentRoot)
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(payload.Certificate, root, now); err != nil {
+		t.Fatalf("issued certificate should verify: %v", err)
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(payload.Certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.CertificateFingerprint != fingerprint {
+		t.Fatalf("expected fingerprint %q, got %q", fingerprint, payload.CertificateFingerprint)
+	}
+	if payload.Certificate.TicketCode != ticket.Code || payload.Certificate.HostName != "managed-mac" || payload.Certificate.Mode != model.HostModeManaged {
+		t.Fatalf("unexpected issued certificate: %#v", payload.Certificate)
+	}
+}
+
+func TestEnrollmentCertificatesEndpointRequiresIssuer(t *testing.T) {
+	handler := NewServer(gateway.NewMemoryGateway()).Handler()
+	req := httptest.NewRequest(http.MethodPost, "/v1/enrollment/certificates", bytes.NewBufferString(`{"ticket_code":"ABCD"}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("enrollment issuer not configured")) {
+		t.Fatalf("expected issuer error, got %s", rec.Body.String())
+	}
+}
+
 func TestTrustBundleEndpointRejectsRollback(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	publicKey, privateKey := httpTestKeyPair(t)

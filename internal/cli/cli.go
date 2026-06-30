@@ -109,6 +109,40 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 		return fmt.Errorf("missing enrollment subcommand")
 	}
 	switch args[0] {
+	case "issue-certificate":
+		fs := flag.NewFlagSet("enrollment issue-certificate", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway", "", "gateway base URL")
+		out := fs.String("out", "", "output enrollment certificate path")
+		rootPublicKey := fs.String("root-public-key", "", "expected enrollment root public key, formatted key_id:base64url_public_key")
+		ticketCode := fs.String("ticket-code", "", "ticket code authorized by this certificate")
+		name := fs.String("name", "", "host name authorized by this certificate")
+		osName := fs.String("os", "", "host operating system authorized by this certificate")
+		arch := fs.String("arch", "", "host architecture authorized by this certificate")
+		identityKeyID := fs.String("identity-key-id", "", "host identity key id")
+		identityPublicKey := fs.String("identity-public-key", "", "host identity public key")
+		identityFingerprint := fs.String("identity-fingerprint", "", "host identity fingerprint")
+		capabilities := fs.String("capabilities", "", "comma-separated authorized capabilities; defaults to ticket capabilities")
+		validMinutes := fs.Int("valid-minutes", 60, "certificate validity window in minutes")
+		force := fs.Bool("force", false, "overwrite output certificate")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentIssueCertificate(ctx, enrollmentIssueCertificateOptions{
+			GatewayURL:          *gatewayURL,
+			OutPath:             *out,
+			RootPublicKey:       *rootPublicKey,
+			TicketCode:          *ticketCode,
+			Name:                *name,
+			OS:                  *osName,
+			Arch:                *arch,
+			IdentityKeyID:       *identityKeyID,
+			IdentityPublicKey:   *identityPublicKey,
+			IdentityFingerprint: *identityFingerprint,
+			Capabilities:        splitCapabilities(*capabilities),
+			ValidMinutes:        *validMinutes,
+			Force:               *force,
+		})
 	case "sign-certificate":
 		fs := flag.NewFlagSet("enrollment sign-certificate", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -250,6 +284,22 @@ type enrollmentSignCertificateOptions struct {
 	KeyID               string
 	TicketCode          string
 	Mode                string
+	Name                string
+	OS                  string
+	Arch                string
+	IdentityKeyID       string
+	IdentityPublicKey   string
+	IdentityFingerprint string
+	Capabilities        []string
+	ValidMinutes        int
+	Force               bool
+}
+
+type enrollmentIssueCertificateOptions struct {
+	GatewayURL          string
+	OutPath             string
+	RootPublicKey       string
+	TicketCode          string
 	Name                string
 	OS                  string
 	Arch                string
@@ -420,6 +470,8 @@ type gatewayServeOptions struct {
 	ManifestSigningKeyPath  string
 	ManifestSigningKeyID    string
 	EnrollmentRootPublicKey string
+	EnrollmentKeyPath       string
+	EnrollmentKeyID         string
 	EnrollmentRevocations   string
 	TLSCertPath             string
 	TLSKeyPath              string
@@ -2559,6 +2611,8 @@ func (a App) gateway(args []string) error {
 		manifestSigningKey := fs.String("manifest-signing-key", "", "optional Ed25519 key file for signing join manifests")
 		manifestSigningKeyID := fs.String("manifest-signing-key-id", "manifest-dev", "signing key id for join manifests")
 		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key; when set, host registration requires rdev.host-enrollment-certificate.v1")
+		enrollmentKey := fs.String("enrollment-key", "", "optional Ed25519 enrollment root signing key file for dev hosted certificate issuance")
+		enrollmentKeyID := fs.String("enrollment-key-id", "enrollment-root", "enrollment root signing key id for new or existing enrollment key file")
 		enrollmentRevocations := fs.String("enrollment-revocations", "", "optional signed enrollment revocation list JSON path")
 		tlsCert := fs.String("tls-cert", "", "optional TLS server certificate PEM path for the development gateway")
 		tlsKey := fs.String("tls-key", "", "optional TLS server private key PEM path for the development gateway")
@@ -2578,6 +2632,8 @@ func (a App) gateway(args []string) error {
 			ManifestSigningKeyPath:  *manifestSigningKey,
 			ManifestSigningKeyID:    *manifestSigningKeyID,
 			EnrollmentRootPublicKey: *enrollmentRootPublicKey,
+			EnrollmentKeyPath:       *enrollmentKey,
+			EnrollmentKeyID:         *enrollmentKeyID,
 			EnrollmentRevocations:   *enrollmentRevocations,
 			TLSCertPath:             *tlsCert,
 			TLSKeyPath:              *tlsKey,
@@ -3086,7 +3142,33 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 	}
 	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
 	if opts.EnrollmentRevocations != "" && opts.EnrollmentRootPublicKey == "" {
-		return fmt.Errorf("gateway serve --enrollment-revocations requires --enrollment-root-public-key")
+		if opts.EnrollmentKeyPath == "" {
+			return fmt.Errorf("gateway serve --enrollment-revocations requires --enrollment-root-public-key or --enrollment-key")
+		}
+	}
+	if opts.EnrollmentKeyPath != "" {
+		enrollmentKey, enrollmentCreated, err := signing.LoadOrCreate(opts.EnrollmentKeyPath, opts.EnrollmentKeyID)
+		if err != nil {
+			return err
+		}
+		enrollmentRoot := model.NewTrustBundle(enrollmentKey.ID, enrollmentKey.PublicKey)
+		if opts.EnrollmentRootPublicKey != "" {
+			configuredRoot, err := parseRootPublicKey(opts.EnrollmentRootPublicKey)
+			if err != nil {
+				return err
+			}
+			if configuredRoot.SigningKeyID != enrollmentRoot.SigningKeyID || configuredRoot.PublicKey != enrollmentRoot.PublicKey {
+				return fmt.Errorf("gateway serve --enrollment-key does not match --enrollment-root-public-key")
+			}
+		}
+		gw.WithEnrollmentIssuer(enrollmentRoot, enrollmentKey.PrivateKey)
+		action := "loaded"
+		if enrollmentCreated {
+			action = "created"
+		}
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment signing key %s at %s\n", action, opts.EnrollmentKeyPath)
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment root id=%s public_key=%s\n", enrollmentKey.ID, encodeRootPublicKey(enrollmentKey.ID, enrollmentKey.PublicKey))
+		opts.EnrollmentRootPublicKey = encodeRootPublicKey(enrollmentKey.ID, enrollmentKey.PublicKey)
 	}
 	if opts.EnrollmentRootPublicKey != "" {
 		root, err := parseRootPublicKey(opts.EnrollmentRootPublicKey)
@@ -3277,6 +3359,85 @@ func (a App) enrollmentSignCertificate(opts enrollmentSignCertificateOptions) er
 	}
 	if opts.OutPath != "" {
 		payload["certificate_path"] = opts.OutPath
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+type issuedEnrollmentCertificatePayload struct {
+	Certificate            model.HostEnrollmentCertificate `json:"certificate"`
+	CertificateFingerprint string                          `json:"certificate_fingerprint"`
+	EnrollmentRoot         model.TrustBundle               `json:"enrollment_root"`
+	Error                  string                          `json:"error,omitempty"`
+}
+
+func (a App) enrollmentIssueCertificate(ctx context.Context, opts enrollmentIssueCertificateOptions) error {
+	if opts.GatewayURL == "" {
+		return fmt.Errorf("gateway is required")
+	}
+	if opts.OutPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if opts.RootPublicKey == "" {
+		return fmt.Errorf("root-public-key is required")
+	}
+	if opts.TicketCode == "" {
+		return fmt.Errorf("ticket-code is required")
+	}
+	if opts.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if opts.OS == "" {
+		return fmt.Errorf("os is required")
+	}
+	if opts.Arch == "" {
+		return fmt.Errorf("arch is required")
+	}
+	if opts.IdentityKeyID == "" || opts.IdentityPublicKey == "" || opts.IdentityFingerprint == "" {
+		return fmt.Errorf("identity-key-id, identity-public-key, and identity-fingerprint are required")
+	}
+	if opts.ValidMinutes <= 0 {
+		return fmt.Errorf("valid-minutes must be positive")
+	}
+	expectedRoot, err := parseRootPublicKey(opts.RootPublicKey)
+	if err != nil {
+		return err
+	}
+	issued, err := issueEnrollmentCertificate(ctx, opts.GatewayURL, opts)
+	if err != nil {
+		return err
+	}
+	if issued.EnrollmentRoot.SigningKeyID != expectedRoot.SigningKeyID || issued.EnrollmentRoot.PublicKey != expectedRoot.PublicKey {
+		return fmt.Errorf("issued enrollment root does not match pinned root-public-key")
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(issued.Certificate, expectedRoot, time.Now()); err != nil {
+		return err
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(issued.Certificate)
+	if err != nil {
+		return err
+	}
+	if fingerprint != issued.CertificateFingerprint {
+		return fmt.Errorf("issued enrollment certificate fingerprint mismatch")
+	}
+	if err := writeEnrollmentCertificateFile(opts.OutPath, issued.Certificate, opts.Force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                      true,
+		"schema":                  issued.Certificate.SchemaVersion,
+		"gateway":                 opts.GatewayURL,
+		"certificate":             issued.Certificate,
+		"certificate_path":        opts.OutPath,
+		"certificate_fingerprint": fingerprint,
+		"root_public_key":         opts.RootPublicKey,
+		"issuer_key_id":           issued.Certificate.IssuerKeyID,
+		"authorized_mode":         issued.Certificate.Mode,
+		"authorized_host":         issued.Certificate.HostName,
+		"authorized_identity":     issued.Certificate.SubjectIdentityFingerprint,
+		"not_before":              issued.Certificate.NotBefore,
+		"not_after":               issued.Certificate.NotAfter,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -4975,6 +5136,7 @@ Usage:
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
   rdev adapter verify-cancellation --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
+  rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:...
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
   rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-renewed.json --key .rdev/keys/enrollment-root.json --revocations revocations.json
@@ -5483,6 +5645,44 @@ func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey s
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
 	}
 	return payload.Revocations, root, nil
+}
+
+func issueEnrollmentCertificate(ctx context.Context, gatewayURL string, opts enrollmentIssueCertificateOptions) (issuedEnrollmentCertificatePayload, error) {
+	body, err := json.Marshal(map[string]any{
+		"ticket_code":          opts.TicketCode,
+		"name":                 opts.Name,
+		"os":                   opts.OS,
+		"arch":                 opts.Arch,
+		"capabilities":         opts.Capabilities,
+		"identity_key_id":      opts.IdentityKeyID,
+		"identity_public_key":  opts.IdentityPublicKey,
+		"identity_fingerprint": opts.IdentityFingerprint,
+		"valid_minutes":        opts.ValidMinutes,
+	})
+	if err != nil {
+		return issuedEnrollmentCertificatePayload{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/enrollment/certificates", bytes.NewReader(body))
+	if err != nil {
+		return issuedEnrollmentCertificatePayload{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return issuedEnrollmentCertificatePayload{}, err
+	}
+	defer resp.Body.Close()
+	var payload issuedEnrollmentCertificatePayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return issuedEnrollmentCertificatePayload{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return issuedEnrollmentCertificatePayload{}, fmt.Errorf("issue enrollment certificate failed: %s", payload.Error)
+	}
+	return payload, nil
 }
 
 func fetchTrustBundleUpdate(ctx context.Context, client *http.Client, gatewayURL, hostID string, currentSequence int, currentHash string) (model.TrustBundleUpdate, error) {

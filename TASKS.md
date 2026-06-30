@@ -91,6 +91,7 @@
 - [x] Add signed host enrollment certificate revocation-list primitive with `rdev.host-enrollment-revocations.v1`, `rdev enrollment revoke-certificate`, `rdev enrollment verify-revocations`, MCP revocation checks, and gateway registration rejection for revoked certificates.
 - [x] Add signed empty enrollment revocation-list baseline with `rdev enrollment init-revocations`.
 - [x] Add dev enrollment revocation-list distribution with `GET /v1/enrollment/revocations` and `rdev enrollment fetch-revocations` pinned-root verification.
+- [x] Add dev hosted enrollment certificate issuance with `POST /v1/enrollment/certificates`, `rdev gateway serve --dev --enrollment-key`, and `rdev enrollment issue-certificate --root-public-key`, including ticket capability bounds.
 - [x] Add local enrollment certificate renewal with `rdev enrollment renew-certificate`, preserving scope, extending validity, and rejecting revoked current certificates when a signed revocation list is supplied.
 - [x] Add local GitHub project readiness audit with `rdev.github-project-readiness.v1` and wire it into release smoke without external mutation.
 
@@ -181,7 +182,7 @@
 - [ ] Add production WSS/mTLS host transport beyond the dev gateway TLS/mTLS client/listener path.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
 - [ ] Add hardware-backed or fleet-managed protected host identity/trust storage beyond Keychain, DPAPI, libsecret, keyctl, and local files.
-- [ ] Add full production enrollment authority lifecycle beyond the local certificate, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: operator roles, hosted issuance API, renewal automation, authenticated hosted revocation refresh, and emergency drills.
+- [ ] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance primitive, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: operator roles, authenticated hosted issuance API, renewal automation, authenticated hosted revocation refresh, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.

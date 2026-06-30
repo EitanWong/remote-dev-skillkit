@@ -313,6 +313,79 @@ func TestMemoryGatewayEnrollmentRootAcceptsValidCertificate(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayIssuesEnrollmentCertificate(t *testing.T) {
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	capabilities := []string{"shell.user", "git.diff"}
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := signedGatewayHostRegistration(t, ticket, capabilities)
+	certificate, err := gw.IssueEnrollmentCertificate(EnrollmentCertificateRequest{
+		TicketCode:          ticket.Code,
+		Name:                registration.Name,
+		OS:                  registration.OS,
+		Arch:                registration.Arch,
+		Capabilities:        []string{"shell.user"},
+		IdentityKeyID:       registration.IdentityKeyID,
+		IdentityPublicKey:   registration.IdentityPublicKey,
+		IdentityFingerprint: registration.IdentityFingerprint,
+		ValidMinutes:        60,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(certificate, root, now); err != nil {
+		t.Fatalf("issued certificate should verify: %v", err)
+	}
+	registration.Capabilities = []string{"shell.user"}
+	registration.EnrollmentCertificate = &certificate
+	host, err := gw.RegisterHost(registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Status != model.HostStatusPending {
+		t.Fatalf("expected pending host, got %s", host.Status)
+	}
+}
+
+func TestMemoryGatewayIssueEnrollmentCertificateRejectsCapabilityEscalation(t *testing.T) {
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(model.NewTrustBundle("enrollment-root", issuerPublicKey), issuerPrivateKey)
+	capabilities := []string{"shell.user"}
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := signedGatewayHostRegistration(t, ticket, capabilities)
+	_, err = gw.IssueEnrollmentCertificate(EnrollmentCertificateRequest{
+		TicketCode:          ticket.Code,
+		Name:                registration.Name,
+		OS:                  registration.OS,
+		Arch:                registration.Arch,
+		Capabilities:        []string{"shell.user", "git.diff"},
+		IdentityKeyID:       registration.IdentityKeyID,
+		IdentityPublicKey:   registration.IdentityPublicKey,
+		IdentityFingerprint: registration.IdentityFingerprint,
+		ValidMinutes:        60,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceed ticket capabilities") {
+		t.Fatalf("expected capability escalation rejection, got %v", err)
+	}
+}
+
 func TestMemoryGatewayEnrollmentRevocationsRejectCertificate(t *testing.T) {
 	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

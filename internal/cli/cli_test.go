@@ -1263,6 +1263,132 @@ func TestEnrollmentInitRevocationsWritesEmptyVerifiedList(t *testing.T) {
 	}
 }
 
+func TestEnrollmentIssueCertificateWritesVerifiedGatewayCertificate(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	capabilities := []string{"shell.user", "git.diff"}
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	identityPath := filepath.Join(dir, "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath := filepath.Join(dir, "certs", "host-enrollment.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "issue-certificate",
+		"--gateway", server.URL,
+		"--out", certificatePath,
+		"--root-public-key", encodeRootPublicKey("enrollment-root", issuerPublicKey),
+		"--ticket-code", ticket.Code,
+		"--name", "managed-mac",
+		"--os", "darwin",
+		"--arch", "arm64",
+		"--identity-key-id", identity.KeyID,
+		"--identity-public-key", identity.EncodedPublicKey(),
+		"--identity-fingerprint", identity.Fingerprint(),
+		"--capabilities", "shell.user",
+		"--valid-minutes", "30",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK                     bool   `json:"ok"`
+		Schema                 string `json:"schema"`
+		CertificatePath        string `json:"certificate_path"`
+		CertificateFingerprint string `json:"certificate_fingerprint"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid issue output: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != model.HostEnrollmentCertificateSchemaVersion || payload.CertificatePath != certificatePath || payload.CertificateFingerprint == "" {
+		t.Fatalf("unexpected issue output: %s", stdout.String())
+	}
+	certificate, err := readEnrollmentCertificateFile(certificatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if certificate.TicketCode != ticket.Code || certificate.HostName != "managed-mac" || certificate.Mode != model.HostModeManaged {
+		t.Fatalf("unexpected issued certificate: %#v", certificate)
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(certificate, root, now); err != nil {
+		t.Fatalf("issued certificate should verify: %v", err)
+	}
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	err = verifyApp.Run(context.Background(), []string{
+		"enrollment", "verify-certificate",
+		"--certificate", certificatePath,
+		"--root-public-key", encodeRootPublicKey("enrollment-root", issuerPublicKey),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected issued certificate verification, got %s", verifyStdout.String())
+	}
+}
+
+func TestEnrollmentIssueCertificateRejectsWrongPinnedRoot(t *testing.T) {
+	now := time.Now().UTC()
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(model.NewTrustBundle("enrollment-root", issuerPublicKey), issuerPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, []string{"shell.user"}, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	identityPath := filepath.Join(t.TempDir(), "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(t.TempDir(), "certs", "host-enrollment.json")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "issue-certificate",
+		"--gateway", server.URL,
+		"--out", outPath,
+		"--root-public-key", encodeRootPublicKey("enrollment-root", wrongPublicKey),
+		"--ticket-code", ticket.Code,
+		"--name", "managed-mac",
+		"--os", "darwin",
+		"--arch", "arm64",
+		"--identity-key-id", identity.KeyID,
+		"--identity-public-key", identity.EncodedPublicKey(),
+		"--identity-fingerprint", identity.Fingerprint(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match pinned root-public-key") {
+		t.Fatalf("expected pinned root rejection, got %v", err)
+	}
+	if _, statErr := os.Stat(outPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no certificate to be written, stat err=%v", statErr)
+	}
+}
+
 func TestEnrollmentRenewCertificateExtendsVerifiedCertificate(t *testing.T) {
 	dir := t.TempDir()
 	identityPath := filepath.Join(dir, "identity", "host.json")

@@ -38,10 +38,24 @@ type MemoryGateway struct {
 	manifestPublicKey  ed25519.PublicKey
 	manifestPrivateKey ed25519.PrivateKey
 	enrollmentRoot     model.TrustBundle
+	enrollmentPrivate  ed25519.PrivateKey
 	enrollmentRevokes  model.HostEnrollmentRevocationList
 	requireEnrollment  bool
+	issueEnrollment    bool
 	checkEnrollmentCRL bool
 	trustBundle        model.SignedTrustBundle
+}
+
+type EnrollmentCertificateRequest struct {
+	TicketCode          string
+	Name                string
+	OS                  string
+	Arch                string
+	Capabilities        []string
+	IdentityKeyID       string
+	IdentityPublicKey   string
+	IdentityFingerprint string
+	ValidMinutes        int
 }
 
 type AuditSink interface {
@@ -137,12 +151,36 @@ func (g *MemoryGateway) WithEnrollmentRoot(root model.TrustBundle) *MemoryGatewa
 	return g
 }
 
+func (g *MemoryGateway) WithEnrollmentIssuer(root model.TrustBundle, privateKey ed25519.PrivateKey) *MemoryGateway {
+	publicKey, err := root.Ed25519PublicKey()
+	if err != nil {
+		panic(fmt.Sprintf("invalid enrollment root public key: %v", err))
+	}
+	validateSigningKey("enrollment", publicKey, privateKey)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.enrollmentRoot = root
+	g.enrollmentPrivate = append(ed25519.PrivateKey(nil), privateKey...)
+	g.requireEnrollment = true
+	g.issueEnrollment = true
+	return g
+}
+
 func (g *MemoryGateway) WithEnrollmentRevocations(list model.HostEnrollmentRevocationList) *MemoryGateway {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.enrollmentRevokes = list
 	g.checkEnrollmentCRL = true
 	return g
+}
+
+func (g *MemoryGateway) EnrollmentRoot() (model.TrustBundle, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.requireEnrollment {
+		return model.TrustBundle{}, false
+	}
+	return g.enrollmentRoot, true
 }
 
 func (g *MemoryGateway) EnrollmentRevocations() (model.HostEnrollmentRevocationList, bool) {
@@ -185,6 +223,52 @@ func (g *MemoryGateway) CreateTicket(mode model.HostMode, ttlSeconds int, capabi
 	g.codeIndex[ticket.Code] = ticket.ID
 	g.appendAuditLocked("operator", "ticket.create", ticket.ID, "created short-lived ticket")
 	return ticket, nil
+}
+
+func (g *MemoryGateway) IssueEnrollmentCertificate(req EnrollmentCertificateRequest) (model.HostEnrollmentCertificate, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.issueEnrollment {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: enrollment issuer not configured", ErrInvalidState)
+	}
+	ticketID, ok := g.codeIndex[req.TicketCode]
+	if !ok {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: ticket code", ErrNotFound)
+	}
+	ticket := g.tickets[ticketID]
+	if ticket.Status != model.TicketStatusActive {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: ticket is not active", ErrInvalidState)
+	}
+	now := g.now().UTC()
+	if !now.Before(ticket.ExpiresAt) {
+		return model.HostEnrollmentCertificate{}, ErrTicketExpired
+	}
+	if req.ValidMinutes <= 0 {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: valid_minutes must be positive", ErrPolicyDenied)
+	}
+	capabilities := normalizeCapabilities(req.Capabilities)
+	if len(capabilities) == 0 {
+		capabilities = normalizeCapabilities(ticket.Capabilities)
+	}
+	if !capabilitiesWithin(capabilities, ticket.Capabilities) {
+		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: enrollment certificate capabilities exceed ticket capabilities", ErrPolicyDenied)
+	}
+	registration := model.HostRegistration{
+		TicketCode:          req.TicketCode,
+		Name:                req.Name,
+		OS:                  req.OS,
+		Arch:                req.Arch,
+		Capabilities:        capabilities,
+		IdentityKeyID:       req.IdentityKeyID,
+		IdentityPublicKey:   req.IdentityPublicKey,
+		IdentityFingerprint: req.IdentityFingerprint,
+	}
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, g.enrollmentRoot.SigningKeyID, g.enrollmentPrivate, now, time.Duration(req.ValidMinutes)*time.Minute)
+	if err != nil {
+		return model.HostEnrollmentCertificate{}, err
+	}
+	g.appendAuditLocked("operator", "enrollment.certificate.issue", ticket.ID, "issued host enrollment certificate")
+	return certificate, nil
 }
 
 func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model.Host, error) {
@@ -908,6 +992,40 @@ func stringSliceValue(values map[string]any, key string, fallback []string) []st
 	default:
 		return append([]string(nil), fallback...)
 	}
+}
+
+func normalizeCapabilities(capabilities []string) []string {
+	if len(capabilities) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(capabilities))
+	seen := map[string]struct{}{}
+	for _, capability := range capabilities {
+		capability = strings.TrimSpace(capability)
+		if capability == "" {
+			continue
+		}
+		if _, ok := seen[capability]; ok {
+			continue
+		}
+		seen[capability] = struct{}{}
+		normalized = append(normalized, capability)
+	}
+	sort.Strings(normalized)
+	return normalized
+}
+
+func capabilitiesWithin(requested, allowed []string) bool {
+	allowedSet := map[string]struct{}{}
+	for _, capability := range normalizeCapabilities(allowed) {
+		allowedSet[capability] = struct{}{}
+	}
+	for _, capability := range normalizeCapabilities(requested) {
+		if _, ok := allowedSet[capability]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func appendApprovalToken(values []model.ApprovalToken, next model.ApprovalToken) []model.ApprovalToken {

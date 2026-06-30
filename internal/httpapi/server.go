@@ -35,6 +35,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/trust", s.trust)
 	mux.HandleFunc("GET /v1/trust-bundle", s.getTrustBundle)
 	mux.HandleFunc("GET /v1/enrollment/revocations", s.getEnrollmentRevocations)
+	mux.HandleFunc("POST /v1/enrollment/certificates", s.issueEnrollmentCertificate)
 	mux.HandleFunc("POST /v1/trust-bundle", s.updateTrustBundle)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
@@ -69,6 +70,60 @@ func (s Server) getEnrollmentRevocations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"revocations": revocations})
+}
+
+func (s Server) issueEnrollmentCertificate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TicketCode          string   `json:"ticket_code"`
+		Name                string   `json:"name"`
+		OS                  string   `json:"os"`
+		Arch                string   `json:"arch"`
+		Capabilities        []string `json:"capabilities"`
+		IdentityKeyID       string   `json:"identity_key_id"`
+		IdentityPublicKey   string   `json:"identity_public_key"`
+		IdentityFingerprint string   `json:"identity_fingerprint"`
+		ValidMinutes        int      `json:"valid_minutes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.ValidMinutes == 0 {
+		req.ValidMinutes = 60
+	}
+	certificate, err := s.Gateway.IssueEnrollmentCertificate(gateway.EnrollmentCertificateRequest{
+		TicketCode:          req.TicketCode,
+		Name:                req.Name,
+		OS:                  req.OS,
+		Arch:                req.Arch,
+		Capabilities:        req.Capabilities,
+		IdentityKeyID:       req.IdentityKeyID,
+		IdentityPublicKey:   req.IdentityPublicKey,
+		IdentityFingerprint: req.IdentityFingerprint,
+		ValidMinutes:        req.ValidMinutes,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	root, ok := s.Gateway.EnrollmentRoot()
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "enrollment root not configured")
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"certificate":             certificate,
+		"certificate_fingerprint": fingerprint,
+		"enrollment_root":         root,
+	})
 }
 
 func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {

@@ -252,8 +252,33 @@ rdev enrollment init-revocations \
   --out .rdev/enrollment/revocations.json \
   --key .rdev/keys/enrollment-root.json
 
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --enrollment-key .rdev/keys/enrollment-root.json \
+  --enrollment-revocations .rdev/enrollment/revocations.json
+
+rdev enrollment issue-certificate \
+  --gateway http://127.0.0.1:8787 \
+  --out .rdev/enrollment/host-enrollment-issued.json \
+  --root-public-key enrollment-root:<base64url_ed25519_public_key> \
+  --ticket-code ABCD-1234 \
+  --name managed-mac \
+  --os darwin \
+  --arch arm64 \
+  --identity-key-id host \
+  --identity-public-key <base64url_ed25519_public_key> \
+  --identity-fingerprint sha256:<hex> \
+  --capabilities codex.run,git.diff
+
+rdev enrollment verify-certificate \
+  --certificate .rdev/enrollment/host-enrollment-issued.json \
+  --root-public-key enrollment-root:<base64url_ed25519_public_key> \
+  --revocations .rdev/enrollment/revocations.json
+
 rdev enrollment renew-certificate \
-  --certificate .rdev/enrollment/host-enrollment.json \
+  --certificate .rdev/enrollment/host-enrollment-issued.json \
   --out .rdev/enrollment/host-enrollment-renewed.json \
   --key .rdev/keys/enrollment-root.json \
   --revocations .rdev/enrollment/revocations.json \
@@ -263,12 +288,6 @@ rdev enrollment verify-certificate \
   --certificate .rdev/enrollment/host-enrollment-renewed.json \
   --root-public-key enrollment-root:<base64url_ed25519_public_key> \
   --revocations .rdev/enrollment/revocations.json
-
-rdev gateway serve \
-  --dev \
-  --addr 127.0.0.1:8787 \
-  --signing-key .rdev/keys/gateway-signing-key.json \
-  --enrollment-root-public-key enrollment-root:<base64url_ed25519_public_key>
 
 rdev host serve \
   --mode managed \
@@ -280,12 +299,17 @@ rdev host serve \
 
 The certificate uses schema `rdev.host-enrollment-certificate.v1` and binds the
 ticket code, host mode, host name, OS/arch, capabilities, validity window, and
-host identity fingerprint to the enrollment root signature. `renew-certificate`
-first verifies the current certificate, optionally checks signed revocations,
-then emits a refreshed certificate with the same authorized scope and a new
-validity window. Signed registration proof still proves private-key possession;
-the enrollment certificate proves the operator authorized this host to join
-under the stated scope.
+host identity fingerprint to the enrollment root signature. Operators can sign
+it locally with `sign-certificate` or, when the dev gateway is started with
+`--enrollment-key`, request it from `POST /v1/enrollment/certificates` through
+`issue-certificate`; the CLI verifies the returned certificate against the
+pinned `--root-public-key` before writing it. Hosted issuance cannot grant
+capabilities outside the ticket capability set. `renew-certificate` first
+verifies the current certificate, optionally checks signed revocations, then
+emits a refreshed certificate with the same authorized scope and a new validity
+window. Signed registration proof still proves private-key possession; the
+enrollment certificate proves the operator authorized this host to join under
+the stated scope.
 
 The revocation list uses schema `rdev.host-enrollment-revocations.v1` and binds
 revoked enrollment certificate fingerprints to the same enrollment root. When
@@ -294,9 +318,11 @@ signature and freshness before registration and rejects revoked certificates.
 Use `rdev enrollment init-revocations` to publish a signed empty baseline before
 any certificate has been revoked, pass that baseline to `renew-certificate`
 before extending a certificate, then append retired or compromised certificates
-with `revoke-certificate --current`. This is a local signed revocation-list and
-renewal primitive plus a dev distribution path, not the full hosted enrollment
-authority lifecycle.
+with `revoke-certificate --current`. This is a local signed revocation-list,
+dev hosted issuance, and renewal primitive plus a dev distribution path; it is
+not the full production enrollment authority lifecycle with authenticated
+operator roles, hosted renewal automation, emergency drills, or production key
+custody.
 
 To smoke the revocation path, revoke a certificate and then expect
 `verify-certificate --revocations` or gateway registration with that same
@@ -891,7 +917,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 - If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
 - `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode. They are durable across process restarts only when `--state` is enabled with the matching persistent `--signing-key`.
 - `--trust-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available.
-- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; when `--enrollment-root-public-key` is configured, registrations must also include `rdev.host-enrollment-certificate.v1`; when `--enrollment-revocations` is configured, the gateway accepts signed empty revocation baselines and rejects certificates listed in non-empty signed `rdev.host-enrollment-revocations.v1` files. Full production enrollment authority lifecycle, hosted issuance, hosted renewal automation, hosted revocation distribution, and emergency drills remain future production gates.
+- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; when `--enrollment-root-public-key` is configured, registrations must also include `rdev.host-enrollment-certificate.v1`; when `--enrollment-revocations` is configured, the gateway accepts signed empty revocation baselines and rejects certificates listed in non-empty signed `rdev.host-enrollment-revocations.v1` files. Full production enrollment authority lifecycle, authenticated hosted issuance, hosted renewal automation, hosted revocation distribution, operator roles, and emergency drills remain future production gates.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
 - Linux systemd support currently writes and controls user units, `rdev acceptance linux-managed-service` can verify a release-evidence plan, and `rdev acceptance package-linux-managed-service` can archive real run evidence. Real managed Linux acceptance still needs reboot/reconnect evidence from a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.
