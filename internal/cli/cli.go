@@ -348,6 +348,48 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			HostName:                       *hostName,
 			Force:                          *force,
 		})
+	case "windows-managed-service":
+		fs := flag.NewFlagSet("acceptance windows-managed-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "empty output directory for the Windows managed service acceptance plan")
+		binaryPath := fs.String("binary", "", "absolute Windows path to rdev.exe on the target host")
+		gatewayURL := fs.String("gateway", "", "gateway URL for managed ticket enrollment")
+		ticketCode := fs.String("ticket-code", "", "managed enrollment ticket code")
+		manifestURL := fs.String("manifest-url", "", "signed managed enrollment manifest URL")
+		label := fs.String("label", service.DefaultWindowsServiceName, "Windows Service name")
+		displayName := fs.String("display-name", "Remote Dev Skillkit Host", "Windows Service display name")
+		description := fs.String("description", "Remote Dev Skillkit managed host", "Windows Service description")
+		identityStore := fs.String("identity-store", "", "managed host identity store path")
+		trustStore := fs.String("trust-store", "", "managed host trust bundle store path")
+		nonceStore := fs.String("nonce-store", "", "managed host nonce store path")
+		approvalStore := fs.String("approval-store", "", "managed host approval store path")
+		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
+		releaseBundle := fs.String("release-bundle", "", "signed release bundle path on the Windows host, verified by the managed host before registration")
+		releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle, formatted key_id:base64url_public_key")
+		releaseRequiredArtifacts := fs.String("release-require-artifacts", "rdev.exe,rdev-host.exe,rdev-verify.exe", "comma-separated artifact ids required in --release-bundle")
+		force := fs.Bool("force", false, "overwrite generated plan if it already exists")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceWindowsManagedService(acceptance.WindowsManagedServiceOptions{
+			OutDir:                   *out,
+			BinaryPath:               *binaryPath,
+			GatewayURL:               *gatewayURL,
+			TicketCode:               *ticketCode,
+			ManifestURL:              *manifestURL,
+			ServiceName:              *label,
+			DisplayName:              *displayName,
+			Description:              *description,
+			IdentityStore:            *identityStore,
+			TrustStore:               *trustStore,
+			NonceStore:               *nonceStore,
+			ApprovalStore:            *approvalStore,
+			WorkspaceLockStore:       *workspaceLockStore,
+			ReleaseBundle:            *releaseBundle,
+			ReleaseRootPublicKey:     *releaseRootPublicKey,
+			ReleaseRequiredArtifacts: splitCapabilities(*releaseRequiredArtifacts),
+			Force:                    *force,
+		})
 	case "verify":
 		fs := flag.NewFlagSet("acceptance verify", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -364,6 +406,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyWindowsTemporary(*plan)
+	case "verify-windows-managed-service":
+		fs := flag.NewFlagSet("acceptance verify-windows-managed-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "Windows managed service acceptance plan path, for example <out>/windows-managed-service-plan.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerifyWindowsManagedService(*plan)
 	case "package-windows-temporary":
 		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -466,6 +516,32 @@ func (a App) acceptanceWindowsTemporary(opts acceptance.WindowsTemporaryOptions)
 	return enc.Encode(payload)
 }
 
+func (a App) acceptanceWindowsManagedService(opts acceptance.WindowsManagedServiceOptions) error {
+	plan, err := acceptance.RunWindowsManagedServicePlan(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  allAcceptanceChecksPassed(plan.Checks),
+		"schema":              plan.SchemaVersion,
+		"out":                 plan.OutDir,
+		"plan":                filepath.Join(plan.OutDir, "windows-managed-service-plan.json"),
+		"service_name":        plan.Service.ServiceName,
+		"display_name":        plan.Service.DisplayName,
+		"args":                plan.Service.Args,
+		"bin_path":            plan.Service.BinPath,
+		"start_type":          plan.Service.StartType,
+		"checks":              plan.Checks,
+		"commands":            plan.Commands,
+		"required_evidence":   plan.RequiredEvidence,
+		"recommended_actions": plan.RecommendedActions,
+		"note":                "plan written only; no PowerShell or sc.exe command was executed by this command",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) acceptanceVerify(reportPath string) error {
 	verification, err := acceptance.VerifyManagedMacReport(reportPath)
 	if err != nil {
@@ -513,6 +589,30 @@ func (a App) acceptanceVerifyWindowsTemporary(planPath string) error {
 	}
 	if !verification.OK() {
 		return fmt.Errorf("windows temporary acceptance plan verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptanceVerifyWindowsManagedService(planPath string) error {
+	verification, err := acceptance.VerifyWindowsManagedServicePlan(planPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"plan":                verification.PlanPath,
+		"plan_schema":         verification.PlanSchema,
+		"checks":              verification.Checks,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("windows managed service acceptance plan verification failed")
 	}
 	return nil
 }
@@ -3722,8 +3822,10 @@ Usage:
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
   rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example/rdev-verify.exe --verifier-sha256 <sha256>
+  rdev acceptance windows-managed-service --out windows-service-plan --binary 'C:\Program Files\rdev\rdev.exe' --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle 'C:\Program Files\rdev\release-bundle.json' --release-root-public-key release-root:... --release-require-artifacts rdev.exe,rdev-host.exe,rdev-verify.exe
   rdev acceptance verify --report acceptance-run/report.json
   rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
+  rdev acceptance verify-windows-managed-service --plan windows-service-plan/windows-managed-service-plan.json
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...

@@ -49,6 +49,11 @@ rdev-host.exe host serve --mode temporary --manifest-url <manifest-url>
 
 It does not install a Windows Service, write registry persistence, weaken execution policy, or bypass UAC.
 
+Managed Windows Service onboarding is separate from temporary bootstrap. Use
+`rdev acceptance windows-managed-service` and
+`rdev acceptance verify-windows-managed-service` to generate and check reviewed
+`sc.exe` command plans before any owned-host Windows Service acceptance run.
+
 The repository also includes release artifact signature primitives:
 
 ```bash

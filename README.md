@@ -66,6 +66,7 @@ Implemented now:
 - macOS LaunchAgent plist generation, status inspection, safe plist removal, and opt-in lifecycle control via `rdev host install-service`, `rdev host service-status`, `rdev host service-control`, and `rdev host uninstall-service`, with `--execute` required before running `launchctl`.
 - Linux systemd user-unit generation, status inspection, safe unit removal, and opt-in lifecycle control via the same host service commands, with `--execute` required before running `systemctl --user`.
 - Windows Service managed-host planning, status-command planning, dry-run control, and uninstall-command planning via the same host service commands. The Windows path emits reviewed `sc.exe create/query/qc/start/stop/delete` command plans, carries the managed-host release-bundle gate, uses `start= demand`, and requires explicit `service-control --execute` before running `sc.exe`; real Windows Service acceptance is still a future gate.
+- Windows managed-service acceptance planning and verification via `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, producing and checking a machine-readable plan with reviewed `sc.exe create/description/query/qc/start/stop/delete` commands, managed-host args, `start= demand`, release-bundle startup gate, required evidence checklist, and explicit warnings that no PowerShell or `sc.exe` command was executed.
 - Persistent development gateway signing key files plus host trust pin checks.
 - Trust lifecycle operator commands via `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed `rdev.trust-bundle.v1` bundles with sequence, previous-hash, key rotation, key retirement, key revocation, and pinned-root verification.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
@@ -129,7 +130,7 @@ Not implemented yet:
 - Full production adapter SDK beyond the current lifecycle runner and lifecycle/result/cancellation/runtime-fixture conformance verifiers.
 - OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
-- Real Windows Service managed-host acceptance execution and reconnect proof beyond dry-run `sc.exe` plans.
+- Real Windows Service managed-host acceptance execution and reconnect proof beyond dry-run `sc.exe` plans and verified acceptance-plan generation.
 - Real Linux systemd managed-host acceptance execution and reboot/reconnect proof.
 - Tailscale/headscale adapter.
 - GUI adapter.
@@ -176,6 +177,8 @@ go run ./cmd/rdev acceptance managed-mac --out .rdev/acceptance/managed-mac --re
 go run ./cmd/rdev acceptance managed-mac-service --out .rdev/acceptance/managed-mac-service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
 go run ./cmd/rdev acceptance windows-temporary --out .rdev/acceptance/windows-temporary --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example.com/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example.com/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example.com/rdev-verify.exe --verifier-sha256 <sha256>
 go run ./cmd/rdev acceptance verify-windows-temporary --plan .rdev/acceptance/windows-temporary/windows-temporary-plan.json
+go run ./cmd/rdev acceptance windows-managed-service --out .rdev/acceptance/windows-managed-service --binary 'C:\Program Files\rdev\rdev.exe' --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle 'C:\Program Files\rdev\release-bundle.json' --release-root-public-key release-root:... --release-require-artifacts rdev.exe,rdev-host.exe,rdev-verify.exe
+go run ./cmd/rdev acceptance verify-windows-managed-service --plan .rdev/acceptance/windows-managed-service/windows-managed-service-plan.json
 go run ./cmd/rdev acceptance package-windows-temporary --plan .rdev/acceptance/windows-temporary/windows-temporary-plan.json --out .rdev/acceptance/windows-temporary-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
 go run ./cmd/rdev acceptance verify --report .rdev/acceptance/managed-mac/report.json
 go run ./cmd/rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex

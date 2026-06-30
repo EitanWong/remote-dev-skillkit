@@ -233,6 +233,62 @@ Audit export must prove:
 - approval decisions;
 - host revocation.
 
+## Gate D: Managed Windows Service
+
+Purpose: prove that an owned or formally managed Windows host can run `rdev` as
+an explicit Windows Service without borrowing the attended-temporary contract.
+
+The local planning gate is:
+
+```bash
+rdev acceptance windows-managed-service \
+  --out .rdev/acceptance/windows-managed-service \
+  --binary 'C:\Program Files\rdev\rdev.exe' \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --release-bundle 'C:\Program Files\rdev\release-bundle.json' \
+  --release-root-public-key release-root:... \
+  --release-require-artifacts rdev.exe,rdev-host.exe,rdev-verify.exe
+
+rdev acceptance verify-windows-managed-service \
+  --plan .rdev/acceptance/windows-managed-service/windows-managed-service-plan.json
+```
+
+These commands generate and verify a plan only. They do not run PowerShell,
+`sc.exe`, create a service, start a service, or delete a service.
+
+### Required Evidence
+
+- Verified `rdev.acceptance.windows-managed-service-plan.v1` output.
+- Elevated PowerShell transcript for reviewed `sc.exe create` and
+  `sc.exe description`.
+- `sc.exe query` and `sc.exe qc` transcript after creation and after start.
+- Release-bundle startup gate output before host registration.
+- Gateway host registration, approval, trust refresh, and managed-host audit
+  events.
+- Reconnect evidence after login or reboot.
+- Managed coding or repair evidence bundle with approval-required artifacts.
+- `sc.exe stop` and `sc.exe delete` uninstall transcript.
+- Evidence that attended-temporary mode remains non-persistent and separate.
+
+### Pass Criteria
+
+- The service uses `start= demand` unless a later explicit policy changes it.
+- The service command runs `rdev host serve --mode managed --once=false`.
+- Identity, trust, nonce, approval, workspace-lock, and release-bundle gate
+  arguments are present.
+- The host reconnects and rejects out-of-policy work locally.
+- Stop and uninstall are explicit, transcripted, and auditable.
+
+### Fail Criteria
+
+- The plan or transcript weakens execution policy, firewall, Defender, UAC, or
+  Group Policy.
+- A Windows Service claim is made from a plan without real Windows host
+  transcripts.
+- The service silently grants L3/L4 operations or external consequences.
+- Temporary-mode evidence is reused to claim managed Windows Service support.
+
 ## Current Automation Coverage
 
 The local test suite currently covers:
@@ -279,6 +335,7 @@ The local test suite currently covers:
 - macOS LaunchAgent plist status and safe uninstall through `rdev host service-status` and `rdev host uninstall-service`, including label-mismatch refusal to avoid deleting unrelated plists.
 - Linux systemd user-unit generation through `rdev host install-service --platform linux`, including managed host arguments, `0600` unit permissions, basic hardening flags, explicit `systemctl --user` next steps, status inspection, dry-run service-control planning, unit mismatch refusal, and safe uninstall without auto-starting the service.
 - Windows Service managed-host planning through `rdev host install-service --platform windows`, including managed host arguments, release-bundle gate arguments, `start= demand`, reviewed `sc.exe create` / `description` command plans, dry-run status/control/uninstall command planning, explicit `service-control --execute` before invoking `sc.exe`, and no claim of real Windows Service acceptance yet.
+- Windows managed-service acceptance planning and verification through `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, covering reviewed `sc.exe` create/description/query/qc/start/stop/delete plans, managed args, `start= demand`, release-bundle gate requirements, required evidence checklist, forbidden policy-weakening command rejection, and no PowerShell or `sc.exe` execution.
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.
 - workspace lock enforcement during host execution through `rdev host serve --workspace-lock-store`, including hostrunner lock acquire/release, `workspace_locked` structured denial artifacts, lock release after adapter denial, and managed LaunchAgent `--workspace-lock-store` argument generation.
 - managed Mac coding harness through `rdev acceptance managed-mac`, covering managed host registration, Git worktree creation, Codex adapter execution with workspace locking, diff/test evidence export, approval-required probe for `git.push`, workspace lock release, and evidence bundle creation.
@@ -299,7 +356,7 @@ The local test suite currently covers:
 - Real managed Mac LaunchAgent acceptance execution: review generated plan, start/inspect/stop with `rdev host service-control --execute`, reconnect after reboot, run locked-worktree Codex, verify evidence, and uninstall.
 - Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, approval-required probes, and revocation transcript.
 - Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and evidence bundle checksums for each release candidate.
-- Windows Service managed-host acceptance execution: run the reviewed `sc.exe` plan on a clean Windows machine, verify service creation/status/start/stop/delete, confirm release-bundle startup gate, reconnect behavior, local stop/uninstall, and absence of temporary-mode persistence leakage.
+- Windows Service managed-host acceptance execution: run the verified reviewed `sc.exe` plan on a clean Windows machine, verify service creation/status/start/stop/delete, confirm release-bundle startup gate, reconnect behavior, local stop/uninstall, and absence of temporary-mode persistence leakage.
 - Full production Adapter SDK integration and executable lifecycle/cancellation fixtures for future third-party adapters beyond the built-in hostrunner fixture path.
 
 The following remain real-environment acceptance tests:

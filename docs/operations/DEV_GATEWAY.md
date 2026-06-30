@@ -547,6 +547,26 @@ default; `service-control --execute` is required before `sc.exe start`, `stop`,
 or `query/qc` is invoked. This is a managed-host planning/control surface, not
 real Windows Service acceptance evidence.
 
+For release-evidence planning, generate and verify a Windows managed-service
+acceptance plan before running the reviewed commands on a real Windows host:
+
+```powershell
+rdev acceptance windows-managed-service `
+  --out .rdev\acceptance\windows-managed-service `
+  --binary 'C:\Program Files\rdev\rdev.exe' `
+  --gateway https://api.example.com/v1 `
+  --ticket-code ABCD-1234 `
+  --release-bundle 'C:\Program Files\rdev\release-bundle.json' `
+  --release-root-public-key release-root:... `
+  --release-require-artifacts rdev.exe,rdev-host.exe,rdev-verify.exe
+
+rdev acceptance verify-windows-managed-service `
+  --plan .rdev\acceptance\windows-managed-service\windows-managed-service-plan.json
+```
+
+These acceptance commands also do not execute PowerShell or `sc.exe`; they only
+write and verify the plan and required evidence checklist.
+
 ## Release Artifact Verification
 
 Development release artifacts can be signed and verified before bootstrap:

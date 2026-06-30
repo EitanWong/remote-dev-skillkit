@@ -146,6 +146,7 @@
 - [x] Wire signed release bundle verification into Windows temporary bootstrap and acceptance-plan verification.
 - [x] Add Windows temporary acceptance evidence packaging for release archival.
 - [x] Add Windows Service managed-host planning/control dry-run with reviewed `sc.exe` command plans and release-bundle gate arguments.
+- [x] Add Windows managed-service acceptance plan and verifier for reviewed `sc.exe` service evidence without executing PowerShell or `sc.exe`.
 - [x] Add release candidate packaging with staged artifacts, signed manifests, signed release bundle, verified Skillkit, checksums, and summary JSON.
 - [x] Add standalone release candidate verification for downloaded or staged candidates.
 - [x] Add GitHub Release dry-run plan generation with assets, commands, notes, Skillkit archive, and no external mutation.
@@ -198,6 +199,7 @@
 - [x] Standalone `rdev-verify` can verify signed release bundles before target-host execution.
 - [x] Windows bootstrap can verify signed release bundles before target-host execution through a hash-pinned standalone verifier.
 - [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, approval probes, no-persistence checks, redaction, and checksums.
+- [x] Windows managed-service acceptance can generate and verify a preflight plan with service create/status/start/stop/delete commands, release gate, required evidence, and explicit no-execution semantics.
 - [x] Host serve can verify a signed release bundle before host registration or job polling.
 - [x] Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate.
 - [ ] Production releases verify signed manifests and binaries before host execution.

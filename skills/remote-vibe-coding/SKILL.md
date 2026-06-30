@@ -37,7 +37,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Use `scripts/github/plan-release.sh --candidate <dir|release-candidate.json> --repo <owner/repo>` to create a local GitHub Release plan; do not run the generated `gh release` commands without explicit operator approval.
 - For release-surface changes, expect `./scripts/check.sh` and `./scripts/ci/release-smoke.sh` to pass locally and in GitHub Actions before claiming release readiness.
 - For service-backed managed Mac acceptance, first generate and review `rdev acceptance managed-mac-service --out <empty-dir> --gateway <url> --ticket-code <code> --repo <repo>`; it must not auto-run `launchctl`. Use `rdev host service-control --execute` only after reviewing the generated plan.
-- For Windows managed service work, use `rdev host install-service --platform windows` only as a reviewed `sc.exe` command plan with `start= demand` and release-bundle gate arguments; do not claim real Windows Service support until a clean Windows host proves create/status/start/reconnect/stop/uninstall acceptance.
+- For Windows managed service work, use `rdev host install-service --platform windows` only as a reviewed `sc.exe` command plan with `start= demand` and release-bundle gate arguments; for release-evidence planning, run `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`. Do not claim real Windows Service support until a clean Windows host proves create/status/start/reconnect/stop/uninstall acceptance.
 - Do not push, merge, deploy, or modify credentials without approval.
 - Return evidence: diff summary, tests run, exit codes, and artifacts.
 
