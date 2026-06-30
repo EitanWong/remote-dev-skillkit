@@ -18,7 +18,7 @@ const (
 	CapabilityGUIControlApproval     Capability = "gui.control.requiresApproval"
 	CapabilityDevCodex               Capability = "dev.codex"
 	CapabilityDevClaudeCode          Capability = "claude-code.run"
-	CapabilityDevACP                 Capability = "dev.acpx"
+	CapabilityDevACP                 Capability = "acpx.run"
 )
 
 func TemporaryDefaults() []Capability {

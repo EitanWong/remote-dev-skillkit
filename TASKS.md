@@ -76,7 +76,7 @@
 - [x] Add final architecture closure that makes `PERFECT_ENDING_SOLUTION.md` the single decision header for product boundaries, golden paths, closed loops, and implementation order.
 - [x] Add final perfect-ending blueprint with component boundaries, stable protocol family, mode products, permission lattice, canonical state machines, reliability contract, non-goals, and release ladder.
 - [x] Add final operational architecture index for topology, authority, mode contracts, protocol spine, host sovereignty, storage/transport, reliability, acceptance gates, and implementation spine.
-- [x] Add hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, and Claude Code adapters through `--capture-runtime-fixture`.
+- [x] Add hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `--capture-runtime-fixture`.
 - [x] Add verifiable Skillkit install planning for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
 - [x] Add dry-run-by-default direct Skillkit installer for mainstream Agent frameworks through `rdev skillkit install`.
 
@@ -159,8 +159,8 @@
 - [ ] Add Windows Service mode.
 - [x] Add systemd user-unit mode.
 - [ ] Add real Linux systemd acceptance execution with reboot/reconnect proof.
-- [ ] Add acpx adapter.
-- [x] Add cancellation artifact conformance for built-in shell, PowerShell, Codex, and Claude Code result evidence.
+- [x] Add acpx adapter.
+- [x] Add cancellation artifact conformance for built-in shell, PowerShell, Codex, Claude Code, and acpx result evidence.
 - [ ] Generalize runtime cooperative cancellation across future Adapter SDK implementations.
 - [x] Add Claude Code adapter.
 - [ ] Add Tailscale/headscale adapter.
@@ -188,6 +188,7 @@
 - [x] Release candidates can be packaged locally before GitHub Release publication.
 - [x] Release candidates can be independently verified after staging or download.
 - [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
+- [x] Hostrunner can execute `adapter=acpx` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.acpx-result.v1` artifacts.
 - [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.
 - [x] Managed Mac acceptance reports can be independently verified through `rdev acceptance verify`, including checksum and audit-chain validation.
 - [x] Release bundle indexes can be signed and verified before publishing, including every listed artifact manifest and binary checksum.
@@ -197,13 +198,13 @@
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 - [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.
-- [x] Built-in shell, PowerShell, Codex, and Claude Code adapters pass public adapterkit result-artifact conformance checks.
+- [x] Built-in shell, PowerShell, Codex, Claude Code, and acpx adapters pass public adapterkit result-artifact conformance checks.
 - [x] MCP stdio exposes adapter result-artifact conformance as `rdev.adapter.verify_result`.
 - [x] Adapter lifecycle manifests can be verified through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
 - [x] Third-party adapter authors can scaffold a lifecycle manifest and verify it before runtime integration.
 - [x] Adapter cancellation artifacts can be verified through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
 - [x] Adapter runtime lifecycle fixtures can be generated through `adapterkit.RunLifecycle` and verified through `pkg/adapterkit`, `rdev adapter verify-runtime`, and MCP tool `rdev.adapter.verify_runtime`.
-- [x] Built-in shell, PowerShell, Codex, and Claude Code hostrunner jobs can append `rdev.adapter-runtime-fixture.v1` artifacts with `--capture-runtime-fixture`.
+- [x] Built-in shell, PowerShell, Codex, Claude Code, and acpx hostrunner jobs can append `rdev.adapter-runtime-fixture.v1` artifacts with `--capture-runtime-fixture`.
 
 ## Definition Of Done For v0.1.0
 

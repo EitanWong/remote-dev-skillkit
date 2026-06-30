@@ -88,6 +88,7 @@ Built-in adapters currently covered by hostrunner runtime fixtures:
 | `powershell` | `rdev.powershell-result.v1` | `powershell.user` |
 | `codex` | `rdev.codex-result.v1` | `codex.run` + `git.diff` |
 | `claude-code` | `rdev.claude-code-result.v1` | `claude-code.run` + `git.diff` |
+| `acpx` | `rdev.acpx-result.v1` | `acpx.run` + `git.diff` |
 
 ## Lifecycle Manifest Conformance
 
@@ -280,10 +281,10 @@ verifiers.
 ## Current Scope
 
 The current runtime lifecycle runner plus hostrunner opt-in capture are still
-not the complete production Adapter SDK. Built-in shell, PowerShell, Codex, and
-Claude Code now have hostrunner-integrated runtime fixtures, but new adapter
-authors still need production wrappers for policy planning, workspace/session
-preparation, adapter-specific execution, and shared runtime cancellation
-fixtures. The current package provides shared runtime fixture generation plus
-conformance layers for lifecycle declarations, runtime fixtures, result
-evidence, and cancellation evidence.
+not the complete production Adapter SDK. Built-in shell, PowerShell, Codex,
+Claude Code, and acpx now have hostrunner-integrated runtime fixtures, but new
+adapter authors still need production wrappers for policy planning,
+workspace/session preparation, adapter-specific execution, and shared runtime
+cancellation fixtures. The current package provides shared runtime fixture
+generation plus conformance layers for lifecycle declarations, runtime
+fixtures, result evidence, and cancellation evidence.

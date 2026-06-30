@@ -51,8 +51,8 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Multi-platform GitHub Release dry-run planning through `scripts/github/plan-platform-release.sh`, producing unique platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and command previews without external mutation.
 - Post-release install verification planning through `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification commands from a local GitHub Release dry-run plan without external mutation.
 - Post-release install plan verification through `scripts/github/verify-post-release-install-plan.sh`, checking the generated plan and scripts before they are archived as release evidence and rejecting tampered verification scripts in CI smoke.
-- Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, Codex, and Claude Code result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
-- Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, and Claude Code adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled jobs.
+- Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, Codex, Claude Code, and acpx result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
+- Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled jobs.
 - Strong symlink/workspace escape regression tests.
 - Explainable denial and approval decisions.
 - Final operational architecture index covering topology, permanent separations, mode contracts, trust keys, protocol spine, permission lattice, host sovereignty, adapter contract, storage/transport, reliability, acceptance gates, and implementation spine.
@@ -90,17 +90,19 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Codex adapter MVP with hostrunner integration, `codex.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, and redaction.
 - Codex adapter conformance coverage for workspace canonicalization, write-scope escape rejection before execution, nonzero-exit evidence, host-side redaction, output truncation, and timeout cancellation evidence.
 - Claude Code adapter MVP with hostrunner integration, `claude-code.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, redaction, and runtime fixture capture.
+- ACP/acpx adapter MVP with hostrunner integration, `acpx.run` and `git.diff` capability checks, default `acpx --cwd <workspace> codex exec <prompt>` execution, signed payload overrides for `acpx_command` / `acpx_agent` / `acpx_args`, locked-workspace execution, implicit approval preflight, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, redaction, cooperative cancellation, and runtime fixture capture.
 - Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
 - Claude Code adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
+- acpx adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
 - Shell adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and `rdev.shell-result.v1` artifacts with explicit `canceled` state.
 - PowerShell adapter cooperative cancellation through context-aware hostrunner execution and `rdev.powershell-result.v1` artifacts with explicit `canceled` state.
-- Canceled shell, PowerShell, Codex, and Claude Code jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
+- Canceled shell, PowerShell, Codex, Claude Code, and acpx jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
 - Managed Mac coding acceptance harness through `rdev acceptance managed-mac`, producing a managed-mode report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification through `rdev acceptance verify`, including evidence bundle checksum validation, artifact index validation, audit-chain verification, approval-gate checks, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning through `rdev acceptance managed-mac-service`, producing a verified plist, launchctl start/inspect/stop commands, service-backed coding acceptance commands, verification command, and safe uninstall guidance without auto-starting launchd.
 - macOS LaunchAgent lifecycle control through `rdev host service-control`, dry-running by default and requiring `--execute` before invoking launchctl start, inspect, or stop.
 - Git diff and test evidence bundles.
-- Shared implicit approval preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell, Codex, and Claude Code jobs.
+- Shared implicit approval preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell, Codex, Claude Code, and acpx jobs.
 - Managed install, health, stop, and uninstall commands.
 
 Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through MCP, Codex runs in a locked worktree, and the result includes diff, tests, artifacts, audit slice, and residual risk.
@@ -114,7 +116,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Restart/recovery.
 - Auto-update/rollback.
 - Full production adapter SDK beyond the first runtime lifecycle runner, built-in hostrunner runtime fixture capture, and lifecycle/result/cancellation/runtime-fixture conformance.
-- ACP adapter.
+- ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable hosted storage.
 - WSS transport with HTTPS polling fallback.

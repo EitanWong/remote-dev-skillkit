@@ -199,7 +199,7 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 	if implicitMissing := missingImplicitApprovals(envelope, approved); len(implicitMissing) > 0 {
 		return requireApproval(job, implicitMissing, approved, tokenIDs)
 	}
-	if envelope.Adapter != "shell" && envelope.Adapter != "codex" && envelope.Adapter != "claude-code" && envelope.Adapter != "powershell" {
+	if !supportedAdapter(envelope.Adapter) {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
 			Summary:   "Requested adapter is not supported by this host runner.",
@@ -259,6 +259,15 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 	return result, nil
 }
 
+func supportedAdapter(adapter string) bool {
+	switch adapter {
+	case "shell", "powershell", "codex", "claude-code", "acpx":
+		return true
+	default:
+		return false
+	}
+}
+
 func missingAdapterCapability(envelope model.JobEnvelope) string {
 	switch envelope.Adapter {
 	case "shell":
@@ -279,6 +288,13 @@ func missingAdapterCapability(envelope model.JobEnvelope) string {
 	case "claude-code":
 		if !hasCapability(envelope.Capabilities, "claude-code.run") {
 			return "claude-code.run"
+		}
+		if !hasCapability(envelope.Capabilities, "git.diff") {
+			return "git.diff"
+		}
+	case "acpx":
+		if !hasCapability(envelope.Capabilities, "acpx.run") {
+			return "acpx.run"
 		}
 		if !hasCapability(envelope.Capabilities, "git.diff") {
 			return "git.diff"
@@ -402,6 +418,8 @@ func implicitRiskApprovals(envelope model.JobEnvelope) []string {
 	}
 	var textValues []string
 	switch envelope.Adapter {
+	case "acpx":
+		textValues = acpxRiskText(envelope)
 	case "codex":
 		textValues = codexRiskText(envelope)
 	case "claude-code":
@@ -480,6 +498,16 @@ func claudeCodeRiskText(envelope model.JobEnvelope) []string {
 	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
 	values = append(values, stringSliceValue(envelope.Payload, "claude_code_args")...)
 	values = append(values, stringSliceValue(envelope.Payload, "claude_args")...)
+	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
+		values = append(values, strings.Join(command, " "))
+	}
+	return values
+}
+
+func acpxRiskText(envelope model.JobEnvelope) []string {
+	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
+	values = append(values, stringValue(envelope.Payload, "acpx_agent", ""))
+	values = append(values, stringSliceValue(envelope.Payload, "acpx_args")...)
 	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
 		values = append(values, strings.Join(command, " "))
 	}
@@ -855,6 +883,46 @@ func claudeCodeDenial(job model.Job, err error) (denialSpec, bool) {
 			Summary:   "Workspace root is invalid.",
 			Detail:    err.Error(),
 			Adapter:   "claude-code",
+			Retryable: true,
+		}, true
+	default:
+		return denialSpec{}, false
+	}
+}
+
+func acpxDenial(job model.Job, err error) (denialSpec, bool) {
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "not allowlisted"):
+		return denialSpec{
+			Code:      "command_not_allowlisted",
+			Summary:   "acpx verification command is not allowlisted.",
+			Detail:    err.Error(),
+			Adapter:   "acpx",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "escapes workspace root"):
+		return denialSpec{
+			Code:      "workspace_escape",
+			Summary:   "Requested write scope escapes the workspace root.",
+			Detail:    err.Error(),
+			Adapter:   "acpx",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "prompt is required"):
+		return denialSpec{
+			Code:      "adapter_payload_invalid",
+			Summary:   "acpx prompt is required.",
+			Detail:    err.Error(),
+			Adapter:   "acpx",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "path is required") || strings.Contains(text, "resolve path") || strings.Contains(text, "stat path") || strings.Contains(text, "path must be a directory"):
+		return denialSpec{
+			Code:      "workspace_invalid",
+			Summary:   "Workspace root is invalid.",
+			Detail:    err.Error(),
+			Adapter:   "acpx",
 			Retryable: true,
 		}, true
 	default:

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/acpxadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/claudecodeadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -139,6 +140,20 @@ func (a *hostRuntimeAdapter) Cleanup(context.Context, adapterkit.RuntimeRequest)
 
 func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (string, error) {
 	switch envelope.Adapter {
+	case "acpx":
+		execution, err := acpxadapter.ExecuteContext(ctx, acpxadapter.Spec{
+			WorkspaceRoot:             envelope.Workspace.Root,
+			WriteScope:                envelope.Workspace.WriteScope,
+			Prompt:                    stringValue(envelope.Payload, "prompt", envelope.Intent),
+			AcpxCommand:               stringValue(envelope.Payload, "acpx_command", ""),
+			AcpxAgent:                 stringValue(envelope.Payload, "acpx_agent", ""),
+			AcpxArgs:                  stringSliceValue(envelope.Payload, "acpx_args"),
+			VerificationCommands:      stringMatrixValue(envelope.Payload, "verification_commands"),
+			AllowVerificationCommands: stringSliceValue(envelope.Payload, "allow_verification_commands"),
+			MaxDurationSeconds:        envelope.Limits.MaxDurationSeconds,
+			MaxOutputBytes:            envelope.Limits.MaxOutputBytes,
+		})
+		return execution.ArtifactContent(), err
 	case "claude-code":
 		execution, err := claudecodeadapter.ExecuteContext(ctx, claudecodeadapter.Spec{
 			WorkspaceRoot:             envelope.Workspace.Root,
@@ -191,6 +206,8 @@ func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (s
 
 func adapterDenial(job model.Job, adapter string, err error) (denialSpec, bool) {
 	switch adapter {
+	case "acpx":
+		return acpxDenial(job, err)
 	case "claude-code":
 		return claudeCodeDenial(job, err)
 	case "codex":
@@ -204,6 +221,8 @@ func adapterDenial(job model.Job, adapter string, err error) (denialSpec, bool) 
 
 func resultSchemaForAdapter(adapter string) string {
 	switch adapter {
+	case "acpx":
+		return acpxadapter.ResultSchemaVersion
 	case "claude-code":
 		return claudecodeadapter.ResultSchemaVersion
 	case "codex":

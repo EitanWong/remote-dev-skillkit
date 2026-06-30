@@ -125,11 +125,11 @@ These should not be opened as new GitHub issues unless regression work is needed
 - host trust-bundle update checks;
 - macOS LaunchAgent plist generation, status, safe uninstall, and service-control;
 - workspace lock manager and Git worktree preparation foundation;
-- Codex and Claude Code adapter MVPs with diff/test evidence, redaction, truncation, timeout, and cancellation evidence;
-- shared risky-action approval preflight for shell, Codex, and Claude Code;
+- Codex, Claude Code, and ACP/acpx adapter MVPs with diff/test evidence, redaction, truncation, timeout, and cancellation evidence;
+- shared risky-action approval preflight for shell, Codex, Claude Code, and acpx;
 - managed Mac local acceptance harness and independent evidence verifier;
 - managed Mac LaunchAgent service acceptance plan;
-- public `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_cancellation`, and `rdev.adapter.verify_runtime` onboarding/conformance flow for lifecycle manifests, runtime fixtures, result artifacts, and cancellation artifacts; shell, PowerShell, Codex, and Claude Code tests use the result and cancellation checks, and hostrunner can append built-in adapter runtime fixtures with `--capture-runtime-fixture`.
+- public `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_cancellation`, and `rdev.adapter.verify_runtime` onboarding/conformance flow for lifecycle manifests, runtime fixtures, result artifacts, and cancellation artifacts; shell, PowerShell, Codex, Claude Code, and acpx tests use the result and cancellation checks, and hostrunner can append built-in adapter runtime fixtures with `--capture-runtime-fixture`.
 
 ## Seed Issues To Create After Approval
 
@@ -177,16 +177,18 @@ The current bootstrap script creates the following seed backlog.
    - Labels: `area:adapter`, `area:policy`, `area:evidence`, `kind:feature`, `kind:test`, `priority:p1`
    - Acceptance:
      - shared adapter interface covers detect, plan, prepare, run, collect, cleanup;
-     - shell, PowerShell, Codex, and Claude Code keep passing shared lifecycle, runtime fixture, result, cancellation artifact, and runtime cancellation conformance fixtures;
+     - shell, PowerShell, Codex, Claude Code, and acpx keep passing shared lifecycle, runtime fixture, result, cancellation artifact, and runtime cancellation conformance fixtures;
      - future adapters use the same hostrunner runtime fixture capture path instead of bespoke evidence formats;
      - new adapter authors can run local conformance tests.
 
-6. **Implement ACP adapter behind the safety kernel**
+6. **Harden ACP/acpx adapter behind the safety kernel**
    - Labels: `area:adapter`, `area:skillkit`, `kind:feature`, `priority:p2`
    - Acceptance:
      - adapter runs only after signed envelope, host validation, workspace lock, and approval preflight;
-     - diff/test evidence matches Codex expectations where possible;
-     - dangerous external consequences pause before execution.
+     - real upstream acpx CLI smoke covers default `acpx --cwd <workspace> codex exec <prompt>` behavior or documents a required payload override while acpx remains alpha;
+     - diff/test evidence matches Codex and Claude Code expectations where possible;
+     - dangerous external consequences pause before execution;
+     - runtime fixture, result-artifact, cancellation, redaction, truncation, and timeout evidence keep passing conformance.
 
 7. **Add Windows Service and systemd managed host lifecycle**
    - Labels: `area:service`, `area:host`, `kind:feature`, `kind:ops`, `priority:p1`

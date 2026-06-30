@@ -1048,6 +1048,218 @@ func main() {
 	}
 }
 
+func TestRunDevJobExecutesAcpxAdapterWithWorkspaceLock(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeAcpx := writeHostrunnerFakeCodex(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nchanged by hostrunner acpx\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake acpx wrote README")
+}
+`)
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	job, err := gw.CreateJob(host.ID, "acpx", "update README", map[string]any{
+		"workspace_root":              repo,
+		"capabilities":                []string{"acpx.run", "git.diff"},
+		"prompt":                      "update README",
+		"acpx_command":                "go",
+		"acpx_args":                   []string{"run", fakeAcpx},
+		"verification_commands":       [][]string{{"git", "status", "--short"}},
+		"allow_verification_commands": []string{"git"},
+		"max_duration_seconds":        30,
+		"max_output_bytes":            64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore: lockStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.acpx-result.v1"`) {
+		t.Fatalf("expected acpx result artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, "changed by hostrunner acpx") {
+		t.Fatalf("expected diff evidence in acpx artifact, got %s", result.ArtifactContent)
+	}
+	status, err := workspace.NewFileLockStore(lockStore).Status(repo, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Exists {
+		t.Fatalf("expected workspace lock release after acpx execution, got %#v", status)
+	}
+}
+
+func TestRunDevJobRejectsAcpxWithoutCapability(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "acpx", "demo", map[string]any{
+		"workspace_root": t.TempDir(),
+		"capabilities":   []string{"git.diff"},
+		"prompt":         "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "missing_capability")
+	if !strings.Contains(result.ArtifactContent, `"capability": "acpx.run"`) {
+		t.Fatalf("expected missing acpx.run capability, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobRequiresApprovalForAcpxGitPushIntent(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeAcpx := writeHostrunnerFakeCodex(t, `package main
+
+import "os"
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nthis acpx must not run without approval\n"), 0o644); err != nil {
+		panic(err)
+	}
+}
+`)
+	job, err := gw.CreateJob(host.ID, "acpx", "update README and git push to origin", map[string]any{
+		"workspace_root": repo,
+		"capabilities":   []string{"acpx.run", "git.diff"},
+		"prompt":         "Update README, then run git push to origin.",
+		"acpx_command":   "go",
+		"acpx_args":      []string{"run", fakeAcpx},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "git.push")
+	content, readErr := os.ReadFile(filepath.Join(repo, "README.md"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(content), "this acpx must not run without approval") {
+		t.Fatalf("acpx adapter executed before git.push approval: %s", string(content))
+	}
+}
+
+func TestRunDevJobCapturesAcpxRuntimeFixture(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeAcpx := writeHostrunnerFakeCodex(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nruntime fixture acpx\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake acpx wrote README")
+}
+`)
+	job, err := gw.CreateJob(host.ID, "acpx", "capture acpx runtime fixture", map[string]any{
+		"workspace_root":              repo,
+		"capabilities":                []string{"acpx.run", "git.diff"},
+		"prompt":                      "update README",
+		"acpx_command":                "go",
+		"acpx_args":                   []string{"run", fakeAcpx},
+		"verification_commands":       [][]string{{"git", "status", "--short"}},
+		"allow_verification_commands": []string{"git"},
+		"max_duration_seconds":        30,
+		"max_output_bytes":            64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore:    filepath.Join(t.TempDir(), "locks"),
+		CaptureRuntimeFixture: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.acpx-result.v1"`) {
+		t.Fatalf("expected primary acpx artifact, got %s", result.ArtifactContent)
+	}
+	report := adapterkit.VerifyRuntimeFixtureJSON([]byte(result.RuntimeFixtureContent), adapterkit.RuntimeFixtureContract{
+		Adapter:               "acpx",
+		RequireSuccessful:     true,
+		RequireCleanup:        true,
+		RequireResultArtifact: true,
+	})
+	if !report.OK {
+		t.Fatalf("acpx runtime fixture failed conformance: %#v\n%s", report, result.RuntimeFixtureContent)
+	}
+	if !strings.Contains(result.RuntimeFixtureContent, `"result_artifact_schema": "rdev.acpx-result.v1"`) {
+		t.Fatalf("expected acpx result schema in runtime fixture, got %s", result.RuntimeFixtureContent)
+	}
+}
+
+func TestRunDevJobCancelsAcpxWhenContextCanceled(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeAcpx := buildHostrunnerFakeCodexBinary(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	job, err := gw.CreateJob(host.ID, "acpx", "sleep until canceled", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"acpx.run", "git.diff"},
+		"prompt":               "sleep until canceled",
+		"acpx_command":         fakeAcpx,
+		"max_duration_seconds": 30,
+		"max_output_bytes":     64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	result, err := RunDevJobWithOptionsContext(ctx, host.ID, gw.TrustBundle(), job, now, Options{})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.acpx-result.v1"`) {
+		t.Fatalf("expected acpx artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, `"canceled": true`) {
+		t.Fatalf("expected canceled evidence, got %s", result.ArtifactContent)
+	}
+	if strings.Contains(result.ArtifactContent, `"timed_out": true`) {
+		t.Fatalf("canceled acpx job should not be marked timed out, got %s", result.ArtifactContent)
+	}
+}
+
 func TestRunDevJobRejectsClaudeCodeWithoutCapability(t *testing.T) {
 	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
