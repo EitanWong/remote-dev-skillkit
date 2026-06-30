@@ -187,6 +187,66 @@ func TestHostEnrollmentCertificateRejectsExpiredCertificate(t *testing.T) {
 	}
 }
 
+func TestHostEnrollmentRevocationListRejectsRevokedCertificate(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := SignHostEnrollmentRevocationList([]HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: fingerprint,
+			Reason:                 "host retired",
+			RevokedAt:              now,
+		},
+	}, "enrollment-root", issuerPrivateKey, now, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyHostEnrollmentRevocationListSignature(list, NewTrustBundle("enrollment-root", issuerPublicKey), now.Add(time.Minute)); err != nil {
+		t.Fatalf("expected revocation list to verify: %v", err)
+	}
+	err = VerifyHostEnrollmentCertificateNotRevoked(certificate, list)
+	if err == nil || !strings.Contains(err.Error(), "host retired") {
+		t.Fatalf("expected revoked certificate rejection, got %v", err)
+	}
+}
+
+func TestHostEnrollmentRevocationListRejectsWrongRoot(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	_, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := SignHostEnrollmentRevocationList([]HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: "sha256:" + strings.Repeat("a", 64),
+			Reason:                 "test",
+			RevokedAt:              now,
+		},
+	}, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = VerifyHostEnrollmentRevocationListSignature(list, NewTrustBundle("enrollment-root", wrongPublicKey), now)
+	if err == nil || !strings.Contains(err.Error(), "signature mismatch") {
+		t.Fatalf("expected signature mismatch, got %v", err)
+	}
+}
+
 func hostRegistrationTestTicket(t *testing.T) Ticket {
 	t.Helper()
 	ticket, err := NewTicket(HostModeManaged, 600, []string{"shell.user"}, "test", time.Now())

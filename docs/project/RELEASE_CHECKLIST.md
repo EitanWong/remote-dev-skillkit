@@ -35,7 +35,7 @@
 - [ ] Verify signed release bundle index with `rdev release verify-bundle`.
 - [ ] Verify the same signed bundle with standalone `rdev-verify --bundle`.
 - [ ] Smoke `rdev host serve --release-bundle ... --release-root-public-key ...` before release publication.
-- [ ] Smoke `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, MCP tool `rdev.enrollment.verify_certificate`, `rdev gateway serve --dev --enrollment-root-public-key ...`, and `rdev host serve --enrollment-certificate ...` before making enrollment-certificate support claims.
+- [ ] Smoke `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev enrollment revoke-certificate`, `rdev enrollment verify-revocations`, `rdev enrollment verify-certificate --revocations`, MCP tool `rdev.enrollment.verify_certificate` with revocation-list input, `rdev gateway serve --dev --enrollment-root-public-key ... --enrollment-revocations ...`, and `rdev host serve --enrollment-certificate ...` before making enrollment-certificate or revocation support claims.
 - [ ] Confirm generated managed LaunchAgent/systemd definitions and Windows Service command plans include the release bundle gate when managed hosts are in scope.
 - [ ] Generate and verify managed Mac LaunchAgent acceptance plans with `rdev acceptance managed-mac-service` and `rdev acceptance verify-managed-mac-service` before any service-backed managed Mac support claim.
 - [ ] Package managed Mac LaunchAgent acceptance evidence with `rdev acceptance package-managed-mac-service` when managed Mac service-backed support is in scope.

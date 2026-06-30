@@ -53,8 +53,10 @@ type HostRegistration struct {
 const (
 	HostRegistrationProofSchemaVersion         = "rdev.host-registration-proof.v1"
 	HostEnrollmentCertificateSchemaVersion     = "rdev.host-enrollment-certificate.v1"
+	HostEnrollmentRevocationListSchemaVersion  = "rdev.host-enrollment-revocations.v1"
 	hostRegistrationProofPayloadVersion        = "rdev.host-registration-proof-payload.v1"
 	hostEnrollmentCertificatePayloadSchema     = "rdev.host-enrollment-certificate-payload.v1"
+	hostEnrollmentRevocationListPayloadSchema  = "rdev.host-enrollment-revocations-payload.v1"
 	defaultHostEnrollmentCertificateMaxBackoff = 30 * time.Second
 )
 
@@ -81,6 +83,22 @@ type HostEnrollmentCertificate struct {
 	Signature                  string    `json:"signature"`
 }
 
+type HostEnrollmentCertificateRevocation struct {
+	CertificateFingerprint string    `json:"certificate_fingerprint"`
+	Reason                 string    `json:"reason,omitempty"`
+	RevokedAt              time.Time `json:"revoked_at"`
+}
+
+type HostEnrollmentRevocationList struct {
+	SchemaVersion       string                                `json:"schema_version"`
+	SigningAlg          string                                `json:"signing_alg"`
+	IssuerKeyID         string                                `json:"issuer_key_id"`
+	GeneratedAt         time.Time                             `json:"generated_at"`
+	NotAfter            time.Time                             `json:"not_after"`
+	RevokedCertificates []HostEnrollmentCertificateRevocation `json:"revoked_certificates"`
+	Signature           string                                `json:"signature"`
+}
+
 type hostRegistrationProofPayload struct {
 	SchemaVersion       string `json:"schema_version"`
 	TicketCode          string `json:"ticket_code"`
@@ -104,6 +122,20 @@ type hostEnrollmentCertificatePayload struct {
 	Capabilities               []string  `json:"capabilities"`
 	NotBefore                  time.Time `json:"not_before"`
 	NotAfter                   time.Time `json:"not_after"`
+}
+
+type hostEnrollmentCertificateFingerprintPayload struct {
+	SchemaVersion string `json:"schema_version"`
+	Payload       []byte `json:"payload"`
+	Signature     string `json:"signature"`
+}
+
+type hostEnrollmentRevocationListPayload struct {
+	SchemaVersion       string                                `json:"schema_version"`
+	IssuerKeyID         string                                `json:"issuer_key_id"`
+	GeneratedAt         time.Time                             `json:"generated_at"`
+	NotAfter            time.Time                             `json:"not_after"`
+	RevokedCertificates []HostEnrollmentCertificateRevocation `json:"revoked_certificates"`
 }
 
 func NewHost(ticket Ticket, registration HostRegistration, now time.Time) (Host, error) {
@@ -369,6 +401,123 @@ func VerifyHostEnrollmentCertificateSignature(certificate HostEnrollmentCertific
 	return nil
 }
 
+func HostEnrollmentCertificateFingerprint(certificate HostEnrollmentCertificate) (string, error) {
+	payload, err := hostEnrollmentCertificatePayloadBytes(certificate)
+	if err != nil {
+		return "", err
+	}
+	fingerprintPayload := hostEnrollmentCertificateFingerprintPayload{
+		SchemaVersion: "rdev.host-enrollment-certificate-fingerprint.v1",
+		Payload:       payload,
+		Signature:     certificate.Signature,
+	}
+	content, err := json.Marshal(fingerprintPayload)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(content)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func SignHostEnrollmentRevocationList(revocations []HostEnrollmentCertificateRevocation, issuerKeyID string, issuerPrivateKey ed25519.PrivateKey, now time.Time, ttl time.Duration) (HostEnrollmentRevocationList, error) {
+	if issuerKeyID == "" {
+		return HostEnrollmentRevocationList{}, fmt.Errorf("enrollment issuer key id is required")
+	}
+	if len(issuerPrivateKey) != ed25519.PrivateKeySize {
+		return HostEnrollmentRevocationList{}, fmt.Errorf("invalid enrollment issuer private key length %d", len(issuerPrivateKey))
+	}
+	if ttl <= 0 {
+		return HostEnrollmentRevocationList{}, fmt.Errorf("host enrollment revocation list ttl must be positive")
+	}
+	normalized, err := normalizeHostEnrollmentRevocations(revocations)
+	if err != nil {
+		return HostEnrollmentRevocationList{}, err
+	}
+	if len(normalized) == 0 {
+		return HostEnrollmentRevocationList{}, fmt.Errorf("host enrollment revocation list requires at least one revoked certificate")
+	}
+	now = now.UTC()
+	list := HostEnrollmentRevocationList{
+		SchemaVersion:       HostEnrollmentRevocationListSchemaVersion,
+		SigningAlg:          JobEnvelopeSigningAlg,
+		IssuerKeyID:         issuerKeyID,
+		GeneratedAt:         now,
+		NotAfter:            now.Add(ttl).UTC(),
+		RevokedCertificates: normalized,
+	}
+	payload, err := hostEnrollmentRevocationListPayloadBytes(list)
+	if err != nil {
+		return HostEnrollmentRevocationList{}, err
+	}
+	list.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(issuerPrivateKey, payload))
+	return list, nil
+}
+
+func VerifyHostEnrollmentRevocationListSignature(list HostEnrollmentRevocationList, root TrustBundle, now time.Time) error {
+	if list.SchemaVersion != HostEnrollmentRevocationListSchemaVersion {
+		return fmt.Errorf("unsupported host enrollment revocation list schema %q", list.SchemaVersion)
+	}
+	if list.SigningAlg != JobEnvelopeSigningAlg {
+		return fmt.Errorf("unsupported host enrollment revocation list signing algorithm %q", list.SigningAlg)
+	}
+	if list.IssuerKeyID == "" {
+		return fmt.Errorf("host enrollment revocation list issuer key id is required")
+	}
+	if root.SigningKeyID != list.IssuerKeyID {
+		return fmt.Errorf("host enrollment revocation list issuer key id mismatch")
+	}
+	if list.GeneratedAt.IsZero() || list.NotAfter.IsZero() || !list.GeneratedAt.Before(list.NotAfter) {
+		return fmt.Errorf("host enrollment revocation list validity window is invalid")
+	}
+	now = now.UTC()
+	if now.Add(defaultHostEnrollmentCertificateMaxBackoff).Before(list.GeneratedAt.UTC()) {
+		return fmt.Errorf("host enrollment revocation list is not valid yet")
+	}
+	if now.After(list.NotAfter.UTC()) {
+		return fmt.Errorf("host enrollment revocation list expired")
+	}
+	normalized, err := normalizeHostEnrollmentRevocations(list.RevokedCertificates)
+	if err != nil {
+		return err
+	}
+	if len(normalized) == 0 {
+		return fmt.Errorf("host enrollment revocation list requires at least one revoked certificate")
+	}
+	list.RevokedCertificates = normalized
+	signature, err := base64.RawURLEncoding.DecodeString(list.Signature)
+	if err != nil {
+		return fmt.Errorf("decode host enrollment revocation list signature: %w", err)
+	}
+	publicKey, err := root.Ed25519PublicKey()
+	if err != nil {
+		return err
+	}
+	payload, err := hostEnrollmentRevocationListPayloadBytes(list)
+	if err != nil {
+		return err
+	}
+	if !ed25519.Verify(publicKey, payload, signature) {
+		return fmt.Errorf("host enrollment revocation list signature mismatch")
+	}
+	return nil
+}
+
+func VerifyHostEnrollmentCertificateNotRevoked(certificate HostEnrollmentCertificate, list HostEnrollmentRevocationList) error {
+	fingerprint, err := HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		return err
+	}
+	for _, revoked := range list.RevokedCertificates {
+		if revoked.CertificateFingerprint == fingerprint {
+			if revoked.Reason != "" {
+				return fmt.Errorf("host enrollment certificate revoked: %s", revoked.Reason)
+			}
+			return fmt.Errorf("host enrollment certificate revoked")
+		}
+	}
+	return nil
+}
+
 func hostEnrollmentCertificatePayloadBytes(certificate HostEnrollmentCertificate) ([]byte, error) {
 	payload := hostEnrollmentCertificatePayload{
 		SchemaVersion:              hostEnrollmentCertificatePayloadSchema,
@@ -384,6 +533,53 @@ func hostEnrollmentCertificatePayloadBytes(certificate HostEnrollmentCertificate
 		NotAfter:                   certificate.NotAfter.UTC(),
 	}
 	return json.Marshal(payload)
+}
+
+func hostEnrollmentRevocationListPayloadBytes(list HostEnrollmentRevocationList) ([]byte, error) {
+	revocations, err := normalizeHostEnrollmentRevocations(list.RevokedCertificates)
+	if err != nil {
+		return nil, err
+	}
+	payload := hostEnrollmentRevocationListPayload{
+		SchemaVersion:       hostEnrollmentRevocationListPayloadSchema,
+		IssuerKeyID:         list.IssuerKeyID,
+		GeneratedAt:         list.GeneratedAt.UTC(),
+		NotAfter:            list.NotAfter.UTC(),
+		RevokedCertificates: revocations,
+	}
+	return json.Marshal(payload)
+}
+
+func normalizeHostEnrollmentRevocations(revocations []HostEnrollmentCertificateRevocation) ([]HostEnrollmentCertificateRevocation, error) {
+	if len(revocations) == 0 {
+		return nil, nil
+	}
+	normalized := make([]HostEnrollmentCertificateRevocation, 0, len(revocations))
+	seen := map[string]struct{}{}
+	for _, revocation := range revocations {
+		fingerprint := strings.TrimSpace(revocation.CertificateFingerprint)
+		if fingerprint == "" {
+			return nil, fmt.Errorf("host enrollment revocation certificate fingerprint is required")
+		}
+		if !strings.HasPrefix(fingerprint, "sha256:") {
+			return nil, fmt.Errorf("host enrollment revocation certificate fingerprint must start with sha256:")
+		}
+		if _, ok := seen[fingerprint]; ok {
+			return nil, fmt.Errorf("duplicate host enrollment revocation fingerprint %q", fingerprint)
+		}
+		seen[fingerprint] = struct{}{}
+		revocation.CertificateFingerprint = fingerprint
+		revocation.Reason = strings.TrimSpace(revocation.Reason)
+		revocation.RevokedAt = revocation.RevokedAt.UTC()
+		if revocation.RevokedAt.IsZero() {
+			return nil, fmt.Errorf("host enrollment revocation revoked_at is required")
+		}
+		normalized = append(normalized, revocation)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i].CertificateFingerprint < normalized[j].CertificateFingerprint
+	})
+	return normalized, nil
 }
 
 func normalizedCapabilities(capabilities []string) []string {

@@ -280,6 +280,9 @@ type enrollmentCertificateVerificationReport struct {
 	SchemaVersion              string         `json:"schema_version"`
 	OK                         bool           `json:"ok"`
 	CertificateSchema          string         `json:"certificate_schema,omitempty"`
+	CertificateFingerprint     string         `json:"certificate_fingerprint,omitempty"`
+	RevocationListSchema       string         `json:"revocation_list_schema,omitempty"`
+	RevokedCertificateCount    int            `json:"revoked_certificate_count,omitempty"`
 	IssuerKeyID                string         `json:"issuer_key_id,omitempty"`
 	RootKeyID                  string         `json:"root_key_id,omitempty"`
 	SubjectIdentityFingerprint string         `json:"subject_identity_fingerprint,omitempty"`
@@ -326,6 +329,12 @@ func (s Server) verifyEnrollmentCertificate(args map[string]any) (any, error) {
 		return report, nil
 	}
 	report.CertificateSchema = certificate.SchemaVersion
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		report.Errors = append(report.Errors, err.Error())
+		return report, nil
+	}
+	report.CertificateFingerprint = fingerprint
 	report.IssuerKeyID = certificate.IssuerKeyID
 	report.SubjectIdentityFingerprint = certificate.SubjectIdentityFingerprint
 	report.TicketCode = certificate.TicketCode
@@ -348,8 +357,38 @@ func (s Server) verifyEnrollmentCertificate(args map[string]any) (any, error) {
 		report.RecommendedActions = append(report.RecommendedActions, "reject this host registration until a valid enrollment certificate is presented")
 		return report, nil
 	}
-	report.OK = true
 	report.Checks = append(report.Checks, "signature_valid", "validity_window_active", "issuer_matches_root")
+	if revocationsJSON := stringArg(args, "revocations_json", ""); revocationsJSON != "" || stringArg(args, "revocations_artifact_id", "") != "" {
+		if artifactID := stringArg(args, "revocations_artifact_id", ""); artifactID != "" {
+			artifact, err := s.Gateway.Artifact(artifactID)
+			if err != nil {
+				return nil, err
+			}
+			revocationsJSON = artifact.Content
+		}
+		revocations, err := decodeEnrollmentRevocationListJSON([]byte(revocationsJSON))
+		if err != nil {
+			report.Errors = append(report.Errors, err.Error())
+			report.RecommendedActions = append(report.RecommendedActions, "provide a JSON object using schema rdev.host-enrollment-revocations.v1")
+			return report, nil
+		}
+		report.RevocationListSchema = revocations.SchemaVersion
+		report.RevokedCertificateCount = len(revocations.RevokedCertificates)
+		report.Checks = append(report.Checks, "revocation_list_json_decoded")
+		if err := model.VerifyHostEnrollmentRevocationListSignature(revocations, root, verifyAt); err != nil {
+			report.Errors = append(report.Errors, err.Error())
+			report.RecommendedActions = append(report.RecommendedActions, "refresh the enrollment revocation list from the trusted authority before trusting this registration")
+			return report, nil
+		}
+		report.Checks = append(report.Checks, "revocation_list_signature_valid", "revocation_list_fresh")
+		if err := model.VerifyHostEnrollmentCertificateNotRevoked(certificate, revocations); err != nil {
+			report.Errors = append(report.Errors, err.Error())
+			report.RecommendedActions = append(report.RecommendedActions, "reject this host registration because its enrollment certificate is revoked")
+			return report, nil
+		}
+		report.Checks = append(report.Checks, "certificate_not_revoked")
+	}
+	report.OK = true
 	return report, nil
 }
 
@@ -373,6 +412,17 @@ func decodeEnrollmentCertificateJSON(content []byte) (model.HostEnrollmentCertif
 	default:
 		return model.HostEnrollmentCertificate{}, fmt.Errorf("unsupported enrollment certificate schema")
 	}
+}
+
+func decodeEnrollmentRevocationListJSON(content []byte) (model.HostEnrollmentRevocationList, error) {
+	var list model.HostEnrollmentRevocationList
+	if err := json.Unmarshal(content, &list); err != nil {
+		return model.HostEnrollmentRevocationList{}, fmt.Errorf("decode enrollment revocation list JSON: %w", err)
+	}
+	if list.SchemaVersion != model.HostEnrollmentRevocationListSchemaVersion {
+		return model.HostEnrollmentRevocationList{}, fmt.Errorf("unsupported enrollment revocation list schema %q", list.SchemaVersion)
+	}
+	return list, nil
 }
 
 func (s Server) verifyAdapterResult(args map[string]any) (any, error) {

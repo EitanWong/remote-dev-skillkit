@@ -83,8 +83,8 @@
     },
     {
       "name": "rdev.enrollment.verify_certificate",
-      "description": "Verify a host enrollment certificate against a pinned enrollment root before trusting a host registration.",
-      "safety": "Read-only certificate validation; does not issue certificates or grant host access."
+      "description": "Verify a host enrollment certificate and optional signed revocation list against a pinned enrollment root before trusting a host registration.",
+      "safety": "Read-only certificate and revocation validation; does not issue certificates or grant host access."
     },
     {
       "name": "rdev.adapter.verify_result",

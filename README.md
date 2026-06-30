@@ -75,7 +75,7 @@ Implemented now:
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
 - macOS Keychain, Windows DPAPI, and Linux libsecret protected-store references for managed host identity and trust bundle persistence via `--identity-store keychain:<service>/<account>` / `--trust-store keychain:<service>/<account>` on macOS, `--identity-store dpapi:<service>/<account>` / `--trust-store dpapi:<service>/<account>` on Windows, and `--identity-store libsecret:<service>/<account>` / `--trust-store libsecret:<service>/<account>` on Linux hosts with `secret-tool` and a reachable Secret Service, preserving the same identity fingerprint, trust-bundle sequence, rollback checks, and host-bound update rules as file-backed development stores.
 - Signed host registration proofs via `rdev.host-registration-proof.v1`; hosts that present identity keys must prove possession of the matching private key before the gateway preserves the identity fingerprint and binds future job envelopes to it.
-- Host enrollment certificates via `rdev.host-enrollment-certificate.v1`; `rdev enrollment sign-certificate` / `rdev enrollment verify-certificate` sign and verify certificate files that bind ticket code, mode, host name, OS/arch, capabilities, validity window, and host identity fingerprint to an enrollment root. `rdev.enrollment.verify_certificate` exposes the same verifier over MCP for agents that review registrations before trust. `rdev gateway serve --dev --enrollment-root-public-key <key_id>:<base64url_public_key>` requires that certificate during host registration, and `rdev host serve --enrollment-certificate <file>` attaches it to the registration payload.
+- Host enrollment certificates and revocations via `rdev.host-enrollment-certificate.v1` and `rdev.host-enrollment-revocations.v1`; `rdev enrollment sign-certificate` / `verify-certificate` sign and verify certificate files that bind ticket code, mode, host name, OS/arch, capabilities, validity window, and host identity fingerprint to an enrollment root, while `rdev enrollment revoke-certificate` / `verify-revocations` produce and verify signed certificate revocation lists. `rdev.enrollment.verify_certificate` exposes certificate verification plus optional revocation-list checks over MCP for agents that review registrations before trust. `rdev gateway serve --dev --enrollment-root-public-key <key_id>:<base64url_public_key> --enrollment-revocations <file>` requires that certificate during host registration and rejects revoked certificates when a revocation list is configured, and `rdev host serve --enrollment-certificate <file>` attaches the certificate to the registration payload.
 - Host-side nonce replay cache with in-memory and file-backed development stores.
 - Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
 - Local evidence bundle export via `rdev evidence export`.
@@ -127,7 +127,7 @@ Implemented now:
 Not implemented yet:
 
 - Production gateway networking, authentication, and storage beyond the development HTTP gateway and JSON snapshot path.
-- Full production host enrollment authority lifecycle beyond the current local certificate primitive: operator roles, CA/key custody, renewal, revocation distribution, emergency drills, and hosted enrollment API.
+- Full production host enrollment authority lifecycle beyond the current local certificate and signed revocation-list primitives: operator roles, CA/key custody, renewal automation, hosted revocation distribution, emergency drills, and hosted enrollment API.
 - Production signing key storage beyond local key files.
 - Authenticated durable managed host trust distribution beyond the current development endpoints and macOS Keychain-backed local store.
 - Full production bootstrap trust root lifecycle and release signing policy.
@@ -163,6 +163,11 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
 go run ./cmd/rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json --enrollment-root-public-key enrollment-root:...
 go run ./cmd/rdev enrollment sign-certificate --out .rdev/enrollment/host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
 go run ./cmd/rdev enrollment verify-certificate --certificate .rdev/enrollment/host-enrollment.json --root-public-key enrollment-root:...
+# Optional revocation smoke for a retired or compromised certificate:
+go run ./cmd/rdev enrollment revoke-certificate --out .rdev/enrollment/revocations.json --key .rdev/keys/enrollment-root.json --certificate .rdev/enrollment/host-enrollment.json --reason "host retired"
+go run ./cmd/rdev enrollment verify-revocations --revocations .rdev/enrollment/revocations.json --root-public-key enrollment-root:...
+# This should fail after the certificate is listed as revoked:
+go run ./cmd/rdev enrollment verify-certificate --certificate .rdev/enrollment/host-enrollment.json --root-public-key enrollment-root:... --revocations .rdev/enrollment/revocations.json
 go run ./cmd/rdev mcp tools | rg 'rdev.enrollment.verify_certificate'
 go run ./cmd/rdev trust init --out .rdev/trust/trust-bundle.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-prod.json
 go run ./cmd/rdev trust rotate --current .rdev/trust/trust-bundle.json --out .rdev/trust/trust-bundle-next.json --root-key .rdev/keys/trust-root.json --gateway-key .rdev/keys/gateway-next.json --gateway-key-id gateway-next --retire-key gateway-prod

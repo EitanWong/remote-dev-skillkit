@@ -313,6 +313,40 @@ func TestMemoryGatewayEnrollmentRootAcceptsValidCertificate(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayEnrollmentRevocationsRejectCertificate(t *testing.T) {
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	capabilities := []string{"shell.user"}
+	ticket, registration := enrollmentGatewayRegistration(t, now, capabilities, issuerPrivateKey)
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(*registration.EnrollmentCertificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocations, err := model.SignHostEnrollmentRevocationList([]model.HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: fingerprint,
+			Reason:                 "compromised host identity",
+			RevokedAt:              now,
+		},
+	}, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentRoot(root).
+		WithEnrollmentRevocations(revocations)
+	gw.tickets[ticket.ID] = ticket
+	gw.codeIndex[ticket.Code] = ticket.ID
+	_, err = gw.RegisterHost(registration)
+	if err == nil || !strings.Contains(err.Error(), "revoked") {
+		t.Fatalf("expected revoked enrollment certificate rejection, got %v", err)
+	}
+}
+
 func TestMemoryGatewayCreatesJoinManifestWithSeparateRoot(t *testing.T) {
 	gatewayPublicKey, gatewayPrivateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -684,4 +718,19 @@ func signedGatewayHostRegistration(t *testing.T, ticket model.Ticket, capabiliti
 	}
 	registration.IdentityProof = &proof
 	return registration
+}
+
+func enrollmentGatewayRegistration(t *testing.T, now time.Time, capabilities []string, issuerPrivateKey ed25519.PrivateKey) (model.Ticket, model.HostRegistration) {
+	t.Helper()
+	ticket, err := model.NewTicket(model.HostModeManaged, 600, capabilities, "managed enrollment", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := signedGatewayHostRegistration(t, ticket, capabilities)
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration.EnrollmentCertificate = &certificate
+	return ticket, registration
 }

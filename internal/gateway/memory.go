@@ -38,7 +38,9 @@ type MemoryGateway struct {
 	manifestPublicKey  ed25519.PublicKey
 	manifestPrivateKey ed25519.PrivateKey
 	enrollmentRoot     model.TrustBundle
+	enrollmentRevokes  model.HostEnrollmentRevocationList
 	requireEnrollment  bool
+	checkEnrollmentCRL bool
 	trustBundle        model.SignedTrustBundle
 }
 
@@ -135,6 +137,14 @@ func (g *MemoryGateway) WithEnrollmentRoot(root model.TrustBundle) *MemoryGatewa
 	return g
 }
 
+func (g *MemoryGateway) WithEnrollmentRevocations(list model.HostEnrollmentRevocationList) *MemoryGateway {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.enrollmentRevokes = list
+	g.checkEnrollmentCRL = true
+	return g
+}
+
 func (g *MemoryGateway) WithAuditSink(sink AuditSink) *MemoryGateway {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -187,6 +197,14 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 	if g.requireEnrollment {
 		if err := model.VerifyHostEnrollmentCertificate(registration, ticket, g.enrollmentRoot, g.now()); err != nil {
 			return model.Host{}, err
+		}
+		if g.checkEnrollmentCRL {
+			if err := model.VerifyHostEnrollmentRevocationListSignature(g.enrollmentRevokes, g.enrollmentRoot, g.now()); err != nil {
+				return model.Host{}, err
+			}
+			if err := model.VerifyHostEnrollmentCertificateNotRevoked(*registration.EnrollmentCertificate, g.enrollmentRevokes); err != nil {
+				return model.Host{}, err
+			}
 		}
 	}
 

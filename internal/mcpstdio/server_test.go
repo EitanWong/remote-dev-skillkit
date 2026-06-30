@@ -221,6 +221,58 @@ func TestServerToolCallVerifyEnrollmentCertificateReportsFailure(t *testing.T) {
 	}
 }
 
+func TestServerToolCallVerifyEnrollmentCertificateReportsRevocation(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	certificate, root, issuerPrivateKey := enrollmentCertificateForMCPTestWithPrivateKey(t, now)
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocations, err := model.SignHostEnrollmentRevocationList([]model.HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: fingerprint,
+			Reason:                 "host retired",
+			RevokedAt:              now,
+		},
+	}, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificateContent, err := json.Marshal(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocationsContent, err := json.Marshal(revocations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.enrollment.verify_certificate", map[string]any{
+		"certificate_json": string(certificateContent),
+		"revocations_json": string(revocationsContent),
+		"root_public_key":  root,
+		"verify_at":        now.Add(time.Minute).Format(time.RFC3339),
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	if lines[0]["error"] != nil {
+		t.Fatalf("revocation failure should be structured content, got RPC error: %#v", lines[0]["error"])
+	}
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["ok"] != false || structured["certificate_fingerprint"] != fingerprint {
+		t.Fatalf("expected revoked enrollment certificate report, got %#v", structured)
+	}
+	errors, ok := structured["errors"].([]any)
+	if !ok || len(errors) == 0 || !strings.Contains(errors[0].(string), "revoked") {
+		t.Fatalf("expected revoked certificate error, got %#v", structured)
+	}
+}
+
 func TestServerToolCallVerifyAdapterResultReportsFailure(t *testing.T) {
 	artifact := `{
   "schema_version": "rdev.shell-result.v1",
@@ -372,6 +424,12 @@ func TestServerToolCallVerifyAdapterRuntime(t *testing.T) {
 
 func enrollmentCertificateForMCPTest(t *testing.T, now time.Time) (model.HostEnrollmentCertificate, string) {
 	t.Helper()
+	certificate, root, _ := enrollmentCertificateForMCPTestWithPrivateKey(t, now)
+	return certificate, root
+}
+
+func enrollmentCertificateForMCPTestWithPrivateKey(t *testing.T, now time.Time) (model.HostEnrollmentCertificate, string, ed25519.PrivateKey) {
+	t.Helper()
 	hostPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -399,7 +457,7 @@ func enrollmentCertificateForMCPTest(t *testing.T, now time.Time) (model.HostEnr
 	if err != nil {
 		t.Fatal(err)
 	}
-	return certificate, trustref.Encode("enrollment-root", issuerPublicKey)
+	return certificate, trustref.Encode("enrollment-root", issuerPublicKey), issuerPrivateKey
 }
 
 func enrollmentFingerprintForMCPTest(publicKey ed25519.PublicKey) string {

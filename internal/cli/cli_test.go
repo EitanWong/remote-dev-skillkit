@@ -992,6 +992,45 @@ func TestHostServeRegistersWithEnrollmentCertificate(t *testing.T) {
 	if payload.Host.IdentityFingerprint != identity.Fingerprint() {
 		t.Fatalf("expected host identity fingerprint %q, got %q", identity.Fingerprint(), payload.Host.IdentityFingerprint)
 	}
+
+	revocationsPath := filepath.Join(dir, "certs", "revocations.json")
+	var revokeStdout bytes.Buffer
+	revokeApp := NewApp(&revokeStdout, &bytes.Buffer{})
+	err = revokeApp.Run(context.Background(), []string{
+		"enrollment", "revoke-certificate",
+		"--out", revocationsPath,
+		"--key", keyPath,
+		"--certificate", certificatePath,
+		"--reason", "host retired",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(revokeStdout.String(), model.HostEnrollmentRevocationListSchemaVersion) {
+		t.Fatalf("expected revocation list schema, got %s", revokeStdout.String())
+	}
+	var verifyRevocationsStdout bytes.Buffer
+	verifyRevocationsApp := NewApp(&verifyRevocationsStdout, &bytes.Buffer{})
+	err = verifyRevocationsApp.Run(context.Background(), []string{
+		"enrollment", "verify-revocations",
+		"--revocations", revocationsPath,
+		"--root-public-key", signPayload.RootPublicKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyRevocationsStdout.String(), `"ok": true`) {
+		t.Fatalf("expected revocation verification ok=true, got %s", verifyRevocationsStdout.String())
+	}
+	err = verifyApp.Run(context.Background(), []string{
+		"enrollment", "verify-certificate",
+		"--certificate", certificatePath,
+		"--root-public-key", signPayload.RootPublicKey,
+		"--revocations", revocationsPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "revoked") {
+		t.Fatalf("expected revoked certificate verification failure, got %v", err)
+	}
 }
 
 func TestHostServeRegistersWithProtectedIdentityStore(t *testing.T) {

@@ -86,6 +86,7 @@
 - [x] Add dry-run-by-default direct Skillkit installer for mainstream Agent frameworks through `rdev skillkit install`.
 - [x] Add host enrollment certificate primitive with `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`.
 - [x] Add `rdev.enrollment.verify_certificate` MCP tool so agents can verify host enrollment certificates against pinned roots before trusting registrations.
+- [x] Add signed host enrollment certificate revocation-list primitive with `rdev.host-enrollment-revocations.v1`, `rdev enrollment revoke-certificate`, `rdev enrollment verify-revocations`, MCP revocation checks, and gateway registration rejection for revoked certificates.
 
 ## Next
 
@@ -173,7 +174,7 @@
 - [ ] Add WSS/mTLS transport.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
 - [ ] Add Linux keyctl or non-Secret-Service protected host identity/trust storage.
-- [ ] Add full production enrollment authority lifecycle beyond the local certificate primitive: operator roles, hosted issuance API, certificate renewal/revocation distribution, and emergency drills.
+- [ ] Add full production enrollment authority lifecycle beyond the local certificate and signed revocation-list primitives: operator roles, hosted issuance API, certificate renewal, hosted revocation distribution, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.
@@ -222,6 +223,7 @@
 - [x] Host serve can verify a signed release bundle before host registration or job polling.
 - [x] Gateway can require a signed `rdev.host-enrollment-certificate.v1` before host registration when an enrollment root is configured.
 - [x] MCP stdio exposes enrollment certificate verification as `rdev.enrollment.verify_certificate`, returning structured success/failure reports without granting access.
+- [x] Gateway can load a signed `rdev.host-enrollment-revocations.v1` list and reject host registration with a revoked enrollment certificate.
 - [x] Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
