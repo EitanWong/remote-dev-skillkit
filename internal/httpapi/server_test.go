@@ -198,6 +198,38 @@ func TestEnrollmentRevocationsEndpointReturnsConfiguredList(t *testing.T) {
 	}
 }
 
+func TestEnrollmentRevocationsEndpointReturnsEmptyBaseline(t *testing.T) {
+	now := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	publicKey, privateKey := httpTestKeyPair(t)
+	revocations, err := model.SignHostEnrollmentRevocationList(nil, "enrollment-root", privateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentRoot(model.NewTrustBundle("enrollment-root", publicKey)).
+		WithEnrollmentRevocations(revocations)
+	handler := NewServer(gw).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/enrollment/revocations", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Revocations model.HostEnrollmentRevocationList `json:"revocations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := model.VerifyHostEnrollmentRevocationListSignature(payload.Revocations, model.NewTrustBundle("enrollment-root", publicKey), now); err != nil {
+		t.Fatalf("expected empty endpoint revocations to verify: %v", err)
+	}
+	if len(payload.Revocations.RevokedCertificates) != 0 {
+		t.Fatalf("expected empty baseline, got %d revoked certificates", len(payload.Revocations.RevokedCertificates))
+	}
+}
+
 func TestEnrollmentRevocationsEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	handler := NewServer(gateway.NewMemoryGateway()).Handler()
 	req := httptest.NewRequest(http.MethodGet, "/v1/enrollment/revocations", nil)

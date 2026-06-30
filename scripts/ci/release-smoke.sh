@@ -15,6 +15,11 @@ go test ./internal/cli \
   -count=1 \
   > "$work_dir/dev-mtls-host-smoke.txt"
 
+go test ./internal/model ./internal/cli ./internal/httpapi \
+  -run 'TestHostEnrollmentRevocationListAllowsEmptyBaseline|TestEnrollmentInitRevocationsWritesEmptyVerifiedList|TestEnrollmentRevocationsEndpointReturnsEmptyBaseline' \
+  -count=1 \
+  > "$work_dir/enrollment-revocation-baseline-smoke.txt"
+
 scripts/release/build-artifacts.sh \
   --out "$work_dir/artifacts" \
   --version "$version" \
@@ -211,6 +216,7 @@ print(json.dumps({
     "skillkit_install_frameworks": skillkit_install_plan_output["framework_count"],
     "skillkit_install_executed": skillkit_install_execute["executed"],
     "dev_mtls_host_smoke": True,
+    "enrollment_revocation_baseline_smoke": True,
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))

@@ -179,6 +179,24 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 			ValidHours:      *validHours,
 			Force:           *force,
 		})
+	case "init-revocations":
+		fs := flag.NewFlagSet("enrollment init-revocations", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "output signed empty enrollment revocation list path")
+		keyPath := fs.String("key", "", "Ed25519 enrollment root signing key file")
+		keyID := fs.String("key-id", "enrollment-root", "enrollment root signing key id")
+		validHours := fs.Int("valid-hours", 168, "revocation list validity window in hours")
+		force := fs.Bool("force", false, "overwrite output revocation list")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentInitRevocations(enrollmentInitRevocationsOptions{
+			OutPath:    *out,
+			KeyPath:    *keyPath,
+			KeyID:      *keyID,
+			ValidHours: *validHours,
+			Force:      *force,
+		})
 	case "verify-revocations":
 		fs := flag.NewFlagSet("enrollment verify-revocations", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -230,6 +248,14 @@ type enrollmentRevokeCertificateOptions struct {
 	Reason          string
 	ValidHours      int
 	Force           bool
+}
+
+type enrollmentInitRevocationsOptions struct {
+	OutPath    string
+	KeyPath    string
+	KeyID      string
+	ValidHours int
+	Force      bool
 }
 
 func (a App) trust(args []string) error {
@@ -3276,6 +3302,42 @@ func (a App) enrollmentVerifyCertificate(certificatePath, rootPublicKey, revocat
 	return enc.Encode(payload)
 }
 
+func (a App) enrollmentInitRevocations(opts enrollmentInitRevocationsOptions) error {
+	if opts.OutPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if opts.KeyPath == "" {
+		return fmt.Errorf("key is required")
+	}
+	if opts.ValidHours <= 0 {
+		return fmt.Errorf("valid-hours must be positive")
+	}
+	key, _, err := signing.LoadOrCreate(opts.KeyPath, opts.KeyID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	list, err := model.SignHostEnrollmentRevocationList(nil, key.ID, key.PrivateKey, now, time.Duration(opts.ValidHours)*time.Hour)
+	if err != nil {
+		return err
+	}
+	if err := writeEnrollmentRevocationListFile(opts.OutPath, list, opts.Force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                        true,
+		"schema":                    list.SchemaVersion,
+		"revocations_path":          opts.OutPath,
+		"revoked_certificate_count": len(list.RevokedCertificates),
+		"issuer_key_id":             list.IssuerKeyID,
+		"root_public_key":           encodeRootPublicKey(key.ID, key.PublicKey),
+		"not_after":                 list.NotAfter,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) enrollmentRevokeCertificate(opts enrollmentRevokeCertificateOptions) error {
 	if opts.OutPath == "" {
 		return fmt.Errorf("out is required")
@@ -4809,6 +4871,7 @@ Usage:
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
+  rdev enrollment init-revocations --out revocations.json --key .rdev/keys/enrollment-root.json
   rdev enrollment revoke-certificate --out revocations.json --key .rdev/keys/enrollment-root.json --certificate host-enrollment.json --reason "host retired"
   rdev enrollment verify-revocations --revocations revocations.json --root-public-key enrollment-root:...
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:... --revocations revocations.json

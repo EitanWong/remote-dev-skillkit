@@ -433,9 +433,6 @@ func SignHostEnrollmentRevocationList(revocations []HostEnrollmentCertificateRev
 	if err != nil {
 		return HostEnrollmentRevocationList{}, err
 	}
-	if len(normalized) == 0 {
-		return HostEnrollmentRevocationList{}, fmt.Errorf("host enrollment revocation list requires at least one revoked certificate")
-	}
 	now = now.UTC()
 	list := HostEnrollmentRevocationList{
 		SchemaVersion:       HostEnrollmentRevocationListSchemaVersion,
@@ -479,9 +476,6 @@ func VerifyHostEnrollmentRevocationListSignature(list HostEnrollmentRevocationLi
 	normalized, err := normalizeHostEnrollmentRevocations(list.RevokedCertificates)
 	if err != nil {
 		return err
-	}
-	if len(normalized) == 0 {
-		return fmt.Errorf("host enrollment revocation list requires at least one revoked certificate")
 	}
 	list.RevokedCertificates = normalized
 	signature, err := base64.RawURLEncoding.DecodeString(list.Signature)
@@ -552,7 +546,7 @@ func hostEnrollmentRevocationListPayloadBytes(list HostEnrollmentRevocationList)
 
 func normalizeHostEnrollmentRevocations(revocations []HostEnrollmentCertificateRevocation) ([]HostEnrollmentCertificateRevocation, error) {
 	if len(revocations) == 0 {
-		return nil, nil
+		return []HostEnrollmentCertificateRevocation{}, nil
 	}
 	normalized := make([]HostEnrollmentCertificateRevocation, 0, len(revocations))
 	seen := map[string]struct{}{}

@@ -221,6 +221,32 @@ func TestHostEnrollmentRevocationListRejectsRevokedCertificate(t *testing.T) {
 	}
 }
 
+func TestHostEnrollmentRevocationListAllowsEmptyBaseline(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := SignHostEnrollmentRevocationList(nil, "enrollment-root", issuerPrivateKey, now, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.RevokedCertificates) != 0 {
+		t.Fatalf("expected empty revocation baseline, got %d entries", len(list.RevokedCertificates))
+	}
+	if err := VerifyHostEnrollmentRevocationListSignature(list, NewTrustBundle("enrollment-root", issuerPublicKey), now.Add(time.Minute)); err != nil {
+		t.Fatalf("expected empty revocation list to verify: %v", err)
+	}
+	if err := VerifyHostEnrollmentCertificateNotRevoked(certificate, list); err != nil {
+		t.Fatalf("expected certificate to pass empty revocation list: %v", err)
+	}
+}
+
 func TestHostEnrollmentRevocationListRejectsWrongRoot(t *testing.T) {
 	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	_, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)

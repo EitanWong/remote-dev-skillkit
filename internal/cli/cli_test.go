@@ -1213,6 +1213,55 @@ func TestEnrollmentFetchRevocationsWritesVerifiedList(t *testing.T) {
 	}
 }
 
+func TestEnrollmentInitRevocationsWritesEmptyVerifiedList(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "keys", "enrollment-root.json")
+	revocationsPath := filepath.Join(dir, "revocations", "revocations.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"enrollment", "init-revocations",
+		"--out", revocationsPath,
+		"--key", keyPath,
+		"--key-id", "enrollment-root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK                      bool   `json:"ok"`
+		Schema                  string `json:"schema"`
+		RootPublicKey           string `json:"root_public_key"`
+		RevokedCertificateCount int    `json:"revoked_certificate_count"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid init output: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != model.HostEnrollmentRevocationListSchemaVersion || payload.RevokedCertificateCount != 0 {
+		t.Fatalf("unexpected init output: %s", stdout.String())
+	}
+	revocations, err := readEnrollmentRevocationListFile(revocationsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revocations.RevokedCertificates) != 0 {
+		t.Fatalf("expected empty revocation list, got %d entries", len(revocations.RevokedCertificates))
+	}
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	err = verifyApp.Run(context.Background(), []string{
+		"enrollment", "verify-revocations",
+		"--revocations", revocationsPath,
+		"--root-public-key", payload.RootPublicKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"revoked_certificate_count": 0`) {
+		t.Fatalf("expected empty revocation verification, got %s", verifyStdout.String())
+	}
+}
+
 func TestHostServeRegistersWithProtectedIdentityStore(t *testing.T) {
 	backend := &cliMemoryKeychainBackend{items: map[string][]byte{}}
 	restore := protectedstore.SetKeychainBackendForTest(backend)
