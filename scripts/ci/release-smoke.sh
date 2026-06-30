@@ -229,6 +229,7 @@ print(json.dumps({
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_renewal_smoke": True,
     "enrollment_issuance_smoke": True,
+    "enrollment_issuer_token_smoke": True,
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))

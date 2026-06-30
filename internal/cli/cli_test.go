@@ -1389,6 +1389,85 @@ func TestEnrollmentIssueCertificateRejectsWrongPinnedRoot(t *testing.T) {
 	}
 }
 
+func TestEnrollmentIssueCertificateSendsIssuerTokenFromFile(t *testing.T) {
+	now := time.Now().UTC()
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	capabilities := []string{"shell.user"}
+	ticket, err := model.NewTicket(model.HostModeManaged, 600, capabilities, "managed enrollment", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityPath := filepath.Join(t.TempDir(), "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := model.HostRegistration{
+		TicketCode:          ticket.Code,
+		Name:                "managed-mac",
+		OS:                  "darwin",
+		Arch:                "arm64",
+		Capabilities:        capabilities,
+		IdentityKeyID:       identity.KeyID,
+		IdentityPublicKey:   identity.EncodedPublicKey(),
+		IdentityFingerprint: identity.Fingerprint(),
+	}
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, root.SigningKeyID, issuerPrivateKey, now, 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenAuthorization := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuthorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/enrollment/certificates" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"certificate":             certificate,
+			"certificate_fingerprint": fingerprint,
+			"enrollment_root":         root,
+		})
+	}))
+	defer server.Close()
+	tokenPath := filepath.Join(t.TempDir(), "issuer-token.txt")
+	if err := os.WriteFile(tokenPath, []byte(" issuer-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(t.TempDir(), "certs", "host-enrollment.json")
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "issue-certificate",
+		"--gateway", server.URL,
+		"--out", outPath,
+		"--root-public-key", encodeRootPublicKey(root.SigningKeyID, issuerPublicKey),
+		"--ticket-code", ticket.Code,
+		"--name", registration.Name,
+		"--os", registration.OS,
+		"--arch", registration.Arch,
+		"--identity-key-id", identity.KeyID,
+		"--identity-public-key", identity.EncodedPublicKey(),
+		"--identity-fingerprint", identity.Fingerprint(),
+		"--issuer-token-file", tokenPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenAuthorization != "Bearer issuer-secret" {
+		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
+	}
+	if _, err := readEnrollmentCertificateFile(outPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnrollmentRenewCertificateExtendsVerifiedCertificate(t *testing.T) {
 	dir := t.TempDir()
 	identityPath := filepath.Join(dir, "identity", "host.json")

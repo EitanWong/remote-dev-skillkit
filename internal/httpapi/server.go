@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,9 +17,10 @@ import (
 )
 
 type Server struct {
-	Gateway   *gateway.MemoryGateway
-	StatePath string
-	stateMu   *sync.Mutex
+	Gateway               *gateway.MemoryGateway
+	StatePath             string
+	EnrollmentIssuerToken string
+	stateMu               *sync.Mutex
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
@@ -27,6 +29,10 @@ func NewServer(gw *gateway.MemoryGateway) Server {
 
 func NewServerWithState(gw *gateway.MemoryGateway, statePath string) Server {
 	return Server{Gateway: gw, StatePath: statePath, stateMu: &sync.Mutex{}}
+}
+
+func NewServerWithOptions(gw *gateway.MemoryGateway, statePath, enrollmentIssuerToken string) Server {
+	return Server{Gateway: gw, StatePath: statePath, EnrollmentIssuerToken: enrollmentIssuerToken, stateMu: &sync.Mutex{}}
 }
 
 func (s Server) Handler() http.Handler {
@@ -73,6 +79,10 @@ func (s Server) getEnrollmentRevocations(w http.ResponseWriter, r *http.Request)
 }
 
 func (s Server) issueEnrollmentCertificate(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeEnrollmentIssuer(r) {
+		writeError(w, http.StatusUnauthorized, "enrollment issuer token is required")
+		return
+	}
 	var req struct {
 		TicketCode          string   `json:"ticket_code"`
 		Name                string   `json:"name"`
@@ -124,6 +134,20 @@ func (s Server) issueEnrollmentCertificate(w http.ResponseWriter, r *http.Reques
 		"certificate_fingerprint": fingerprint,
 		"enrollment_root":         root,
 	})
+}
+
+func (s Server) authorizeEnrollmentIssuer(r *http.Request) bool {
+	token := strings.TrimSpace(s.EnrollmentIssuerToken)
+	if token == "" {
+		return true
+	}
+	const prefix = "Bearer "
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	provided := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
 }
 
 func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {

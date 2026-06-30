@@ -317,6 +317,61 @@ func TestEnrollmentCertificatesEndpointRequiresIssuer(t *testing.T) {
 	}
 }
 
+func TestEnrollmentCertificatesEndpointRequiresIssuerToken(t *testing.T) {
+	now := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	issuerPublicKey, issuerPrivateKey := httpTestKeyPair(t)
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, []string{"shell.user"}, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"ticket_code":          ticket.Code,
+		"name":                 "managed-mac",
+		"os":                   "darwin",
+		"arch":                 "arm64",
+		"capabilities":         []string{"shell.user"},
+		"identity_key_id":      "host-test",
+		"identity_public_key":  base64.RawURLEncoding.EncodeToString(hostPublicKey),
+		"identity_fingerprint": httpHostIdentityFingerprint(hostPublicKey),
+		"valid_minutes":        30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(gw)
+	server.EnrollmentIssuerToken = "issuer-secret"
+	handler := server.Handler()
+
+	for _, tc := range []struct {
+		name   string
+		auth   string
+		status int
+	}{
+		{name: "missing", status: http.StatusUnauthorized},
+		{name: "wrong", auth: "Bearer wrong-secret", status: http.StatusUnauthorized},
+		{name: "valid", auth: "Bearer issuer-secret", status: http.StatusCreated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/enrollment/certificates", bytes.NewReader(body))
+			if tc.auth != "" {
+				req.Header.Set("Authorization", tc.auth)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("expected %d, got %d: %s", tc.status, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestTrustBundleEndpointRejectsRollback(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	publicKey, privateKey := httpTestKeyPair(t)

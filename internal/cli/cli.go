@@ -123,6 +123,7 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 		identityPublicKey := fs.String("identity-public-key", "", "host identity public key")
 		identityFingerprint := fs.String("identity-fingerprint", "", "host identity fingerprint")
 		capabilities := fs.String("capabilities", "", "comma-separated authorized capabilities; defaults to ticket capabilities")
+		issuerTokenFile := fs.String("issuer-token-file", "", "optional file containing bearer token for protected enrollment issuance")
 		validMinutes := fs.Int("valid-minutes", 60, "certificate validity window in minutes")
 		force := fs.Bool("force", false, "overwrite output certificate")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -140,6 +141,7 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 			IdentityPublicKey:   *identityPublicKey,
 			IdentityFingerprint: *identityFingerprint,
 			Capabilities:        splitCapabilities(*capabilities),
+			IssuerTokenFile:     *issuerTokenFile,
 			ValidMinutes:        *validMinutes,
 			Force:               *force,
 		})
@@ -307,6 +309,7 @@ type enrollmentIssueCertificateOptions struct {
 	IdentityPublicKey   string
 	IdentityFingerprint string
 	Capabilities        []string
+	IssuerTokenFile     string
 	ValidMinutes        int
 	Force               bool
 }
@@ -462,20 +465,21 @@ type trustRevokeOptions struct {
 }
 
 type gatewayServeOptions struct {
-	Addr                    string
-	AuditLog                string
-	StatePath               string
-	SigningKeyPath          string
-	SigningKeyID            string
-	ManifestSigningKeyPath  string
-	ManifestSigningKeyID    string
-	EnrollmentRootPublicKey string
-	EnrollmentKeyPath       string
-	EnrollmentKeyID         string
-	EnrollmentRevocations   string
-	TLSCertPath             string
-	TLSKeyPath              string
-	ClientCAPath            string
+	Addr                      string
+	AuditLog                  string
+	StatePath                 string
+	SigningKeyPath            string
+	SigningKeyID              string
+	ManifestSigningKeyPath    string
+	ManifestSigningKeyID      string
+	EnrollmentRootPublicKey   string
+	EnrollmentKeyPath         string
+	EnrollmentKeyID           string
+	EnrollmentIssuerTokenFile string
+	EnrollmentRevocations     string
+	TLSCertPath               string
+	TLSKeyPath                string
+	ClientCAPath              string
 }
 
 func (a App) acceptance(ctx context.Context, args []string) error {
@@ -2613,6 +2617,7 @@ func (a App) gateway(args []string) error {
 		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key; when set, host registration requires rdev.host-enrollment-certificate.v1")
 		enrollmentKey := fs.String("enrollment-key", "", "optional Ed25519 enrollment root signing key file for dev hosted certificate issuance")
 		enrollmentKeyID := fs.String("enrollment-key-id", "enrollment-root", "enrollment root signing key id for new or existing enrollment key file")
+		enrollmentIssuerTokenFile := fs.String("enrollment-issuer-token-file", "", "optional file containing bearer token required by POST /v1/enrollment/certificates")
 		enrollmentRevocations := fs.String("enrollment-revocations", "", "optional signed enrollment revocation list JSON path")
 		tlsCert := fs.String("tls-cert", "", "optional TLS server certificate PEM path for the development gateway")
 		tlsKey := fs.String("tls-key", "", "optional TLS server private key PEM path for the development gateway")
@@ -2624,20 +2629,21 @@ func (a App) gateway(args []string) error {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
 		return a.gatewayServeDev(gatewayServeOptions{
-			Addr:                    *addr,
-			AuditLog:                *auditLog,
-			StatePath:               *statePath,
-			SigningKeyPath:          *signingKey,
-			SigningKeyID:            *signingKeyID,
-			ManifestSigningKeyPath:  *manifestSigningKey,
-			ManifestSigningKeyID:    *manifestSigningKeyID,
-			EnrollmentRootPublicKey: *enrollmentRootPublicKey,
-			EnrollmentKeyPath:       *enrollmentKey,
-			EnrollmentKeyID:         *enrollmentKeyID,
-			EnrollmentRevocations:   *enrollmentRevocations,
-			TLSCertPath:             *tlsCert,
-			TLSKeyPath:              *tlsKey,
-			ClientCAPath:            *clientCA,
+			Addr:                      *addr,
+			AuditLog:                  *auditLog,
+			StatePath:                 *statePath,
+			SigningKeyPath:            *signingKey,
+			SigningKeyID:              *signingKeyID,
+			ManifestSigningKeyPath:    *manifestSigningKey,
+			ManifestSigningKeyID:      *manifestSigningKeyID,
+			EnrollmentRootPublicKey:   *enrollmentRootPublicKey,
+			EnrollmentKeyPath:         *enrollmentKey,
+			EnrollmentKeyID:           *enrollmentKeyID,
+			EnrollmentIssuerTokenFile: *enrollmentIssuerTokenFile,
+			EnrollmentRevocations:     *enrollmentRevocations,
+			TLSCertPath:               *tlsCert,
+			TLSKeyPath:                *tlsKey,
+			ClientCAPath:              *clientCA,
 		})
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
@@ -3221,7 +3227,16 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		store := audit.NewJSONLStore(opts.AuditLog)
 		gw.WithAuditSink(&store)
 	}
-	server := httpapi.NewServerWithState(gw, opts.StatePath)
+	enrollmentIssuerToken := ""
+	if opts.EnrollmentIssuerTokenFile != "" {
+		token, err := readTokenFile(opts.EnrollmentIssuerTokenFile)
+		if err != nil {
+			return err
+		}
+		enrollmentIssuerToken = token
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment issuer token loaded from %s\n", opts.EnrollmentIssuerTokenFile)
+	}
+	server := httpapi.NewServerWithOptions(gw, opts.StatePath, enrollmentIssuerToken)
 	if opts.SigningKeyPath != "" {
 		action := "loaded"
 		if created {
@@ -5136,7 +5151,7 @@ Usage:
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
   rdev adapter verify-cancellation --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
-  rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:...
+  rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --issuer-token-file issuer-token.txt
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
   rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-renewed.json --key .rdev/keys/enrollment-root.json --revocations revocations.json
@@ -5667,6 +5682,13 @@ func issueEnrollmentCertificate(ctx context.Context, gatewayURL string, opts enr
 		return issuedEnrollmentCertificatePayload{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if opts.IssuerTokenFile != "" {
+		token, err := readTokenFile(opts.IssuerTokenFile)
+		if err != nil {
+			return issuedEnrollmentCertificatePayload{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return issuedEnrollmentCertificatePayload{}, err
@@ -5683,6 +5705,21 @@ func issueEnrollmentCertificate(ctx context.Context, gatewayURL string, opts enr
 		return issuedEnrollmentCertificatePayload{}, fmt.Errorf("issue enrollment certificate failed: %s", payload.Error)
 	}
 	return payload, nil
+}
+
+func readTokenFile(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(string(content))
+	if token == "" {
+		return "", fmt.Errorf("token file %s is empty", path)
+	}
+	if strings.ContainsAny(token, "\r\n\t ") {
+		return "", fmt.Errorf("token file %s must contain a single bearer token", path)
+	}
+	return token, nil
 }
 
 func fetchTrustBundleUpdate(ctx context.Context, client *http.Client, gatewayURL, hostID string, currentSequence int, currentHash string) (model.TrustBundleUpdate, error) {
