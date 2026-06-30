@@ -281,26 +281,32 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		approvalStore := fs.String("approval-store", "", "managed host approval store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
 		logDir := fs.String("log-dir", "", "managed host log directory")
+		releaseBundle := fs.String("release-bundle", "", "signed release bundle path on the Mac host, verified by the managed host before registration")
+		releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle, formatted key_id:base64url_public_key")
+		releaseRequiredArtifacts := fs.String("release-require-artifacts", "rdev,rdev-host,rdev-verify", "comma-separated artifact ids required in --release-bundle")
 		force := fs.Bool("force", false, "overwrite an existing service output path")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.acceptanceManagedMacService(ctx, acceptance.ManagedMacServiceOptions{
-			RepoRoot:           *repo,
-			OutDir:             *out,
-			BinaryPath:         *binaryPath,
-			GatewayURL:         *gatewayURL,
-			TicketCode:         *ticketCode,
-			ManifestURL:        *manifestURL,
-			Label:              *label,
-			PlistOut:           *plistOut,
-			IdentityStore:      *identityStore,
-			TrustStore:         *trustStore,
-			NonceStore:         *nonceStore,
-			ApprovalStore:      *approvalStore,
-			WorkspaceLockStore: *workspaceLockStore,
-			LogDir:             *logDir,
-			Force:              *force,
+			RepoRoot:                 *repo,
+			OutDir:                   *out,
+			BinaryPath:               *binaryPath,
+			GatewayURL:               *gatewayURL,
+			TicketCode:               *ticketCode,
+			ManifestURL:              *manifestURL,
+			Label:                    *label,
+			PlistOut:                 *plistOut,
+			IdentityStore:            *identityStore,
+			TrustStore:               *trustStore,
+			NonceStore:               *nonceStore,
+			ApprovalStore:            *approvalStore,
+			WorkspaceLockStore:       *workspaceLockStore,
+			LogDir:                   *logDir,
+			ReleaseBundle:            *releaseBundle,
+			ReleaseRootPublicKey:     *releaseRootPublicKey,
+			ReleaseRequiredArtifacts: splitCapabilities(*releaseRequiredArtifacts),
+			Force:                    *force,
 		})
 	case "windows-temporary":
 		fs := flag.NewFlagSet("acceptance windows-temporary", flag.ContinueOnError)
@@ -448,6 +454,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyWindowsTemporary(*plan)
+	case "verify-managed-mac-service":
+		fs := flag.NewFlagSet("acceptance verify-managed-mac-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "Managed Mac service acceptance plan path, for example <out>/service-plan.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerifyManagedMacService(*plan)
 	case "verify-windows-managed-service":
 		fs := flag.NewFlagSet("acceptance verify-windows-managed-service", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -486,6 +500,40 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			AuditPath:               *auditPath,
 			NoPersistenceDir:        *noPersistenceDir,
 			ApprovalProbesDir:       *approvalProbesDir,
+			NotesPath:               *notes,
+		})
+	case "package-managed-mac-service":
+		fs := flag.NewFlagSet("acceptance package-managed-mac-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "Managed Mac service acceptance plan path")
+		out := fs.String("out", "", "empty output directory for the packaged managed Mac service evidence")
+		reviewTranscript := fs.String("review-transcript", "", "plutil/cat review transcript for the LaunchAgent plist")
+		startTranscript := fs.String("start-transcript", "", "rdev host service-control --platform macos --action start --execute transcript")
+		inspectTranscript := fs.String("inspect-transcript", "", "rdev host service-control --platform macos --action inspect --execute transcript")
+		logs := fs.String("logs", "", "managed host stdout/stderr log excerpt")
+		releaseGate := fs.String("release-gate", "", "rdev host startup release-gate JSON/output")
+		auditPath := fs.String("audit", "", "audit export or transcript for host registration, approvals, jobs, revocation, and completion")
+		reconnect := fs.String("reconnect", "", "logout/login or reboot reconnect evidence transcript")
+		managedReport := fs.String("managed-report", "", "service-backed rdev acceptance managed-mac report.json")
+		stopTranscript := fs.String("stop-transcript", "", "rdev host service-control --platform macos --action stop --execute transcript")
+		uninstallTranscript := fs.String("uninstall-transcript", "", "rdev host uninstall-service --platform macos transcript")
+		notes := fs.String("notes", "", "optional operator notes file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptancePackageManagedMacService(acceptance.ManagedMacServicePackageOptions{
+			PlanPath:                *plan,
+			OutDir:                  *out,
+			ReviewTranscriptPath:    *reviewTranscript,
+			StartTranscriptPath:     *startTranscript,
+			InspectTranscriptPath:   *inspectTranscript,
+			LogsPath:                *logs,
+			ReleaseGatePath:         *releaseGate,
+			AuditPath:               *auditPath,
+			ReconnectPath:           *reconnect,
+			ManagedReportPath:       *managedReport,
+			StopTranscriptPath:      *stopTranscript,
+			UninstallTranscriptPath: *uninstallTranscript,
 			NotesPath:               *notes,
 		})
 	case "package-linux-managed-service":
@@ -701,6 +749,30 @@ func (a App) acceptanceVerifyWindowsTemporary(planPath string) error {
 	return nil
 }
 
+func (a App) acceptanceVerifyManagedMacService(planPath string) error {
+	verification, err := acceptance.VerifyManagedMacServicePlan(planPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"plan":                verification.PlanPath,
+		"plan_schema":         verification.PlanSchema,
+		"checks":              verification.Checks,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("managed Mac service acceptance plan verification failed")
+	}
+	return nil
+}
+
 func (a App) acceptanceVerifyWindowsManagedService(planPath string) error {
 	verification, err := acceptance.VerifyWindowsManagedServicePlan(planPath)
 	if err != nil {
@@ -772,6 +844,33 @@ func (a App) acceptancePackageWindowsTemporary(opts acceptance.WindowsTemporaryP
 	}
 	if !pkg.OK() {
 		return fmt.Errorf("windows temporary acceptance package verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptancePackageManagedMacService(opts acceptance.ManagedMacServicePackageOptions) error {
+	pkg, err := acceptance.PackageManagedMacServiceEvidence(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    pkg.OK(),
+		"schema":                pkg.SchemaVersion,
+		"out":                   pkg.OutDir,
+		"package":               filepath.Join(pkg.OutDir, "package.json"),
+		"checksums":             filepath.Join(pkg.OutDir, "checksums.txt"),
+		"checks":                pkg.Checks,
+		"files":                 pkg.Files,
+		"redaction_rule_counts": pkg.RedactionRuleCounts,
+		"recommended_actions":   pkg.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("managed Mac service acceptance package verification failed")
 	}
 	return nil
 }
@@ -3994,14 +4093,16 @@ Usage:
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev acceptance managed-mac --out acceptance-run --repo .
-  rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo .
+  rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo . --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
   rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example/rdev-verify.exe --verifier-sha256 <sha256>
   rdev acceptance windows-managed-service --out windows-service-plan --binary 'C:\Program Files\rdev\rdev.exe' --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle 'C:\Program Files\rdev\release-bundle.json' --release-root-public-key release-root:... --release-require-artifacts rdev.exe,rdev-host.exe,rdev-verify.exe
   rdev acceptance linux-managed-service --out linux-service-plan --binary /opt/rdev/rdev --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
   rdev acceptance verify --report acceptance-run/report.json
+  rdev acceptance verify-managed-mac-service --plan service-plan/service-plan.json
   rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
   rdev acceptance verify-windows-managed-service --plan windows-service-plan/windows-managed-service-plan.json
   rdev acceptance verify-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json
+  rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json

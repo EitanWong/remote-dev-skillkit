@@ -140,6 +140,7 @@
 - [x] Add managed Mac coding acceptance harness with locked-worktree evidence export.
 - [x] Add acceptance report verifier for evidence checksums, artifact index, audit chain, approval gate, and workspace-lock release.
 - [x] Add managed Mac LaunchAgent acceptance plan command with checked plist, launchctl steps, service-backed acceptance commands, and uninstall guidance.
+- [x] Add managed Mac LaunchAgent acceptance plan verification and evidence packaging.
 - [x] Add opt-in macOS LaunchAgent service-control dry-run/execute command for start, inspect, and stop.
 - [x] Add Windows temporary acceptance plan command with reviewed launcher, release-verification requirements, approval probes, no-persistence checks, and evidence checklist.
 - [x] Add Windows temporary acceptance plan verifier for launcher safety, hashes, release inputs, approval probes, no-persistence checks, and required evidence.
@@ -201,6 +202,7 @@
 - [x] Hostrunner can execute `adapter=acpx` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.acpx-result.v1` artifacts.
 - [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.
 - [x] Managed Mac acceptance reports can be independently verified through `rdev acceptance verify`, including checksum and audit-chain validation.
+- [x] Managed Mac LaunchAgent service-backed acceptance evidence can be packaged with verified plan/plist, release-gate output, reconnect proof, verified managed Mac report, approval-required evidence, redaction, and checksums.
 - [x] Release bundle indexes can be signed and verified before publishing, including every listed artifact manifest and binary checksum.
 - [x] Standalone `rdev-verify` can verify signed release bundles before target-host execution.
 - [x] Windows bootstrap can verify signed release bundles before target-host execution through a hash-pinned standalone verifier.

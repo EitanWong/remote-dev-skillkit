@@ -104,17 +104,26 @@ rdev acceptance managed-mac-service \
   --out .rdev/acceptance/managed-mac-service \
   --gateway https://api.example.com/v1 \
   --ticket-code ABCD-1234 \
-  --repo .
+  --repo . \
+  --release-bundle /opt/rdev/release-bundle.json \
+  --release-root-public-key release-root:... \
+  --release-require-artifacts rdev,rdev-host,rdev-verify
+
+rdev acceptance verify-managed-mac-service \
+  --plan .rdev/acceptance/managed-mac-service/service-plan.json
 ```
 
 The command writes `service-plan.json` with schema
-`rdev.acceptance.managed-mac-service-plan.v1` and a LaunchAgent plist. It validates:
+`rdev.acceptance.managed-mac-service-plan.v1` and a LaunchAgent plist. The
+verifier emits `rdev.acceptance-verification.managed-mac-service-plan.v1`. It
+validates:
 
 - plist is written with `0600` permissions;
 - label matches the generated plist;
 - `RunAtLoad` and `KeepAlive` are enabled for explicit managed mode;
 - host arguments include `--mode managed`, `--once=false`, transport, identity,
   trust, nonce, approval, and workspace-lock stores;
+- release-bundle startup gate arguments are present;
 - enrollment uses either `--ticket-code` or `--manifest-url`;
 - manual `rdev host service-control --execute` start/inspect/stop commands,
   managed coding acceptance, `rdev acceptance verify`, and uninstall commands are present.
@@ -122,6 +131,32 @@ The command writes `service-plan.json` with schema
 This command does not execute `launchctl`. It produces the operator-reviewed plan
 for the real LaunchAgent acceptance run. Use `rdev host service-control` without
 `--execute` to preview the launchctl command and with `--execute` to run it.
+
+After the real service-backed managed Mac run, package the collected evidence:
+
+```bash
+rdev acceptance package-managed-mac-service \
+  --plan .rdev/acceptance/managed-mac-service/service-plan.json \
+  --out .rdev/acceptance/managed-mac-service-evidence \
+  --review-transcript review.txt \
+  --start-transcript start.txt \
+  --inspect-transcript inspect.txt \
+  --logs launchagent.log \
+  --release-gate release-gate.json \
+  --audit audit.jsonl \
+  --reconnect reconnect.txt \
+  --managed-report .rdev/acceptance/managed-mac/report.json \
+  --stop-transcript stop.txt \
+  --uninstall-transcript uninstall.txt
+```
+
+The package command emits `rdev.acceptance-package.managed-mac-service.v1`,
+writes `package.json` and `checksums.txt`, copies the verified plan, LaunchAgent
+plist, plan-verifier output, service transcripts, logs, release-gate output,
+audit, reconnect proof, and verified managed Mac evidence bundle, then redacts
+copied evidence. It fails closed until release-gate output contains `ok=true`,
+the managed Mac report verifies through `rdev acceptance verify`, and the
+approval-required proof is present in the bundled evidence.
 
 ## Windows Temporary Host Plan
 

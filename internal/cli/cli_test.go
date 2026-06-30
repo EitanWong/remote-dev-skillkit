@@ -3422,6 +3422,8 @@ func TestAcceptanceManagedMacServicePlan(t *testing.T) {
 		"--ticket-code", "ABCD-1234",
 		"--repo", repo,
 		"--label", "com.example.rdev-acceptance",
+		"--release-bundle", "/opt/rdev/release-bundle.json",
+		"--release-root-public-key", "release-root:abc123",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3452,6 +3454,127 @@ func TestAcceptanceManagedMacServicePlan(t *testing.T) {
 	commands := stdout.String()
 	if !strings.Contains(commands, "rdev host service-control") || !strings.Contains(commands, "rdev acceptance verify") {
 		t.Fatalf("expected service-control and verification commands, got %s", commands)
+	}
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{
+		"acceptance", "verify-managed-mac-service",
+		"--plan", payload.Plan,
+	}); err != nil {
+		t.Fatalf("expected managed mac service plan verification to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.acceptance-verification.managed-mac-service-plan.v1"`) {
+		t.Fatalf("expected managed mac service verification schema, got %s", verifyStdout.String())
+	}
+}
+
+func TestAcceptancePackageManagedMacService(t *testing.T) {
+	requireGitForCLITest(t)
+	fakeCodex := buildCLITestBinary(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# rdev acceptance fixture\n\nChanged by managed Mac service package.\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake codex service package run")
+}
+`)
+	root := t.TempDir()
+	planOut := filepath.Join(root, "managed-mac-service")
+	var planStdout bytes.Buffer
+	planApp := NewApp(&planStdout, &bytes.Buffer{})
+	if err := planApp.Run(context.Background(), []string{
+		"acceptance", "managed-mac-service",
+		"--out", planOut,
+		"--binary", filepath.Join(root, "rdev"),
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--repo", t.TempDir(),
+		"--label", "com.example.rdev-acceptance",
+		"--release-bundle", "/opt/rdev/release-bundle.json",
+		"--release-root-public-key", "release-root:abc123",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var planPayload struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(planStdout.Bytes(), &planPayload); err != nil {
+		t.Fatalf("invalid plan json: %v\n%s", err, planStdout.String())
+	}
+	managedOut := filepath.Join(root, "managed-mac-run")
+	var managedStdout bytes.Buffer
+	managedApp := NewApp(&managedStdout, &bytes.Buffer{})
+	if err := managedApp.Run(context.Background(), []string{
+		"acceptance", "managed-mac",
+		"--out", managedOut,
+		"--codex-command", fakeCodex,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var managedPayload struct {
+		Report string `json:"report"`
+	}
+	if err := json.Unmarshal(managedStdout.Bytes(), &managedPayload); err != nil {
+		t.Fatalf("invalid managed mac json: %v\n%s", err, managedStdout.String())
+	}
+	fakeGitHubToken := "ghp_" + "abcdefghijklmnopqrstuvwx"
+	evidence := writeManagedMacServicePackageEvidenceForCLITest(t, root, `{"ok": true, "token": "`+fakeGitHubToken+`"}`)
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-managed-mac-service",
+		"--plan", planPayload.Plan,
+		"--out", filepath.Join(root, "managed-mac-service-evidence"),
+		"--review-transcript", evidence.reviewTranscriptPath,
+		"--start-transcript", evidence.startTranscriptPath,
+		"--inspect-transcript", evidence.inspectTranscriptPath,
+		"--logs", evidence.logsPath,
+		"--release-gate", evidence.releaseGatePath,
+		"--audit", evidence.auditPath,
+		"--reconnect", evidence.reconnectPath,
+		"--managed-report", managedPayload.Report,
+		"--stop-transcript", evidence.stopTranscriptPath,
+		"--uninstall-transcript", evidence.uninstallTranscriptPath,
+	}); err != nil {
+		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+	}
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Schema  string `json:"schema"`
+		Package string `json:"package"`
+		Files   []struct {
+			Path string `json:"path"`
+			Kind string `json:"kind"`
+		} `json:"files"`
+		RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected package ok, got %s", stdout.String())
+	}
+	if payload.Schema != "rdev.acceptance-package.managed-mac-service.v1" {
+		t.Fatalf("unexpected schema %q", payload.Schema)
+	}
+	if _, err := os.Stat(payload.Package); err != nil {
+		t.Fatalf("expected package manifest: %v", err)
+	}
+	if payload.RedactionRuleCounts["github_token"] != 1 {
+		t.Fatalf("expected github_token redaction count, got %#v", payload.RedactionRuleCounts)
+	}
+	output := stdout.String()
+	for _, expected := range []string{"launch-agent-plist", "managed-mac-report", "managed-mac-evidence", "checksums.txt"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected packaged output containing %q, got %s", expected, output)
+		}
 	}
 }
 
@@ -4038,6 +4161,52 @@ type linuxPackageEvidenceForCLITest struct {
 	jobEvidenceDir          string
 	stopTranscriptPath      string
 	uninstallTranscriptPath string
+}
+
+type managedMacServicePackageEvidenceForCLITest struct {
+	reviewTranscriptPath    string
+	startTranscriptPath     string
+	inspectTranscriptPath   string
+	logsPath                string
+	releaseGatePath         string
+	auditPath               string
+	reconnectPath           string
+	stopTranscriptPath      string
+	uninstallTranscriptPath string
+}
+
+func writeManagedMacServicePackageEvidenceForCLITest(t *testing.T, root, releaseGate string) managedMacServicePackageEvidenceForCLITest {
+	t.Helper()
+	evidenceRoot := filepath.Join(root, "managed-mac-service-package-fixture")
+	reviewTranscriptPath := filepath.Join(evidenceRoot, "review.txt")
+	startTranscriptPath := filepath.Join(evidenceRoot, "start.txt")
+	inspectTranscriptPath := filepath.Join(evidenceRoot, "inspect.txt")
+	logsPath := filepath.Join(evidenceRoot, "logs.txt")
+	releaseGatePath := filepath.Join(evidenceRoot, "release-gate.json")
+	auditPath := filepath.Join(evidenceRoot, "audit.jsonl")
+	reconnectPath := filepath.Join(evidenceRoot, "reconnect.txt")
+	stopTranscriptPath := filepath.Join(evidenceRoot, "stop.txt")
+	uninstallTranscriptPath := filepath.Join(evidenceRoot, "uninstall.txt")
+	writeFileForCLITest(t, reviewTranscriptPath, "plutil -lint com.example.rdev-acceptance.plist\nOK\n")
+	writeFileForCLITest(t, startTranscriptPath, "rdev host service-control --platform macos --action start --execute\n")
+	writeFileForCLITest(t, inspectTranscriptPath, "rdev host service-control --platform macos --action inspect --execute\nstate = running\n")
+	writeFileForCLITest(t, logsPath, "managed host log release gate passed\n")
+	writeFileForCLITest(t, releaseGatePath, releaseGate+"\n")
+	writeFileForCLITest(t, auditPath, `{"event":"host.registered"}`+"\n"+`{"event":"job.completed"}`+"\n")
+	writeFileForCLITest(t, reconnectPath, "logout/login complete; host hst_123 reconnected\n")
+	writeFileForCLITest(t, stopTranscriptPath, "rdev host service-control --platform macos --action stop --execute\n")
+	writeFileForCLITest(t, uninstallTranscriptPath, "rdev host uninstall-service --platform macos --removed true\n")
+	return managedMacServicePackageEvidenceForCLITest{
+		reviewTranscriptPath:    reviewTranscriptPath,
+		startTranscriptPath:     startTranscriptPath,
+		inspectTranscriptPath:   inspectTranscriptPath,
+		logsPath:                logsPath,
+		releaseGatePath:         releaseGatePath,
+		auditPath:               auditPath,
+		reconnectPath:           reconnectPath,
+		stopTranscriptPath:      stopTranscriptPath,
+		uninstallTranscriptPath: uninstallTranscriptPath,
+	}
 }
 
 func writeLinuxPackageEvidenceForCLITest(t *testing.T, root, releaseGate string) linuxPackageEvidenceForCLITest {

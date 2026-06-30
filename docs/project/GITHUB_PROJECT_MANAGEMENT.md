@@ -145,6 +145,7 @@ The current bootstrap script creates the following seed backlog.
      - confirm reconnect after login or reboot;
      - run service-backed managed Mac Codex acceptance;
      - verify evidence with `rdev acceptance verify`;
+     - package release evidence with `rdev acceptance package-managed-mac-service`;
      - stop and uninstall without touching unrelated plists.
 
 ### v0.2 Temporary Windows Host

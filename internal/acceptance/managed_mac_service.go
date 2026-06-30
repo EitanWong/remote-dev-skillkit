@@ -16,24 +16,27 @@ import (
 const ManagedMacServicePlanSchemaVersion = "rdev.acceptance.managed-mac-service-plan.v1"
 
 type ManagedMacServiceOptions struct {
-	RepoRoot           string
-	OutDir             string
-	BinaryPath         string
-	GatewayURL         string
-	TicketCode         string
-	ManifestURL        string
-	Label              string
-	PlistOut           string
-	IdentityStore      string
-	TrustStore         string
-	NonceStore         string
-	ApprovalStore      string
-	WorkspaceLockStore string
-	LogDir             string
-	Transport          string
-	LongPollTimeout    string
-	Force              bool
-	Now                time.Time
+	RepoRoot                 string
+	OutDir                   string
+	BinaryPath               string
+	GatewayURL               string
+	TicketCode               string
+	ManifestURL              string
+	Label                    string
+	PlistOut                 string
+	IdentityStore            string
+	TrustStore               string
+	NonceStore               string
+	ApprovalStore            string
+	WorkspaceLockStore       string
+	LogDir                   string
+	ReleaseBundle            string
+	ReleaseRootPublicKey     string
+	ReleaseRequiredArtifacts []string
+	Transport                string
+	LongPollTimeout          string
+	Force                    bool
+	Now                      time.Time
 }
 
 type ManagedMacServicePlan struct {
@@ -47,6 +50,7 @@ type ManagedMacServicePlan struct {
 	Status             service.LaunchAgentStatus `json:"status"`
 	Checks             []Check                   `json:"checks"`
 	Commands           []ServiceCommand          `json:"commands"`
+	RequiredEvidence   []string                  `json:"required_evidence"`
 	RecommendedActions []string                  `json:"recommended_actions"`
 }
 
@@ -88,19 +92,22 @@ func RunManagedMacServicePlan(ctx context.Context, opts ManagedMacServiceOptions
 		return ManagedMacServicePlan{}, err
 	}
 	agent, err := service.NewMacOSLaunchAgent(service.LaunchAgentOptions{
-		Label:                  defaults.Label,
-		BinaryPath:             defaults.BinaryPath,
-		GatewayURL:             defaults.GatewayURL,
-		TicketCode:             defaults.TicketCode,
-		ManifestURL:            defaults.ManifestURL,
-		IdentityStorePath:      defaults.IdentityStore,
-		TrustStorePath:         defaults.TrustStore,
-		NonceStorePath:         defaults.NonceStore,
-		ApprovalStorePath:      defaults.ApprovalStore,
-		WorkspaceLockStorePath: defaults.WorkspaceLockStore,
-		LogDir:                 defaults.LogDir,
-		Transport:              defaults.Transport,
-		LongPollTimeout:        defaults.LongPollTimeout,
+		Label:                    defaults.Label,
+		BinaryPath:               defaults.BinaryPath,
+		GatewayURL:               defaults.GatewayURL,
+		TicketCode:               defaults.TicketCode,
+		ManifestURL:              defaults.ManifestURL,
+		IdentityStorePath:        defaults.IdentityStore,
+		TrustStorePath:           defaults.TrustStore,
+		NonceStorePath:           defaults.NonceStore,
+		ApprovalStorePath:        defaults.ApprovalStore,
+		WorkspaceLockStorePath:   defaults.WorkspaceLockStore,
+		ReleaseBundlePath:        defaults.ReleaseBundle,
+		ReleaseRootPublicKey:     defaults.ReleaseRootPublicKey,
+		ReleaseRequiredArtifacts: defaults.ReleaseRequiredArtifacts,
+		LogDir:                   defaults.LogDir,
+		Transport:                defaults.Transport,
+		LongPollTimeout:          defaults.LongPollTimeout,
 	})
 	if err != nil {
 		return ManagedMacServicePlan{}, err
@@ -126,6 +133,19 @@ func RunManagedMacServicePlan(ctx context.Context, opts ManagedMacServiceOptions
 		LaunchAgent:   agent,
 		Status:        status,
 		Commands:      managedMacServiceCommands(defaults, repoRoot),
+		RequiredEvidence: []string{
+			"Generated service-plan.json, written LaunchAgent plist, and verifier output.",
+			"plutil -lint review transcript for the LaunchAgent plist.",
+			"rdev host service-control --platform macos --action start --execute transcript proving the LaunchAgent was loaded.",
+			"rdev host service-control --platform macos --action inspect --execute transcript or launchctl print output.",
+			"rdev host startup output proving the release-bundle gate passed before registration.",
+			"Gateway host registration, approval, trust refresh, and managed host audit events.",
+			"Reconnect evidence after logout, login, or reboot.",
+			"Managed Mac acceptance report and evidence bundle with diff, tests, audit chain, and approval-required artifacts.",
+			"rdev acceptance verify output with ok=true for the service-backed managed Mac report.",
+			"rdev host service-control --platform macos --action stop --execute transcript.",
+			"rdev host uninstall-service --platform macos transcript confirming only the reviewed plist was removed.",
+		},
 		RecommendedActions: []string{
 			"Review the generated plist before running launchctl.",
 			"Start the LaunchAgent manually, then confirm reconnect through the gateway host registry.",
@@ -141,20 +161,23 @@ func RunManagedMacServicePlan(ctx context.Context, opts ManagedMacServiceOptions
 }
 
 type managedMacServiceResolvedOptions struct {
-	BinaryPath         string
-	GatewayURL         string
-	TicketCode         string
-	ManifestURL        string
-	Label              string
-	PlistOut           string
-	IdentityStore      string
-	TrustStore         string
-	NonceStore         string
-	ApprovalStore      string
-	WorkspaceLockStore string
-	LogDir             string
-	Transport          string
-	LongPollTimeout    string
+	BinaryPath               string
+	GatewayURL               string
+	TicketCode               string
+	ManifestURL              string
+	Label                    string
+	PlistOut                 string
+	IdentityStore            string
+	TrustStore               string
+	NonceStore               string
+	ApprovalStore            string
+	WorkspaceLockStore       string
+	LogDir                   string
+	ReleaseBundle            string
+	ReleaseRootPublicKey     string
+	ReleaseRequiredArtifacts []string
+	Transport                string
+	LongPollTimeout          string
 }
 
 func managedMacServiceDefaults(outDir string, opts ManagedMacServiceOptions) (managedMacServiceResolvedOptions, error) {
@@ -182,21 +205,28 @@ func managedMacServiceDefaults(outDir string, opts ManagedMacServiceOptions) (ma
 		plistOut = filepath.Join(outDir, plistOut)
 	}
 	hostDir := filepath.Join(outDir, "host-state")
+	releaseRequired := append([]string(nil), opts.ReleaseRequiredArtifacts...)
+	if strings.TrimSpace(opts.ReleaseBundle) != "" && len(releaseRequired) == 0 {
+		releaseRequired = []string{"rdev", "rdev-host", "rdev-verify"}
+	}
 	return managedMacServiceResolvedOptions{
-		BinaryPath:         binaryPath,
-		GatewayURL:         opts.GatewayURL,
-		TicketCode:         opts.TicketCode,
-		ManifestURL:        opts.ManifestURL,
-		Label:              label,
-		PlistOut:           filepath.Clean(plistOut),
-		IdentityStore:      firstNonEmptyString(opts.IdentityStore, filepath.Join(hostDir, "identity.json")),
-		TrustStore:         firstNonEmptyString(opts.TrustStore, filepath.Join(hostDir, "trust-bundle.json")),
-		NonceStore:         firstNonEmptyString(opts.NonceStore, filepath.Join(hostDir, "nonces.json")),
-		ApprovalStore:      firstNonEmptyString(opts.ApprovalStore, filepath.Join(hostDir, "approvals.json")),
-		WorkspaceLockStore: firstNonEmptyString(opts.WorkspaceLockStore, filepath.Join(outDir, "workspace-locks")),
-		LogDir:             firstNonEmptyString(opts.LogDir, filepath.Join(outDir, "logs")),
-		Transport:          firstNonEmptyString(opts.Transport, "long-poll"),
-		LongPollTimeout:    firstNonEmptyString(opts.LongPollTimeout, "25s"),
+		BinaryPath:               binaryPath,
+		GatewayURL:               opts.GatewayURL,
+		TicketCode:               opts.TicketCode,
+		ManifestURL:              opts.ManifestURL,
+		Label:                    label,
+		PlistOut:                 filepath.Clean(plistOut),
+		IdentityStore:            firstNonEmptyString(opts.IdentityStore, filepath.Join(hostDir, "identity.json")),
+		TrustStore:               firstNonEmptyString(opts.TrustStore, filepath.Join(hostDir, "trust-bundle.json")),
+		NonceStore:               firstNonEmptyString(opts.NonceStore, filepath.Join(hostDir, "nonces.json")),
+		ApprovalStore:            firstNonEmptyString(opts.ApprovalStore, filepath.Join(hostDir, "approvals.json")),
+		WorkspaceLockStore:       firstNonEmptyString(opts.WorkspaceLockStore, filepath.Join(outDir, "workspace-locks")),
+		LogDir:                   firstNonEmptyString(opts.LogDir, filepath.Join(outDir, "logs")),
+		ReleaseBundle:            strings.TrimSpace(opts.ReleaseBundle),
+		ReleaseRootPublicKey:     strings.TrimSpace(opts.ReleaseRootPublicKey),
+		ReleaseRequiredArtifacts: releaseRequired,
+		Transport:                firstNonEmptyString(opts.Transport, "long-poll"),
+		LongPollTimeout:          firstNonEmptyString(opts.LongPollTimeout, "25s"),
 	}, nil
 }
 
@@ -217,7 +247,38 @@ func managedMacServiceChecks(plan ManagedMacServicePlan, opts managedMacServiceR
 		{Name: "nonce_store_arg", Passed: strings.Contains(args, "--nonce-store\x00"+opts.NonceStore), Detail: opts.NonceStore},
 		{Name: "approval_store_arg", Passed: strings.Contains(args, "--approval-store\x00"+opts.ApprovalStore), Detail: opts.ApprovalStore},
 		{Name: "enrollment_arg", Passed: enrollmentConfigured(args), Detail: "ticket-code or manifest-url"},
+		{Name: "release_bundle_arg", Passed: opts.ReleaseBundle != "" && strings.Contains(args, "--release-bundle\x00"+opts.ReleaseBundle), Detail: opts.ReleaseBundle},
+		{Name: "release_root_arg", Passed: opts.ReleaseRootPublicKey != "" && strings.Contains(args, "--release-root-public-key\x00"+opts.ReleaseRootPublicKey)},
+		{Name: "release_required_artifacts_arg", Passed: len(opts.ReleaseRequiredArtifacts) > 0 && strings.Contains(args, "--release-require-artifacts\x00"+strings.Join(opts.ReleaseRequiredArtifacts, ",")), Detail: strings.Join(opts.ReleaseRequiredArtifacts, ",")},
+		{Name: "required_evidence_complete", Passed: managedMacServiceRequiredEvidenceComplete(plan.RequiredEvidence), Detail: missingManagedMacServiceEvidence(plan.RequiredEvidence)},
 	}
+}
+
+func managedMacServiceRequiredEvidenceComplete(evidence []string) bool {
+	return missingManagedMacServiceEvidence(evidence) == ""
+}
+
+func missingManagedMacServiceEvidence(evidence []string) string {
+	joined := strings.ToLower(strings.Join(evidence, "\n"))
+	required := []string{
+		"plutil -lint",
+		"service-control --platform macos --action start",
+		"service-control --platform macos --action inspect",
+		"release-bundle gate",
+		"reconnect",
+		"evidence bundle",
+		"approval-required",
+		"acceptance verify",
+		"service-control --platform macos --action stop",
+		"uninstall-service --platform macos",
+	}
+	var missing []string
+	for _, value := range required {
+		if !strings.Contains(joined, value) {
+			missing = append(missing, value)
+		}
+	}
+	return strings.Join(missing, ",")
 }
 
 func enrollmentConfigured(args string) bool {

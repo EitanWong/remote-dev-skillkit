@@ -33,6 +33,8 @@
 - [ ] Verify the same signed bundle with standalone `rdev-verify --bundle`.
 - [ ] Smoke `rdev host serve --release-bundle ... --release-root-public-key ...` before release publication.
 - [ ] Confirm generated managed LaunchAgent/systemd definitions and Windows Service command plans include the release bundle gate when managed hosts are in scope.
+- [ ] Generate and verify managed Mac LaunchAgent acceptance plans with `rdev acceptance managed-mac-service` and `rdev acceptance verify-managed-mac-service` before any service-backed managed Mac support claim.
+- [ ] Package managed Mac LaunchAgent acceptance evidence with `rdev acceptance package-managed-mac-service` when managed Mac service-backed support is in scope.
 - [ ] Generate and verify Windows managed-service acceptance plans with `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service` before any Windows Service support claim.
 - [ ] Generate and verify Linux managed-service acceptance plans with `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service` before any Linux systemd managed-service support claim.
 - [ ] Package Linux managed-service acceptance evidence with `rdev acceptance package-linux-managed-service` when Linux systemd managed-service support is in scope.
