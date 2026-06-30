@@ -75,6 +75,7 @@
 - [x] Add first runtime Adapter SDK lifecycle runner and runtime fixture verifier through `adapterkit.RunLifecycle`, `rdev adapter verify-runtime`, and MCP tool `rdev.adapter.verify_runtime`.
 - [x] Add final architecture closure that makes `PERFECT_ENDING_SOLUTION.md` the single decision header for product boundaries, golden paths, closed loops, and implementation order.
 - [x] Add final perfect-ending blueprint with component boundaries, stable protocol family, mode products, permission lattice, canonical state machines, reliability contract, non-goals, and release ladder.
+- [x] Add final operational architecture index for topology, authority, mode contracts, protocol spine, host sovereignty, storage/transport, reliability, acceptance gates, and implementation spine.
 - [x] Add hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, and Claude Code adapters through `--capture-runtime-fixture`.
 - [x] Add verifiable Skillkit install planning for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
 - [x] Add dry-run-by-default direct Skillkit installer for mainstream Agent frameworks through `rdev skillkit install`.

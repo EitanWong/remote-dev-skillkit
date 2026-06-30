@@ -38,7 +38,7 @@ shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevP
 
 The project intentionally reuses mature ecosystems where they fit: MCP for agent tools, Tailscale/headscale or SSH for owned-host connectivity, Coder/DevPod for governed workspaces, RustDesk/MeshCentral for explicit GUI sessions, and platform/Sigstore-style signing for release trust. What `rdev` owns is the missing agent safety kernel: signed job envelopes, host-side policy, approval gates, workspace locks, redaction, evidence bundles, audit chains, and revocation.
 
-The canonical endgame is locked in [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md): its `Final Perfect-Ending Blueprint` under `Final Architecture Closure - 2026-06-30` is the decision header for product boundaries, protocol objects, modes, permission rings, state machines, release gates, and implementation order. The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
+The canonical endgame is locked in [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md): its `Operational Final Architecture - 2026-06-30` section is the execution index for topology, authority, protocol objects, mode contracts, permission rings, storage, transport, reliability, acceptance gates, and implementation order. The `Final Perfect-Ending Blueprint` under `Final Architecture Closure - 2026-06-30` remains the decision header for product boundaries. The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP/acpx, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
 
 [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md) is the concise release-facing summary. [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md) and [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) remain supporting rationale and implementation detail.
 
@@ -54,7 +54,7 @@ Implemented now:
 - `rdev ticket create` local ticket preview.
 - `rdev policy explain` local policy simulation.
 - `rdev policy explain-shell` shell job policy preflight explanation.
-- `rdev mcp tools` tool-contract listing, including `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, and `rdev.adapter.verify_cancellation` for agent-side adapter conformance checks.
+- `rdev mcp tools` tool-contract listing, including `rdev.adapter.verify_result`, `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_runtime`, and `rdev.adapter.verify_cancellation` for agent-side adapter conformance checks.
 - `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev gateway serve --dev` local HTTP development gateway.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.

@@ -10,6 +10,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 ## Rules
 
 - Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
+- Treat `Operational Final Architecture - 2026-06-30` in `docs/architecture/PERFECT_ENDING_SOLUTION.md` as the execution index for topology, authority, protocol objects, mode contracts, permission rings, host sovereignty, adapter lifecycle, storage/transport, reliability, acceptance gates, and implementation order.
 - Treat `Final Perfect-Ending Blueprint` under `Final Architecture Closure - 2026-06-30` in `docs/architecture/PERFECT_ENDING_SOLUTION.md` as the decision header: every host, adapter, transport, release, and Skillkit change must preserve the component boundaries, stable protocol family, mode separation, permission lattice, state machines, release ladder, six closed loops, and seven invariants.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Prefer ACP/acpx adapters over raw PTY scraping when available.
@@ -43,7 +44,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 
 1. List hosts with `rdev.hosts.list`.
 2. Inspect capabilities with `rdev.hosts.capabilities`.
-3. Select an adapter: `acpx`, `codex`, `claude`, `shell`, or `powershell`.
+3. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
 4. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
 5. Create a job with workspace policy.
 6. Stream status until completion.
