@@ -419,6 +419,37 @@ func HostEnrollmentCertificateFingerprint(certificate HostEnrollmentCertificate)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+func RenewHostEnrollmentCertificate(certificate HostEnrollmentCertificate, root TrustBundle, issuerPrivateKey ed25519.PrivateKey, now time.Time, ttl time.Duration) (HostEnrollmentCertificate, error) {
+	if ttl <= 0 {
+		return HostEnrollmentCertificate{}, fmt.Errorf("enrollment certificate ttl must be positive")
+	}
+	if len(issuerPrivateKey) != ed25519.PrivateKeySize {
+		return HostEnrollmentCertificate{}, fmt.Errorf("invalid enrollment issuer private key length %d", len(issuerPrivateKey))
+	}
+	rootPublicKey, err := root.Ed25519PublicKey()
+	if err != nil {
+		return HostEnrollmentCertificate{}, err
+	}
+	derived, ok := issuerPrivateKey.Public().(ed25519.PublicKey)
+	if !ok || !derived.Equal(rootPublicKey) {
+		return HostEnrollmentCertificate{}, fmt.Errorf("enrollment issuer private key does not match root public key")
+	}
+	if err := VerifyHostEnrollmentCertificateSignature(certificate, root, now); err != nil {
+		return HostEnrollmentCertificate{}, err
+	}
+	now = now.UTC()
+	renewed := certificate
+	renewed.NotBefore = now
+	renewed.NotAfter = now.Add(ttl).UTC()
+	renewed.Signature = ""
+	payload, err := hostEnrollmentCertificatePayloadBytes(renewed)
+	if err != nil {
+		return HostEnrollmentCertificate{}, err
+	}
+	renewed.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(issuerPrivateKey, payload))
+	return renewed, nil
+}
+
 func SignHostEnrollmentRevocationList(revocations []HostEnrollmentCertificateRevocation, issuerKeyID string, issuerPrivateKey ed25519.PrivateKey, now time.Time, ttl time.Duration) (HostEnrollmentRevocationList, error) {
 	if issuerKeyID == "" {
 		return HostEnrollmentRevocationList{}, fmt.Errorf("enrollment issuer key id is required")

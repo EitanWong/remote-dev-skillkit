@@ -187,6 +187,65 @@ func TestHostEnrollmentCertificateRejectsExpiredCertificate(t *testing.T) {
 	}
 }
 
+func TestHostEnrollmentCertificateRenewalPreservesScope(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewed, err := RenewHostEnrollmentCertificate(certificate, NewTrustBundle("enrollment-root", issuerPublicKey), issuerPrivateKey, now.Add(10*time.Minute), 2*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.TicketCode != certificate.TicketCode || renewed.Mode != certificate.Mode || renewed.HostName != certificate.HostName || renewed.SubjectIdentityFingerprint != certificate.SubjectIdentityFingerprint {
+		t.Fatalf("renewal changed certificate scope: before=%#v after=%#v", certificate, renewed)
+	}
+	if !renewed.NotAfter.After(certificate.NotAfter) {
+		t.Fatalf("expected renewed certificate to extend validity: before=%s after=%s", certificate.NotAfter, renewed.NotAfter)
+	}
+	registration.EnrollmentCertificate = &renewed
+	if err := VerifyHostEnrollmentCertificate(registration, ticket, NewTrustBundle("enrollment-root", issuerPublicKey), now.Add(11*time.Minute)); err != nil {
+		t.Fatalf("expected renewed certificate to verify: %v", err)
+	}
+	previousFingerprint, err := HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewedFingerprint, err := HostEnrollmentCertificateFingerprint(renewed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewedFingerprint == previousFingerprint {
+		t.Fatal("expected renewed certificate fingerprint to change")
+	}
+}
+
+func TestHostEnrollmentCertificateRenewalRejectsWrongPrivateKey(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, wrongPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := SignHostEnrollmentCertificate(registration, ticket, "enrollment-root", issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = RenewHostEnrollmentCertificate(certificate, NewTrustBundle("enrollment-root", issuerPublicKey), wrongPrivateKey, now.Add(10*time.Minute), 2*time.Hour)
+	if err == nil || !strings.Contains(err.Error(), "does not match root public key") {
+		t.Fatalf("expected wrong renewal key rejection, got %v", err)
+	}
+}
+
 func TestHostEnrollmentRevocationListRejectsRevokedCertificate(t *testing.T) {
 	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	registration, ticket, _ := signedHostRegistrationForEnrollmentTest(t)

@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1259,6 +1260,199 @@ func TestEnrollmentInitRevocationsWritesEmptyVerifiedList(t *testing.T) {
 	}
 	if !strings.Contains(verifyStdout.String(), `"revoked_certificate_count": 0`) {
 		t.Fatalf("expected empty revocation verification, got %s", verifyStdout.String())
+	}
+}
+
+func TestEnrollmentRenewCertificateExtendsVerifiedCertificate(t *testing.T) {
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "renew enrollment certificate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "keys", "enrollment-root.json")
+	certificatePath := filepath.Join(dir, "certs", "host-enrollment.json")
+	var signStdout bytes.Buffer
+	signApp := NewApp(&signStdout, &bytes.Buffer{})
+	err = signApp.Run(context.Background(), []string{
+		"enrollment", "sign-certificate",
+		"--out", certificatePath,
+		"--key", keyPath,
+		"--key-id", "enrollment-root",
+		"--ticket-code", ticket.Code,
+		"--mode", "managed",
+		"--name", "renew-host",
+		"--os", runtime.GOOS,
+		"--arch", runtime.GOARCH,
+		"--identity-key-id", identity.KeyID,
+		"--identity-public-key", identity.EncodedPublicKey(),
+		"--identity-fingerprint", identity.Fingerprint(),
+		"--capabilities", strings.Join(capabilities, ","),
+		"--valid-minutes", "30",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var signPayload struct {
+		RootPublicKey string `json:"root_public_key"`
+	}
+	if err := json.Unmarshal(signStdout.Bytes(), &signPayload); err != nil {
+		t.Fatalf("invalid sign output: %v\n%s", err, signStdout.String())
+	}
+	original, err := readEnrollmentCertificateFile(certificatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalFingerprint, err := model.HostEnrollmentCertificateFingerprint(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	revocationsPath := filepath.Join(dir, "revocations", "revocations.json")
+	var initStdout bytes.Buffer
+	initApp := NewApp(&initStdout, &bytes.Buffer{})
+	err = initApp.Run(context.Background(), []string{
+		"enrollment", "init-revocations",
+		"--out", revocationsPath,
+		"--key", keyPath,
+		"--key-id", "enrollment-root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renewedPath := filepath.Join(dir, "certs", "host-enrollment-renewed.json")
+	var renewStdout bytes.Buffer
+	renewApp := NewApp(&renewStdout, &bytes.Buffer{})
+	err = renewApp.Run(context.Background(), []string{
+		"enrollment", "renew-certificate",
+		"--certificate", certificatePath,
+		"--out", renewedPath,
+		"--key", keyPath,
+		"--revocations", revocationsPath,
+		"--valid-minutes", "120",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var renewPayload struct {
+		OK                             bool   `json:"ok"`
+		Schema                         string `json:"schema"`
+		PreviousCertificateFingerprint string `json:"previous_certificate_fingerprint"`
+		CertificateFingerprint         string `json:"certificate_fingerprint"`
+		RootPublicKey                  string `json:"root_public_key"`
+	}
+	if err := json.Unmarshal(renewStdout.Bytes(), &renewPayload); err != nil {
+		t.Fatalf("invalid renew output: %v\n%s", err, renewStdout.String())
+	}
+	if !renewPayload.OK || renewPayload.Schema != model.HostEnrollmentCertificateSchemaVersion {
+		t.Fatalf("unexpected renew output: %s", renewStdout.String())
+	}
+	if renewPayload.RootPublicKey != signPayload.RootPublicKey {
+		t.Fatalf("expected same enrollment root, got sign=%q renew=%q", signPayload.RootPublicKey, renewPayload.RootPublicKey)
+	}
+	if renewPayload.PreviousCertificateFingerprint != originalFingerprint {
+		t.Fatalf("expected previous fingerprint %q, got %q", originalFingerprint, renewPayload.PreviousCertificateFingerprint)
+	}
+	if renewPayload.CertificateFingerprint == originalFingerprint {
+		t.Fatalf("expected renewed fingerprint to change, got %q", renewPayload.CertificateFingerprint)
+	}
+	renewed, err := readEnrollmentCertificateFile(renewedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.TicketCode != original.TicketCode || renewed.Mode != original.Mode || renewed.HostName != original.HostName || renewed.SubjectIdentityFingerprint != original.SubjectIdentityFingerprint {
+		t.Fatalf("renewal changed certificate scope: before=%#v after=%#v", original, renewed)
+	}
+	if renewed.OS != original.OS || renewed.Arch != original.Arch || !slices.Equal(renewed.Capabilities, original.Capabilities) {
+		t.Fatalf("renewal changed platform or capabilities: before=%#v after=%#v", original, renewed)
+	}
+	if !renewed.NotAfter.After(original.NotAfter) {
+		t.Fatalf("expected renewed certificate to extend validity: before=%s after=%s", original.NotAfter, renewed.NotAfter)
+	}
+
+	var verifyStdout bytes.Buffer
+	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
+	err = verifyApp.Run(context.Background(), []string{
+		"enrollment", "verify-certificate",
+		"--certificate", renewedPath,
+		"--root-public-key", signPayload.RootPublicKey,
+		"--revocations", revocationsPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("expected renewed certificate verification, got %s", verifyStdout.String())
+	}
+}
+
+func TestEnrollmentRenewCertificateRejectsRevokedCertificate(t *testing.T) {
+	dir := t.TempDir()
+	identityPath := filepath.Join(dir, "identity", "host.json")
+	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, capabilities, "revoked renewal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "keys", "enrollment-root.json")
+	certificatePath := filepath.Join(dir, "certs", "host-enrollment.json")
+	var signStdout bytes.Buffer
+	signApp := NewApp(&signStdout, &bytes.Buffer{})
+	err = signApp.Run(context.Background(), []string{
+		"enrollment", "sign-certificate",
+		"--out", certificatePath,
+		"--key", keyPath,
+		"--key-id", "enrollment-root",
+		"--ticket-code", ticket.Code,
+		"--mode", "managed",
+		"--name", "revoked-renew-host",
+		"--os", runtime.GOOS,
+		"--arch", runtime.GOARCH,
+		"--identity-key-id", identity.KeyID,
+		"--identity-public-key", identity.EncodedPublicKey(),
+		"--identity-fingerprint", identity.Fingerprint(),
+		"--capabilities", strings.Join(capabilities, ","),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	revocationsPath := filepath.Join(dir, "revocations", "revocations.json")
+	var revokeStdout bytes.Buffer
+	revokeApp := NewApp(&revokeStdout, &bytes.Buffer{})
+	err = revokeApp.Run(context.Background(), []string{
+		"enrollment", "revoke-certificate",
+		"--out", revocationsPath,
+		"--key", keyPath,
+		"--certificate", certificatePath,
+		"--reason", "renewal blocked",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var renewStdout bytes.Buffer
+	renewApp := NewApp(&renewStdout, &bytes.Buffer{})
+	err = renewApp.Run(context.Background(), []string{
+		"enrollment", "renew-certificate",
+		"--certificate", certificatePath,
+		"--out", filepath.Join(dir, "certs", "host-enrollment-renewed.json"),
+		"--key", keyPath,
+		"--revocations", revocationsPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "revoked") {
+		t.Fatalf("expected revoked certificate renewal failure, got %v", err)
 	}
 }
 

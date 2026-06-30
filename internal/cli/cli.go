@@ -155,6 +155,28 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.enrollmentVerifyCertificate(*certificatePath, *rootPublicKey, *revocationsPath)
+	case "renew-certificate":
+		fs := flag.NewFlagSet("enrollment renew-certificate", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "output renewed enrollment certificate path")
+		keyPath := fs.String("key", "", "Ed25519 enrollment root signing key file")
+		keyID := fs.String("key-id", "enrollment-root", "enrollment root signing key id")
+		certificatePath := fs.String("certificate", "", "current enrollment certificate JSON path to renew")
+		revocationsPath := fs.String("revocations", "", "optional signed enrollment revocation list JSON path checked before renewal")
+		validMinutes := fs.Int("valid-minutes", 60, "renewed certificate validity window in minutes")
+		force := fs.Bool("force", false, "overwrite output certificate")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentRenewCertificate(enrollmentRenewCertificateOptions{
+			OutPath:         *out,
+			KeyPath:         *keyPath,
+			KeyID:           *keyID,
+			CertificatePath: *certificatePath,
+			RevocationsPath: *revocationsPath,
+			ValidMinutes:    *validMinutes,
+			Force:           *force,
+		})
 	case "revoke-certificate":
 		fs := flag.NewFlagSet("enrollment revoke-certificate", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -247,6 +269,16 @@ type enrollmentRevokeCertificateOptions struct {
 	CertificatePath string
 	Reason          string
 	ValidHours      int
+	Force           bool
+}
+
+type enrollmentRenewCertificateOptions struct {
+	OutPath         string
+	KeyPath         string
+	KeyID           string
+	CertificatePath string
+	RevocationsPath string
+	ValidMinutes    int
 	Force           bool
 }
 
@@ -3302,6 +3334,80 @@ func (a App) enrollmentVerifyCertificate(certificatePath, rootPublicKey, revocat
 	return enc.Encode(payload)
 }
 
+func (a App) enrollmentRenewCertificate(opts enrollmentRenewCertificateOptions) error {
+	if opts.OutPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	if opts.KeyPath == "" {
+		return fmt.Errorf("key is required")
+	}
+	if opts.CertificatePath == "" {
+		return fmt.Errorf("certificate is required")
+	}
+	if opts.ValidMinutes <= 0 {
+		return fmt.Errorf("valid-minutes must be positive")
+	}
+	key, _, err := signing.LoadOrCreate(opts.KeyPath, opts.KeyID)
+	if err != nil {
+		return err
+	}
+	certificate, err := readEnrollmentCertificateFile(opts.CertificatePath)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	root := model.NewTrustBundle(key.ID, key.PublicKey)
+	if opts.RevocationsPath != "" {
+		revocations, err := readEnrollmentRevocationListFile(opts.RevocationsPath)
+		if err != nil {
+			return err
+		}
+		if err := model.VerifyHostEnrollmentRevocationListSignature(revocations, root, now); err != nil {
+			return err
+		}
+		if err := model.VerifyHostEnrollmentCertificateNotRevoked(certificate, revocations); err != nil {
+			return err
+		}
+	}
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		return err
+	}
+	renewed, err := model.RenewHostEnrollmentCertificate(certificate, root, key.PrivateKey, now, time.Duration(opts.ValidMinutes)*time.Minute)
+	if err != nil {
+		return err
+	}
+	renewedFingerprint, err := model.HostEnrollmentCertificateFingerprint(renewed)
+	if err != nil {
+		return err
+	}
+	if err := writeEnrollmentCertificateFile(opts.OutPath, renewed, opts.Force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                               true,
+		"schema":                           renewed.SchemaVersion,
+		"certificate":                      renewed,
+		"certificate_path":                 opts.OutPath,
+		"previous_certificate":             opts.CertificatePath,
+		"previous_certificate_fingerprint": previousFingerprint,
+		"certificate_fingerprint":          renewedFingerprint,
+		"root_public_key":                  encodeRootPublicKey(key.ID, key.PublicKey),
+		"issuer_key_id":                    renewed.IssuerKeyID,
+		"authorized_mode":                  renewed.Mode,
+		"authorized_host":                  renewed.HostName,
+		"authorized_identity":              renewed.SubjectIdentityFingerprint,
+		"not_before":                       renewed.NotBefore,
+		"not_after":                        renewed.NotAfter,
+	}
+	if opts.RevocationsPath != "" {
+		payload["revocations"] = opts.RevocationsPath
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) enrollmentInitRevocations(opts enrollmentInitRevocationsOptions) error {
 	if opts.OutPath == "" {
 		return fmt.Errorf("out is required")
@@ -4871,6 +4977,7 @@ Usage:
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
+  rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-renewed.json --key .rdev/keys/enrollment-root.json --revocations revocations.json
   rdev enrollment init-revocations --out revocations.json --key .rdev/keys/enrollment-root.json
   rdev enrollment revoke-certificate --out revocations.json --key .rdev/keys/enrollment-root.json --certificate host-enrollment.json --reason "host retired"
   rdev enrollment verify-revocations --revocations revocations.json --root-public-key enrollment-root:...

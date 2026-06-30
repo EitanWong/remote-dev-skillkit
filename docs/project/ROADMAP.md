@@ -38,6 +38,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Durable host trust bundle store.
 - Signed host registration proofs for identity-bearing registrations.
 - Host enrollment certificate primitive through `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`, binding ticket code, mode, host metadata, capabilities, identity fingerprint, validity window, and enrollment root signature before registration when configured.
+- Local enrollment certificate renewal primitive through `rdev enrollment renew-certificate`, preserving the existing certificate scope, requiring the current certificate to verify, optionally checking signed revocation lists before renewal, and emitting a new certificate fingerprint and validity window.
 - Signed enrollment certificate revocation-list primitive through `rdev.host-enrollment-revocations.v1`, `rdev enrollment init-revocations`, `rdev enrollment revoke-certificate`, `rdev enrollment verify-revocations`, `rdev enrollment verify-certificate --revocations`, and `rdev gateway serve --dev --enrollment-revocations`, publishing a signed empty baseline before any revocation exists and rejecting revoked certificates before registration when configured.
 - Dev enrollment revocation-list distribution through `GET /v1/enrollment/revocations` and `rdev enrollment fetch-revocations`, requiring pinned enrollment-root verification before writing the fetched list to disk.
 - Agent-side enrollment certificate verification through MCP tool `rdev.enrollment.verify_certificate`, returning `rdev.enrollment-certificate-verification.v1` reports so Skillkit workflows can reject missing, expired, wrong-root, tampered, stale-revocation-list, or revoked certificates before trusting a host registration.
@@ -135,7 +136,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Linux libsecret protected-store references for managed host identity/trust persistence on hosts with `secret-tool` and a reachable Secret Service.
 - Linux keyctl protected-store references for headless managed host identity/trust runtime storage on hosts with a user keyring; real reboot persistence/reconnect proof remains a separate acceptance gate.
 - Hardware-backed or fleet-managed protected stores beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, Linux keyctl, and file-backed paths.
-- Full production enrollment authority lifecycle beyond the local certificate, signed empty revocation baseline, and dev revocation-list distribution primitives, including hosted issuance, operator roles, renewal, authenticated hosted revocation refresh, and emergency drills.
+- Full production enrollment authority lifecycle beyond the local certificate, local renewal, signed empty revocation baseline, and dev revocation-list distribution primitives, including hosted issuance, operator roles, renewal automation, authenticated hosted revocation refresh, and emergency drills.
 - ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable hosted storage.

@@ -20,6 +20,11 @@ go test ./internal/model ./internal/cli ./internal/httpapi \
   -count=1 \
   > "$work_dir/enrollment-revocation-baseline-smoke.txt"
 
+go test ./internal/model ./internal/cli \
+  -run 'TestHostEnrollmentCertificateRenewal|TestEnrollmentRenewCertificate' \
+  -count=1 \
+  > "$work_dir/enrollment-renewal-smoke.txt"
+
 scripts/release/build-artifacts.sh \
   --out "$work_dir/artifacts" \
   --version "$version" \
@@ -217,6 +222,7 @@ print(json.dumps({
     "skillkit_install_executed": skillkit_install_execute["executed"],
     "dev_mtls_host_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
+    "enrollment_renewal_smoke": True,
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))
