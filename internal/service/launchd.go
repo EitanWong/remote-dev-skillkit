@@ -13,19 +13,22 @@ import (
 const DefaultMacOSLaunchAgentLabel = "com.remote-dev-skillkit.host"
 
 type LaunchAgentOptions struct {
-	Label                  string
-	BinaryPath             string
-	GatewayURL             string
-	TicketCode             string
-	ManifestURL            string
-	IdentityStorePath      string
-	TrustStorePath         string
-	NonceStorePath         string
-	ApprovalStorePath      string
-	WorkspaceLockStorePath string
-	LogDir                 string
-	Transport              string
-	LongPollTimeout        string
+	Label                    string
+	BinaryPath               string
+	GatewayURL               string
+	TicketCode               string
+	ManifestURL              string
+	IdentityStorePath        string
+	TrustStorePath           string
+	NonceStorePath           string
+	ApprovalStorePath        string
+	WorkspaceLockStorePath   string
+	ReleaseBundlePath        string
+	ReleaseRootPublicKey     string
+	ReleaseRequiredArtifacts []string
+	LogDir                   string
+	Transport                string
+	LongPollTimeout          string
 }
 
 type LaunchAgent struct {
@@ -114,6 +117,7 @@ func NewMacOSLaunchAgent(opts LaunchAgentOptions) (LaunchAgent, error) {
 	if opts.WorkspaceLockStorePath != "" {
 		args = append(args, "--workspace-lock-store", opts.WorkspaceLockStorePath)
 	}
+	appendReleaseGateArgs(&args, opts.ReleaseBundlePath, opts.ReleaseRootPublicKey, opts.ReleaseRequiredArtifacts)
 	return LaunchAgent{
 		Label:            opts.Label,
 		ProgramArguments: args,
@@ -369,6 +373,9 @@ func validateLaunchAgentOptions(opts LaunchAgentOptions) error {
 	}
 	if opts.Transport != "long-poll" && opts.Transport != "poll" {
 		return fmt.Errorf("unsupported transport %q", opts.Transport)
+	}
+	if err := validateReleaseGateOptions(opts.ReleaseBundlePath, opts.ReleaseRootPublicKey, opts.ReleaseRequiredArtifacts); err != nil {
+		return err
 	}
 	return nil
 }

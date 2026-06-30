@@ -46,6 +46,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Skillkit direct install through `rdev skillkit install`, dry-running by default, requiring `--execute` before local copy, refusing existing skill conflicts unless `--force`, and preserving `external_mutation=false`.
 - Release candidate packaging that stages built artifacts, signed manifests, signed release bundle, verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Release candidate verification that checks staged or downloaded candidates before publication or installation.
+- Host startup release gates through `rdev host serve --release-bundle --release-root-public-key --release-require-artifacts`, verifying signed release bundles before host registration or job polling.
 - Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, and checksums before candidate packaging.
 - Per-platform release candidate automation through `scripts/release/prepare-platform-candidates.sh`, grouping real build artifacts by `GOOS/GOARCH`, producing one verified candidate per target, and writing `rdev.platform-release-candidates.v1`.
 - Multi-platform GitHub Release dry-run planning through `scripts/github/plan-platform-release.sh`, producing unique platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and command previews without external mutation.
@@ -101,6 +102,7 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - Acceptance report verification through `rdev acceptance verify`, including evidence bundle checksum validation, artifact index validation, audit-chain verification, approval-gate checks, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning through `rdev acceptance managed-mac-service`, producing a verified plist, launchctl start/inspect/stop commands, service-backed coding acceptance commands, verification command, and safe uninstall guidance without auto-starting launchd.
 - macOS LaunchAgent lifecycle control through `rdev host service-control`, dry-running by default and requiring `--execute` before invoking launchctl start, inspect, or stop.
+- Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate, so service restarts verify signed release artifacts before registration.
 - Git diff and test evidence bundles.
 - Shared implicit approval preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell, Codex, Claude Code, and acpx jobs.
 - Managed install, health, stop, and uninstall commands.

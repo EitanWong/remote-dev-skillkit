@@ -12,16 +12,19 @@ import (
 
 func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 	agent, err := NewMacOSLaunchAgent(LaunchAgentOptions{
-		Label:                  "com.example.rdev-host",
-		BinaryPath:             "/opt/rdev/bin/rdev",
-		GatewayURL:             "https://api.example.com/v1",
-		TicketCode:             "ABCD-1234",
-		IdentityStorePath:      "/Users/eitan/.rdev/host/identity.json",
-		TrustStorePath:         "/Users/eitan/.rdev/host/trust.json",
-		NonceStorePath:         "/Users/eitan/.rdev/host/nonces.json",
-		ApprovalStorePath:      "/Users/eitan/.rdev/host/approvals.json",
-		WorkspaceLockStorePath: "/Users/eitan/.rdev/host/workspace-locks",
-		LogDir:                 "/Users/eitan/Library/Logs/rdev",
+		Label:                    "com.example.rdev-host",
+		BinaryPath:               "/opt/rdev/bin/rdev",
+		GatewayURL:               "https://api.example.com/v1",
+		TicketCode:               "ABCD-1234",
+		IdentityStorePath:        "/Users/eitan/.rdev/host/identity.json",
+		TrustStorePath:           "/Users/eitan/.rdev/host/trust.json",
+		NonceStorePath:           "/Users/eitan/.rdev/host/nonces.json",
+		ApprovalStorePath:        "/Users/eitan/.rdev/host/approvals.json",
+		WorkspaceLockStorePath:   "/Users/eitan/.rdev/host/workspace-locks",
+		ReleaseBundlePath:        "/opt/rdev/release-bundle.json",
+		ReleaseRootPublicKey:     "release-root:abc123",
+		ReleaseRequiredArtifacts: []string{"rdev-host", "rdev-verify"},
+		LogDir:                   "/Users/eitan/Library/Logs/rdev",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +49,12 @@ func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 		"/Users/eitan/.rdev/host/trust.json",
 		"--workspace-lock-store",
 		"/Users/eitan/.rdev/host/workspace-locks",
+		"--release-bundle",
+		"/opt/rdev/release-bundle.json",
+		"--release-root-public-key",
+		"release-root:abc123",
+		"--release-require-artifacts",
+		"rdev-host,rdev-verify",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected argument %q in %#v", expected, agent.ProgramArguments)
@@ -188,5 +197,15 @@ func TestNewMacOSLaunchAgentRejectsUnsafeOptions(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "ticket code or manifest URL is required") {
 		t.Fatalf("expected enrollment error, got %v", err)
+	}
+	_, err = NewMacOSLaunchAgent(LaunchAgentOptions{
+		Label:             "com.example.rdev-host",
+		BinaryPath:        "/opt/rdev/bin/rdev",
+		GatewayURL:        "https://api.example.com/v1",
+		TicketCode:        "ABCD-1234",
+		ReleaseBundlePath: "/opt/rdev/release-bundle.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "release root public key is required") {
+		t.Fatalf("expected release root error, got %v", err)
 	}
 }

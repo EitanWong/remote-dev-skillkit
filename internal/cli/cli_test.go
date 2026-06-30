@@ -611,6 +611,112 @@ func TestHostServeRegistersWithLocalGateway(t *testing.T) {
 	}
 }
 
+func TestHostServeVerifiesReleaseBundleBeforeRegistration(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "release-root.json")
+	root := signReleaseArtifactWithCLIForTest(t, dir, keyPath, "rdev-host", "host-binary")
+	signReleaseArtifactWithCLIForTest(t, dir, keyPath, "rdev-verify", "verify-binary")
+	bundlePath := createReleaseBundleForHostServeTest(t, dir, keyPath, "rdev-host,rdev-verify")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--name", "verified-host",
+		"--release-bundle", bundlePath,
+		"--release-root-public-key", root,
+		"--release-require-artifacts", "rdev-host,rdev-verify",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Status string `json:"status"`
+		Host   struct {
+			Name string `json:"name"`
+		} `json:"host"`
+		ReleaseGate struct {
+			OK                bool     `json:"ok"`
+			Schema            string   `json:"schema"`
+			Bundle            string   `json:"bundle"`
+			RootKeyID         string   `json:"root_key_id"`
+			RequiredArtifacts []string `json:"required_artifacts"`
+			ArtifactCount     int      `json:"artifact_count"`
+		} `json:"release_gate"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid host serve output: %v\n%s", err, stdout.String())
+	}
+	if payload.Status != "registered-pending-approval" || payload.Host.Name != "verified-host" {
+		t.Fatalf("unexpected registration payload: %s", stdout.String())
+	}
+	if !payload.ReleaseGate.OK || payload.ReleaseGate.Schema != "rdev.release-bundle-verification.v1" {
+		t.Fatalf("expected release gate verification in output, got %s", stdout.String())
+	}
+	if payload.ReleaseGate.Bundle != bundlePath || payload.ReleaseGate.RootKeyID != "release-root" {
+		t.Fatalf("unexpected release gate identity: %#v", payload.ReleaseGate)
+	}
+	if payload.ReleaseGate.ArtifactCount != 2 || strings.Join(payload.ReleaseGate.RequiredArtifacts, ",") != "rdev-host,rdev-verify" {
+		t.Fatalf("unexpected release gate artifacts: %#v", payload.ReleaseGate)
+	}
+	if len(gw.Hosts("")) != 1 {
+		t.Fatalf("expected exactly one registered host, got %d", len(gw.Hosts("")))
+	}
+}
+
+func TestHostServeRejectsTamperedReleaseBundleBeforeRegistration(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "release-root.json")
+	root := signReleaseArtifactWithCLIForTest(t, dir, keyPath, "rdev-host", "host-binary")
+	signReleaseArtifactWithCLIForTest(t, dir, keyPath, "rdev-verify", "verify-binary")
+	bundlePath := createReleaseBundleForHostServeTest(t, dir, keyPath, "rdev-host,rdev-verify")
+	if err := os.WriteFile(filepath.Join(dir, "rdev-host"), []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--release-bundle", bundlePath,
+		"--release-root-public-key", root,
+		"--release-require-artifacts", "rdev-host,rdev-verify",
+	})
+	if err == nil {
+		t.Fatalf("expected tampered release gate to fail, got output %s", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "host release bundle verification failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(gw.Hosts("")) != 0 {
+		t.Fatalf("release gate failed after registering hosts: %#v", gw.Hosts(""))
+	}
+}
+
 func TestHostServeRegistersWithIdentityStore(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -3484,6 +3590,31 @@ func signReleaseArtifactWithCLIForTest(t *testing.T, dir, keyPath, name, content
 		t.Fatalf("expected root public key in sign output: %s", stdout.String())
 	}
 	return signed.RootPublicKey
+}
+
+func createReleaseBundleForHostServeTest(t *testing.T, dir, keyPath, artifacts string) string {
+	t.Helper()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"release", "create-bundle",
+		"--dir", dir,
+		"--artifacts", artifacts,
+		"--require-artifacts", artifacts,
+		"--key", keyPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Bundle string `json:"bundle"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid bundle output: %v\n%s", err, stdout.String())
+	}
+	if payload.Bundle == "" {
+		t.Fatalf("expected bundle path in output: %s", stdout.String())
+	}
+	return payload.Bundle
 }
 
 func writeJSONForTest(t *testing.T, path string, value any) {

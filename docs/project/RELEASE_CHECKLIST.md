@@ -30,6 +30,8 @@
 - [ ] Create signed release bundle index with `rdev release create-bundle`.
 - [ ] Verify signed release bundle index with `rdev release verify-bundle`.
 - [ ] Verify the same signed bundle with standalone `rdev-verify --bundle`.
+- [ ] Smoke `rdev host serve --release-bundle ... --release-root-public-key ...` before release publication.
+- [ ] Confirm generated managed LaunchAgent/systemd definitions include the release bundle gate when managed hosts are in scope.
 - [ ] Authenticode-sign Windows binaries and scripts.
 - [ ] Verify Windows Authenticode signatures in CI.
 - [ ] Confirm release key ids are active and not revoked.

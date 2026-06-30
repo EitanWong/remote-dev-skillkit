@@ -195,6 +195,8 @@
 - [x] Standalone `rdev-verify` can verify signed release bundles before target-host execution.
 - [x] Windows bootstrap can verify signed release bundles before target-host execution through a hash-pinned standalone verifier.
 - [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, approval probes, no-persistence checks, redaction, and checksums.
+- [x] Host serve can verify a signed release bundle before host registration or job polling.
+- [x] Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate.
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 - [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.

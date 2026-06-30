@@ -606,30 +606,36 @@ func (a App) host(ctx context.Context, args []string) error {
 		workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
 		captureRuntimeFixture := fs.Bool("capture-runtime-fixture", false, "append an adapter runtime fixture artifact for completed, failed, or canceled jobs")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
+		releaseBundle := fs.String("release-bundle", "", "optional signed release bundle index to verify before host registration")
+		releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle, formatted key_id:base64url_public_key")
+		releaseRequiredArtifacts := fs.String("release-require-artifacts", "", "comma-separated artifact ids required in --release-bundle")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.hostServe(ctx, hostServeOptions{
-			Mode:                  *mode,
-			GatewayURL:            *gateway,
-			TicketCode:            *ticketCode,
-			ManifestURL:           *manifestURL,
-			Name:                  *name,
-			Once:                  *once,
-			Transport:             *transport,
-			PollInterval:          *pollInterval,
-			LongPollTimeout:       *longPollTimeout,
-			MaxJobs:               *maxJobs,
-			ApprovalTimeout:       *approvalTimeout,
-			TrustPin:              *trustPin,
-			TrustStorePath:        *trustStore,
-			IdentityStorePath:     *identityStore,
-			IdentityKeyID:         *identityKeyID,
-			NonceStorePath:        *nonceStore,
-			ApprovalStorePath:     *approvalStore,
-			WorkspaceLockStore:    *workspaceLockStore,
-			CaptureRuntimeFixture: *captureRuntimeFixture,
-			ManifestRootPublicKey: *manifestRootPublicKey,
+			Mode:                     *mode,
+			GatewayURL:               *gateway,
+			TicketCode:               *ticketCode,
+			ManifestURL:              *manifestURL,
+			Name:                     *name,
+			Once:                     *once,
+			Transport:                *transport,
+			PollInterval:             *pollInterval,
+			LongPollTimeout:          *longPollTimeout,
+			MaxJobs:                  *maxJobs,
+			ApprovalTimeout:          *approvalTimeout,
+			TrustPin:                 *trustPin,
+			TrustStorePath:           *trustStore,
+			IdentityStorePath:        *identityStore,
+			IdentityKeyID:            *identityKeyID,
+			NonceStorePath:           *nonceStore,
+			ApprovalStorePath:        *approvalStore,
+			WorkspaceLockStore:       *workspaceLockStore,
+			CaptureRuntimeFixture:    *captureRuntimeFixture,
+			ManifestRootPublicKey:    *manifestRootPublicKey,
+			ReleaseBundlePath:        *releaseBundle,
+			ReleaseRootPublicKey:     *releaseRootPublicKey,
+			ReleaseRequiredArtifacts: splitCapabilities(*releaseRequiredArtifacts),
 		})
 	case "install-service":
 		fs := flag.NewFlagSet("host install-service", flag.ContinueOnError)
@@ -645,6 +651,9 @@ func (a App) host(ctx context.Context, args []string) error {
 		nonceStore := fs.String("nonce-store", "", "managed host nonce store path")
 		approvalStore := fs.String("approval-store", "", "managed host approval store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "managed host workspace lock store directory")
+		releaseBundle := fs.String("release-bundle", "", "optional signed release bundle index verified by the managed host before registration")
+		releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle, formatted key_id:base64url_public_key")
+		releaseRequiredArtifacts := fs.String("release-require-artifacts", "", "comma-separated artifact ids required in --release-bundle")
 		logDir := fs.String("log-dir", "", "managed host log directory")
 		plistOut := fs.String("plist-out", "", "LaunchAgent plist output path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
 		unitOut := fs.String("unit-out", "", "systemd user unit output path; defaults to ~/.config/systemd/user/<unit>.service on Linux")
@@ -653,21 +662,24 @@ func (a App) host(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.hostInstallService(hostInstallServiceOptions{
-			Platform:           *platform,
-			Label:              *label,
-			BinaryPath:         *binaryPath,
-			GatewayURL:         *gatewayURL,
-			TicketCode:         *ticketCode,
-			ManifestURL:        *manifestURL,
-			IdentityStorePath:  *identityStore,
-			TrustStorePath:     *trustStore,
-			NonceStorePath:     *nonceStore,
-			ApprovalStorePath:  *approvalStore,
-			WorkspaceLockStore: *workspaceLockStore,
-			LogDir:             *logDir,
-			PlistOut:           *plistOut,
-			UnitOut:            *unitOut,
-			Force:              *force,
+			Platform:                 *platform,
+			Label:                    *label,
+			BinaryPath:               *binaryPath,
+			GatewayURL:               *gatewayURL,
+			TicketCode:               *ticketCode,
+			ManifestURL:              *manifestURL,
+			IdentityStorePath:        *identityStore,
+			TrustStorePath:           *trustStore,
+			NonceStorePath:           *nonceStore,
+			ApprovalStorePath:        *approvalStore,
+			WorkspaceLockStore:       *workspaceLockStore,
+			ReleaseBundlePath:        *releaseBundle,
+			ReleaseRootPublicKey:     *releaseRootPublicKey,
+			ReleaseRequiredArtifacts: splitCapabilities(*releaseRequiredArtifacts),
+			LogDir:                   *logDir,
+			PlistOut:                 *plistOut,
+			UnitOut:                  *unitOut,
+			Force:                    *force,
 		})
 	case "service-status":
 		fs := flag.NewFlagSet("host service-status", flag.ContinueOnError)
@@ -731,44 +743,50 @@ func (a App) host(ctx context.Context, args []string) error {
 }
 
 type hostServeOptions struct {
-	Mode                  string
-	GatewayURL            string
-	TicketCode            string
-	ManifestURL           string
-	Name                  string
-	Once                  bool
-	Transport             string
-	PollInterval          time.Duration
-	LongPollTimeout       time.Duration
-	MaxJobs               int
-	ApprovalTimeout       time.Duration
-	TrustPin              string
-	TrustStorePath        string
-	IdentityStorePath     string
-	IdentityKeyID         string
-	NonceStorePath        string
-	ApprovalStorePath     string
-	WorkspaceLockStore    string
-	CaptureRuntimeFixture bool
-	ManifestRootPublicKey string
+	Mode                     string
+	GatewayURL               string
+	TicketCode               string
+	ManifestURL              string
+	Name                     string
+	Once                     bool
+	Transport                string
+	PollInterval             time.Duration
+	LongPollTimeout          time.Duration
+	MaxJobs                  int
+	ApprovalTimeout          time.Duration
+	TrustPin                 string
+	TrustStorePath           string
+	IdentityStorePath        string
+	IdentityKeyID            string
+	NonceStorePath           string
+	ApprovalStorePath        string
+	WorkspaceLockStore       string
+	CaptureRuntimeFixture    bool
+	ManifestRootPublicKey    string
+	ReleaseBundlePath        string
+	ReleaseRootPublicKey     string
+	ReleaseRequiredArtifacts []string
 }
 
 type hostInstallServiceOptions struct {
-	Platform           string
-	Label              string
-	BinaryPath         string
-	GatewayURL         string
-	TicketCode         string
-	ManifestURL        string
-	IdentityStorePath  string
-	TrustStorePath     string
-	NonceStorePath     string
-	ApprovalStorePath  string
-	WorkspaceLockStore string
-	LogDir             string
-	PlistOut           string
-	UnitOut            string
-	Force              bool
+	Platform                 string
+	Label                    string
+	BinaryPath               string
+	GatewayURL               string
+	TicketCode               string
+	ManifestURL              string
+	IdentityStorePath        string
+	TrustStorePath           string
+	NonceStorePath           string
+	ApprovalStorePath        string
+	WorkspaceLockStore       string
+	ReleaseBundlePath        string
+	ReleaseRootPublicKey     string
+	ReleaseRequiredArtifacts []string
+	LogDir                   string
+	PlistOut                 string
+	UnitOut                  string
+	Force                    bool
 }
 
 type hostServiceOptions struct {
@@ -789,6 +807,16 @@ type hostServiceControlOptions struct {
 	Execute  bool
 }
 
+type hostReleaseGateResult struct {
+	OK                bool      `json:"ok"`
+	Schema            string    `json:"schema"`
+	Bundle            string    `json:"bundle"`
+	RootKeyID         string    `json:"root_key_id"`
+	RequiredArtifacts []string  `json:"required_artifacts,omitempty"`
+	VerifiedAt        time.Time `json:"verified_at"`
+	ArtifactCount     int       `json:"artifact_count"`
+}
+
 func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	switch opts.Mode {
 	case "temporary", "managed", "break-glass":
@@ -802,6 +830,10 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	case "poll", "long-poll":
 	default:
 		return fmt.Errorf("unsupported host transport %q", opts.Transport)
+	}
+	releaseGate, err := verifyHostReleaseGate(opts)
+	if err != nil {
+		return err
 	}
 	if opts.ManifestURL != "" {
 		manifest, err := fetchJoinManifest(ctx, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
@@ -860,6 +892,9 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		"status": "registered-pending-approval",
 		"note":   "local development registration only; WSS transport is not implemented yet",
 	}
+	if releaseGate != nil {
+		payload["release_gate"] = releaseGate
+	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	if opts.Once {
@@ -875,6 +910,35 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	payload["processed_jobs"] = processed
 	payload["status"] = "polling-complete"
 	return enc.Encode(payload)
+}
+
+func verifyHostReleaseGate(opts hostServeOptions) (*hostReleaseGateResult, error) {
+	if strings.TrimSpace(opts.ReleaseBundlePath) == "" {
+		if strings.TrimSpace(opts.ReleaseRootPublicKey) != "" || len(opts.ReleaseRequiredArtifacts) > 0 {
+			return nil, fmt.Errorf("release bundle is required when release verification options are provided")
+		}
+		return nil, nil
+	}
+	root, err := parseRootPublicKey(opts.ReleaseRootPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	verification, err := release.VerifyBundle(opts.ReleaseBundlePath, root, opts.ReleaseRequiredArtifacts)
+	if err != nil {
+		return nil, err
+	}
+	if !verification.OK() {
+		return nil, fmt.Errorf("host release bundle verification failed")
+	}
+	return &hostReleaseGateResult{
+		OK:                true,
+		Schema:            verification.SchemaVersion,
+		Bundle:            verification.BundlePath,
+		RootKeyID:         verification.RootKeyID,
+		RequiredArtifacts: append([]string(nil), opts.ReleaseRequiredArtifacts...),
+		VerifiedAt:        verification.GeneratedAt,
+		ArtifactCount:     len(verification.Artifacts),
+	}, nil
 }
 
 func (a App) hostInstallService(opts hostInstallServiceOptions) error {
@@ -916,19 +980,22 @@ func (a App) hostInstallMacOSService(opts hostInstallServiceOptions, binaryPath 
 		plistOut = service.DefaultMacOSLaunchAgentPath(home, label)
 	}
 	agent, err := service.NewMacOSLaunchAgent(service.LaunchAgentOptions{
-		Label:                  opts.Label,
-		BinaryPath:             binaryPath,
-		GatewayURL:             opts.GatewayURL,
-		TicketCode:             opts.TicketCode,
-		ManifestURL:            opts.ManifestURL,
-		IdentityStorePath:      opts.IdentityStorePath,
-		TrustStorePath:         opts.TrustStorePath,
-		NonceStorePath:         opts.NonceStorePath,
-		ApprovalStorePath:      opts.ApprovalStorePath,
-		WorkspaceLockStorePath: opts.WorkspaceLockStore,
-		LogDir:                 opts.LogDir,
-		Transport:              "long-poll",
-		LongPollTimeout:        "25s",
+		Label:                    opts.Label,
+		BinaryPath:               binaryPath,
+		GatewayURL:               opts.GatewayURL,
+		TicketCode:               opts.TicketCode,
+		ManifestURL:              opts.ManifestURL,
+		IdentityStorePath:        opts.IdentityStorePath,
+		TrustStorePath:           opts.TrustStorePath,
+		NonceStorePath:           opts.NonceStorePath,
+		ApprovalStorePath:        opts.ApprovalStorePath,
+		WorkspaceLockStorePath:   opts.WorkspaceLockStore,
+		ReleaseBundlePath:        opts.ReleaseBundlePath,
+		ReleaseRootPublicKey:     opts.ReleaseRootPublicKey,
+		ReleaseRequiredArtifacts: opts.ReleaseRequiredArtifacts,
+		LogDir:                   opts.LogDir,
+		Transport:                "long-poll",
+		LongPollTimeout:          "25s",
 	})
 	if err != nil {
 		return err
@@ -974,19 +1041,22 @@ func (a App) hostInstallLinuxSystemdService(opts hostInstallServiceOptions, bina
 		unitOut = service.DefaultLinuxSystemdUserUnitPath(home, unitName)
 	}
 	unit, err := service.NewLinuxSystemdUserService(service.SystemdUserServiceOptions{
-		UnitName:               unitName,
-		BinaryPath:             binaryPath,
-		GatewayURL:             opts.GatewayURL,
-		TicketCode:             opts.TicketCode,
-		ManifestURL:            opts.ManifestURL,
-		IdentityStorePath:      opts.IdentityStorePath,
-		TrustStorePath:         opts.TrustStorePath,
-		NonceStorePath:         opts.NonceStorePath,
-		ApprovalStorePath:      opts.ApprovalStorePath,
-		WorkspaceLockStorePath: opts.WorkspaceLockStore,
-		LogDir:                 opts.LogDir,
-		Transport:              "long-poll",
-		LongPollTimeout:        "25s",
+		UnitName:                 unitName,
+		BinaryPath:               binaryPath,
+		GatewayURL:               opts.GatewayURL,
+		TicketCode:               opts.TicketCode,
+		ManifestURL:              opts.ManifestURL,
+		IdentityStorePath:        opts.IdentityStorePath,
+		TrustStorePath:           opts.TrustStorePath,
+		NonceStorePath:           opts.NonceStorePath,
+		ApprovalStorePath:        opts.ApprovalStorePath,
+		WorkspaceLockStorePath:   opts.WorkspaceLockStore,
+		ReleaseBundlePath:        opts.ReleaseBundlePath,
+		ReleaseRootPublicKey:     opts.ReleaseRootPublicKey,
+		ReleaseRequiredArtifacts: opts.ReleaseRequiredArtifacts,
+		LogDir:                   opts.LogDir,
+		Transport:                "long-poll",
+		LongPollTimeout:          "25s",
 	})
 	if err != nil {
 		return err
@@ -3487,11 +3557,12 @@ Usage:
   rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --key .rdev/keys/release-root.json
   rdev release verify-candidate --candidate dist/release-candidate --require-artifacts rdev-host.exe,rdev-verify.exe
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
-  rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --plist-out ./com.remote-dev-skillkit.host.plist
+  rdev host serve --mode managed --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
+  rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
   rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
   rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
-  rdev host install-service --platform linux --label rdev-host.service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --unit-out ./rdev-host.service
+  rdev host install-service --platform linux --label rdev-host.service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify --unit-out ./rdev-host.service
   rdev host service-status --platform linux --label rdev-host.service --unit ./rdev-host.service
   rdev host service-control --platform linux --action start --label rdev-host.service --unit ./rdev-host.service
   rdev host uninstall-service --platform linux --label rdev-host.service --unit ./rdev-host.service

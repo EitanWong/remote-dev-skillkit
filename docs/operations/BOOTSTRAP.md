@@ -65,6 +65,25 @@ index binding the release artifacts to their manifests and expected hashes. The
 standalone `rdev-verify` binary can verify either one artifact manifest or the
 full signed bundle index after it has been hash-pinned by the bootstrap.
 
+For hosts that already have the release bundle and root key locally, `rdev host
+serve` can also enforce the same release gate before host registration:
+
+```bash
+rdev host serve \
+  --mode managed \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --release-bundle /opt/rdev/release-bundle.json \
+  --release-root-public-key release-root:<base64url_ed25519_public_key> \
+  --release-require-artifacts rdev-host,rdev-verify
+```
+
+If bundle verification fails, the host does not register and does not poll for
+jobs. `rdev host install-service` accepts the same three release flags and
+writes them into macOS LaunchAgent or Linux systemd managed-host definitions so
+the service self-checks the signed release bundle on restart. This is a startup
+integrity gate, not a full auto-update or rollback system.
+
 When `ReleaseManifestUrl` or `ReleaseBundleUrl` is provided, the Windows bootstrap requires `ReleaseRootPublicKey`, `VerifierDownloadUrl`, and `VerifierExpectedSha256`. It downloads `rdev-verify.exe`, checks the verifier SHA-256 first, then uses that verifier to validate either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host. Bundle mode downloads the bundle's listed manifest files, then runs `rdev-verify --bundle ... --require-artifacts rdev-host.exe,rdev-verify.exe` by default.
 
 This avoids asking the untrusted host binary to verify itself. Production release signing and platform-native Windows code signing are governed by [Release Key Lifecycle](../security/RELEASE_KEY_LIFECYCLE.md).

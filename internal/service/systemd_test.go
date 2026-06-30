@@ -9,16 +9,19 @@ import (
 
 func TestNewLinuxSystemdUserServiceBuildsManagedHostArguments(t *testing.T) {
 	unit, err := NewLinuxSystemdUserService(SystemdUserServiceOptions{
-		UnitName:               "rdev-host.service",
-		BinaryPath:             "/opt/rdev/bin/rdev",
-		GatewayURL:             "https://api.example.com/v1",
-		TicketCode:             "ABCD-1234",
-		IdentityStorePath:      "/home/eitan/.rdev/host/identity.json",
-		TrustStorePath:         "/home/eitan/.rdev/host/trust.json",
-		NonceStorePath:         "/home/eitan/.rdev/host/nonces.json",
-		ApprovalStorePath:      "/home/eitan/.rdev/host/approvals.json",
-		WorkspaceLockStorePath: "/home/eitan/.rdev/host/workspace-locks",
-		LogDir:                 "/home/eitan/.local/state/rdev/logs",
+		UnitName:                 "rdev-host.service",
+		BinaryPath:               "/opt/rdev/bin/rdev",
+		GatewayURL:               "https://api.example.com/v1",
+		TicketCode:               "ABCD-1234",
+		IdentityStorePath:        "/home/eitan/.rdev/host/identity.json",
+		TrustStorePath:           "/home/eitan/.rdev/host/trust.json",
+		NonceStorePath:           "/home/eitan/.rdev/host/nonces.json",
+		ApprovalStorePath:        "/home/eitan/.rdev/host/approvals.json",
+		WorkspaceLockStorePath:   "/home/eitan/.rdev/host/workspace-locks",
+		ReleaseBundlePath:        "/opt/rdev/release-bundle.json",
+		ReleaseRootPublicKey:     "release-root:abc123",
+		ReleaseRequiredArtifacts: []string{"rdev-host", "rdev-verify"},
+		LogDir:                   "/home/eitan/.local/state/rdev/logs",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +46,12 @@ func TestNewLinuxSystemdUserServiceBuildsManagedHostArguments(t *testing.T) {
 		"/home/eitan/.rdev/host/trust.json",
 		"--workspace-lock-store",
 		"/home/eitan/.rdev/host/workspace-locks",
+		"--release-bundle",
+		"/opt/rdev/release-bundle.json",
+		"--release-root-public-key",
+		"release-root:abc123",
+		"--release-require-artifacts",
+		"rdev-host,rdev-verify",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected argument %q in %#v", expected, unit.ExecStart)
@@ -194,5 +203,15 @@ func TestNewLinuxSystemdUserServiceRejectsUnsafeOptions(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "ticket code or manifest URL is required") {
 		t.Fatalf("expected enrollment error, got %v", err)
+	}
+	_, err = NewLinuxSystemdUserService(SystemdUserServiceOptions{
+		UnitName:          "rdev-host.service",
+		BinaryPath:        "/opt/rdev/bin/rdev",
+		GatewayURL:        "https://api.example.com/v1",
+		TicketCode:        "ABCD-1234",
+		ReleaseBundlePath: "/opt/rdev/release-bundle.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "release root public key is required") {
+		t.Fatalf("expected release root error, got %v", err)
 	}
 }

@@ -98,6 +98,7 @@ Implemented now:
 - Release artifact signing and verification primitives via `rdev release sign` / `rdev release verify`.
 - Signed release bundle indexes via `rdev release create-bundle` / `rdev release verify-bundle`, checking the signed index, every artifact manifest, artifact and manifest SHA-256/size, and required artifact presence before publishing.
 - The standalone `rdev-verify` helper can verify either a single signed artifact manifest or a full signed release bundle before host execution.
+- `rdev host serve` can enforce an optional startup release gate with `--release-bundle`, `--release-root-public-key`, and `--release-require-artifacts`; verification runs before host registration and job polling. Managed LaunchAgent and systemd unit generation can carry the same gate so owned hosts self-check signed release bundles on restart.
 - Release candidate packaging via `rdev release prepare-candidate`, staging built artifacts, signed manifests, a signed release bundle, a verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Release candidate verification via `rdev release verify-candidate`, checking a staged or downloaded candidate's summary, checksums, signed bundle, manifests, artifacts, Skillkit bundle, required artifacts, and unlisted files.
 - Real release artifact builds via `scripts/release/build-artifacts.sh`, producing target directories, `rdev.build-artifacts.v1`, and checksums for `rdev`, `rdev-host`, `rdev-gateway`, `rdev-mcp`, and `rdev-verify`.
@@ -189,6 +190,7 @@ go run ./cmd/rdev-verify --artifact dist/artifacts/windows-amd64/rdev-host.exe -
 go run ./cmd/rdev release create-bundle --dir dist/artifacts/windows-amd64 --artifacts rdev.exe,rdev-host.exe,rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
 go run ./cmd/rdev release verify-bundle --bundle dist/artifacts/windows-amd64/release-bundle.json --root-public-key release-root:...
 go run ./cmd/rdev-verify --bundle dist/artifacts/windows-amd64/release-bundle.json --root-public-key release-root:... --require-artifacts rdev-host.exe,rdev-verify.exe
+go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --release-bundle dist/artifacts/darwin-arm64/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
 go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-candidate-windows-amd64 --version v0.1.0 --artifacts dist/artifacts/windows-amd64/rdev.exe,dist/artifacts/windows-amd64/rdev-host.exe,dist/artifacts/windows-amd64/rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json --gateway-url https://api.example.com/v1
 go run ./cmd/rdev release verify-candidate --candidate dist/release-candidate-windows-amd64 --require-artifacts rdev-host.exe,rdev-verify.exe
 scripts/github/plan-release.sh --candidate dist/release-candidates/windows-amd64 --repo EitanWong/remote-dev-skillkit --require-artifacts rdev-host.exe,rdev-verify.exe
@@ -197,11 +199,11 @@ scripts/github/plan-post-release-install.sh --release-plan dist/release-candidat
 scripts/github/verify-post-release-install-plan.sh --plan dist/release-candidates/github-platform-release-plan/post-release-install/post-release-install-plan.json
 go run ./cmd/rdev host serve --mode temporary
 go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234 --once=false --transport long-poll --workspace-lock-store .rdev/workspace-locks --capture-runtime-fixture
-go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --plist-out ./com.remote-dev-skillkit.host.plist
+go run ./cmd/rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify --plist-out ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
 go run ./cmd/rdev host uninstall-service --platform macos --plist ./com.remote-dev-skillkit.host.plist
-go run ./cmd/rdev host install-service --platform linux --label rdev-host.service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --unit-out ./rdev-host.service
+go run ./cmd/rdev host install-service --platform linux --label rdev-host.service --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store ~/.rdev/host/workspace-locks --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify --unit-out ./rdev-host.service
 go run ./cmd/rdev host service-status --platform linux --label rdev-host.service --unit ./rdev-host.service
 go run ./cmd/rdev host service-control --platform linux --action start --label rdev-host.service --unit ./rdev-host.service
 go run ./cmd/rdev host uninstall-service --platform linux --label rdev-host.service --unit ./rdev-host.service
