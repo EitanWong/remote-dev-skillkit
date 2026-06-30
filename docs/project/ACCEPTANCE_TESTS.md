@@ -315,6 +315,27 @@ These commands generate and verify a plan only. They write a local reviewed
 unit file in the acceptance output directory, but they do not run `systemctl`,
 enable a service, start a service, stop a service, or remove a service.
 
+After a real Linux host run, package release evidence with:
+
+```bash
+rdev acceptance package-linux-managed-service \
+  --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json \
+  --out .rdev/acceptance/linux-managed-service-evidence \
+  --start-transcript start.txt \
+  --status-transcript status.txt \
+  --logs journal.txt \
+  --release-gate release-gate.json \
+  --audit audit.jsonl \
+  --reconnect reconnect.txt \
+  --job-evidence-dir job-evidence \
+  --stop-transcript stop.txt \
+  --uninstall-transcript uninstall.txt
+```
+
+This command packages and checks evidence only. It does not execute
+`systemctl`, start or stop the service, or claim acceptance if required evidence
+is missing.
+
 ### Required Evidence
 
 - Verified `rdev.acceptance.linux-managed-service-plan.v1` output.
@@ -398,6 +419,7 @@ The local test suite currently covers:
 - macOS LaunchAgent plist status and safe uninstall through `rdev host service-status` and `rdev host uninstall-service`, including label-mismatch refusal to avoid deleting unrelated plists.
 - Linux systemd user-unit generation through `rdev host install-service --platform linux`, including managed host arguments, `0600` unit permissions, basic hardening flags, explicit `systemctl --user` next steps, status inspection, dry-run service-control planning, unit mismatch refusal, and safe uninstall without auto-starting the service.
 - Linux managed-service acceptance planning and verification through `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, covering written `0600` systemd user units, managed args, hardening flags, release-bundle gate requirements, required evidence checklist, forbidden policy-weakening command rejection, missing-unit rejection, and no `systemctl` execution.
+- Linux managed-service acceptance evidence packaging through `rdev acceptance package-linux-managed-service`, covering verified plan and unit archival, plan-verifier output, redacted start/status/log/release-gate/audit/reconnect/stop/uninstall transcripts, managed job evidence bundle archival, approval-required proof, checksums, and release-blocking failure when release-gate output is not `ok=true`.
 - Windows Service managed-host planning through `rdev host install-service --platform windows`, including managed host arguments, release-bundle gate arguments, `start= demand`, reviewed `sc.exe create` / `description` command plans, dry-run status/control/uninstall command planning, explicit `service-control --execute` before invoking `sc.exe`, and no claim of real Windows Service acceptance yet.
 - Windows managed-service acceptance planning and verification through `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, covering reviewed `sc.exe` create/description/query/qc/start/stop/delete plans, managed args, `start= demand`, release-bundle gate requirements, required evidence checklist, forbidden policy-weakening command rejection, and no PowerShell or `sc.exe` execution.
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.

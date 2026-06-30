@@ -58,7 +58,10 @@ Managed Linux systemd onboarding is also separate from temporary bootstrap. Use
 `rdev acceptance linux-managed-service` and
 `rdev acceptance verify-linux-managed-service` to generate and check a reviewed
 systemd user-unit plan before any owned-host Linux acceptance run. These
-commands write and verify the plan only; they do not run `systemctl`.
+commands write and verify the plan only; they do not run `systemctl`. After a
+real Linux run, use `rdev acceptance package-linux-managed-service` to archive
+the reviewed plan, unit, release-gate output, service transcripts, audit,
+reconnect proof, and managed job evidence.
 
 The repository also includes release artifact signature primitives:
 

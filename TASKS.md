@@ -148,6 +148,7 @@
 - [x] Add Windows Service managed-host planning/control dry-run with reviewed `sc.exe` command plans and release-bundle gate arguments.
 - [x] Add Windows managed-service acceptance plan and verifier for reviewed `sc.exe` service evidence without executing PowerShell or `sc.exe`.
 - [x] Add Linux managed-service acceptance plan and verifier for reviewed systemd user-service evidence without executing `systemctl`.
+- [x] Add Linux managed-service acceptance evidence packaging for real systemd user-service transcripts.
 - [x] Add release candidate packaging with staged artifacts, signed manifests, signed release bundle, verified Skillkit, checksums, and summary JSON.
 - [x] Add standalone release candidate verification for downloaded or staged candidates.
 - [x] Add GitHub Release dry-run plan generation with assets, commands, notes, Skillkit archive, and no external mutation.
@@ -164,6 +165,7 @@
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.
+- [x] Add Linux managed-service acceptance package generation for start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence.
 - [ ] Add real Linux systemd acceptance execution with reboot/reconnect proof.
 - [x] Add acpx adapter.
 - [x] Add cancellation artifact conformance for built-in shell, PowerShell, Codex, Claude Code, and acpx result evidence.
@@ -203,6 +205,7 @@
 - [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, approval probes, no-persistence checks, redaction, and checksums.
 - [x] Windows managed-service acceptance can generate and verify a preflight plan with service create/status/start/stop/delete commands, release gate, required evidence, and explicit no-execution semantics.
 - [x] Linux managed-service acceptance can generate and verify a preflight plan with a written systemd user unit, service start/status/stop commands, hardening flags, release gate, required evidence, and explicit no-execution semantics.
+- [x] Linux managed-service acceptance evidence can be packaged with plan/unit/verifier output, start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence, redaction, and checksums.
 - [x] Host serve can verify a signed release bundle before host registration or job polling.
 - [x] Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate.
 - [ ] Production releases verify signed manifests and binaries before host execution.

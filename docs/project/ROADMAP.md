@@ -115,6 +115,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Windows managed-service acceptance planning and verification through `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, emitting a machine-readable checked plan with reviewed `sc.exe` create/description/query/qc/start/stop/delete commands, managed host args, `start= demand`, release-bundle startup gate, required evidence checklist, and no PowerShell or `sc.exe` execution.
 - Linux systemd user-unit generation, status inspection, dry-run/opt-in lifecycle control, and safe uninstall.
 - Linux managed-service acceptance planning and verification through `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, emitting a machine-readable checked plan with a written `0600` systemd user unit, reviewed `systemctl --user daemon-reload/enable --now/status/disable --now` commands, managed host args, hardening flags, release-bundle startup gate, required evidence checklist, and no `systemctl` execution.
+- Linux managed-service acceptance evidence packaging through `rdev acceptance package-linux-managed-service`, turning real systemd user-service transcripts, release-gate output, audit, reconnect proof, and managed job evidence into a redacted checksummed release artifact.
 - Real Linux systemd reboot/reconnect acceptance proof.
 - launchd support.
 - Restart/recovery.

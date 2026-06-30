@@ -213,12 +213,64 @@ evidence is present:
 Use the packaged directory as the release-candidate artifact. Do not publish a
 Windows temporary acceptance claim from screenshots or raw transcripts alone.
 
+## Linux Managed Service
+
+Generate and verify a Linux systemd user-service acceptance plan before running
+service-manager commands on a real Linux host:
+
+```bash
+rdev acceptance linux-managed-service \
+  --out .rdev/acceptance/linux-managed-service \
+  --binary /opt/rdev/rdev \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --release-bundle /opt/rdev/release-bundle.json \
+  --release-root-public-key release-root:... \
+  --release-require-artifacts rdev,rdev-host,rdev-verify
+
+rdev acceptance verify-linux-managed-service \
+  --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json
+```
+
+These commands write and verify `rdev.acceptance.linux-managed-service-plan.v1`
+and a reviewed `0600` systemd user unit. They do not run `systemctl`.
+
+After the real Linux host run, package the collected evidence:
+
+```bash
+rdev acceptance package-linux-managed-service \
+  --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json \
+  --out .rdev/acceptance/linux-managed-service-evidence \
+  --start-transcript start.txt \
+  --status-transcript status.txt \
+  --logs journal.txt \
+  --release-gate release-gate.json \
+  --audit audit.jsonl \
+  --reconnect reconnect.txt \
+  --job-evidence-dir job-evidence \
+  --stop-transcript stop.txt \
+  --uninstall-transcript uninstall.txt
+```
+
+The package command emits `rdev.acceptance-package.linux-managed-service.v1`,
+writes `package.json` and `checksums.txt`, copies the plan, generated unit,
+plan-verifier output, transcripts, logs, release-gate output, audit, reconnect
+proof, and managed job evidence, then redacts copied evidence. It fails closed
+until release-gate output contains `ok=true`, job evidence contains a manifest
+and approval-required proof, and all required service transcripts are present.
+
+Use the packaged directory as the Linux managed-service release evidence
+artifact. Do not publish Linux managed-service support from a generated plan
+alone.
+
 ## Current Boundary
 
 This harness proves the managed test-process path. It does not yet prove:
 
 - Windows clean-VM execution of the generated temporary-host plan;
 - Windows no-persistence inspection output from a real machine;
+- Linux systemd user-service execution, reconnect, and packaged evidence from a
+  real Linux host;
 - macOS LaunchAgent installed and started with `rdev host service-control --execute` after reviewing the generated plan;
 - reconnect after reboot;
 - OS-protected identity/trust storage;

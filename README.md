@@ -66,6 +66,7 @@ Implemented now:
 - macOS LaunchAgent plist generation, status inspection, safe plist removal, and opt-in lifecycle control via `rdev host install-service`, `rdev host service-status`, `rdev host service-control`, and `rdev host uninstall-service`, with `--execute` required before running `launchctl`.
 - Linux systemd user-unit generation, status inspection, safe unit removal, and opt-in lifecycle control via the same host service commands, with `--execute` required before running `systemctl --user`.
 - Linux managed-service acceptance planning and verification via `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, producing and checking a machine-readable plan with a written `0600` systemd user unit, reviewed `systemctl --user daemon-reload/enable --now/status/disable --now` commands, managed-host args, hardening flags, release-bundle startup gate, required evidence checklist, and explicit warnings that no `systemctl` command was executed.
+- Linux managed-service acceptance evidence packaging via `rdev acceptance package-linux-managed-service`, collecting a verified plan, generated unit, plan verifier output, start/status/log/release-gate/audit/reconnect/stop/uninstall transcripts, and managed job evidence into a redacted checksummed package.
 - Windows Service managed-host planning, status-command planning, dry-run control, and uninstall-command planning via the same host service commands. The Windows path emits reviewed `sc.exe create/query/qc/start/stop/delete` command plans, carries the managed-host release-bundle gate, uses `start= demand`, and requires explicit `service-control --execute` before running `sc.exe`; real Windows Service acceptance is still a future gate.
 - Windows managed-service acceptance planning and verification via `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, producing and checking a machine-readable plan with reviewed `sc.exe create/description/query/qc/start/stop/delete` commands, managed-host args, `start= demand`, release-bundle startup gate, required evidence checklist, and explicit warnings that no PowerShell or `sc.exe` command was executed.
 - Persistent development gateway signing key files plus host trust pin checks.
@@ -132,7 +133,7 @@ Not implemented yet:
 - OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
 - Real Windows Service managed-host acceptance execution and reconnect proof beyond dry-run `sc.exe` plans and verified acceptance-plan generation.
-- Real Linux systemd managed-host acceptance execution and reboot/reconnect proof beyond verified acceptance-plan generation.
+- Real Linux systemd managed-host acceptance execution and reboot/reconnect proof beyond verified acceptance-plan and evidence-package generation.
 - Tailscale/headscale adapter.
 - GUI adapter.
 
@@ -183,6 +184,7 @@ go run ./cmd/rdev acceptance verify-windows-managed-service --plan .rdev/accepta
 go run ./cmd/rdev acceptance linux-managed-service --out .rdev/acceptance/linux-managed-service --binary /opt/rdev/rdev --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
 go run ./cmd/rdev acceptance verify-linux-managed-service --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json
 go run ./cmd/rdev acceptance package-windows-temporary --plan .rdev/acceptance/windows-temporary/windows-temporary-plan.json --out .rdev/acceptance/windows-temporary-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
+go run ./cmd/rdev acceptance package-linux-managed-service --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json --out .rdev/acceptance/linux-managed-service-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
 go run ./cmd/rdev acceptance verify --report .rdev/acceptance/managed-mac/report.json
 go run ./cmd/rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
 go run ./cmd/rdev workspace status --repo .

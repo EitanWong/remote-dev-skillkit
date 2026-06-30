@@ -488,6 +488,38 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			ApprovalProbesDir:       *approvalProbesDir,
 			NotesPath:               *notes,
 		})
+	case "package-linux-managed-service":
+		fs := flag.NewFlagSet("acceptance package-linux-managed-service", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "Linux managed service acceptance plan path")
+		out := fs.String("out", "", "empty output directory for the packaged Linux managed-service evidence")
+		startTranscript := fs.String("start-transcript", "", "systemctl --user daemon-reload and enable --now transcript")
+		statusTranscript := fs.String("status-transcript", "", "systemctl --user status transcript")
+		logs := fs.String("logs", "", "journalctl --user -u transcript or service log excerpt")
+		releaseGate := fs.String("release-gate", "", "rdev host startup release-gate JSON/output")
+		auditPath := fs.String("audit", "", "audit export or transcript for host registration, approvals, jobs, revocation, and completion")
+		reconnect := fs.String("reconnect", "", "logout/reboot reconnect evidence transcript")
+		jobEvidenceDir := fs.String("job-evidence-dir", "", "directory containing managed coding/repair evidence bundle")
+		stopTranscript := fs.String("stop-transcript", "", "systemctl --user disable --now transcript")
+		uninstallTranscript := fs.String("uninstall-transcript", "", "rdev host uninstall-service transcript")
+		notes := fs.String("notes", "", "optional operator notes file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptancePackageLinuxManagedService(acceptance.LinuxManagedServicePackageOptions{
+			PlanPath:                *plan,
+			OutDir:                  *out,
+			StartTranscriptPath:     *startTranscript,
+			StatusTranscriptPath:    *statusTranscript,
+			LogsPath:                *logs,
+			ReleaseGatePath:         *releaseGate,
+			AuditPath:               *auditPath,
+			ReconnectPath:           *reconnect,
+			JobEvidenceDir:          *jobEvidenceDir,
+			StopTranscriptPath:      *stopTranscript,
+			UninstallTranscriptPath: *uninstallTranscript,
+			NotesPath:               *notes,
+		})
 	default:
 		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
 	}
@@ -740,6 +772,33 @@ func (a App) acceptancePackageWindowsTemporary(opts acceptance.WindowsTemporaryP
 	}
 	if !pkg.OK() {
 		return fmt.Errorf("windows temporary acceptance package verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptancePackageLinuxManagedService(opts acceptance.LinuxManagedServicePackageOptions) error {
+	pkg, err := acceptance.PackageLinuxManagedServiceEvidence(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    pkg.OK(),
+		"schema":                pkg.SchemaVersion,
+		"out":                   pkg.OutDir,
+		"package":               filepath.Join(pkg.OutDir, "package.json"),
+		"checksums":             filepath.Join(pkg.OutDir, "checksums.txt"),
+		"checks":                pkg.Checks,
+		"files":                 pkg.Files,
+		"redaction_rule_counts": pkg.RedactionRuleCounts,
+		"recommended_actions":   pkg.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("linux managed service acceptance package verification failed")
 	}
 	return nil
 }
@@ -3929,6 +3988,7 @@ Usage:
   rdev acceptance verify-windows-managed-service --plan windows-service-plan/windows-managed-service-plan.json
   rdev acceptance verify-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
+  rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json

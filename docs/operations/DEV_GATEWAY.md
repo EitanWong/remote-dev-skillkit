@@ -534,6 +534,28 @@ it. Real Linux managed support still requires a Linux host transcript proving
 start, status, release-gated registration, reconnect after logout or reboot,
 managed job evidence, stop, and uninstall.
 
+After the real host run, package the collected evidence:
+
+```bash
+rdev acceptance package-linux-managed-service \
+  --plan .rdev/acceptance/linux-managed-service/linux-managed-service-plan.json \
+  --out .rdev/acceptance/linux-managed-service-evidence \
+  --start-transcript start.txt \
+  --status-transcript status.txt \
+  --logs journal.txt \
+  --release-gate release-gate.json \
+  --audit audit.jsonl \
+  --reconnect reconnect.txt \
+  --job-evidence-dir job-evidence \
+  --stop-transcript stop.txt \
+  --uninstall-transcript uninstall.txt
+```
+
+The package command redacts copied evidence, writes `package.json` and
+`checksums.txt`, requires release-gate output with `ok=true`, and requires
+job evidence containing an approval-required artifact. It still does not run
+`systemctl`.
+
 Windows uses reviewed `sc.exe` command plans:
 
 ```powershell
@@ -658,5 +680,5 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 - `--trust-store` is a file-backed development store. Production managed hosts should move this to OS-protected storage where available.
 - `--identity-store` is a file-backed development host identity store. Production managed hosts should move identity keys to OS-protected storage and add signed registration proofs.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
-- Linux systemd support currently writes and controls user units, and `rdev acceptance linux-managed-service` can verify a release-evidence plan. Real managed Linux acceptance still needs reboot/reconnect evidence on a Linux host.
+- Linux systemd support currently writes and controls user units, `rdev acceptance linux-managed-service` can verify a release-evidence plan, and `rdev acceptance package-linux-managed-service` can archive real run evidence. Real managed Linux acceptance still needs reboot/reconnect evidence from a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

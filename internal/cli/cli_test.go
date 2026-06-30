@@ -3930,8 +3930,141 @@ func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 	}
 }
 
+func TestAcceptancePackageLinuxManagedService(t *testing.T) {
+	root := t.TempDir()
+	planOut := filepath.Join(root, "linux-managed-service")
+	var planStdout bytes.Buffer
+	planApp := NewApp(&planStdout, &bytes.Buffer{})
+	if err := planApp.Run(context.Background(), []string{
+		"acceptance", "linux-managed-service",
+		"--out", planOut,
+		"--binary", "/opt/rdev/rdev",
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--release-bundle", "/opt/rdev/release-bundle.json",
+		"--release-root-public-key", "release-root:abc123",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var planPayload struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(planStdout.Bytes(), &planPayload); err != nil {
+		t.Fatalf("invalid plan json: %v\n%s", err, planStdout.String())
+	}
+	fakeGitHubToken := "ghp_" + "abcdefghijklmnopqrstuvwx"
+	evidence := writeLinuxPackageEvidenceForCLITest(t, root, `{"ok": true, "token": "`+fakeGitHubToken+`"}`)
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-linux-managed-service",
+		"--plan", planPayload.Plan,
+		"--out", filepath.Join(root, "linux-evidence"),
+		"--start-transcript", evidence.startTranscriptPath,
+		"--status-transcript", evidence.statusTranscriptPath,
+		"--logs", evidence.logsPath,
+		"--release-gate", evidence.releaseGatePath,
+		"--audit", evidence.auditPath,
+		"--reconnect", evidence.reconnectPath,
+		"--job-evidence-dir", evidence.jobEvidenceDir,
+		"--stop-transcript", evidence.stopTranscriptPath,
+		"--uninstall-transcript", evidence.uninstallTranscriptPath,
+	}); err != nil {
+		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+	}
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Schema  string `json:"schema"`
+		Package string `json:"package"`
+		Files   []struct {
+			Path string `json:"path"`
+			Kind string `json:"kind"`
+		} `json:"files"`
+		RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected package ok, got %s", stdout.String())
+	}
+	if payload.Schema != "rdev.acceptance-package.linux-managed-service.v1" {
+		t.Fatalf("unexpected schema %q", payload.Schema)
+	}
+	if _, err := os.Stat(payload.Package); err != nil {
+		t.Fatalf("expected package manifest: %v", err)
+	}
+	if payload.RedactionRuleCounts["github_token"] != 1 {
+		t.Fatalf("expected github_token redaction count, got %#v", payload.RedactionRuleCounts)
+	}
+	output := stdout.String()
+	for _, expected := range []string{"start-transcript", "release-gate", "job-evidence", "checksums.txt"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected packaged output containing %q, got %s", expected, output)
+		}
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
+}
+
+type linuxPackageEvidenceForCLITest struct {
+	startTranscriptPath     string
+	statusTranscriptPath    string
+	logsPath                string
+	releaseGatePath         string
+	auditPath               string
+	reconnectPath           string
+	jobEvidenceDir          string
+	stopTranscriptPath      string
+	uninstallTranscriptPath string
+}
+
+func writeLinuxPackageEvidenceForCLITest(t *testing.T, root, releaseGate string) linuxPackageEvidenceForCLITest {
+	t.Helper()
+	evidenceRoot := filepath.Join(root, "linux-package-fixture")
+	startTranscriptPath := filepath.Join(evidenceRoot, "start.txt")
+	statusTranscriptPath := filepath.Join(evidenceRoot, "status.txt")
+	logsPath := filepath.Join(evidenceRoot, "logs.txt")
+	releaseGatePath := filepath.Join(evidenceRoot, "release-gate.json")
+	auditPath := filepath.Join(evidenceRoot, "audit.jsonl")
+	reconnectPath := filepath.Join(evidenceRoot, "reconnect.txt")
+	stopTranscriptPath := filepath.Join(evidenceRoot, "stop.txt")
+	uninstallTranscriptPath := filepath.Join(evidenceRoot, "uninstall.txt")
+	jobEvidenceDir := filepath.Join(evidenceRoot, "job-evidence")
+	writeFileForCLITest(t, startTranscriptPath, "systemctl --user daemon-reload\nsystemctl --user enable --now remote-dev-skillkit-host.service\n")
+	writeFileForCLITest(t, statusTranscriptPath, "systemctl --user status remote-dev-skillkit-host.service\nactive (running)\n")
+	writeFileForCLITest(t, logsPath, "journalctl --user -u remote-dev-skillkit-host.service\nrelease gate passed\n")
+	writeFileForCLITest(t, releaseGatePath, releaseGate+"\n")
+	writeFileForCLITest(t, auditPath, `{"event":"host.registered"}`+"\n"+`{"event":"job.completed"}`+"\n")
+	writeFileForCLITest(t, reconnectPath, "rebooted host reconnected as hst_123\n")
+	writeFileForCLITest(t, stopTranscriptPath, "systemctl --user disable --now remote-dev-skillkit-host.service\n")
+	writeFileForCLITest(t, uninstallTranscriptPath, "rdev host uninstall-service --platform linux --removed true\n")
+	writeFileForCLITest(t, filepath.Join(jobEvidenceDir, "manifest.json"), `{"schema_version":"rdev.evidence-bundle.v1"}`+"\n")
+	writeFileForCLITest(t, filepath.Join(jobEvidenceDir, "artifacts", "approval-required.json"), `{"schema_version":"rdev.approval-required.v1"}`+"\n")
+	return linuxPackageEvidenceForCLITest{
+		startTranscriptPath:     startTranscriptPath,
+		statusTranscriptPath:    statusTranscriptPath,
+		logsPath:                logsPath,
+		releaseGatePath:         releaseGatePath,
+		auditPath:               auditPath,
+		reconnectPath:           reconnectPath,
+		jobEvidenceDir:          jobEvidenceDir,
+		stopTranscriptPath:      stopTranscriptPath,
+		uninstallTranscriptPath: uninstallTranscriptPath,
+	}
+}
+
+func writeFileForCLITest(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func signReleaseArtifactWithCLIForTest(t *testing.T, dir, keyPath, name, content string) string {
