@@ -256,6 +256,174 @@ func TestPlanInstallRejectsUnsupportedFramework(t *testing.T) {
 	}
 }
 
+func TestInstallDryRunDoesNotCopyFiles(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "codex-skills")
+
+	report, err := Install(InstallOptions{
+		BundleDir:   bundle,
+		Framework:   "codex",
+		TargetDir:   target,
+		GeneratedAt: time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK() {
+		t.Fatalf("expected dry-run install report to verify: %#v", report.Checks)
+	}
+	if report.Executed || report.LocalMutation {
+		t.Fatalf("dry-run must not execute or mutate: %#v", report)
+	}
+	if _, err := os.Stat(filepath.Join(target, "remote-vibe-coding")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not copy skills, stat err=%v", err)
+	}
+}
+
+func TestInstallExecuteCopiesVerifiedBundle(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "codex-skills")
+
+	report, err := Install(InstallOptions{
+		BundleDir: bundle,
+		Framework: "codex",
+		TargetDir: target,
+		Execute:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK() || !report.Executed || !report.LocalMutation || report.ExternalMutation {
+		t.Fatalf("unexpected install report: %#v", report)
+	}
+	for _, path := range []string{
+		"remote-vibe-coding/SKILL.md",
+		"safe-remote-support/SKILL.md",
+		".remote-dev-skillkit/mcp/tools.json",
+		".remote-dev-skillkit/frameworks/codex.md",
+	} {
+		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(path))); err != nil {
+			t.Fatalf("expected installed file %s: %v", path, err)
+		}
+	}
+}
+
+func TestInstallRejectsConflictUnlessForced(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "codex-skills")
+	if err := os.MkdirAll(filepath.Join(target, "remote-vibe-coding"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "remote-vibe-coding", "old.txt"), []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Install(InstallOptions{
+		BundleDir: bundle,
+		Framework: "codex",
+		TargetDir: target,
+		Execute:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK() {
+		t.Fatalf("expected conflict to fail without force")
+	}
+	if !checkDetailContains(report.Checks, "existing_skill_conflicts", "remote-vibe-coding") {
+		t.Fatalf("expected conflict check: %#v", report.Checks)
+	}
+
+	forced, err := Install(InstallOptions{
+		BundleDir: bundle,
+		Framework: "codex",
+		TargetDir: target,
+		Execute:   true,
+		Force:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !forced.OK() || !forced.Executed {
+		t.Fatalf("expected forced install to pass: %#v", forced.Checks)
+	}
+	if _, err := os.Stat(filepath.Join(target, "remote-vibe-coding", "old.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected force to replace old skill directory, stat err=%v", err)
+	}
+}
+
+func TestInstallGenericRequiresExplicitTarget(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Install(InstallOptions{
+		BundleDir: bundle,
+		Framework: "generic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.OK() {
+		t.Fatalf("expected generic install without target to fail")
+	}
+	if !checkDetailContains(report.Checks, "generic_target_explicit", "RDEV_GENERIC_AGENT_SKILLS_DIR") {
+		t.Fatalf("expected explicit target failure: %#v", report.Checks)
+	}
+}
+
+func TestInstallGenericUsesTargetEnv(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "bundle")
+	if _, err := Export(ExportOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "generic-skills")
+	t.Setenv("RDEV_GENERIC_AGENT_SKILLS_DIR", target)
+
+	report, err := Install(InstallOptions{
+		BundleDir: bundle,
+		Framework: "generic",
+		Execute:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK() || !report.Executed {
+		t.Fatalf("expected env target install to pass: %#v", report.Checks)
+	}
+	if report.TargetDir != target {
+		t.Fatalf("expected target %q, got %q", target, report.TargetDir)
+	}
+	if _, err := os.Stat(filepath.Join(target, "remote-vibe-coding", "SKILL.md")); err != nil {
+		t.Fatalf("expected installed generic skill: %v", err)
+	}
+}
+
 func TestVerifyRejectsTamperedBundleFile(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "bundle")
 	if _, err := Export(ExportOptions{

@@ -72,7 +72,7 @@ Implemented now:
 - Hash-chained audit export and verification via `rdev audit export` / `rdev audit verify`.
 - Local evidence bundle export via `rdev evidence export`.
 - Gateway-backed evidence bundle export from a job id via `rdev evidence export --gateway ... --job-id ...`.
-- Skillkit bundle export, verification, install-plan generation, and install-plan verification via `rdev skillkit export`, `rdev skillkit verify`, `rdev skillkit plan-install`, and `rdev skillkit verify-install-plan` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
+- Skillkit bundle export, verification, install-plan generation, install-plan verification, and dry-run-by-default direct installation via `rdev skillkit export`, `rdev skillkit verify`, `rdev skillkit plan-install`, `rdev skillkit verify-install-plan`, and `rdev skillkit install` for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Managed Mac coding acceptance harness via `rdev acceptance managed-mac`, producing a report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
 - Acceptance report verification via `rdev acceptance verify --report ...`, including evidence manifest checksums, artifact index validation, audit-chain verification, approval-gate evidence, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning via `rdev acceptance managed-mac-service`, producing a checked plist, service plan, launchctl commands, service-backed acceptance commands, and uninstall steps without auto-starting launchd.
@@ -161,6 +161,8 @@ go run ./cmd/rdev skillkit export --source-root . --out dist/remote-dev-skillkit
 go run ./cmd/rdev skillkit verify --bundle dist/remote-dev-skillkit
 go run ./cmd/rdev skillkit plan-install --bundle dist/remote-dev-skillkit --out dist/skillkit-install --frameworks codex,hermes,generic-mcp-agent
 go run ./cmd/rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
+go run ./cmd/rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
+go run ./cmd/rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 go run ./cmd/rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json --force
 go run ./cmd/rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
 go run ./cmd/rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code

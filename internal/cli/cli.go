@@ -1768,6 +1768,18 @@ func (a App) skillkit(args []string) error {
 			return err
 		}
 		return a.skillkitVerifyInstallPlan(*plan)
+	case "install":
+		fs := flag.NewFlagSet("skillkit install", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		bundle := fs.String("bundle", "", "verified skillkit bundle directory")
+		framework := fs.String("framework", "", "target framework: codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent")
+		target := fs.String("target", "", "target skill directory override; required for generic-mcp-agent")
+		execute := fs.Bool("execute", false, "actually copy files; default is dry-run")
+		force := fs.Bool("force", false, "overwrite existing skill directories after review")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.skillkitInstall(*bundle, *framework, *target, *execute, *force)
 	default:
 		return fmt.Errorf("unknown skillkit subcommand %q", args[0])
 	}
@@ -3315,6 +3327,54 @@ func (a App) skillkitVerifyInstallPlan(planPath string) error {
 	return nil
 }
 
+func (a App) skillkitInstall(bundleDir, framework, targetDir string, execute, force bool) error {
+	if bundleDir == "" {
+		return fmt.Errorf("bundle is required")
+	}
+	if framework == "" {
+		return fmt.Errorf("framework is required")
+	}
+	report, err := skillkit.Install(skillkit.InstallOptions{
+		BundleDir: bundleDir,
+		Framework: framework,
+		TargetDir: targetDir,
+		Execute:   execute,
+		Force:     force,
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  report.OK(),
+		"schema":              report.SchemaVersion,
+		"bundle":              report.BundleDir,
+		"framework":           report.Framework,
+		"display_name":        report.DisplayName,
+		"target":              report.TargetDir,
+		"execute":             report.Execute,
+		"executed":            report.Executed,
+		"force":               report.Force,
+		"local_mutation":      report.LocalMutation,
+		"external_mutation":   report.ExternalMutation,
+		"bundle_verify_ok":    report.BundleVerification.OK(),
+		"checks":              report.Checks,
+		"actions":             report.Actions,
+		"installed_skills":    report.InstalledSkills,
+		"reference_files":     report.ReferenceFiles,
+		"recommended_steps":   report.RecommendedNextSteps,
+		"recommended_actions": report.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !report.OK() {
+		return fmt.Errorf("skillkit install verification failed")
+	}
+	return nil
+}
+
 func installPlanFrameworkNames(plans []skillkit.FrameworkInstallPlan) []string {
 	names := make([]string, 0, len(plans))
 	for _, plan := range plans {
@@ -3401,6 +3461,8 @@ Usage:
   rdev skillkit verify --bundle dist/remote-dev-skillkit
   rdev skillkit plan-install --bundle dist/remote-dev-skillkit --out dist/skillkit-install --frameworks codex,hermes,generic-mcp-agent
   rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
+  rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
+  rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
   rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code

@@ -43,6 +43,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Skillkit bundle export for agent runtimes and mainstream framework notes.
 - Skillkit bundle verification for required skills, required framework notes, file checksums, safe paths, and unlisted-file detection.
 - Skillkit framework install planning and verification through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`, generating reviewed shell/PowerShell scripts for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents without external mutation or hidden config writes.
+- Skillkit direct install through `rdev skillkit install`, dry-running by default, requiring `--execute` before local copy, refusing existing skill conflicts unless `--force`, and preserving `external_mutation=false`.
 - Release candidate packaging that stages built artifacts, signed manifests, signed release bundle, verified Skillkit bundle, checksums, and `release-candidate.json`.
 - Release candidate verification that checks staged or downloaded candidates before publication or installation.
 - Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, and checksums before candidate packaging.
@@ -128,7 +129,7 @@ Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation 
 
 - Stable MCP contract.
 - Stable host enrollment protocol.
-- Stable `rdev skillkit export`, `rdev skillkit verify`, `rdev skillkit plan-install`, and `rdev skillkit verify-install-plan` package path for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
+- Stable `rdev skillkit export`, `rdev skillkit verify`, `rdev skillkit plan-install`, `rdev skillkit verify-install-plan`, and dry-run-by-default `rdev skillkit install` package path for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - Full audit trail.
 - Signed releases.
 - Local release candidate packaging before GitHub Release publication.

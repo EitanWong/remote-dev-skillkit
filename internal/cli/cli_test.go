@@ -2244,6 +2244,57 @@ func TestSkillkitPlanInstallAndVerifyInstallPlan(t *testing.T) {
 	}
 }
 
+func TestSkillkitInstallDryRunAndExecute(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "skillkit")
+	exportApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := exportApp.Run(context.Background(), []string{
+		"skillkit", "export",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "codex-skills")
+
+	var dryRunStdout bytes.Buffer
+	dryRunApp := NewApp(&dryRunStdout, &bytes.Buffer{})
+	if err := dryRunApp.Run(context.Background(), []string{
+		"skillkit", "install",
+		"--bundle", bundle,
+		"--framework", "codex",
+		"--target", target,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dryRunStdout.String(), `"schema": "rdev.skillkit-install-report.v1"`) ||
+		!strings.Contains(dryRunStdout.String(), `"execute": false`) ||
+		!strings.Contains(dryRunStdout.String(), `"local_mutation": false`) {
+		t.Fatalf("expected dry-run install report, got %s", dryRunStdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(target, "remote-vibe-coding")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not copy skills, stat err=%v", err)
+	}
+
+	var executeStdout bytes.Buffer
+	executeApp := NewApp(&executeStdout, &bytes.Buffer{})
+	if err := executeApp.Run(context.Background(), []string{
+		"skillkit", "install",
+		"--bundle", bundle,
+		"--framework", "codex",
+		"--target", target,
+		"--execute",
+	}); err != nil {
+		t.Fatalf("expected execute install to pass: %v\n%s", err, executeStdout.String())
+	}
+	if !strings.Contains(executeStdout.String(), `"executed": true`) ||
+		!strings.Contains(executeStdout.String(), `"external_mutation": false`) {
+		t.Fatalf("expected executed install report, got %s", executeStdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(target, "remote-vibe-coding", "SKILL.md")); err != nil {
+		t.Fatalf("expected installed skill: %v", err)
+	}
+}
+
 func TestAdapterVerifyResultAcceptsShellArtifact(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "shell-result.json")

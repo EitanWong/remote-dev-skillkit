@@ -71,10 +71,15 @@ agent-framework install path:
 2. `rdev skillkit verify --bundle <skillkit-dir>`
 3. `rdev skillkit plan-install --bundle <skillkit-dir> --out <empty-install-plan-dir>`
 4. `rdev skillkit verify-install-plan --plan <install-plan-dir>/install-plan.json`
+5. `rdev skillkit install --bundle <skillkit-dir> --framework <framework> --target <temporary-dir>`
+6. `rdev skillkit install --bundle <skillkit-dir> --framework <framework> --target <temporary-dir> --execute`
 
 The install plan evidence must include `rdev.skillkit-install-plan.v1`,
 `rdev.skillkit-install-plan-verification.v1`, `INSTALL_COMMANDS.md`, all
 generated framework scripts, and the verification output proving
+`external_mutation=false`. Direct installer evidence must include
+`rdev.skillkit-install-report.v1` dry-run and execute reports proving dry-run
+has `local_mutation=false`, execute has `local_mutation=true`, and both keep
 `external_mutation=false`. This is a release gate for the `area:skillkit` and
 `area:release` surfaces.
 

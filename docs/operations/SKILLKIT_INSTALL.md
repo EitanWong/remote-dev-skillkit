@@ -20,6 +20,17 @@ rdev skillkit plan-install \
 
 rdev skillkit verify-install-plan \
   --plan dist/skillkit-install/install-plan.json
+
+rdev skillkit install \
+  --bundle dist/remote-dev-skillkit \
+  --framework codex \
+  --target "$HOME/.codex/skills"
+
+rdev skillkit install \
+  --bundle dist/remote-dev-skillkit \
+  --framework codex \
+  --target "$HOME/.codex/skills" \
+  --execute
 ```
 
 The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
@@ -50,12 +61,21 @@ verification, listed script SHA-256/size, required scripts, no forbidden
 external mutation, bundle-verification calls, and absence of unlisted files in
 the install-plan directory. Treat `ok=false` as installation-blocking.
 
+`rdev skillkit install` is the direct installer path. It defaults to dry-run and
+emits `rdev.skillkit-install-report.v1`; no files are copied until `--execute`
+is supplied. The installer verifies the bundle first, resolves the framework
+target directory, refuses filesystem-root targets, refuses existing skill
+directory conflicts unless `--force` is supplied, copies only the verified skill
+folders plus `.remote-dev-skillkit/mcp/tools.json` and framework notes, and does
+not write MCP runtime configuration. Generic MCP agents must use `--target`
+explicitly.
+
 ## Generic Agent Runtime
 
 1. Install or build the `rdev` binary.
 2. Verify the exported or downloaded bundle with `rdev skillkit verify --bundle <bundle-dir>`.
 3. Generate and verify an install plan with `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
-4. Run only the reviewed script for the target runtime. Generic MCP agents must set `RDEV_GENERIC_AGENT_SKILLS_DIR` explicitly.
+4. Run `rdev skillkit install --framework <name> --target <dir>` first as a dry-run, then re-run with `--execute`, or run only the reviewed script for the target runtime. Generic MCP agents must set an explicit target.
 5. Configure MCP stdio with `rdev mcp serve`, or configure MCP HTTP/API against the deployed gateway.
 6. Keep these skills installed together:
    - `safe-remote-support`;

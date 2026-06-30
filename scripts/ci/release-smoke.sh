@@ -65,6 +65,18 @@ go run ./cmd/rdev skillkit plan-install \
 go run ./cmd/rdev skillkit verify-install-plan \
   --plan "$skillkit_install_dir/install-plan.json" \
   > "$work_dir/skillkit-install-plan-verification.json"
+skillkit_install_target="$work_dir/skillkit-install-target"
+go run ./cmd/rdev skillkit install \
+  --bundle "$first_skillkit_dir" \
+  --framework codex \
+  --target "$skillkit_install_target" \
+  > "$work_dir/skillkit-install-dry-run.json"
+go run ./cmd/rdev skillkit install \
+  --bundle "$first_skillkit_dir" \
+  --framework codex \
+  --target "$skillkit_install_target" \
+  --execute \
+  > "$work_dir/skillkit-install-execute.json"
 
 cp -R "$post_release_dir" "$work_dir/post-release-install-tampered"
 printf '\nNew-Service rdev\n' >> "$work_dir/post-release-install-tampered/verify-windows-amd64.ps1"
@@ -92,6 +104,8 @@ post_release_verification = json.loads((root / "post-release-verification.json")
 post_release_tampered = json.loads((root / "post-release-tampered-verification.json").read_text())
 skillkit_install_plan_output = json.loads((root / "skillkit-install-plan-output.json").read_text())
 skillkit_install_plan_verification = json.loads((root / "skillkit-install-plan-verification.json").read_text())
+skillkit_install_dry_run = json.loads((root / "skillkit-install-dry-run.json").read_text())
+skillkit_install_execute = json.loads((root / "skillkit-install-execute.json").read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
 assert build["ok"] is True, build
@@ -144,6 +158,21 @@ assert skillkit_install_plan_verification["schema"] == "rdev.skillkit-install-pl
 assert skillkit_install_plan_verification["ok"] is True, skillkit_install_plan_verification
 assert skillkit_install_plan_verification["bundle_verify_ok"] is True, skillkit_install_plan_verification
 assert skillkit_install_plan_verification["frameworks_verified"] == 6, skillkit_install_plan_verification
+assert skillkit_install_dry_run["schema"] == "rdev.skillkit-install-report.v1", skillkit_install_dry_run
+assert skillkit_install_dry_run["ok"] is True, skillkit_install_dry_run
+assert skillkit_install_dry_run["execute"] is False, skillkit_install_dry_run
+assert skillkit_install_dry_run["executed"] is False, skillkit_install_dry_run
+assert skillkit_install_dry_run["local_mutation"] is False, skillkit_install_dry_run
+assert skillkit_install_dry_run["external_mutation"] is False, skillkit_install_dry_run
+assert skillkit_install_execute["schema"] == "rdev.skillkit-install-report.v1", skillkit_install_execute
+assert skillkit_install_execute["ok"] is True, skillkit_install_execute
+assert skillkit_install_execute["execute"] is True, skillkit_install_execute
+assert skillkit_install_execute["executed"] is True, skillkit_install_execute
+assert skillkit_install_execute["local_mutation"] is True, skillkit_install_execute
+assert skillkit_install_execute["external_mutation"] is False, skillkit_install_execute
+install_target = pathlib.Path(skillkit_install_execute["target"])
+assert (install_target / "remote-vibe-coding" / "SKILL.md").is_file(), skillkit_install_execute
+assert (install_target / ".remote-dev-skillkit" / "mcp" / "tools.json").is_file(), skillkit_install_execute
 
 print(json.dumps({
     "ok": True,
@@ -156,9 +185,11 @@ print(json.dumps({
     "post_release_verification_schema": post_release_verification["schema_version"],
     "skillkit_install_plan_schema": skillkit_install_plan_output["schema"],
     "skillkit_install_plan_verification_schema": skillkit_install_plan_verification["schema"],
+    "skillkit_install_report_schema": skillkit_install_execute["schema"],
     "planned_platforms": plan_output["platform_count"],
     "post_release_platforms": post_release_output["platform_count"],
     "skillkit_install_frameworks": skillkit_install_plan_output["framework_count"],
+    "skillkit_install_executed": skillkit_install_execute["executed"],
     "asset_count": len(plan["assets"]),
     "external_mutation": plan["external_mutation"],
 }, indent=2))
