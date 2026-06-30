@@ -61,7 +61,8 @@ MCP clients can call `rdev.adapter.verify_runtime` with `artifact_json` or
 Built-in hostrunner adapters can also emit runtime fixtures in real host jobs.
 Run `rdev host serve` with `--capture-runtime-fixture` to keep the normal
 adapter result as the primary job artifact and append a second
-`rdev.adapter-runtime-fixture.v1` artifact for shell, PowerShell, or Codex jobs:
+`rdev.adapter-runtime-fixture.v1` artifact for shell, PowerShell, Codex, or
+Claude Code jobs:
 
 ```bash
 rdev host serve \
@@ -78,6 +79,15 @@ same top-level adapter result artifact. When enabled, the fixture records
 hostrunner phases, cleanup, cancellation/timeout state, and the embedded
 adapter result artifact. This is the first hostrunner-integrated runtime
 fixture path for built-in adapters.
+
+Built-in adapters currently covered by hostrunner runtime fixtures:
+
+| Adapter | Result schema | Primary capability |
+|---|---|---|
+| `shell` | `rdev.shell-result.v1` | `shell.user` |
+| `powershell` | `rdev.powershell-result.v1` | `powershell.user` |
+| `codex` | `rdev.codex-result.v1` | `codex.run` + `git.diff` |
+| `claude-code` | `rdev.claude-code-result.v1` | `claude-code.run` + `git.diff` |
 
 ## Lifecycle Manifest Conformance
 
@@ -171,6 +181,12 @@ rdev adapter verify-result \
   --adapter codex \
   --schema rdev.codex-result.v1 \
   --command-fields codex_command,git_status,git_diff_stat,git_diff
+
+rdev adapter verify-result \
+  --artifact claude-code-result.json \
+  --adapter claude-code \
+  --schema rdev.claude-code-result.v1 \
+  --command-fields claude_code_command,git_status,git_diff_stat,git_diff
 ```
 
 The CLI prints `rdev.adapter-conformance-report.v1`. When `ok=false`, it prints
@@ -264,10 +280,10 @@ verifiers.
 ## Current Scope
 
 The current runtime lifecycle runner plus hostrunner opt-in capture are still
-not the complete production Adapter SDK. Built-in shell, PowerShell, and Codex
-now have hostrunner-integrated runtime fixtures, but new adapter authors still
-need production wrappers for policy planning, workspace/session preparation,
-adapter-specific execution, and shared runtime cancellation fixtures. The
-current package provides shared runtime fixture generation plus conformance
-layers for lifecycle declarations, runtime fixtures, result evidence, and
-cancellation evidence.
+not the complete production Adapter SDK. Built-in shell, PowerShell, Codex, and
+Claude Code now have hostrunner-integrated runtime fixtures, but new adapter
+authors still need production wrappers for policy planning, workspace/session
+preparation, adapter-specific execution, and shared runtime cancellation
+fixtures. The current package provides shared runtime fixture generation plus
+conformance layers for lifecycle declarations, runtime fixtures, result
+evidence, and cancellation evidence.

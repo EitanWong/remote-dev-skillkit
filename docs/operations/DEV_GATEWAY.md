@@ -209,7 +209,7 @@ If the host runner rejects a job, the host reports the failure to `POST /v1/jobs
 
 The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Before execution, the host also runs the shared implicit approval preflight. Shell jobs that request package installation, elevation, GUI control, service management, push, merge, deploy, publish, or credential changes return `rdev.approval-required.v1` unless a matching signed approval token is present. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, cancellation state, truncation state, duration, redaction rules, and redaction counts.
 
-When the gateway job status becomes `canceled`, `rdev host serve` cancels the local job context. Built-in shell, PowerShell, and Codex adapters receive that context and stop the running child process cooperatively. The host may append cancellation evidence through `POST /v1/jobs/{job_id}/artifact` while preserving the gateway job's `canceled` terminal state.
+When the gateway job status becomes `canceled`, `rdev host serve` cancels the local job context. Built-in shell, PowerShell, Codex, and Claude Code adapters receive that context and stop the running child process cooperatively. The host may append cancellation evidence through `POST /v1/jobs/{job_id}/artifact` while preserving the gateway job's `canceled` terminal state.
 
 The development PowerShell adapter uses the same host safety path. Create an `adapter=powershell` job with `powershell.user` capability:
 
@@ -266,9 +266,54 @@ For deterministic local tests, signed job payloads may override `codex_command` 
 
 Codex jobs also run the same implicit approval preflight before workspace lock acquisition and before adapter execution. If `intent`, `prompt`, `codex_args`, `verification_commands`, `external_actions`, `dangerous_actions`, `approval_actions`, or `requested_approvals` request high-risk external consequences, the host returns `rdev.approval-required.v1` unless a matching approval token is present. Current operations include `git.push`, `git.merge`, `deploy.run`, `publish.run`, `credential.change`, `service.manage`, `package.install`, `elevation.request`, and `gui.control`.
 
+The development Claude Code adapter uses the same host safety path. Create an
+`adapter=claude-code` job with `claude-code.run` and `git.diff` capabilities:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+  -H 'content-type: application/json' \
+  -d '{
+    "host_id": "hst_...",
+    "adapter": "claude-code",
+    "intent": "update README",
+    "policy": {
+      "workspace_root": ".",
+      "capabilities": ["claude-code.run", "git.diff"],
+      "prompt": "Update README and keep the change scoped to this repository.",
+      "verification_commands": [["git", "status", "--short"]],
+      "allow_verification_commands": ["git"],
+      "max_duration_seconds": 1800,
+      "max_output_bytes": 1048576
+    }
+  }'
+```
+
+By default the adapter runs:
+
+```bash
+claude -p <prompt>
+```
+
+For deterministic local tests or custom hosts, signed job payloads may override
+`claude_code_command` and `claude_code_args`. The result artifact uses schema
+`rdev.claude-code-result.v1` and includes Claude Code command output, Git
+status, Git diff/stat, optional verification command results, output
+truncation flags, duration, redaction rules, and redaction counts. Verification
+commands must be allowlisted through `allow_verification_commands`. When a
+verification command is `go test -json ...`, the command result also includes a
+`rdev.test-report.v1` summary with package/test pass, fail, skip counts and
+parsed test cases.
+
+Claude Code jobs run the same implicit approval preflight as Codex before
+workspace lock acquisition and before adapter execution. If `intent`, `prompt`,
+`claude_code_args`, `verification_commands`, `external_actions`,
+`dangerous_actions`, `approval_actions`, or `requested_approvals` request
+high-risk external consequences, the host returns `rdev.approval-required.v1`
+unless a matching approval token is present.
+
 ## Workspace Locks And Git Worktrees
 
-Managed coding jobs should not mutate the primary checkout directly. The development CLI now includes the workspace foundation that future Codex, Claude Code, ACP, and Git adapters will share.
+Managed coding jobs should not mutate the primary checkout directly. The development CLI now includes the workspace foundation that Codex, Claude Code, future ACP, and Git adapters share.
 
 Acquire a one-writer lock for a repository:
 

@@ -32,3 +32,31 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 		t.Fatal("expected adapter cancellation verification tool")
 	}
 }
+
+func TestJobsCreateAdapterEnumIncludesClaudeCode(t *testing.T) {
+	for _, tool := range Tools() {
+		if tool.Name != "rdev.jobs.create" {
+			continue
+		}
+		properties, _ := tool.InputSchema["properties"].(map[string]any)
+		adapterSchema, _ := properties["adapter"].(map[string]any)
+		values, _ := adapterSchema["enum"].([]any)
+		if !containsEnum(values, "claude-code") {
+			t.Fatalf("jobs.create adapter enum should include claude-code: %#v", values)
+		}
+		if containsEnum(values, "claude") {
+			t.Fatalf("jobs.create adapter enum should use claude-code, not ambiguous claude: %#v", values)
+		}
+		return
+	}
+	t.Fatal("missing rdev.jobs.create tool")
+}
+
+func containsEnum(values []any, want string) bool {
+	for _, value := range values {
+		if text, ok := value.(string); ok && text == want {
+			return true
+		}
+	}
+	return false
+}

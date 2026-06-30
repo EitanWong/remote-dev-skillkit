@@ -70,7 +70,7 @@ func Tools() []Tool {
 			Safety:      "May execute on host after policy checks.",
 			InputSchema: object(map[string]any{
 				"host_id": stringField(),
-				"adapter": enum("shell", "powershell", "acpx", "codex", "claude"),
+				"adapter": enum("shell", "powershell", "acpx", "codex", "claude-code"),
 				"intent":  stringField(),
 				"policy":  map[string]any{"type": "object"},
 			}, []string{"host_id", "adapter", "intent", "policy"}),

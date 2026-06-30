@@ -993,6 +993,218 @@ func main() {
 	}
 }
 
+func TestRunDevJobExecutesClaudeCodeAdapterWithWorkspaceLock(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeClaude := writeHostrunnerFakeCodex(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nchanged by hostrunner claude code\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake claude code wrote README")
+}
+`)
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	job, err := gw.CreateJob(host.ID, "claude-code", "update README", map[string]any{
+		"workspace_root":              repo,
+		"capabilities":                []string{"claude-code.run", "git.diff"},
+		"prompt":                      "update README",
+		"claude_code_command":         "go",
+		"claude_code_args":            []string{"run", fakeClaude},
+		"verification_commands":       [][]string{{"git", "status", "--short"}},
+		"allow_verification_commands": []string{"git"},
+		"max_duration_seconds":        30,
+		"max_output_bytes":            64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore: lockStore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.claude-code-result.v1"`) {
+		t.Fatalf("expected Claude Code result artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, "changed by hostrunner claude code") {
+		t.Fatalf("expected diff evidence in Claude Code artifact, got %s", result.ArtifactContent)
+	}
+	status, err := workspace.NewFileLockStore(lockStore).Status(repo, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Exists {
+		t.Fatalf("expected workspace lock release after Claude Code execution, got %#v", status)
+	}
+}
+
+func TestRunDevJobRejectsClaudeCodeWithoutCapability(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "claude-code", "demo", map[string]any{
+		"workspace_root": t.TempDir(),
+		"capabilities":   []string{"git.diff"},
+		"prompt":         "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertDenial(t, result, err, "missing_capability")
+	if !strings.Contains(result.ArtifactContent, `"capability": "claude-code.run"`) {
+		t.Fatalf("expected missing claude-code.run capability, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobRequiresApprovalForClaudeCodeGitPushIntent(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeClaude := writeHostrunnerFakeCodex(t, `package main
+
+import "os"
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nthis must not run without approval\n"), 0o644); err != nil {
+		panic(err)
+	}
+}
+`)
+	job, err := gw.CreateJob(host.ID, "claude-code", "update README and git push to origin", map[string]any{
+		"workspace_root":      repo,
+		"capabilities":        []string{"claude-code.run", "git.diff"},
+		"prompt":              "Update README, then run git push to origin.",
+		"claude_code_command": "go",
+		"claude_code_args":    []string{"run", fakeClaude},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "git.push")
+	content, readErr := os.ReadFile(filepath.Join(repo, "README.md"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(content), "this must not run without approval") {
+		t.Fatalf("Claude Code adapter executed before git.push approval: %s", string(content))
+	}
+}
+
+func TestRunDevJobCapturesClaudeCodeRuntimeFixture(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeClaude := writeHostrunnerFakeCodex(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if err := os.WriteFile("README.md", []byte("# demo\n\nruntime fixture claude code\n"), 0o644); err != nil {
+		panic(err)
+	}
+	fmt.Println("fake claude code wrote README")
+}
+`)
+	job, err := gw.CreateJob(host.ID, "claude-code", "capture Claude Code runtime fixture", map[string]any{
+		"workspace_root":              repo,
+		"capabilities":                []string{"claude-code.run", "git.diff"},
+		"prompt":                      "update README",
+		"claude_code_command":         "go",
+		"claude_code_args":            []string{"run", fakeClaude},
+		"verification_commands":       [][]string{{"git", "status", "--short"}},
+		"allow_verification_commands": []string{"git"},
+		"max_duration_seconds":        30,
+		"max_output_bytes":            64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunDevJobWithOptions(host.ID, gw.TrustBundle(), job, now, Options{
+		WorkspaceLockStore:    filepath.Join(t.TempDir(), "locks"),
+		CaptureRuntimeFixture: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.claude-code-result.v1"`) {
+		t.Fatalf("expected primary Claude Code artifact, got %s", result.ArtifactContent)
+	}
+	report := adapterkit.VerifyRuntimeFixtureJSON([]byte(result.RuntimeFixtureContent), adapterkit.RuntimeFixtureContract{
+		Adapter:               "claude-code",
+		RequireSuccessful:     true,
+		RequireCleanup:        true,
+		RequireResultArtifact: true,
+	})
+	if !report.OK {
+		t.Fatalf("Claude Code runtime fixture failed conformance: %#v\n%s", report, result.RuntimeFixtureContent)
+	}
+	if !strings.Contains(result.RuntimeFixtureContent, `"result_artifact_schema": "rdev.claude-code-result.v1"`) {
+		t.Fatalf("expected Claude Code result schema in runtime fixture, got %s", result.RuntimeFixtureContent)
+	}
+}
+
+func TestRunDevJobCancelsClaudeCodeWhenContextCanceled(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	repo := initHostrunnerGitRepo(t)
+	fakeClaude := buildHostrunnerFakeCodexBinary(t, `package main
+
+import "time"
+
+func main() {
+	time.Sleep(5 * time.Second)
+}
+`)
+	job, err := gw.CreateJob(host.ID, "claude-code", "sleep until canceled", map[string]any{
+		"workspace_root":       repo,
+		"capabilities":         []string{"claude-code.run", "git.diff"},
+		"prompt":               "sleep until canceled",
+		"claude_code_command":  fakeClaude,
+		"max_duration_seconds": 30,
+		"max_output_bytes":     64 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	result, err := RunDevJobWithOptionsContext(ctx, host.ID, gw.TrustBundle(), job, now, Options{})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("expected cancellation error, got %v", err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.claude-code-result.v1"`) {
+		t.Fatalf("expected Claude Code artifact, got %s", result.ArtifactContent)
+	}
+	if !strings.Contains(result.ArtifactContent, `"canceled": true`) {
+		t.Fatalf("expected canceled evidence, got %s", result.ArtifactContent)
+	}
+	if strings.Contains(result.ArtifactContent, `"timed_out": true`) {
+		t.Fatalf("canceled Claude Code job should not be marked timed out, got %s", result.ArtifactContent)
+	}
+}
+
 func TestRunDevJobExecutesCodexAfterImplicitApprovalSatisfied(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })

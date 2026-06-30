@@ -199,7 +199,7 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 	if implicitMissing := missingImplicitApprovals(envelope, approved); len(implicitMissing) > 0 {
 		return requireApproval(job, implicitMissing, approved, tokenIDs)
 	}
-	if envelope.Adapter != "shell" && envelope.Adapter != "codex" && envelope.Adapter != "powershell" {
+	if envelope.Adapter != "shell" && envelope.Adapter != "codex" && envelope.Adapter != "claude-code" && envelope.Adapter != "powershell" {
 		return deny(job, denialSpec{
 			Code:      "unsupported_adapter",
 			Summary:   "Requested adapter is not supported by this host runner.",
@@ -272,6 +272,13 @@ func missingAdapterCapability(envelope model.JobEnvelope) string {
 	case "codex":
 		if !hasCapability(envelope.Capabilities, "codex.run") {
 			return "codex.run"
+		}
+		if !hasCapability(envelope.Capabilities, "git.diff") {
+			return "git.diff"
+		}
+	case "claude-code":
+		if !hasCapability(envelope.Capabilities, "claude-code.run") {
+			return "claude-code.run"
 		}
 		if !hasCapability(envelope.Capabilities, "git.diff") {
 			return "git.diff"
@@ -397,6 +404,8 @@ func implicitRiskApprovals(envelope model.JobEnvelope) []string {
 	switch envelope.Adapter {
 	case "codex":
 		textValues = codexRiskText(envelope)
+	case "claude-code":
+		textValues = claudeCodeRiskText(envelope)
 	case "shell", "powershell":
 		textValues = commandRiskText(envelope)
 	default:
@@ -461,6 +470,16 @@ func implicitRiskApprovals(envelope model.JobEnvelope) []string {
 func codexRiskText(envelope model.JobEnvelope) []string {
 	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
 	values = append(values, stringSliceValue(envelope.Payload, "codex_args")...)
+	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
+		values = append(values, strings.Join(command, " "))
+	}
+	return values
+}
+
+func claudeCodeRiskText(envelope model.JobEnvelope) []string {
+	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
+	values = append(values, stringSliceValue(envelope.Payload, "claude_code_args")...)
+	values = append(values, stringSliceValue(envelope.Payload, "claude_args")...)
 	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
 		values = append(values, strings.Join(command, " "))
 	}
@@ -796,6 +815,46 @@ func codexDenial(job model.Job, err error) (denialSpec, bool) {
 			Summary:   "Workspace root is invalid.",
 			Detail:    err.Error(),
 			Adapter:   "codex",
+			Retryable: true,
+		}, true
+	default:
+		return denialSpec{}, false
+	}
+}
+
+func claudeCodeDenial(job model.Job, err error) (denialSpec, bool) {
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "not allowlisted"):
+		return denialSpec{
+			Code:      "command_not_allowlisted",
+			Summary:   "Claude Code verification command is not allowlisted.",
+			Detail:    err.Error(),
+			Adapter:   "claude-code",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "escapes workspace root"):
+		return denialSpec{
+			Code:      "workspace_escape",
+			Summary:   "Requested write scope escapes the workspace root.",
+			Detail:    err.Error(),
+			Adapter:   "claude-code",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "prompt is required"):
+		return denialSpec{
+			Code:      "adapter_payload_invalid",
+			Summary:   "Claude Code prompt is required.",
+			Detail:    err.Error(),
+			Adapter:   "claude-code",
+			Retryable: true,
+		}, true
+	case strings.Contains(text, "path is required") || strings.Contains(text, "resolve path") || strings.Contains(text, "stat path") || strings.Contains(text, "path must be a directory"):
+		return denialSpec{
+			Code:      "workspace_invalid",
+			Summary:   "Workspace root is invalid.",
+			Detail:    err.Error(),
+			Adapter:   "claude-code",
 			Retryable: true,
 		}, true
 	default:

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/claudecodeadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/powershelladapter"
@@ -138,6 +139,19 @@ func (a *hostRuntimeAdapter) Cleanup(context.Context, adapterkit.RuntimeRequest)
 
 func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (string, error) {
 	switch envelope.Adapter {
+	case "claude-code":
+		execution, err := claudecodeadapter.ExecuteContext(ctx, claudecodeadapter.Spec{
+			WorkspaceRoot:             envelope.Workspace.Root,
+			WriteScope:                envelope.Workspace.WriteScope,
+			Prompt:                    stringValue(envelope.Payload, "prompt", envelope.Intent),
+			ClaudeCodeCommand:         stringValue(envelope.Payload, "claude_code_command", stringValue(envelope.Payload, "claude_command", "")),
+			ClaudeCodeArgs:            stringSliceValue(envelope.Payload, "claude_code_args"),
+			VerificationCommands:      stringMatrixValue(envelope.Payload, "verification_commands"),
+			AllowVerificationCommands: stringSliceValue(envelope.Payload, "allow_verification_commands"),
+			MaxDurationSeconds:        envelope.Limits.MaxDurationSeconds,
+			MaxOutputBytes:            envelope.Limits.MaxOutputBytes,
+		})
+		return execution.ArtifactContent(), err
 	case "codex":
 		execution, err := codexadapter.ExecuteContext(ctx, codexadapter.Spec{
 			WorkspaceRoot:             envelope.Workspace.Root,
@@ -177,6 +191,8 @@ func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (s
 
 func adapterDenial(job model.Job, adapter string, err error) (denialSpec, bool) {
 	switch adapter {
+	case "claude-code":
+		return claudeCodeDenial(job, err)
 	case "codex":
 		return codexDenial(job, err)
 	case "powershell":
@@ -188,6 +204,8 @@ func adapterDenial(job model.Job, adapter string, err error) (denialSpec, bool) 
 
 func resultSchemaForAdapter(adapter string) string {
 	switch adapter {
+	case "claude-code":
+		return claudecodeadapter.ResultSchemaVersion
 	case "codex":
 		return codexadapter.ResultSchemaVersion
 	case "powershell":

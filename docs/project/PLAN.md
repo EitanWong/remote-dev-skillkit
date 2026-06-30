@@ -61,7 +61,7 @@ Phase 2 starts with an in-memory gateway to validate ticket, host, job, artifact
 
 - `acpx` adapter.
 - Codex adapter.
-- Claude Code adapter.
+- Claude Code adapter MVP is implemented; remaining adapter backlog focuses on ACP/acpx and production Adapter SDK hardening.
 - Workspace locks.
 - Git worktree/branch workflow.
 - Test evidence collection.

@@ -17,7 +17,7 @@ const (
 	CapabilityGUIView                Capability = "gui.view"
 	CapabilityGUIControlApproval     Capability = "gui.control.requiresApproval"
 	CapabilityDevCodex               Capability = "dev.codex"
-	CapabilityDevClaude              Capability = "dev.claude"
+	CapabilityDevClaudeCode          Capability = "claude-code.run"
 	CapabilityDevACP                 Capability = "dev.acpx"
 )
 
