@@ -1,8 +1,8 @@
 # Development Gateway
 
-`rdev gateway serve --dev` starts a local HTTP gateway backed by the same in-memory state machine used by `rdev mcp serve`.
+`rdev gateway serve --dev` starts a local HTTP or HTTPS gateway backed by the same in-memory state machine used by `rdev mcp serve`.
 
-This is a development surface only. It is not production transport, does not authenticate requests, and binds to `127.0.0.1` by default.
+This is a development surface only. It is not the production WSS host transport and binds to `127.0.0.1` by default. Plain HTTP does not authenticate requests. When `--tls-cert` and `--tls-key` are set, the dev gateway serves HTTPS. When `--client-ca` is also set, the dev gateway requires and verifies client certificates signed by that CA.
 
 ## Start
 
@@ -15,6 +15,20 @@ rdev gateway serve \
   --signing-key .rdev/keys/gateway-signing-key.json \
   --manifest-signing-key .rdev/keys/manifest-root-key.json
 ```
+
+For local TLS or mTLS transport preflight, add server certificate material and, when mutual TLS is required, a client CA:
+
+```bash
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --tls-cert .rdev/tls/gateway-server.pem \
+  --tls-key .rdev/tls/gateway-server-key.pem \
+  --client-ca .rdev/tls/client-ca.pem
+```
+
+`--tls-cert` and `--tls-key` must be provided together. `--client-ca` requires both of them and changes the listener from server-authenticated HTTPS to mTLS by setting the gateway to require and verify client certificates. This does not replace signed job envelopes, enrollment certificates, host-local policy, or approval gates; transport authentication is not job authorization.
 
 When `--signing-key` is set, the dev gateway creates or reuses an Ed25519 signing key file with `0600` permissions and prints its public-key fingerprint:
 
@@ -822,9 +836,9 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 ## Limitations
 
 - In-memory state by default. `--state` adds a restart-safe development JSON snapshot, but it is not a production database, lock manager, backup policy, or multi-node storage layer.
-- No production WSS/mTLS host transport. Development HTTPS long-poll is available for local outbound-channel testing.
-- No authentication.
-- No production TLS.
+- No production WSS/mTLS host transport. Development HTTPS long-poll and the optional dev TLS/mTLS listener are available for local outbound-channel and certificate preflight testing.
+- No production application-layer authentication. Plain HTTP has no authentication; optional mTLS authenticates the client certificate at the transport layer only.
+- No production TLS lifecycle, ACME/cert rotation, public gateway auth, or WSS session protocol. The dev TLS/mTLS listener only loads local PEM files and enforces client certificates when `--client-ca` is configured.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.

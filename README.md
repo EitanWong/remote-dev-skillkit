@@ -58,6 +58,7 @@ Implemented now:
 - `rdev mcp serve` minimal MCP stdio server for initialize, tools/list, and tools/call.
 - `rdev gateway serve --dev` local HTTP development gateway.
 - Optional development gateway state snapshots through `rdev gateway serve --dev --signing-key ... --state ...`, preserving tickets, hosts, jobs, artifacts, audit events, and trust bundles across gateway restarts while keeping the same signing key.
+- Optional development gateway TLS and mTLS listener through `rdev gateway serve --dev --tls-cert <server.pem> --tls-key <server-key.pem> [--client-ca <ca.pem>]`, requiring verified client certificates when `--client-ca` is set. This is a transport/authentication primitive for local and pre-production testing, not the full production WSS host channel.
 - `rdev demo local` in-memory ticket, host approval, job, artifact, and audit flow.
 - Development signed job envelopes using Ed25519 in-memory gateway keys.
 - Local dev host registration, job polling, and job completion loop.
@@ -133,7 +134,7 @@ Not implemented yet:
 - Authenticated durable managed host trust distribution beyond the current development endpoints and local protected stores.
 - Full production bootstrap trust root lifecycle and release signing policy.
 - Platform-native code signing / Authenticode policy for Windows releases.
-- Production WSS host transport.
+- Production WSS host transport beyond the current HTTPS long-poll fallback and dev TLS/mTLS listener.
 - Production-grade shell adapter hardening beyond the development scoped executor.
 - Full production adapter SDK beyond the current lifecycle runner and lifecycle/result/cancellation/runtime-fixture conformance verifiers.
 - Hardware-backed or fleet-managed protected host identity/trust storage beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, Linux keyctl, and file-backed store paths.

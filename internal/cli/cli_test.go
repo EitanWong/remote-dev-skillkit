@@ -5,9 +5,16 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2457,6 +2464,108 @@ func TestGatewayServeStateRequiresSigningKey(t *testing.T) {
 	}
 }
 
+func TestGatewayTLSConfigRequiresCompleteKeyPair(t *testing.T) {
+	_, err := gatewayTLSConfig(gatewayServeOptions{TLSCertPath: filepath.Join(t.TempDir(), "cert.pem")})
+	if err == nil || !strings.Contains(err.Error(), "both --tls-cert and --tls-key") {
+		t.Fatalf("expected incomplete TLS keypair error, got %v", err)
+	}
+	_, err = gatewayTLSConfig(gatewayServeOptions{ClientCAPath: filepath.Join(t.TempDir(), "ca.pem")})
+	if err == nil || !strings.Contains(err.Error(), "--client-ca requires --tls-cert and --tls-key") {
+		t.Fatalf("expected client CA TLS requirement, got %v", err)
+	}
+}
+
+func TestGatewayTLSConfigLoadsServerTLS(t *testing.T) {
+	material := writeGatewayTLSMaterial(t)
+	config, err := gatewayTLSConfig(gatewayServeOptions{
+		TLSCertPath: material.ServerCert,
+		TLSKeyPath:  material.ServerKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config == nil {
+		t.Fatal("expected TLS config")
+	}
+	if config.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("expected TLS 1.2 minimum, got %d", config.MinVersion)
+	}
+	if len(config.Certificates) != 1 {
+		t.Fatalf("expected one server certificate, got %d", len(config.Certificates))
+	}
+	if config.ClientAuth != tls.NoClientCert {
+		t.Fatalf("expected no client cert requirement, got %v", config.ClientAuth)
+	}
+}
+
+func TestGatewayTLSConfigRequiresClientCertificatesWhenClientCASet(t *testing.T) {
+	material := writeGatewayTLSMaterial(t)
+	config, err := gatewayTLSConfig(gatewayServeOptions{
+		TLSCertPath:  material.ServerCert,
+		TLSKeyPath:   material.ServerKey,
+		ClientCAPath: material.CACert,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("expected client certificate enforcement, got %v", config.ClientAuth)
+	}
+	if config.ClientCAs == nil {
+		t.Fatal("expected client CA pool")
+	}
+}
+
+func TestGatewayDevMTLSHealthzRequiresClientCertificate(t *testing.T) {
+	material := writeGatewayTLSMaterial(t)
+	config, err := gatewayTLSConfig(gatewayServeOptions{
+		TLSCertPath:  material.ServerCert,
+		TLSKeyPath:   material.ServerKey,
+		ClientCAPath: material.CACert,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(httpapi.NewServer(gateway.NewMemoryGateway()).Handler())
+	server.TLS = config
+	server.StartTLS()
+	defer server.Close()
+
+	caPEM, err := os.ReadFile(material.CACert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		t.Fatal("expected test CA PEM to parse")
+	}
+	noClientCert := server.Client()
+	noClientCert.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}}
+	resp, err := noClientCert.Get(server.URL + "/healthz")
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("expected TLS handshake to fail without a client certificate")
+	}
+
+	clientCert, err := tls.LoadX509KeyPair(material.ClientCert, material.ClientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withClientCert := server.Client()
+	withClientCert.Transport = &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs:      roots,
+		Certificates: []tls.Certificate{clientCert},
+	}}
+	resp, err = withClientCert.Get(server.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with client certificate, got %d", resp.StatusCode)
+	}
+}
+
 func TestAuditExportAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	jsonlPath := filepath.Join(dir, "events.jsonl")
@@ -4782,6 +4891,102 @@ func buildCLITestBinary(t *testing.T, source string) string {
 		t.Fatalf("go build failed: %v\n%s", err, string(output))
 	}
 	return binaryPath
+}
+
+type gatewayTLSMaterial struct {
+	CACert     string
+	ServerCert string
+	ServerKey  string
+	ClientCert string
+	ClientKey  string
+}
+
+func writeGatewayTLSMaterial(t *testing.T) gatewayTLSMaterial {
+	t.Helper()
+	dir := t.TempDir()
+	caCert, caKey := createTestCertificateAuthority(t)
+	serverCert, serverKey := createSignedTestCertificate(t, caCert, caKey, "rdev-gateway-test-server", []string{"localhost"}, []net.IP{net.ParseIP("127.0.0.1")}, nil)
+	clientCert, clientKey := createSignedTestCertificate(t, caCert, caKey, "rdev-gateway-test-client", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	material := gatewayTLSMaterial{
+		CACert:     filepath.Join(dir, "ca.pem"),
+		ServerCert: filepath.Join(dir, "server-cert.pem"),
+		ServerKey:  filepath.Join(dir, "server-key.pem"),
+		ClientCert: filepath.Join(dir, "client-cert.pem"),
+		ClientKey:  filepath.Join(dir, "client-key.pem"),
+	}
+	writePEMFile(t, material.CACert, "CERTIFICATE", caCert.Raw)
+	writePEMFile(t, material.ServerCert, "CERTIFICATE", serverCert.Raw)
+	writePEMFile(t, material.ServerKey, "RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(serverKey))
+	writePEMFile(t, material.ClientCert, "CERTIFICATE", clientCert.Raw)
+	writePEMFile(t, material.ClientKey, "RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(clientKey))
+	return material
+}
+
+func createTestCertificateAuthority(t *testing.T) (*x509.Certificate, *rsa.PrivateKey) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "rdev gateway test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	raw, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, key
+}
+
+func createSignedTestCertificate(t *testing.T, caCert *x509.Certificate, caKey *rsa.PrivateKey, commonName string, dnsNames []string, ipAddresses []net.IP, extKeyUsage []x509.ExtKeyUsage) (*x509.Certificate, *rsa.PrivateKey) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(extKeyUsage) == 0 {
+		extKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  extKeyUsage,
+		DNSNames:     dnsNames,
+		IPAddresses:  ipAddresses,
+	}
+	raw, err := x509.CreateCertificate(rand.Reader, template, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, key
+}
+
+func writePEMFile(t *testing.T, path, blockType string, der []byte) {
+	t.Helper()
+	var content bytes.Buffer
+	if err := pem.Encode(&content, &pem.Block{Type: blockType, Bytes: der}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func waitForJobStatus(t *testing.T, gw *gateway.MemoryGateway, jobID string, status model.JobStatus, timeout time.Duration) {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -349,6 +351,21 @@ type trustRevokeOptions struct {
 	Reason      string
 	ValidHours  int
 	Force       bool
+}
+
+type gatewayServeOptions struct {
+	Addr                    string
+	AuditLog                string
+	StatePath               string
+	SigningKeyPath          string
+	SigningKeyID            string
+	ManifestSigningKeyPath  string
+	ManifestSigningKeyID    string
+	EnrollmentRootPublicKey string
+	EnrollmentRevocations   string
+	TLSCertPath             string
+	TLSKeyPath              string
+	ClientCAPath            string
 }
 
 func (a App) acceptance(ctx context.Context, args []string) error {
@@ -2425,13 +2442,29 @@ func (a App) gateway(args []string) error {
 		manifestSigningKeyID := fs.String("manifest-signing-key-id", "manifest-dev", "signing key id for join manifests")
 		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key; when set, host registration requires rdev.host-enrollment-certificate.v1")
 		enrollmentRevocations := fs.String("enrollment-revocations", "", "optional signed enrollment revocation list JSON path")
+		tlsCert := fs.String("tls-cert", "", "optional TLS server certificate PEM path for the development gateway")
+		tlsKey := fs.String("tls-key", "", "optional TLS server private key PEM path for the development gateway")
+		clientCA := fs.String("client-ca", "", "optional client CA PEM path; when set, require and verify client certificates")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if !*dev {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
-		return a.gatewayServeDev(*addr, *auditLog, *statePath, *signingKey, *signingKeyID, *manifestSigningKey, *manifestSigningKeyID, *enrollmentRootPublicKey, *enrollmentRevocations)
+		return a.gatewayServeDev(gatewayServeOptions{
+			Addr:                    *addr,
+			AuditLog:                *auditLog,
+			StatePath:               *statePath,
+			SigningKeyPath:          *signingKey,
+			SigningKeyID:            *signingKeyID,
+			ManifestSigningKeyPath:  *manifestSigningKey,
+			ManifestSigningKeyID:    *manifestSigningKeyID,
+			EnrollmentRootPublicKey: *enrollmentRootPublicKey,
+			EnrollmentRevocations:   *enrollmentRevocations,
+			TLSCertPath:             *tlsCert,
+			TLSKeyPath:              *tlsKey,
+			ClientCAPath:            *clientCA,
+		})
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
 	}
@@ -2925,26 +2958,26 @@ func (a App) release(args []string) error {
 	}
 }
 
-func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingKeyID, manifestSigningKeyPath, manifestSigningKeyID, enrollmentRootPublicKey, enrollmentRevocationsPath string) error {
-	if statePath != "" && signingKeyPath == "" {
+func (a App) gatewayServeDev(opts gatewayServeOptions) error {
+	if opts.StatePath != "" && opts.SigningKeyPath == "" {
 		return fmt.Errorf("gateway serve --state requires --signing-key so restored job envelopes keep the same trust root")
 	}
-	key, created, err := signing.LoadOrCreate(signingKeyPath, signingKeyID)
+	key, created, err := signing.LoadOrCreate(opts.SigningKeyPath, opts.SigningKeyID)
 	if err != nil {
 		return err
 	}
 	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
-	if enrollmentRevocationsPath != "" && enrollmentRootPublicKey == "" {
+	if opts.EnrollmentRevocations != "" && opts.EnrollmentRootPublicKey == "" {
 		return fmt.Errorf("gateway serve --enrollment-revocations requires --enrollment-root-public-key")
 	}
-	if enrollmentRootPublicKey != "" {
-		root, err := parseRootPublicKey(enrollmentRootPublicKey)
+	if opts.EnrollmentRootPublicKey != "" {
+		root, err := parseRootPublicKey(opts.EnrollmentRootPublicKey)
 		if err != nil {
 			return err
 		}
 		gw.WithEnrollmentRoot(root)
-		if enrollmentRevocationsPath != "" {
-			revocations, err := readEnrollmentRevocationListFile(enrollmentRevocationsPath)
+		if opts.EnrollmentRevocations != "" {
+			revocations, err := readEnrollmentRevocationListFile(opts.EnrollmentRevocations)
 			if err != nil {
 				return err
 			}
@@ -2952,7 +2985,7 @@ func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingK
 				return err
 			}
 			gw.WithEnrollmentRevocations(revocations)
-			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment revocations loaded path=%s revoked=%d\n", enrollmentRevocationsPath, len(revocations.RevokedCertificates))
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment revocations loaded path=%s revoked=%d\n", opts.EnrollmentRevocations, len(revocations.RevokedCertificates))
 		}
 		fingerprint, err := root.Fingerprint()
 		if err != nil {
@@ -2960,19 +2993,19 @@ func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingK
 		}
 		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment root id=%s fingerprint=%s\n", root.SigningKeyID, fingerprint)
 	}
-	if statePath != "" {
-		snapshot, loaded, err := gw.LoadSnapshotIfExists(statePath)
+	if opts.StatePath != "" {
+		snapshot, loaded, err := gw.LoadSnapshotIfExists(opts.StatePath)
 		if err != nil {
 			return err
 		}
 		if loaded {
-			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot loaded from %s tickets=%d hosts=%d jobs=%d audit=%d\n", statePath, len(snapshot.Tickets), len(snapshot.Hosts), len(snapshot.Jobs), len(snapshot.Audit))
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot loaded from %s tickets=%d hosts=%d jobs=%d audit=%d\n", opts.StatePath, len(snapshot.Tickets), len(snapshot.Hosts), len(snapshot.Jobs), len(snapshot.Audit))
 		} else {
-			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot will be created at %s\n", statePath)
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot will be created at %s\n", opts.StatePath)
 		}
 	}
-	if manifestSigningKeyPath != "" {
-		manifestKey, manifestCreated, err := signing.LoadOrCreate(manifestSigningKeyPath, manifestSigningKeyID)
+	if opts.ManifestSigningKeyPath != "" {
+		manifestKey, manifestCreated, err := signing.LoadOrCreate(opts.ManifestSigningKeyPath, opts.ManifestSigningKeyID)
 		if err != nil {
 			return err
 		}
@@ -2981,24 +3014,80 @@ func (a App) gatewayServeDev(addr, auditLog, statePath, signingKeyPath, signingK
 		if manifestCreated {
 			action = "created"
 		}
-		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway manifest signing key %s at %s\n", action, manifestSigningKeyPath)
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway manifest signing key %s at %s\n", action, opts.ManifestSigningKeyPath)
 		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway manifest root id=%s public_key=%s\n", manifestKey.ID, encodeRootPublicKey(manifestKey.ID, manifestKey.PublicKey))
 	}
-	if auditLog != "" {
-		store := audit.NewJSONLStore(auditLog)
+	if opts.AuditLog != "" {
+		store := audit.NewJSONLStore(opts.AuditLog)
 		gw.WithAuditSink(&store)
 	}
-	server := httpapi.NewServerWithState(gw, statePath)
-	if signingKeyPath != "" {
+	server := httpapi.NewServerWithState(gw, opts.StatePath)
+	if opts.SigningKeyPath != "" {
 		action := "loaded"
 		if created {
 			action = "created"
 		}
-		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway signing key %s at %s\n", action, signingKeyPath)
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway signing key %s at %s\n", action, opts.SigningKeyPath)
 	}
 	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway signing key id=%s fingerprint=%s\n", key.ID, signing.Fingerprint(key.PublicKey))
-	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev listening on http://%s\n", addr)
-	return http.ListenAndServe(addr, server.Handler())
+	tlsConfig, err := gatewayTLSConfig(opts)
+	if err != nil {
+		return err
+	}
+	scheme := "http"
+	if tlsConfig != nil {
+		scheme = "https"
+		if opts.ClientCAPath != "" {
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev mTLS client CA loaded from %s\n", opts.ClientCAPath)
+		}
+	}
+	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev listening on %s://%s\n", scheme, opts.Addr)
+	return listenAndServeGateway(opts.Addr, server.Handler(), tlsConfig)
+}
+
+func gatewayTLSConfig(opts gatewayServeOptions) (*tls.Config, error) {
+	if opts.ClientCAPath != "" && (opts.TLSCertPath == "" || opts.TLSKeyPath == "") {
+		return nil, fmt.Errorf("gateway serve --client-ca requires --tls-cert and --tls-key")
+	}
+	if opts.TLSCertPath == "" && opts.TLSKeyPath == "" {
+		return nil, nil
+	}
+	if opts.TLSCertPath == "" || opts.TLSKeyPath == "" {
+		return nil, fmt.Errorf("gateway serve TLS requires both --tls-cert and --tls-key")
+	}
+	certificate, err := tls.LoadX509KeyPair(opts.TLSCertPath, opts.TLSKeyPath)
+	if err != nil {
+		return nil, err
+	}
+	config := &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{certificate},
+	}
+	if opts.ClientCAPath != "" {
+		content, err := os.ReadFile(opts.ClientCAPath)
+		if err != nil {
+			return nil, err
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(content) {
+			return nil, fmt.Errorf("gateway serve --client-ca does not contain a valid PEM certificate")
+		}
+		config.ClientAuth = tls.RequireAndVerifyClientCert
+		config.ClientCAs = pool
+	}
+	return config, nil
+}
+
+func listenAndServeGateway(addr string, handler http.Handler, tlsConfig *tls.Config) error {
+	server := &http.Server{
+		Addr:      addr,
+		Handler:   handler,
+		TLSConfig: tlsConfig,
+	}
+	if tlsConfig != nil {
+		return server.ListenAndServeTLS("", "")
+	}
+	return server.ListenAndServe()
 }
 
 func (a App) enrollmentSignCertificate(opts enrollmentSignCertificateOptions) error {
@@ -4642,6 +4731,7 @@ Usage:
   rdev mcp tools
   rdev mcp serve
   rdev gateway serve --dev --addr 127.0.0.1:8787 --signing-key .rdev/keys/gateway-signing-key.json --state .rdev/gateway/state.json --enrollment-root-public-key enrollment-root:... --enrollment-revocations .rdev/enrollment/revocations.json
+  rdev gateway serve --dev --addr 127.0.0.1:8787 --tls-cert gateway.pem --tls-key gateway-key.pem --client-ca client-ca.pem
   rdev audit export --input .rdev/audit/events.jsonl --out .rdev/audit/chain.json
   rdev audit verify --input .rdev/audit/chain.json
   rdev evidence export --job-json job.json --artifacts-json artifacts.json --audit-jsonl events.jsonl --out job_evidence
