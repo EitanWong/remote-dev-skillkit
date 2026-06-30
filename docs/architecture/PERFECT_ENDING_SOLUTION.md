@@ -18,6 +18,208 @@ Supporting documents have narrower jobs:
 This file defines the product, the open-source project, and Eitan's
 Hermes/Lucky deployment.
 
+## Converged Perfect Ending - 2026-06-30
+
+This is the final compression layer for the architecture. Future architecture
+changes should patch this section and the affected contracts instead of adding
+another dated "final" layer. Sections below remain rationale, detail, and
+history; this section is the decision lens.
+
+### One Sentence
+
+Remote Dev Skillkit is a permissioned agent-work operating layer: it lets an
+agent ask a real machine to perform bounded development or repair work, while
+the gateway governs intent, the host verifies local safety, adapters execute
+inside scoped lifecycles, and proof is produced before any success claim.
+
+It is not a remote-admin product, not a tunnel, not screen sharing, not a
+coding-CLI wrapper, and not a Hermes-only integration. Those tools can be
+plugins. The product is the safety and proof kernel around them.
+
+### Final Topology
+
+```text
+agent runtime
+  Hermes/Lucky, Codex, Claude Code, OpenCode, generic MCP agent
+    |
+    v
+Skillkit + MCP/API
+  typed intent, policy preview, approval request, evidence review
+    |
+    v
+rdev-gateway
+  tickets, hosts, leases, envelopes, approvals, artifacts, audit, revocation
+    |
+    v
+outbound host channel
+  HTTPS long-poll fallback, WSS/mTLS production path
+    |
+    v
+rdev-host sovereignty kernel
+  identity, trust, nonce, local policy, workspace lock, approval consumption
+    |
+    v
+adapter lifecycle
+  shell, PowerShell, Codex, Claude Code, ACP/acpx, GUI, mesh, workspace provider
+    |
+    v
+evidence, audit, release, acceptance, and conformance verifiers
+```
+
+Only two edges may cross a network boundary by default: agent to gateway, and
+host to gateway or host-facing edge. Temporary hosts never expose inbound
+listeners.
+
+### Six Closure Loops
+
+The project is complete only when these loops are closed end to end:
+
+| Loop | Start | End state |
+|---|---|---|
+| Distribution | source tree and release key | verified platform candidate, signed bundle, Skillkit bundle, post-release install proof |
+| Enrollment | operator ticket | host identity, capabilities, trust root, mode, expiry, approval, revocation path |
+| Authorization | typed intent | signed host-bound envelope plus explicit approval requirements |
+| Execution | host lease | denial, approval-required pause, result, cancellation, or failure artifact |
+| Proof | artifacts and audit events | checksummed evidence bundle, hash-chain verification, acceptance package |
+| Recovery | crash, offline host, revoke, rotate, uninstall | idempotent state, local spool, cancel/stop/revoke/rotate/uninstall evidence |
+
+If a feature does not fit one of these loops, it is probably an adapter,
+deployment convenience, or future plugin rather than kernel work.
+
+### Authority Planes
+
+| Plane | Owns | Must never own |
+|---|---|---|
+| Agent | planning, explanation, review prompts | standing host credentials or self-approval |
+| Skillkit/MCP | typed workflow surface and verifier entrypoints | hidden persistence or raw default shell |
+| Gateway | orchestration, policy dry-run, signing, approvals, audit, revocation | local filesystem trust or host-side execution safety |
+| Host | identity, trust, nonce, policy, locks, adapter supervision, local stop | authority invention or approval broadening |
+| Adapter | one bounded execution domain | signing, approval, persistence, transport authority |
+| Proof | evidence, audit, conformance, release, acceptance verification | narrative-only success |
+| Distribution | signed artifacts and install plans | runtime job authorization |
+
+Any feature that collapses these planes is rejected or moved behind a plugin
+boundary until it can preserve the separation.
+
+### Mode Products
+
+Modes are separate product contracts sharing one kernel:
+
+| Mode | Target | Persistence | Required promise |
+|---|---|---:|---|
+| attended temporary | third-party or short-lived host | none | one visible command, outbound-only, TTL-bound, local stop, transcript, no service residue |
+| managed owned host | Eitan-owned or managed fleet host | explicit service | reconnect, trust refresh, workspace locks, evidence spool, status/logs/stop/uninstall |
+| workspace provider | cloud/devcontainer/Coder/DevPod style backend | provider-owned | create/use/destroy through signed jobs and provider evidence |
+| break-glass | emergency repair | shorter than normal | narrower scope, stronger approval, denser audit, no permanent policy weakening |
+
+Temporary mode must never become stealth managed mode. Managed mode must never
+become ambient admin.
+
+### Stable Protocol Family
+
+The supported system revolves around a small protocol family:
+
+- distribution: `rdev.release-bundle.v1`, `rdev.release-candidate.v1`,
+  `rdev.skillkit-manifest.v1`;
+- enrollment: `rdev.ticket.v1`, `rdev.join-manifest.v1`,
+  `rdev.host-registration.v1`, `rdev.trust-bundle.v1`;
+- authorization: `rdev.job-envelope.v1`, `rdev.approval-token.v1`;
+- execution: `rdev.host-denial.v1`, `rdev.approval-required.v1`, adapter result
+  and runtime fixture artifacts;
+- proof: `rdev.evidence-bundle.v1`, `rdev.audit-chain.v1`,
+  `rdev.acceptance-package.*.v1`, adapter conformance reports.
+
+New transports, databases, UIs, and adapters are allowed only if they preserve
+these objects and their verifier semantics.
+
+### Storage And Trust Target
+
+The production gateway should use durable storage for tickets, hosts,
+capabilities, jobs, leases, approvals, artifacts, audit events, trust bundles,
+revocations, and release records. SQLite plus filesystem storage is acceptable
+for single-user and development deployments if the same logical model is kept.
+
+Managed hosts should use OS-protected storage where available:
+
+| Platform | Identity and trust target | Service target |
+|---|---|---|
+| macOS | Keychain, file fallback only for dev/test | LaunchAgent first |
+| Windows | DPAPI or Windows credential/key storage | Windows Service, demand start by default |
+| Linux | libsecret/keyctl or `0600` fallback with documented risk | systemd user service first |
+
+File-backed stores remain development or degraded-mode paths until the release
+evidence says otherwise.
+
+### Permission Lattice
+
+The final product optimizes for maximum useful access with explicit grant,
+local validation, audit, and revocation:
+
+| Ring | Scope | Examples | Default |
+|---|---|---|---|
+| L0 observe | facts without mutation | capability inventory, logs, `git status` | allowed on approved host/workspace |
+| L1 workspace | project mutation | edit, test, build, generated files | workspace lock required |
+| L2 repair | user-level machine repair | package/cache/process repair | scoped approval or managed policy |
+| L3 privileged or visual | OS, services, GUI, elevation | UAC/admin, LaunchAgent/systemd/Service, screenshots | fresh approval |
+| L4 external consequence | outside-host effects | push, merge, deploy, publish, paid action, credentials | approval after evidence review |
+
+Managed mode may remember a host. It must not remember broad L3 or L4 consent.
+
+### Acceptance Rule
+
+Support claims must use the highest proven level only:
+
+| Level | Meaning | Evidence |
+|---|---|---|
+| design | architecture exists | document only |
+| plan | reviewed command or package plan exists | plan verifier |
+| dry-run | local generator produces commands without mutation | dry-run transcript |
+| simulated | fixture or local harness passes | tests and fixture evidence |
+| accepted | real platform proves it | redacted transcript, package, audit, verifier |
+| supported | accepted and release docs match | CI, release verification, security docs, install docs |
+
+This rule is intentionally strict. A generated service plan is not service
+support. A bootstrap script is not Windows acceptance. A passing adapter unit
+test is not production adapter support.
+
+### Golden User Outcomes
+
+The perfect ending is reached when all of these are boring:
+
+1. A non-technical Windows user can run one visible temporary command, the host
+   verifies release inputs, connects outbound only, pauses for dangerous
+   actions, and leaves no persistence after stop or TTL.
+2. Eitan can tell Lucky to use an owned Mac, Linux, or Windows host; the managed
+   service reconnects, runs Codex/Claude/ACP in a locked worktree, returns diff
+   and test evidence, and can be stopped, revoked, rotated, or uninstalled.
+3. A self-hosted user can replace Lunflux, Hermes, GitHub, storage, and adapters
+   without replacing the safety kernel.
+4. A third-party adapter author can scaffold, implement, run, verify, and
+   publish an adapter without learning private project internals or bypassing
+   policy.
+5. A maintainer can verify a public release from source tag to downloaded
+   binary, Skillkit install, platform acceptance package, audit chain, and
+   security policy.
+
+### Final Close Order
+
+The remaining work closes in this order:
+
+1. real clean Windows temporary acceptance package;
+2. real service-backed managed Mac acceptance package;
+3. real Linux systemd reboot/reconnect acceptance package;
+4. real Windows Service managed acceptance package;
+5. OS-protected host identity/trust stores;
+6. authenticated trust refresh, revocation propagation, and emergency drills;
+7. WSS/mTLS production transport while preserving HTTPS long-poll fallback;
+8. production Adapter SDK integration for built-in and third-party adapters;
+9. optional GUI, mesh, Coder, DevPod, browser, and workspace-provider adapters;
+10. public release only after release, install, acceptance, security, and
+    self-host documentation match shipped behavior.
+
+This order is not project management decoration. It is part of the architecture:
+proof and recovery must outrun breadth.
+
 ## Final Closure Specification - 2026-06-30
 
 This section is the practical closure spec for the perfect-ending design. The
