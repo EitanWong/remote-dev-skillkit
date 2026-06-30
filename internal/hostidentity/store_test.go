@@ -98,6 +98,34 @@ func TestLoadOrCreateUsesProtectedStoreRef(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateUsesDPAPIProtectedStoreRef(t *testing.T) {
+	backend := &identityMemoryDPAPIBackend{items: map[string][]byte{}}
+	restore := protectedstore.SetDPAPIBackendForTest(backend)
+	defer restore()
+
+	ref := "dpapi:remote-dev-skillkit/managed-windows"
+	first, created, err := LoadOrCreate(ref, "host-dpapi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected DPAPI identity to be created")
+	}
+	second, created, err := LoadOrCreate(ref, "host-dpapi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("expected DPAPI identity to be reused")
+	}
+	if !second.PrivateKey.Equal(first.PrivateKey) {
+		t.Fatal("expected DPAPI private key to be reused")
+	}
+	if _, _, err := LoadOrCreate(ref, "other-key"); err == nil {
+		t.Fatal("expected DPAPI key id mismatch")
+	}
+}
+
 type identityMemoryKeychainBackend struct {
 	items map[string][]byte
 }
@@ -111,6 +139,23 @@ func (b *identityMemoryKeychainBackend) Load(service, account string) ([]byte, b
 }
 
 func (b *identityMemoryKeychainBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type identityMemoryDPAPIBackend struct {
+	items map[string][]byte
+}
+
+func (b *identityMemoryDPAPIBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *identityMemoryDPAPIBackend) Save(service, account string, content []byte) error {
 	b.items[service+"/"+account] = append([]byte(nil), content...)
 	return nil
 }

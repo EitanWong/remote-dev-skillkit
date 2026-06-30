@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-const KeychainPrefix = "keychain:"
+const (
+	KeychainPrefix = "keychain:"
+	DPAPIPrefix    = "dpapi:"
+)
 
 var ErrNotFound = errors.New("protected store item not found")
 
@@ -26,27 +29,53 @@ type keychainBackend interface {
 	Save(service, account string, content []byte) error
 }
 
+type dpapiBackend interface {
+	Load(service, account string) ([]byte, bool, error)
+	Save(service, account string, content []byte) error
+}
+
 var activeKeychainBackend keychainBackend = platformKeychainBackend()
+var activeDPAPIBackend dpapiBackend = platformDPAPIBackend()
 
 func IsRef(value string) bool {
-	return strings.HasPrefix(value, KeychainPrefix)
+	return strings.HasPrefix(value, KeychainPrefix) || strings.HasPrefix(value, DPAPIPrefix)
 }
 
 func ParseRef(value string) (Ref, error) {
-	if !IsRef(value) {
+	switch {
+	case strings.HasPrefix(value, KeychainPrefix):
+		service, account, err := parseServiceAccount(value, KeychainPrefix)
+		if err != nil {
+			return Ref{}, fmt.Errorf("keychain ref must be formatted keychain:<service>/<account>")
+		}
+		return Ref{
+			Backend: "keychain",
+			Service: service,
+			Account: account,
+		}, nil
+	case strings.HasPrefix(value, DPAPIPrefix):
+		service, account, err := parseServiceAccount(value, DPAPIPrefix)
+		if err != nil {
+			return Ref{}, fmt.Errorf("dpapi ref must be formatted dpapi:<service>/<account>")
+		}
+		return Ref{
+			Backend: "dpapi",
+			Service: service,
+			Account: account,
+		}, nil
+	default:
 		return Ref{}, fmt.Errorf("unsupported protected store ref %q", value)
 	}
-	raw := strings.TrimPrefix(value, KeychainPrefix)
+}
+
+func parseServiceAccount(value, prefix string) (string, string, error) {
+	raw := strings.TrimPrefix(value, prefix)
 	raw = strings.TrimPrefix(raw, "//")
 	parts := strings.SplitN(raw, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return Ref{}, fmt.Errorf("keychain ref must be formatted keychain:<service>/<account>")
+		return "", "", fmt.Errorf("missing service or account")
 	}
-	return Ref{
-		Backend: "keychain",
-		Service: parts[0],
-		Account: parts[1],
-	}, nil
+	return parts[0], parts[1], nil
 }
 
 func Open(value string) (Store, error) {
@@ -54,7 +83,14 @@ func Open(value string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return KeychainStore{Service: ref.Service, Account: ref.Account}, nil
+	switch ref.Backend {
+	case "keychain":
+		return KeychainStore{Service: ref.Service, Account: ref.Account}, nil
+	case "dpapi":
+		return DPAPIStore{Service: ref.Service, Account: ref.Account}, nil
+	default:
+		return nil, fmt.Errorf("unsupported protected store backend %q", ref.Backend)
+	}
 }
 
 type KeychainStore struct {
@@ -76,10 +112,37 @@ func (s KeychainStore) Save(content []byte) error {
 	return activeKeychainBackend.Save(s.Service, s.Account, content)
 }
 
+type DPAPIStore struct {
+	Service string
+	Account string
+}
+
+func (s DPAPIStore) Load() ([]byte, bool, error) {
+	if s.Service == "" || s.Account == "" {
+		return nil, false, fmt.Errorf("dpapi service and account are required")
+	}
+	return activeDPAPIBackend.Load(s.Service, s.Account)
+}
+
+func (s DPAPIStore) Save(content []byte) error {
+	if s.Service == "" || s.Account == "" {
+		return fmt.Errorf("dpapi service and account are required")
+	}
+	return activeDPAPIBackend.Save(s.Service, s.Account, content)
+}
+
 func SetKeychainBackendForTest(next keychainBackend) func() {
 	previous := activeKeychainBackend
 	activeKeychainBackend = next
 	return func() {
 		activeKeychainBackend = previous
+	}
+}
+
+func SetDPAPIBackendForTest(next dpapiBackend) func() {
+	previous := activeDPAPIBackend
+	activeDPAPIBackend = next
+	return func() {
+		activeDPAPIBackend = previous
 	}
 }

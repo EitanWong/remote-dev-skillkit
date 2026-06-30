@@ -12,6 +12,7 @@
 - [ ] Build binaries for macOS, Linux, and Windows with `scripts/release/build-artifacts.sh`.
 - [ ] Review `rdev.build-artifacts.v1` and `checksums.txt`.
 - [ ] Confirm macOS artifacts that claim Keychain-backed managed host identity/trust support were built natively with `cgo_enabled=true`, or explicitly document that `keychain:` stores are unavailable in that artifact.
+- [ ] Confirm Windows artifacts that claim DPAPI-backed managed host identity/trust support were built for Windows and have at least cross-compiled `internal/protectedstore` / `rdev-host` coverage; real Windows runtime acceptance remains release-blocking before support claims.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.

@@ -127,6 +127,7 @@
 - [x] Add installable Skillkit bundle verification for required skills, framework docs, file checksums, safe paths, and unlisted files.
 - [x] Add host-bound managed trust bundle update checks for trust-store refresh.
 - [x] Add macOS Keychain protected-store references for managed host identity and trust persistence.
+- [x] Add Windows DPAPI protected-store references for managed host identity and trust persistence.
 - [x] Add macOS LaunchAgent plist generation for explicit managed host install.
 - [x] Add macOS LaunchAgent status inspection and safe plist uninstall.
 - [x] Add workspace lock manager and Git worktree preparation foundation.
@@ -167,7 +168,7 @@
 
 - [ ] Add WSS/mTLS transport.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
-- [ ] Add Windows DPAPI and Linux libsecret/keyctl host identity/trust storage plus production enrollment certificates.
+- [ ] Add Linux libsecret/keyctl host identity/trust storage plus production enrollment certificates.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.

@@ -31,6 +31,32 @@ func TestParseKeychainRefRejectsMissingAccount(t *testing.T) {
 	}
 }
 
+func TestParseDPAPIRef(t *testing.T) {
+	ref, err := ParseRef("dpapi:remote-dev-skillkit/managed-windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Backend != "dpapi" || ref.Service != "remote-dev-skillkit" || ref.Account != "managed-windows" {
+		t.Fatalf("unexpected ref: %#v", ref)
+	}
+}
+
+func TestParseDPAPIURLLikeRef(t *testing.T) {
+	ref, err := ParseRef("dpapi://remote-dev-skillkit/managed-windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Backend != "dpapi" || ref.Service != "remote-dev-skillkit" || ref.Account != "managed-windows" {
+		t.Fatalf("unexpected ref: %#v", ref)
+	}
+}
+
+func TestParseDPAPIRefRejectsMissingAccount(t *testing.T) {
+	if _, err := ParseRef("dpapi:remote-dev-skillkit"); err == nil {
+		t.Fatal("expected missing account to fail")
+	}
+}
+
 func TestKeychainStoreUsesBackend(t *testing.T) {
 	backend := &memoryKeychainBackend{items: map[string][]byte{}}
 	restore := SetKeychainBackendForTest(backend)
@@ -56,6 +82,31 @@ func TestKeychainStoreUsesBackend(t *testing.T) {
 	}
 }
 
+func TestDPAPIStoreUsesBackend(t *testing.T) {
+	backend := &memoryDPAPIBackend{items: map[string][]byte{}}
+	restore := SetDPAPIBackendForTest(backend)
+	defer restore()
+
+	store, err := Open("dpapi:remote-dev-skillkit/managed-windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.Load(); err != nil || ok {
+		t.Fatalf("expected empty store, ok=%v err=%v", ok, err)
+	}
+	content := []byte("protected windows content")
+	if err := store.Save(content); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !bytes.Equal(loaded, content) {
+		t.Fatalf("unexpected loaded content ok=%v content=%q", ok, loaded)
+	}
+}
+
 type memoryKeychainBackend struct {
 	items map[string][]byte
 }
@@ -69,6 +120,23 @@ func (b *memoryKeychainBackend) Load(service, account string) ([]byte, bool, err
 }
 
 func (b *memoryKeychainBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type memoryDPAPIBackend struct {
+	items map[string][]byte
+}
+
+func (b *memoryDPAPIBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *memoryDPAPIBackend) Save(service, account string, content []byte) error {
 	b.items[service+"/"+account] = append([]byte(nil), content...)
 	return nil
 }

@@ -191,7 +191,7 @@ rdev policy explain-shell \
 
 Agents can call the same policy engine through MCP tool `rdev.policy.explain_shell`.
 
-`rdev host serve` generates an Ed25519 host identity for the session. When `--identity-store <path>` is set, the identity is persisted to a local `0600` JSON file using schema `rdev.host-identity.v1`; the parent directory is created with `0700` permissions. On macOS, `--identity-store keychain:<service>/<account>` stores the same `rdev.host-identity.v1` payload in the user's Keychain instead of a JSON file. The host registration includes the identity key id, public key, fingerprint, and signed `rdev.host-registration-proof.v1` proof. The gateway verifies that proof before preserving the identity fingerprint. Signed job envelopes include the registered host identity fingerprint, and a host with a local identity rejects jobs bound to a different fingerprint.
+`rdev host serve` generates an Ed25519 host identity for the session. When `--identity-store <path>` is set, the identity is persisted to a local `0600` JSON file using schema `rdev.host-identity.v1`; the parent directory is created with `0700` permissions. On macOS, `--identity-store keychain:<service>/<account>` stores the same `rdev.host-identity.v1` payload in the user's Keychain instead of a JSON file. On Windows, `--identity-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. The host registration includes the identity key id, public key, fingerprint, and signed `rdev.host-registration-proof.v1` proof. The gateway verifies that proof before preserving the identity fingerprint. Signed job envelopes include the registered host identity fingerprint, and a host with a local identity rejects jobs bound to a different fingerprint.
 
 `rdev host serve` keeps a nonce replay cache for signed job envelopes. By default, this cache is in-memory for the process. When `--nonce-store <path>` is set, used nonces are persisted to a local `0600` JSON file using schema `rdev.host-nonce-store.v1`; the parent directory is created with `0700` permissions. Expired nonce entries are pruned before new entries are written.
 
@@ -211,7 +211,7 @@ rdev host serve \
 
 Long-poll uses the same safety path as short polling but holds the host's outbound `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=<n>` request open until a job is available or the wait timeout elapses. This is a development bridge toward WSS/mTLS transport; it is not a production transport by itself.
 
-When `--trust-store <path>` is set, the host persists verified signed trust bundles to a local `0600` JSON file. On macOS, `--trust-store keychain:<service>/<account>` stores the same `rdev.host-trust-store.v1` payload in Keychain. Future updates must verify against the stored bundle's active signing key, increase sequence, and match `previous_bundle_hash`. If the gateway trust-bundle endpoint is unavailable, the host can use the stored bundle for job verification.
+When `--trust-store <path>` is set, the host persists verified signed trust bundles to a local `0600` JSON file. On macOS, `--trust-store keychain:<service>/<account>` stores the same `rdev.host-trust-store.v1` payload in Keychain. On Windows, `--trust-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. Future updates must verify against the stored bundle's active signing key, increase sequence, and match `previous_bundle_hash`. If the gateway trust-bundle endpoint is unavailable, the host can use the stored bundle for job verification.
 
 For a managed Mac, a protected local identity/trust pair can be configured without changing the rest of the host command:
 
@@ -226,8 +226,22 @@ rdev host serve \
   --transport long-poll
 ```
 
-`keychain:` references are currently macOS-only. Windows DPAPI and Linux
-libsecret/keyctl protected stores remain future production hardening work.
+For a managed Windows host, use the same command shape with Windows DPAPI refs:
+
+```powershell
+rdev host serve `
+  --mode managed `
+  --gateway https://api.example.com/v1 `
+  --ticket-code ABCD-1234 `
+  --identity-store dpapi:remote-dev-skillkit/managed-windows-identity `
+  --trust-store dpapi:remote-dev-skillkit/managed-windows-trust `
+  --once=false `
+  --transport long-poll
+```
+
+`keychain:` references are macOS-only. `dpapi:` references are Windows-only and
+use the current Windows user context. Linux libsecret/keyctl protected stores
+remain future production hardening work.
 
 If the host runner rejects a job, the host reports the failure to `POST /v1/jobs/{job_id}/fail`. The gateway marks the job `failed`, stores `failure_reason`, and writes a `job.fail` audit event.
 
@@ -701,8 +715,8 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
 - If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
 - `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode. They are durable across process restarts only when `--state` is enabled with the matching persistent `--signing-key`.
-- `--trust-store` supports local `0600` JSON files and macOS `keychain:<service>/<account>` references. Windows DPAPI and Linux libsecret/keyctl protected stores are not implemented yet.
-- `--identity-store` supports local `0600` JSON files and macOS `keychain:<service>/<account>` references. Registrations with identity keys must include `rdev.host-registration-proof.v1`; production managed hosts still need enrollment certificates and non-macOS protected stores.
+- `--trust-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, and Windows `dpapi:<service>/<account>` references. Linux libsecret/keyctl protected stores are not implemented yet.
+- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, and Windows `dpapi:<service>/<account>` references. Registrations with identity keys must include `rdev.host-registration-proof.v1`; production managed hosts still need enrollment certificates and Linux protected stores.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
 - Linux systemd support currently writes and controls user units, `rdev acceptance linux-managed-service` can verify a release-evidence plan, and `rdev acceptance package-linux-managed-service` can archive real run evidence. Real managed Linux acceptance still needs reboot/reconnect evidence from a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.
