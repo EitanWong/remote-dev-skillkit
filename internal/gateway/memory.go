@@ -145,6 +145,17 @@ func (g *MemoryGateway) WithEnrollmentRevocations(list model.HostEnrollmentRevoc
 	return g
 }
 
+func (g *MemoryGateway) EnrollmentRevocations() (model.HostEnrollmentRevocationList, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.checkEnrollmentCRL {
+		return model.HostEnrollmentRevocationList{}, false
+	}
+	list := g.enrollmentRevokes
+	list.RevokedCertificates = append([]model.HostEnrollmentCertificateRevocation(nil), g.enrollmentRevokes.RevokedCertificates...)
+	return list, true
+}
+
 func (g *MemoryGateway) WithAuditSink(sink AuditSink) *MemoryGateway {
 	g.mu.Lock()
 	defer g.mu.Unlock()

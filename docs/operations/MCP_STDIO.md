@@ -31,6 +31,13 @@ tampered revocation lists, revoked certificates, and signature mismatches return
 `ok=false` with recommended actions rather than an RPC failure. Missing required
 arguments remain RPC errors.
 
+When a gateway exposes configured dev revocations through
+`GET /v1/enrollment/revocations`, operators or agents should first fetch and
+verify the list with `rdev enrollment fetch-revocations --root-public-key ...`,
+then pass the fetched JSON as `revocations_json` or store it as an artifact and
+pass `revocations_artifact_id`. Fetching a revocation list is read-only and does
+not approve a host.
+
 `rdev.adapter.verify_result` returns `rdev.adapter-conformance-report.v1` in
 `structuredContent`. It accepts either `artifact_json` or `artifact_id`, plus
 the expected adapter and result schema.

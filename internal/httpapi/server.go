@@ -34,6 +34,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /v1/trust", s.trust)
 	mux.HandleFunc("GET /v1/trust-bundle", s.getTrustBundle)
+	mux.HandleFunc("GET /v1/enrollment/revocations", s.getEnrollmentRevocations)
 	mux.HandleFunc("POST /v1/trust-bundle", s.updateTrustBundle)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
@@ -59,6 +60,15 @@ func (s Server) trust(w http.ResponseWriter, r *http.Request) {
 
 func (s Server) getTrustBundle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": s.Gateway.SignedTrustBundle()})
+}
+
+func (s Server) getEnrollmentRevocations(w http.ResponseWriter, r *http.Request) {
+	revocations, ok := s.Gateway.EnrollmentRevocations()
+	if !ok {
+		writeError(w, http.StatusNotFound, "enrollment revocations not configured")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"revocations": revocations})
 }
 
 func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {

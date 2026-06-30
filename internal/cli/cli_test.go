@@ -1033,6 +1033,68 @@ func TestHostServeRegistersWithEnrollmentCertificate(t *testing.T) {
 	}
 }
 
+func TestEnrollmentFetchRevocationsWritesVerifiedList(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocations, err := model.SignHostEnrollmentRevocationList([]model.HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: "sha256:enrollment-fetch-revoked-test",
+			Reason:                 "compromised",
+			RevokedAt:              now,
+		},
+	}, "enrollment-root", privateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentRoot(model.NewTrustBundle("enrollment-root", publicKey)).
+		WithEnrollmentRevocations(revocations)
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	outPath := filepath.Join(t.TempDir(), "revocations", "revocations.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "fetch-revocations",
+		"--gateway", server.URL,
+		"--root-public-key", encodeRootPublicKey("enrollment-root", publicKey),
+		"--out", outPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) {
+		t.Fatalf("expected ok fetch output, got %s", stdout.String())
+	}
+	fetched, err := readEnrollmentRevocationListFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.VerifyHostEnrollmentRevocationListSignature(fetched, model.NewTrustBundle("enrollment-root", publicKey), time.Now()); err != nil {
+		t.Fatalf("expected fetched revocations to verify: %v", err)
+	}
+	if len(fetched.RevokedCertificates) != 1 {
+		t.Fatalf("expected one revoked certificate, got %d", len(fetched.RevokedCertificates))
+	}
+	wrongPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = app.Run(context.Background(), []string{
+		"enrollment", "fetch-revocations",
+		"--gateway", server.URL,
+		"--root-public-key", encodeRootPublicKey("enrollment-root", wrongPublicKey),
+		"--out", filepath.Join(t.TempDir(), "wrong-root.json"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "signature mismatch") {
+		t.Fatalf("expected wrong root to reject fetched revocations, got %v", err)
+	}
+}
+
 func TestHostServeRegistersWithProtectedIdentityStore(t *testing.T) {
 	backend := &cliMemoryKeychainBackend{items: map[string][]byte{}}
 	restore := protectedstore.SetKeychainBackendForTest(backend)

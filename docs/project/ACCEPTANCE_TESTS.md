@@ -426,6 +426,7 @@ The local test suite currently covers:
 - signed host registration proof through `rdev.host-registration-proof.v1` for registrations that present identity keys;
 - signed host enrollment certificate checks through `rdev.host-enrollment-certificate.v1`, including CLI signing/verification, gateway enforcement when an enrollment root is configured, host registration attachment, and rejection of missing, expired, wrong-root, or tampered host metadata/capability bindings;
 - signed enrollment certificate revocation-list checks through `rdev.host-enrollment-revocations.v1`, including CLI revoke/verify, `verify-certificate --revocations`, gateway enforcement when a revocation list is configured, and rejection of revoked certificates;
+- dev revocation-list distribution checks through `GET /v1/enrollment/revocations` and `rdev enrollment fetch-revocations`, including pinned-root verification and wrong-root rejection before the fetched list is used by CLI or MCP workflows;
 - MCP enrollment certificate verification through `rdev.enrollment.verify_certificate`, including structured `rdev.enrollment-certificate-verification.v1` success/failure reports, certificate fingerprints, optional revocation-list checks, revoked-certificate failure evidence, and wrong-root failure evidence before an agent trusts a host registration;
 - host-side job verification through signed trust bundle active keys, with legacy trust fallback.
 - durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.

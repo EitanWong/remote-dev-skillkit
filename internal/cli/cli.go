@@ -79,7 +79,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 	case "release":
 		return a.release(args[1:])
 	case "enrollment":
-		return a.enrollment(args[1:])
+		return a.enrollment(ctx, args[1:])
 	case "trust":
 		return a.trust(args[1:])
 	case "audit":
@@ -102,7 +102,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 	}
 }
 
-func (a App) enrollment(args []string) error {
+func (a App) enrollment(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing enrollment subcommand")
 	}
@@ -186,6 +186,17 @@ func (a App) enrollment(args []string) error {
 			return err
 		}
 		return a.enrollmentVerifyRevocations(*revocationsPath, *rootPublicKey)
+	case "fetch-revocations":
+		fs := flag.NewFlagSet("enrollment fetch-revocations", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway", "", "gateway base URL")
+		rootPublicKey := fs.String("root-public-key", "", "enrollment root public key, formatted key_id:base64url_public_key")
+		out := fs.String("out", "", "output signed enrollment revocation list JSON path")
+		force := fs.Bool("force", false, "overwrite output revocation list")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentFetchRevocations(ctx, *gatewayURL, *rootPublicKey, *out, *force)
 	default:
 		return fmt.Errorf("unknown enrollment subcommand %q", args[0])
 	}
@@ -3222,6 +3233,39 @@ func (a App) enrollmentVerifyRevocations(revocationsPath, rootPublicKey string) 
 	return enc.Encode(payload)
 }
 
+func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPublicKey, outPath string, force bool) error {
+	if gatewayURL == "" {
+		return fmt.Errorf("gateway is required")
+	}
+	if rootPublicKey == "" {
+		return fmt.Errorf("root-public-key is required")
+	}
+	if outPath == "" {
+		return fmt.Errorf("out is required")
+	}
+	revocations, root, err := fetchEnrollmentRevocations(ctx, gatewayURL, rootPublicKey)
+	if err != nil {
+		return err
+	}
+	if err := writeEnrollmentRevocationListFile(outPath, revocations, force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                        true,
+		"schema":                    revocations.SchemaVersion,
+		"gateway":                   gatewayURL,
+		"revocations_path":          outPath,
+		"issuer_key_id":             revocations.IssuerKeyID,
+		"root_public_key_verified":  root.SigningKeyID,
+		"revoked_certificate_count": len(revocations.RevokedCertificates),
+		"generated_at":              revocations.GeneratedAt,
+		"not_after":                 revocations.NotAfter,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func (a App) releaseSign(artifactPath, keyPath, keyID, outPath string) error {
 	if artifactPath == "" {
 		return fmt.Errorf("artifact is required")
@@ -5079,6 +5123,39 @@ func fetchSignedTrustBundle(ctx context.Context, gatewayURL, trustPin string) (m
 		return model.SignedTrustBundle{}, err
 	}
 	return payload.TrustBundle, nil
+}
+
+func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
+	root, err := parseRootPublicKey(rootPublicKey)
+	if err != nil {
+		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/enrollment/revocations", nil)
+	if err != nil {
+		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Revocations model.HostEnrollmentRevocationList `json:"revocations"`
+		Error       string                             `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, fmt.Errorf("fetch enrollment revocations failed: %s", payload.Error)
+	}
+	if err := model.VerifyHostEnrollmentRevocationListSignature(payload.Revocations, root, time.Now()); err != nil {
+		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
+	}
+	return payload.Revocations, root, nil
 }
 
 func fetchTrustBundleUpdate(ctx context.Context, gatewayURL, hostID string, currentSequence int, currentHash string) (model.TrustBundleUpdate, error) {

@@ -160,6 +160,57 @@ func TestTrustBundleEndpointUpdatesSignedBundle(t *testing.T) {
 	}
 }
 
+func TestEnrollmentRevocationsEndpointReturnsConfiguredList(t *testing.T) {
+	now := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	publicKey, privateKey := httpTestKeyPair(t)
+	revocations, err := model.SignHostEnrollmentRevocationList([]model.HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: "sha256:enrollment-revoked-for-http-test",
+			Reason:                 "host retired",
+			RevokedAt:              now,
+		},
+	}, "enrollment-root", privateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentRoot(model.NewTrustBundle("enrollment-root", publicKey)).
+		WithEnrollmentRevocations(revocations)
+	handler := NewServer(gw).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/enrollment/revocations", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Revocations model.HostEnrollmentRevocationList `json:"revocations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := model.VerifyHostEnrollmentRevocationListSignature(payload.Revocations, model.NewTrustBundle("enrollment-root", publicKey), now); err != nil {
+		t.Fatalf("expected endpoint revocations to verify: %v", err)
+	}
+	if len(payload.Revocations.RevokedCertificates) != 1 {
+		t.Fatalf("expected one revoked certificate, got %d", len(payload.Revocations.RevokedCertificates))
+	}
+}
+
+func TestEnrollmentRevocationsEndpointReturnsNotFoundWhenMissing(t *testing.T) {
+	handler := NewServer(gateway.NewMemoryGateway()).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/v1/enrollment/revocations", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("enrollment revocations not configured")) {
+		t.Fatalf("expected explanatory error, got %s", rec.Body.String())
+	}
+}
+
 func TestTrustBundleEndpointRejectsRollback(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	publicKey, privateKey := httpTestKeyPair(t)

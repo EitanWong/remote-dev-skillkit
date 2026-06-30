@@ -237,6 +237,18 @@ The supported system revolves around a small protocol family:
 New transports, databases, UIs, and adapters are allowed only if they preserve
 these objects and their verifier semantics.
 
+### Revocation Distribution Decision
+
+Revocation is a first-class product loop, not a note attached to enrollment.
+The minimum compatible loop is: sign a revocation list with the enrollment root,
+publish it through the gateway, fetch it through a read-only endpoint, verify it
+against a pinned root before local persistence, and require agents, gateways,
+and hosts to treat revoked certificates as denial evidence. The development
+path is `rdev.host-enrollment-revocations.v1`,
+`GET /v1/enrollment/revocations`, and `rdev enrollment fetch-revocations`.
+Production may replace the endpoint, storage, or polling strategy, but not the
+pinned-root verification, freshness check, or revoked-certificate denial.
+
 ### Storage And Trust Target
 
 The production gateway should use durable storage for tickets, hosts,
@@ -318,7 +330,7 @@ The remaining work closes in this order:
 3. real Linux systemd reboot/reconnect acceptance package;
 4. real Windows Service managed acceptance package;
 5. OS-protected host identity/trust stores;
-6. authenticated trust refresh, revocation propagation, and emergency drills;
+6. authenticated trust refresh, hosted revocation distribution, and emergency drills;
 7. WSS/mTLS production transport while preserving HTTPS long-poll fallback;
 8. production Adapter SDK integration for built-in and third-party adapters;
 9. optional GUI, mesh, Coder, DevPod, browser, and workspace-provider adapters;
@@ -571,7 +583,7 @@ the next:
 3. real Linux systemd reboot/reconnect acceptance package;
 4. Windows Service managed acceptance package;
 5. OS-protected host identity/trust storage;
-6. authenticated trust refresh and revocation propagation;
+6. authenticated trust refresh and hosted revocation distribution;
 7. WSS/mTLS production channel with long-poll fallback preserved;
 8. production Adapter SDK integration and third-party adapter documentation;
 9. optional GUI, mesh, Coder, DevPod, and browser adapters;

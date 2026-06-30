@@ -59,6 +59,7 @@ rdev host serve \
 - `GET /healthz`
 - `GET /v1/trust`
 - `GET /v1/trust-bundle`
+- `GET /v1/enrollment/revocations`
 - `POST /v1/trust-bundle`
 - `POST /v1/tickets`
 - `GET /v1/tickets/{ticket_code}/manifest`
@@ -240,8 +241,8 @@ The revocation list uses schema `rdev.host-enrollment-revocations.v1` and binds
 revoked enrollment certificate fingerprints to the same enrollment root. When
 `--enrollment-revocations` is configured, the dev gateway verifies the list
 signature and freshness before registration and rejects revoked certificates.
-This is a local signed revocation-list primitive, not the full hosted
-enrollment authority lifecycle.
+This is a local signed revocation-list primitive and dev distribution path, not
+the full hosted enrollment authority lifecycle.
 
 To smoke the revocation path, revoke a certificate and then expect
 `verify-certificate --revocations` or gateway registration with that same
@@ -257,6 +258,13 @@ rdev enrollment revoke-certificate \
 rdev enrollment verify-revocations \
   --revocations .rdev/enrollment/revocations.json \
   --root-public-key enrollment-root:<base64url_ed25519_public_key>
+
+curl -s http://127.0.0.1:8787/v1/enrollment/revocations
+
+rdev enrollment fetch-revocations \
+  --gateway http://127.0.0.1:8787 \
+  --root-public-key enrollment-root:<base64url_ed25519_public_key> \
+  --out .rdev/enrollment/fetched-revocations.json
 
 rdev enrollment verify-certificate \
   --certificate .rdev/enrollment/host-enrollment.json \
