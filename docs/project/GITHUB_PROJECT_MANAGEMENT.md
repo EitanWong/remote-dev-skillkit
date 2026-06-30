@@ -193,8 +193,8 @@ The current bootstrap script creates the following seed backlog.
 7. **Add Windows Service and systemd managed host lifecycle**
    - Labels: `area:service`, `area:host`, `kind:feature`, `kind:ops`, `priority:p1`
    - Acceptance:
-     - `rdev host install-service` supports Windows Service and systemd;
-     - install, status, service-control, stop, and uninstall are inspectable;
+     - `rdev host install-service` supports Linux systemd units and Windows Service command planning;
+     - install/status/service-control/stop/uninstall are inspectable, with Windows real install/start/reconnect/stop/uninstall acceptance tracked separately from dry-run `sc.exe` plans;
      - temporary mode cannot install persistence through these commands.
 
 ### v1.0 Public Skillkit

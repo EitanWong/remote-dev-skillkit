@@ -65,6 +65,7 @@ Implemented now:
 - Host-bound trust bundle update checks for managed host trust-store refresh.
 - macOS LaunchAgent plist generation, status inspection, safe plist removal, and opt-in lifecycle control via `rdev host install-service`, `rdev host service-status`, `rdev host service-control`, and `rdev host uninstall-service`, with `--execute` required before running `launchctl`.
 - Linux systemd user-unit generation, status inspection, safe unit removal, and opt-in lifecycle control via the same host service commands, with `--execute` required before running `systemctl --user`.
+- Windows Service managed-host planning, status-command planning, dry-run control, and uninstall-command planning via the same host service commands. The Windows path emits reviewed `sc.exe create/query/qc/start/stop/delete` command plans, carries the managed-host release-bundle gate, uses `start= demand`, and requires explicit `service-control --execute` before running `sc.exe`; real Windows Service acceptance is still a future gate.
 - Persistent development gateway signing key files plus host trust pin checks.
 - Trust lifecycle operator commands via `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed `rdev.trust-bundle.v1` bundles with sequence, previous-hash, key rotation, key retirement, key revocation, and pinned-root verification.
 - File-backed host identity key store with registration fingerprint preservation and signed job identity binding.
@@ -128,7 +129,7 @@ Not implemented yet:
 - Full production adapter SDK beyond the current lifecycle runner and lifecycle/result/cancellation/runtime-fixture conformance verifiers.
 - OS-protected managed host identity and trust storage beyond file-backed dev mode.
 - Artifact streaming.
-- Windows service installation.
+- Real Windows Service managed-host acceptance execution and reconnect proof beyond dry-run `sc.exe` plans.
 - Real Linux systemd managed-host acceptance execution and reboot/reconnect proof.
 - Tailscale/headscale adapter.
 - GUI adapter.
@@ -207,6 +208,10 @@ go run ./cmd/rdev host install-service --platform linux --label rdev-host.servic
 go run ./cmd/rdev host service-status --platform linux --label rdev-host.service --unit ./rdev-host.service
 go run ./cmd/rdev host service-control --platform linux --action start --label rdev-host.service --unit ./rdev-host.service
 go run ./cmd/rdev host uninstall-service --platform linux --label rdev-host.service --unit ./rdev-host.service
+go run ./cmd/rdev host install-service --platform windows --label RemoteDevSkillkitHost --binary 'C:\Program Files\rdev\rdev.exe' --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --workspace-lock-store 'C:\ProgramData\rdev\workspace-locks' --release-bundle 'C:\Program Files\rdev\release-bundle.json' --release-root-public-key release-root:... --release-require-artifacts rdev-host.exe,rdev-verify.exe
+go run ./cmd/rdev host service-status --platform windows --label RemoteDevSkillkitHost
+go run ./cmd/rdev host service-control --platform windows --action start --label RemoteDevSkillkitHost
+go run ./cmd/rdev host uninstall-service --platform windows --label RemoteDevSkillkitHost
 ```
 
 ## Design Invariants

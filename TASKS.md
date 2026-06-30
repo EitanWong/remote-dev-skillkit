@@ -144,6 +144,7 @@
 - [x] Add standalone `rdev-verify --bundle` support for bootstrap-side signed release bundle verification.
 - [x] Wire signed release bundle verification into Windows temporary bootstrap and acceptance-plan verification.
 - [x] Add Windows temporary acceptance evidence packaging for release archival.
+- [x] Add Windows Service managed-host planning/control dry-run with reviewed `sc.exe` command plans and release-bundle gate arguments.
 - [x] Add release candidate packaging with staged artifacts, signed manifests, signed release bundle, verified Skillkit, checksums, and summary JSON.
 - [x] Add standalone release candidate verification for downloaded or staged candidates.
 - [x] Add GitHub Release dry-run plan generation with assets, commands, notes, Skillkit archive, and no external mutation.
@@ -157,7 +158,7 @@
 - [ ] Add WSS/mTLS transport.
 - [ ] Add authenticated production managed host trust lifecycle with OS-protected storage.
 - [ ] Add OS-protected managed host identity storage and registration proof.
-- [ ] Add Windows Service mode.
+- [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [ ] Add real Linux systemd acceptance execution with reboot/reconnect proof.
 - [x] Add acpx adapter.

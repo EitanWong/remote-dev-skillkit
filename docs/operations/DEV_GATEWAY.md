@@ -507,9 +507,45 @@ rdev host uninstall-service \
   --unit ./rdev-host.service
 ```
 
-For both platforms, `service-control` is a dry-run by default. It prints the
+For macOS and Linux, `service-control` is a dry-run by default. It prints the
 planned `launchctl` or `systemctl --user` commands and requires `--execute`
 before invoking the OS service manager.
+
+Windows uses reviewed `sc.exe` command plans:
+
+```powershell
+rdev host install-service `
+  --platform windows `
+  --label RemoteDevSkillkitHost `
+  --binary 'C:\Program Files\rdev\rdev.exe' `
+  --gateway https://api.example.com/v1 `
+  --ticket-code ABCD-1234 `
+  --workspace-lock-store 'C:\ProgramData\rdev\workspace-locks' `
+  --release-bundle 'C:\Program Files\rdev\release-bundle.json' `
+  --release-root-public-key release-root:... `
+  --release-require-artifacts rdev-host.exe,rdev-verify.exe
+
+rdev host service-status `
+  --platform windows `
+  --label RemoteDevSkillkitHost
+
+rdev host service-control `
+  --platform windows `
+  --action start `
+  --label RemoteDevSkillkitHost
+
+rdev host uninstall-service `
+  --platform windows `
+  --label RemoteDevSkillkitHost
+```
+
+`install-service --platform windows` does not create the service itself. It
+prints machine-readable `sc.exe create` and `sc.exe description` command plans
+so an operator can review and run them from an elevated PowerShell session.
+`service-status`, `service-control`, and `uninstall-service` are dry-run by
+default; `service-control --execute` is required before `sc.exe start`, `stop`,
+or `query/qc` is invoked. This is a managed-host planning/control surface, not
+real Windows Service acceptance evidence.
 
 ## Release Artifact Verification
 

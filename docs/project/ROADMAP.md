@@ -111,7 +111,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 
 ## v0.4.0 Managed Device Generalization
 
-- Windows Service.
+- Windows Service managed-host planning through `rdev host install-service --platform windows`, status command planning, dry-run `service-control`, and uninstall command planning, emitting reviewed `sc.exe` create/query/qc/start/stop/delete commands without auto-installing or auto-starting a service.
 - Linux systemd user-unit generation, status inspection, dry-run/opt-in lifecycle control, and safe uninstall.
 - Real Linux systemd reboot/reconnect acceptance proof.
 - launchd support.
@@ -123,7 +123,7 @@ Exit gate: Eitan's managed Mac reconnects after reboot, Lucky selects it through
 - Durable hosted storage.
 - WSS transport with HTTPS polling fallback.
 
-Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, and a new adapter can be added without bypassing policy.
+Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, Windows Service has real install/start/reconnect/stop/uninstall acceptance evidence beyond dry-run plans, and a new adapter can be added without bypassing policy.
 
 ## v0.5.0 Mesh and GUI
 

@@ -51,7 +51,7 @@ Phase 2 starts with an in-memory gateway to validate ticket, host, job, artifact
 
 ## Phase 4: Managed Hosts
 
-- Windows Service install/uninstall.
+- Windows Service planning/control first, then real install/start/reconnect/stop/uninstall acceptance.
 - Linux systemd unit.
 - macOS LaunchAgent/LaunchDaemon.
 - Watchdog/restart policy.

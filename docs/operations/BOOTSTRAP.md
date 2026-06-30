@@ -80,9 +80,10 @@ rdev host serve \
 
 If bundle verification fails, the host does not register and does not poll for
 jobs. `rdev host install-service` accepts the same three release flags and
-writes them into macOS LaunchAgent or Linux systemd managed-host definitions so
-the service self-checks the signed release bundle on restart. This is a startup
-integrity gate, not a full auto-update or rollback system.
+writes them into macOS LaunchAgent and Linux systemd managed-host definitions,
+or includes them in Windows `sc.exe create` command plans, so the managed host
+self-checks the signed release bundle on restart. This is a startup integrity
+gate, not a full auto-update or rollback system.
 
 When `ReleaseManifestUrl` or `ReleaseBundleUrl` is provided, the Windows bootstrap requires `ReleaseRootPublicKey`, `VerifierDownloadUrl`, and `VerifierExpectedSha256`. It downloads `rdev-verify.exe`, checks the verifier SHA-256 first, then uses that verifier to validate either the signed `rdev-host.exe` release manifest or the signed release bundle before starting the host. Bundle mode downloads the bundle's listed manifest files, then runs `rdev-verify --bundle ... --require-artifacts rdev-host.exe,rdev-verify.exe` by default.
 
@@ -135,3 +136,25 @@ rdev host uninstall-service \
 ```
 
 `uninstall-service` removes only the plist file. It refuses to remove a plist whose embedded label does not match `--label` unless `--force` is explicitly set.
+
+Windows managed service setup is also explicit and review-first:
+
+```powershell
+rdev host install-service `
+  --platform windows `
+  --label RemoteDevSkillkitHost `
+  --binary 'C:\Program Files\rdev\rdev.exe' `
+  --gateway https://api.example.com/v1 `
+  --ticket-code ABCD-1234 `
+  --workspace-lock-store 'C:\ProgramData\rdev\workspace-locks' `
+  --release-bundle 'C:\Program Files\rdev\release-bundle.json' `
+  --release-root-public-key release-root:<base64url_ed25519_public_key> `
+  --release-require-artifacts rdev-host.exe,rdev-verify.exe
+```
+
+The Windows command emits `sc.exe create` and `sc.exe description` plans with
+`start= demand`; it does not install or start the service automatically. Review
+the plan, run the create command from an elevated PowerShell session only for
+explicitly managed hosts, then use `rdev host service-control --platform
+windows --action start --execute` when you intentionally want to invoke
+`sc.exe`. This path must not be used for third-party temporary sessions.

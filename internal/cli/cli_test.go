@@ -228,6 +228,64 @@ func TestHostInstallServiceWritesLinuxSystemdUnit(t *testing.T) {
 	}
 }
 
+func TestHostInstallServicePlansWindowsService(t *testing.T) {
+	binaryPath := `C:\Program Files\rdev\rdev.exe`
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "windows",
+		"--label", "RemoteDevSkillkitHost",
+		"--binary", binaryPath,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+		"--identity-store", `C:\ProgramData\rdev\identity.json`,
+		"--trust-store", `C:\ProgramData\rdev\trust.json`,
+		"--nonce-store", `C:\ProgramData\rdev\nonces.json`,
+		"--approval-store", `C:\ProgramData\rdev\approvals.json`,
+		"--workspace-lock-store", `C:\ProgramData\rdev\workspace-locks`,
+		"--release-bundle", `C:\Program Files\rdev\release-bundle.json`,
+		"--release-root-public-key", "release-root:abc123",
+		"--release-require-artifacts", "rdev-host.exe,rdev-verify.exe",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"platform": "windows"`,
+		`"service_name": "RemoteDevSkillkitHost"`,
+		`"sc.exe"`,
+		`"create"`,
+		`C:\\Program Files\\rdev\\rdev.exe`,
+		`"--mode"`,
+		`"managed"`,
+		`"--release-bundle"`,
+		`C:\\Program Files\\rdev\\release-bundle.json`,
+		`"start_type": "demand"`,
+		`dry-run only`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected Windows service output to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
+func TestHostInstallServiceRejectsRelativeWindowsBinaryPath(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"host", "install-service",
+		"--platform", "windows",
+		"--binary", `rdev.exe`,
+		"--gateway", "https://api.example.com/v1",
+		"--ticket-code", "ABCD-1234",
+	})
+	if err == nil || !strings.Contains(err.Error(), "binary path must be absolute") {
+		t.Fatalf("expected absolute path error, got %v", err)
+	}
+}
+
 func TestHostServiceStatusReadsMacOSLaunchAgentPlist(t *testing.T) {
 	dir := t.TempDir()
 	plistPath := filepath.Join(dir, "com.example.rdev-host.plist")
@@ -298,6 +356,29 @@ func TestHostServiceStatusReadsLinuxSystemdUnit(t *testing.T) {
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("expected status output to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
+func TestHostServiceStatusPlansWindowsCommands(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "service-status",
+		"--platform", "windows",
+		"--label", "RemoteDevSkillkitHost",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"platform": "windows"`,
+		`"service_name": "RemoteDevSkillkitHost"`,
+		`"query"`,
+		`"qc"`,
+		`status commands were not executed`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected Windows status output to contain %q, got %s", expected, stdout.String())
 		}
 	}
 }
@@ -380,6 +461,31 @@ func TestHostServiceControlDryRunPlansSystemd(t *testing.T) {
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("expected service-control output to contain %q, got %s", expected, stdout.String())
+		}
+	}
+}
+
+func TestHostServiceControlDryRunPlansWindowsService(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "service-control",
+		"--platform", "windows",
+		"--action", "start",
+		"--label", "RemoteDevSkillkitHost",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"execute": false`,
+		`"platform": "windows"`,
+		`"action": "start"`,
+		`"sc.exe"`,
+		`"start"`,
+		`dry-run only`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected Windows service-control output to contain %q, got %s", expected, stdout.String())
 		}
 	}
 }
@@ -510,6 +616,29 @@ func TestHostUninstallServiceRemovesLinuxSystemdUnit(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `systemctl was not executed`) {
 		t.Fatalf("expected no systemctl execution note, got %s", stdout.String())
+	}
+}
+
+func TestHostUninstallServicePlansWindowsServiceRemoval(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"host", "uninstall-service",
+		"--platform", "windows",
+		"--label", "RemoteDevSkillkitHost",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"platform": "windows"`,
+		`"service_name": "RemoteDevSkillkitHost"`,
+		`"stop"`,
+		`"delete"`,
+		`stop/delete commands were not executed`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected Windows uninstall output to contain %q, got %s", expected, stdout.String())
+		}
 	}
 }
 

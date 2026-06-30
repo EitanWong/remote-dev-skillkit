@@ -640,7 +640,7 @@ func (a App) host(ctx context.Context, args []string) error {
 	case "install-service":
 		fs := flag.NewFlagSet("host install-service", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos or linux")
+		platform := fs.String("platform", "macos", "service platform: macos, linux, or windows")
 		label := fs.String("label", "", "managed host service label or systemd unit name")
 		binaryPath := fs.String("binary", "", "absolute path to rdev binary; defaults to current executable")
 		gatewayURL := fs.String("gateway", "", "gateway URL")
@@ -684,7 +684,7 @@ func (a App) host(ctx context.Context, args []string) error {
 	case "service-status":
 		fs := flag.NewFlagSet("host service-status", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos or linux")
+		platform := fs.String("platform", "macos", "service platform: macos, linux, or windows")
 		label := fs.String("label", "", "managed host service label or systemd unit name")
 		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
 		unitPath := fs.String("unit", "", "systemd user unit path; defaults to ~/.config/systemd/user/<unit>.service on Linux")
@@ -700,7 +700,7 @@ func (a App) host(ctx context.Context, args []string) error {
 	case "service-control":
 		fs := flag.NewFlagSet("host service-control", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos or linux")
+		platform := fs.String("platform", "macos", "service platform: macos, linux, or windows")
 		action := fs.String("action", "", "service action: start, stop, or inspect")
 		label := fs.String("label", "", "managed host service label or systemd unit name")
 		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
@@ -722,7 +722,7 @@ func (a App) host(ctx context.Context, args []string) error {
 	case "uninstall-service":
 		fs := flag.NewFlagSet("host uninstall-service", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		platform := fs.String("platform", "macos", "service platform: macos or linux")
+		platform := fs.String("platform", "macos", "service platform: macos, linux, or windows")
 		label := fs.String("label", "", "managed host service label or systemd unit name")
 		plistPath := fs.String("plist", "", "LaunchAgent plist path; defaults to ~/Library/LaunchAgents/<label>.plist on macOS")
 		unitPath := fs.String("unit", "", "systemd user unit path; defaults to ~/.config/systemd/user/<unit>.service on Linux")
@@ -953,7 +953,7 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 		}
 		binaryPath = current
 	}
-	if !filepath.IsAbs(binaryPath) {
+	if !isServiceBinaryPathAbsolute(opts.Platform, binaryPath) {
 		return fmt.Errorf("binary path must be absolute")
 	}
 	switch opts.Platform {
@@ -961,9 +961,30 @@ func (a App) hostInstallService(opts hostInstallServiceOptions) error {
 		return a.hostInstallMacOSService(opts, binaryPath)
 	case "linux", "systemd":
 		return a.hostInstallLinuxSystemdService(opts, binaryPath)
+	case "windows", "win32":
+		return a.hostInstallWindowsService(opts, binaryPath)
 	default:
 		return fmt.Errorf("unsupported service platform %q", opts.Platform)
 	}
+}
+
+func isServiceBinaryPathAbsolute(platform, path string) bool {
+	switch platform {
+	case "windows", "win32":
+		return isWindowsAbsolutePath(path)
+	default:
+		return filepath.IsAbs(path)
+	}
+}
+
+func isWindowsAbsolutePath(path string) bool {
+	if len(path) >= 3 {
+		drive := path[0]
+		if ((drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/') {
+			return true
+		}
+	}
+	return strings.HasPrefix(path, `\\`)
 }
 
 func (a App) hostInstallMacOSService(opts hostInstallServiceOptions, binaryPath string) error {
@@ -1086,6 +1107,49 @@ func (a App) hostInstallLinuxSystemdService(opts hostInstallServiceOptions, bina
 	return enc.Encode(payload)
 }
 
+func (a App) hostInstallWindowsService(opts hostInstallServiceOptions, binaryPath string) error {
+	serviceName := opts.Label
+	if serviceName == "" {
+		serviceName = service.DefaultWindowsServiceName
+	}
+	winService, err := service.NewWindowsService(service.WindowsServiceOptions{
+		ServiceName:              serviceName,
+		BinaryPath:               binaryPath,
+		GatewayURL:               opts.GatewayURL,
+		TicketCode:               opts.TicketCode,
+		ManifestURL:              opts.ManifestURL,
+		IdentityStorePath:        opts.IdentityStorePath,
+		TrustStorePath:           opts.TrustStorePath,
+		NonceStorePath:           opts.NonceStorePath,
+		ApprovalStorePath:        opts.ApprovalStorePath,
+		WorkspaceLockStorePath:   opts.WorkspaceLockStore,
+		ReleaseBundlePath:        opts.ReleaseBundlePath,
+		ReleaseRootPublicKey:     opts.ReleaseRootPublicKey,
+		ReleaseRequiredArtifacts: opts.ReleaseRequiredArtifacts,
+		Transport:                "long-poll",
+		LongPollTimeout:          "25s",
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":           true,
+		"platform":     "windows",
+		"service_name": winService.ServiceName,
+		"display_name": winService.DisplayName,
+		"args":         winService.Args,
+		"bin_path":     winService.BinPath,
+		"commands":     winService.Commands,
+		"shell":        winService.Shell,
+		"start_type":   winService.StartType,
+		"next":         windowsServiceNextSteps(winService.ServiceName),
+		"note":         "dry-run only; use rdev host service-control --platform windows --action start --execute after creating the service with approved commands",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func writeServiceFile(path string, content []byte, force bool) error {
 	if path == "" {
 		return fmt.Errorf("service output path is required")
@@ -1122,6 +1186,8 @@ func (a App) hostServiceStatus(opts hostServiceOptions) error {
 		return a.hostMacOSServiceStatus(opts)
 	case "linux", "systemd":
 		return a.hostLinuxSystemdServiceStatus(opts)
+	case "windows", "win32":
+		return a.hostWindowsServiceStatus(opts)
 	default:
 		return fmt.Errorf("unsupported service platform %q", opts.Platform)
 	}
@@ -1180,6 +1246,29 @@ func (a App) hostLinuxSystemdServiceStatus(opts hostServiceOptions) error {
 	return enc.Encode(payload)
 }
 
+func (a App) hostWindowsServiceStatus(opts hostServiceOptions) error {
+	serviceName := opts.Label
+	if serviceName == "" {
+		serviceName = service.DefaultWindowsServiceName
+	}
+	status, err := service.NewWindowsServiceStatus(serviceName)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":           true,
+		"platform":     "windows",
+		"service_name": status.ServiceName,
+		"commands":     status.Commands,
+		"shell":        status.Shell,
+		"next":         windowsServiceNextSteps(status.ServiceName),
+		"note":         "dry-run only; status commands were not executed",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 type launchctlRunResult struct {
 	ExitCode int    `json:"exit_code"`
 	Stdout   string `json:"stdout,omitempty"`
@@ -1195,6 +1284,8 @@ func (a App) hostServiceControl(ctx context.Context, opts hostServiceControlOpti
 		return a.hostMacOSServiceControl(ctx, opts)
 	case "linux", "systemd":
 		return a.hostLinuxSystemdServiceControl(ctx, opts)
+	case "windows", "win32":
+		return a.hostWindowsServiceControl(ctx, opts)
 	default:
 		return fmt.Errorf("unsupported service platform %q", opts.Platform)
 	}
@@ -1354,6 +1445,53 @@ func (a App) hostLinuxSystemdServiceControl(ctx context.Context, opts hostServic
 	return enc.Encode(payload)
 }
 
+func (a App) hostWindowsServiceControl(ctx context.Context, opts hostServiceControlOptions) error {
+	serviceName := opts.Label
+	if serviceName == "" {
+		serviceName = service.DefaultWindowsServiceName
+	}
+	if strings.TrimSpace(opts.Action) == "" {
+		return fmt.Errorf("service action is required")
+	}
+	plan, err := service.NewWindowsServiceControlPlan(service.WindowsServiceControlOptions{
+		Action:      opts.Action,
+		ServiceName: serviceName,
+	})
+	if err != nil {
+		return err
+	}
+	if opts.Execute {
+		results, runErr := runServiceCommands(ctx, plan.Commands)
+		payload := map[string]any{
+			"ok":           runErr == nil,
+			"platform":     "windows",
+			"service_name": serviceName,
+			"execute":      true,
+			"command":      plan,
+			"results":      results,
+			"note":         "sc.exe was executed because --execute was set",
+		}
+		enc := json.NewEncoder(a.Stdout)
+		enc.SetIndent("", "  ")
+		if encodeErr := enc.Encode(payload); encodeErr != nil {
+			return encodeErr
+		}
+		return runErr
+	}
+	payload := map[string]any{
+		"ok":           true,
+		"platform":     "windows",
+		"service_name": serviceName,
+		"execute":      false,
+		"command":      plan,
+		"next":         windowsServiceNextSteps(serviceName),
+		"note":         "dry-run only; add --execute to run sc.exe",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func resolveLaunchctlDomain(ctx context.Context, domain string) (string, error) {
 	if domain != "gui/$(id -u)" {
 		return domain, nil
@@ -1426,6 +1564,8 @@ func (a App) hostUninstallService(opts hostServiceOptions) error {
 		return a.hostUninstallMacOSService(opts)
 	case "linux", "systemd":
 		return a.hostUninstallLinuxSystemdService(opts)
+	case "windows", "win32":
+		return a.hostUninstallWindowsService(opts)
 	default:
 		return fmt.Errorf("unsupported service platform %q", opts.Platform)
 	}
@@ -1511,6 +1651,28 @@ func (a App) hostUninstallLinuxSystemdService(opts hostServiceOptions) error {
 	return enc.Encode(payload)
 }
 
+func (a App) hostUninstallWindowsService(opts hostServiceOptions) error {
+	serviceName := opts.Label
+	if serviceName == "" {
+		serviceName = service.DefaultWindowsServiceName
+	}
+	plan, err := service.NewWindowsServiceUninstallPlan(serviceName)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":           true,
+		"platform":     "windows",
+		"service_name": serviceName,
+		"commands":     plan.Commands,
+		"shell":        plan.Shell,
+		"note":         "dry-run only; stop/delete commands were not executed",
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func servicePlistPath(opts hostServiceOptions) (string, error) {
 	if opts.Label == "" {
 		opts.Label = service.DefaultMacOSLaunchAgentLabel
@@ -1563,6 +1725,19 @@ func linuxSystemdNextSteps(unitName, unitPath string) map[string]string {
 		"inspect":   "systemctl --user status " + unitName,
 		"logs":      "journalctl --user -u " + unitName + " -n 100 --no-pager",
 		"uninstall": "rdev host uninstall-service --platform linux --label " + unitName + " --unit " + unitPath,
+	}
+}
+
+func windowsServiceNextSteps(serviceName string) map[string]string {
+	if serviceName == "" {
+		serviceName = service.DefaultWindowsServiceName
+	}
+	return map[string]string{
+		"create":    "run the planned sc.exe create command from rdev host install-service output in an elevated PowerShell session",
+		"start":     "sc.exe start " + serviceName,
+		"stop":      "sc.exe stop " + serviceName,
+		"inspect":   "sc.exe query " + serviceName + " && sc.exe qc " + serviceName,
+		"uninstall": "rdev host uninstall-service --platform windows --label " + serviceName,
 	}
 }
 
@@ -3566,6 +3741,10 @@ Usage:
   rdev host service-status --platform linux --label rdev-host.service --unit ./rdev-host.service
   rdev host service-control --platform linux --action start --label rdev-host.service --unit ./rdev-host.service
   rdev host uninstall-service --platform linux --label rdev-host.service --unit ./rdev-host.service
+  rdev host install-service --platform windows --label RemoteDevSkillkitHost --binary 'C:\Program Files\rdev\rdev.exe' --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle 'C:\Program Files\rdev\release-bundle.json' --release-root-public-key release-root:... --release-require-artifacts rdev-host.exe,rdev-verify.exe
+  rdev host service-status --platform windows --label RemoteDevSkillkitHost
+  rdev host service-control --platform windows --action start --label RemoteDevSkillkitHost
+  rdev host uninstall-service --platform windows --label RemoteDevSkillkitHost
 `))
 }
 
