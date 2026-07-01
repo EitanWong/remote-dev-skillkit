@@ -130,6 +130,25 @@ MCP-capable agents can call `rdev.invites.create` directly through
 `rdev mcp serve`; no private server addresses or local paths are baked into the
 project.
 
+## Connection Paths
+
+Native rdev host connections are outbound-first:
+
+| Path | Status | Best Fit |
+|---|---|---|
+| WSS over TLS/mTLS | implemented | Low-latency public or LAN gateway |
+| HTTPS long-poll | implemented | Proxies and firewalls that allow HTTPS but block WebSocket upgrades |
+| HTTPS short-poll | implemented | Maximum compatibility when long-held requests are unstable |
+| LAN gateway URL | implemented when routable | Agent server and target host share a LAN/VPN segment |
+
+Invite output also includes agent-managed options for HTTPS relay, mesh/VPN,
+and SSH tunnel scenarios. Agents may inspect local network interfaces, route
+tables, proxy settings, SSH config, and installed mesh tooling; they may also
+probe scoped LAN/private-network reachability and use configured relay/mesh/SSH
+paths automatically. Those are connectivity assists, not authorization
+shortcuts: rdev still requires target consent, host approval, signed jobs,
+local policy checks, and evidence.
+
 ## Try It Locally
 
 ```bash

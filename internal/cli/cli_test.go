@@ -107,6 +107,25 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 				HostCommand string `json:"host_command"`
 			} `json:"candidates"`
 		} `json:"transport_plan"`
+		ConnectionPlan struct {
+			SchemaVersion       string `json:"schema_version"`
+			NetworkScope        string `json:"network_scope"`
+			GatewayReachability string `json:"gateway_reachability"`
+			Implemented         []struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"implemented"`
+			AgentManaged []struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"agent_managed"`
+			DiscoveryPlan struct {
+				SchemaVersion string   `json:"schema_version"`
+				Allowed       []string `json:"allowed"`
+			} `json:"discovery_plan"`
+			SelectionOrder    []string `json:"selection_order"`
+			EnvironmentProbes []string `json:"environment_probes"`
+		} `json:"connection_plan"`
 		HostCommand        string   `json:"host_command"`
 		FallbackCommands   []string `json:"fallback_commands"`
 		HumanNextActions   []string `json:"human_next_actions"`
@@ -134,6 +153,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if len(payload.HumanNextActions) == 0 || len(payload.AgentNextActions) == 0 || len(payload.ConnectivityChecks) == 0 {
 		t.Fatalf("invite should split human and agent actions: %#v", payload)
+	}
+	if payload.ConnectionPlan.SchemaVersion != "rdev.connection-plan.v1" || len(payload.ConnectionPlan.Implemented) < 4 || len(payload.ConnectionPlan.AgentManaged) < 3 {
+		t.Fatalf("invite should include implemented and agent-managed connection options: %#v", payload.ConnectionPlan)
+	}
+	if payload.ConnectionPlan.DiscoveryPlan.SchemaVersion != "rdev.discovery-plan.v1" || len(payload.ConnectionPlan.DiscoveryPlan.Allowed) == 0 {
+		t.Fatalf("invite should include discovery plan: %#v", payload.ConnectionPlan)
 	}
 	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())
@@ -179,6 +204,42 @@ func TestInviteCreateDefaultsToAutoTransportPlan(t *testing.T) {
 	}
 	if len(payload.FallbackCommands) != 2 || !strings.Contains(payload.FallbackCommands[0], "--transport long-poll") || !strings.Contains(payload.FallbackCommands[1], "--transport poll") {
 		t.Fatalf("expected long-poll and poll fallback commands, got %#v", payload.FallbackCommands)
+	}
+}
+
+func TestInviteCreateLANScopeMarksLANReachability(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--reason", "repair target host",
+		"--network-scope", "lan",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		ConnectionPlan struct {
+			NetworkScope        string   `json:"network_scope"`
+			GatewayReachability string   `json:"gateway_reachability"`
+			SelectionOrder      []string `json:"selection_order"`
+		} `json:"connection_plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid invite JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.ConnectionPlan.NetworkScope != "lan" {
+		t.Fatalf("expected lan network scope, got %#v", payload.ConnectionPlan)
+	}
+	if payload.ConnectionPlan.GatewayReachability != "local-machine" {
+		t.Fatalf("expected local-machine reachability for httptest localhost gateway, got %#v", payload.ConnectionPlan)
+	}
+	if len(payload.ConnectionPlan.SelectionOrder) == 0 || !strings.Contains(payload.ConnectionPlan.SelectionOrder[0], "lan-gateway") {
+		t.Fatalf("expected LAN path first in selection order, got %#v", payload.ConnectionPlan.SelectionOrder)
 	}
 }
 

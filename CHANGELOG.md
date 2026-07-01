@@ -27,6 +27,15 @@ manifest, transport, and approval steps.
   `connectivity_checks` fields so agents can reason about NAT, firewalls,
   proxies, TLS interception, VPN requirements, and relay/mesh escalation without
   guessing.
+- Added invite `connection_plan` with implemented native paths for outbound
+  WSS/mTLS, HTTPS long-poll, HTTPS short-poll, and LAN-reachable gateways, plus
+  explicit agent-managed entries for HTTPS relay, mesh/VPN, and SSH tunnel
+  scenarios when those paths are configured or discoverable.
+- Added invite `discovery_plan` so agents can inspect interfaces, routes,
+  proxy settings, SSH config, mesh tooling, and scoped LAN/private-network
+  reachability before asking the user.
+- Added `--network-scope` / `network_scope` hints for invites so agents can
+  distinguish auto, internet, LAN, relay, mesh, and SSH-assisted contexts.
 
 ### Changed
 
@@ -38,6 +47,10 @@ manifest, transport, and approval steps.
   status, and evidence.
 - Changed invite defaults from WSS-only to auto transport for maximum
   field-connectivity while preserving WSS as the first candidate.
+- Documented that agents may scan scoped local/private networks and use
+  configured relay, mesh, and SSH paths automatically, while those paths remain
+  connectivity choices only and never replace rdev target consent, host
+  approval, signed jobs, local policy checks, or evidence.
 
 ### Verification
 

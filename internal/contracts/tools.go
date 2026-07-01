@@ -20,6 +20,7 @@ func Tools() []Tool {
 				"capabilities":          stringArray(),
 				"reason":                stringField(),
 				"transport":             enum("auto", "wss", "long-poll", "poll"),
+				"network_scope":         enum("auto", "internet", "lan", "relay", "mesh", "ssh"),
 				"rdev_command":          stringField(),
 				"once":                  boolField(),
 				"require_host_approval": boolField(),

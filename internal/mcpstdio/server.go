@@ -184,6 +184,7 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 		GatewayURL:          gatewayURL,
 		Ticket:              ticket,
 		Transport:           stringArg(args, "transport", "auto"),
+		NetworkScope:        stringArg(args, "network_scope", "auto"),
 		Once:                boolArg(args, "once", false),
 		RequireHostApproval: boolArg(args, "require_host_approval", true),
 		RdevCommand:         stringArg(args, "rdev_command", "rdev"),

@@ -20,8 +20,12 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   then HTTPS long-poll, then short polling, all as outbound target-host
   connections. If the host does not appear, ask about proxy requirements, TLS
   interception, blocked outbound 443, DNS failure, captive portals, VPN
-  requirements, or operator-approved relay/mesh availability before trying
-  another path.
+  requirements, or use configured relay/mesh/SSH paths before asking.
+- When the target host and Agent gateway may be on the same LAN, ask for or
+  derive a LAN-reachable gateway URL. Agents may inspect local interfaces,
+  routes, DNS/mDNS, proxy settings, SSH config, and installed mesh tooling, and
+  may run scoped private-network reachability probes. Treat relay, mesh/VPN, and
+  SSH tunnel paths as connectivity only and never as authorization to run work.
 - Preserve the current architecture decision layer in `docs/architecture/PERFECT_ENDING_SOLUTION.md`; update that document when changing host, adapter, transport, release, or Skillkit boundaries.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Before creating a coding job, discover the available hosts, target OS,

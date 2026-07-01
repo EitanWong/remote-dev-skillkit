@@ -17,13 +17,22 @@ Agent-first session tools include:
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
-`transport_plan`, `fallback_commands`, `connectivity_checks`,
-`human_next_actions`, and `agent_next_actions`. Agents should call this before
-asking a human to connect a new target host. The command still requires consent
-on the target machine; it does not execute remotely by itself. The default
-transport is `auto`, which tries WSS first and falls back to HTTPS long-poll and
-then short polling when restrictive networks block WebSocket upgrades or
-long-held requests.
+`transport_plan`, `connection_plan`, `fallback_commands`,
+`connectivity_checks`, `human_next_actions`, and `agent_next_actions`. Agents
+should call this before asking a human to connect a new target host. The command
+still requires consent on the target machine; it does not execute remotely by
+itself. The default transport is `auto`, which tries WSS first and falls back to
+HTTPS long-poll and then short polling when restrictive networks block WebSocket
+upgrades or long-held requests.
+
+The `connection_plan` separates native support from agent-managed paths:
+implemented native paths are outbound WSS/mTLS, HTTPS long-poll, HTTPS
+short-poll, and LAN-reachable gateway URLs. Agent-managed paths such as an
+HTTPS relay, mesh/VPN, or SSH tunnel may be used automatically when local
+configuration or credentials are already available. Missing or ambiguous
+configuration should trigger a concise question; external account or credential
+mutation still requires explicit approval. These paths remain connectivity
+only.
 
 Useful read-only tools include:
 

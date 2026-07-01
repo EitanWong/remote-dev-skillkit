@@ -2829,6 +2829,7 @@ func (a App) invite(ctx context.Context, args []string) error {
 		reason := fs.String("reason", "remote support", "ticket reason")
 		capList := fs.String("capabilities", "", "comma-separated capabilities; defaults to temporary-mode capabilities")
 		transport := fs.String("transport", "auto", "host job transport: auto, wss, long-poll, or poll")
+		networkScope := fs.String("network-scope", "auto", "network scope hint: auto, internet, lan, relay, mesh, or ssh")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path to run on the target host")
 		once := fs.Bool("once", false, "ask the target host process to exit after one job")
@@ -2842,6 +2843,7 @@ func (a App) invite(ctx context.Context, args []string) error {
 			Reason:            *reason,
 			Capabilities:      splitCapabilities(*capList),
 			Transport:         *transport,
+			NetworkScope:      *networkScope,
 			OperatorTokenFile: *operatorTokenFile,
 			RdevCommand:       *rdevCommand,
 			Once:              *once,
@@ -2858,6 +2860,7 @@ type inviteCreateOptions struct {
 	Reason            string
 	Capabilities      []string
 	Transport         string
+	NetworkScope      string
 	OperatorTokenFile string
 	RdevCommand       string
 	Once              bool
@@ -2883,6 +2886,7 @@ func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
 		ManifestURL:         payload.ManifestURL,
 		Ticket:              payload.Ticket,
 		Transport:           opts.Transport,
+		NetworkScope:        opts.NetworkScope,
 		Once:                opts.Once,
 		RequireHostApproval: true,
 		RdevCommand:         opts.RdevCommand,

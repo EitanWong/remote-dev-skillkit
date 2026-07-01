@@ -183,7 +183,17 @@ HTTPS long-poll, then short polling. That keeps the connection path useful
 across NAT, restrictive firewalls, proxies that block WebSocket upgrades, and
 networks that interrupt long-held requests. If all outbound HTTPS variants fail,
 the Agent should ask about proxy configuration, DNS, captive portal, VPN, TLS
-inspection, or an operator-approved relay/mesh path rather than guessing.
+inspection, or use already configured relay/mesh/SSH paths. If the required
+route, credential, or endpoint is ambiguous, the Agent should ask a concise
+question rather than guessing.
+
+When the Agent server and target host share a LAN, use a gateway URL that is
+actually routable from the target, such as `http://192.0.2.10:8787` in
+documentation examples or the discovered private address in real use. Do not
+use `127.0.0.1` for a different target machine. The invite `connection_plan`
+marks LAN, relay, mesh, and SSH paths separately so agents can probe local
+interfaces, route tables, SSH config, proxy settings, and mesh tooling before
+asking follow-up questions.
 
 The target host command in the invite consumes the signed join manifest, which
 carries the ticket code, gateway URL, trust bundle, and trust fingerprint:

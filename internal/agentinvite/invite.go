@@ -2,6 +2,7 @@ package agentinvite
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ type Options struct {
 	ManifestURL         string
 	Ticket              model.Ticket
 	Transport           string
+	NetworkScope        string
 	Once                bool
 	RequireHostApproval bool
 	RdevCommand         string
@@ -31,6 +33,7 @@ type Invite struct {
 	Ticket              model.Ticket      `json:"ticket"`
 	Transport           string            `json:"transport"`
 	TransportPlan       TransportPlan     `json:"transport_plan"`
+	ConnectionPlan      ConnectionPlan    `json:"connection_plan"`
 	HostCommand         string            `json:"host_command"`
 	FallbackCommands    []string          `json:"fallback_commands"`
 	HumanNextActions    []string          `json:"human_next_actions"`
@@ -54,6 +57,34 @@ type TransportCandidate struct {
 	Reason       string   `json:"reason"`
 	HostCommand  string   `json:"host_command"`
 	FailureHints []string `json:"failure_hints,omitempty"`
+}
+
+type ConnectionPlan struct {
+	SchemaVersion       string               `json:"schema_version"`
+	NetworkScope        string               `json:"network_scope"`
+	GatewayReachability string               `json:"gateway_reachability"`
+	Implemented         []ConnectionProtocol `json:"implemented"`
+	AgentManaged        []ConnectionProtocol `json:"agent_managed"`
+	DiscoveryPlan       DiscoveryPlan        `json:"discovery_plan"`
+	SelectionOrder      []string             `json:"selection_order"`
+	EnvironmentProbes   []string             `json:"environment_probes"`
+	AgentRules          []string             `json:"agent_rules"`
+}
+
+type ConnectionProtocol struct {
+	ID            string   `json:"id"`
+	Status        string   `json:"status"`
+	BestFor       string   `json:"best_for"`
+	Requirements  []string `json:"requirements"`
+	SecurityModel string   `json:"security_model"`
+	AgentAction   string   `json:"agent_action"`
+}
+
+type DiscoveryPlan struct {
+	SchemaVersion string   `json:"schema_version"`
+	Allowed       []string `json:"allowed"`
+	Boundaries    []string `json:"boundaries"`
+	StopWhen      []string `json:"stop_when"`
 }
 
 func New(opts Options) (Invite, error) {
@@ -85,6 +116,13 @@ func New(opts Options) (Invite, error) {
 	if !validTransport(transport) {
 		return Invite{}, fmt.Errorf("unsupported transport %q", transport)
 	}
+	networkScope := strings.TrimSpace(opts.NetworkScope)
+	if networkScope == "" {
+		networkScope = "auto"
+	}
+	if !validNetworkScope(networkScope) {
+		return Invite{}, fmt.Errorf("unsupported network scope %q", networkScope)
+	}
 	rdevCommand := strings.TrimSpace(opts.RdevCommand)
 	if rdevCommand == "" {
 		rdevCommand = "rdev"
@@ -96,6 +134,7 @@ func New(opts Options) (Invite, error) {
 
 	hostCommand := hostServeCommand(rdevCommand, manifestURL, transport, opts.Once)
 	transportPlan := newTransportPlan(rdevCommand, manifestURL, transport, opts.Once)
+	connectionPlan := newConnectionPlan(gatewayURL, networkScope)
 	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
 
 	agentActions := []string{
@@ -117,6 +156,7 @@ func New(opts Options) (Invite, error) {
 		Ticket:           opts.Ticket,
 		Transport:        transport,
 		TransportPlan:    transportPlan,
+		ConnectionPlan:   connectionPlan,
 		HostCommand:      hostCommand,
 		FallbackCommands: fallbackCommands,
 		HumanNextActions: []string{
@@ -129,7 +169,8 @@ func New(opts Options) (Invite, error) {
 			"Ask the target-side human to run host_command; the host connects outbound, so no inbound port should be opened on the target machine.",
 			"If the host does not appear, ask for target-side network symptoms: proxy requirement, TLS interception, blocked outbound 443, DNS failure, captive portal, or VPN requirement.",
 			"Prefer auto transport. It tries WSS first and falls back to HTTPS long-poll, then short polling for restrictive networks.",
-			"Use mTLS inputs only when the operator provides CA and client certificate material; never invent certificate paths.",
+			"If the Agent and target are on the same LAN, probe scoped local/LAN reachability and prefer a LAN-reachable gateway URL before relay, mesh, or SSH.",
+			"Use mTLS, SSH, mesh, relay, or proxy inputs automatically when they are already configured in the environment; ask only when required values cannot be discovered.",
 		},
 		MCPTools: map[string]string{
 			"list_hosts":    "rdev.hosts.list",
@@ -159,6 +200,15 @@ func validTransport(transport string) bool {
 	}
 }
 
+func validNetworkScope(scope string) bool {
+	switch scope {
+	case "auto", "internet", "lan", "relay", "mesh", "ssh":
+		return true
+	default:
+		return false
+	}
+}
+
 func newTransportPlan(rdevCommand, manifestURL, transport string, once bool) TransportPlan {
 	transports := []string{transport}
 	if transport == "auto" {
@@ -181,9 +231,163 @@ func newTransportPlan(rdevCommand, manifestURL, transport string, once bool) Tra
 		Notes: []string{
 			"All candidates are outbound target-host connections; target networks do not need inbound firewall rules.",
 			"Transport only carries signed work and evidence; host-side policy still authorizes every job.",
-			"Use relay, VPN, or mesh only as an operator-approved connectivity assist for owned hosts, never as job authorization.",
+			"Relay, VPN, mesh, and SSH are connectivity assists only; they never authorize jobs by themselves.",
 		},
 	}
+}
+
+func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
+	reachability := "internet-or-operator-configured"
+	if gatewayLooksLocal(gatewayURL) {
+		reachability = "local-machine"
+	} else if gatewayLooksLAN(gatewayURL) {
+		reachability = "lan"
+	}
+	implemented := []ConnectionProtocol{
+		{
+			ID:            "outbound-wss-mtls",
+			Status:        "implemented",
+			BestFor:       "public gateway, LAN gateway, low-latency job delivery, and mTLS deployments",
+			Requirements:  []string{"target can reach gateway over outbound TCP 443 or configured WSS port", "WebSocket upgrade is allowed", "CA/client certificate material is provided when mTLS is required"},
+			SecurityModel: "transport identity only; signed envelopes, host policy, approvals, and evidence remain authoritative",
+			AgentAction:   "try first when network scope is auto and the gateway is reachable",
+		},
+		{
+			ID:            "outbound-https-long-poll",
+			Status:        "implemented",
+			BestFor:       "corporate proxies, NAT, and firewalls that allow HTTPS but block WebSocket upgrades",
+			Requirements:  []string{"target can reach gateway over outbound HTTP or HTTPS", "long-held requests are not aggressively terminated"},
+			SecurityModel: "same signed job and host-local policy model as WSS",
+			AgentAction:   "use automatically after WSS fails before any relay, mesh, or SSH escalation",
+		},
+		{
+			ID:            "outbound-https-short-poll",
+			Status:        "implemented",
+			BestFor:       "maximum compatibility when long-held requests are interrupted",
+			Requirements:  []string{"target can make repeated outbound HTTP or HTTPS requests to gateway"},
+			SecurityModel: "same signed job and host-local policy model as WSS",
+			AgentAction:   "use as the final native fallback before agent-managed relay, mesh, or SSH connectivity",
+		},
+		{
+			ID:            "lan-gateway-http-https",
+			Status:        lanStatus(gatewayURL),
+			BestFor:       "Agent server and target host on the same LAN or VPN segment",
+			Requirements:  []string{"gateway URL uses a LAN-reachable host/IP", "target can route to that address", "local firewall permits the gateway listener"},
+			SecurityModel: "LAN reachability is not authorization; host still verifies manifests, trust pins, envelopes, and approvals",
+			AgentAction:   "if gateway is local-only or private, probe scoped LAN reachability and use the routable LAN URL when available",
+		},
+	}
+	agentManaged := []ConnectionProtocol{
+		{
+			ID:            "agent-managed-https-relay",
+			Status:        "agent-managed-when-configured",
+			BestFor:       "target cannot reach private Agent server directly but can reach a neutral HTTPS relay",
+			Requirements:  []string{"relay URL is configured or discoverable", "relay forwards only rdev gateway HTTP/WSS traffic", "relay credentials stay in local config or secret storage"},
+			SecurityModel: "relay is connectivity only and cannot authorize jobs",
+			AgentAction:   "use a configured relay automatically after native outbound HTTPS paths fail; ask only if no relay is configured",
+		},
+		{
+			ID:            "agent-managed-mesh-vpn",
+			Status:        "agent-managed-when-configured",
+			BestFor:       "owned or managed hosts where Tailscale/headscale/WireGuard-style mesh is installed or available",
+			Requirements:  []string{"mesh CLI/config is present or configured", "gateway URL resolves inside the mesh", "mesh credentials are not emitted in invite output"},
+			SecurityModel: "mesh identity assists routing only; rdev host approval and signed jobs still govern execution",
+			AgentAction:   "detect installed mesh tooling and use it automatically when already configured; ask only before new enrollment or external account mutation",
+		},
+		{
+			ID:            "agent-managed-ssh-tunnel",
+			Status:        "agent-managed-when-configured",
+			BestFor:       "reachable hosts where SSH access already exists and HTTPS egress is blocked",
+			Requirements:  []string{"SSH endpoint is discovered or configured", "SSH key custody stays in the local SSH agent/config", "target consent and host approval still happen"},
+			SecurityModel: "SSH is a tunnel only, not job authorization",
+			AgentAction:   "use existing SSH config/agent entries automatically for tunnel setup; ask only when endpoint, username, or key choice is unclear",
+		},
+	}
+	return ConnectionPlan{
+		SchemaVersion:       "rdev.connection-plan.v1",
+		NetworkScope:        networkScope,
+		GatewayReachability: reachability,
+		Implemented:         implemented,
+		AgentManaged:        agentManaged,
+		DiscoveryPlan: DiscoveryPlan{
+			SchemaVersion: "rdev.discovery-plan.v1",
+			Allowed: []string{
+				"local interface and route inspection",
+				"configured gateway, proxy, SSH, relay, and mesh config inspection",
+				"scoped LAN reachability probes for private/link-local ranges related to local interfaces",
+				"mDNS/Bonjour or local DNS lookup when available",
+				"gateway health checks and protocol preflight checks",
+			},
+			Boundaries: []string{
+				"scan local/private networks and any explicit public target ranges provided by the user or configuration",
+				"do not print secrets, tokens, SSH keys, relay credentials, or private server addresses into public artifacts",
+				"do not mutate third-party relay/mesh accounts or credentials without explicit approval",
+				"do not treat a discovered transport path as host approval or job authorization",
+			},
+			StopWhen: []string{
+				"a host registers and becomes pending or active",
+				"a required credential, route, proxy, relay, mesh, or SSH value is ambiguous",
+				"the probe would leave the local/private scope",
+			},
+		},
+		SelectionOrder: []string{
+			"lan-gateway-http-https when gateway URL is local/private and target is on the same LAN",
+			"outbound-wss-mtls",
+			"outbound-https-long-poll",
+			"outbound-https-short-poll",
+			"agent-managed-https-relay",
+			"agent-managed-mesh-vpn",
+			"agent-managed-ssh-tunnel",
+		},
+		EnvironmentProbes: []string{
+			"rdev doctor on the Agent side",
+			"gateway /healthz reachability from the Agent side",
+			"target-side DNS resolution for the gateway host",
+			"target-side outbound TCP 443 or configured gateway port",
+			"proxy, captive portal, VPN, TLS interception, and firewall policy",
+			"whether Agent and target share a LAN, VPN, relay, SSH route, or configured mesh",
+		},
+		AgentRules: []string{
+			"Actively probe the local environment and scoped private network before asking the user.",
+			"Use configured relay, mesh, SSH, proxy, certificate, or private gateway values automatically when unambiguous.",
+			"Ask concise questions only when network scope, credentials, or target identity are unclear.",
+			"Prefer outbound target-host connections; avoid inbound target firewall changes.",
+			"Treat every non-rdev transport as connectivity assistance only.",
+		},
+	}
+}
+
+func lanStatus(gatewayURL string) string {
+	if gatewayLooksLAN(gatewayURL) || gatewayLooksLocal(gatewayURL) {
+		return "implemented-when-target-can-route-to-gateway"
+	}
+	return "supported-with-lan-reachable-gateway-url"
+}
+
+func gatewayLooksLocal(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	ip := net.ParseIP(host)
+	return host == "localhost" || strings.HasSuffix(host, ".localhost") || (ip != nil && ip.IsLoopback())
+}
+
+func gatewayLooksLAN(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if strings.HasSuffix(host, ".local") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 func fallbackCommandsFromPlan(plan TransportPlan, selected string) []string {

@@ -26,6 +26,17 @@
             ],
             "type": "string"
           },
+          "network_scope": {
+            "enum": [
+              "auto",
+              "internet",
+              "lan",
+              "relay",
+              "mesh",
+              "ssh"
+            ],
+            "type": "string"
+          },
           "once": {
             "type": "boolean"
           },

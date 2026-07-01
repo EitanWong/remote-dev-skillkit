@@ -98,6 +98,22 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || plan["mode"] != "auto" {
 		t.Fatalf("expected auto transport plan, got %#v", structured)
 	}
+	connectionPlan, ok := structured["connection_plan"].(map[string]any)
+	if !ok || connectionPlan["schema_version"] != "rdev.connection-plan.v1" {
+		t.Fatalf("expected connection plan, got %#v", structured)
+	}
+	implemented, ok := connectionPlan["implemented"].([]any)
+	if !ok || len(implemented) < 4 {
+		t.Fatalf("expected implemented connection protocols, got %#v", connectionPlan)
+	}
+	agentManaged, ok := connectionPlan["agent_managed"].([]any)
+	if !ok || len(agentManaged) < 3 {
+		t.Fatalf("expected agent-managed connection protocols, got %#v", connectionPlan)
+	}
+	discoveryPlan, ok := connectionPlan["discovery_plan"].(map[string]any)
+	if !ok || discoveryPlan["schema_version"] != "rdev.discovery-plan.v1" {
+		t.Fatalf("expected discovery plan, got %#v", connectionPlan)
+	}
 }
 
 func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {
