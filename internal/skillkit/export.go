@@ -305,6 +305,8 @@ func installDoc(gatewayURL string) string {
 		"",
 		"%s",
 		"",
+		adaptiveConfigurationContract(),
+		"",
 		"## Generic Install Shape",
 		"",
 		"1. Verify the bundle with `rdev skillkit verify --bundle <bundle-dir>`.",
@@ -348,13 +350,26 @@ func frameworkDoc(name, gatewayURL string) string {
 		"   %s",
 		"   ```",
 		"",
-		"6. Ask the agent to use `host-triage` first, then `safe-remote-support` or `remote-vibe-coding`, and finally `remote-job-review`.",
+		"6. Keep the adaptive configuration contract active: the agent should probe the installed `rdev` binary, MCP tools, OS, shell, service manager, gateway, workspace, adapters, framework path, and permissions before acting. If gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy is unclear, it must ask instead of inventing a value.",
+		"7. Ask the agent to use `host-triage` first, then `safe-remote-support` or `remote-vibe-coding`, and finally `remote-job-review`.",
 		"",
 		"## Required Review Step",
 		"",
 		"Before the agent claims success, it should call the artifact/evidence tools and review the exported `rdev.evidence-bundle.v1` bundle.",
 		"",
 	}, "\n"), name, name, gateway)
+}
+
+func adaptiveConfigurationContract() string {
+	return strings.Join([]string{
+		"## Adaptive Configuration Contract",
+		"",
+		"Agents using this Skillkit must discover their environment before acting. They should inspect the installed `rdev` binary, MCP tools, target OS, shell, available service manager, gateway configuration, workspace path, installed agent adapters, framework install path, and current permissions.",
+		"",
+		"If a gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy cannot be discovered safely, the agent must ask a short follow-up question instead of inventing a value.",
+		"",
+		"Examples such as `https://api.example.com/v1`, `/Users/example`, `/home/example`, and `C:\\Users\\Alice` are placeholders. Runtime agents must replace them with operator-provided or detected values.",
+	}, "\n")
 }
 
 func frameworksIndex() string {

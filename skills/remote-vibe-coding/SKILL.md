@@ -12,6 +12,17 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
 - Preserve the current architecture decision layer in `docs/architecture/PERFECT_ENDING_SOLUTION.md`; update that document when changing host, adapter, transport, release, or Skillkit boundaries.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
+- Before creating a coding job, discover the available hosts, target OS,
+  workspace path, Git state, installed adapters, gateway/MCP configuration,
+  release trust inputs, and operator-approved capabilities. Use read-only probes
+  such as `rdev doctor`, `rdev.hosts.list`, `rdev.hosts.capabilities`,
+  `rdev mcp tools`, `git status`, `git rev-parse`, `command -v`, and `where`.
+- If gateway URL, ticket code, host identity, workspace root, adapter choice,
+  release root, framework install path, or approval policy is unclear, ask the
+  user or operator before proceeding. Do not infer real values from examples.
+- Adapt to the detected system: use LaunchAgent planning on macOS, systemd user
+  units on Linux, Windows Service plans on Windows, PowerShell only when present,
+  and shell/Codex/Claude/acpx only when the host advertises those capabilities.
 - Prefer ACP/acpx adapters over raw PTY scraping when available.
 - Lock a workspace before starting a coding job.
 - Use a branch or worktree for code changes.
@@ -47,11 +58,14 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 
 ## Workflow
 
-1. List hosts with `rdev.hosts.list`.
-2. Inspect capabilities with `rdev.hosts.capabilities`.
-3. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
-4. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
-5. Create a job with workspace policy.
-6. Stream status until completion.
-7. Inspect artifacts and audit events.
-8. Request approval before push/merge/deploy.
+1. Discover the local runtime, MCP tools, gateway configuration, and candidate
+   host list.
+2. Inspect host OS, workspace, capabilities, adapters, and approval policy.
+3. Ask for any missing gateway, host, workspace, release, adapter, or approval
+   configuration that cannot be safely discovered.
+4. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
+5. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
+6. Create a job with workspace policy.
+7. Stream status until completion.
+8. Inspect artifacts and audit events.
+9. Request approval before push/merge/deploy.

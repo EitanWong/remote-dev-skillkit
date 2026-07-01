@@ -56,6 +56,26 @@ func TestExportWritesInstallableSkillkitBundle(t *testing.T) {
 	if !strings.Contains(install, "https://api.example.com/v1") {
 		t.Fatalf("expected gateway URL in install doc, got %s", install)
 	}
+	for _, want := range []string{
+		"Adaptive Configuration Contract",
+		"inspect the installed `rdev` binary",
+		"must ask a short follow-up question instead of inventing a value",
+		"Examples such as `https://api.example.com/v1`, `/Users/example`, `/home/example`, and `C:\\Users\\Alice` are placeholders",
+	} {
+		if !strings.Contains(install, want) {
+			t.Fatalf("expected install doc to contain %q, got %s", want, install)
+		}
+	}
+	codexDoc := readFile(t, filepath.Join(out, "frameworks", "codex.md"))
+	for _, want := range []string{
+		"probe the installed `rdev` binary",
+		"it must ask instead of inventing a value",
+		"framework install path",
+	} {
+		if !strings.Contains(codexDoc, want) {
+			t.Fatalf("expected codex framework doc to contain %q, got %s", want, codexDoc)
+		}
+	}
 	content := readFile(t, filepath.Join(out, "manifest.json"))
 	var onDisk Manifest
 	if err := json.Unmarshal([]byte(content), &onDisk); err != nil {

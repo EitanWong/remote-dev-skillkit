@@ -46,6 +46,20 @@ manifest schema, required skills, required framework notes, safe relative paths,
 listed file SHA-256/size, and absence of unlisted bundle files. Do not install a
 bundle into any agent runtime until verification returns `ok=true`.
 
+## Adaptive Configuration Contract
+
+Agents using this Skillkit must discover their environment before acting. They
+should inspect the installed `rdev` binary, MCP tools, target OS, shell,
+available service manager, gateway configuration, workspace path, installed
+agent adapters, and current permissions. If a gateway URL, ticket code, root
+key, release URL, checksum, framework install path, workspace root, adapter
+choice, or approval policy cannot be discovered safely, the agent must ask a
+short follow-up question instead of inventing a value.
+
+Examples such as `https://api.example.com/v1`, `/Users/example`,
+`/home/example`, and `C:\Users\Alice` are placeholders. Runtime agents must
+replace them with operator-provided or detected values.
+
 `rdev skillkit plan-install` adds a second, reviewable layer for mainstream
 agent runtimes. It writes `rdev.skillkit-install-plan.v1`, `INSTALL_COMMANDS.md`,
 and per-framework shell/PowerShell scripts. The command does not modify Codex,

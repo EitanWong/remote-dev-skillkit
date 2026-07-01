@@ -10,6 +10,14 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 ## Rules
 
 - Use attended temporary mode for third-party machines.
+- Before creating tickets, launchers, service plans, or jobs, determine the
+  target OS, shell, installed `rdev` binary, gateway or join URL, ticket source,
+  release-verification inputs, and operator-approved capabilities. Probe
+  read-only when available; ask a concise follow-up when any required value is
+  ambiguous.
+- Do not substitute placeholder domains, user paths, ticket codes, release
+  roots, checksums, or framework paths for real configuration. Example values
+  are documentation only.
 - For Windows temporary acceptance, prefer `rdev acceptance windows-temporary --release-bundle-url <url> --out <empty-dir> ...`, then verify it with `rdev acceptance verify-windows-temporary --plan <out>/windows-temporary-plan.json` before sending a one-command bootstrap to a target user.
 - After a real Windows temporary run, package release evidence with `rdev acceptance package-windows-temporary --plan <plan> --out <empty-dir> --transcript <file> --release-verification <file> --audit <file> --no-persistence-dir <dir> --approval-probes-dir <dir>`.
 - For published Windows bootstrap artifacts, hash-pin `rdev-verify.exe` and prefer signed release bundle verification; use single host release manifests only for compatibility.
@@ -23,17 +31,21 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 
 ## Workflow
 
-1. Create a ticket with `rdev.tickets.create`.
-2. For Windows temporary support, generate and verify the acceptance plan, then review the launcher, release-verification requirements, no-persistence checks, and approval probes.
-3. Explain the join URL and visible consent screen.
-4. Wait for the host to appear pending.
-5. Ask the operator to approve the host with scoped capabilities.
-6. Inspect capabilities with `rdev.hosts.capabilities`.
-7. Create small scoped jobs with `rdev.jobs.create`.
-8. Use `rdev.jobs.approve` for dangerous actions.
-9. Read artifacts and audit evidence.
-10. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
-11. Package Windows acceptance evidence before claiming the run is release-ready.
+1. Discover local context: available `rdev`, MCP tools, gateway configuration,
+   target OS, shell, release bundle/verifier inputs, and approved support mode.
+2. Ask for missing gateway, ticket, release, checksum, root key, or target-user
+   details before generating commands.
+3. Create a ticket with `rdev.tickets.create`.
+4. For Windows temporary support, generate and verify the acceptance plan, then review the launcher, release-verification requirements, no-persistence checks, and approval probes.
+5. Explain the join URL and visible consent screen.
+6. Wait for the host to appear pending.
+7. Ask the operator to approve the host with scoped capabilities.
+8. Inspect capabilities with `rdev.hosts.capabilities`.
+9. Create small scoped jobs with `rdev.jobs.create`.
+10. Use `rdev.jobs.approve` for dangerous actions.
+11. Read artifacts and audit evidence.
+12. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
+13. Package Windows acceptance evidence before claiming the run is release-ready.
 
 ## Default Temporary Capabilities
 
