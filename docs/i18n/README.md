@@ -1,8 +1,16 @@
-# Multilingual Quick Start
+# Multilingual Quick Starts
 
 Remote Dev Skillkit is designed for a global agent-developer community. These
 short translations explain the project, safety model, and install path in major
 world languages. The English README remains the authoritative technical source.
+
+Every quick start keeps the same install spine as the English README:
+
+1. build or install `rdev`;
+2. run `rdev doctor`;
+3. export and verify a Skillkit bundle;
+4. generate and verify a framework install plan;
+5. run `rdev skillkit install` as a dry-run first, then again with `--execute`.
 
 | Language | File |
 |---|---|
@@ -20,3 +28,7 @@ world languages. The English README remains the authoritative technical source.
 
 If a translation conflicts with the English README, follow the English README
 and open an issue or pull request to update the translation.
+
+Maintainers can run `scripts/audit-i18n-quickstarts.sh` to verify that all
+translations still include the common framework list, quick install commands,
+local demo commands, safety posture, and Apache-2.0 license reference.

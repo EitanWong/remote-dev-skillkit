@@ -1,35 +1,55 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit é um núcleo de segurança para desenvolvimento remoto guiado
-por agentes. Não é uma ferramenta oculta de controle remoto: ele permite que
-Codex, Claude Code, Hermes, OpenClaw/OpenCode e agentes MCP genéricos deleguem
-trabalho a máquinas reais com jobs assinados, política local no host,
-aprovações, evidências e auditoria.
+Remote Dev Skillkit é uma camada de segurança para agentes de IA que precisam trabalhar em máquinas reais com Mac, Windows ou Linux. Não é uma ferramenta oculta de controle remoto: Codex, Claude Code, Hermes, OpenClaw/OpenCode e agentes MCP genéricos podem executar trabalho real com jobs assinados, política local no host, aprovações, pacotes de evidência e auditoria.
 
-## O que ele oferece
+## Destaques
 
-- CLI `rdev` e binários de host, gateway, MCP e verificação.
-- Bundles Agent Skillkit exportáveis, verificáveis e instaláveis.
-- Job envelopes assinados, locks de workspace, approval gates, evidence bundles
-  e audit chains.
-- Adaptadores para Codex, Claude Code, ACP/acpx, shell e PowerShell.
+- Um Agent Skillkit portátil para instalar em Agent Frameworks populares.
+- Jobs são assinados, verificados e só então executados; nada de entregar uma shell crua ao agente.
+- As skills detectam OS, shell, service manager, gateway, workspace, adapter e permissões; se algo não estiver claro, elas perguntam.
+- Adapters para Codex, Claude Code, ACP/acpx, shell, PowerShell e adapters personalizados.
 - Licença open source Apache-2.0.
 
-## Verificação local
+## Instalação rápida
 
 ```bash
-go test ./...
-./scripts/check.sh
-./scripts/ci/release-smoke.sh
+go install ./cmd/rdev
+rdev doctor
 ```
 
-## Instalar o Skillkit
+Exporte e verifique o bundle Skillkit:
 
 ```bash
-rdev skillkit export --source-root . --out dist/remote-dev-skillkit
+rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
 rdev skillkit verify --bundle dist/remote-dev-skillkit
-rdev skillkit plan-install --bundle dist/remote-dev-skillkit --out dist/skillkit-install
+```
+
+Gere um plano de instalação revisável para Agent Frameworks:
+
+```bash
+rdev skillkit plan-install \
+  --bundle dist/remote-dev-skillkit \
+  --out dist/skillkit-install \
+  --frameworks codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent
+
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-O [README em inglês](../../README.md) é a referência técnica oficial.
+A instalação direta é dry-run por padrão. Revise o relatório e depois adicione `--execute`:
+
+```bash
+rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
+rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
+```
+
+A segunda linha de install é o caminho de instalação em um comando quando o bundle já foi verificado.
+
+## Demo local
+
+```bash
+go test ./...
+rdev demo local
+rdev mcp tools
+```
+
+O [README](../../README.md) em inglês é a referência técnica oficial; se houver conflito, siga o README em inglês.

@@ -55,15 +55,17 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 dry_run_output="$(mktemp /tmp/rdev-github-project-dry-run.XXXXXX)"
 public_surface_output="$(mktemp /tmp/rdev-public-surface-audit.XXXXXX)"
-trap 'rm -f "$dry_run_output" "$public_surface_output"' EXIT
+i18n_output="$(mktemp /tmp/rdev-i18n-quickstarts-audit.XXXXXX)"
+trap 'rm -f "$dry_run_output" "$public_surface_output" "$i18n_output"' EXIT
 
 (
   cd "$repo_root"
   scripts/github/bootstrap-project.sh --dry-run "$repo" > "$dry_run_output"
   scripts/audit-public-surface.sh > "$public_surface_output"
+  scripts/audit-i18n-quickstarts.sh > "$i18n_output"
 )
 
-python3 - "$repo_root" "$repo" "$dry_run_output" "$public_surface_output" "$out" <<'PY'
+python3 - "$repo_root" "$repo" "$dry_run_output" "$public_surface_output" "$i18n_output" "$out" <<'PY'
 import datetime
 import hashlib
 import json
@@ -75,7 +77,8 @@ repo_root = pathlib.Path(sys.argv[1])
 repo = sys.argv[2]
 dry_run_path = pathlib.Path(sys.argv[3])
 public_surface_path = pathlib.Path(sys.argv[4])
-out_arg = sys.argv[5]
+i18n_path = pathlib.Path(sys.argv[5])
+out_arg = sys.argv[6]
 
 def run_git(*args):
     try:
@@ -121,6 +124,7 @@ required_files = [
     "scripts/github/plan-platform-release.sh",
     "scripts/github/plan-post-release-install.sh",
     "scripts/github/verify-post-release-install-plan.sh",
+    "scripts/audit-i18n-quickstarts.sh",
 ]
 
 required_i18n_files = [
@@ -160,6 +164,8 @@ add("bootstrap_dry_run_no_gh_commands", "gh " not in dry_run, "dry-run output is
 add("bootstrap_dry_run_completed", "GitHub project bootstrap dry-run completed" in dry_run, "completion marker")
 public_surface = public_surface_path.read_text()
 add("public_surface_audit", "public_surface_ok=true" in public_surface, public_surface.strip())
+i18n_quickstarts = i18n_path.read_text()
+add("i18n_quickstarts_audit", "i18n_quickstarts_ok=true" in i18n_quickstarts, i18n_quickstarts.strip())
 
 workflow = (repo_root / ".github/workflows/ci.yml").read_text() if (repo_root / ".github/workflows/ci.yml").is_file() else ""
 add("ci_runs_check_script", "./scripts/check.sh" in workflow, "")
@@ -224,6 +230,11 @@ report = {
         "ok": "public_surface_ok=true" in public_surface,
         "output": public_surface.strip(),
         "sha256": sha256(public_surface_path),
+    },
+    "i18n_quickstarts_audit": {
+        "ok": "i18n_quickstarts_ok=true" in i18n_quickstarts,
+        "output": i18n_quickstarts.strip(),
+        "sha256": sha256(i18n_path),
     },
     "files": file_entries,
     "checks": checks,

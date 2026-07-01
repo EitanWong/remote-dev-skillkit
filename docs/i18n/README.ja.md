@@ -1,30 +1,55 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit は、Agent によるリモート開発のための安全カーネルです。隠れたリモート操作ツールではありません。Codex、Claude Code、Hermes、OpenClaw/OpenCode、汎用 MCP Agent が、署名済みジョブ、ホスト側ポリシー、承認、証跡、監査ログを通じて実マシンへ作業を委譲できるようにします。
+Remote Dev Skillkit は、AI Agent が実際の Mac、Windows、Linux マシンで作業するための安全レイヤーです。隠れたリモート操作ツールではありません。Codex、Claude Code、Hermes、OpenClaw/OpenCode、汎用 MCP Agent が、署名済みジョブ、ホスト側ポリシー、承認、証跡バンドル、監査ログを通じて実作業を実行できます。
 
-## 提供するもの
+## 主なポイント
 
-- `rdev` CLI と host、gateway、MCP、verifier バイナリ。
-- エクスポート、検証、インストール可能な Agent Skillkit バンドル。
-- 署名済み job envelope、workspace lock、approval gate、evidence bundle、audit chain。
-- Codex、Claude Code、ACP/acpx、shell、PowerShell アダプター。
+- 主要な Agent Framework に導入できるポータブルな Agent Skillkit。
+- ジョブは署名、検証、その後に実行されます。生の shell 権限をそのまま渡しません。
+- Skills は OS、shell、service manager、gateway、workspace、adapter、権限を検出します。不明な場合は推測せず質問します。
+- Codex、Claude Code、ACP/acpx、shell、PowerShell、カスタム adapters に対応。
 - Apache-2.0 オープンソースライセンス。
 
-## ローカル検証
+## クイックインストール
 
 ```bash
-go test ./...
-./scripts/check.sh
-./scripts/ci/release-smoke.sh
+go install ./cmd/rdev
+rdev doctor
 ```
 
-## Skillkit のインストール
+Skillkit bundle をエクスポートして検証します：
 
 ```bash
-rdev skillkit export --source-root . --out dist/remote-dev-skillkit
+rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
 rdev skillkit verify --bundle dist/remote-dev-skillkit
-rdev skillkit plan-install --bundle dist/remote-dev-skillkit --out dist/skillkit-install
+```
+
+Agent Framework 向けの確認可能なインストール計画を作成します：
+
+```bash
+rdev skillkit plan-install \
+  --bundle dist/remote-dev-skillkit \
+  --out dist/skillkit-install \
+  --frameworks codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent
+
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-技術的な正本は英語の [README](../../README.md) です。
+直接インストールはデフォルトで dry-run です。確認後に `--execute` を追加します：
+
+```bash
+rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
+rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
+```
+
+2 つ目の install コマンドが、検証済み bundle がある場合の one-command install パスです。
+
+## ローカルデモ
+
+```bash
+go test ./...
+rdev demo local
+rdev mcp tools
+```
+
+技術的な正本は英語の [README](../../README.md) です。翻訳と異なる場合は英語版を優先してください。

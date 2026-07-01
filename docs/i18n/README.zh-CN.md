@@ -1,30 +1,55 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit 是一个面向 Agent 开发者的远程开发安全内核。它不是隐藏远控工具，而是让 Codex、Claude Code、Hermes、OpenClaw/OpenCode 和通用 MCP Agent 以可审计、可撤销、受策略约束的方式，把任务交给真实机器执行。
+Remote Dev Skillkit 是给 AI Agent 使用真实 Mac、Windows、Linux 机器时准备的安全层。它不是隐藏远控工具，而是让 Codex、Claude Code、Hermes、OpenClaw/OpenCode 和通用 MCP Agent 通过签名任务、主机本地策略、审批门禁、证据包和审计链来执行真实开发工作。
 
-## 核心能力
+## 核心亮点
 
-- `rdev` CLI、`rdev-host`、`rdev-gateway`、`rdev-mcp` 和 `rdev-verify`。
-- Agent Skillkit：可导出、验证并安装到主流 Agent Framework。
-- 签名 job envelope、host 本地策略校验、workspace lock、approval gate、evidence bundle、audit chain。
-- Codex、Claude Code、ACP/acpx、shell、PowerShell 适配器。
+- 一个可移植的 Agent Skillkit，可安装到主流 Agent Framework。
+- 任务先签名、再校验、再执行，不把原始 shell 权限随手交给 Agent。
+- Skills 会先探测 OS、shell、service manager、gateway、workspace、adapter 和权限；不清楚就询问。
+- 支持 Codex、Claude Code、ACP/acpx、shell、PowerShell 和自定义 adapter。
 - Apache-2.0 开源许可证。
 
-## 快速验证
+## 快速安装
 
 ```bash
-go test ./...
-./scripts/check.sh
-./scripts/ci/release-smoke.sh
+go install ./cmd/rdev
+rdev doctor
 ```
 
-## 安装 Skillkit
+导出并验证 Skillkit bundle：
 
 ```bash
-rdev skillkit export --source-root . --out dist/remote-dev-skillkit
+rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
 rdev skillkit verify --bundle dist/remote-dev-skillkit
-rdev skillkit plan-install --bundle dist/remote-dev-skillkit --out dist/skillkit-install
+```
+
+为主流 Agent Framework 生成可审查安装计划：
+
+```bash
+rdev skillkit plan-install \
+  --bundle dist/remote-dev-skillkit \
+  --out dist/skillkit-install \
+  --frameworks codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent
+
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-详细技术说明以英文 [README](../../README.md) 为准。
+直接安装默认是 dry-run。确认目标目录无误后，再加 `--execute`：
+
+```bash
+rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
+rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
+```
+
+第二条 install 命令就是已验证 bundle 存在后的“一条命令安装”路径。
+
+## 本地试跑
+
+```bash
+go test ./...
+rdev demo local
+rdev mcp tools
+```
+
+英文 [README](../../README.md) 是权威技术说明；如果翻译和英文冲突，请以英文为准。
