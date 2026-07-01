@@ -44,6 +44,7 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		"release-candidate.json",
 		"release-bundle.json",
 		"sbom.spdx.json",
+		"provenance.json",
 		"checksums.txt",
 		"rdev",
 		"rdev.rdev-release.json",
@@ -68,10 +69,31 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	if !strings.Contains(string(checksums), "sbom.spdx.json") {
 		t.Fatalf("expected SBOM checksum, got %s", string(checksums))
 	}
+	if !strings.Contains(string(checksums), "provenance.json") {
+		t.Fatalf("expected provenance checksum, got %s", string(checksums))
+	}
 	sbom := readReleaseCandidateTestFile(t, filepath.Join(out, "sbom.spdx.json"))
 	for _, want := range []string{`"spdxVersion": "SPDX-2.3"`, `"fileName": "./rdev-host.exe"`, `"algorithm": "SHA256"`} {
 		if !strings.Contains(sbom, want) {
 			t.Fatalf("expected SBOM to contain %q, got %s", want, sbom)
+		}
+	}
+	provenance := readReleaseCandidateTestFile(t, filepath.Join(out, "provenance.json"))
+	for _, want := range []string{`"schema_version": "rdev.release-provenance.v1"`, `"external_mutation": false`, `"path": "rdev-host.exe"`, `"path": "sbom.spdx.json"`} {
+		if !strings.Contains(provenance, want) {
+			t.Fatalf("expected provenance to contain %q, got %s", want, provenance)
+		}
+	}
+	candidateJSON := readReleaseCandidateTestFile(t, filepath.Join(out, "release-candidate.json"))
+	if strings.Contains(candidateJSON, filepath.Dir(rdev)) {
+		t.Fatalf("release candidate should not leak source artifact directory %q: %s", filepath.Dir(rdev), candidateJSON)
+	}
+	if strings.Contains(candidateJSON, out) || strings.Contains(candidateJSON, filepath.Dir(out)) {
+		t.Fatalf("release candidate should not leak local output directory %q: %s", out, candidateJSON)
+	}
+	for _, want := range []string{`"out_dir": "."`, `"release_bundle_path": "release-bundle.json"`, `"skillkit_path": "skillkit"`, `"sbom_path": "sbom.spdx.json"`, `"provenance_path": "provenance.json"`, `"checksums_path": "checksums.txt"`} {
+		if !strings.Contains(candidateJSON, want) {
+			t.Fatalf("expected candidate summary to contain %q, got %s", want, candidateJSON)
 		}
 	}
 }
@@ -250,6 +272,53 @@ func TestVerifyCandidateDetectsTamperedSBOM(t *testing.T) {
 	if !strings.Contains(failures, "sbom.spdx.json:file_sha256_matches") ||
 		!strings.Contains(failures, "sbom_hashes_match_artifacts") {
 		t.Fatalf("expected SBOM checksum and content failures, got %s", failures)
+	}
+}
+
+func TestVerifyCandidateDetectsTamperedProvenance(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCandidateArtifactForTest(t, input, "rdev", "cli-binary")
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "host-binary")
+	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+
+	_, err = PrepareCandidate(CandidateOptions{
+		SourceRoot:        filepath.Join("..", ".."),
+		OutDir:            out,
+		Version:           "v0.1.0",
+		GatewayURL:        "https://api.example.com/v1",
+		ArtifactPaths:     []string{rdev, host, verify},
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		Key:               key,
+		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenancePath := filepath.Join(out, "provenance.json")
+	provenance := strings.Replace(readReleaseCandidateTestFile(t, provenancePath), `"sha256": "`, `"sha256": "0000000000000000000000000000000000000000000000000000000000000000", "_old": "`, 1)
+	if err := os.WriteFile(provenancePath, []byte(provenance), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{
+		CandidatePath:     out,
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected tampered provenance to fail verification")
+	}
+	failures := failedCandidateVerificationNames(verification)
+	if !strings.Contains(failures, "provenance.json:file_sha256_matches") ||
+		!strings.Contains(failures, "provenance_hashes_match_subjects") {
+		t.Fatalf("expected provenance checksum and content failures, got %s", failures)
 	}
 }
 

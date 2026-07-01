@@ -130,7 +130,11 @@ manifest = json.loads(manifest_path.read_text())
 if manifest.get("schema_version") != "rdev.build-artifacts.v1":
     raise SystemExit(f"unsupported build manifest schema: {manifest.get('schema_version')}")
 
-build_root = pathlib.Path(manifest.get("out_dir") or manifest_path.parent).expanduser().resolve()
+manifest_out_dir = pathlib.Path(manifest.get("out_dir") or ".").expanduser()
+if manifest_out_dir.is_absolute():
+    build_root = manifest_out_dir.resolve()
+else:
+    build_root = (manifest_path.parent / manifest_out_dir).resolve()
 groups = {}
 target_order = []
 for artifact in manifest.get("artifacts", []):

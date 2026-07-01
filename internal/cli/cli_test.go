@@ -4745,13 +4745,15 @@ func TestReleasePrepareCandidateStagesBundleAndSkillkit(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"ok": true`) ||
 		!strings.Contains(stdout.String(), `"schema": "rdev.release-candidate.v1"`) ||
-		!strings.Contains(stdout.String(), `"sbom":`) {
+		!strings.Contains(stdout.String(), `"sbom":`) ||
+		!strings.Contains(stdout.String(), `"provenance":`) {
 		t.Fatalf("expected release candidate output, got %s", stdout.String())
 	}
 	for _, path := range []string{
 		"release-candidate.json",
 		"release-bundle.json",
 		"sbom.spdx.json",
+		"provenance.json",
 		"checksums.txt",
 		"skillkit/manifest.json",
 		"rdev-host.exe.rdev-release.json",

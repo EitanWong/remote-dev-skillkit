@@ -137,9 +137,9 @@ These should not be opened as new GitHub issues unless regression work is needed
 - gateway-backed evidence bundle export;
 - hash-chained audit export and verification;
 - portable Skillkit bundle export and verification;
-- local release candidate packaging with signed artifacts, release bundle, verified Skillkit, checksums, and summary JSON;
+- local release candidate packaging with signed artifacts, release bundle, verified Skillkit, SPDX 2.3 SBOM, provenance, checksums, and summary JSON with package-relative public paths;
 - local GitHub Release dry-run planning from verified candidates with generated release notes, Skillkit archive, asset manifest, and commands preview;
-- real build artifact generation with `rdev.build-artifacts.v1` and checksums;
+- real build artifact generation with `rdev.build-artifacts.v1`, SPDX 2.3 SBOM, provenance, and checksums;
 - per-platform release candidate automation with `rdev.platform-release-candidates.v1`;
 - multi-platform GitHub Release dry-run planning with platform archives, release index, install guide, verification summary, and command previews;
 - GitHub Actions CI for `./scripts/check.sh` and real build artifact / per-platform release candidate / multi-platform GitHub release-plan smoke;

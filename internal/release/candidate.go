@@ -42,6 +42,7 @@ type Candidate struct {
 	ReleaseBundlePath    string                      `json:"release_bundle_path"`
 	SkillkitPath         string                      `json:"skillkit_path"`
 	SBOMPath             string                      `json:"sbom_path"`
+	ProvenancePath       string                      `json:"provenance_path"`
 	ChecksumsPath        string                      `json:"checksums_path"`
 	Artifacts            []CandidateArtifact         `json:"artifacts"`
 	SkillkitVerification skillkit.VerificationReport `json:"skillkit_verification"`
@@ -53,7 +54,7 @@ type Candidate struct {
 
 type CandidateArtifact struct {
 	Name         string `json:"name"`
-	SourcePath   string `json:"source_path"`
+	SourcePath   string `json:"source_path,omitempty"`
 	ArtifactPath string `json:"artifact_path"`
 	ManifestPath string `json:"manifest_path"`
 	SHA256       string `json:"sha256"`
@@ -174,9 +175,9 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 		SchemaVersion: CandidateSchemaVersion,
 		Version:       opts.Version,
 		GeneratedAt:   now.UTC(),
-		OutDir:        outDir,
+		OutDir:        ".",
 		RootPublicKey: encodeReleaseRoot(opts.Key),
-		SkillkitPath:  filepath.Join(outDir, "skillkit"),
+		SkillkitPath:  "skillkit",
 	}
 	add := func(name string, passed bool, detail string) {
 		candidate.Checks = append(candidate.Checks, CandidateCheck{Name: name, Passed: passed, Detail: detail})
@@ -204,23 +205,25 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 	if err != nil {
 		return Candidate{}, err
 	}
-	candidate.ReleaseBundlePath = filepath.Join(outDir, "release-bundle.json")
-	if err := WriteBundle(candidate.ReleaseBundlePath, bundle); err != nil {
+	candidate.ReleaseBundlePath = "release-bundle.json"
+	releaseBundlePath := filepath.Join(outDir, candidate.ReleaseBundlePath)
+	if err := WriteBundle(releaseBundlePath, bundle); err != nil {
 		return Candidate{}, err
 	}
-	add("release_bundle_written", pathExists(candidate.ReleaseBundlePath), candidate.ReleaseBundlePath)
+	add("release_bundle_written", pathExists(releaseBundlePath), candidate.ReleaseBundlePath)
 
 	root := model.NewTrustBundle(opts.Key.ID, opts.Key.PublicKey)
-	bundleVerification, err := VerifyBundle(candidate.ReleaseBundlePath, root, required)
+	bundleVerification, err := VerifyBundle(releaseBundlePath, root, required)
 	if err != nil {
 		return Candidate{}, err
 	}
 	candidate.BundleVerification = bundleVerification
+	candidate.BundleVerification = publicCandidateBundleVerification(candidate.BundleVerification)
 	add("release_bundle_verified", bundleVerification.OK(), failedBundleCheckNames(bundleVerification))
 
 	skillManifest, err := skillkit.Export(skillkit.ExportOptions{
 		SourceRoot:  sourceRootAbs,
-		OutDir:      candidate.SkillkitPath,
+		OutDir:      filepath.Join(outDir, candidate.SkillkitPath),
 		GatewayURL:  opts.GatewayURL,
 		GeneratedAt: now,
 	})
@@ -229,21 +232,39 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 	}
 	add("skillkit_exported", skillManifest.SchemaVersion == skillkit.ManifestSchemaVersion, skillManifest.SchemaVersion)
 	skillkitVerification, err := skillkit.Verify(skillkit.VerifyOptions{
-		BundleDir:   candidate.SkillkitPath,
+		BundleDir:   filepath.Join(outDir, candidate.SkillkitPath),
 		GeneratedAt: now,
 	})
 	if err != nil {
 		return Candidate{}, err
 	}
 	candidate.SkillkitVerification = skillkitVerification
+	candidate.SkillkitVerification = publicCandidateSkillkitVerification(candidate.SkillkitVerification)
 	add("skillkit_verified", skillkitVerification.OK(), failedSkillkitCheckNames(skillkitVerification))
 
-	candidate.SBOMPath = filepath.Join(outDir, "sbom.spdx.json")
-	sbomEntry, err := WriteCandidateSBOM(candidate.SBOMPath, candidate.Version, candidate.Artifacts, now)
+	candidate.SBOMPath = "sbom.spdx.json"
+	sbomPath := filepath.Join(outDir, candidate.SBOMPath)
+	sbomEntry, err := WriteCandidateSBOM(sbomPath, candidate.Version, candidate.Artifacts, now)
 	if err != nil {
 		return Candidate{}, err
 	}
-	add("sbom_written", pathExists(candidate.SBOMPath), sbomEntry.Path)
+	add("sbom_written", pathExists(sbomPath), sbomEntry.Path)
+
+	provenanceFiles, err := collectCandidateFiles(outDir, map[string]bool{
+		"release-candidate.json": true,
+		"checksums.txt":          true,
+		"provenance.json":        true,
+	})
+	if err != nil {
+		return Candidate{}, err
+	}
+	candidate.ProvenancePath = "provenance.json"
+	provenancePath := filepath.Join(outDir, candidate.ProvenancePath)
+	provenanceEntry, err := WriteCandidateProvenance(provenancePath, candidate, provenanceFiles, now)
+	if err != nil {
+		return Candidate{}, err
+	}
+	add("provenance_written", pathExists(provenancePath), provenanceEntry.Path)
 
 	files, err := collectCandidateFiles(outDir, map[string]bool{
 		"release-candidate.json": true,
@@ -252,21 +273,22 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 	if err != nil {
 		return Candidate{}, err
 	}
-	candidate.ChecksumsPath = filepath.Join(outDir, "checksums.txt")
-	checksumEntry, err := writeCandidateChecksums(candidate.ChecksumsPath, files)
+	candidate.ChecksumsPath = "checksums.txt"
+	checksumsPath := filepath.Join(outDir, candidate.ChecksumsPath)
+	checksumEntry, err := writeCandidateChecksums(checksumsPath, files)
 	if err != nil {
 		return Candidate{}, err
 	}
 	files = append(files, checksumEntry)
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	candidate.Files = files
-	add("checksums_written", pathExists(candidate.ChecksumsPath), candidate.ChecksumsPath)
+	add("checksums_written", pathExists(checksumsPath), candidate.ChecksumsPath)
 
 	if !candidate.OK() {
 		candidate.RecommendedActions = []string{
 			"Rebuild the release candidate from a clean output directory.",
 			"Do not publish GitHub release assets until release bundle and Skillkit verification both pass.",
-			"Check release-candidate.json, release-bundle.json, sbom.spdx.json, skillkit/manifest.json, and checksums.txt for the first failed check.",
+			"Check release-candidate.json, release-bundle.json, sbom.spdx.json, provenance.json, skillkit/manifest.json, and checksums.txt for the first failed check.",
 		}
 	}
 	if err := writeCandidate(filepath.Join(outDir, "release-candidate.json"), candidate); err != nil {
@@ -286,8 +308,8 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 	}
 	verification := CandidateVerification{
 		SchemaVersion:     CandidateVerificationSchemaVersion,
-		CandidatePath:     candidatePath,
-		CandidateDir:      candidateDir,
+		CandidatePath:     "release-candidate.json",
+		CandidateDir:      ".",
 		GeneratedAt:       now.UTC(),
 		RequiredArtifacts: cleanStringList(opts.RequiredArtifacts),
 	}
@@ -296,7 +318,7 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 	}
 
 	content, err := os.ReadFile(candidatePath)
-	add("candidate_file_exists", err == nil, candidatePath)
+	add("candidate_file_exists", err == nil, "release-candidate.json")
 	if err != nil {
 		verification.RecommendedActions = failedCandidateVerificationActions()
 		return verification, nil
@@ -315,6 +337,7 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 	add("candidate_files_present", len(candidate.Files) > 0, fmt.Sprintf("%d", len(candidate.Files)))
 	add("candidate_artifacts_present", len(candidate.Artifacts) > 0, fmt.Sprintf("%d", len(candidate.Artifacts)))
 	add("candidate_sbom_listed", candidateHasFile(candidate.Files, "sbom.spdx.json"), "sbom.spdx.json")
+	add("candidate_provenance_listed", candidateHasFile(candidate.Files, "provenance.json"), "provenance.json")
 
 	root, rootErr := parseCandidateRootPublicKey(candidate.RootPublicKey)
 	add("candidate_root_public_key_valid", rootErr == nil, errorDetail(rootErr))
@@ -323,9 +346,10 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 		add("release_bundle_exists", pathExists(releaseBundlePath), "release-bundle.json")
 		bundleVerification, err := VerifyBundle(releaseBundlePath, root, opts.RequiredArtifacts)
 		if err != nil {
-			add("release_bundle_readable", false, err.Error())
+			add("release_bundle_readable", false, publicCandidateDetail(err.Error(), candidateDir))
 		} else {
 			verification.BundleVerification = bundleVerification
+			verification.BundleVerification = publicCandidateBundleVerification(verification.BundleVerification)
 			add("release_bundle_verified", bundleVerification.OK(), failedBundleCheckNames(bundleVerification))
 		}
 	}
@@ -337,9 +361,10 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 		GeneratedAt: now,
 	})
 	if err != nil {
-		add("skillkit_readable", false, err.Error())
+		add("skillkit_readable", false, publicCandidateDetail(err.Error(), candidateDir))
 	} else {
 		verification.SkillkitVerification = skillkitVerification
+		verification.SkillkitVerification = publicCandidateSkillkitVerification(verification.SkillkitVerification)
 		add("skillkit_verified", skillkitVerification.OK(), failedSkillkitCheckNames(skillkitVerification))
 	}
 
@@ -356,6 +381,11 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 
 	sbomChecks := VerifyCandidateSBOM(candidateDir, candidate.Artifacts)
 	for _, check := range sbomChecks {
+		verification.Checks = append(verification.Checks, check)
+	}
+
+	provenanceChecks := VerifyCandidateProvenance(candidateDir, candidate)
+	for _, check := range provenanceChecks {
 		verification.Checks = append(verification.Checks, check)
 	}
 
@@ -409,7 +439,6 @@ func stageAndSignCandidateArtifacts(outDir string, sources []string, key signing
 		}
 		artifacts = append(artifacts, CandidateArtifact{
 			Name:         name,
-			SourcePath:   sourceAbs,
 			ArtifactPath: name,
 			ManifestPath: name + ".rdev-release.json",
 			SHA256:       sha,
@@ -503,6 +532,8 @@ func candidateFileKind(path string) string {
 		return "release-bundle"
 	case path == "sbom.spdx.json":
 		return "sbom"
+	case path == "provenance.json":
+		return "provenance"
 	case strings.HasSuffix(path, ".rdev-release.json"):
 		return "release-manifest"
 	case strings.HasPrefix(path, "skillkit/"):
@@ -549,6 +580,28 @@ func writeCandidate(path string, candidate Candidate) error {
 	}
 	content = append(content, '\n')
 	return os.WriteFile(path, content, 0o644)
+}
+
+func publicCandidateBundleVerification(verification BundleVerification) BundleVerification {
+	verification.BundlePath = "release-bundle.json"
+	return verification
+}
+
+func publicCandidateSkillkitVerification(report skillkit.VerificationReport) skillkit.VerificationReport {
+	report.BundleDir = "skillkit"
+	report.ManifestPath = "skillkit/manifest.json"
+	for i, check := range report.Checks {
+		if check.Name == "manifest_exists" {
+			report.Checks[i].Detail = "skillkit/manifest.json"
+		}
+	}
+	return report
+}
+
+func publicCandidateDetail(detail, candidateDir string) string {
+	detail = strings.ReplaceAll(detail, candidateDir, ".")
+	detail = strings.ReplaceAll(detail, filepath.ToSlash(candidateDir), ".")
+	return detail
 }
 
 func failedBundleCheckNames(verification BundleVerification) string {

@@ -70,6 +70,11 @@ checksums_path="$out_dir/checksums.txt"
 tsv_path="$out_dir/.build-artifacts.tsv"
 : > "$checksums_path"
 : > "$tsv_path"
+source_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+source_dirty=false
+if [[ -n "$source_commit" ]] && [[ -n "$(git status --short 2>/dev/null || true)" ]]; then
+  source_dirty=true
+fi
 
 IFS=',' read -r -a target_list <<< "$targets"
 IFS=',' read -r -a command_list <<< "$commands"
@@ -117,13 +122,13 @@ for target in "${target_list[@]}"; do
   done
 done
 
-python3 - "$out_dir" "$version" "$generated_at" "$targets" "$commands" "$tsv_path" <<'PY'
+python3 - "$out_dir" "$version" "$generated_at" "$targets" "$commands" "$tsv_path" "$source_commit" "$source_dirty" <<'PY'
 import json
 import os
 import pathlib
 import sys
 
-out_dir, version, generated_at, targets, commands, tsv_path = sys.argv[1:]
+out_dir, version, generated_at, targets, commands, tsv_path, source_commit, source_dirty = sys.argv[1:]
 artifacts = []
 for line in pathlib.Path(tsv_path).read_text().splitlines():
     command, target, goos, goarch, rel, sha, size, cgo_enabled = line.split("\t")
@@ -186,13 +191,57 @@ sbom_sha = hashlib.sha256(sbom_path.read_bytes()).hexdigest()
 with (pathlib.Path(out_dir) / "checksums.txt").open("a", encoding="utf-8") as handle:
     handle.write(f"{sbom_sha}  sbom.spdx.json\n")
 
+provenance = {
+    "schema_version": "rdev.release-provenance.v1",
+    "version": version,
+    "generated_at": generated_at,
+    "builder": {
+        "id": "remote-dev-skillkit/scripts",
+        "command": "scripts/release/build-artifacts.sh",
+    },
+    "invocation": {
+        "command": "scripts/release/build-artifacts.sh",
+        "args": [
+            "--out", "<out-dir>",
+            "--version", version,
+            "--targets", targets,
+            "--commands", commands,
+        ],
+    },
+    "source": {
+        "repository": "remote-dev-skillkit",
+        "commit": source_commit,
+        "dirty": source_dirty.lower() == "true",
+    },
+    "external_mutation": False,
+    "subjects": [{
+        "name": item["name"],
+        "path": item["path"],
+        "sha256": item["sha256"],
+        "size_bytes": item["size_bytes"],
+        "kind": "artifact",
+    } for item in artifacts] + [{
+        "name": "sbom.spdx.json",
+        "path": "sbom.spdx.json",
+        "sha256": sbom_sha,
+        "size_bytes": sbom_path.stat().st_size,
+        "kind": "sbom",
+    }],
+}
+provenance_path = pathlib.Path(out_dir) / "provenance.json"
+provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
+provenance_sha = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+with (pathlib.Path(out_dir) / "checksums.txt").open("a", encoding="utf-8") as handle:
+    handle.write(f"{provenance_sha}  provenance.json\n")
+
 payload = {
     "schema_version": "rdev.build-artifacts.v1",
     "version": version,
     "generated_at": generated_at,
-    "out_dir": os.path.abspath(out_dir),
+    "out_dir": ".",
     "checksums_path": "checksums.txt",
     "sbom_path": "sbom.spdx.json",
+    "provenance_path": "provenance.json",
     "targets": [value.strip() for value in targets.split(",") if value.strip()],
     "commands": [value.strip() for value in commands.split(",") if value.strip()],
     "artifacts": artifacts,
@@ -205,6 +254,7 @@ print(json.dumps({
     "manifest": str(manifest),
     "checksums": str(pathlib.Path(out_dir) / "checksums.txt"),
     "sbom": str(sbom_path),
+    "provenance": str(provenance_path),
     "artifact_count": len(artifacts),
 }, indent=2))
 PY

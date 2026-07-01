@@ -150,6 +150,7 @@ commands = pathlib.Path(plan_output["commands"]).read_text()
 assert build["ok"] is True, build
 build_manifest = json.loads(pathlib.Path(build["manifest"]).read_text())
 assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_manifest
+assert build_manifest["out_dir"] == ".", build_manifest
 assert len(build_manifest["artifacts"]) == 6, build_manifest["artifacts"]
 assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert all(artifact["cgo_enabled"] is False for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
@@ -159,7 +160,19 @@ assert build_sbom_path.is_file(), build
 build_sbom = json.loads(build_sbom_path.read_text())
 assert build_sbom["spdxVersion"] == "SPDX-2.3", build_sbom
 assert len(build_sbom["files"]) == len(build_manifest["artifacts"]), build_sbom
-assert "sbom.spdx.json" in pathlib.Path(build["checksums"]).read_text(), build
+build_provenance_path = pathlib.Path(build["provenance"])
+assert build_manifest["provenance_path"] == "provenance.json", build_manifest
+assert build_provenance_path.is_file(), build
+build_provenance = json.loads(build_provenance_path.read_text())
+assert build_provenance["schema_version"] == "rdev.release-provenance.v1", build_provenance
+assert build_provenance["external_mutation"] is False, build_provenance
+assert len(build_provenance["subjects"]) == len(build_manifest["artifacts"]) + 1, build_provenance
+build_provenance_subjects = {subject["path"]: subject for subject in build_provenance["subjects"]}
+assert "sbom.spdx.json" in build_provenance_subjects, build_provenance
+assert all(artifact["path"] in build_provenance_subjects for artifact in build_manifest["artifacts"]), build_provenance
+build_checksums = pathlib.Path(build["checksums"]).read_text()
+assert "sbom.spdx.json" in build_checksums, build
+assert "provenance.json" in build_checksums, build
 assert platform_output["ok"] is True, platform_output
 assert platform_manifest["schema_version"] == "rdev.platform-release-candidates.v1", platform_manifest
 assert platform_manifest["external_mutation"] is False, platform_manifest
@@ -169,12 +182,22 @@ assert all(candidate["candidate_schema"] == "rdev.release-candidate.v1" for cand
 assert all(candidate["verification_schema"] == "rdev.release-candidate-verification.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
 for candidate in platform_manifest["candidates"]:
     candidate_json = json.loads((pathlib.Path(candidate["candidate_dir"]) / "release-candidate.json").read_text())
+    assert candidate_json["out_dir"] == ".", candidate_json
+    assert candidate_json["provenance_path"] == "provenance.json", candidate_json
+    assert any(file["path"] == "provenance.json" and file["kind"] == "provenance" for file in candidate_json["files"]), candidate_json["files"]
     assert any(file["path"] == "sbom.spdx.json" and file["kind"] == "sbom" for file in candidate_json["files"]), candidate_json["files"]
     sbom = json.loads((pathlib.Path(candidate["candidate_dir"]) / "sbom.spdx.json").read_text())
     assert sbom["spdxVersion"] == "SPDX-2.3", sbom
     artifact_names = {artifact["name"] for artifact in candidate_json["artifacts"]}
     sbom_names = {pathlib.Path(file["fileName"]).name for file in sbom["files"]}
     assert artifact_names == sbom_names, (artifact_names, sbom_names)
+    provenance = json.loads((pathlib.Path(candidate["candidate_dir"]) / "provenance.json").read_text())
+    assert provenance["schema_version"] == "rdev.release-provenance.v1", provenance
+    assert provenance["external_mutation"] is False, provenance
+    provenance_artifacts = {subject["path"] for subject in provenance["subjects"] if subject["kind"] == "artifact"}
+    assert provenance_artifacts == {artifact["artifact_path"] for artifact in candidate_json["artifacts"]}, provenance
+    provenance_support = {subject["path"] for subject in provenance["subjects"] if subject["kind"] != "artifact"}
+    assert {"release-bundle.json", "sbom.spdx.json"}.issubset(provenance_support), provenance
 assert plan_output["ok"] is True, plan_output
 assert plan["schema_version"] == "rdev.github-platform-release-plan.v1", plan
 assert plan["external_mutation"] is False, plan
@@ -248,6 +271,7 @@ print(json.dumps({
     "build_schema": build_manifest["schema_version"],
     "built_artifacts": len(build_manifest["artifacts"]),
     "build_sbom": True,
+    "build_provenance": True,
     "platform_candidates_schema": platform_manifest["schema_version"],
     "platform_candidate_count": len(platform_manifest["candidates"]),
     "plan_schema": plan["schema_version"],
@@ -275,6 +299,7 @@ print(json.dumps({
     "enrollment_issuer_token_smoke": True,
     "asset_count": len(plan["assets"]),
     "candidate_sbom": True,
+    "candidate_provenance": True,
     "external_mutation": plan["external_mutation"],
 }, indent=2))
 PY
