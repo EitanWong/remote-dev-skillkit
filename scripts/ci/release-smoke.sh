@@ -152,6 +152,13 @@ assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_mani
 assert len(build_manifest["artifacts"]) == 6, build_manifest["artifacts"]
 assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert all(artifact["cgo_enabled"] is False for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
+build_sbom_path = pathlib.Path(build["sbom"])
+assert build_manifest["sbom_path"] == "sbom.spdx.json", build_manifest
+assert build_sbom_path.is_file(), build
+build_sbom = json.loads(build_sbom_path.read_text())
+assert build_sbom["spdxVersion"] == "SPDX-2.3", build_sbom
+assert len(build_sbom["files"]) == len(build_manifest["artifacts"]), build_sbom
+assert "sbom.spdx.json" in pathlib.Path(build["checksums"]).read_text(), build
 assert platform_output["ok"] is True, platform_output
 assert platform_manifest["schema_version"] == "rdev.platform-release-candidates.v1", platform_manifest
 assert platform_manifest["external_mutation"] is False, platform_manifest
@@ -159,6 +166,14 @@ assert len(platform_manifest["candidates"]) == 2, platform_manifest["candidates"
 assert {candidate["target"] for candidate in platform_manifest["candidates"]} == {"linux/amd64", "windows/amd64"}, platform_manifest["candidates"]
 assert all(candidate["candidate_schema"] == "rdev.release-candidate.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
 assert all(candidate["verification_schema"] == "rdev.release-candidate-verification.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
+for candidate in platform_manifest["candidates"]:
+    candidate_json = json.loads((pathlib.Path(candidate["candidate_dir"]) / "release-candidate.json").read_text())
+    assert any(file["path"] == "sbom.spdx.json" and file["kind"] == "sbom" for file in candidate_json["files"]), candidate_json["files"]
+    sbom = json.loads((pathlib.Path(candidate["candidate_dir"]) / "sbom.spdx.json").read_text())
+    assert sbom["spdxVersion"] == "SPDX-2.3", sbom
+    artifact_names = {artifact["name"] for artifact in candidate_json["artifacts"]}
+    sbom_names = {pathlib.Path(file["fileName"]).name for file in sbom["files"]}
+    assert artifact_names == sbom_names, (artifact_names, sbom_names)
 assert plan_output["ok"] is True, plan_output
 assert plan["schema_version"] == "rdev.github-platform-release-plan.v1", plan
 assert plan["external_mutation"] is False, plan
@@ -223,6 +238,7 @@ print(json.dumps({
     "ok": True,
     "build_schema": build_manifest["schema_version"],
     "built_artifacts": len(build_manifest["artifacts"]),
+    "build_sbom": True,
     "platform_candidates_schema": platform_manifest["schema_version"],
     "platform_candidate_count": len(platform_manifest["candidates"]),
     "plan_schema": plan["schema_version"],
@@ -248,6 +264,7 @@ print(json.dumps({
     "enrollment_issuance_smoke": True,
     "enrollment_issuer_token_smoke": True,
     "asset_count": len(plan["assets"]),
+    "candidate_sbom": True,
     "external_mutation": plan["external_mutation"],
 }, indent=2))
 PY

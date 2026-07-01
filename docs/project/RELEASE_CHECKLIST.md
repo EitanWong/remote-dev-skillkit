@@ -11,6 +11,7 @@
 - [ ] GitHub Actions CI passes for the release commit.
 - [ ] Build binaries for macOS, Linux, and Windows with `scripts/release/build-artifacts.sh`.
 - [ ] Review `rdev.build-artifacts.v1` and `checksums.txt`.
+- [ ] Review generated `sbom.spdx.json` from `scripts/release/build-artifacts.sh` and confirm it is listed in `checksums.txt`.
 - [ ] Confirm macOS artifacts that claim Keychain-backed managed host identity/trust support were built natively with `cgo_enabled=true`, or explicitly document that `keychain:` stores are unavailable in that artifact.
 - [ ] Confirm Windows artifacts that claim DPAPI-backed managed host identity/trust support were built for Windows and have at least cross-compiled `internal/protectedstore` / `rdev-host` coverage; real Windows runtime acceptance remains release-blocking before support claims.
 - [ ] Confirm Linux artifacts that claim libsecret-backed managed host identity/trust support were built for Linux and document the runtime `secret-tool` plus Secret Service requirement; confirm Linux artifacts that claim keyctl-backed managed host identity/trust support were built for Linux and document the runtime `keyctl` plus user keyring requirement. Real Linux service reboot/reconnect acceptance remains release-blocking before support claims.
@@ -22,6 +23,7 @@
 - [ ] Run `rdev skillkit install` dry-run and execute smoke into a temporary target directory; archive `rdev.skillkit-install-report.v1` outputs proving `external_mutation=false`.
 - [ ] Prepare and verify per-platform candidates with `scripts/release/prepare-platform-candidates.sh`.
 - [ ] Review `rdev.platform-release-candidates.v1`.
+- [ ] Confirm each release candidate contains `sbom.spdx.json` and that `rdev release verify-candidate` passes SBOM coverage/hash checks.
 - [ ] Generate and review a multi-platform GitHub Release dry-run plan with `scripts/github/plan-platform-release.sh`.
 - [ ] Review `rdev.github-platform-release-plan.v1`, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, and `INSTALL_PLATFORMS.md`.
 - [ ] Run `scripts/github/audit-project-readiness.sh --repo <owner/repo> --out <path>` and archive `rdev.github-project-readiness.v1` before external GitHub mutation.
@@ -48,7 +50,7 @@
 - [ ] Verify Windows Authenticode signatures in CI.
 - [ ] Confirm release key ids are active and not revoked.
 - [ ] Package Windows temporary acceptance evidence with `rdev acceptance package-windows-temporary` when Windows support is in scope.
-- [ ] Archive release evidence: checksums, manifests, signatures, SBOM, verification logs, redacted acceptance packages, and audit-chain exports.
+- [ ] Archive release evidence: checksums, manifests, signatures, `sbom.spdx.json`, verification logs, redacted acceptance packages, and audit-chain exports.
 - [ ] Update `CHANGELOG.md`.
 - [ ] Update install docs.
 - [ ] Review `SECURITY.md` and threat model.

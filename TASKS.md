@@ -60,6 +60,7 @@
 - [x] Add GitHub Release dry-run planning from verified release candidates.
 - [x] Add GitHub Actions CI for tests, shell syntax, release candidate verification, and release-plan smoke.
 - [x] Add real release artifact builder and thin `rdev-host`, `rdev-gateway`, and `rdev-mcp` entrypoints.
+- [x] Add SPDX 2.3 SBOM generation to release artifact builds and release candidates.
 - [x] Add per-platform release candidate automation from real build artifacts.
 - [x] Add multi-platform GitHub Release dry-run planning from verified platform candidates.
 - [x] Refine the canonical perfect ending into a final delivery architecture with sealed contracts, component boundaries, host kernel layers, API surfaces, reliability rules, and close plan.
@@ -174,8 +175,8 @@
 - [x] Add Windows managed-service acceptance plan and verifier for reviewed `sc.exe` service evidence without executing PowerShell or `sc.exe`.
 - [x] Add Linux managed-service acceptance plan and verifier for reviewed systemd user-service evidence without executing `systemctl`.
 - [x] Add Linux managed-service acceptance evidence packaging for real systemd user-service transcripts.
-- [x] Add release candidate packaging with staged artifacts, signed manifests, signed release bundle, verified Skillkit, checksums, and summary JSON.
-- [x] Add standalone release candidate verification for downloaded or staged candidates.
+- [x] Add release candidate packaging with staged artifacts, signed manifests, signed release bundle, verified Skillkit, SPDX 2.3 SBOM, checksums, and summary JSON.
+- [x] Add standalone release candidate verification for downloaded or staged candidates, including SBOM coverage and hash checks.
 - [x] Add GitHub Release dry-run plan generation with assets, commands, notes, Skillkit archive, and no external mutation.
 - [x] Add CI release smoke for prepare-candidate, verify-candidate, and plan-release.
 - [x] Switch CI release smoke to real Go-built Windows artifacts instead of placeholder files.
@@ -221,6 +222,7 @@
 - [x] Agent Skillkit bundles can be independently verified before installation into Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Release candidates can be packaged locally before GitHub Release publication.
 - [x] Release candidates can be independently verified after staging or download.
+- [x] Release candidates include and verify an SPDX 2.3 SBOM covering staged release artifacts.
 - [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
 - [x] Hostrunner can execute `adapter=acpx` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.acpx-result.v1` artifacts.
 - [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.

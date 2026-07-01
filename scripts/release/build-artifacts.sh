@@ -139,12 +139,60 @@ for line in pathlib.Path(tsv_path).read_text().splitlines():
         "cgo_enabled": cgo_enabled == "1",
     })
 
+def spdx_id(value):
+    chars = []
+    for char in value:
+        if char.isalnum() or char in ".-":
+            chars.append("-" if char == "." else char)
+        else:
+            chars.append("-")
+    out = "".join(chars).strip("-")
+    return out or "artifact"
+
+sbom = {
+    "SPDXID": "SPDXRef-DOCUMENT",
+    "spdxVersion": "SPDX-2.3",
+    "name": f"remote-dev-skillkit-{version}",
+    "dataLicense": "CC0-1.0",
+    "documentNamespace": f"https://example.com/remote-dev-skillkit/sbom/{spdx_id(version)}",
+    "creationInfo": {
+        "created": generated_at,
+        "creators": ["Tool: scripts/release/build-artifacts.sh"],
+    },
+    "packages": [{
+        "SPDXID": "SPDXRef-Package-remote-dev-skillkit",
+        "name": "remote-dev-skillkit",
+        "versionInfo": version,
+        "downloadLocation": "NOASSERTION",
+        "filesAnalyzed": True,
+        "licenseConcluded": "Apache-2.0",
+        "licenseDeclared": "Apache-2.0",
+        "copyrightText": "NOASSERTION",
+    }],
+    "files": [{
+        "SPDXID": f"SPDXRef-File-{spdx_id(item['target'] + '-' + item['name'])}",
+        "fileName": "./" + item["path"],
+        "fileTypes": ["BINARY"],
+        "checksums": [{"algorithm": "SHA256", "checksumValue": item["sha256"]}],
+        "licenseConcluded": "NOASSERTION",
+        "copyrightText": "NOASSERTION",
+        "comment": f"{item['command']} for {item['target']} ({item['size_bytes']} bytes)",
+    } for item in artifacts],
+}
+sbom_path = pathlib.Path(out_dir) / "sbom.spdx.json"
+sbom_path.write_text(json.dumps(sbom, indent=2) + "\n")
+import hashlib
+sbom_sha = hashlib.sha256(sbom_path.read_bytes()).hexdigest()
+with (pathlib.Path(out_dir) / "checksums.txt").open("a", encoding="utf-8") as handle:
+    handle.write(f"{sbom_sha}  sbom.spdx.json\n")
+
 payload = {
     "schema_version": "rdev.build-artifacts.v1",
     "version": version,
     "generated_at": generated_at,
     "out_dir": os.path.abspath(out_dir),
     "checksums_path": "checksums.txt",
+    "sbom_path": "sbom.spdx.json",
     "targets": [value.strip() for value in targets.split(",") if value.strip()],
     "commands": [value.strip() for value in commands.split(",") if value.strip()],
     "artifacts": artifacts,
@@ -156,6 +204,7 @@ print(json.dumps({
     "schema": payload["schema_version"],
     "manifest": str(manifest),
     "checksums": str(pathlib.Path(out_dir) / "checksums.txt"),
+    "sbom": str(sbom_path),
     "artifact_count": len(artifacts),
 }, indent=2))
 PY

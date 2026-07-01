@@ -4147,6 +4147,7 @@ func (a App) releasePrepareCandidate(sourceRoot, outPath, version, gatewayURL st
 		"release_candidate":   filepath.Join(candidate.OutDir, "release-candidate.json"),
 		"release_bundle":      candidate.ReleaseBundlePath,
 		"skillkit":            candidate.SkillkitPath,
+		"sbom":                candidate.SBOMPath,
 		"checksums":           candidate.ChecksumsPath,
 		"artifact_count":      len(candidate.Artifacts),
 		"file_count":          len(candidate.Files),

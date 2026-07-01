@@ -43,6 +43,7 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	for _, path := range []string{
 		"release-candidate.json",
 		"release-bundle.json",
+		"sbom.spdx.json",
 		"checksums.txt",
 		"rdev",
 		"rdev.rdev-release.json",
@@ -63,6 +64,15 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	}
 	if !strings.Contains(string(checksums), "release-bundle.json") || !strings.Contains(string(checksums), "skillkit/manifest.json") {
 		t.Fatalf("expected release and skillkit checksums, got %s", string(checksums))
+	}
+	if !strings.Contains(string(checksums), "sbom.spdx.json") {
+		t.Fatalf("expected SBOM checksum, got %s", string(checksums))
+	}
+	sbom := readReleaseCandidateTestFile(t, filepath.Join(out, "sbom.spdx.json"))
+	for _, want := range []string{`"spdxVersion": "SPDX-2.3"`, `"fileName": "./rdev-host.exe"`, `"algorithm": "SHA256"`} {
+		if !strings.Contains(sbom, want) {
+			t.Fatalf("expected SBOM to contain %q, got %s", want, sbom)
+		}
 	}
 }
 
@@ -196,6 +206,53 @@ func TestVerifyCandidateRejectsUnlistedFiles(t *testing.T) {
 	}
 }
 
+func TestVerifyCandidateDetectsTamperedSBOM(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCandidateArtifactForTest(t, input, "rdev", "cli-binary")
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "host-binary")
+	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+
+	_, err = PrepareCandidate(CandidateOptions{
+		SourceRoot:        filepath.Join("..", ".."),
+		OutDir:            out,
+		Version:           "v0.1.0",
+		GatewayURL:        "https://api.example.com/v1",
+		ArtifactPaths:     []string{rdev, host, verify},
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		Key:               key,
+		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sbomPath := filepath.Join(out, "sbom.spdx.json")
+	sbom := strings.Replace(readReleaseCandidateTestFile(t, sbomPath), `"checksumValue": "`, `"checksumValue": "0000000000000000000000000000000000000000000000000000000000000000", "_old": "`, 1)
+	if err := os.WriteFile(sbomPath, []byte(sbom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{
+		CandidatePath:     out,
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected tampered SBOM to fail verification")
+	}
+	failures := failedCandidateVerificationNames(verification)
+	if !strings.Contains(failures, "sbom.spdx.json:file_sha256_matches") ||
+		!strings.Contains(failures, "sbom_hashes_match_artifacts") {
+		t.Fatalf("expected SBOM checksum and content failures, got %s", failures)
+	}
+}
+
 func TestPrepareCandidateRejectsDuplicateArtifactNames(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
@@ -252,4 +309,13 @@ func writeCandidateArtifactForTest(t *testing.T, dir, name, content string) stri
 		t.Fatal(err)
 	}
 	return path
+}
+
+func readReleaseCandidateTestFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
