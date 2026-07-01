@@ -484,6 +484,44 @@ func TestMemoryGatewayEnrollmentRevocationsRejectCertificate(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayEnrollmentRevocationsRejectRenewal(t *testing.T) {
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	capabilities := []string{"shell.user"}
+	ticket, registration := enrollmentGatewayRegistration(t, now, capabilities, issuerPrivateKey)
+	certificate := *registration.EnrollmentCertificate
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocations, err := model.SignHostEnrollmentRevocationList([]model.HostEnrollmentCertificateRevocation{
+		{
+			CertificateFingerprint: fingerprint,
+			Reason:                 "compromised host identity",
+			RevokedAt:              now,
+		},
+	}, root.SigningKeyID, issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey).
+		WithEnrollmentRevocations(revocations)
+	gw.tickets[ticket.ID] = ticket
+	gw.codeIndex[ticket.Code] = ticket.ID
+	_, err = gw.RenewEnrollmentCertificate(EnrollmentCertificateRenewalRequest{
+		Certificate:  certificate,
+		ValidMinutes: 120,
+	})
+	if err == nil || !strings.Contains(err.Error(), "revoked") {
+		t.Fatalf("expected revoked enrollment certificate renewal rejection, got %v", err)
+	}
+}
+
 func TestMemoryGatewayCreatesJoinManifestWithSeparateRoot(t *testing.T) {
 	gatewayPublicKey, gatewayPrivateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

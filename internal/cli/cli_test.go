@@ -1302,18 +1302,170 @@ func TestHostServeRequiresExplicitEnrollmentRevocationFetch(t *testing.T) {
 	}
 }
 
+func TestHostServeRenewsEnrollmentCertificateBeforeRegistration(t *testing.T) {
+	dir := t.TempDir()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	now := time.Now().UTC()
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "renewing temporary host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath, rootPublicKey, _, certificate, _ := writeHostServeEnrollmentCertificateFixtureWithRoot(t, dir, ticket, "renewing-host", root, issuerPrivateKey, 5*time.Minute)
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--identity-store", filepath.Join(dir, "identity", "host.json"),
+		"--identity-key-id", "host-test",
+		"--enrollment-certificate", certificatePath,
+		"--renew-enrollment-certificate",
+		"--enrollment-root-public-key", rootPublicKey,
+		"--enrollment-renew-before", "10m",
+		"--enrollment-renew-valid-minutes", "120",
+		"--name", "renewing-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Status                string `json:"status"`
+		EnrollmentCertificate struct {
+			Renewed                        bool   `json:"renewed"`
+			PreviousCertificateFingerprint string `json:"previous_certificate_fingerprint"`
+			CertificateFingerprint         string `json:"certificate_fingerprint"`
+		} `json:"enrollment_certificate"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid host output: %v\n%s", err, stdout.String())
+	}
+	if payload.Status != "registered-pending-approval" || !payload.EnrollmentCertificate.Renewed {
+		t.Fatalf("expected renewed registration output, got %s", stdout.String())
+	}
+	if payload.EnrollmentCertificate.PreviousCertificateFingerprint != previousFingerprint {
+		t.Fatalf("expected previous fingerprint %q, got %s", previousFingerprint, stdout.String())
+	}
+	renewed, err := readEnrollmentCertificateFile(certificatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewedFingerprint, err := model.HostEnrollmentCertificateFingerprint(renewed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewedFingerprint == previousFingerprint || renewedFingerprint != payload.EnrollmentCertificate.CertificateFingerprint {
+		t.Fatalf("unexpected renewed fingerprint: before=%q after=%q output=%s", previousFingerprint, renewedFingerprint, stdout.String())
+	}
+	if !renewed.NotAfter.After(certificate.NotAfter) {
+		t.Fatalf("expected renewed certificate validity to extend: before=%s after=%s", certificate.NotAfter, renewed.NotAfter)
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(renewed, root, time.Now()); err != nil {
+		t.Fatalf("renewed certificate should verify: %v", err)
+	}
+}
+
+func TestHostServeSkipsEnrollmentRenewalWhenCertificateIsFresh(t *testing.T) {
+	dir := t.TempDir()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	now := time.Now().UTC()
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "fresh temporary host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath, rootPublicKey, _, certificate, _ := writeHostServeEnrollmentCertificateFixtureWithRoot(t, dir, ticket, "fresh-host", root, issuerPrivateKey, 2*time.Hour)
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--identity-store", filepath.Join(dir, "identity", "host.json"),
+		"--identity-key-id", "host-test",
+		"--enrollment-certificate", certificatePath,
+		"--renew-enrollment-certificate",
+		"--enrollment-root-public-key", rootPublicKey,
+		"--enrollment-renew-before", "10m",
+		"--name", "fresh-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		EnrollmentCertificate struct {
+			Renewed bool `json:"renewed"`
+		} `json:"enrollment_certificate"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid host output: %v\n%s", err, stdout.String())
+	}
+	if payload.EnrollmentCertificate.Renewed {
+		t.Fatalf("did not expect fresh certificate renewal, got %s", stdout.String())
+	}
+	written, err := readEnrollmentCertificateFile(certificatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writtenFingerprint, err := model.HostEnrollmentCertificateFingerprint(written)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writtenFingerprint != previousFingerprint {
+		t.Fatalf("expected certificate file to remain unchanged, before=%q after=%q", previousFingerprint, writtenFingerprint)
+	}
+}
+
 func writeHostServeEnrollmentCertificateFixture(t *testing.T, dir string, ticket model.Ticket, name string) (string, string, model.TrustBundle, model.HostEnrollmentCertificate, ed25519.PrivateKey) {
+	t.Helper()
+	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	return writeHostServeEnrollmentCertificateFixtureWithRoot(t, dir, ticket, name, root, issuerPrivateKey, time.Hour)
+}
+
+func writeHostServeEnrollmentCertificateFixtureWithRoot(t *testing.T, dir string, ticket model.Ticket, name string, root model.TrustBundle, issuerPrivateKey ed25519.PrivateKey, ttl time.Duration) (string, string, model.TrustBundle, model.HostEnrollmentCertificate, ed25519.PrivateKey) {
 	t.Helper()
 	identityPath := filepath.Join(dir, "identity", "host.json")
 	identity, _, err := hostidentity.LoadOrCreate(identityPath, "host-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	issuerPublicKey, err := root.Ed25519PublicKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
 	registration := model.HostRegistration{
 		TicketCode:          ticket.Code,
 		Name:                name,
@@ -1324,7 +1476,7 @@ func writeHostServeEnrollmentCertificateFixture(t *testing.T, dir string, ticket
 		IdentityPublicKey:   identity.EncodedPublicKey(),
 		IdentityFingerprint: identity.Fingerprint(),
 	}
-	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, root.SigningKeyID, issuerPrivateKey, time.Now().UTC().Add(-time.Minute), time.Hour)
+	certificate, err := model.SignHostEnrollmentCertificate(registration, ticket, root.SigningKeyID, issuerPrivateKey, time.Now().UTC().Add(-time.Minute), ttl)
 	if err != nil {
 		t.Fatal(err)
 	}

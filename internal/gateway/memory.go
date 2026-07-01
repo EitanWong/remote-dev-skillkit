@@ -286,6 +286,14 @@ func (g *MemoryGateway) RenewEnrollmentCertificate(req EnrollmentCertificateRene
 		return model.HostEnrollmentCertificate{}, fmt.Errorf("%w: valid_minutes must be positive", ErrPolicyDenied)
 	}
 	now := g.now().UTC()
+	if g.checkEnrollmentCRL {
+		if err := model.VerifyHostEnrollmentRevocationListSignature(g.enrollmentRevokes, g.enrollmentRoot, now); err != nil {
+			return model.HostEnrollmentCertificate{}, err
+		}
+		if err := model.VerifyHostEnrollmentCertificateNotRevoked(req.Certificate, g.enrollmentRevokes); err != nil {
+			return model.HostEnrollmentCertificate{}, err
+		}
+	}
 	renewed, err := model.RenewHostEnrollmentCertificate(req.Certificate, g.enrollmentRoot, g.enrollmentPrivate, now, time.Duration(req.ValidMinutes)*time.Minute)
 	if err != nil {
 		return model.HostEnrollmentCertificate{}, err

@@ -1235,6 +1235,10 @@ func (a App) host(ctx context.Context, args []string) error {
 		enrollmentCertificate := fs.String("enrollment-certificate", "", "optional host enrollment certificate JSON path")
 		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key for host-side enrollment revocation refresh, formatted key_id:base64url_public_key")
 		fetchEnrollmentRevocations := fs.Bool("fetch-enrollment-revocations", false, "fetch and verify signed enrollment revocations from the gateway before registration")
+		renewEnrollmentCertificate := fs.Bool("renew-enrollment-certificate", false, "renew the enrollment certificate from the gateway before registration when it is near expiry")
+		enrollmentIssuerTokenFile := fs.String("enrollment-issuer-token-file", "", "optional file containing bearer token for protected hosted enrollment renewal")
+		enrollmentRenewBefore := fs.Duration("enrollment-renew-before", 24*time.Hour, "renew enrollment certificate when it expires within this duration")
+		enrollmentRenewValidMinutes := fs.Int("enrollment-renew-valid-minutes", 60, "renewed enrollment certificate validity window in minutes")
 		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
 		approvalStore := fs.String("approval-store", "", "optional local host approval token consumption store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
@@ -1247,35 +1251,39 @@ func (a App) host(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.hostServe(ctx, hostServeOptions{
-			Mode:                       *mode,
-			GatewayURL:                 *gateway,
-			TicketCode:                 *ticketCode,
-			ManifestURL:                *manifestURL,
-			Name:                       *name,
-			Once:                       *once,
-			Transport:                  *transport,
-			PollInterval:               *pollInterval,
-			LongPollTimeout:            *longPollTimeout,
-			MaxJobs:                    *maxJobs,
-			ApprovalTimeout:            *approvalTimeout,
-			TrustPin:                   *trustPin,
-			GatewayCACertPath:          *gatewayCA,
-			GatewayClientCertPath:      *gatewayClientCert,
-			GatewayClientKeyPath:       *gatewayClientKey,
-			TrustStorePath:             *trustStore,
-			IdentityStorePath:          *identityStore,
-			IdentityKeyID:              *identityKeyID,
-			EnrollmentCertificatePath:  *enrollmentCertificate,
-			EnrollmentRootPublicKey:    *enrollmentRootPublicKey,
-			FetchEnrollmentRevocations: *fetchEnrollmentRevocations,
-			NonceStorePath:             *nonceStore,
-			ApprovalStorePath:          *approvalStore,
-			WorkspaceLockStore:         *workspaceLockStore,
-			CaptureRuntimeFixture:      *captureRuntimeFixture,
-			ManifestRootPublicKey:      *manifestRootPublicKey,
-			ReleaseBundlePath:          *releaseBundle,
-			ReleaseRootPublicKey:       *releaseRootPublicKey,
-			ReleaseRequiredArtifacts:   splitCapabilities(*releaseRequiredArtifacts),
+			Mode:                        *mode,
+			GatewayURL:                  *gateway,
+			TicketCode:                  *ticketCode,
+			ManifestURL:                 *manifestURL,
+			Name:                        *name,
+			Once:                        *once,
+			Transport:                   *transport,
+			PollInterval:                *pollInterval,
+			LongPollTimeout:             *longPollTimeout,
+			MaxJobs:                     *maxJobs,
+			ApprovalTimeout:             *approvalTimeout,
+			TrustPin:                    *trustPin,
+			GatewayCACertPath:           *gatewayCA,
+			GatewayClientCertPath:       *gatewayClientCert,
+			GatewayClientKeyPath:        *gatewayClientKey,
+			TrustStorePath:              *trustStore,
+			IdentityStorePath:           *identityStore,
+			IdentityKeyID:               *identityKeyID,
+			EnrollmentCertificatePath:   *enrollmentCertificate,
+			EnrollmentRootPublicKey:     *enrollmentRootPublicKey,
+			FetchEnrollmentRevocations:  *fetchEnrollmentRevocations,
+			RenewEnrollmentCertificate:  *renewEnrollmentCertificate,
+			EnrollmentIssuerTokenFile:   *enrollmentIssuerTokenFile,
+			EnrollmentRenewBefore:       *enrollmentRenewBefore,
+			EnrollmentRenewValidMinutes: *enrollmentRenewValidMinutes,
+			NonceStorePath:              *nonceStore,
+			ApprovalStorePath:           *approvalStore,
+			WorkspaceLockStore:          *workspaceLockStore,
+			CaptureRuntimeFixture:       *captureRuntimeFixture,
+			ManifestRootPublicKey:       *manifestRootPublicKey,
+			ReleaseBundlePath:           *releaseBundle,
+			ReleaseRootPublicKey:        *releaseRootPublicKey,
+			ReleaseRequiredArtifacts:    splitCapabilities(*releaseRequiredArtifacts),
 		})
 	case "install-service":
 		fs := flag.NewFlagSet("host install-service", flag.ContinueOnError)
@@ -1383,35 +1391,39 @@ func (a App) host(ctx context.Context, args []string) error {
 }
 
 type hostServeOptions struct {
-	Mode                       string
-	GatewayURL                 string
-	TicketCode                 string
-	ManifestURL                string
-	Name                       string
-	Once                       bool
-	Transport                  string
-	PollInterval               time.Duration
-	LongPollTimeout            time.Duration
-	MaxJobs                    int
-	ApprovalTimeout            time.Duration
-	TrustPin                   string
-	GatewayCACertPath          string
-	GatewayClientCertPath      string
-	GatewayClientKeyPath       string
-	TrustStorePath             string
-	IdentityStorePath          string
-	IdentityKeyID              string
-	EnrollmentCertificatePath  string
-	EnrollmentRootPublicKey    string
-	FetchEnrollmentRevocations bool
-	NonceStorePath             string
-	ApprovalStorePath          string
-	WorkspaceLockStore         string
-	CaptureRuntimeFixture      bool
-	ManifestRootPublicKey      string
-	ReleaseBundlePath          string
-	ReleaseRootPublicKey       string
-	ReleaseRequiredArtifacts   []string
+	Mode                        string
+	GatewayURL                  string
+	TicketCode                  string
+	ManifestURL                 string
+	Name                        string
+	Once                        bool
+	Transport                   string
+	PollInterval                time.Duration
+	LongPollTimeout             time.Duration
+	MaxJobs                     int
+	ApprovalTimeout             time.Duration
+	TrustPin                    string
+	GatewayCACertPath           string
+	GatewayClientCertPath       string
+	GatewayClientKeyPath        string
+	TrustStorePath              string
+	IdentityStorePath           string
+	IdentityKeyID               string
+	EnrollmentCertificatePath   string
+	EnrollmentRootPublicKey     string
+	FetchEnrollmentRevocations  bool
+	RenewEnrollmentCertificate  bool
+	EnrollmentIssuerTokenFile   string
+	EnrollmentRenewBefore       time.Duration
+	EnrollmentRenewValidMinutes int
+	NonceStorePath              string
+	ApprovalStorePath           string
+	WorkspaceLockStore          string
+	CaptureRuntimeFixture       bool
+	ManifestRootPublicKey       string
+	ReleaseBundlePath           string
+	ReleaseRootPublicKey        string
+	ReleaseRequiredArtifacts    []string
 }
 
 type hostInstallServiceOptions struct {
@@ -1476,8 +1488,24 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		if strings.TrimSpace(opts.EnrollmentRootPublicKey) == "" {
 			return fmt.Errorf("enrollment-root-public-key is required when --fetch-enrollment-revocations is set")
 		}
-	} else if strings.TrimSpace(opts.EnrollmentRootPublicKey) != "" {
-		return fmt.Errorf("--fetch-enrollment-revocations is required when --enrollment-root-public-key is provided")
+	}
+	if opts.RenewEnrollmentCertificate {
+		if strings.TrimSpace(opts.EnrollmentCertificatePath) == "" {
+			return fmt.Errorf("enrollment certificate is required when --renew-enrollment-certificate is set")
+		}
+		if strings.TrimSpace(opts.EnrollmentRootPublicKey) == "" {
+			return fmt.Errorf("enrollment-root-public-key is required when --renew-enrollment-certificate is set")
+		}
+		if opts.EnrollmentRenewBefore < 0 {
+			return fmt.Errorf("enrollment-renew-before must be non-negative")
+		}
+		if opts.EnrollmentRenewValidMinutes <= 0 {
+			return fmt.Errorf("enrollment-renew-valid-minutes must be positive")
+		}
+	} else if strings.TrimSpace(opts.EnrollmentRootPublicKey) != "" && !opts.FetchEnrollmentRevocations {
+		return fmt.Errorf("--fetch-enrollment-revocations or --renew-enrollment-certificate is required when --enrollment-root-public-key is provided")
+	} else if strings.TrimSpace(opts.EnrollmentIssuerTokenFile) != "" {
+		return fmt.Errorf("--renew-enrollment-certificate is required when --enrollment-issuer-token-file is provided")
 	}
 	if opts.Transport == "" {
 		opts.Transport = "poll"
@@ -1542,10 +1570,40 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	enrollmentRevocationCount := 0
 	enrollmentRevocationsFetched := false
 	enrollmentRevocationRoot := ""
+	enrollmentRenewed := false
+	enrollmentPreviousFingerprint := ""
+	enrollmentCertificateFingerprint := ""
 	if opts.EnrollmentCertificatePath != "" {
 		certificate, err := readEnrollmentCertificateFile(opts.EnrollmentCertificatePath)
 		if err != nil {
 			return err
+		}
+		if opts.RenewEnrollmentCertificate {
+			root, err := parseRootPublicKey(opts.EnrollmentRootPublicKey)
+			if err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			if err := model.VerifyHostEnrollmentCertificateSignature(certificate, root, now); err != nil {
+				return err
+			}
+			if !now.Add(opts.EnrollmentRenewBefore).Before(certificate.NotAfter.UTC()) {
+				renewed, previousFingerprint, fingerprint, err := renewEnrollmentCertificateFromGateway(ctx, gatewayClient, opts.GatewayURL, certificate, enrollmentRenewCertificateOptions{
+					RootPublicKey:   opts.EnrollmentRootPublicKey,
+					IssuerTokenFile: opts.EnrollmentIssuerTokenFile,
+					ValidMinutes:    opts.EnrollmentRenewValidMinutes,
+				})
+				if err != nil {
+					return err
+				}
+				if err := writeEnrollmentCertificateFile(opts.EnrollmentCertificatePath, renewed, true); err != nil {
+					return err
+				}
+				certificate = renewed
+				enrollmentRenewed = true
+				enrollmentPreviousFingerprint = previousFingerprint
+				enrollmentCertificateFingerprint = fingerprint
+			}
 		}
 		if opts.FetchEnrollmentRevocations {
 			revocations, root, err := fetchEnrollmentRevocationsWithClient(ctx, gatewayClient, opts.GatewayURL, opts.EnrollmentRootPublicKey)
@@ -1591,6 +1649,11 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 			"schema":        registration.EnrollmentCertificate.SchemaVersion,
 			"issuer_key_id": registration.EnrollmentCertificate.IssuerKeyID,
 			"not_after":     registration.EnrollmentCertificate.NotAfter,
+		}
+		if enrollmentRenewed {
+			enrollmentSummary["renewed"] = true
+			enrollmentSummary["previous_certificate_fingerprint"] = enrollmentPreviousFingerprint
+			enrollmentSummary["certificate_fingerprint"] = enrollmentCertificateFingerprint
 		}
 		if enrollmentRevocationsFetched {
 			enrollmentSummary["revocations_fetched"] = true
@@ -3653,57 +3716,65 @@ func (a App) enrollmentRenewCertificateFromGateway(ctx context.Context, opts enr
 	if err != nil {
 		return err
 	}
-	expectedRoot, err := parseRootPublicKey(opts.RootPublicKey)
+	renewed, previousFingerprint, fingerprint, err := renewEnrollmentCertificateFromGateway(ctx, http.DefaultClient, opts.GatewayURL, certificate, opts)
 	if err != nil {
 		return err
 	}
-	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
-	if err != nil {
-		return err
-	}
-	renewed, err := renewEnrollmentCertificate(ctx, opts.GatewayURL, certificate, opts)
-	if err != nil {
-		return err
-	}
-	if renewed.EnrollmentRoot.SigningKeyID != expectedRoot.SigningKeyID || renewed.EnrollmentRoot.PublicKey != expectedRoot.PublicKey {
-		return fmt.Errorf("renewed enrollment root does not match pinned root-public-key")
-	}
-	if renewed.PreviousCertificateFingerprint != previousFingerprint {
-		return fmt.Errorf("renewed enrollment certificate previous fingerprint mismatch")
-	}
-	if err := model.VerifyHostEnrollmentCertificateSignature(renewed.Certificate, expectedRoot, time.Now()); err != nil {
-		return err
-	}
-	fingerprint, err := model.HostEnrollmentCertificateFingerprint(renewed.Certificate)
-	if err != nil {
-		return err
-	}
-	if fingerprint != renewed.CertificateFingerprint {
-		return fmt.Errorf("renewed enrollment certificate fingerprint mismatch")
-	}
-	if err := writeEnrollmentCertificateFile(opts.OutPath, renewed.Certificate, opts.Force); err != nil {
+	if err := writeEnrollmentCertificateFile(opts.OutPath, renewed, opts.Force); err != nil {
 		return err
 	}
 	payload := map[string]any{
 		"ok":                               true,
-		"schema":                           renewed.Certificate.SchemaVersion,
+		"schema":                           renewed.SchemaVersion,
 		"gateway":                          opts.GatewayURL,
-		"certificate":                      renewed.Certificate,
+		"certificate":                      renewed,
 		"certificate_path":                 opts.OutPath,
 		"previous_certificate":             opts.CertificatePath,
 		"previous_certificate_fingerprint": previousFingerprint,
 		"certificate_fingerprint":          fingerprint,
 		"root_public_key":                  opts.RootPublicKey,
-		"issuer_key_id":                    renewed.Certificate.IssuerKeyID,
-		"authorized_mode":                  renewed.Certificate.Mode,
-		"authorized_host":                  renewed.Certificate.HostName,
-		"authorized_identity":              renewed.Certificate.SubjectIdentityFingerprint,
-		"not_before":                       renewed.Certificate.NotBefore,
-		"not_after":                        renewed.Certificate.NotAfter,
+		"issuer_key_id":                    renewed.IssuerKeyID,
+		"authorized_mode":                  renewed.Mode,
+		"authorized_host":                  renewed.HostName,
+		"authorized_identity":              renewed.SubjectIdentityFingerprint,
+		"not_before":                       renewed.NotBefore,
+		"not_after":                        renewed.NotAfter,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func renewEnrollmentCertificateFromGateway(ctx context.Context, client *http.Client, gatewayURL string, certificate model.HostEnrollmentCertificate, opts enrollmentRenewCertificateOptions) (model.HostEnrollmentCertificate, string, string, error) {
+	expectedRoot, err := parseRootPublicKey(opts.RootPublicKey)
+	if err != nil {
+		return model.HostEnrollmentCertificate{}, "", "", err
+	}
+	previousFingerprint, err := model.HostEnrollmentCertificateFingerprint(certificate)
+	if err != nil {
+		return model.HostEnrollmentCertificate{}, "", "", err
+	}
+	renewed, err := renewEnrollmentCertificate(ctx, client, gatewayURL, certificate, opts)
+	if err != nil {
+		return model.HostEnrollmentCertificate{}, "", "", err
+	}
+	if renewed.EnrollmentRoot.SigningKeyID != expectedRoot.SigningKeyID || renewed.EnrollmentRoot.PublicKey != expectedRoot.PublicKey {
+		return model.HostEnrollmentCertificate{}, "", "", fmt.Errorf("renewed enrollment root does not match pinned root-public-key")
+	}
+	if renewed.PreviousCertificateFingerprint != previousFingerprint {
+		return model.HostEnrollmentCertificate{}, "", "", fmt.Errorf("renewed enrollment certificate previous fingerprint mismatch")
+	}
+	if err := model.VerifyHostEnrollmentCertificateSignature(renewed.Certificate, expectedRoot, time.Now()); err != nil {
+		return model.HostEnrollmentCertificate{}, "", "", err
+	}
+	fingerprint, err := model.HostEnrollmentCertificateFingerprint(renewed.Certificate)
+	if err != nil {
+		return model.HostEnrollmentCertificate{}, "", "", err
+	}
+	if fingerprint != renewed.CertificateFingerprint {
+		return model.HostEnrollmentCertificate{}, "", "", fmt.Errorf("renewed enrollment certificate fingerprint mismatch")
+	}
+	return renewed.Certificate, previousFingerprint, fingerprint, nil
 }
 
 func (a App) enrollmentInitRevocations(opts enrollmentInitRevocationsOptions) error {
@@ -5309,7 +5380,7 @@ Usage:
   rdev release prepare-candidate --source-root . --out dist/release-candidate --version v0.1.0 --artifacts ./rdev,./rdev-host.exe,./rdev-verify.exe --key .rdev/keys/release-root.json
   rdev release verify-candidate --candidate dist/release-candidate --require-artifacts rdev-host.exe,rdev-verify.exe
   rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
-  rdev host serve --mode managed --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --enrollment-certificate host-enrollment.json --fetch-enrollment-revocations --enrollment-root-public-key enrollment-root:... --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
+  rdev host serve --mode managed --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --enrollment-certificate host-enrollment.json --renew-enrollment-certificate --fetch-enrollment-revocations --enrollment-root-public-key enrollment-root:... --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify
   rdev host install-service --platform macos --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev-host,rdev-verify --plist-out ./com.remote-dev-skillkit.host.plist
   rdev host service-status --platform macos --plist ./com.remote-dev-skillkit.host.plist
   rdev host service-control --platform macos --action start --plist ./com.remote-dev-skillkit.host.plist
@@ -5838,7 +5909,7 @@ func issueEnrollmentCertificate(ctx context.Context, gatewayURL string, opts enr
 	return payload, nil
 }
 
-func renewEnrollmentCertificate(ctx context.Context, gatewayURL string, certificate model.HostEnrollmentCertificate, opts enrollmentRenewCertificateOptions) (renewedEnrollmentCertificatePayload, error) {
+func renewEnrollmentCertificate(ctx context.Context, client *http.Client, gatewayURL string, certificate model.HostEnrollmentCertificate, opts enrollmentRenewCertificateOptions) (renewedEnrollmentCertificatePayload, error) {
 	body, err := json.Marshal(map[string]any{
 		"certificate":   certificate,
 		"valid_minutes": opts.ValidMinutes,
@@ -5858,7 +5929,7 @@ func renewEnrollmentCertificate(ctx context.Context, gatewayURL string, certific
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return renewedEnrollmentCertificatePayload{}, err
 	}

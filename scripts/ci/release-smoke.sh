@@ -25,6 +25,11 @@ go test ./internal/cli \
   -count=1 \
   > "$work_dir/enrollment-host-revocation-refresh-smoke.txt"
 
+go test ./internal/cli ./internal/gateway \
+  -run 'TestHostServeRenewsEnrollmentCertificateBeforeRegistration|TestHostServeSkipsEnrollmentRenewalWhenCertificateIsFresh|TestMemoryGatewayEnrollmentRevocationsRejectRenewal' \
+  -count=1 \
+  > "$work_dir/enrollment-host-renewal-smoke.txt"
+
 go test ./internal/model ./internal/gateway ./internal/httpapi ./internal/cli \
   -run 'TestHostEnrollmentCertificateRenewal|TestMemoryGatewayRenewsEnrollmentCertificate|TestEnrollmentCertificatesRenewEndpoint|TestEnrollmentRenewCertificate' \
   -count=1 \
@@ -233,6 +238,7 @@ print(json.dumps({
     "dev_mtls_host_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,
+    "enrollment_host_renewal_smoke": True,
     "enrollment_renewal_smoke": True,
     "enrollment_hosted_renewal_smoke": True,
     "enrollment_issuance_smoke": True,
