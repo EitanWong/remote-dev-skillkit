@@ -167,6 +167,9 @@ func TestVerifyAcceptsExportedBundle(t *testing.T) {
 	if !checkPassed(report.Checks, "required_skills_keep_adaptive_contract") {
 		t.Fatalf("expected required skills adaptive contract check: %#v", report.Checks)
 	}
+	if !checkPassed(report.Checks, "skill_agents_metadata") {
+		t.Fatalf("expected skill agents metadata check: %#v", report.Checks)
+	}
 }
 
 func minimalSkillSourceRoot(t *testing.T) string {

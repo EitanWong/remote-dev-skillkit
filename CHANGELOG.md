@@ -94,6 +94,10 @@ manifest, transport, and approval steps.
 - Added runtime-memory and stable-output expectations to host triage, remote job
   review, and safe remote support Skills so Agent/Harness runs can reuse safe
   discoveries and summarize results consistently.
+- Added `agents/openai.yaml` metadata for all shipped Skills so Codex/Harness
+  UIs can show clear names, concise descriptions, and default prompts.
+- Added Skillkit verification for `agents/openai.yaml` so shipped Skills must
+  keep useful UI/Harness metadata and `$skill-name` default prompts.
 
 ### Changed
 
@@ -148,6 +152,10 @@ manifest, transport, and approval steps.
 - Tightened supporting Skills for professional Agent/Harness execution:
   refreshed trigger descriptions, read-before-probe memory usage, scoped memory
   writes, and stable report fields.
+- Improved Skill discoverability after installation without adding icon or
+  asset dependencies.
+- Promoted Skill metadata from documentation nicety to release-verified
+  contract.
 
 ### Verification
 

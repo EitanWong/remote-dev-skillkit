@@ -125,6 +125,7 @@ func Verify(opts VerifyOptions) (VerificationReport, error) {
 	add("required_skills_present", skillFailures == "", skillFailures)
 	add("skill_paths_match_names", skillPathFailures(manifest) == "", skillPathFailures(manifest))
 	add("required_skills_keep_adaptive_contract", skillsAdaptiveContractFailures(bundleDir, manifest) == "", skillsAdaptiveContractFailures(bundleDir, manifest))
+	add("skill_agents_metadata", skillAgentMetadataFailures(bundleDir, manifest) == "", skillAgentMetadataFailures(bundleDir, manifest))
 
 	frameworkFailures := missingStrings(DefaultFrameworks, manifest.Frameworks)
 	report.FrameworksVerified = len(manifest.Frameworks)
@@ -229,6 +230,54 @@ func skillsAdaptiveContractFailures(bundleDir string, manifest Manifest) string 
 	}
 	sort.Strings(failures)
 	return strings.Join(failures, ",")
+}
+
+func skillAgentMetadataFailures(bundleDir string, manifest Manifest) string {
+	required := map[string]bool{
+		"safe-remote-support": true,
+		"host-triage":         true,
+		"remote-vibe-coding":  true,
+		"remote-job-review":   true,
+	}
+	var failures []string
+	for _, skill := range manifest.Skills {
+		if !required[skill.Name] {
+			continue
+		}
+		path := filepath.ToSlash(filepath.Join("skills", skill.Name, "agents", "openai.yaml"))
+		if !safeBundlePath(path) {
+			failures = append(failures, skill.Name+":unsafe-path")
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(bundleDir, filepath.FromSlash(path)))
+		if err != nil {
+			failures = append(failures, skill.Name+":missing")
+			continue
+		}
+		if !agentMetadataLooksUseful(skill.Name, string(content)) {
+			failures = append(failures, skill.Name+":invalid")
+		}
+	}
+	sort.Strings(failures)
+	return strings.Join(failures, ",")
+}
+
+func agentMetadataLooksUseful(skillName, content string) bool {
+	required := []string{
+		"interface:",
+		"display_name:",
+		"short_description:",
+		"default_prompt:",
+		"$" + skillName,
+		"policy:",
+		"allow_implicit_invocation: true",
+	}
+	for _, needle := range required {
+		if !strings.Contains(content, needle) {
+			return false
+		}
+	}
+	return true
 }
 
 func installDocAdaptiveContractFailures(bundleDir string, manifest Manifest) string {

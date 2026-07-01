@@ -123,6 +123,8 @@
 - [x] Optimize remote-vibe-coding Skill with progressive-disclosure references and a concise core workflow.
 - [x] Add dynamic Skill runtime memory guidance for discovered environment facts and configuration paths.
 - [x] Improve supporting Skills with runtime-memory usage and Harness-friendly stable output fields.
+- [x] Add `agents/openai.yaml` metadata for all shipped Skills to improve Codex/Harness discoverability.
+- [x] Verify shipped Skill `agents/openai.yaml` metadata during Skillkit bundle verification.
 
 ## Next
 
