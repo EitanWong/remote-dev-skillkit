@@ -165,6 +165,14 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 			AutoInstallAllowed  []string `json:"auto_install_allowed"`
 			ApprovalRequiredFor []string `json:"approval_required_for"`
 		} `json:"agent_provisioning_plan"`
+		CollaborationPlan struct {
+			SchemaVersion     string   `json:"schema_version"`
+			Mode              string   `json:"mode"`
+			Protocols         []string `json:"protocols"`
+			DiscoveryTargets  []string `json:"discovery_targets"`
+			CollaborationUses []string `json:"collaboration_uses"`
+			DelegationRules   []string `json:"delegation_rules"`
+		} `json:"agent_collaboration_plan"`
 		HostCommand        string   `json:"host_command"`
 		FallbackCommands   []string `json:"fallback_commands"`
 		HumanNextActions   []string `json:"human_next_actions"`
@@ -222,6 +230,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if len(payload.ProvisioningPlan.DiscoveryTargets) == 0 || len(payload.ProvisioningPlan.AutoInstallAllowed) == 0 || len(payload.ProvisioningPlan.ApprovalRequiredFor) == 0 {
 		t.Fatalf("provisioning plan should define discovery, auto-install, and approval rules: %#v", payload.ProvisioningPlan)
+	}
+	if payload.CollaborationPlan.SchemaVersion != "rdev.agent-collaboration-plan.v1" || payload.CollaborationPlan.Mode != "host-local-peer-collaboration" {
+		t.Fatalf("invite should include agent collaboration plan: %#v", payload.CollaborationPlan)
+	}
+	if !slices.Contains(payload.CollaborationPlan.Protocols, "a2a-agent-card") || len(payload.CollaborationPlan.DiscoveryTargets) == 0 || len(payload.CollaborationPlan.CollaborationUses) == 0 || len(payload.CollaborationPlan.DelegationRules) == 0 {
+		t.Fatalf("collaboration plan should include A2A discovery and delegation rules: %#v", payload.CollaborationPlan)
 	}
 	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())

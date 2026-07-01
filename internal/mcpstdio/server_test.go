@@ -130,6 +130,10 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || provisioningPlan["schema_version"] != "rdev.agent-provisioning-plan.v1" || provisioningPlan["mode"] != "adaptive-host-local" {
 		t.Fatalf("expected agent provisioning plan, got %#v", structured)
 	}
+	collaborationPlan, ok := structured["agent_collaboration_plan"].(map[string]any)
+	if !ok || collaborationPlan["schema_version"] != "rdev.agent-collaboration-plan.v1" || collaborationPlan["mode"] != "host-local-peer-collaboration" {
+		t.Fatalf("expected agent collaboration plan, got %#v", structured)
+	}
 }
 
 func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {

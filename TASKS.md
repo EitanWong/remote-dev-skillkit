@@ -113,6 +113,7 @@
 - [x] Add one-link attended customer bootstrap with join page, platform bootstrap scripts, invite `customer_bootstrap`, and Agent follow-up instructions.
 - [x] Add host-context-first progressive disclosure plan so remote host environment, project structure, requirements, logs, and evidence stay on the host while agents load indexed slices on demand.
 - [x] Add adaptive host-local provisioning plan so agents can probe and install verified skills, MCP tools, adapters, and dependencies on the target host when policy allows.
+- [x] Add A2A-aware peer-Agent collaboration plan so target-host AI tools can assist through bounded signed jobs, policy, approvals, and evidence.
 
 ## Next
 

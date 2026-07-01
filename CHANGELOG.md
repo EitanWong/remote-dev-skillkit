@@ -57,6 +57,9 @@ manifest, transport, and approval steps.
   detect target-host skills, MCP tools, adapters, runtimes, package managers,
   project dependencies, framework paths, proxies, and permissions, then install
   verified user/workspace-scoped missing pieces when policy allows.
+- Added `rdev.agent-collaboration-plan.v1` to invite output for discovering and
+  using local or configured peer Agents, including A2A-style Agent Card peers,
+  MCP stdio peers, and local Agent CLIs for bounded collaborative subtasks.
 
 ### Changed
 
@@ -84,6 +87,9 @@ manifest, transport, and approval steps.
   dependencies, and adapter helpers with approval gates for elevated,
   system-wide, credential, service, firewall, external, paid, publish, deploy,
   push, or persistent security-policy changes.
+- Documented peer-Agent collaboration as a bounded adapter/collaborator path:
+  A2A/MCP/local Agent work must still use signed jobs, host policy, workspace
+  locks, redaction, approvals, audit, and evidence.
 
 ### Verification
 

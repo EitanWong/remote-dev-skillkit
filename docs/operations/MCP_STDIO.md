@@ -18,7 +18,8 @@ Agent-first session tools include:
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
 `transport_plan`, `connection_plan`, `customer_bootstrap`,
-`host_context_plan`, `agent_provisioning_plan`, `fallback_commands`, `authority_profile`,
+`host_context_plan`, `agent_provisioning_plan`,
+`agent_collaboration_plan`, `fallback_commands`, `authority_profile`,
 `connectivity_checks`, `human_next_actions`, and `agent_next_actions`. Agents
 should call this before asking a human to connect a new target host. The command
 still requires consent on the target machine; it does not execute remotely by
@@ -50,6 +51,14 @@ verified skills, MCP metadata, adapter helpers, and project dependencies. It
 must ask for approval before elevation, system-wide packages, services,
 credentials, firewall changes, external accounts, paid resources, publish,
 deploy, push, or security-policy mutation.
+
+The `agent_collaboration_plan` is the standard for cooperating with other AI
+tools on the target host. It includes A2A-style discovery through Agent Cards,
+JSON-RPC/HTTP tasks, SSE streaming, MCP stdio peers, and local Agent CLIs. MCP
+clients may delegate bounded subtasks to discovered peers when doing so helps
+the remote repair or development task, but peer work must be wrapped in rdev
+jobs so host policy, workspace locks, redaction, cancellation, approval gates,
+audit, and evidence still apply.
 
 The `connection_plan` separates native support from agent-managed paths:
 implemented native paths are outbound WSS/mTLS, HTTPS long-poll, HTTPS

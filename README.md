@@ -142,6 +142,14 @@ Elevation, services, credentials, firewall changes, external accounts, paid
 resources, publish/deploy/push actions, and security-policy mutation require an
 approval gate and evidence.
 
+If the target host already has other AI tools or Agents, invite output includes
+`agent_collaboration_plan`. rdev can discover local or configured Agent peers,
+including A2A-compatible agents through Agent Cards, and use them for bounded
+subtasks, diagnostics, summaries, or project-local expertise. Peer agents are
+collaborators, not authorization roots: delegation still runs through signed
+rdev jobs, host policy, workspace locks, redaction, approval gates, audit, and
+evidence.
+
 `--transport auto` is the field-friendly default: the host tries outbound WSS
 first, falls back to HTTPS long-poll when WebSocket upgrades are blocked, and
 keeps short polling as the maximum-compatibility path for stubborn networks.
@@ -232,6 +240,8 @@ storage provider packages, and final external GitHub publishing steps.
   progressive disclosure.
 - No blind dependency or tool installation: probe first, install from verified
   sources, prefer host-local/user/workspace scope, and record evidence.
+- No peer Agent free-for-all: A2A/MCP/local Agent collaboration must stay
+  bounded by signed jobs, policy, redaction, approvals, and evidence.
 - Every serious remote job must be signed, policy-checked, auditable, and
   revocable.
 - Destructive actions and high-risk capabilities need explicit approval gates.

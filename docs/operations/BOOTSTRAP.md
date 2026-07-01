@@ -151,6 +151,13 @@ pause for approval before elevation, system-wide packages, service changes,
 credential changes, firewall changes, external account mutation, paid resource
 use, or publish/deploy/push actions.
 
+`agent_collaboration_plan` defines the peer-Agent rule. When the target host
+has other AI tools or Agents installed, the Agent may discover configured A2A
+Agent Cards, local MCP servers, and local Agent CLIs. It can ask those peers to
+perform bounded diagnostics, summaries, coding subtasks, or tool-specific
+checks, but all delegation must remain inside rdev signed jobs, host policy,
+workspace locks, redaction, approval gates, audit, and evidence.
+
 The development gateway serves:
 
 ```text

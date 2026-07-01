@@ -39,6 +39,7 @@ type Invite struct {
 	CustomerBootstrap   CustomerBootstrap `json:"customer_bootstrap"`
 	HostContextPlan     HostContextPlan   `json:"host_context_plan"`
 	ProvisioningPlan    ProvisioningPlan  `json:"agent_provisioning_plan"`
+	CollaborationPlan   CollaborationPlan `json:"agent_collaboration_plan"`
 	HostCommand         string            `json:"host_command"`
 	FallbackCommands    []string          `json:"fallback_commands"`
 	HumanNextActions    []string          `json:"human_next_actions"`
@@ -147,6 +148,17 @@ type ProvisioningPlan struct {
 	EvidenceRequired    []string `json:"evidence_required"`
 }
 
+type CollaborationPlan struct {
+	SchemaVersion       string   `json:"schema_version"`
+	Mode                string   `json:"mode"`
+	Protocols           []string `json:"protocols"`
+	DiscoveryTargets    []string `json:"discovery_targets"`
+	CollaborationUses   []string `json:"collaboration_uses"`
+	DelegationRules     []string `json:"delegation_rules"`
+	ApprovalRequiredFor []string `json:"approval_required_for"`
+	EvidenceRequired    []string `json:"evidence_required"`
+}
+
 func New(opts Options) (Invite, error) {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
@@ -206,6 +218,7 @@ func New(opts Options) (Invite, error) {
 	customerBootstrap := newCustomerBootstrap(joinURL)
 	hostContextPlan := newHostContextPlan()
 	provisioningPlan := newProvisioningPlan()
+	collaborationPlan := newCollaborationPlan()
 	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
 
 	agentActions := []string{
@@ -232,6 +245,7 @@ func New(opts Options) (Invite, error) {
 		CustomerBootstrap: customerBootstrap,
 		HostContextPlan:   hostContextPlan,
 		ProvisioningPlan:  provisioningPlan,
+		CollaborationPlan: collaborationPlan,
 		HostCommand:       hostCommand,
 		FallbackCommands:  fallbackCommands,
 		HumanNextActions: []string{
@@ -249,6 +263,7 @@ func New(opts Options) (Invite, error) {
 			"When authority_profile permits downstream control, the connected host may act as the field workstation for discovering and controlling other reachable authorized devices.",
 			"Keep remote environment, project structure, requirement notes, and large evidence on the host; load only indexed slices or artifact references into the Agent server context.",
 			"Let the host detect missing skills, MCP tools, adapters, language runtimes, package managers, and project dependencies; install user-scoped missing pieces automatically when policy allows, and ask before elevation or external mutation.",
+			"Discover local or configured Agent peers, including A2A-compatible agents, when collaboration can help; delegate only through signed jobs, scoped policy, approvals, redaction, and evidence.",
 		},
 		MCPTools: map[string]string{
 			"list_hosts":    "rdev.hosts.list",
@@ -298,6 +313,56 @@ func newHostContextPlan() HostContextPlan {
 			"redact secrets, tokens, private keys, customer identifiers, and private hostnames before upload",
 			"store sensitive raw context on the host when possible and upload only redacted summaries or references",
 			"include checksums and freshness metadata so later slices can be verified without reloading everything",
+		},
+	}
+}
+
+func newCollaborationPlan() CollaborationPlan {
+	return CollaborationPlan{
+		SchemaVersion: "rdev.agent-collaboration-plan.v1",
+		Mode:          "host-local-peer-collaboration",
+		Protocols: []string{
+			"a2a-agent-card",
+			"a2a-jsonrpc-http",
+			"a2a-sse-streaming",
+			"mcp-stdio",
+			"local-agent-cli",
+		},
+		DiscoveryTargets: []string{
+			"A2A agent cards from configured URLs or well-known local endpoints",
+			"local MCP servers and tool contracts",
+			"installed agent CLIs such as codex, claude, acpx, openclaw, opencode, or hermes",
+			"workspace-local agent configuration files",
+			"operator-provided peer endpoints and trust roots",
+		},
+		CollaborationUses: []string{
+			"ask a specialized local Agent to inspect or summarize host-local context",
+			"delegate a bounded coding, debugging, documentation, or test subtask",
+			"coordinate with an existing project Agent that already knows the workspace",
+			"request tool-specific diagnostics without copying full project context to the central Agent server",
+			"collect peer artifacts, messages, task status, and summaries as rdev evidence",
+		},
+		DelegationRules: []string{
+			"treat peer agents as adapters or downstream collaborators, not as authorization roots",
+			"discover peer capabilities before delegation and choose the narrowest useful task",
+			"use host-local context slices and artifact references instead of dumping full repositories into peer prompts",
+			"wrap peer work in signed rdev jobs so host policy, workspace locks, redaction, audit, cancellation, and approval gates apply",
+			"do not expose rdev operator tokens, host private keys, release keys, customer secrets, or unrestricted shell access to peers",
+			"prefer A2A task, message, and artifact boundaries when a peer advertises an A2A Agent Card",
+		},
+		ApprovalRequiredFor: []string{
+			"delegating to an untrusted, unauthenticated, or internet-reachable peer",
+			"sharing sensitive customer data, secrets, credentials, private hostnames, or regulated data",
+			"letting a peer install packages, mutate services, push, deploy, publish, spend money, or change external resources",
+			"granting a peer downstream control over additional hosts or devices",
+		},
+		EvidenceRequired: []string{
+			"peer discovery result and advertised capabilities",
+			"selected protocol and endpoint trust basis",
+			"delegated task intent, scope, and policy",
+			"peer messages, task status, artifacts, checksums, and redaction metadata",
+			"approval tokens used for high-risk collaboration",
+			"final peer summary linked to rdev job and audit ids",
 		},
 	}
 }
