@@ -3,6 +3,16 @@
 Read this only when loading, updating, pruning, exporting, or reasoning from
 Skill runtime memory.
 
+## Contents
+
+- [Purpose](#purpose)
+- [Storage Rules](#storage-rules)
+- [Record Shape](#record-shape)
+- [Read Before Acting](#read-before-acting)
+- [Write After Discovering](#write-after-discovering)
+- [Refresh and Invalidate](#refresh-and-invalidate)
+- [Evidence and Privacy](#evidence-and-privacy)
+
 ## Purpose
 
 Skill runtime memory stores reusable facts discovered during real sessions so

@@ -98,6 +98,9 @@ manifest, transport, and approval steps.
   UIs can show clear names, concise descriptions, and default prompts.
 - Added Skillkit verification for `agents/openai.yaml` so shipped Skills must
   keep useful UI/Harness metadata and `$skill-name` default prompts.
+- Added `scripts/audit-skills.sh` and wired it into `./scripts/check.sh` so
+  Skill structure, frontmatter, metadata, linked references, hidden files, and
+  long-reference contents are checked continuously.
 
 ### Changed
 
@@ -156,6 +159,8 @@ manifest, transport, and approval steps.
   asset dependencies.
 - Promoted Skill metadata from documentation nicety to release-verified
   contract.
+- Added a contents index to the long runtime-memory reference so progressive
+  disclosure remains scan-friendly.
 
 ### Verification
 

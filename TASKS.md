@@ -125,6 +125,7 @@
 - [x] Improve supporting Skills with runtime-memory usage and Harness-friendly stable output fields.
 - [x] Add `agents/openai.yaml` metadata for all shipped Skills to improve Codex/Harness discoverability.
 - [x] Verify shipped Skill `agents/openai.yaml` metadata during Skillkit bundle verification.
+- [x] Add a Skills quality audit script and wire it into the main check flow.
 
 ## Next
 
