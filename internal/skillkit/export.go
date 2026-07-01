@@ -125,12 +125,17 @@ func copySkills(sourceRoot, outDir string) ([]SkillEntry, []FileEntry, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			return nil, nil, fmt.Errorf("unsupported file in skills directory: %s", entry.Name())
+		}
+		if !entry.IsDir() {
+			return nil, nil, fmt.Errorf("unsupported file in skills directory: %s", entry.Name())
+		}
+	}
 	var skills []SkillEntry
 	var files []FileEntry
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
 		name := entry.Name()
 		skillRoot := filepath.Join(skillsRoot, name)
 		skillFile := filepath.Join(skillRoot, "SKILL.md")
@@ -150,9 +155,15 @@ func copySkills(sourceRoot, outDir string) ([]SkillEntry, []FileEntry, error) {
 			if d.IsDir() {
 				return nil
 			}
+			if strings.HasPrefix(d.Name(), ".") {
+				return fmt.Errorf("unsupported hidden file in skill %s: %s", name, d.Name())
+			}
 			rel, err := filepath.Rel(skillsRoot, path)
 			if err != nil {
 				return err
+			}
+			if !supportedSkillBundlePath(filepath.ToSlash(rel)) {
+				return fmt.Errorf("unsupported file in skill %s: %s", name, filepath.ToSlash(rel))
 			}
 			entry, err := copyFile(path, outDir, filepath.ToSlash(filepath.Join("skills", rel)), "skill")
 			if err != nil {
@@ -169,6 +180,22 @@ func copySkills(sourceRoot, outDir string) ([]SkillEntry, []FileEntry, error) {
 		return nil, nil, fmt.Errorf("no skills found under %s", skillsRoot)
 	}
 	return skills, files, nil
+}
+
+func supportedSkillBundlePath(rel string) bool {
+	parts := strings.Split(rel, "/")
+	if len(parts) < 2 {
+		return false
+	}
+	if len(parts) == 2 {
+		return parts[1] == "SKILL.md"
+	}
+	switch parts[1] {
+	case "agents", "scripts", "references", "assets":
+		return true
+	default:
+		return false
+	}
 }
 
 func copyFile(source, outDir, bundlePath, kind string) (FileEntry, error) {
@@ -334,7 +361,7 @@ func frameworksIndex() string {
 	return "# Framework Install Notes\n\n" +
 		"- `codex.md` - Codex-oriented install notes.\n" +
 		"- `claude-code.md` - Claude Code-oriented install notes.\n" +
-		"- `hermes.md` - Hermes/Lucky-oriented install notes.\n" +
+		"- `hermes.md` - Hermes-oriented install notes.\n" +
 		"- `openclaw-opencode.md` - OpenClaw/OpenCode-oriented install notes.\n" +
 		"- `generic-mcp-agent.md` - Generic MCP-compatible agent notes.\n"
 }

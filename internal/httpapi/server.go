@@ -254,7 +254,7 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ticket":      ticket,
-		"joinUrl":     "https://agent.lunflux.com/join/" + ticket.Code,
+		"joinUrl":     requestBaseURL(r) + "/join/" + ticket.Code,
 		"manifestUrl": requestBaseURL(r) + "/v1/tickets/" + ticket.Code + "/manifest",
 	})
 }

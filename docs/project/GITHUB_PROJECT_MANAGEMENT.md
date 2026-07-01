@@ -1,28 +1,26 @@
 # GitHub Project Management
 
 This document defines the GitHub operating model for Remote Dev Skillkit. It is
-kept local until Eitan explicitly approves external GitHub mutations.
+kept local until an operator explicitly approves external GitHub mutations.
 
 ## Current State
 
-As of 2026-06-30:
+This repository is prepared for a public GitHub launch, but local evidence must
+be regenerated before each external mutation:
 
-- local repository path: `/Users/eitan/Documents/Codex/2026-06-28/pe/work/remote-dev-skillkit`
-- current branch: `main`
-- latest audited local baseline before this project-readiness audit:
-  `c542c5b feat: distribute enrollment revocations`
-- GitHub CLI account: `EitanWong`
-- local git remote: none configured
-- `gh repo view EitanWong/remote-dev-skillkit`: no repository found at audit time
+- local repository path: `REPO_ROOT`
+- expected branch: `main`
+- recommended repository format: `OWNER/remote-dev-skillkit`
+- GitHub CLI account: `OWNER`
 
 No GitHub repository, issues, labels, milestones, project board, release, or push
-should be created until Eitan explicitly approves that external change.
+should be created until an operator explicitly approves that external change.
 
 Local project readiness is machine-checkable:
 
 ```bash
 scripts/github/audit-project-readiness.sh \
-  --repo EitanWong/remote-dev-skillkit \
+  --repo OWNER/remote-dev-skillkit \
   --out dist/github-project-readiness.json
 ```
 
@@ -39,7 +37,7 @@ OpenClaw/OpenCode, Apache-2.0, project structure, and multilingual entry points.
 Recommended remote repository:
 
 ```text
-EitanWong/remote-dev-skillkit
+OWNER/remote-dev-skillkit
 ```
 
 Recommended visibility for the current open-source launch target:
@@ -49,7 +47,7 @@ public
 ```
 
 Real Windows, Linux, and Mac acceptance evidence remains required before making
-platform-production claims. Eitan will collect that target-machine evidence
+platform-production claims. The project operator should collect that target-machine evidence
 manually; public launch readiness should still keep the acceptance-plan and
 evidence-package tooling visible so external contributors can reproduce the
 checks.
@@ -82,7 +80,7 @@ Recommended fields:
 |---|---|---|
 | `v0.1 Local Safety Kernel` | signed local job execution, host-side verification, approvals, evidence, audit, Skillkit export | substantially implemented locally; keep open only for release-note/evidence cleanup |
 | `v0.2 Temporary Windows Host` | one visible verified Windows command starts an attended outbound host | clean Windows VM joins, verifies signed artifacts, enforces approvals, revokes, leaves no persistence |
-| `v0.3 Managed Mac Coding` | Eitan-owned managed Mac runs Codex jobs safely | service-backed LaunchAgent transcript proves reconnect, locked worktree, diff/test evidence, approval gates |
+| `v0.3 Managed Mac Coding` | operator-owned managed Mac runs Codex jobs safely | service-backed LaunchAgent transcript proves reconnect, locked worktree, diff/test evidence, approval gates |
 | `v0.4 Managed Device Generalization` | generalize managed runtime across Mac, Windows, Linux | Windows Service, systemd, WSS/mTLS, OS-protected storage, adapter SDK |
 | `v1.0 Public Skillkit` | stable open-source release for mainstream agent frameworks | signed releases, stable schemas, install docs, threat model, security policy, public acceptance transcripts |
 
@@ -246,7 +244,7 @@ The current bootstrap script creates the following seed backlog.
 Preview the GitHub changes locally:
 
 ```bash
-scripts/github/bootstrap-project.sh --dry-run EitanWong/remote-dev-skillkit
+scripts/github/bootstrap-project.sh --dry-run OWNER/remote-dev-skillkit
 ```
 
 Audit the local GitHub project-management surface before opening or mutating
@@ -254,7 +252,7 @@ anything on GitHub:
 
 ```bash
 scripts/github/audit-project-readiness.sh \
-  --repo EitanWong/remote-dev-skillkit \
+  --repo OWNER/remote-dev-skillkit \
   --out dist/github-project-readiness.json
 ```
 
@@ -263,7 +261,7 @@ Preview GitHub Release publication from a verified local candidate:
 ```bash
 scripts/github/plan-release.sh \
   --candidate dist/release-candidate \
-  --repo EitanWong/remote-dev-skillkit \
+  --repo OWNER/remote-dev-skillkit \
   --require-artifacts rdev-host.exe,rdev-verify.exe
 ```
 
@@ -276,7 +274,7 @@ candidates:
 ```bash
 scripts/github/plan-platform-release.sh \
   --platform-candidates dist/release-candidates/platform-candidates.json \
-  --repo EitanWong/remote-dev-skillkit
+  --repo OWNER/remote-dev-skillkit
 ```
 
 Preview post-release download and install verification steps from that local
@@ -306,22 +304,22 @@ command previews. It does not create a release or upload assets.
 Recommended sequence after explicit approval:
 
 ```bash
-gh repo create EitanWong/remote-dev-skillkit --public --source . --remote origin --push
-scripts/github/bootstrap-project.sh EitanWong/remote-dev-skillkit
+gh repo create OWNER/remote-dev-skillkit --public --source . --remote origin --push
+scripts/github/bootstrap-project.sh OWNER/remote-dev-skillkit
 ```
 
 If the repository already exists:
 
 ```bash
-git remote add origin https://github.com/EitanWong/remote-dev-skillkit.git
+git remote add origin https://github.com/OWNER/remote-dev-skillkit.git
 git push -u origin main
-scripts/github/bootstrap-project.sh EitanWong/remote-dev-skillkit
+scripts/github/bootstrap-project.sh OWNER/remote-dev-skillkit
 ```
 
 If a private staging repository was used earlier, switch visibility deliberately:
 
 ```bash
-gh repo edit EitanWong/remote-dev-skillkit --visibility public
+gh repo edit OWNER/remote-dev-skillkit --visibility public
 ```
 
 Do this only after the security policy, release signing, manual acceptance

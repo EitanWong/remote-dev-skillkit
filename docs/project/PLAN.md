@@ -9,10 +9,10 @@ Create `remote-dev-skillkit`: a robust agent-native toolkit for remote coding an
 The project is complete when:
 
 1. Agents can install skills and discover `rdev-mcp` tools.
-2. Hermes/Lucky can create a support ticket.
+2. Hermes can create a support ticket.
 3. A Windows target can run a visible bootstrap and connect outbound-only.
 4. Hermes can approve/revoke the host.
-5. Lucky can create policy-bound jobs.
+5. an agent can create policy-bound jobs.
 6. The host can execute allowed jobs, stream logs/artifacts, and reject disallowed actions.
 7. Jobs produce audit evidence.
 8. Managed devices can run as stable services with recovery.

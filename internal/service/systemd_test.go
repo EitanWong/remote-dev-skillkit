@@ -13,15 +13,15 @@ func TestNewLinuxSystemdUserServiceBuildsManagedHostArguments(t *testing.T) {
 		BinaryPath:               "/opt/rdev/bin/rdev",
 		GatewayURL:               "https://api.example.com/v1",
 		TicketCode:               "ABCD-1234",
-		IdentityStorePath:        "/home/eitan/.rdev/host/identity.json",
-		TrustStorePath:           "/home/eitan/.rdev/host/trust.json",
-		NonceStorePath:           "/home/eitan/.rdev/host/nonces.json",
-		ApprovalStorePath:        "/home/eitan/.rdev/host/approvals.json",
-		WorkspaceLockStorePath:   "/home/eitan/.rdev/host/workspace-locks",
+		IdentityStorePath:        "/home/example/.rdev/host/identity.json",
+		TrustStorePath:           "/home/example/.rdev/host/trust.json",
+		NonceStorePath:           "/home/example/.rdev/host/nonces.json",
+		ApprovalStorePath:        "/home/example/.rdev/host/approvals.json",
+		WorkspaceLockStorePath:   "/home/example/.rdev/host/workspace-locks",
 		ReleaseBundlePath:        "/opt/rdev/release-bundle.json",
 		ReleaseRootPublicKey:     "release-root:abc123",
 		ReleaseRequiredArtifacts: []string{"rdev-host", "rdev-verify"},
-		LogDir:                   "/home/eitan/.local/state/rdev/logs",
+		LogDir:                   "/home/example/.local/state/rdev/logs",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,11 +41,11 @@ func TestNewLinuxSystemdUserServiceBuildsManagedHostArguments(t *testing.T) {
 		"--transport",
 		"long-poll",
 		"--identity-store",
-		"/home/eitan/.rdev/host/identity.json",
+		"/home/example/.rdev/host/identity.json",
 		"--trust-store",
-		"/home/eitan/.rdev/host/trust.json",
+		"/home/example/.rdev/host/trust.json",
 		"--workspace-lock-store",
-		"/home/eitan/.rdev/host/workspace-locks",
+		"/home/example/.rdev/host/workspace-locks",
 		"--release-bundle",
 		"/opt/rdev/release-bundle.json",
 		"--release-root-public-key",
@@ -57,7 +57,7 @@ func TestNewLinuxSystemdUserServiceBuildsManagedHostArguments(t *testing.T) {
 			t.Fatalf("expected argument %q in %#v", expected, unit.ExecStart)
 		}
 	}
-	if unit.StandardOutput != "append:/home/eitan/.local/state/rdev/logs/rdev-host.out.log" {
+	if unit.StandardOutput != "append:/home/example/.local/state/rdev/logs/rdev-host.out.log" {
 		t.Fatalf("unexpected stdout target %q", unit.StandardOutput)
 	}
 	if unit.Restart != "on-failure" || unit.RestartSec != "5s" {

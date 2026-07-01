@@ -875,7 +875,7 @@ rdev host uninstall-service `
 
 `install-service --platform windows` does not create the service itself. It
 prints machine-readable `sc.exe create` and `sc.exe description` command plans
-so an operator can review and run them from an elevated PowerShell session.
+so the operator can review and run them from an elevated PowerShell session.
 `service-status`, `service-control`, and `uninstall-service` are dry-run by
 default; `service-control --execute` is required before `sc.exe start`, `stop`,
 or `query/qc` is invoked. This is a managed-host planning/control surface, not
@@ -943,7 +943,7 @@ For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
 
 ```powershell
 .\windows-temporary.ps1 `
-  -GatewayUrl https://agent.lunflux.com `
+  -GatewayUrl https://agent.example.com `
   -TicketCode ABCD-1234 `
   -DownloadUrl https://example/rdev-host.exe `
   -ExpectedSha256 <host_sha256> `

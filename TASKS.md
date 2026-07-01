@@ -66,12 +66,12 @@
 - [x] Add post-release install verification planning from local GitHub Release dry-run plans.
 - [x] Add post-release install plan verification and tamper smoke coverage.
 - [x] Add trust lifecycle CLI for root/gateway key initialization, rotation, revocation, and bundle verification.
-- [x] Add final 2026-06-30 perfect-ending architecture refinement with product lines, mode separation, trust boundaries, protocol closure, and implementation spine.
+- [x] Add final perfect-ending architecture refinement with product lines, mode separation, trust boundaries, protocol closure, and implementation spine.
 - [x] Add Linux systemd user-unit managed host lifecycle with safe install/status/dry-run control/uninstall commands.
 - [x] Add public adapterkit result-artifact conformance verifier for built-in and third-party adapters.
 - [x] Add `rdev adapter verify-result` CLI for result-artifact conformance reports.
 - [x] Add `rdev.adapter.verify_result` MCP tool for agent-side result-artifact conformance.
-- [x] Add final product constitution for the perfect-ending architecture, including planes, adapter lifecycle, permission lattice, storage, API/MCP contract, Eitan deployment, v1.0 definition, and build order.
+- [x] Add final product constitution for the perfect-ending architecture, including planes, adapter lifecycle, permission lattice, storage, API/MCP contract, an operator deployment, v1.0 definition, and build order.
 - [x] Add adapter lifecycle manifest conformance through `pkg/adapterkit`, `rdev adapter verify-lifecycle`, and MCP tool `rdev.adapter.verify_lifecycle`.
 - [x] Add `rdev adapter scaffold` for copyable third-party adapter lifecycle manifest templates.
 - [x] Add adapter cancellation artifact conformance through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.

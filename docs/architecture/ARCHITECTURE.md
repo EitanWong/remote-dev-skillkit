@@ -7,7 +7,7 @@ Remote Dev Skillkit has four surfaces:
 - Agent Skills: instruct agents how to request and review remote jobs safely.
 - CLI: install, inspect, enroll, debug, and operate the system.
 - MCP tools: expose host, ticket, job, artifact, audit, and policy actions.
-- Host/Gateway services: connect target machines to Hermes/Lucky.
+- Host/Gateway services: connect target machines to Hermes.
 
 ## Connectivity Layers
 

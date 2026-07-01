@@ -46,6 +46,8 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
+const exampleAgentJoinBaseURL = "https://agent.example.com"
+
 type App struct {
 	Stdout io.Writer
 	Stderr io.Writer
@@ -1216,7 +1218,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		fs := flag.NewFlagSet("host serve", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
 		mode := fs.String("mode", "temporary", "host mode: temporary, managed, or break-glass")
-		gateway := fs.String("gateway", "https://agent.lunflux.com", "gateway URL")
+		gateway := fs.String("gateway", "", "gateway URL; required with --ticket-code unless --manifest-url is used")
 		ticketCode := fs.String("ticket-code", "", "one-time ticket code for local dev registration")
 		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
 		name := fs.String("name", "", "host display name; defaults to detected hostname")
@@ -1536,11 +1538,14 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if opts.TicketCode == "" {
 		_, err := fmt.Fprintf(
 			a.Stdout,
-			"rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --ticket-code to register with a local dev gateway; production transport is not implemented yet\n",
+			"rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --gateway and --ticket-code to register with a local dev gateway, or --manifest-url for a signed join manifest; production transport is not implemented yet\n",
 			opts.Mode,
 			opts.GatewayURL,
 		)
 		return err
+	}
+	if strings.TrimSpace(opts.GatewayURL) == "" {
+		return fmt.Errorf("gateway is required when --ticket-code is provided")
 	}
 	if !isLocalDevGatewayURL(opts.GatewayURL) {
 		return fmt.Errorf("host registration currently supports local dev gateways only")
@@ -2599,7 +2604,7 @@ func (a App) ticketCreate(mode model.HostMode, ttlSeconds int, reason, capList s
 	}
 	payload := map[string]any{
 		"ticket":  ticket,
-		"joinUrl": "https://agent.lunflux.com/join/" + ticket.Code,
+		"joinUrl": exampleJoinURL(ticket.Code),
 		"note":    "local preview only; gateway persistence is not implemented yet",
 	}
 	enc := json.NewEncoder(a.Stdout)
@@ -2700,7 +2705,7 @@ func (a App) demoLocal() error {
 
 	payload := map[string]any{
 		"ticket":    ticket,
-		"joinUrl":   "https://agent.lunflux.com/join/" + ticket.Code,
+		"joinUrl":   exampleJoinURL(ticket.Code),
 		"host":      host,
 		"job":       job,
 		"artifact":  artifact,
@@ -2710,6 +2715,10 @@ func (a App) demoLocal() error {
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func exampleJoinURL(ticketCode string) string {
+	return strings.TrimRight(exampleAgentJoinBaseURL, "/") + "/join/" + ticketCode
 }
 
 func (a App) gateway(args []string) error {

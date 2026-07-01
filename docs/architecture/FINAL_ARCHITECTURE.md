@@ -1,6 +1,6 @@
 # Final Architecture
 
-Remote Dev Skillkit is an agent-native remote development and support system. Its final form is not a remote shell wrapper. It is a consent-first control plane that lets Hermes/Lucky, Codex, Claude Code, OpenCode, and similar agents delegate work to enrolled machines through signed, policy-bound, auditable jobs.
+Remote Dev Skillkit is an agent-native remote development and support system. Its final form is not a remote shell wrapper. It is a consent-first control plane that lets Hermes, Codex, Claude Code, OpenCode, and similar agents delegate work to enrolled machines through signed, policy-bound, auditable jobs.
 
 For the canonical final architecture lock, including trust boundaries, protocols, acceptance tests, and the open-source package shape, see [Perfect Ending Solution](PERFECT_ENDING_SOLUTION.md). [Perfect End-State Architecture](PERFECT_END_STATE.md) and [Final System Design](FINAL_SYSTEM_DESIGN.md) remain supporting background. This file remains the implementation-oriented v1 architecture narrative.
 
@@ -15,7 +15,7 @@ The ideal user experience is:
 5. The host validates every signed job locally, executes through an adapter, streams evidence, and rejects anything outside policy.
 6. The agent summarizes diffs, logs, tests, approvals, artifacts, and residual risk before the operator decides whether to push, merge, deploy, revoke, or continue.
 
-The system must be useful for Eitan's Hermes/Lucky workflow first, but generic enough to publish as an open-source skill/toolkit for other agent stacks.
+The system must be useful for an operator's Hermes workflow first, but generic enough to publish as an open-source skill/toolkit for other agent stacks.
 
 ## Design Principles
 
@@ -51,7 +51,7 @@ Execution Plane
 
 ### `rdev-gateway`
 
-Runs near Hermes/Lucky and owns server-side state.
+Runs near Hermes and owns server-side state.
 
 Responsibilities:
 
@@ -87,7 +87,7 @@ Temporary mode is foreground-only. Managed mode may install a service, but only 
 
 ### `rdev-mcp`
 
-Exposes agent-facing tools. MCP is the primary interface for Lucky and other agents.
+Exposes agent-facing tools. MCP is the primary interface for an agent and other agents.
 
 Required tool groups:
 
@@ -237,8 +237,8 @@ Required fields:
   "host_id": "hst_...",
   "ticket_id": "tkt_...",
   "operator_id": "op_...",
-  "issued_at": "2026-06-28T00:00:00Z",
-  "expires_at": "2026-06-28T00:10:00Z",
+  "issued_at": "<iso8601-issued-at>",
+  "expires_at": "<iso8601-expires-at>",
   "nonce": "...",
   "mode": "attended-temporary",
   "adapter": "codex",
@@ -471,25 +471,25 @@ Production HTTP API:
 
 All production APIs require authentication. Development APIs may bind to localhost without auth only under an explicit `--dev` flag.
 
-## Deployment For Hermes/Lucky
+## Deployment For Hermes
 
 Recommended personal deployment:
 
 ```text
-api.lunflux.com
+api.example.com
   rdev-gateway
   rdev-mcp
   Postgres or SQLite
   artifact store
   audit store
 
-agent.lunflux.com
+agent.example.com
   join page
   bootstrap manifest
   release binaries
   WSS relay endpoint
 
-Hermes/Lucky
+Hermes
   installs Agent Skills
   talks to rdev-mcp
 ```
@@ -571,17 +571,17 @@ Open-source releases require:
 
 ## Definition Of "Perfect Ending"
 
-The project is done when Eitan can tell Lucky:
+The project is done when the operator can tell an agent:
 
 > Help this Windows machine fix its failing development environment.
 
-Then Lucky can create a short-lived join ticket, the remote user can run a visible signed bootstrap, the host can connect outbound-only, Lucky can triage the machine, run bounded repair jobs, collect evidence, ask for approvals when needed, and revoke access cleanly.
+Then an agent can create a short-lived join ticket, the remote user can run a visible signed bootstrap, the host can connect outbound-only, an agent can triage the machine, run bounded repair jobs, collect evidence, ask for approvals when needed, and revoke access cleanly.
 
-The same system should also let Eitan say:
+The same system should also let an operator say:
 
 > Use my Mac to continue development in this repository with Codex, run the tests, and show me the diff.
 
-Lucky should select the managed Mac, create a signed coding job, run Codex or another adapter in a locked worktree, return diff and test evidence, and ask before push or merge.
+an agent should select the managed Mac, create a signed coding job, run Codex or another adapter in a locked worktree, return diff and test evidence, and ask before push or merge.
 
 That is the final product: a universal, secure, agent-native remote execution fabric for personal and professional development work.
 

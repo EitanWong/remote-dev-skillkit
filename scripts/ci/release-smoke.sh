@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="${1:-EitanWong/remote-dev-skillkit}"
+repo="${1:-example/remote-dev-skillkit}"
 version="${RDEV_SMOKE_VERSION:-v0.1.0-ci-smoke}"
 work_dir="$(mktemp -d /tmp/rdev-release-smoke.XXXXXX)"
 
@@ -9,6 +9,8 @@ cleanup() {
   rm -rf "$work_dir"
 }
 trap cleanup EXIT
+
+scripts/audit-public-surface.sh > "$work_dir/public-surface-audit.txt"
 
 go test ./internal/cli \
   -run 'TestGatewayDevMTLSHealthzRequiresClientCertificate|TestHostServeRegistersWithLocalMTLSGateway|TestHostServeMTLSGatewayRejectsMissingClientCertificate|TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway' \
@@ -235,6 +237,7 @@ print(json.dumps({
     "post_release_platforms": post_release_output["platform_count"],
     "skillkit_install_frameworks": skillkit_install_plan_output["framework_count"],
     "skillkit_install_executed": skillkit_install_execute["executed"],
+    "public_surface_audit": True,
     "dev_mtls_host_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

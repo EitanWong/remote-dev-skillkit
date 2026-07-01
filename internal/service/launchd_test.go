@@ -16,15 +16,15 @@ func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 		BinaryPath:               "/opt/rdev/bin/rdev",
 		GatewayURL:               "https://api.example.com/v1",
 		TicketCode:               "ABCD-1234",
-		IdentityStorePath:        "/Users/eitan/.rdev/host/identity.json",
-		TrustStorePath:           "/Users/eitan/.rdev/host/trust.json",
-		NonceStorePath:           "/Users/eitan/.rdev/host/nonces.json",
-		ApprovalStorePath:        "/Users/eitan/.rdev/host/approvals.json",
-		WorkspaceLockStorePath:   "/Users/eitan/.rdev/host/workspace-locks",
+		IdentityStorePath:        "/Users/example/.rdev/host/identity.json",
+		TrustStorePath:           "/Users/example/.rdev/host/trust.json",
+		NonceStorePath:           "/Users/example/.rdev/host/nonces.json",
+		ApprovalStorePath:        "/Users/example/.rdev/host/approvals.json",
+		WorkspaceLockStorePath:   "/Users/example/.rdev/host/workspace-locks",
 		ReleaseBundlePath:        "/opt/rdev/release-bundle.json",
 		ReleaseRootPublicKey:     "release-root:abc123",
 		ReleaseRequiredArtifacts: []string{"rdev-host", "rdev-verify"},
-		LogDir:                   "/Users/eitan/Library/Logs/rdev",
+		LogDir:                   "/Users/example/Library/Logs/rdev",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,11 +44,11 @@ func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 		"--transport",
 		"long-poll",
 		"--identity-store",
-		"/Users/eitan/.rdev/host/identity.json",
+		"/Users/example/.rdev/host/identity.json",
 		"--trust-store",
-		"/Users/eitan/.rdev/host/trust.json",
+		"/Users/example/.rdev/host/trust.json",
 		"--workspace-lock-store",
-		"/Users/eitan/.rdev/host/workspace-locks",
+		"/Users/example/.rdev/host/workspace-locks",
 		"--release-bundle",
 		"/opt/rdev/release-bundle.json",
 		"--release-root-public-key",
@@ -60,7 +60,7 @@ func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 			t.Fatalf("expected argument %q in %#v", expected, agent.ProgramArguments)
 		}
 	}
-	if agent.StdoutPath != "/Users/eitan/Library/Logs/rdev/com.example.rdev-host.out.log" {
+	if agent.StdoutPath != "/Users/example/Library/Logs/rdev/com.example.rdev-host.out.log" {
 		t.Fatalf("unexpected stdout path %q", agent.StdoutPath)
 	}
 	if !agent.KeepAlive || !agent.RunAtLoad {
@@ -144,13 +144,13 @@ func TestNewMacOSLaunchAgentControlPlan(t *testing.T) {
 	start, err := NewMacOSLaunchAgentControlPlan(LaunchAgentControlOptions{
 		Action:    "start",
 		Label:     "com.example.rdev-host",
-		PlistPath: "/Users/eitan/Library/LaunchAgents/com.example.rdev-host.plist",
+		PlistPath: "/Users/example/Library/LaunchAgents/com.example.rdev-host.plist",
 		Domain:    "gui/501",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(start.Argv, " ") != "launchctl bootstrap gui/501 /Users/eitan/Library/LaunchAgents/com.example.rdev-host.plist" {
+	if strings.Join(start.Argv, " ") != "launchctl bootstrap gui/501 /Users/example/Library/LaunchAgents/com.example.rdev-host.plist" {
 		t.Fatalf("unexpected start argv %#v", start.Argv)
 	}
 	if !strings.Contains(start.Shell, "launchctl bootstrap gui/501") {

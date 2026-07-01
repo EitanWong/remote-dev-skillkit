@@ -8,8 +8,8 @@ This project is the implementation home for the `rdev` toolchain:
 
 - `rdev`: operator CLI and local debugging surface.
 - `rdev-host`: target-machine agent for temporary or managed hosts.
-- `rdev-gateway`: Hermes-side control plane for tickets, host registry, jobs, artifacts, and audit.
-- `rdev-mcp`: MCP tools exposed to Hermes/Lucky, Codex, Claude Code, OpenCode, and other agents.
+- `rdev-gateway`: agent/operator-side control plane for tickets, host registry, jobs, artifacts, and audit.
+- `rdev-mcp`: MCP tools exposed to Hermes, Codex, Claude Code, OpenCode, and other agents.
 - `skills/`: Agent Skills that teach agents how to use the remote development workflow safely.
 
 For repository layout and package boundaries, see [Project Structure](docs/project/PROJECT_STRUCTURE.md).
@@ -19,7 +19,7 @@ The project is released under the [Apache-2.0 license](LICENSE).
 
 Remote Dev Skillkit is not a hidden remote-control tool. It is consent-first infrastructure for visible, auditable, policy-bound remote support and remote coding.
 
-Temporary third-party machines use foreground, time-limited support sessions. Long-lived unattended service mode is reserved for Eitan-owned or formally managed devices.
+Temporary third-party machines use foreground, time-limited support sessions. Long-lived unattended service mode is reserved for operator-owned or formally managed devices.
 
 ## Final Shape
 
@@ -43,7 +43,7 @@ shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevP
 
 The project intentionally reuses mature ecosystems where they fit: MCP for agent tools, Tailscale/headscale or SSH for owned-host connectivity, Coder/DevPod for governed workspaces, RustDesk/MeshCentral for explicit GUI sessions, and platform/Sigstore-style signing for release trust. What `rdev` owns is the missing agent safety kernel: signed job envelopes, host-side policy, approval gates, workspace locks, redaction, evidence bundles, audit chains, and revocation.
 
-The canonical endgame is locked in [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md). Its `Converged Perfect Ending - 2026-06-30` section is the top decision lens and should be patched instead of adding more dated "final" layers. The `Final Operating Decision` inside that section is the compressed product decision: one signed control protocol, two host products, separated trust roots, non-bypassable join/run/approve/prove paths, and proof packages for releases, Skillkit installs, platform acceptance, evidence/audit, and adapter conformance. `Final Closure Specification - 2026-06-30` and `Definitive Perfect-Ending Blueprint - 2026-06-30` remain the implementation-grade decision detail for topology, product surfaces, protocol objects, permission rings, mode contracts, state machines, host sovereignty, adapter lifecycle, reliability, security, acceptance gates, v1.0 proof packages, and close order. Older "final" sections remain rationale and implementation detail. The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP/acpx, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
+The canonical endgame is locked in [Perfect Ending Solution](docs/architecture/PERFECT_ENDING_SOLUTION.md). Keep that document as the architecture decision layer instead of adding new one-off "final" sections. The compressed product decision is one signed control protocol, two host products, separated trust roots, non-bypassable join/run/approve/prove paths, and proof packages for releases, Skillkit installs, platform acceptance, evidence/audit, and adapter conformance. The design intentionally separates temporary attended repair from explicit managed service mode, and it treats Codex, Claude Code, ACP/acpx, GUI, mesh, Coder, DevPod, shell, and PowerShell as adapters behind the same signed-job, evidence, approval, and revocation contract.
 
 [Final Closure Blueprint](docs/architecture/FINAL_CLOSURE_BLUEPRINT.md) is the concise release-facing summary. [Ultimate Closure Design](docs/architecture/ULTIMATE_CLOSURE_DESIGN.md) and [Final System Design](docs/architecture/FINAL_SYSTEM_DESIGN.md) remain supporting rationale and implementation detail.
 
@@ -234,9 +234,9 @@ go run ./cmd/rdev host serve --mode temporary --gateway http://127.0.0.1:8787 --
 go run ./cmd/rdev host serve --mode temporary --gateway https://127.0.0.1:8787 --gateway-ca .rdev/tls/gateway-ca.pem --gateway-client-cert .rdev/tls/host-client.pem --gateway-client-key .rdev/tls/host-client-key.pem --ticket-code ABCD-1234
 go run ./cmd/rdev release prepare-candidate --source-root . --out dist/release-candidate-windows-amd64 --version v0.1.0 --artifacts dist/artifacts/windows-amd64/rdev.exe,dist/artifacts/windows-amd64/rdev-host.exe,dist/artifacts/windows-amd64/rdev-verify.exe --require-artifacts rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json --gateway-url https://api.example.com/v1
 go run ./cmd/rdev release verify-candidate --candidate dist/release-candidate-windows-amd64 --require-artifacts rdev-host.exe,rdev-verify.exe
-scripts/github/plan-release.sh --candidate dist/release-candidates/windows-amd64 --repo EitanWong/remote-dev-skillkit --require-artifacts rdev-host.exe,rdev-verify.exe
-scripts/github/plan-platform-release.sh --platform-candidates dist/release-candidates/platform-candidates.json --repo EitanWong/remote-dev-skillkit
-scripts/github/audit-project-readiness.sh --repo EitanWong/remote-dev-skillkit --out dist/github-project-readiness.json
+scripts/github/plan-release.sh --candidate dist/release-candidates/windows-amd64 --repo OWNER/remote-dev-skillkit --require-artifacts rdev-host.exe,rdev-verify.exe
+scripts/github/plan-platform-release.sh --platform-candidates dist/release-candidates/platform-candidates.json --repo OWNER/remote-dev-skillkit
+scripts/github/audit-project-readiness.sh --repo OWNER/remote-dev-skillkit --out dist/github-project-readiness.json
 scripts/github/plan-post-release-install.sh --release-plan dist/release-candidates/github-platform-release-plan/plan.json
 scripts/github/verify-post-release-install-plan.sh --plan dist/release-candidates/github-platform-release-plan/post-release-install/post-release-install-plan.json
 go run ./cmd/rdev host serve --mode temporary

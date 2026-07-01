@@ -10,7 +10,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 ## Rules
 
 - Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
-- Treat `Converged Perfect Ending - 2026-06-30` in `docs/architecture/PERFECT_ENDING_SOLUTION.md` as the top decision lens; patch that layer for future architecture changes instead of appending more dated final sections. `Final Closure Specification - 2026-06-30` and `Definitive Perfect-Ending Blueprint - 2026-06-30` remain the implementation detail: every host, adapter, transport, release, and Skillkit change must preserve the kernel/plugin boundaries, gateway data model, host kernel layers, API/MCP surface, deployment profiles, acceptance matrix, product surfaces, component boundaries, stable protocol spine, mode separation, permission lattice, state machines, host sovereignty kernel, adapter lifecycle, reliability contract, security contract, golden paths, v1.0 proof gates, and close order.
+- Preserve the current architecture decision layer in `docs/architecture/PERFECT_ENDING_SOLUTION.md`; update that document when changing host, adapter, transport, release, or Skillkit boundaries.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Prefer ACP/acpx adapters over raw PTY scraping when available.
 - Lock a workspace before starting a coding job.

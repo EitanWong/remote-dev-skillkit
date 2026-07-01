@@ -178,8 +178,12 @@ func (s Server) createTicket(args map[string]any) (any, error) {
 	}
 	return map[string]any{
 		"ticket":  ticket,
-		"joinUrl": "https://agent.lunflux.com/join/" + ticket.Code,
+		"joinUrl": publicExampleJoinURL(ticket.Code),
 	}, nil
+}
+
+func publicExampleJoinURL(ticketCode string) string {
+	return "https://agent.example.com/join/" + ticketCode
 }
 
 func (s Server) revokeTicket(args map[string]any) (any, error) {

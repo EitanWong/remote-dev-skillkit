@@ -121,7 +121,7 @@ ensure_label "priority:p2" "c5def5" "useful but not blocking current milestone"
 
 ensure_milestone "v0.1 Local Safety Kernel" "Signed local job execution, host-side verification, approval gates, evidence bundles, audit verification, and portable Skillkit export."
 ensure_milestone "v0.2 Temporary Windows Host" "One visible verified Windows command starts an outbound-only foreground host, enforces approvals, revokes cleanly, and leaves no persistence."
-ensure_milestone "v0.3 Managed Mac Coding" "Eitan-owned managed Mac reconnects after reboot, runs Codex in a locked worktree, returns diff/test evidence, and gates push/merge/deploy."
+ensure_milestone "v0.3 Managed Mac Coding" "operator-owned managed Mac reconnects after reboot, runs Codex in a locked worktree, returns diff/test evidence, and gates push/merge/deploy."
 ensure_milestone "v0.4 Managed Device Generalization" "Windows Service, systemd, OS-protected storage, WSS/mTLS, adapter SDK, and durable reconnect across platforms."
 ensure_milestone "v1.0 Public Skillkit" "Stable self-hostable open-source release with signed artifacts, installer docs, conformance suite, threat model, and public acceptance transcripts."
 

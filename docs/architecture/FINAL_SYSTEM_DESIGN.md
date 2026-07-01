@@ -33,7 +33,7 @@ The highest-level rule is:
 
 > Maximum capability after explicit consent; minimum ambient authority by default.
 
-That rule resolves the tension between remote repair convenience and safety. Temporary third-party machines get visible, time-limited, foreground sessions. Eitan-owned or formally managed machines can opt into durable service mode.
+That rule resolves the tension between remote repair convenience and safety. Temporary third-party machines get visible, time-limited, foreground sessions. operator-owned or formally managed machines can opt into durable service mode.
 
 ## Final Architecture Lock
 
@@ -125,7 +125,7 @@ The same kernel supports four intentionally separate modes:
 | Mode | Use case | Persistence | Default authority | Non-negotiable rule |
 |---|---|---:|---|---|
 | `attended-temporary` | third-party or short-lived support | none | foreground, TTL-bound, scoped repair | no service, autorun, hidden restart, or silent resurrection |
-| `managed` | Eitan-owned or formally managed machines | explicit service | durable reconnect with approved roots | service install, status, stop, and uninstall must be visible |
+| `managed` | operator-owned or formally managed machines | explicit service | durable reconnect with approved roots | service install, status, stop, and uninstall must be visible |
 | `break-glass` | urgent recovery | short-lived only | narrow, high-audit emergency actions | stronger approvals and shorter TTL than normal temporary mode |
 | `workspace-provider` | Coder, DevPod, devcontainers, disposable cloud workspaces | provider-owned | bounded workspace lifecycle | provider identity never replaces rdev job authorization |
 
@@ -174,21 +174,21 @@ Adapters make the project useful. They are never the place where trust is invent
 
 ### Final Personal Deployment
 
-Eitan's reference deployment is the first production shape:
+an operator's reference deployment is the first production shape:
 
 ```text
-Hermes/Lucky
+Hermes
   -> Remote Dev Skillkit skills
   -> MCP HTTP or local bridge
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
   -> tickets, hosts, jobs, approvals, artifacts, audit, signing
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> join page, release manifests, bootstrap, outbound host relay
-  -> managed Eitan hosts and attended temporary hosts
+  -> managed operator hosts and attended temporary hosts
 ```
 
-`api.lunflux.com` is the authenticated agent/operator API surface. `agent.lunflux.com` is the human join, bootstrap, release-download, and host-relay surface. They can share a deployment at first, but their responsibilities must stay separate.
+`api.example.com` is the authenticated agent/operator API surface. `agent.example.com` is the human join, bootstrap, release-download, and host-relay surface. They can share a deployment at first, but their responsibilities must stay separate.
 
 ### Final Open-Source Shape
 
@@ -202,14 +202,14 @@ The public project ships five installable deliverables:
 | Skillkit bundle | portable Skills and MCP contracts for Hermes, Codex, Claude Code, OpenCode, and generic agents |
 | Adapter SDK and conformance suite | safe extension point for new execution backends |
 
-The public package succeeds only if another user can adopt the safe workflow without adopting Hermes, while Eitan's Hermes/Lucky deployment remains the reference environment.
+The public package succeeds only if another user can adopt the safe workflow without adopting Hermes, while an operator's Hermes deployment remains the reference environment.
 
 ### Perfect Ending Gates
 
 The final architecture is realized when these gates pass:
 
 1. A temporary Windows host joins from one visible verified command, connects outbound only, runs foreground, enforces approvals, and leaves no persistence.
-2. Eitan's managed Mac reconnects after reboot, receives a Lucky-requested Codex job, locks a Git worktree, returns diff/test evidence, and requires approval before push or merge.
+2. an operator's managed Mac reconnects after reboot, receives a agent-requested Codex job, locks a Git worktree, returns diff/test evidence, and requires approval before push or merge.
 3. Tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, workspace-escaping, or missing-capability jobs are rejected host-side with structured denials.
 4. Package install, elevation, GUI control, service mutation, credential changes, push, merge, deploy, publish, and paid actions require scoped approval tokens.
 5. Revocation of tickets, hosts, jobs, approvals, or keys prevents future work and cancels queued or running work where possible.
@@ -219,7 +219,7 @@ The final architecture is realized when these gates pass:
 9. Skillkit export installs cleanly into mainstream agent runtimes without Hermes-specific assumptions.
 10. The threat model, release process, security policy, and acceptance transcripts match the shipped behavior.
 
-The perfect ending is reached when Eitan can say, "Lucky, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
+The perfect ending is reached when the operator can say, "an agent, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
 
 ### Final Product Boundary
 
@@ -238,26 +238,26 @@ This boundary keeps the core small enough to secure while leaving the ecosystem 
 
 ### Final Deployment Shape
 
-Eitan's personal production deployment should be the reference implementation:
+an operator's production deployment should be the reference implementation:
 
 ```text
-Hermes/Lucky
+Hermes
   -> Remote Dev Skillkit skills
   -> MCP HTTP or local MCP bridge
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
   -> tickets, jobs, approvals, artifacts, audit, signing
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> join page, signed manifests, host relay, release downloads
   -> managed hosts or temporary attended hosts
 ```
 
 The server can start as one binary on one VPS, but the architecture must preserve separate responsibilities:
 
-- `api.lunflux.com/v1` is the authenticated agent/operator API surface.
-- `agent.lunflux.com` is the human join, bootstrap, release, and host-relay surface.
-- Hermes/Lucky holds an agent-client identity, not host credentials.
-- Eitan approves high-risk operations through scoped approval tokens.
+- `api.example.com/v1` is the authenticated agent/operator API surface.
+- `agent.example.com` is the human join, bootstrap, release, and host-relay surface.
+- Hermes holds an agent-client identity, not host credentials.
+- the operator approves high-risk operations through scoped approval tokens.
 - The host verifies every executable job even if the gateway or client behaves incorrectly.
 
 ### Final Runtime Loops
@@ -274,7 +274,7 @@ The loops are intentionally boring. They make retries, reconnects, cancellation,
 
 ### Final Host Selection Model
 
-Lucky or another agent should never pick a host by hostname alone. Host selection should be a policy decision over a registry snapshot.
+an agent or another agent should never pick a host by hostname alone. Host selection should be a policy decision over a registry snapshot.
 
 Selection inputs:
 
@@ -338,7 +338,7 @@ Initial adapter priority:
 
 1. `shell` and `powershell` for controlled diagnostics and repair.
 2. `git` for branches, worktrees, diffs, commits, and evidence.
-3. `codex` for Eitan's managed Mac coding path.
+3. `codex` for an operator's managed Mac coding path.
 4. `claude-code` and `acp` for broader coding-agent compatibility.
 5. `browser-e2e`, GUI, mesh, Coder, and DevPod after the safety kernel is stable.
 
@@ -363,7 +363,7 @@ If a temporary host needs durable reconnect after reboot, the correct answer is 
 
 ### Final Managed Host Design
 
-Managed hosts are for Eitan-owned or formally managed machines.
+Managed hosts are for operator-owned or formally managed machines.
 
 Final properties:
 
@@ -442,14 +442,14 @@ The public project should ship five things:
 | Skillkit bundle | portable install surface for Hermes, Codex, Claude Code, OpenCode, and generic MCP agents |
 | Adapter SDK and conformance tests | safe extension surface for new execution backends |
 
-Success means other users can adopt the safe workflow without adopting Hermes, while Eitan's Hermes/Lucky deployment remains the first reference environment.
+Success means other users can adopt the safe workflow without adopting Hermes, while an operator's Hermes deployment remains the first reference environment.
 
 ### Final Implementation Finish Line
 
 The final architecture is done when these are true:
 
 1. A temporary Windows machine can join from a visible verified command, run bounded repair jobs, and leave no persistence.
-2. Eitan's managed Mac can reconnect after reboot, receive a Codex job, lock a worktree, return diff/test evidence, and require approval before push or merge.
+2. an operator's managed Mac can reconnect after reboot, receive a Codex job, lock a worktree, return diff/test evidence, and require approval before push or merge.
 3. Every executable job is a signed, host-bound, nonce-protected, expiring envelope.
 4. Gateway policy and host policy both enforce the same capability vocabulary.
 5. Adapters cannot bypass workspace locks, approval gates, evidence, redaction, or audit.
@@ -482,7 +482,7 @@ The product is correct only when all boundaries hold at the same time.
 
 ```text
 Agent Runtime
-  Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor-style agents
+  Hermes, Codex, Claude Code, OpenCode, Cursor-style agents
         |
         v
 Skillkit + MCP/API Surface
@@ -517,7 +517,7 @@ The same kernel supports four modes. Modes must stay visibly separate in CLI, po
 | Mode | Target | Persistence | Who consents | Typical work | Hard stop |
 |---|---|---:|---|---|---|
 | `attended-temporary` | third-party or short-lived machine | none | local user plus operator | repair, diagnostics, scoped fix | TTL, stop, ticket revoke |
-| `managed` | Eitan-owned or formally managed device | explicit service | operator during install and policy approval | durable coding, tests, scheduled maintenance | host revoke, policy revoke, service uninstall |
+| `managed` | operator-owned or formally managed device | explicit service | operator during install and policy approval | durable coding, tests, scheduled maintenance | host revoke, policy revoke, service uninstall |
 | `break-glass` | emergency repair | no hidden persistence; short-lived | stronger local/operator approval | urgent recovery | short TTL and dense audit |
 | `workspace-provider` | Coder/DevPod/cloud workspace | provider-managed | operator and workspace policy | disposable coding environment | workspace destroy/revoke |
 
@@ -544,8 +544,8 @@ The project is finished when these paths work without special pleading.
 
 | Path | Final user experience | Required proof |
 |---|---|---|
-| Temporary Windows repair | Eitan sends a join link/command; the user runs a visible verified bootstrap; Lucky triages and repairs through signed jobs | no persistence, outbound only, release verification, approval pauses, denials, artifacts, audit, revoke |
-| Managed Mac coding | Lucky selects Eitan's Mac, locks a Git worktree, runs Codex, runs tests, returns diff/evidence | host identity, workspace lock, Codex adapter result, diff/tests, audit slice, approval before push/merge |
+| Temporary Windows repair | an operator sends a join link/command; the user runs a visible verified bootstrap; an agent triages and repairs through signed jobs | no persistence, outbound only, release verification, approval pauses, denials, artifacts, audit, revoke |
+| Managed Mac coding | an agent selects an operator's Mac, locks a Git worktree, runs Codex, runs tests, returns diff/evidence | host identity, workspace lock, Codex adapter result, diff/tests, audit slice, approval before push/merge |
 | Public Skillkit install | another agent user installs skills and MCP contracts without Hermes assumptions | exported Skillkit bundle, stable schemas, self-host docs, signed releases, threat model |
 | Adapter extension | contributor adds a new adapter | conformance tests prove capability mapping, workspace enforcement, cancellation, redaction, evidence, and audit |
 
@@ -578,7 +578,7 @@ If any answer is no, the feature is outside the final architecture until redesig
 - threat model, release key lifecycle, security policy, and emergency revocation process;
 - acceptance evidence for Temporary Windows Repair and Managed Mac Coding.
 
-The perfect ending is reached when Eitan can say "Lucky, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
+The perfect ending is reached when the operator can say "an agent, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
 
 ## Endgame Operating Model
 
@@ -618,7 +618,7 @@ The complete open-source product should ship as four installable surfaces and on
 
 | Surface | Primary user | Final responsibility |
 |---|---|---|
-| Agent Skills | Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor-style agents | teach safe workflows: invite, triage, job, approval, evidence, revoke |
+| Agent Skills | Hermes, Codex, Claude Code, OpenCode, Cursor-style agents | teach safe workflows: invite, triage, job, approval, evidence, revoke |
 | MCP/API gateway | operator or self-hosted service | own tickets, host registry, policy, signing, approvals, artifacts, audit, revocation |
 | Host runtime | target Mac, Windows, Linux machine | connect outbound, validate every job, run adapters, spool evidence |
 | Operator CLI | human operator and developer | bootstrap, debug, inspect, export evidence, verify releases |
@@ -651,7 +651,7 @@ install rdev
   -> approve continuation or revoke
 ```
 
-This is the universal shape for Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor-style agents, and generic MCP agents. A runtime may present different UI, but it must preserve the same protocol objects and approval boundaries.
+This is the universal shape for Hermes, Codex, Claude Code, OpenCode, Cursor-style agents, and generic MCP agents. A runtime may present different UI, but it must preserve the same protocol objects and approval boundaries.
 
 ### Final Capability Rings
 
@@ -689,26 +689,26 @@ The end state is complete only when these schemas are stable, versioned, documen
 
 The schemas are the product's durable API. CLIs, hosted deployments, UI consoles, and agent frameworks can evolve around them.
 
-### Final Eitan Deployment
+### Final Operator Deployment
 
-Eitan's personal production topology should stay single-operator first:
+an operator's production topology should stay single-operator first:
 
 ```text
-Hermes/Lucky
+Hermes
   -> Remote Dev Skillkit skills
-  -> rdev MCP HTTP at https://api.lunflux.com/v1
+  -> rdev MCP HTTP at https://api.example.com/v1
   -> rdev-gateway on the server
   -> job signing, approvals, artifacts, audit
-  -> host relay/join surface at https://agent.lunflux.com
-  -> managed Eitan hosts or attended temporary hosts
+  -> host relay/join surface at https://agent.example.com
+  -> managed operator hosts or attended temporary hosts
 ```
 
-The server may initially run one binary, but the public contract should keep `api.lunflux.com` and `agent.lunflux.com` separate in responsibility:
+The server may initially run one binary, but the public contract should keep `api.example.com` and `agent.example.com` separate in responsibility:
 
-- `api.lunflux.com/v1`: authenticated agent/operator API, MCP tools, jobs, approvals, artifacts, audit.
-- `agent.lunflux.com`: human join page, bootstrap manifests, release downloads, outbound host relay.
+- `api.example.com/v1`: authenticated agent/operator API, MCP tools, jobs, approvals, artifacts, audit.
+- `agent.example.com`: human join page, bootstrap manifests, release downloads, outbound host relay.
 
-Hermes/Lucky should hold an agent-client identity with tool permissions. It should not hold reusable host credentials, raw SSH passwords, or approval power for dangerous operations.
+Hermes should hold an agent-client identity with tool permissions. It should not hold reusable host credentials, raw SSH passwords, or approval power for dangerous operations.
 
 ### Final Public Install Experience
 
@@ -728,7 +728,7 @@ The remaining path to the perfect ending should be implemented in this order:
 
 1. Finish the local safety kernel and bundle export so the protocol is installable and testable.
 2. Harden temporary Windows bootstrap because it is the riskiest and most universal support path.
-3. Build managed Mac coding because it proves Lucky can safely delegate real development to Codex on Eitan-owned hardware.
+3. Build managed Mac coding because it proves an agent can safely delegate real development to Codex on operator-owned hardware.
 4. Generalize managed services across Windows, macOS, and Linux with protected identity storage and trust updates.
 5. Add adapter SDK and conformance tests so Codex, Claude Code, ACP, GUI, mesh, Coder, and DevPod integrations cannot bypass the kernel.
 6. Stabilize schemas, signed releases, docs, threat model, and public install paths for v1.0.
@@ -822,7 +822,7 @@ The final product is a universal remote-work safety layer for agents. It lets an
 
 The end state is made of five cooperating products:
 
-1. **Skillkit**: small Agent Skills that teach Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor Agent, and similar systems to create tickets, request jobs, ask for approvals, read evidence, and revoke sessions.
+1. **Skillkit**: small Agent Skills that teach Hermes, Codex, Claude Code, OpenCode, Cursor Agent, and similar systems to create tickets, request jobs, ask for approvals, read evidence, and revoke sessions.
 2. **MCP/API Gateway**: a control plane that exposes typed tools, owns tickets, host registry, policies, approvals, signing, artifacts, audit, and revocation.
 3. **Host Runtime**: a cross-platform binary that runs on Mac, Windows, and Linux in either visible temporary mode or explicit managed service mode.
 4. **Adapter SDK**: a stable way to plug in shell, PowerShell, Git, Codex, Claude Code, ACP, browser, mesh, SSH, GUI, Coder, DevPod, or future coding environments without weakening the core safety model.
@@ -845,30 +845,30 @@ The system is complete only when all of these statements are true:
 9. Audit export proves ticket, host, policy, approval, job, artifact, trust update, revocation, and release-verification events without trusting mutable logs.
 10. Other users can self-host the same stack with safe defaults, stable MCP schemas, installable skills, signed releases, and documented threat boundaries.
 
-### Personal Perfect Ending For Eitan
+### Personal Perfect Ending For An Operator
 
-Eitan's finished personal system should work like this:
+an operator's personal system should work like this:
 
 ```text
-Lucky on Hermes
-  -> rdev MCP tools at https://api.lunflux.com/v1
+an agent on Hermes
+  -> rdev MCP tools at https://api.example.com/v1
   -> rdev-gateway signs bounded jobs
-  -> Eitan approves scoped host/session/workspace policy
-  -> target host connects outbound to https://agent.lunflux.com
+  -> the operator approves scoped host/session/workspace policy
+  -> target host connects outbound to https://agent.example.com
   -> rdev-host executes through a typed adapter
-  -> Lucky reads evidence and summarizes next decisions
+  -> an agent reads evidence and summarizes next decisions
 ```
 
-For Eitan-owned machines, Lucky should be able to select a managed Mac, Windows host, or Linux host by capability, repository root, current load, and last heartbeat. For third-party machines, Lucky should create a short-lived join link and wait for explicit operator approval before the first job.
+For operator-owned machines, an agent should be able to select a managed Mac, Windows host, or Linux host by capability, repository root, current load, and last heartbeat. For third-party machines, an agent should create a short-lived join link and wait for explicit operator approval before the first job.
 
 The personal deployment should optimize for one operator first, not premature multi-tenant complexity:
 
-1. `api.lunflux.com` exposes the authenticated rdev API and MCP HTTP surface.
-2. `agent.lunflux.com` exposes the join page, signed manifests, release downloads, and host relay.
-3. Hermes/Lucky holds an agent-client identity with tool permissions, not host credentials.
-4. Managed Eitan devices keep durable host identity and trust bundles.
+1. `api.example.com` exposes the authenticated rdev API and MCP HTTP surface.
+2. `agent.example.com` exposes the join page, signed manifests, release downloads, and host relay.
+3. Hermes holds an agent-client identity with tool permissions, not host credentials.
+4. Managed operator devices keep durable host identity and trust bundles.
 5. Third-party devices use temporary session-scoped identity and no persistence.
-6. Every remote coding session ends in an evidence bundle Lucky can summarize before Eitan decides whether to continue, push, merge, deploy, or revoke.
+6. Every remote coding session ends in an evidence bundle an agent can summarize before an operator decides whether to continue, push, merge, deploy, or revoke.
 
 ### Public Perfect Ending For The Open-Source Project
 
@@ -880,14 +880,14 @@ The open-source package should give a new user three install paths:
 | `rdev self-host` | power user or small team | gateway, join page, artifacts, audit, signed host runtime |
 | `rdev skillkit` | agent ecosystem user | Agent Skills plus MCP tool contracts for an existing gateway |
 
-The public package should not require adopting Hermes. Hermes/Lucky is the first-class personal deployment, but the project succeeds only if Codex, Claude Code, OpenCode, and other agent stacks can use the same tools.
+The public package should not require adopting Hermes. Hermes is the first-class personal deployment, but the project succeeds only if Codex, Claude Code, OpenCode, and other agent stacks can use the same tools.
 
 ## Perfect Ending
 
 The perfect ending is not a single feature. It is a stable operating model:
 
-1. Eitan can ask Hermes/Lucky to work on any approved Mac, Windows, or Linux host.
-2. Lucky can discover or enroll a host through MCP tools without receiving raw machine ownership.
+1. the operator can ask Hermes to work on any approved Mac, Windows, or Linux host.
+2. an agent can discover or enroll a host through MCP tools without receiving raw machine ownership.
 3. A temporary third-party Windows machine can join from one visible command, verify the host binary before running it, connect outbound only, and leave no persistence behind.
 4. A managed Mac can reconnect after reboot, receive a Codex coding job, work inside a locked Git worktree, and return diff/test evidence before any push or merge.
 5. Every executable action is a signed, host-bound, time-bound, policy-bound envelope.
@@ -895,7 +895,7 @@ The perfect ending is not a single feature. It is a stable operating model:
 7. Dangerous actions become explicit approval requests with evidence and scope, not hidden side effects.
 8. Revocation stops future work and cancels outstanding work.
 9. Audit export can reconstruct who requested what, which host ran it, which policy allowed or denied it, which artifacts were produced, and which human approvals were used.
-10. Other agent users can install the same skills, MCP server, gateway, and host runtime as an open-source toolkit without inheriting Eitan-specific assumptions.
+10. Other agent users can install the same skills, MCP server, gateway, and host runtime as an open-source toolkit without inheriting operator-specific assumptions.
 
 If a shortcut makes any of those statements false, it is outside the final design.
 
@@ -988,28 +988,28 @@ This boundary prevents the project from rebuilding every remote development prod
 
 ## Reference Deployment
 
-For Eitan's personal deployment:
+For an operator's deployment:
 
 ```text
-Hermes / Lucky
+Hermes / an agent
   - installs Remote Dev Skillkit Agent Skills
   - calls rdev MCP tools
   - summarizes evidence and asks for approvals
 
-https://api.lunflux.com
+https://api.example.com
   - authenticated rdev API
   - MCP HTTP endpoint
   - tickets, hosts, jobs, artifacts, audit
   - policy, approval, signing, revocation
 
-https://agent.lunflux.com
+https://agent.example.com
   - human join page
   - signed bootstrap manifests
   - signed release downloads
   - outbound WSS relay endpoint
 
 Managed hosts
-  - Eitan's Mac, Windows, and Linux machines
+  - an operator's Mac, Windows, and Linux machines
   - explicit service mode with watchdog and uninstall path
 
 Temporary hosts
@@ -1017,19 +1017,19 @@ Temporary hosts
   - foreground-only, no service, TTL-bound
 ```
 
-`api.lunflux.com` and `agent.lunflux.com` may be served by the same binary at first, but their responsibilities should stay conceptually separate.
+`api.example.com` and `agent.example.com` may be served by the same binary at first, but their responsibilities should stay conceptually separate.
 
 ### Personal Production Topology
 
 The first real deployment should be single-operator and production-shaped:
 
 ```text
-Hermes/Lucky
+Hermes
   -> MCP HTTP or local MCP stdio bridge
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> durable rdev-gateway
   -> Postgres or SQLite, object/artifact store, append-only audit
-  -> outbound host channels on https://agent.lunflux.com
+  -> outbound host channels on https://agent.example.com
 ```
 
 Recommended first production choices:
@@ -1050,7 +1050,7 @@ The deployment may start with one binary and one VPS, but it must preserve separ
 
 ### 1. Agent Interface Plane
 
-Purpose: give Hermes/Lucky, Codex, Claude Code, OpenCode, and similar agents a safe way to request remote work.
+Purpose: give Hermes, Codex, Claude Code, OpenCode, and similar agents a safe way to request remote work.
 
 Surfaces:
 
@@ -1307,7 +1307,7 @@ The product needs "active discovery" without becoming a network scanner or surpr
 
 | Source | Applies to | Behavior |
 |---|---|---|
-| Managed registry | Eitan-owned devices | gateway lists approved hosts, last heartbeat, capabilities, roots, and health |
+| Managed registry | operator-owned devices | gateway lists approved hosts, last heartbeat, capabilities, roots, and health |
 | Invitation ticket | temporary support | gateway creates join URL and one-time code |
 | Mesh inventory | owned devices on Tailscale/headscale | import device metadata as hints, then require rdev host enrollment |
 | Local LAN hinting | same-network owned devices | optional mDNS/Bonjour advertisement in managed mode only |
@@ -1322,26 +1322,26 @@ Discovery is not authorization. A discovered host cannot receive jobs until it h
 Best for third-party machines:
 
 ```text
-Lucky creates ticket
-  -> Eitan sends join URL or command
+an agent creates ticket
+  -> an operator sends join URL or command
   -> remote user runs visible bootstrap
   -> host connects outbound
-  -> Eitan approves scoped capability set
+  -> the operator approves scoped capability set
   -> jobs run until TTL, stop, revoke, or completion
 ```
 
-This is the safest default for machines Eitan does not own.
+This is the safest default for machines an operator does not own.
 
 #### Managed Push Enrollment
 
-Best for Eitan-owned devices:
+Best for operator-owned devices:
 
 ```text
 operator installs rdev-host
   -> host generates durable identity
   -> gateway approves managed policy
   -> service starts with watchdog and reconnect
-  -> Lucky can later select the host for jobs
+  -> an agent can later select the host for jobs
 ```
 
 This requires explicit local install and an uninstall path.
@@ -1373,7 +1373,7 @@ Mesh identity helps reachability and inventory. It does not replace rdev identit
 | Mode | Use Case | Persistence | Privilege | UX Requirement |
 |---|---|---:|---|---|
 | `attended-temporary` | third-party repair, one-off machine | none | normal user | visible foreground, stop button, TTL |
-| `managed` | Eitan-owned or formally managed machine | explicit service | least privilege | install summary, health, uninstall path |
+| `managed` | operator-owned or formally managed machine | explicit service | least privilege | install summary, health, uninstall path |
 | `break-glass` | emergency repair | explicit short-lived session | JIT elevation only | extra warnings, short TTL, dense audit |
 
 The modes must not silently upgrade into each other.
@@ -1525,8 +1525,8 @@ The one-command path should:
 2. verify the verifier or host binary by SHA-256 and signature;
 3. run `rdev-host` in foreground temporary mode;
 4. generate a local host keypair;
-5. connect outbound to `agent.lunflux.com`;
-6. wait in `pending` until Eitan approves;
+5. connect outbound to `agent.example.com`;
+6. wait in `pending` until the operator approves;
 7. leave no service behind.
 
 The bootstrap must not weaken execution policy, disable Defender, bypass UAC, or install persistence in temporary mode.
@@ -1564,7 +1564,7 @@ Managed bootstrap rules:
 Managed install is a separate explicit command:
 
 ```bash
-rdev host install-service --mode managed --gateway https://api.lunflux.com
+rdev host install-service --mode managed --gateway https://api.example.com
 ```
 
 It must display:
@@ -1583,13 +1583,13 @@ The user-facing flow can be one command, but it should not be opaque magic. The 
 The command shape should be:
 
 ```powershell
-powershell -NoProfile -Command "$p=Join-Path $env:TEMP 'rdev-bootstrap-<code>.ps1'; Invoke-WebRequest 'https://agent.lunflux.com/j/<code>/bootstrap.ps1' -OutFile $p; $s=Get-AuthenticodeSignature $p; if ($s.Status -ne 'Valid') { throw 'Invalid bootstrap signature' }; & $p"
+powershell -NoProfile -Command "$p=Join-Path $env:TEMP 'rdev-bootstrap-<code>.ps1'; Invoke-WebRequest 'https://agent.example.com/j/<code>/bootstrap.ps1' -OutFile $p; $s=Get-AuthenticodeSignature $p; if ($s.Status -ne 'Valid') { throw 'Invalid bootstrap signature' }; & $p"
 ```
 
 This is only acceptable when the downloaded script is Authenticode-signed, performs release checks before executing `rdev-host`, and does not weaken machine policy. The project should not rely on `Invoke-Expression` as the recommended path. For stricter environments, the join page should offer a download-and-inspect flow:
 
 ```powershell
-iwr https://agent.lunflux.com/j/<code>/bootstrap.ps1 -OutFile .\rdev-bootstrap.ps1
+iwr https://agent.example.com/j/<code>/bootstrap.ps1 -OutFile .\rdev-bootstrap.ps1
 Get-Content .\rdev-bootstrap.ps1
 powershell -NoProfile -File .\rdev-bootstrap.ps1
 ```
@@ -1715,7 +1715,7 @@ Adapter priority:
 
 1. `shell` and `powershell` for safe diagnostics and repair primitives;
 2. `git` for workspace, branch, worktree, diff, and commit evidence;
-3. `codex` for Eitan's current Mac-based coding workflow;
+3. `codex` for an operator's current Mac-based coding workflow;
 4. `claude-code` for alternate coding agents;
 5. `acp` or agent-native protocols when available;
 6. `browser-e2e` for Playwright/browser evidence;
@@ -1815,7 +1815,7 @@ Rules:
 - require approval before destructive Git operations;
 - require approval before push, merge, deploy, or publish.
 
-For Eitan's managed Mac, the primary golden path is:
+For an operator's managed Mac, the primary golden path is:
 
 ```text
 select managed Mac
@@ -2072,7 +2072,7 @@ Approvals should be boring, explicit, and narrow.
 
 ### Local User Consent
 
-For third-party temporary support, some actions need both Eitan/operator approval and local user visibility:
+For third-party temporary support, some actions need both an operator/operator approval and local user visibility:
 
 - elevation;
 - GUI view/control;
@@ -2357,12 +2357,12 @@ Exit criteria:
 
 Exit criteria:
 
-- Eitan's managed Mac reconnects after reboot;
-- Lucky can select the host through MCP;
+- an operator's managed Mac reconnects after reboot;
+- an agent can select the host through MCP;
 - Codex runs in a locked Git worktree;
 - result includes changed files, diff, tests, adapter artifact, audit slice, and residual risk;
 - push, merge, deploy, credential changes, and service changes require approval.
-- a failed coding job still produces enough evidence for Lucky or another reviewer to continue safely.
+- a failed coding job still produces enough evidence for an agent or another reviewer to continue safely.
 
 ### Gate 4: Generalize To Multi-Host (`v0.4`)
 
@@ -2432,7 +2432,7 @@ These decisions are now fixed unless a security review proves them wrong:
 The project is done when all of these pass:
 
 1. A third-party Windows host joins from one visible command, verifies signed release artifacts, connects outbound only, runs foreground temporary mode, and leaves no service behind.
-2. A managed Mac receives a Lucky-requested coding job, runs Codex in a locked worktree, returns diff/test evidence, and waits for approval before push or merge.
+2. A managed Mac receives a agent-requested coding job, runs Codex in a locked worktree, returns diff/test evidence, and waits for approval before push or merge.
 3. Tampered, expired, wrong-host, wrong-key, or replayed envelopes are rejected by the host.
 4. Workspace escapes, symlink escapes, non-allowlisted commands, and missing capabilities are rejected locally with explainable policy output.
 5. Package installation, elevation, GUI control, service changes, push, merge, deploy, publish, paid jobs, and credential changes require approval.

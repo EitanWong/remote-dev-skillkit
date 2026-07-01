@@ -309,7 +309,7 @@ This harness proves the managed test-process path. It does not yet prove:
 - macOS LaunchAgent installed and started with `rdev host service-control --execute` after reviewing the generated plan;
 - reconnect after reboot;
 - OS-protected identity/trust storage;
-- real Codex authentication on Eitan's managed Mac;
+- real Codex authentication on an operator's managed Mac;
 - production gateway authentication.
 
 Those remain real-environment acceptance gates.

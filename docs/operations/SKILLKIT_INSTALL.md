@@ -88,7 +88,7 @@ explicitly.
 
 - Codex: install the skill folders into the Codex skill path and configure the MCP command to run `rdev mcp serve`.
 - Claude Code: install the skill files as project or user instructions and configure MCP stdio/HTTP through the runtime's MCP surface.
-- Hermes/Lucky: install the skills into the Hermes agent profile and point tools at the deployed rdev gateway.
+- Hermes: install the skills into the Hermes agent profile and point tools at the deployed rdev gateway.
 - OpenClaw/OpenCode: install the same skill folders and MCP tool contract; no Hermes-only dependency is required.
 - Generic MCP agents: use `mcp/tools.json` as the stable schema reference and call the rdev MCP server.
 

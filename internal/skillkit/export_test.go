@@ -83,6 +83,39 @@ func TestExportRejectsNonEmptyOutputDirectory(t *testing.T) {
 	}
 }
 
+func TestExportRejectsHiddenFilesInSkillsRoot(t *testing.T) {
+	sourceRoot := minimalSkillSourceRoot(t)
+	if err := os.WriteFile(filepath.Join(sourceRoot, "skills", ".DS_Store"), []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Export(ExportOptions{SourceRoot: sourceRoot, OutDir: filepath.Join(t.TempDir(), "bundle")})
+	if err == nil || !strings.Contains(err.Error(), "unsupported file in skills directory") {
+		t.Fatalf("expected unsupported hidden file error, got %v", err)
+	}
+}
+
+func TestExportRejectsHiddenFilesInsideSkill(t *testing.T) {
+	sourceRoot := minimalSkillSourceRoot(t)
+	if err := os.WriteFile(filepath.Join(sourceRoot, "skills", "remote-vibe-coding", ".DS_Store"), []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Export(ExportOptions{SourceRoot: sourceRoot, OutDir: filepath.Join(t.TempDir(), "bundle")})
+	if err == nil || !strings.Contains(err.Error(), "unsupported hidden file in skill remote-vibe-coding") {
+		t.Fatalf("expected unsupported hidden file error, got %v", err)
+	}
+}
+
+func TestExportRejectsUnscopedSkillDocs(t *testing.T) {
+	sourceRoot := minimalSkillSourceRoot(t)
+	if err := os.WriteFile(filepath.Join(sourceRoot, "skills", "remote-vibe-coding", "README.md"), []byte("# extra\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Export(ExportOptions{SourceRoot: sourceRoot, OutDir: filepath.Join(t.TempDir(), "bundle")})
+	if err == nil || !strings.Contains(err.Error(), "unsupported file in skill remote-vibe-coding") {
+		t.Fatalf("expected unsupported skill file error, got %v", err)
+	}
+}
+
 func TestVerifyAcceptsExportedBundle(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "bundle")
 	if _, err := Export(ExportOptions{
@@ -106,6 +139,33 @@ func TestVerifyAcceptsExportedBundle(t *testing.T) {
 	if report.FilesVerified == 0 {
 		t.Fatalf("expected verified files")
 	}
+}
+
+func minimalSkillSourceRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "skills", "remote-vibe-coding"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "mcp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	skill := strings.Join([]string{
+		"---",
+		"name: remote-vibe-coding",
+		"description: Test skill.",
+		"---",
+		"",
+		"# Remote Vibe Coding",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(root, "skills", "remote-vibe-coding", "SKILL.md"), []byte(skill), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mcp", "tools.json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return root
 }
 
 func TestPlanInstallGeneratesVerifiableFrameworkScripts(t *testing.T) {

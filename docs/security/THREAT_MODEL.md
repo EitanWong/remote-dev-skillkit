@@ -3,7 +3,7 @@
 ## Assets
 
 - Target host access.
-- Hermes/Lucky operator identity.
+- Hermes operator identity.
 - Host identity keys.
 - Job transcripts and artifacts.
 - Audit logs.

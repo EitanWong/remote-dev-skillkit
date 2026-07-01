@@ -20,7 +20,7 @@ The missing open-source layer is a portable remote-work protocol for agents:
 - require approval for dangerous steps;
 - revoke access cleanly.
 
-The "perfect ending" is a reusable skillkit that Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor Agent, and other agent stacks can install without each one reinventing unsafe remote execution.
+The "perfect ending" is a reusable skillkit that Hermes, Codex, Claude Code, OpenCode, Cursor Agent, and other agent stacks can install without each one reinventing unsafe remote execution.
 
 ## Standards Anchors
 
@@ -36,7 +36,7 @@ The design intentionally aligns with current public platform behavior:
 
 ### Temporary Repair
 
-Eitan tells Lucky:
+an operator tells an agent:
 
 > Help this Windows machine fix its failing development environment.
 
@@ -48,7 +48,7 @@ The final system should:
 4. verify a signed manifest and signed `rdev-host` binary;
 5. generate a per-host keypair locally;
 6. connect outbound to the gateway over HTTPS/WSS on port 443;
-7. wait in a pending state until Eitan approves scoped capabilities;
+7. wait in a pending state until the operator approves scoped capabilities;
 8. run small signed jobs such as triage, package inspection, repair, tests, and log collection;
 9. ask for approval before elevation, package installation, GUI control, service changes, credential access, destructive operations, push, deploy, or publish;
 10. return transcript snippets, exit codes, changed files, diffs, screenshots when approved, artifacts, and audit events;
@@ -56,7 +56,7 @@ The final system should:
 
 ### Managed Coding
 
-Eitan tells Lucky:
+an operator tells an agent:
 
 > Use my Mac to continue development in this repository with Codex, run the tests, and show me the diff.
 
@@ -253,8 +253,8 @@ Every executable request becomes a canonical, signed envelope:
   "host_id": "hst_...",
   "ticket_id": "tkt_...",
   "operator_id": "op_...",
-  "issued_at": "2026-06-29T00:00:00Z",
-  "expires_at": "2026-06-29T00:10:00Z",
+  "issued_at": "<iso8601-issued-at>",
+  "expires_at": "<iso8601-expires-at>",
   "nonce": "...",
   "mode": "attended-temporary",
   "adapter": "shell",
@@ -534,30 +534,30 @@ remote-dev-skillkit/
 
 Skills remain concise and procedural; the CLI and MCP server carry deterministic behavior.
 
-## Lunflux Deployment Target
+## example deployment Deployment Target
 
 Recommended personal deployment:
 
 ```text
-https://api.lunflux.com
+https://api.example.com
   rdev-gateway HTTP API
   rdev-mcp HTTP/SSE or streamable HTTP endpoint
   durable database
   artifact store
   audit store
 
-https://agent.lunflux.com
+https://agent.example.com
   join page
   bootstrap manifest
   signed release downloads
   WSS relay endpoint
 
-Hermes/Lucky
+Hermes
   installs Agent Skills
   invokes rdev MCP tools
 ```
 
-`api.lunflux.com` is the API/control endpoint. `agent.lunflux.com` is the human join and host transport endpoint. They may be served by the same binary, but keeping the conceptual boundary helps security review and future hosted deployment.
+`api.example.com` is the API/control endpoint. `agent.example.com` is the human join and host transport endpoint. They may be served by the same binary, but keeping the conceptual boundary helps security review and future hosted deployment.
 
 ## Threat Control Matrix
 

@@ -13,7 +13,7 @@ Use this skill before making changes on a target host.
 - User identity and admin/elevation status.
 - Shell and PowerShell availability.
 - Git, SSH, package manager, Codex, Claude, acpx.
-- Network reachability to `agent.lunflux.com:443`.
+- Network reachability to the configured Remote Dev Skillkit gateway or join URL.
 - Workspace boundaries.
 - Existing security tools or enterprise restrictions.
 

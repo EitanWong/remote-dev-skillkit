@@ -708,7 +708,7 @@ func TestHostServeWithoutTicketExplainsPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "provide --ticket-code") {
+	if !strings.Contains(stdout.String(), "provide --gateway and --ticket-code") {
 		t.Fatalf("expected ticket-code guidance, got %q", stdout.String())
 	}
 }
@@ -3535,7 +3535,7 @@ func TestTicketCreateOutputsJoinURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "https://agent.lunflux.com/join/") {
+	if !strings.Contains(stdout.String(), "https://agent.example.com/join/") {
 		t.Fatalf("expected join URL, got %q", stdout.String())
 	}
 }

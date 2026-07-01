@@ -133,11 +133,11 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 
 ## Gate B: Managed Mac Coding
 
-Purpose: prove that an Eitan-owned Mac can run a Lucky-requested coding job through a managed host and return diff/test evidence without pushing or merging automatically.
+Purpose: prove that an operator-owned Mac can run a agent-requested coding job through a managed host and return diff/test evidence without pushing or merging automatically.
 
 ### Required Environment
 
-- macOS managed host owned by Eitan.
+- macOS managed host owned by an operator.
 - `rdev-host` installed as an explicit LaunchAgent or foreground managed test process.
 - Codex CLI installed and authenticated locally.
 - Git installed.

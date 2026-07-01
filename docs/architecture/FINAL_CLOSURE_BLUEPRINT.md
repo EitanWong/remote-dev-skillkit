@@ -79,7 +79,7 @@ runtime becomes the security root, the architecture has regressed.
 | Mode | Use case | Persistence | Default authority | Hard rule |
 |---|---|---:|---|---|
 | `attended-temporary` | third-party support and short-lived repair | none | foreground, TTL-bound, scoped | no service, autorun, hidden restart, or silent resurrection |
-| `managed` | Eitan-owned or formally managed machines | explicit service | durable reconnect with approved roots | reliability never implies approval for external consequences |
+| `managed` | operator-owned or formally managed machines | explicit service | durable reconnect with approved roots | reliability never implies approval for external consequences |
 | `break-glass` | urgent recovery | short-lived | narrow emergency actions | shorter TTL, stronger approval, denser audit |
 | `workspace-provider` | Coder, DevPod, devcontainers, disposable cloud workspaces | provider-owned | bounded workspace lifecycle | provider identity never replaces rdev authorization |
 
@@ -89,21 +89,21 @@ control, service mutation, or elevation.
 
 ## Golden Reference Deployment
 
-Eitan's personal deployment is the first production shape:
+an operator's deployment is the first production shape:
 
 ```text
-Hermes/Lucky
+Hermes
   -> Remote Dev Skillkit skills
   -> MCP HTTP or local bridge
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
   -> tickets, hosts, jobs, approvals, artifacts, audit, signing
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> join page, signed manifests, release downloads, outbound host relay
-  -> managed Eitan hosts and attended temporary hosts
+  -> managed operator hosts and attended temporary hosts
 ```
 
-`api.lunflux.com` is the authenticated agent/operator API surface. `agent.lunflux.com`
+`api.example.com` is the authenticated agent/operator API surface. `agent.example.com`
 is the human join, bootstrap, release-download, and host-relay surface. They can start
 in one binary, but they must stay separate in responsibility.
 
@@ -119,7 +119,7 @@ The public release ships five installable deliverables:
 | Skillkit bundle | portable Skills and MCP contracts for Hermes, Codex, Claude Code, OpenCode, and generic agents |
 | Adapter SDK and conformance suite | safe extension point for new execution backends |
 
-Hermes/Lucky is the reference environment, not a required dependency.
+Hermes is the reference environment, not a required dependency.
 
 ## Protocol Closure
 
@@ -209,7 +209,7 @@ Required gates:
 1. A clean Windows 10/11 host joins from one visible verified command, connects outbound
    only, runs bounded repair jobs, enforces approvals, revokes cleanly, and leaves no
    service or autorun persistence.
-2. Eitan's managed Mac reconnects after reboot, runs a Lucky-requested Codex job in a
+2. an operator's managed Mac reconnects after reboot, runs a agent-requested Codex job in a
    locked worktree, returns diff/test/cancellation evidence, and requires approval before
    push, merge, deploy, credentials, or service changes.
 3. Tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, missing-capability,
@@ -224,9 +224,9 @@ Required gates:
 
 ## Final Sentence
 
-The perfect ending is reached when an operator can say:
+The perfect ending is reached when the operator can say:
 
-> Lucky, use that approved machine to solve this.
+> an agent, use that approved machine to solve this.
 
 And the system responds with bounded execution, local verification, approval gates,
 evidence, audit, and revocation instead of trust-me automation.

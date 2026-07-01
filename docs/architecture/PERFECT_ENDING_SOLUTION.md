@@ -1,7 +1,5 @@
 # Perfect Ending Solution
 
-Date: 2026-06-30
-
 This document is the canonical final architecture lock and execution spec for
 Remote Dev Skillkit. If another architecture document conflicts with this file,
 this file wins until a new architecture decision explicitly replaces it.
@@ -15,10 +13,10 @@ Supporting documents have narrower jobs:
 - [Final System Design](FINAL_SYSTEM_DESIGN.md) is the broad product reasoning
   record.
 
-This file defines the product, the open-source project, and Eitan's
-Hermes/Lucky deployment.
+This file defines the product, the open-source project, and a generic reference
+deployment.
 
-## Converged Perfect Ending - 2026-06-30
+## Converged Perfect Ending
 
 This is the final compression layer for the architecture. Future architecture
 changes should patch this section and the affected contracts instead of adding
@@ -77,7 +75,7 @@ it must not remember broad consent to privileged or external actions.
 
 The open-source shape is therefore stable: the kernel owns consent, identity,
 authorization, host veto, adapter supervision, proof, and recovery. Everything
-else is replaceable: Hermes/Lucky, Codex, Claude Code, ACP/acpx, transport,
+else is replaceable: Hermes, Codex, Claude Code, ACP/acpx, transport,
 database, object storage, release host, mesh, GUI tool, and workspace provider.
 If replacing an edge requires weakening signed jobs, host-side validation,
 approval, evidence, audit, or release verification, that edge is not compatible
@@ -87,7 +85,7 @@ with the final architecture.
 
 ```text
 agent runtime
-  Hermes/Lucky, Codex, Claude Code, OpenCode, generic MCP agent
+  Hermes, Codex, Claude Code, OpenCode, generic MCP agent
     |
     v
 Skillkit + MCP/API
@@ -157,8 +155,8 @@ through the same kernel.
 
 The concrete end state is:
 
-1. **Lucky can coordinate**: Hermes/Lucky calls Skillkit or MCP tools against
-   `https://api.lunflux.com/v1`, receives policy previews, creates jobs, reviews
+1. **an agent can coordinate**: Hermes calls Skillkit or MCP tools against
+   `https://api.example.com/v1`, receives policy previews, creates jobs, reviews
    evidence, and requests approvals without receiving standing host secrets.
 2. **Hosts can veto**: every target machine independently checks release trust,
    host identity, trust sequence, nonce, expiry, capability, workspace/session
@@ -212,7 +210,7 @@ Modes are separate product contracts sharing one kernel:
 | Mode | Target | Persistence | Required promise |
 |---|---|---:|---|
 | attended temporary | third-party or short-lived host | none | one visible command, outbound-only, TTL-bound, local stop, transcript, no service residue |
-| managed owned host | Eitan-owned or managed fleet host | explicit service | reconnect, trust refresh, workspace locks, evidence spool, status/logs/stop/uninstall |
+| managed owned host | operator-owned or managed fleet host | explicit service | reconnect, trust refresh, workspace locks, evidence spool, status/logs/stop/uninstall |
 | workspace provider | cloud/devcontainer/Coder/DevPod style backend | provider-owned | create/use/destroy through signed jobs and provider evidence |
 | break-glass | emergency repair | shorter than normal | narrower scope, stronger approval, denser audit, no permanent policy weakening |
 
@@ -309,10 +307,10 @@ The perfect ending is reached when all of these are boring:
 1. A non-technical Windows user can run one visible temporary command, the host
    verifies release inputs, connects outbound only, pauses for dangerous
    actions, and leaves no persistence after stop or TTL.
-2. Eitan can tell Lucky to use an owned Mac, Linux, or Windows host; the managed
+2. the operator can tell an agent to use an owned Mac, Linux, or Windows host; the managed
    service reconnects, runs Codex/Claude/ACP in a locked worktree, returns diff
    and test evidence, and can be stopped, revoked, rotated, or uninstalled.
-3. A self-hosted user can replace Lunflux, Hermes, GitHub, storage, and adapters
+3. A self-hosted user can replace example deployment, Hermes, GitHub, storage, and adapters
    without replacing the safety kernel.
 4. A third-party adapter author can scaffold, implement, run, verify, and
    publish an adapter without learning private project internals or bypassing
@@ -340,7 +338,7 @@ The remaining work closes in this order:
 This order is not project management decoration. It is part of the architecture:
 proof and recovery must outrun breadth.
 
-## Final Closure Specification - 2026-06-30
+## Final Closure Specification
 
 This section is the practical closure spec for the perfect-ending design. The
 blueprint below defines the philosophy and invariants; this section turns them
@@ -361,7 +359,7 @@ typed intent -> policy dry-run -> signed host-bound work
   -> approval, cancel, revoke, rotate, continue, or uninstall
 ```
 
-Everything else is replaceable. Hermes/Lucky, Codex, Claude Code, ACP/acpx,
+Everything else is replaceable. Hermes, Codex, Claude Code, ACP/acpx,
 PowerShell, shell, GUI tools, mesh networks, Coder, DevPod, GitHub Releases, and
 cloud storage are integrations behind this kernel. None of them becomes the
 security root.
@@ -530,12 +528,12 @@ The same open-source project must support these profiles:
 | Profile | Example | Required properties |
 |---|---|---|
 | local demo | one laptop, dev gateway, local host | deterministic tests, no production claims |
-| Eitan/Lunflux | Lucky -> `https://api.lunflux.com/v1` -> `agent.lunflux.com` | Hermes reference deployment, durable gateway, managed Mac, temporary Windows |
+| reference deployment | an agent -> `https://api.example.com/v1` -> `agent.example.com` | durable gateway, managed hosts, temporary support hosts |
 | self-hosted single user | user-managed VPS plus personal hosts | replace domain/storage/auth, keep safety kernel |
 | team or enterprise | hosted gateway, managed fleet, policy roles | stronger auth, audit retention, OS stores, signed releases |
 
-Reference deployment code and docs may mention Lunflux, but public Skillkit
-behavior must not require Lunflux, Hermes, Codex, macOS, GitHub, or any one
+Reference deployment code and docs may mention example deployment, but public Skillkit
+behavior must not require example deployment, Hermes, Codex, macOS, GitHub, or any one
 adapter.
 
 ### Acceptance Matrix
@@ -592,7 +590,7 @@ the next:
 Skipping ahead to more adapters before these gates close makes the product look
 broader while making it less trustworthy.
 
-## Definitive Perfect-Ending Blueprint - 2026-06-30
+## Definitive Perfect-Ending Blueprint
 
 This is the final decision layer. Everything below this section remains useful
 rationale, but this section is the acceptance rule for future work.
@@ -650,26 +648,27 @@ The open-source project ships five primary surfaces:
 5. Adapter SDK: conformance-tested extension path for shell, PowerShell, Codex,
    Claude Code, ACP/acpx, GUI/browser, mesh, and workspace providers.
 
-Hermes/Lucky and Lunflux are the reference deployment, not the dependency
-boundary. A self-hosted user must be able to replace the domain, storage,
-gateway, agent runtime, and adapter set without replacing the safety model.
+The example domain and any one agent runtime are reference choices, not the
+dependency boundary. A self-hosted user must be able to replace the domain,
+storage, gateway, agent runtime, and adapter set without replacing the safety
+model.
 
 ### Reference Deployment
 
-Eitan's production slice is the canonical deployment example:
+A self-hosted production slice can use this deployment shape:
 
 ```text
-Lucky on Hermes
+an agent runtime
   -> Remote Dev Skillkit Skill/MCP tools
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> attended temporary hosts and explicitly managed owned hosts
 ```
 
-`https://api.lunflux.com/v1` is the authenticated operator/agent API for typed
+`https://api.example.com/v1` is the authenticated operator/agent API for typed
 jobs, policy planning, approvals, evidence, audit, and MCP-compatible access.
-`https://agent.lunflux.com` is the human and host-facing edge for join pages,
+`https://agent.example.com` is the human and host-facing edge for join pages,
 release metadata, verified bootstrap downloads, and outbound relay. The two
 domains may share infrastructure early, but their responsibilities must remain
 separable.
@@ -713,7 +712,7 @@ Modes are separate products sharing one kernel:
 | Mode | User | Persistence | Contract |
 |---|---|---:|---|
 | `attended-temporary` | third-party or short-lived repair host | none | one visible command, outbound-only session, TTL, local stop, transcript, no service/autorun/firewall residue |
-| `managed` | Eitan-owned or formally managed host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, status/logs/start/stop/uninstall, no ambient L3/L4 authority |
+| `managed` | operator-owned or formally managed host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, status/logs/start/stop/uninstall, no ambient L3/L4 authority |
 | `workspace-provider` | disposable cloud/devcontainer/workspace backend | provider lifecycle | create/use/destroy workspaces through signed jobs and provider evidence |
 | `break-glass` | emergency overlay | shorter than normal | narrower scope, shorter TTL, stronger approval, denser audit, no permanent policy weakening |
 
@@ -851,7 +850,7 @@ features:
    integration without policy bypasses.
 4. **Self-hosted public install**: signed release artifacts, verified Skillkit,
    framework install dry-run, no external mutation by default, and docs that do
-   not assume Hermes, Lunflux, GitHub, macOS, or Codex.
+   not assume Hermes, example deployment, GitHub, macOS, or Codex.
 
 ### v1.0 Gate
 
@@ -910,7 +909,7 @@ A change is core-worthy only if every answer is yes:
 
 Any "no" means the feature is not part of the perfect ending yet.
 
-## Operational Final Architecture - 2026-06-30
+## Operational Final Architecture
 
 This historical section remains operational rationale under the Definitive
 Perfect-Ending Blueprint above. It turns the perfect-ending idea into an
@@ -933,7 +932,7 @@ The final production topology is:
 
 ```text
 Agent runtime
-  Hermes/Lucky, Codex, Claude Code, OpenCode, generic MCP agent
+  Hermes, Codex, Claude Code, OpenCode, generic MCP agent
         |
         v
 Skillkit + MCP/API client
@@ -960,21 +959,21 @@ Proof layer
   result artifacts, evidence bundle, audit chain, acceptance package, verifiers
 ```
 
-Eitan's reference deployment maps this topology to:
+an operator's reference deployment maps this topology to:
 
 ```text
-Lucky on Hermes
+an agent on Hermes
   -> Remote Dev Skillkit Skill/MCP tools
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> temporary and explicitly managed hosts
 ```
 
-`api.lunflux.com` is the authenticated operator/agent API. `agent.lunflux.com`
+`api.example.com` is the authenticated operator/agent API. `agent.example.com`
 is the human and host edge for join pages, bootstrap metadata, release
 downloads, and relay. The open-source project must remain self-hostable without
-Lunflux or Hermes assumptions.
+example deployment or Hermes assumptions.
 
 ### The Five Permanent Separations
 
@@ -998,7 +997,7 @@ The product has three normal modes and one emergency overlay:
 | Mode | Target | Persistence | Contract |
 |---|---|---:|---|
 | `attended-temporary` | third-party or short-lived repair host | none | one visible command, outbound-only, TTL-bound, local stop, transcript, no service/autorun/firewall residue |
-| `managed` | Eitan-owned or formally managed Mac/Windows/Linux host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, status/stop/uninstall, no ambient L3/L4 authority |
+| `managed` | operator-owned or formally managed Mac/Windows/Linux host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, status/stop/uninstall, no ambient L3/L4 authority |
 | `workspace-provider` | disposable cloud/devcontainer/workspace backend | provider-scoped | create/use/destroy workspaces through signed jobs and provider evidence |
 | `break-glass` | emergency overlay | shorter than normal | narrower scope, shorter TTL, stronger approval, denser audit, no permanent policy weakening |
 
@@ -1166,17 +1165,17 @@ recovery.
 
 ### Perfect Ending Definition
 
-The perfect ending is not "Lucky can control any computer." The perfect ending
+The perfect ending is not "an agent can control any computer." The perfect ending
 is:
 
-- Lucky can delegate work without holding host credentials.
+- an agent can delegate work without holding host credentials.
 - A temporary machine can join quickly, visibly, and leave cleanly.
 - A managed machine can reconnect reliably without receiving ambient authority.
 - Every powerful execution tool is just an adapter behind one safety contract.
 - Every success, denial, approval pause, cancellation, revoke, rotate, install,
   and uninstall can be reconstructed from evidence and audit.
 - External users can self-host and install the Skillkit without trusting
-  Lunflux, Hermes, GitHub, macOS, or Codex-specific assumptions.
+  example deployment, Hermes, GitHub, macOS, or Codex-specific assumptions.
 
 That is the final product: the safest path is the easiest path.
 
@@ -1193,14 +1192,14 @@ real machines.
 An operator can say:
 
 ```text
-Lucky, use that approved machine to solve this.
+an agent, use that approved machine to solve this.
 ```
 
 The system responds with typed intent, signed bounded execution, host-side
 verification, approval gates, workspace isolation, evidence, audit, and
 revocation.
 
-## Final Architecture Closure - 2026-06-30
+## Final Architecture Closure
 
 This is the final perfect-ending design. It deliberately stops the project from
 becoming a bigger remote-control stack, a tunnel manager, a coding CLI wrapper,
@@ -1285,7 +1284,7 @@ The project has three production-grade products sharing one kernel:
 | Mode | User | Persistence | Final behavior |
 |---|---|---:|---|
 | `attended-temporary` | third-party or short-lived repair host | none | one visible command, outbound-only session, TTL, local stop, transcript, no autorun/service/firewall residue |
-| `managed` | Eitan-owned or formally managed Mac/Windows/Linux host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, start/status/stop/uninstall, no ambient L3/L4 authority |
+| `managed` | operator-owned or formally managed Mac/Windows/Linux host | explicit service | reconnect, trust refresh, workspace locking, evidence spool, start/status/stop/uninstall, no ambient L3/L4 authority |
 | `workspace-provider` | disposable cloud/devcontainer/workspace backend | provider lifecycle only | create/use/destroy workspaces through signed jobs and provider-scoped evidence |
 
 `break-glass` is not a fourth normal mode. It is a temporary policy overlay:
@@ -1345,23 +1344,23 @@ Cleanup runs after any prepared state, including cancellation, timeout, failure,
 and host restart recovery. A cleanup failure is evidence, not a hidden retry
 forever.
 
-#### Eitan Reference Deployment
+#### an operator Reference Deployment
 
-Eitan's personal production shape is:
+an operator's production shape is:
 
 ```text
-Lucky on Hermes
+an agent on Hermes
   -> Remote Dev Skillkit Skill/MCP tools
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> attended temporary hosts and explicitly managed owned hosts
 ```
 
-`https://api.lunflux.com/v1` is the authenticated operator and agent API for
+`https://api.example.com/v1` is the authenticated operator and agent API for
 typed jobs, policy dry-runs, approvals, evidence, audit, and MCP-compatible
-tools. `https://agent.lunflux.com` is the human and host-facing edge for join
-pages, release metadata, bootstrap downloads, and host relay. Lucky remains the
+tools. `https://agent.example.com` is the human and host-facing edge for join
+pages, release metadata, bootstrap downloads, and host relay. an agent remains the
 coordinator; it never needs root passwords, SSH passwords, permanent host
 credentials, or hidden persistence on another person's machine.
 
@@ -1412,7 +1411,7 @@ The final release ladder is:
    production Adapter SDK.
 5. `v1.0` public Skillkit: stable schemas, signed releases, self-host docs,
    install verification, acceptance packages, threat model, security policy,
-   and no Hermes/Lunflux/Codex-only assumptions.
+   and no Hermes/example deployment/Codex-only assumptions.
 
 No public release may promote a capability from "planned" to "supported" until
 there is a verifier-backed acceptance package for it.
@@ -1463,7 +1462,7 @@ special:
 | Skillkit bundle | portable instructions and MCP schemas for agents | Hermes, Codex, Claude Code, OpenCode, and future agent surfaces |
 | Adapter SDK | safe extension path for Codex, Claude Code, ACP, shell, PowerShell, GUI, mesh, and workspace providers | concrete execution backend |
 
-Hermes/Lucky and Lunflux are the reference deployment, not the dependency
+Hermes and example deployment are the reference deployment, not the dependency
 boundary.
 
 ### The Six Closed Loops
@@ -1502,7 +1501,7 @@ or invisible.
 
 #### 2. Managed Owned-Host Development
 
-An explicitly installed managed host on Eitan-owned Mac, Windows, or Linux
+An explicitly installed managed host on operator-owned Mac, Windows, or Linux
 reconnects after login or reboot, refreshes trust safely, locks a workspace or
 worktree, runs Codex/Claude Code/ACP/shell/PowerShell through adapters, returns
 diff/test/log evidence, and pauses before push, merge, deploy, publish,
@@ -1522,22 +1521,22 @@ adapter is exposed to agents.
 This path makes the open-source project broad without making the safety model
 large.
 
-### Eitan Reference Deployment
+### an operator Reference Deployment
 
-Eitan's personal ending is:
+an operator's ending is:
 
 ```text
-Lucky on Hermes
+an agent on Hermes
   -> Remote Dev Skillkit Skill/MCP workflow
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> attended temporary hosts and explicitly managed owned hosts
 ```
 
-`https://api.lunflux.com/v1` is the authenticated operator and agent API.
-`https://agent.lunflux.com` is the human/host-facing edge for join, bootstrap,
-release metadata, and relay. Lucky remains the coordinator; it does not need
+`https://api.example.com/v1` is the authenticated operator and agent API.
+`https://agent.example.com` is the human/host-facing edge for join, bootstrap,
+release metadata, and relay. an agent remains the coordinator; it does not need
 root passwords, SSH passwords, permanent host credentials, or hidden
 persistence.
 
@@ -1571,12 +1570,12 @@ execution, proof, and recovery loops are real.
 
 The perfect ending is reached when the safest path is also the easiest path:
 
-- Lucky can coordinate real hosts without holding host credentials.
+- an agent can coordinate real hosts without holding host credentials.
 - Temporary machines can join fast, visibly, and without persistence.
 - Managed hosts reconnect reliably without receiving ambient authority.
 - All powerful tools are adapters behind the same signed-job and evidence
   contract.
-- Self-hosted users can install without Hermes, Lunflux, macOS, GitHub, or
+- Self-hosted users can install without Hermes, example deployment, macOS, GitHub, or
   Codex assumptions.
 - Every important claim can be independently verified after the fact.
 
@@ -1584,7 +1583,7 @@ That is the final architecture: a small permissioned delegation layer around
 powerful tools, designed so remote development becomes agent-native precisely
 because it is consented, bounded, locally verified, revocable, and provable.
 
-## Final Kernel Specification - 2026-06-30
+## Final Kernel Specification
 
 This section is the implementation-level lock. It turns the final product
 constitution into a small kernel that can accept or reject future design
@@ -1633,7 +1632,7 @@ The core should stay boring so the edges can be creative.
 
 | Edge | Examples | Rule |
 |---|---|---|
-| Agent runtime | Hermes/Lucky, Codex, Claude Code, OpenCode, generic MCP clients | agents receive typed tools, not standing host credentials |
+| Agent runtime | Hermes, Codex, Claude Code, OpenCode, generic MCP clients | agents receive typed tools, not standing host credentials |
 | Transport | HTTPS long-poll, WSS/mTLS, optional owned-host mesh | transport delivers leases; it never authorizes work by itself |
 | Adapter | shell, PowerShell, Codex, Claude Code, ACP, browser, GUI, Coder, DevPod | adapters execute one domain and cannot self-approve |
 | Storage | local files, SQLite, Postgres, object store, KMS/HSM | storage persists state but does not become an authority |
@@ -1670,9 +1669,9 @@ The final open-source project ships exactly five primary surfaces:
 
 Everything else is optional packaging, adapter work, or deployment-specific
 integration. This keeps the public project universal instead of Hermes-only,
-Lunflux-only, macOS-only, GitHub-only, or Codex-only.
+example deployment-only, macOS-only, GitHub-only, or Codex-only.
 
-## Final Product Constitution - 2026-06-30
+## Final Product Constitution
 
 This is the final architecture constitution. It does not replace the detailed
 sections below; it makes them executable as one product contract. When future
@@ -1724,7 +1723,7 @@ MCP tools, API clients, or deployment packaging.
 
 ```text
 Agent runtime
-  Hermes/Lucky, Codex, Claude Code, OpenCode, generic MCP agent
+  Hermes, Codex, Claude Code, OpenCode, generic MCP agent
         |
         v
 Skillkit and MCP/API client
@@ -1751,7 +1750,7 @@ Proof plane
   result artifact, evidence bundle, audit chain, verifier output
 ```
 
-The gateway may be hosted by Lunflux, self-hosted by another user, or run
+The gateway may be hosted by example deployment, self-hosted by another user, or run
 locally for development. The host rules do not change when the deployment
 changes.
 
@@ -1835,27 +1834,27 @@ The public API and MCP surface should stay small:
 Agents get tools for intent, planning, approval, execution, evidence review, and
 verification. They do not get standing host credentials or self-approval power.
 
-### Eitan Reference Ending
+### an operator Reference Ending
 
 The personal deployment is:
 
 ```text
-Hermes/Lucky
+Hermes
   -> Remote Dev Skillkit
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
-  -> https://agent.lunflux.com
-  -> managed Eitan hosts and attended temporary hosts
+  -> https://agent.example.com
+  -> managed operator hosts and attended temporary hosts
 ```
 
-`https://api.lunflux.com/v1` is the authenticated agent/operator API. It owns
+`https://api.example.com/v1` is the authenticated agent/operator API. It owns
 typed jobs, policy planning, approval, evidence, audit, and MCP-compatible
 access.
 
-`https://agent.lunflux.com` is the human and host-facing edge. It owns join
+`https://agent.example.com` is the human and host-facing edge. It owns join
 pages, release metadata, verified bootstrap downloads, and outbound host relay.
 
-Lucky remains the coordinator. It should never need root passwords, SSH
+an agent remains the coordinator. It should never need root passwords, SSH
 passwords, permanent host credentials, or hidden persistence on someone else's
 machine.
 
@@ -1880,7 +1879,7 @@ The public v1.0 release is allowed only when all of the following are true:
    produce machine-readable `ok=true` evidence.
 8. The public threat model and security policy match shipped behavior.
 9. Self-hosted users can install gateway, host, MCP tools, Skillkit, and
-   adapters without Hermes or Lunflux assumptions.
+   adapters without Hermes or example deployment assumptions.
 10. The easiest documented workflow is also the safest workflow.
 
 ### Final Build Order
@@ -1903,7 +1902,7 @@ This order is the final answer because it prevents the project from optimizing
 for demos before it proves the safety-critical host, release, and evidence
 loops.
 
-## Final 2026-06-30 Refinement
+## Final Refinement
 
 This section is the final architecture decision layer. It resolves the last
 product ambiguity: Remote Dev Skillkit is not a remote administration suite,
@@ -1965,13 +1964,13 @@ The open-source release should remain five installable surfaces:
 | Surface | Purpose | First-class user |
 |---|---|---|
 | `rdev` | operator CLI, local demos, diagnostics, evidence/release verification, service lifecycle | human operator and project maintainer |
-| `rdev-gateway` | self-hosted API, MCP, tickets, hosts, jobs, approvals, relay, artifacts, audit, revocation | self-hoster or Lunflux deployment |
+| `rdev-gateway` | self-hosted API, MCP, tickets, hosts, jobs, approvals, relay, artifacts, audit, revocation | self-hoster or example deployment deployment |
 | `rdev-host` | target-machine runtime for attended temporary and explicit managed modes | local machine owner or managed-device operator |
 | Skillkit bundle | portable agent instructions and MCP tool contracts for Hermes, Codex, Claude Code, OpenCode, and generic agents | agent runtime maintainer |
 | Adapter SDK | conformance-tested extension point for execution backends | tool/adaptor author |
 
-Hermes/Lucky is the reference deployment. The public project must not require
-Hermes, Lunflux, macOS, GitHub, or any single coding CLI.
+Hermes is the reference deployment. The public project must not require
+Hermes, example deployment, macOS, GitHub, or any single coding CLI.
 
 ### Mode Separation
 
@@ -1980,7 +1979,7 @@ Modes are separate safety products sharing one kernel. They must not blur.
 | Mode | Who it is for | Persistence | Strongest allowed promise |
 |---|---|---:|---|
 | `attended-temporary` | third-party or short-lived repair machine | none | visible, outbound-only, TTL-bound help |
-| `managed` | Eitan-owned or formally managed machine | explicit service | durable reconnect and governed coding |
+| `managed` | operator-owned or formally managed machine | explicit service | durable reconnect and governed coding |
 | `workspace-provider` | disposable cloud or devcontainer workspace | provider-owned | lifecycle-wrapped ephemeral workspace |
 | `break-glass` | urgent recovery under pressure | short-lived only | narrower TTL, stronger approvals, denser audit |
 
@@ -2084,15 +2083,15 @@ generalize.
 The perfect ending is reached when the easiest documented path is also the safe
 path:
 
-- Lucky can use `https://api.lunflux.com/v1` and `https://agent.lunflux.com`
+- an agent can use `https://api.example.com/v1` and `https://agent.example.com`
   without holding host credentials.
 - A temporary Windows machine can join quickly, visibly, and without hidden
   persistence.
-- Eitan-owned hosts can reconnect reliably without gaining ambient authority.
+- operator-owned hosts can reconnect reliably without gaining ambient authority.
 - Codex, Claude Code, ACP, shell, PowerShell, Git, GUI, mesh, Coder, and DevPod
   all operate as adapters, not roots.
 - Other agent users can self-host and install the Skillkit without adopting
-  Hermes or Lunflux.
+  Hermes or example deployment.
 - Every success, denial, approval pause, cancellation, failure, release, and
   revoke claim is backed by evidence, audit, and verifier output.
 
@@ -2106,7 +2105,7 @@ Remote Dev Skillkit ships one small safety kernel and many replaceable edges.
 
 ```text
 Agent runtimes
-  Hermes/Lucky, Codex, Claude Code, OpenCode, Cursor-style agents
+  Hermes, Codex, Claude Code, OpenCode, Cursor-style agents
         |
         v
 Skillkit + MCP/API
@@ -2175,12 +2174,12 @@ trusted. The release system is allowed to bless software but not authorize jobs.
 The reference production topology is:
 
 ```text
-Hermes/Lucky or another agent runtime
+Hermes or another agent runtime
   -> installed Skillkit and MCP/API client
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> gateway API edge
   -> gateway policy, scheduler, signing, approvals, audit, artifact store
-  -> outbound relay at https://agent.lunflux.com
+  -> outbound relay at https://agent.example.com
   -> rdev-host on a temporary, managed, or workspace-provider host
   -> host sovereignty guard
   -> adapter-specific work
@@ -2280,14 +2279,14 @@ way to use real machines.
 
 ### Final Personal Deployment
 
-Eitan's deployment is the canonical production slice:
+an operator's deployment is the canonical production slice:
 
 | Domain | Role |
 |---|---|
-| `https://api.lunflux.com/v1` | authenticated agent/operator API, MCP-compatible HTTP, policy planning, job creation, approval, evidence, audit |
-| `https://agent.lunflux.com` | join page, signed release metadata, bootstrap download, outbound host relay, human-facing temporary session UX |
-| Hermes/Lucky | central planner and reviewer that uses typed tools, not host credentials |
-| Managed Eitan hosts | durable owned machines with explicit service install, workspace locks, coding adapters, local stop/uninstall |
+| `https://api.example.com/v1` | authenticated agent/operator API, MCP-compatible HTTP, policy planning, job creation, approval, evidence, audit |
+| `https://agent.example.com` | join page, signed release metadata, bootstrap download, outbound host relay, human-facing temporary session UX |
+| Hermes | central planner and reviewer that uses typed tools, not host credentials |
+| Managed operator hosts | durable owned machines with explicit service install, workspace locks, coding adapters, local stop/uninstall |
 | Attended temporary hosts | third-party or short-lived machines with one visible command, no inbound listener, no persistence, TTL, and local stop |
 
 This deployment should stay boring and inspectable: clear logs, clear status,
@@ -2642,7 +2641,7 @@ CLI, policy, audit, service lifecycle, and UX.
 | Mode | Target | Persistence | Default authority | Hard stop |
 |---|---|---:|---|---|
 | `attended-temporary` | third-party or short-lived repair host | none | visible foreground, scoped, TTL-bound | TTL, local stop, ticket revoke |
-| `managed` | Eitan-owned or formally managed host | explicit OS service | durable reconnect under approved roots | host revoke, policy revoke, service stop/uninstall |
+| `managed` | operator-owned or formally managed host | explicit OS service | durable reconnect under approved roots | host revoke, policy revoke, service stop/uninstall |
 | `break-glass` | urgent recovery | short-lived only | narrow emergency operations | shorter TTL, stronger approval, dense audit |
 | `workspace-provider` | Coder, DevPod, devcontainers, cloud workspaces | provider-owned | bounded workspace lifecycle | workspace destroy or provider revoke |
 
@@ -2762,7 +2761,7 @@ The final permission model is:
 6. Record the approval, the side effect, and the evidence.
 
 For temporary third-party machines, this means powerful repair is possible only
-inside a visible foreground session. For managed Eitan-owned machines, durable
+inside a visible foreground session. For managed operator-owned machines, durable
 reconnect is possible, but push, merge, deploy, publish, paid actions,
 credential changes, GUI control, service mutation, and elevation still require
 fresh scoped approval.
@@ -2793,29 +2792,29 @@ rules are part of the contract.
 Every protocol object needs an owner, signer when applicable, expiry behavior,
 revocation behavior, audit event, verifier command, and conformance fixture.
 
-## Eitan Reference Deployment
+## an operator Reference Deployment
 
-Eitan's deployment is the golden reference, not a private fork.
+an operator's deployment is the golden reference, not a private fork.
 
 ```text
-Hermes/Lucky
+Hermes
   -> Remote Dev Skillkit Skills
   -> MCP HTTP or local bridge
-  -> https://api.lunflux.com/v1
+  -> https://api.example.com/v1
   -> rdev-gateway
   -> tickets, hosts, jobs, approvals, artifacts, audit, signing
-  -> https://agent.lunflux.com
+  -> https://agent.example.com
   -> join page, signed manifests, release downloads, outbound host relay
-  -> managed Eitan hosts and attended temporary hosts
+  -> managed operator hosts and attended temporary hosts
 ```
 
 Responsibilities:
 
-- `https://api.lunflux.com/v1`: authenticated agent/operator API and
+- `https://api.example.com/v1`: authenticated agent/operator API and
   MCP-compatible surface.
-- `https://agent.lunflux.com`: human join, bootstrap, release download, signed
+- `https://agent.example.com`: human join, bootstrap, release download, signed
   manifest hosting, and outbound host relay.
-- Hermes/Lucky: orchestration through typed tools, not host credentials.
+- Hermes: orchestration through typed tools, not host credentials.
 - `rdev-gateway`: governance, policy, signing, approvals, evidence, audit, and
   revocation.
 - `rdev-host`: local verification, execution, stop control, and audit/evidence
@@ -2825,12 +2824,12 @@ The production boundary is:
 
 | Surface | Public role | Authentication | Notes |
 |---|---|---|---|
-| `https://api.lunflux.com/v1` | agent/operator API and MCP-compatible HTTP | operator/session/OAuth-style tokens | no human bootstrap scripts here |
-| `https://agent.lunflux.com` | join page, downloads, relay, release metadata | ticket, host identity, channel auth | no unrestricted admin API here |
+| `https://api.example.com/v1` | agent/operator API and MCP-compatible HTTP | operator/session/OAuth-style tokens | no human bootstrap scripts here |
+| `https://agent.example.com` | join page, downloads, relay, release metadata | ticket, host identity, channel auth | no unrestricted admin API here |
 | local MCP stdio | single-machine development bridge | local process boundary | useful for Codex/Claude local installs |
 | `rdev` CLI | diagnostics, release/evidence verification, service lifecycle | local operator auth where needed | should prove every release claim |
 
-`api.lunflux.com` and `agent.lunflux.com` may share infrastructure at first, but
+`api.example.com` and `agent.example.com` may share infrastructure at first, but
 their responsibilities must stay separable for later hardening.
 
 ## Discovery And Connection Model
@@ -2840,8 +2839,8 @@ is intentional and consent-based.
 
 | Host class | Discovery path | Connection path |
 |---|---|---|
-| Temporary third-party host | operator creates short ticket; local user opens join page or runs one visible command | host connects outbound to `agent.lunflux.com` over 443 |
-| Eitan managed host | explicit service install enrolls host identity and capability inventory | service reconnects outbound and refreshes trust |
+| Temporary third-party host | operator creates short ticket; local user opens join page or runs one visible command | host connects outbound to `agent.example.com` over 443 |
+| an operator managed host | explicit service install enrolls host identity and capability inventory | service reconnects outbound and refreshes trust |
 | Workspace provider | operator creates disposable workspace through adapter | provider lifecycle is wrapped behind signed jobs |
 | Owned mesh host | optional inventory from Tailscale/headscale adapter | mesh assists transport but does not authorize jobs |
 
@@ -2855,7 +2854,7 @@ The final Windows temporary support path should feel like this:
 
 1. Operator creates an attended ticket with reason, TTL, requested capabilities,
    and gateway identity.
-2. Local user opens `https://agent.lunflux.com/j/<code>`.
+2. Local user opens `https://agent.example.com/j/<code>`.
 3. Join page shows operator, reason, TTL, requested capability rings, server
    identity, stop instructions, and a visible command.
 4. Bootstrap downloads only to a temporary location.
@@ -2863,7 +2862,7 @@ The final Windows temporary support path should feel like this:
    host binary digest, signature, and platform policy before execution.
 6. Host starts foreground, displays local stop instructions, generates a
    session key, registers capabilities, and waits for host approval.
-7. Lucky runs bounded diagnosis and repair jobs.
+7. an agent runs bounded diagnosis and repair jobs.
 8. Elevation, package install, GUI control, service mutation, destructive
    actions, credentials, push, merge, deploy, publish, or paid actions pause for
    approval.
@@ -2899,7 +2898,7 @@ The final managed Mac/Linux/Windows coding path should feel like this:
 1. Operator explicitly installs a managed service and reviews service label,
    identity store, trust store, logs, stop command, and uninstall command.
 2. Host reconnects after login/reboot and refreshes trust.
-3. Lucky selects host by policy snapshot, not hostname alone.
+3. an agent selects host by policy snapshot, not hostname alone.
 4. Gateway dry-runs policy and signs a Codex/Claude/ACP job bound to host,
    workspace, adapter, TTL, nonce, limits, and approvals.
 5. Host validates envelope, trust, nonce, capabilities, approvals, workspace,
@@ -3002,7 +3001,7 @@ Conformance tests must prove:
 Adapter priority:
 
 1. `shell`, `powershell`, and `git`.
-2. `codex` for Eitan's managed Mac coding path.
+2. `codex` for an operator's managed Mac coding path.
 3. `claude-code` and `acp` for cross-agent compatibility.
 4. `browser-e2e`, GUI, Coder, DevPod, devcontainers.
 5. Tailscale/headscale, SSH, RustDesk, MeshCentral as optional adapters, not
@@ -3095,7 +3094,7 @@ The open-source project ships five deliverables:
 | Skillkit bundle | portable Skills and MCP contracts for Hermes, Codex, Claude Code, OpenCode, and generic agents |
 | Adapter SDK and conformance suite | safe extension point for new execution backends |
 
-Hermes/Lucky is the reference environment, not a required dependency.
+Hermes is the reference environment, not a required dependency.
 
 ## Release Artifact Reality Contract
 
@@ -3167,7 +3166,7 @@ failure behavior.
    connects outbound only, runs bounded repair, enforces approvals, revokes
    cleanly, leaves no persistence, and exports
    `rdev.acceptance-package.windows-temporary.v1` evidence.
-2. Eitan's managed Mac reconnects after reboot, receives a Lucky-requested Codex
+2. an operator's managed Mac reconnects after reboot, receives a agent-requested Codex
    job, locks a Git worktree, returns diff/test/cancellation evidence, and
    requires approval before push, merge, deploy, credentials, or service changes.
 3. Tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted,
@@ -3243,11 +3242,11 @@ Any "no" means the feature is not part of the perfect ending yet.
 The project reaches its perfect ending when Remote Dev Skillkit becomes the
 portable safety layer agents use before touching real machines:
 
-- Eitan can use Lucky/Hermes against `api.lunflux.com/v1` and
-  `agent.lunflux.com`.
+- the operator can use an agent runtime against `api.example.com/v1` and
+  `agent.example.com`.
 - A third-party Windows machine can be helped quickly without hidden
   persistence or inbound exposure.
-- Eitan-owned managed hosts can reconnect reliably without gaining ambient
+- operator-owned managed hosts can reconnect reliably without gaining ambient
   authority.
 - Codex, Claude Code, ACP, shell, PowerShell, GUI, mesh, Coder, and DevPod are
   adapters behind one safety kernel.

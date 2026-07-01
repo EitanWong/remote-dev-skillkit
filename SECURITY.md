@@ -16,7 +16,7 @@ Temporary third-party sessions must be:
 - auditable;
 - user-level by default.
 
-Managed service mode is only for Eitan-owned or formally managed devices.
+Managed service mode is only for operator-owned or formally managed devices.
 
 ## Prohibited Features
 
