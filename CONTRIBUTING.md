@@ -40,6 +40,20 @@ opening a pull request.
     and how it will be checked.
   - Be ashamed of blind modification; be proud of cautious refactoring that is
     scoped, reversible, reviewed by tests, and aligned with existing structure.
+- Use deep reasoning discipline without exposing private chain-of-thought:
+  - Rephrase the request, identify explicit and implicit requirements, and map
+    knowns, unknowns, constraints, risks, and success criteria before acting.
+  - Keep multiple interpretations and implementation paths alive until evidence
+    or human confirmation makes the right path clear.
+  - Scale analysis to task risk: streamline obvious one-line fixes, but expand
+    reasoning for security, release, transport, enrollment, hosted auth/storage,
+    customer bootstrap, or remote-control changes.
+  - Test assumptions against source, contracts, schemas, docs, and existing
+    behavior; correct course when new evidence contradicts the initial plan.
+  - Track progress explicitly during complex work: what is established, what is
+    still uncertain, current confidence, and what verification remains.
+  - Share concise, auditable reasoning summaries and evidence with humans, not
+    private internal reasoning or chain-of-thought.
 - Keep temporary support visible, foreground, revocable, and non-persistent.
 - Keep managed service mode explicit, inspectable, stoppable, and uninstallable.
 - Do not add hidden persistence, inbound public listeners on target hosts, UAC or

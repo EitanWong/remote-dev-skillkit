@@ -20,6 +20,16 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   single question until there is about 95% confidence in the real goal,
   constraints, and success criteria, then provide the plan or execute the
   scoped work.
+- Use deep reasoning discipline without exposing private chain-of-thought.
+  Rephrase the task internally, separate explicit requirements from inferred
+  ones, map knowns and unknowns, keep multiple hypotheses alive, verify against
+  source/contracts/schemas/docs, and revise when evidence changes the plan.
+  Scale depth to risk: simple fixes can stay lightweight, while transport,
+  enrollment, hosted auth/storage, customer bootstrap, remote-control,
+  release, and security-sensitive work require deliberate analysis and
+  progress tracking. Share concise auditable reasoning summaries, assumptions,
+  confidence, and verification evidence with the human instead of private
+  internal reasoning.
 - Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
 - Treat Remote Dev Skillkit as AI-native. The human should be able to say which
   machine needs help; the agent should probe local configuration, create an

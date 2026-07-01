@@ -118,6 +118,7 @@
 - [x] Add managed development plan for stable long-running Agent work on operator-owned workstations.
 - [x] Add Agent engineering discipline to contribution rules and remote-vibe-coding skill guidance.
 - [x] Add clarification-first one-question-at-a-time rule to contribution rules and remote-vibe-coding skill guidance.
+- [x] Add deep reasoning discipline to contribution rules and remote-vibe-coding skill guidance without exposing private chain-of-thought.
 
 ## Next
 
