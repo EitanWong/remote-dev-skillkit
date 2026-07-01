@@ -6,11 +6,14 @@ world languages. The English README remains the authoritative technical source.
 
 Every quick start keeps the same install spine as the English README:
 
-1. build or install `rdev`;
-2. run `rdev doctor`;
-3. export and verify a Skillkit bundle;
-4. generate and verify a framework install plan;
-5. run `rdev skillkit install` as a dry-run first, then again with `--execute`.
+1. copy the Agent Bootstrap Prompt into Codex, Claude Code, Hermes,
+   OpenClaw/OpenCode, or a generic MCP agent when the agent should install
+   itself;
+2. build or install `rdev`;
+3. run `rdev doctor`;
+4. export and verify a Skillkit bundle;
+5. generate and verify a framework install plan;
+6. run `rdev skillkit install` as a dry-run first, then again with `--execute`.
 
 | Language | File |
 |---|---|
@@ -31,4 +34,5 @@ and open an issue or pull request to update the translation.
 
 Maintainers can run `scripts/audit-i18n-quickstarts.sh` to verify that all
 translations still include the common framework list, quick install commands,
-local demo commands, safety posture, and Apache-2.0 license reference.
+Agent Bootstrap Prompt link, local demo commands, safety posture, and Apache-2.0
+license reference.

@@ -12,6 +12,28 @@ Remote Dev Skillkit 是给 AI Agent 使用真实 Mac、Windows、Linux 机器时
 
 ## 快速安装
 
+如果你已经在 Codex、Claude Code、Hermes、OpenClaw/OpenCode 或其他 MCP Agent 里，可以直接复制这段给你的 Agent：
+
+```text
+Bootstrap Remote Dev Skillkit for this agent runtime.
+
+Repository: https://github.com/EitanWong/remote-dev-skillkit
+
+First clone or update the repository in a safe user/workspace location. Then
+read `docs/operations/AGENT_BOOTSTRAP_PROMPT.md` from the checkout and follow
+that full prompt as the source of truth for installation. If cloning is blocked,
+read the prompt from:
+https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
+
+Probe my OS, shell, Git, Go, `rdev`, current agent framework, skill directory,
+and MCP config before acting. If a required value is unclear, ask me one short
+question instead of guessing. Dry-run before execute. Do not hardcode private
+paths, secrets, or server addresses; use `https://api.example.com/v1` only as
+placeholder metadata until I provide a real gateway URL.
+```
+
+完整版复制 Prompt 见 [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md)。
+
 ```bash
 go install ./cmd/rdev
 rdev doctor

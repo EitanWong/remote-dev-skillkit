@@ -179,6 +179,13 @@ manifest, transport, and approval steps.
   continuous gate.
 - Updated README and Skillkit install docs to surface the agent-facing install
   path before manual checkout commands.
+- Synchronized all multilingual quick starts with the Agent Bootstrap Prompt
+  path and extended the i18n audit so translations must keep the copy-paste
+  agent install entry.
+- Reworked the short Agent install prompt into a bootstrap launcher that tells
+  agents to clone or update the repository first, read the full local
+  `AGENT_BOOTSTRAP_PROMPT.md`, then continue with the verified installation
+  workflow.
 
 ### Verification
 

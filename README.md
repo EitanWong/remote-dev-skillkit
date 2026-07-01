@@ -67,20 +67,21 @@ Already inside Codex, Claude Code, Hermes, OpenClaw/OpenCode, or another
 MCP-capable agent? Copy this into the agent:
 
 ```text
-Install and connect Remote Dev Skillkit for this agent runtime.
+Bootstrap Remote Dev Skillkit for this agent runtime.
 
 Repository: https://github.com/EitanWong/remote-dev-skillkit
 
-Probe my OS, shell, installed Go/Git/rdev, current agent framework, skill
-directory, and MCP config before acting. If a required value is unclear, ask me
-one short question instead of guessing. Clone the repo, install or run `rdev`,
-export and verify the Skillkit bundle, generate and verify an install plan for
-codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent, dry-run the
-matching `rdev skillkit install`, then execute only when the target directory is
-clear and safe. Configure MCP to run `rdev mcp serve` or give me the exact config
-snippet if manual review is required. Do not hardcode private paths, secrets, or
-server addresses; use `https://api.example.com/v1` only as placeholder metadata
-until I provide a real gateway URL.
+First clone or update the repository in a safe user/workspace location. Then
+read `docs/operations/AGENT_BOOTSTRAP_PROMPT.md` from the checkout and follow
+that full prompt as the source of truth for installation. If cloning is blocked,
+read the prompt from:
+https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
+
+Probe my OS, shell, Git, Go, `rdev`, current agent framework, skill directory,
+and MCP config before acting. If a required value is unclear, ask me one short
+question instead of guessing. Dry-run before execute. Do not hardcode private
+paths, secrets, or server addresses; use `https://api.example.com/v1` only as
+placeholder metadata until I provide a real gateway URL.
 ```
 
 For the full copy-paste prompt, see

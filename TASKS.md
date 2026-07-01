@@ -128,7 +128,8 @@
 - [x] Add a Skills quality audit script and wire it into the main check flow.
 - [x] Add regression coverage for the Skills quality audit so invalid Skill metadata, references, hidden files, and long references fail predictably.
 - [x] Wire Skillkit bundle verification and `skill_agents_metadata` acceptance into release smoke.
-- [x] Add a copy-paste Agent Bootstrap Prompt so Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents can install and connect Remote Dev Skillkit by probing their own runtime.
+- [x] Add a copy-paste Agent Bootstrap Prompt so Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents can clone the repository, read the full bootstrap instructions, install, and connect Remote Dev Skillkit by probing their own runtime.
+- [x] Synchronize multilingual quick starts with the copy-paste Agent Bootstrap Prompt and audit the translated entry.
 
 ## Next
 

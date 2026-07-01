@@ -25,6 +25,11 @@ required_patterns=(
   "OpenClaw/OpenCode"
   "MCP"
   "Apache-2.0"
+  "Bootstrap Remote Dev Skillkit for this agent runtime."
+  "Repository: https://github.com/EitanWong/remote-dev-skillkit"
+  "First clone or update the repository in a safe user/workspace location."
+  "Agent Bootstrap Prompt"
+  "../operations/AGENT_BOOTSTRAP_PROMPT.md"
   "go install ./cmd/rdev"
   "rdev doctor"
   "rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1"
@@ -64,6 +69,9 @@ else
   done
   if ! grep -Fq -- "scripts/audit-i18n-quickstarts.sh" "$index"; then
     failures+=("$index: missing audit script reference")
+  fi
+  if ! grep -Fq -- "Agent Bootstrap Prompt" "$index"; then
+    failures+=("$index: missing Agent Bootstrap Prompt reference")
   fi
 fi
 
