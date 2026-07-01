@@ -95,13 +95,24 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 
 	var payload struct {
-		SchemaVersion    string   `json:"schema_version"`
-		GatewayURL       string   `json:"gateway_url"`
-		ManifestURL      string   `json:"manifest_url"`
-		HostCommand      string   `json:"host_command"`
-		HumanNextActions []string `json:"human_next_actions"`
-		AgentNextActions []string `json:"agent_next_actions"`
-		Ticket           struct {
+		SchemaVersion string `json:"schema_version"`
+		GatewayURL    string `json:"gateway_url"`
+		ManifestURL   string `json:"manifest_url"`
+		Transport     string `json:"transport"`
+		TransportPlan struct {
+			SchemaVersion string `json:"schema_version"`
+			Mode          string `json:"mode"`
+			Candidates    []struct {
+				Transport   string `json:"transport"`
+				HostCommand string `json:"host_command"`
+			} `json:"candidates"`
+		} `json:"transport_plan"`
+		HostCommand        string   `json:"host_command"`
+		FallbackCommands   []string `json:"fallback_commands"`
+		HumanNextActions   []string `json:"human_next_actions"`
+		AgentNextActions   []string `json:"agent_next_actions"`
+		ConnectivityChecks []string `json:"connectivity_checks"`
+		Ticket             struct {
 			Code         string   `json:"code"`
 			Capabilities []string `json:"capabilities"`
 		} `json:"ticket"`
@@ -115,14 +126,59 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	if payload.GatewayURL != server.URL {
 		t.Fatalf("expected gateway URL %q, got %#v", server.URL, payload.GatewayURL)
 	}
+	if payload.Transport != "wss" || payload.TransportPlan.Mode != "wss" || len(payload.TransportPlan.Candidates) != 1 {
+		t.Fatalf("explicit WSS invite should keep WSS-only plan: %#v", payload.TransportPlan)
+	}
 	if !strings.Contains(payload.ManifestURL, "/v1/tickets/") || !strings.Contains(payload.HostCommand, "host serve --manifest-url") || !strings.Contains(payload.HostCommand, "--transport wss") {
 		t.Fatalf("invite should include manifest URL and WSS host command: %#v", payload)
 	}
-	if len(payload.HumanNextActions) != 1 || len(payload.AgentNextActions) == 0 {
+	if len(payload.HumanNextActions) == 0 || len(payload.AgentNextActions) == 0 || len(payload.ConnectivityChecks) == 0 {
 		t.Fatalf("invite should split human and agent actions: %#v", payload)
 	}
 	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())
+	}
+}
+
+func TestInviteCreateDefaultsToAutoTransportPlan(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--reason", "repair target host",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Transport        string   `json:"transport"`
+		HostCommand      string   `json:"host_command"`
+		FallbackCommands []string `json:"fallback_commands"`
+		TransportPlan    struct {
+			Mode       string `json:"mode"`
+			Candidates []struct {
+				Transport string `json:"transport"`
+			} `json:"candidates"`
+		} `json:"transport_plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid invite JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.Transport != "auto" || !strings.Contains(payload.HostCommand, "--transport auto") {
+		t.Fatalf("expected auto host command, got %#v", payload)
+	}
+	if payload.TransportPlan.Mode != "auto" || len(payload.TransportPlan.Candidates) != 3 {
+		t.Fatalf("expected three transport candidates, got %#v", payload.TransportPlan)
+	}
+	if payload.TransportPlan.Candidates[0].Transport != "wss" || payload.TransportPlan.Candidates[1].Transport != "long-poll" || payload.TransportPlan.Candidates[2].Transport != "poll" {
+		t.Fatalf("unexpected transport fallback order: %#v", payload.TransportPlan.Candidates)
+	}
+	if len(payload.FallbackCommands) != 2 || !strings.Contains(payload.FallbackCommands[0], "--transport long-poll") || !strings.Contains(payload.FallbackCommands[1], "--transport poll") {
+		t.Fatalf("expected long-poll and poll fallback commands, got %#v", payload.FallbackCommands)
 	}
 }
 
@@ -3014,6 +3070,62 @@ func TestHostServeLongPollWaitsAndCompletesDevJob(t *testing.T) {
 	}
 	if completed.Status != model.JobStatusSucceeded {
 		t.Fatalf("expected job succeeded, got %s", completed.Status)
+	}
+}
+
+func TestHostServeAutoFallsBackToLongPoll(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	processed, err := app.pollAndRunDevJobs(ctx, hostServeOptions{
+		GatewayURL:      server.URL,
+		Transport:       "auto",
+		LongPollTimeout: 100 * time.Millisecond,
+		MaxJobs:         1,
+	}, nil, host.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
+	}
+	completed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected job succeeded after auto fallback, got %s", completed.Status)
 	}
 }
 

@@ -19,7 +19,7 @@ func Tools() []Tool {
 				"ttl_seconds":           integer(60, 86400),
 				"capabilities":          stringArray(),
 				"reason":                stringField(),
-				"transport":             enum("wss"),
+				"transport":             enum("auto", "wss", "long-poll", "poll"),
 				"rdev_command":          stringField(),
 				"once":                  boolField(),
 				"require_host_approval": boolField(),

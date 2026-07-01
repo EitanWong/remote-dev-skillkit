@@ -17,9 +17,13 @@ Agent-first session tools include:
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
+`transport_plan`, `fallback_commands`, `connectivity_checks`,
 `human_next_actions`, and `agent_next_actions`. Agents should call this before
 asking a human to connect a new target host. The command still requires consent
-on the target machine; it does not execute remotely by itself.
+on the target machine; it does not execute remotely by itself. The default
+transport is `auto`, which tries WSS first and falls back to HTTPS long-poll and
+then short polling when restrictive networks block WebSocket upgrades or
+long-held requests.
 
 Useful read-only tools include:
 
@@ -74,7 +78,7 @@ optional result artifacts, and optional cancellation behavior.
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rdev.invites.create","arguments":{"gateway_url":"https://api.example.com/v1","mode":"attended-temporary","ttl_seconds":600,"reason":"local test","transport":"wss"}}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rdev.invites.create","arguments":{"gateway_url":"https://api.example.com/v1","mode":"attended-temporary","ttl_seconds":600,"reason":"local test","transport":"auto"}}}' \
   '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"rdev.adapter.verify_result","arguments":{"adapter":"shell","schema":"rdev.shell-result.v1","artifact_json":"{\"schema_version\":\"rdev.shell-result.v1\",\"adapter\":\"shell\",\"workspace_root\":\"/tmp/repo\",\"exit_code\":0,\"timed_out\":false,\"canceled\":false,\"output_truncated\":false,\"started_at\":\"2026-06-30T00:00:00Z\",\"ended_at\":\"2026-06-30T00:00:01Z\",\"duration_millis\":1000,\"redacted\":false,\"redaction_rules\":[\"openai_api_key\"]}"}}}' \
   '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"rdev.adapter.verify_lifecycle","arguments":{"adapter":"claude-code","artifact_json":"{\"schema_version\":\"rdev.adapter-lifecycle.v1\",\"adapter\":\"claude-code\",\"phases\":{\"detect\":{\"implemented\":true,\"evidence\":[\"version\"]},\"plan\":{\"implemented\":true,\"evidence\":[\"commands\"],\"declares_external_consequences\":true,\"declares_required_approvals\":true},\"prepare\":{\"implemented\":true,\"evidence\":[\"workspace\"],\"enforces_workspace_boundary\":true,\"uses_workspace_lock\":true},\"run\":{\"implemented\":true,\"evidence\":[\"process\"],\"supports_timeout\":true,\"supports_cancellation\":true},\"collect\":{\"implemented\":true,\"evidence\":[\"result\"],\"emits_result_artifact\":true,\"result_schema\":\"rdev.claude-code-result.v1\"},\"cleanup\":{\"implemented\":true,\"evidence\":[\"cleanup\"],\"idempotent\":true,\"releases_locks\":true}},\"safety\":{\"adapter_authorizes_jobs\":false,\"adapter_approves_dangerous_actions\":false,\"adapter_installs_persistence\":false,\"host_validates_before_run\":true,\"redacts_outputs\":true},\"cancellation\":{\"supported\":true,\"evidence_field\":\"canceled\",\"timeout_exclusive\":true,\"cleanup_on_cancel\":true}}"}}}' \
   '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"rdev.adapter.verify_cancellation","arguments":{"adapter":"shell","schema":"rdev.shell-result.v1","artifact_json":"{\"schema_version\":\"rdev.shell-result.v1\",\"adapter\":\"shell\",\"workspace_root\":\"/tmp/repo\",\"exit_code\":-1,\"timed_out\":false,\"canceled\":true,\"output_truncated\":false,\"started_at\":\"2026-06-30T00:00:00Z\",\"ended_at\":\"2026-06-30T00:00:01Z\",\"duration_millis\":1000,\"redacted\":false,\"redaction_rules\":[\"openai_api_key\"]}"}}}' \

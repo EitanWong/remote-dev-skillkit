@@ -111,14 +111,20 @@ rdev invite create \
   --gateway https://api.example.com/v1 \
   --reason "repair target development environment" \
   --capabilities shell.user,codex.run,git.diff \
-  --transport wss
+  --transport auto
 ```
 
 The JSON output includes `schema_version: rdev.agent-invite.v1`, a short-lived
-ticket, the manifest URL, a copyable `host_command`, and the next MCP tools the
-agent should call. The human action is intentionally small: run `host_command`
-on the target computer and approve the host when policy requires it. The agent
-does the waiting, probing, job creation, status tracking, and evidence review.
+ticket, the manifest URL, a copyable `host_command`, a transport fallback plan,
+and the next MCP tools the agent should call. The human action is intentionally
+small: run `host_command` on the target computer and approve the host when
+policy requires it. The agent does the waiting, probing, job creation, status
+tracking, and evidence review.
+
+`--transport auto` is the field-friendly default: the host tries outbound WSS
+first, falls back to HTTPS long-poll when WebSocket upgrades are blocked, and
+keeps short polling as the maximum-compatibility path for stubborn networks.
+No inbound port on the target machine is required.
 
 MCP-capable agents can call `rdev.invites.create` directly through
 `rdev mcp serve`; no private server addresses or local paths are baked into the

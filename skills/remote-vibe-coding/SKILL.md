@@ -16,6 +16,12 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   the generated `host_command` to the human for the target machine, wait for the
   host to appear, request approval only when needed, then dispatch scoped jobs
   and collect evidence.
+- Prefer `--transport auto` for unknown or hostile networks. It attempts WSS,
+  then HTTPS long-poll, then short polling, all as outbound target-host
+  connections. If the host does not appear, ask about proxy requirements, TLS
+  interception, blocked outbound 443, DNS failure, captive portals, VPN
+  requirements, or operator-approved relay/mesh availability before trying
+  another path.
 - Preserve the current architecture decision layer in `docs/architecture/PERFECT_ENDING_SOLUTION.md`; update that document when changing host, adapter, transport, release, or Skillkit boundaries.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Before creating a coding job, discover the available hosts, target OS,
@@ -35,7 +41,7 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Lock a workspace before starting a coding job.
 - Use a branch or worktree for code changes.
 - Prefer hosts started with `--workspace-lock-store` for coding jobs.
-- For HTTPS, mTLS, or WSS gateway drills, start the gateway with `--tls-cert --tls-key [--client-ca]` and start hosts with `--gateway-ca` plus `--gateway-client-cert --gateway-client-key` when client certificates are required; use `--transport wss` for WebSocket job delivery. Treat transport authentication as connectivity identity only, not job authorization.
+- For HTTPS, mTLS, or WSS gateway drills, start the gateway with `--tls-cert --tls-key [--client-ca]` and start hosts with `--gateway-ca` plus `--gateway-client-cert --gateway-client-key` when client certificates are required; use `--transport auto` for field reliability or `--transport wss` when specifically validating WebSocket job delivery. Treat transport authentication as connectivity identity only, not job authorization.
 - Treat Codex, Claude Code, ACP, shell, and PowerShell as adapters behind the signed-job/evidence/approval contract.
 - Before trusting a managed or temporary host registration that includes an enrollment certificate, verify it with MCP tool `rdev.enrollment.verify_certificate` or CLI `rdev enrollment verify-certificate`; when requesting or renewing a certificate from a configured gateway, use `rdev enrollment issue-certificate --root-public-key ...` or `rdev enrollment renew-certificate --gateway ... --root-public-key ...` so returned certificates are pinned-root verified before local write, and include `--operator-token-file` when the gateway was started with `--operator-auth`. Initialize signed empty revocation baselines with `rdev enrollment init-revocations`, renew expiring local certificates with `rdev enrollment renew-certificate --revocations ...`, append later revocations with `rdev enrollment revoke-certificate --current`, and when a gateway exposes signed revocations, fetch them with `rdev enrollment fetch-revocations --root-public-key ... [--operator-token-file ...]` and include `revocations_json` / `revocations_artifact_id` or `--revocations`. Hosts that register with an enrollment certificate should use `rdev host serve --renew-enrollment-certificate --enrollment-root-public-key ...` for near-expiry hosted renewal and `rdev host serve --fetch-enrollment-revocations --enrollment-root-public-key ... [--operator-token-file ...]` when the gateway publishes signed revocations, so the host verifies the local certificate, refreshes it before expiry, and refuses revoked certificates before registration. Certificate and revocation verification are read-only and never grant host access by themselves.
 - For enrollment authority operations, produce machine-readable evidence with `rdev enrollment lifecycle key-custody`, `rdev enrollment lifecycle fleet-renewal-plan`, and `rdev enrollment lifecycle emergency-drill`; do not store private keys, private hostnames, or local machine paths in public evidence.

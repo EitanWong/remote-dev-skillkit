@@ -74,7 +74,6 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 		"ttl_seconds":  600,
 		"reason":       "repair target host",
 		"capabilities": []string{"shell.user", "codex.run"},
-		"transport":    "wss",
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -89,11 +88,15 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 		t.Fatalf("expected agent invite schema, got %#v", structured)
 	}
 	hostCommand, ok := structured["host_command"].(string)
-	if !ok || !strings.Contains(hostCommand, "host serve --manifest-url https://api.example.com/v1/tickets/") || !strings.Contains(hostCommand, "--transport wss") {
-		t.Fatalf("expected target host WSS command, got %#v", structured)
+	if !ok || !strings.Contains(hostCommand, "host serve --manifest-url https://api.example.com/v1/tickets/") || !strings.Contains(hostCommand, "--transport auto") {
+		t.Fatalf("expected target host auto command, got %#v", structured)
 	}
 	if _, ok := structured["agent_next_actions"].([]any); !ok {
 		t.Fatalf("expected agent next actions, got %#v", structured)
+	}
+	plan, ok := structured["transport_plan"].(map[string]any)
+	if !ok || plan["mode"] != "auto" {
+		t.Fatalf("expected auto transport plan, got %#v", structured)
 	}
 }
 

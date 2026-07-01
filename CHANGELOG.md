@@ -20,6 +20,13 @@ manifest, transport, and approval steps.
 - Added MCP tool `rdev.invites.create` so Codex, Claude Code, Hermes,
   OpenClaw/OpenCode, and generic MCP agents can start the remote-host workflow
   directly from conversation.
+- Added `--transport auto` for host runtime and invite plans. Auto transport
+  tries WSS first, falls back to HTTPS long-poll, then falls back to short
+  polling for restrictive networks.
+- Added invite `transport_plan`, `fallback_commands`, and
+  `connectivity_checks` fields so agents can reason about NAT, firewalls,
+  proxies, TLS interception, VPN requirements, and relay/mesh escalation without
+  guessing.
 
 ### Changed
 
@@ -29,10 +36,14 @@ manifest, transport, and approval steps.
   flow: the human runs only the generated target-host command and approves when
   policy requires it; the Agent handles discovery, waiting, job dispatch,
   status, and evidence.
+- Changed invite defaults from WSS-only to auto transport for maximum
+  field-connectivity while preserving WSS as the first candidate.
 
 ### Verification
 
 - Targeted invite, MCP, and tool-contract tests pass locally.
+- Host runtime auto-transport fallback is covered by a test that fails WSS and
+  completes the job over HTTPS long-poll.
 
 ## 0.1.3-dev
 

@@ -42,7 +42,10 @@
           },
           "transport": {
             "enum": [
-              "wss"
+              "auto",
+              "wss",
+              "long-poll",
+              "poll"
             ],
             "type": "string"
           },

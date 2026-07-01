@@ -175,8 +175,15 @@ rdev invite create \
   --gateway http://127.0.0.1:8787 \
   --reason "repair target development environment" \
   --capabilities shell.user,codex.run,git.diff \
-  --transport wss
+  --transport auto
 ```
+
+`auto` is the recommended field setting. The host first tries outbound WSS, then
+HTTPS long-poll, then short polling. That keeps the connection path useful
+across NAT, restrictive firewalls, proxies that block WebSocket upgrades, and
+networks that interrupt long-held requests. If all outbound HTTPS variants fail,
+the Agent should ask about proxy configuration, DNS, captive portal, VPN, TLS
+inspection, or an operator-approved relay/mesh path rather than guessing.
 
 The target host command in the invite consumes the signed join manifest, which
 carries the ticket code, gateway URL, trust bundle, and trust fingerprint:
@@ -185,7 +192,7 @@ carries the ticket code, gateway URL, trust bundle, and trust fingerprint:
 rdev host serve \
   --manifest-url http://127.0.0.1:8787/v1/tickets/<ticket_code>/manifest \
   --manifest-root-public-key manifest-dev:<base64url_ed25519_public_key> \
-  --transport wss
+  --transport auto
 ```
 
 ## Endpoints

@@ -1413,7 +1413,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
 		name := fs.String("name", "", "host display name; defaults to detected hostname")
 		once := fs.Bool("once", true, "register once and exit after printing status")
-		transport := fs.String("transport", "poll", "host job transport: poll, long-poll, or wss")
+		transport := fs.String("transport", "poll", "host job transport: auto, poll, long-poll, or wss")
 		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
 		longPollTimeout := fs.Duration("long-poll-timeout", 25*time.Second, "long-poll wait duration when --transport=long-poll")
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
@@ -1704,7 +1704,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		opts.Transport = "poll"
 	}
 	switch opts.Transport {
-	case "poll", "long-poll", "wss":
+	case "auto", "poll", "long-poll", "wss":
 	default:
 		return fmt.Errorf("unsupported host transport %q", opts.Transport)
 	}
@@ -2828,7 +2828,7 @@ func (a App) invite(ctx context.Context, args []string) error {
 		ttl := fs.Int("ttl-seconds", 7200, "ticket TTL in seconds")
 		reason := fs.String("reason", "remote support", "ticket reason")
 		capList := fs.String("capabilities", "", "comma-separated capabilities; defaults to temporary-mode capabilities")
-		transport := fs.String("transport", "wss", "host job transport, usually wss")
+		transport := fs.String("transport", "auto", "host job transport: auto, wss, long-poll, or poll")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path to run on the target host")
 		once := fs.Bool("once", false, "ask the target host process to exit after one job")
@@ -6043,10 +6043,36 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, clien
 }
 
 func (a App) runHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
-	if strings.TrimSpace(opts.Transport) == "wss" {
+	switch strings.TrimSpace(opts.Transport) {
+	case "auto":
+		return a.runAutoHostJobs(ctx, opts, client, hostID, identityFingerprint)
+	case "wss":
 		return a.runWSSHostJobs(ctx, opts, client, hostID, identityFingerprint)
+	default:
+		return a.runPollingHostJobs(ctx, opts, client, hostID, identityFingerprint)
 	}
-	return a.runPollingHostJobs(ctx, opts, client, hostID, identityFingerprint)
+}
+
+func (a App) runAutoHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+	wssOpts := opts
+	wssOpts.Transport = "wss"
+	processed, err := a.runWSSHostJobs(ctx, wssOpts, client, hostID, identityFingerprint)
+	if err == nil || processed > 0 || ctx.Err() != nil {
+		return processed, err
+	}
+	longPollOpts := opts
+	longPollOpts.Transport = "long-poll"
+	longPollProcessed, longPollErr := a.runPollingHostJobs(ctx, longPollOpts, client, hostID, identityFingerprint)
+	if longPollErr == nil || longPollProcessed > 0 || ctx.Err() != nil {
+		return longPollProcessed, longPollErr
+	}
+	pollOpts := opts
+	pollOpts.Transport = "poll"
+	pollProcessed, pollErr := a.runPollingHostJobs(ctx, pollOpts, client, hostID, identityFingerprint)
+	if pollErr != nil {
+		return pollProcessed, fmt.Errorf("auto transport failed: wss: %v; long-poll: %v; poll: %w", err, longPollErr, pollErr)
+	}
+	return pollProcessed, nil
 }
 
 func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
