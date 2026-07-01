@@ -149,6 +149,13 @@ paths automatically. Those are connectivity assists, not authorization
 shortcuts: rdev still requires target consent, host approval, signed jobs,
 local policy checks, and evidence.
 
+For maximum autonomy, invites default to `authority_profile: max-control`. That
+lets the connected remote host act as the Agent's field workstation: it can run
+heuristic discovery from that vantage point, inventory reachable devices, use
+configured SSH/mesh/relay/API paths, and control downstream authorized hosts or
+devices when the job policy grants `downstream.control.scoped`. Every downstream
+action is still tied to the task intent and captured as evidence.
+
 ## Try It Locally
 
 ```bash

@@ -19,6 +19,7 @@ type Options struct {
 	Ticket              model.Ticket
 	Transport           string
 	NetworkScope        string
+	AuthorityProfile    string
 	Once                bool
 	RequireHostApproval bool
 	RdevCommand         string
@@ -34,6 +35,7 @@ type Invite struct {
 	Transport           string            `json:"transport"`
 	TransportPlan       TransportPlan     `json:"transport_plan"`
 	ConnectionPlan      ConnectionPlan    `json:"connection_plan"`
+	AuthorityProfile    AuthorityProfile  `json:"authority_profile"`
 	HostCommand         string            `json:"host_command"`
 	FallbackCommands    []string          `json:"fallback_commands"`
 	HumanNextActions    []string          `json:"human_next_actions"`
@@ -87,6 +89,26 @@ type DiscoveryPlan struct {
 	StopWhen      []string `json:"stop_when"`
 }
 
+type AuthorityProfile struct {
+	SchemaVersion        string               `json:"schema_version"`
+	Profile              string               `json:"profile"`
+	RemoteHostRole       string               `json:"remote_host_role"`
+	Discovery            AuthorityScope       `json:"discovery"`
+	DownstreamControl    AuthorityScope       `json:"downstream_control"`
+	AutonomousActions    []string             `json:"autonomous_actions"`
+	RequiredCapabilities []string             `json:"required_capabilities"`
+	EvidenceRequired     []string             `json:"evidence_required"`
+	StopConditions       []string             `json:"stop_conditions"`
+	ControlPaths         []ConnectionProtocol `json:"control_paths"`
+}
+
+type AuthorityScope struct {
+	Allowed      bool     `json:"allowed"`
+	Scope        string   `json:"scope"`
+	Description  string   `json:"description"`
+	Requirements []string `json:"requirements"`
+}
+
 func New(opts Options) (Invite, error) {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
@@ -123,6 +145,13 @@ func New(opts Options) (Invite, error) {
 	if !validNetworkScope(networkScope) {
 		return Invite{}, fmt.Errorf("unsupported network scope %q", networkScope)
 	}
+	authorityProfile := strings.TrimSpace(opts.AuthorityProfile)
+	if authorityProfile == "" {
+		authorityProfile = "max-control"
+	}
+	if !validAuthorityProfile(authorityProfile) {
+		return Invite{}, fmt.Errorf("unsupported authority profile %q", authorityProfile)
+	}
 	rdevCommand := strings.TrimSpace(opts.RdevCommand)
 	if rdevCommand == "" {
 		rdevCommand = "rdev"
@@ -135,6 +164,7 @@ func New(opts Options) (Invite, error) {
 	hostCommand := hostServeCommand(rdevCommand, manifestURL, transport, opts.Once)
 	transportPlan := newTransportPlan(rdevCommand, manifestURL, transport, opts.Once)
 	connectionPlan := newConnectionPlan(gatewayURL, networkScope)
+	authority := newAuthorityProfile(authorityProfile)
 	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
 
 	agentActions := []string{
@@ -157,6 +187,7 @@ func New(opts Options) (Invite, error) {
 		Transport:        transport,
 		TransportPlan:    transportPlan,
 		ConnectionPlan:   connectionPlan,
+		AuthorityProfile: authority,
 		HostCommand:      hostCommand,
 		FallbackCommands: fallbackCommands,
 		HumanNextActions: []string{
@@ -171,6 +202,7 @@ func New(opts Options) (Invite, error) {
 			"Prefer auto transport. It tries WSS first and falls back to HTTPS long-poll, then short polling for restrictive networks.",
 			"If the Agent and target are on the same LAN, probe scoped local/LAN reachability and prefer a LAN-reachable gateway URL before relay, mesh, or SSH.",
 			"Use mTLS, SSH, mesh, relay, or proxy inputs automatically when they are already configured in the environment; ask only when required values cannot be discovered.",
+			"When authority_profile permits downstream control, the connected host may act as the field workstation for discovering and controlling other reachable authorized devices.",
 		},
 		MCPTools: map[string]string{
 			"list_hosts":    "rdev.hosts.list",
@@ -209,6 +241,15 @@ func validNetworkScope(scope string) bool {
 	}
 }
 
+func validAuthorityProfile(profile string) bool {
+	switch profile {
+	case "standard", "max-control":
+		return true
+	default:
+		return false
+	}
+}
+
 func newTransportPlan(rdevCommand, manifestURL, transport string, once bool) TransportPlan {
 	transports := []string{transport}
 	if transport == "auto" {
@@ -232,6 +273,125 @@ func newTransportPlan(rdevCommand, manifestURL, transport string, once bool) Tra
 			"All candidates are outbound target-host connections; target networks do not need inbound firewall rules.",
 			"Transport only carries signed work and evidence; host-side policy still authorizes every job.",
 			"Relay, VPN, mesh, and SSH are connectivity assists only; they never authorize jobs by themselves.",
+		},
+	}
+}
+
+func newAuthorityProfile(profile string) AuthorityProfile {
+	if profile == "standard" {
+		return AuthorityProfile{
+			SchemaVersion:  "rdev.agent-authority.v1",
+			Profile:        profile,
+			RemoteHostRole: "approved-rdev-host",
+			Discovery: AuthorityScope{
+				Allowed:     true,
+				Scope:       "host-local",
+				Description: "Inspect the connected host and gateway reachability.",
+				Requirements: []string{
+					"host is registered and approved",
+					"job policy includes read-only inspection capabilities",
+				},
+			},
+			DownstreamControl: AuthorityScope{
+				Allowed:     false,
+				Scope:       "none",
+				Description: "Downstream device control is not enabled by the standard profile.",
+			},
+			AutonomousActions: []string{
+				"host-local diagnostics",
+				"gateway reachability checks",
+				"adapter and tool discovery",
+			},
+			RequiredCapabilities: []string{"process.inspect", "fs.read"},
+			EvidenceRequired:     []string{"diagnostic commands", "host capabilities", "job artifact", "audit events"},
+			StopConditions:       []string{"host approval missing", "job policy denies requested capability"},
+		}
+	}
+	return AuthorityProfile{
+		SchemaVersion:  "rdev.agent-authority.v1",
+		Profile:        profile,
+		RemoteHostRole: "field-workstation-and-control-pivot",
+		Discovery: AuthorityScope{
+			Allowed:     true,
+			Scope:       "host-local, scoped LAN/private network, configured public target ranges, configured relay/mesh/SSH routes",
+			Description: "The approved remote host may be used as the Agent's field vantage point for heuristic discovery.",
+			Requirements: []string{
+				"host is registered and approved",
+				"job policy includes network.discovery.scoped or equivalent operator-granted capability",
+				"discovery evidence is captured as job artifacts",
+			},
+		},
+		DownstreamControl: AuthorityScope{
+			Allowed:     true,
+			Scope:       "reachable devices in discovered or configured authorized scopes",
+			Description: "The Agent may control downstream hosts or devices through the approved remote host when credentials, routes, or management protocols are available.",
+			Requirements: []string{
+				"job policy includes downstream.control.scoped",
+				"credentials or control channels are already configured or supplied through local secret storage",
+				"actions remain tied to the stated task intent",
+				"control evidence and affected device identifiers are captured",
+			},
+		},
+		AutonomousActions: []string{
+			"local interface and route discovery",
+			"scoped LAN/private-network reachability probes",
+			"mDNS/DNS/service discovery where available",
+			"configured SSH tunnel use",
+			"configured mesh/VPN route use",
+			"configured relay use",
+			"downstream device diagnostics and control within job policy",
+		},
+		RequiredCapabilities: []string{
+			"network.discovery.scoped",
+			"network.probe.lan",
+			"relay.use",
+			"mesh.use",
+			"ssh.tunnel",
+			"downstream.control.scoped",
+			"shell.user",
+		},
+		EvidenceRequired: []string{
+			"discovery scope",
+			"probes executed",
+			"reachable device inventory",
+			"selected control path",
+			"commands or API calls executed",
+			"redacted outputs",
+			"affected device identifiers",
+			"audit events",
+		},
+		StopConditions: []string{
+			"requested action no longer matches task intent",
+			"credential or target identity is ambiguous",
+			"job policy denies required capability",
+			"action would mutate third-party accounts or credentials without explicit approval",
+			"downstream device appears outside discovered or configured authorized scope",
+		},
+		ControlPaths: []ConnectionProtocol{
+			{
+				ID:            "downstream-ssh",
+				Status:        "agent-managed-when-configured",
+				BestFor:       "reachable servers, routers, appliances, and dev machines with existing SSH access",
+				Requirements:  []string{"ssh config or agent entry exists", "job policy permits downstream.control.scoped", "commands are captured and redacted"},
+				SecurityModel: "SSH provides reachability; rdev job policy and audit govern the Agent action",
+				AgentAction:   "use existing SSH routes automatically when target identity and key choice are unambiguous",
+			},
+			{
+				ID:            "downstream-http-api",
+				Status:        "agent-managed-when-configured",
+				BestFor:       "routers, NAS devices, services, and management APIs reachable from the host",
+				Requirements:  []string{"API endpoint is in scope", "credentials are configured or supplied through secret storage", "state-changing calls match task intent"},
+				SecurityModel: "API auth is a device credential; rdev records intent, evidence, and affected device identity",
+				AgentAction:   "discover and use configured management APIs when they are needed for the task",
+			},
+			{
+				ID:            "downstream-mesh-or-relay",
+				Status:        "agent-managed-when-configured",
+				BestFor:       "devices reachable only through existing mesh, VPN, or relay routes",
+				Requirements:  []string{"route is installed or discoverable", "credential mutation is not required", "device remains in authorized scope"},
+				SecurityModel: "mesh/relay assists routing only; rdev policy authorizes the work",
+				AgentAction:   "use configured mesh, VPN, or relay routes as soon as native reachability fails",
+			},
 		},
 	}
 }

@@ -16,6 +16,12 @@ const (
 	CapabilityServiceModifyApproval  Capability = "service.modify.requiresApproval"
 	CapabilityGUIView                Capability = "gui.view"
 	CapabilityGUIControlApproval     Capability = "gui.control.requiresApproval"
+	CapabilityNetworkDiscoveryScoped Capability = "network.discovery.scoped"
+	CapabilityNetworkProbeLAN        Capability = "network.probe.lan"
+	CapabilityRelayUse               Capability = "relay.use"
+	CapabilityMeshUse                Capability = "mesh.use"
+	CapabilitySSHTunnel              Capability = "ssh.tunnel"
+	CapabilityDownstreamControl      Capability = "downstream.control.scoped"
 	CapabilityDevCodex               Capability = "dev.codex"
 	CapabilityDevClaudeCode          Capability = "claude-code.run"
 	CapabilityDevACP                 Capability = "acpx.run"
@@ -36,7 +42,8 @@ func IsDangerous(cap Capability) bool {
 	case CapabilityShellAdminJIT,
 		CapabilityPackageInstallApproval,
 		CapabilityServiceModifyApproval,
-		CapabilityGUIControlApproval:
+		CapabilityGUIControlApproval,
+		CapabilityDownstreamControl:
 		return true
 	default:
 		return false

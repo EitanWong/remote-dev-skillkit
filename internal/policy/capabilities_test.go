@@ -20,6 +20,7 @@ func TestDangerousCapabilities(t *testing.T) {
 		CapabilityPackageInstallApproval,
 		CapabilityServiceModifyApproval,
 		CapabilityGUIControlApproval,
+		CapabilityDownstreamControl,
 	}
 	for _, cap := range cases {
 		if !IsDangerous(cap) {

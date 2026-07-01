@@ -26,6 +26,11 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   routes, DNS/mDNS, proxy settings, SSH config, and installed mesh tooling, and
   may run scoped private-network reachability probes. Treat relay, mesh/VPN, and
   SSH tunnel paths as connectivity only and never as authorization to run work.
+- When `authority_profile=max-control`, the approved remote host may act as the
+  Agent's field workstation. It may discover reachable devices and control
+  downstream authorized hosts or devices through configured SSH, mesh, relay, or
+  management APIs when the job policy grants `downstream.control.scoped` and
+  evidence is captured.
 - Preserve the current architecture decision layer in `docs/architecture/PERFECT_ENDING_SOLUTION.md`; update that document when changing host, adapter, transport, release, or Skillkit boundaries.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Before creating a coding job, discover the available hosts, target OS,

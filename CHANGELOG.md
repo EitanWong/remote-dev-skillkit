@@ -36,6 +36,13 @@ manifest, transport, and approval steps.
   reachability before asking the user.
 - Added `--network-scope` / `network_scope` hints for invites so agents can
   distinguish auto, internet, LAN, relay, mesh, and SSH-assisted contexts.
+- Added `rdev.agent-authority.v1` with `standard` and default `max-control`
+  profiles. The max-control profile lets an approved remote host act as the
+  Agent's field workstation for heuristic discovery and downstream authorized
+  device control.
+- Added capability vocabulary for `network.discovery.scoped`,
+  `network.probe.lan`, `relay.use`, `mesh.use`, `ssh.tunnel`, and
+  `downstream.control.scoped`.
 
 ### Changed
 
@@ -51,6 +58,9 @@ manifest, transport, and approval steps.
   configured relay, mesh, and SSH paths automatically, while those paths remain
   connectivity choices only and never replace rdev target consent, host
   approval, signed jobs, local policy checks, or evidence.
+- Documented max-control behavior for using the remote host as a field control
+  point over reachable downstream devices while keeping evidence requirements
+  and task-intent boundaries explicit.
 
 ### Verification
 

@@ -126,6 +126,23 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 			SelectionOrder    []string `json:"selection_order"`
 			EnvironmentProbes []string `json:"environment_probes"`
 		} `json:"connection_plan"`
+		AuthorityProfile struct {
+			SchemaVersion  string `json:"schema_version"`
+			Profile        string `json:"profile"`
+			RemoteHostRole string `json:"remote_host_role"`
+			Discovery      struct {
+				Allowed bool   `json:"allowed"`
+				Scope   string `json:"scope"`
+			} `json:"discovery"`
+			DownstreamControl struct {
+				Allowed bool   `json:"allowed"`
+				Scope   string `json:"scope"`
+			} `json:"downstream_control"`
+			RequiredCapabilities []string `json:"required_capabilities"`
+			ControlPaths         []struct {
+				ID string `json:"id"`
+			} `json:"control_paths"`
+		} `json:"authority_profile"`
 		HostCommand        string   `json:"host_command"`
 		FallbackCommands   []string `json:"fallback_commands"`
 		HumanNextActions   []string `json:"human_next_actions"`
@@ -159,6 +176,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if payload.ConnectionPlan.DiscoveryPlan.SchemaVersion != "rdev.discovery-plan.v1" || len(payload.ConnectionPlan.DiscoveryPlan.Allowed) == 0 {
 		t.Fatalf("invite should include discovery plan: %#v", payload.ConnectionPlan)
+	}
+	if payload.AuthorityProfile.SchemaVersion != "rdev.agent-authority.v1" || payload.AuthorityProfile.Profile != "max-control" || !payload.AuthorityProfile.Discovery.Allowed || !payload.AuthorityProfile.DownstreamControl.Allowed {
+		t.Fatalf("invite should include max-control authority profile: %#v", payload.AuthorityProfile)
+	}
+	if len(payload.AuthorityProfile.ControlPaths) < 3 || !slices.Contains(payload.AuthorityProfile.RequiredCapabilities, "downstream.control.scoped") {
+		t.Fatalf("max-control profile should include downstream control paths and capability: %#v", payload.AuthorityProfile)
 	}
 	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())

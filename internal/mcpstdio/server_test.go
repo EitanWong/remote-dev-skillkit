@@ -114,6 +114,10 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || discoveryPlan["schema_version"] != "rdev.discovery-plan.v1" {
 		t.Fatalf("expected discovery plan, got %#v", connectionPlan)
 	}
+	authority, ok := structured["authority_profile"].(map[string]any)
+	if !ok || authority["schema_version"] != "rdev.agent-authority.v1" || authority["profile"] != "max-control" {
+		t.Fatalf("expected max-control authority profile, got %#v", structured)
+	}
 }
 
 func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {
