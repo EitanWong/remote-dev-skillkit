@@ -101,6 +101,12 @@ manifest, transport, and approval steps.
 - Added `scripts/audit-skills.sh` and wired it into `./scripts/check.sh` so
   Skill structure, frontmatter, metadata, linked references, hidden files, and
   long-reference contents are checked continuously.
+- Added regression tests for the Skills quality audit covering valid Skill
+  trees, missing Agent metadata, broken progressive-disclosure references,
+  hidden files, and long references without contents indexes.
+- Added release-smoke verification that exported Skillkit bundles pass
+  `rdev skillkit verify --bundle` and include passing `skill_agents_metadata`
+  checks before install-plan validation.
 
 ### Changed
 
@@ -161,6 +167,12 @@ manifest, transport, and approval steps.
   contract.
 - Added a contents index to the long runtime-memory reference so progressive
   disclosure remains scan-friendly.
+- Made the Skills quality audit reusable against temporary Skill roots so CI and
+  future Harness tests can validate isolated fixtures instead of only the live
+  repository tree.
+- Promoted Skill metadata verification into the release-smoke acceptance path,
+  making installability, Harness metadata, and bundle verification one
+  continuous gate.
 
 ### Verification
 

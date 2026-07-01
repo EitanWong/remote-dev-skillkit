@@ -108,6 +108,9 @@ if not candidates:
 print(pathlib.Path(candidates[0]["candidate_dir"]) / "skillkit")
 PY
 )"
+go run ./cmd/rdev skillkit verify \
+  --bundle "$first_skillkit_dir" \
+  > "$work_dir/skillkit-verification.json"
 skillkit_install_dir="$work_dir/skillkit-install-plan"
 go run ./cmd/rdev skillkit plan-install \
   --bundle "$first_skillkit_dir" \
@@ -156,6 +159,7 @@ post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_te
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
 post_release_tampered = json.loads((root / "post-release-tampered-verification.json").read_text())
 skillkit_install_plan_output = json.loads((root / "skillkit-install-plan-output.json").read_text())
+skillkit_verification = json.loads((root / "skillkit-verification.json").read_text())
 skillkit_install_plan_verification = json.loads((root / "skillkit-install-plan-verification.json").read_text())
 skillkit_install_dry_run = json.loads((root / "skillkit-install-dry-run.json").read_text())
 skillkit_install_execute = json.loads((root / "skillkit-install-execute.json").read_text())
@@ -253,6 +257,9 @@ assert skillkit_install_plan_output["schema"] == "rdev.skillkit-install-plan.v1"
 assert skillkit_install_plan_output["ok"] is True, skillkit_install_plan_output
 assert skillkit_install_plan_output["external_mutation"] is False, skillkit_install_plan_output
 assert skillkit_install_plan_output["framework_count"] == 6, skillkit_install_plan_output
+assert skillkit_verification["schema"] == "rdev.skillkit-bundle-verification.v1", skillkit_verification
+assert skillkit_verification["ok"] is True, skillkit_verification
+assert any(check["name"] == "skill_agents_metadata" and check["passed"] is True for check in skillkit_verification["checks"]), skillkit_verification
 assert skillkit_manifest["adaptive_configuration"]["schema_version"] == "rdev.adaptive-configuration-contract.v1", skillkit_manifest
 assert skillkit_manifest["adaptive_configuration"]["required"] is True, skillkit_manifest
 assert "rdev doctor" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
@@ -294,6 +301,8 @@ print(json.dumps({
     "post_release_schema": post_release_plan["schema_version"],
     "post_release_verification_schema": post_release_verification["schema_version"],
     "skillkit_install_plan_schema": skillkit_install_plan_output["schema"],
+    "skillkit_bundle_verification_schema": skillkit_verification["schema"],
+    "skillkit_agents_metadata": True,
     "skillkit_install_plan_verification_schema": skillkit_install_plan_verification["schema"],
     "skillkit_install_report_schema": skillkit_install_execute["schema"],
     "skillkit_adaptive_configuration": True,

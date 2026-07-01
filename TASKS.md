@@ -126,6 +126,8 @@
 - [x] Add `agents/openai.yaml` metadata for all shipped Skills to improve Codex/Harness discoverability.
 - [x] Verify shipped Skill `agents/openai.yaml` metadata during Skillkit bundle verification.
 - [x] Add a Skills quality audit script and wire it into the main check flow.
+- [x] Add regression coverage for the Skills quality audit so invalid Skill metadata, references, hidden files, and long references fail predictably.
+- [x] Wire Skillkit bundle verification and `skill_agents_metadata` acceptance into release smoke.
 
 ## Next
 

@@ -2,11 +2,12 @@
 set -euo pipefail
 
 python3 - <<'PY'
+import os
 import re
 import sys
 from pathlib import Path
 
-root = Path("skills")
+root = Path(os.environ.get("SKILLS_ROOT", "skills"))
 failures = []
 required_skills = {
     "host-triage",
@@ -133,5 +134,5 @@ if failures:
         print(failure, file=sys.stderr)
     sys.exit(1)
 
-print(f"skills_audit_ok=true skills={len(required_skills)}")
+print(f"skills_audit_ok=true skills={len(skill_dirs)} required={len(required_skills)}")
 PY
