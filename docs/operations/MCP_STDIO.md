@@ -19,7 +19,7 @@ Agent-first session tools include:
 It creates a ticket and returns a manifest URL, `host_command`,
 `transport_plan`, `connection_plan`, `customer_bootstrap`,
 `host_context_plan`, `agent_provisioning_plan`,
-`agent_collaboration_plan`, `fallback_commands`, `authority_profile`,
+`agent_collaboration_plan`, `localization_plan`, `fallback_commands`, `authority_profile`,
 `connectivity_checks`, `human_next_actions`, and `agent_next_actions`. Agents
 should call this before asking a human to connect a new target host. The command
 still requires consent on the target machine; it does not execute remotely by
@@ -59,6 +59,14 @@ clients may delegate bounded subtasks to discovered peers when doing so helps
 the remote repair or development task, but peer work must be wrapped in rdev
 jobs so host policy, workspace locks, redaction, cancellation, approval gates,
 audit, and evidence still apply.
+
+The `localization_plan` is the standard for cross-language behavior. MCP
+clients should detect the target host/customer language from explicit `lang`
+inputs, `Accept-Language`, `LANG`/`LC_*`/`LANGUAGE`, Windows UI culture, macOS
+AppleLanguages, Linux locale settings, and operator preferences. User-facing
+instructions, approvals, summaries, and evidence should use the selected BCP 47
+language. Protocol keys, schema versions, capability ids, command names, paths,
+JSON field names, checksums, and code blocks must remain stable and untranslated.
 
 The `connection_plan` separates native support from agent-managed paths:
 implemented native paths are outbound WSS/mTLS, HTTPS long-poll, HTTPS

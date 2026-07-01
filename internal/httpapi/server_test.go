@@ -59,13 +59,19 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 	ticket := createTicket(t, handler)
 	for _, tc := range []struct {
 		path     string
+		accept   string
 		contains []string
 	}{
 		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "bootstrap.sh", "bootstrap.ps1"}},
+		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "接下来会发生什么", "bootstrap.ps1"}},
+		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
 		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"rdev host serve", "--manifest-url", "--transport auto", "--once=false"}},
 		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"rdev host serve", "--manifest-url", "--transport auto", "--once=false"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		if tc.accept != "" {
+			req.Header.Set("Accept-Language", tc.accept)
+		}
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {

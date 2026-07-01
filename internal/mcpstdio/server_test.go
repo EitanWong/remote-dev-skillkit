@@ -134,6 +134,10 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || collaborationPlan["schema_version"] != "rdev.agent-collaboration-plan.v1" || collaborationPlan["mode"] != "host-local-peer-collaboration" {
 		t.Fatalf("expected agent collaboration plan, got %#v", structured)
 	}
+	localizationPlan, ok := structured["localization_plan"].(map[string]any)
+	if !ok || localizationPlan["schema_version"] != "rdev.localization-plan.v1" || localizationPlan["mode"] != "target-host-language-auto" {
+		t.Fatalf("expected localization plan, got %#v", structured)
+	}
 }
 
 func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {

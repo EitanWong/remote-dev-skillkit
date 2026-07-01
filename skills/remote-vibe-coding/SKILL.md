@@ -42,6 +42,13 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   context slices narrow, and treat peer Agents as adapters or collaborators, not
   authorization roots. Peer work must produce messages, task status, artifacts,
   checksums, redaction metadata, and audit-linked evidence.
+- Treat `localization_plan` as mandatory language discipline. Detect the target
+  host/customer language from explicit preference, browser hints, OS locale,
+  Windows UI culture, macOS AppleLanguages, Linux locale settings, and
+  environment variables. Localize customer-facing instructions, approval
+  prompts, job summaries, skill guidance, MCP summaries, and evidence summaries.
+  Keep protocol keys, schema versions, commands, paths, JSON fields, checksums,
+  and code blocks unchanged.
 - Prefer `--transport auto` for unknown or hostile networks. It attempts WSS,
   then HTTPS long-poll, then short polling, all as outbound target-host
   connections. If the host does not appear, ask about proxy requirements, TLS
@@ -126,9 +133,11 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
    evidence for every setup action.
 8. Follow `agent_collaboration_plan`: discover A2A/MCP/local Agent peers and
    delegate bounded subtasks only when their advertised capabilities fit.
-9. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
-10. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
-11. Create a job with workspace policy.
-12. Stream status until completion.
-13. Inspect artifacts and audit events.
-14. Request approval before push/merge/deploy.
+9. Follow `localization_plan`: select the target-side language and localize
+   user-facing prompts, summaries, and evidence text.
+10. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
+11. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
+12. Create a job with workspace policy.
+13. Stream status until completion.
+14. Inspect artifacts and audit events.
+15. Request approval before push/merge/deploy.

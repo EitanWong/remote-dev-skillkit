@@ -173,6 +173,14 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 			CollaborationUses []string `json:"collaboration_uses"`
 			DelegationRules   []string `json:"delegation_rules"`
 		} `json:"agent_collaboration_plan"`
+		LocalizationPlan struct {
+			SchemaVersion      string   `json:"schema_version"`
+			Mode               string   `json:"mode"`
+			SupportedLanguages []string `json:"supported_languages"`
+			DetectionSources   []string `json:"detection_sources"`
+			LocalizedSurfaces  []string `json:"localized_surfaces"`
+			FallbackOrder      []string `json:"fallback_order"`
+		} `json:"localization_plan"`
 		HostCommand        string   `json:"host_command"`
 		FallbackCommands   []string `json:"fallback_commands"`
 		HumanNextActions   []string `json:"human_next_actions"`
@@ -236,6 +244,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if !slices.Contains(payload.CollaborationPlan.Protocols, "a2a-agent-card") || len(payload.CollaborationPlan.DiscoveryTargets) == 0 || len(payload.CollaborationPlan.CollaborationUses) == 0 || len(payload.CollaborationPlan.DelegationRules) == 0 {
 		t.Fatalf("collaboration plan should include A2A discovery and delegation rules: %#v", payload.CollaborationPlan)
+	}
+	if payload.LocalizationPlan.SchemaVersion != "rdev.localization-plan.v1" || payload.LocalizationPlan.Mode != "target-host-language-auto" {
+		t.Fatalf("invite should include localization plan: %#v", payload.LocalizationPlan)
+	}
+	if !slices.Contains(payload.LocalizationPlan.SupportedLanguages, "zh-CN") || !slices.Contains(payload.LocalizationPlan.SupportedLanguages, "ar") || len(payload.LocalizationPlan.DetectionSources) == 0 || len(payload.LocalizationPlan.LocalizedSurfaces) == 0 || len(payload.LocalizationPlan.FallbackOrder) == 0 {
+		t.Fatalf("localization plan should define languages, detection, surfaces, and fallback: %#v", payload.LocalizationPlan)
 	}
 	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())

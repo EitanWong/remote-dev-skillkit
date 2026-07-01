@@ -417,14 +417,16 @@ func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestU
 	joinBase := strings.TrimRight(requestBaseURL(r), "/") + "/join/" + code
 	shellCommand := "curl -fsSL " + shellQuote(joinBase+"/bootstrap.sh") + " | sh"
 	powerShellCommand := "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' | iex\""
+	locale := joinLocale(r)
+	copy := joinCopy(locale)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, `<!doctype html>
-<html lang="en">
+<html lang="%s">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Remote Dev Skillkit Join</title>
+  <title>%s</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.45; max-width: 860px; }
     code, pre { background: #f4f4f5; border-radius: 6px; padding: .2rem .35rem; }
@@ -433,21 +435,208 @@ func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestU
   </style>
 </head>
 <body>
-  <h1>Connect This Machine</h1>
-  <p class="note">Run one command on the computer that needs help. The connection is visible, outbound-only, revocable, and scoped to this support ticket.</p>
+  <h1>%s</h1>
+  <p class="note">%s</p>
   <h2>macOS / Linux</h2>
   <pre><code>%s</code></pre>
   <h2>Windows PowerShell</h2>
   <pre><code>%s</code></pre>
-  <h2>What Happens Next</h2>
+  <h2>%s</h2>
   <ol>
-    <li>The bootstrap checks for <code>rdev</code>.</li>
-    <li>It starts a visible attended host session with <code>--transport auto</code>.</li>
-    <li>The Agent waits for the host, approves it when policy requires, and runs scoped repair jobs.</li>
+    <li>%s</li>
+    <li>%s</li>
+    <li>%s</li>
   </ol>
   <p>Manifest: <code>%s</code></p>
 </body>
-</html>`, html.EscapeString(shellCommand), html.EscapeString(powerShellCommand), html.EscapeString(manifestURL))
+</html>`,
+		html.EscapeString(locale),
+		html.EscapeString(copy.Title),
+		html.EscapeString(copy.Heading),
+		html.EscapeString(copy.Note),
+		html.EscapeString(shellCommand),
+		html.EscapeString(powerShellCommand),
+		html.EscapeString(copy.NextHeading),
+		copy.StepCheck,
+		copy.StepStart,
+		copy.StepAgent,
+		html.EscapeString(manifestURL),
+	)
+}
+
+type joinPageCopy struct {
+	Title       string
+	Heading     string
+	Note        string
+	NextHeading string
+	StepCheck   string
+	StepStart   string
+	StepAgent   string
+}
+
+func joinCopy(locale string) joinPageCopy {
+	switch locale {
+	case "zh-CN":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit 连接",
+			Heading:     "连接这台机器",
+			Note:        "在需要帮助的电脑上运行一条命令。连接是可见、仅出站、可撤销，并且限定在此支持工单内。",
+			NextHeading: "接下来会发生什么",
+			StepCheck:   `启动脚本会检查 <code>rdev</code>。`,
+			StepStart:   `它会用 <code>--transport auto</code> 启动一个可见的协助式主机会话。`,
+			StepAgent:   "Agent 会等待主机上线，在策略需要时完成批准，然后运行受限的修复任务。",
+		}
+	case "es":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "Conectar Esta Maquina",
+			Note:        "Ejecuta un comando en el equipo que necesita ayuda. La conexion es visible, solo saliente, revocable y limitada a este ticket.",
+			NextHeading: "Que pasa despues",
+			StepCheck:   `El bootstrap comprueba <code>rdev</code>.`,
+			StepStart:   `Inicia una sesion visible con <code>--transport auto</code>.`,
+			StepAgent:   "El Agent espera el host, lo aprueba si la politica lo requiere y ejecuta trabajos de reparacion limitados.",
+		}
+	case "fr":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "Connecter Cette Machine",
+			Note:        "Executez une commande sur l'ordinateur a aider. La connexion est visible, sortante uniquement, revocable et limitee a ce ticket.",
+			NextHeading: "Et ensuite",
+			StepCheck:   `Le bootstrap verifie <code>rdev</code>.`,
+			StepStart:   `Il demarre une session visible avec <code>--transport auto</code>.`,
+			StepAgent:   "L'Agent attend le host, l'approuve si la politique l'exige, puis execute des reparations limitees.",
+		}
+	case "de":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "Diese Maschine Verbinden",
+			Note:        "Fuhre einen Befehl auf dem Computer aus, der Hilfe braucht. Die Verbindung ist sichtbar, nur ausgehend, widerrufbar und auf dieses Ticket begrenzt.",
+			NextHeading: "Was als Nachstes passiert",
+			StepCheck:   `Der Bootstrap pruft <code>rdev</code>.`,
+			StepStart:   `Er startet eine sichtbare Sitzung mit <code>--transport auto</code>.`,
+			StepAgent:   "Der Agent wartet auf den Host, genehmigt ihn falls erforderlich und startet begrenzte Reparaturjobs.",
+		}
+	case "ja":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "このマシンを接続",
+			Note:        "サポートが必要なコンピューターで 1 つのコマンドを実行します。接続は可視、アウトバウンドのみ、取り消し可能で、このサポートチケットに限定されます。",
+			NextHeading: "次に行われること",
+			StepCheck:   `bootstrap は <code>rdev</code> を確認します。`,
+			StepStart:   `<code>--transport auto</code> で可視のホストセッションを開始します。`,
+			StepAgent:   "Agent はホストを待ち、ポリシーが必要とする場合に承認し、限定された修復ジョブを実行します。",
+		}
+	case "ko":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "이 머신 연결",
+			Note:        "도움이 필요한 컴퓨터에서 명령 하나를 실행합니다. 연결은 보이는 방식이며, 아웃바운드 전용이고, 철회 가능하며, 이 지원 티켓 범위로 제한됩니다.",
+			NextHeading: "다음 단계",
+			StepCheck:   `bootstrap 이 <code>rdev</code> 를 확인합니다.`,
+			StepStart:   `<code>--transport auto</code> 로 보이는 호스트 세션을 시작합니다.`,
+			StepAgent:   "Agent 는 호스트를 기다리고, 정책상 필요하면 승인한 뒤 제한된 복구 작업을 실행합니다.",
+		}
+	case "pt-BR":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "Conectar Esta Maquina",
+			Note:        "Execute um comando no computador que precisa de ajuda. A conexao e visivel, somente de saida, revogavel e limitada a este ticket.",
+			NextHeading: "O que acontece depois",
+			StepCheck:   `O bootstrap verifica <code>rdev</code>.`,
+			StepStart:   `Ele inicia uma sessao visivel com <code>--transport auto</code>.`,
+			StepAgent:   "O Agent aguarda o host, aprova quando a politica exige e executa tarefas de reparo limitadas.",
+		}
+	case "hi":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "इस मशीन को कनेक्ट करें",
+			Note:        "जिस कंप्यूटर को मदद चाहिए उस पर एक कमांड चलाएं। कनेक्शन दिखने वाला, केवल outbound, revoke करने योग्य, और इस support ticket तक सीमित है।",
+			NextHeading: "आगे क्या होगा",
+			StepCheck:   `bootstrap <code>rdev</code> जांचता है।`,
+			StepStart:   `यह <code>--transport auto</code> के साथ visible host session शुरू करता है।`,
+			StepAgent:   "Agent host का इंतजार करता है, policy की जरूरत पर approve करता है, और scoped repair jobs चलाता है।",
+		}
+	case "ar":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "توصيل هذا الجهاز",
+			Note:        "شغّل أمرا واحدا على الكمبيوتر الذي يحتاج إلى مساعدة. الاتصال ظاهر، صادر فقط، قابل للإلغاء، ومحدود بتذكرة الدعم هذه.",
+			NextHeading: "ماذا يحدث بعد ذلك",
+			StepCheck:   `يتحقق bootstrap من <code>rdev</code>.`,
+			StepStart:   `يبدأ جلسة host مرئية باستخدام <code>--transport auto</code>.`,
+			StepAgent:   "ينتظر Agent ظهور host، ويوافق عليه عند الحاجة حسب السياسة، ثم يشغل مهام إصلاح محددة النطاق.",
+		}
+	case "ru":
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "Подключить Эту Машину",
+			Note:        "Выполните одну команду на компьютере, которому нужна помощь. Подключение видимое, только исходящее, отзывное и ограничено этим тикетом.",
+			NextHeading: "Что будет дальше",
+			StepCheck:   `bootstrap проверит <code>rdev</code>.`,
+			StepStart:   `Он запустит видимую сессию host с <code>--transport auto</code>.`,
+			StepAgent:   "Agent дождется host, выполнит approval при необходимости и запустит ограниченные repair jobs.",
+		}
+	default:
+		return joinPageCopy{
+			Title:       "Remote Dev Skillkit Join",
+			Heading:     "Connect This Machine",
+			Note:        "Run one command on the computer that needs help. The connection is visible, outbound-only, revocable, and scoped to this support ticket.",
+			NextHeading: "What Happens Next",
+			StepCheck:   `The bootstrap checks for <code>rdev</code>.`,
+			StepStart:   `It starts a visible attended host session with <code>--transport auto</code>.`,
+			StepAgent:   "The Agent waits for the host, approves it when policy requires, and runs scoped repair jobs.",
+		}
+	}
+}
+
+func joinLocale(r *http.Request) string {
+	if lang := supportedJoinLocale(r.URL.Query().Get("lang")); lang != "" {
+		return lang
+	}
+	for _, part := range strings.Split(r.Header.Get("Accept-Language"), ",") {
+		tag := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if lang := supportedJoinLocale(tag); lang != "" {
+			return lang
+		}
+	}
+	return "en"
+}
+
+func supportedJoinLocale(tag string) string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(tag), "_", "-")
+	if normalized == "" {
+		return ""
+	}
+	lower := strings.ToLower(normalized)
+	switch lower {
+	case "en":
+		return "en"
+	case "zh-cn", "zh-hans", "zh":
+		return "zh-CN"
+	case "es":
+		return "es"
+	case "fr":
+		return "fr"
+	case "de":
+		return "de"
+	case "ja":
+		return "ja"
+	case "ko":
+		return "ko"
+	case "pt-br", "pt":
+		return "pt-BR"
+	case "hi":
+		return "hi"
+	case "ar":
+		return "ar"
+	case "ru":
+		return "ru"
+	default:
+		if base, _, ok := strings.Cut(lower, "-"); ok {
+			return supportedJoinLocale(base)
+		}
+		return ""
+	}
 }
 
 func writeShellBootstrap(w http.ResponseWriter, manifestURL string) {

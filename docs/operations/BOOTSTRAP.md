@@ -158,6 +158,14 @@ perform bounded diagnostics, summaries, coding subtasks, or tool-specific
 checks, but all delegation must remain inside rdev signed jobs, host policy,
 workspace locks, redaction, approval gates, audit, and evidence.
 
+`localization_plan` defines the language rule. The join page supports `?lang=`
+and `Accept-Language` matching for the repository's supported languages:
+English, Simplified Chinese, Spanish, French, German, Japanese, Korean,
+Brazilian Portuguese, Hindi, Arabic, and Russian. After the host connects, the
+Agent should also inspect the target OS locale and user language settings, then
+localize target-side instructions and approval text. Commands, paths, schema
+keys, checksums, and code blocks are not translated.
+
 The development gateway serves:
 
 ```text

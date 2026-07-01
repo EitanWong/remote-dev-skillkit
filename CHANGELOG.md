@@ -60,6 +60,11 @@ manifest, transport, and approval steps.
 - Added `rdev.agent-collaboration-plan.v1` to invite output for discovering and
   using local or configured peer Agents, including A2A-style Agent Card peers,
   MCP stdio peers, and local Agent CLIs for bounded collaborative subtasks.
+- Added `rdev.localization-plan.v1` to invite output so agents can detect the
+  target host/customer language, localize user-facing surfaces, and preserve
+  stable protocol keys, commands, paths, schemas, and checksums.
+- Added language-aware join page matching through `?lang=` and
+  `Accept-Language` for the repository's supported quick-start languages.
 
 ### Changed
 
@@ -90,6 +95,8 @@ manifest, transport, and approval steps.
 - Documented peer-Agent collaboration as a bounded adapter/collaborator path:
   A2A/MCP/local Agent work must still use signed jobs, host policy, workspace
   locks, redaction, approvals, audit, and evidence.
+- Documented target-host language matching for skills, MCP summaries, bootstrap
+  instructions, approvals, job status, and evidence summaries.
 
 ### Verification
 

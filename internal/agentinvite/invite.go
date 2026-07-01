@@ -40,6 +40,7 @@ type Invite struct {
 	HostContextPlan     HostContextPlan   `json:"host_context_plan"`
 	ProvisioningPlan    ProvisioningPlan  `json:"agent_provisioning_plan"`
 	CollaborationPlan   CollaborationPlan `json:"agent_collaboration_plan"`
+	LocalizationPlan    LocalizationPlan  `json:"localization_plan"`
 	HostCommand         string            `json:"host_command"`
 	FallbackCommands    []string          `json:"fallback_commands"`
 	HumanNextActions    []string          `json:"human_next_actions"`
@@ -159,6 +160,17 @@ type CollaborationPlan struct {
 	EvidenceRequired    []string `json:"evidence_required"`
 }
 
+type LocalizationPlan struct {
+	SchemaVersion      string   `json:"schema_version"`
+	Mode               string   `json:"mode"`
+	SupportedLanguages []string `json:"supported_languages"`
+	DetectionSources   []string `json:"detection_sources"`
+	LocalizedSurfaces  []string `json:"localized_surfaces"`
+	AgentRules         []string `json:"agent_rules"`
+	FallbackOrder      []string `json:"fallback_order"`
+	EvidenceRequired   []string `json:"evidence_required"`
+}
+
 func New(opts Options) (Invite, error) {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
@@ -219,6 +231,7 @@ func New(opts Options) (Invite, error) {
 	hostContextPlan := newHostContextPlan()
 	provisioningPlan := newProvisioningPlan()
 	collaborationPlan := newCollaborationPlan()
+	localizationPlan := newLocalizationPlan()
 	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
 
 	agentActions := []string{
@@ -246,6 +259,7 @@ func New(opts Options) (Invite, error) {
 		HostContextPlan:   hostContextPlan,
 		ProvisioningPlan:  provisioningPlan,
 		CollaborationPlan: collaborationPlan,
+		LocalizationPlan:  localizationPlan,
 		HostCommand:       hostCommand,
 		FallbackCommands:  fallbackCommands,
 		HumanNextActions: []string{
@@ -264,6 +278,7 @@ func New(opts Options) (Invite, error) {
 			"Keep remote environment, project structure, requirement notes, and large evidence on the host; load only indexed slices or artifact references into the Agent server context.",
 			"Let the host detect missing skills, MCP tools, adapters, language runtimes, package managers, and project dependencies; install user-scoped missing pieces automatically when policy allows, and ask before elevation or external mutation.",
 			"Discover local or configured Agent peers, including A2A-compatible agents, when collaboration can help; delegate only through signed jobs, scoped policy, approvals, redaction, and evidence.",
+			"Detect the target host language and localize customer bootstrap, skills, MCP responses, job summaries, approval prompts, and evidence summaries; fall back predictably when a locale is unavailable.",
 		},
 		MCPTools: map[string]string{
 			"list_hosts":    "rdev.hosts.list",
@@ -275,6 +290,64 @@ func New(opts Options) (Invite, error) {
 		RequiresHumanAction: []string{"target-host-consent", "operator-approval-when-required"},
 		CreatedAt:           createdAt,
 	}, nil
+}
+
+func newLocalizationPlan() LocalizationPlan {
+	return LocalizationPlan{
+		SchemaVersion: "rdev.localization-plan.v1",
+		Mode:          "target-host-language-auto",
+		SupportedLanguages: []string{
+			"en",
+			"zh-CN",
+			"es",
+			"fr",
+			"de",
+			"ja",
+			"ko",
+			"pt-BR",
+			"hi",
+			"ar",
+			"ru",
+		},
+		DetectionSources: []string{
+			"join page lang query parameter",
+			"HTTP Accept-Language",
+			"target host locale environment variables such as LANG, LC_ALL, LC_MESSAGES, and LANGUAGE",
+			"Windows UI culture and user culture",
+			"macOS AppleLanguages and locale",
+			"Linux locale and desktop language settings",
+			"operator or customer explicit language preference",
+		},
+		LocalizedSurfaces: []string{
+			"join page and bootstrap instructions",
+			"Skillkit README and install notes",
+			"Agent skills and workflow prompts",
+			"MCP tool summaries and user-facing errors",
+			"approval prompts and risk explanations",
+			"job status, artifact summaries, and evidence bundle summaries",
+			"release, verification, and acceptance instructions",
+		},
+		AgentRules: []string{
+			"use BCP 47 language tags and normalize regional variants before matching",
+			"prefer the target host/customer language for target-side instructions",
+			"prefer the operator's configured language for operator-only reports when known",
+			"keep protocol keys, schema versions, capability ids, command names, paths, and code blocks unchanged",
+			"do not translate secrets, tokens, file paths, shell syntax, JSON field names, or evidence checksums",
+			"include the selected language in evidence when language affects customer instructions or approvals",
+			"ask only when detected languages conflict and the next action is customer-facing or high risk",
+		},
+		FallbackOrder: []string{
+			"exact BCP 47 match",
+			"base language match",
+			"English",
+		},
+		EvidenceRequired: []string{
+			"detected locale sources",
+			"selected BCP 47 language",
+			"fallback reason when exact match is unavailable",
+			"localized customer-facing text version or artifact id",
+		},
+	}
 }
 
 func newHostContextPlan() HostContextPlan {

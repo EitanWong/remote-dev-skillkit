@@ -150,6 +150,14 @@ collaborators, not authorization roots: delegation still runs through signed
 rdev jobs, host policy, workspace locks, redaction, approval gates, audit, and
 evidence.
 
+Everything user-facing is language-aware. Invite output includes
+`localization_plan`, and join pages can match `?lang=` or the target browser's
+`Accept-Language`. Agents should detect the target host/customer language from
+host locale, OS UI language, browser hints, and explicit preferences, then
+localize customer instructions, skills, MCP summaries, approval prompts, job
+status, and evidence summaries. Protocol keys, schema versions, commands,
+paths, JSON fields, checksums, and code blocks stay unchanged.
+
 `--transport auto` is the field-friendly default: the host tries outbound WSS
 first, falls back to HTTPS long-poll when WebSocket upgrades are blocked, and
 keeps short polling as the maximum-compatibility path for stubborn networks.
@@ -242,6 +250,9 @@ storage provider packages, and final external GitHub publishing steps.
   sources, prefer host-local/user/workspace scope, and record evidence.
 - No peer Agent free-for-all: A2A/MCP/local Agent collaboration must stay
   bounded by signed jobs, policy, redaction, approvals, and evidence.
+- No English-only UX assumption: target-side instructions, skills, MCP
+  summaries, approvals, and evidence summaries should match the target host
+  language with a predictable fallback.
 - Every serious remote job must be signed, policy-checked, auditable, and
   revocable.
 - Destructive actions and high-risk capabilities need explicit approval gates.
