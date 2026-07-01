@@ -142,6 +142,18 @@ For other frameworks, swap `codex` and the target directory for the plan that
 For the full installer contract, framework notes, and safe deployment rules, see
 [Skillkit Install](docs/operations/SKILLKIT_INSTALL.md).
 
+Check for newer GitHub releases without changing local files:
+
+```bash
+rdev update check --repo EitanWong/remote-dev-skillkit
+rdev update plan --repo EitanWong/remote-dev-skillkit
+```
+
+The update plan is review-first: it selects the matching platform archive,
+emits download and checksum commands, and reminds the agent to verify
+`release-bundle.json` with the configured release root before replacing any
+binary or restarting a managed service.
+
 ## Agent-First Remote Session
 
 When a machine needs help, the agent should create an invite instead of asking

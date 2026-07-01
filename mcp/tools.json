@@ -519,6 +519,56 @@
       }
     },
     {
+      "name": "rdev.update.check",
+      "description": "Check the latest GitHub Release for Remote Dev Skillkit and compare it with the installed version.",
+      "safety": "Read-only GitHub release metadata lookup; does not download, install, or replace files.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "api_base_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "current_version": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "repo": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.update.plan",
+      "description": "Create a dry-run update plan from the latest GitHub Release, including platform archive selection and verification steps.",
+      "safety": "Read-only planning; does not download, install, replace binaries, restart services, or mutate configuration.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "api_base_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "current_version": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "platform": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "repo": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.adapter.verify_result",
       "description": "Verify an adapter result artifact against the public result-artifact conformance contract.",
       "safety": "Read-only artifact validation; does not execute on a host.",
@@ -720,6 +770,5 @@
         "type": "object"
       }
     }
-  ],
-  "version": "0.0.1"
+  ]
 }

@@ -85,7 +85,13 @@ Steps:
 11. Configure this agent's MCP client to run `rdev mcp serve`, or produce the
    exact MCP config snippet and file path if the framework requires manual
    review. Do not silently overwrite existing MCP config.
-12. If the user wants to control a remote host, build a connection-mode plan:
+12. Run `rdev update check --repo EitanWong/remote-dev-skillkit` and
+    `rdev update plan --repo EitanWong/remote-dev-skillkit` to see whether a
+    newer GitHub Release is available. Treat update output as review-only
+    unless I explicitly ask you to upgrade. Before replacing any binary or
+    restarting a managed service, verify the selected archive checksum and
+    signed `release-bundle.json` with the configured release root.
+13. If the user wants to control a remote host, build a connection-mode plan:
     - If the Agent and host are on the same machine, use local MCP stdio and
       local/dev gateway flows.
     - If the Agent and host share a LAN or VPN, prefer a LAN-reachable gateway
@@ -100,14 +106,16 @@ Steps:
       installation.
     - If no open/free option is viable, ask before using paid hosted relay,
       cloud tunnel, DNS, firewall, service, or persistent network changes.
-13. Verify the installed skill folders exist, verify `.remote-dev-skillkit/mcp/tools.json`
+14. Verify the installed skill folders exist, verify `.remote-dev-skillkit/mcp/tools.json`
     exists, and run any available framework command that lists skills or MCP
     tools.
-14. Report:
+15. Report:
     - detected framework
     - installed skill target
     - whether MCP was configured or the exact snippet I need to add
     - verification commands run
+    - whether the installed `rdev` is current, newer release available, or
+      update status unknown
     - selected connection mode for local use
     - selected remote connection mode, if remote-host work was requested
     - whether any tunnel/mesh/relay is needed, which option was chosen, and why

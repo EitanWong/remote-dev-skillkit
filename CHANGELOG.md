@@ -78,6 +78,11 @@ manifest, transport, and approval steps.
   agents should prefer existing or suitable frp, Chisel, headscale, or
   WireGuard paths before asking for paid hosted relays, and must ask before
   privileged, persistent, firewall, DNS, cloud, or security-policy changes.
+- Added `rdev update check` and `rdev update plan` so installed agents and
+  managed hosts can discover the latest GitHub Release, compare it with the
+  current version, select the matching platform archive, and produce
+  reviewable download/checksum/release-bundle verification steps before any
+  binary replacement.
 - Added Agent engineering discipline to contribution and Skill guidance:
   read before guessing, confirm before ambiguous execution, reuse before
   creating, verify before claiming, preserve architecture, admit unknowns, and

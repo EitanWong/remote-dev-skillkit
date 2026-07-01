@@ -45,6 +45,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
@@ -90,6 +91,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.operatorAuth(args[1:])
 	case "release":
 		return a.release(args[1:])
+	case "update":
+		return a.update(ctx, args[1:])
 	case "enrollment":
 		return a.enrollment(ctx, args[1:])
 	case "trust":
@@ -111,6 +114,70 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
+	}
+}
+
+func (a App) update(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing update subcommand")
+	}
+	switch args[0] {
+	case "check":
+		fs := flag.NewFlagSet("update check", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", update.DefaultRepo, "GitHub repository in OWNER/REPO form")
+		apiBaseURL := fs.String("api-base-url", update.DefaultAPIBaseURL, "GitHub API base URL")
+		currentVersion := fs.String("current-version", buildinfo.Version, "currently installed rdev version")
+		tokenFile := fs.String("github-token-file", "", "optional file containing GitHub token for private/rate-limited checks")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		token, err := readOptionalTokenFile(*tokenFile)
+		if err != nil {
+			return err
+		}
+		check, err := update.CheckLatest(ctx, http.DefaultClient, update.Options{
+			Repo:           *repo,
+			APIBaseURL:     *apiBaseURL,
+			CurrentVersion: *currentVersion,
+			Token:          token,
+		})
+		if err != nil {
+			_ = writeJSON(a.Stdout, check)
+			return err
+		}
+		return writeJSON(a.Stdout, check)
+	case "plan":
+		fs := flag.NewFlagSet("update plan", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repo := fs.String("repo", update.DefaultRepo, "GitHub repository in OWNER/REPO form")
+		apiBaseURL := fs.String("api-base-url", update.DefaultAPIBaseURL, "GitHub API base URL")
+		currentVersion := fs.String("current-version", buildinfo.Version, "currently installed rdev version")
+		platform := fs.String("platform", runtime.GOOS+"/"+runtime.GOARCH, "target platform as GOOS/GOARCH")
+		tokenFile := fs.String("github-token-file", "", "optional file containing GitHub token for private/rate-limited checks")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		token, err := readOptionalTokenFile(*tokenFile)
+		if err != nil {
+			return err
+		}
+		opts := update.Options{
+			Repo:           *repo,
+			APIBaseURL:     *apiBaseURL,
+			CurrentVersion: *currentVersion,
+			Platform:       *platform,
+			Token:          token,
+		}
+		check, err := update.CheckLatest(ctx, http.DefaultClient, opts)
+		if err != nil {
+			_ = writeJSON(a.Stdout, check)
+			return err
+		}
+		plan := update.PlanFromCheck(check, opts)
+		return writeJSON(a.Stdout, plan)
+	default:
+		return fmt.Errorf("unknown update subcommand %q", args[0])
 	}
 }
 
@@ -5916,6 +5983,8 @@ Usage:
   rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
   rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
   rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
+  rdev update check --repo EitanWong/remote-dev-skillkit
+  rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
@@ -7090,6 +7159,23 @@ func parseJSONStringMatrix(raw, name string) ([][]string, error) {
 		return nil, fmt.Errorf("invalid %s: %w", name, err)
 	}
 	return values, nil
+}
+
+func readOptionalTokenFile(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(content)), nil
+}
+
+func writeJSON(out io.Writer, value any) error {
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(value)
 }
 
 func allAcceptanceChecksPassed(checks []acceptance.Check) bool {

@@ -5472,6 +5472,113 @@ func TestReleaseVerifyCandidateChecksPreparedCandidate(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckReadsLatestGitHubRelease(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/EitanWong/remote-dev-skillkit/releases/latest" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("X-GitHub-Api-Version"); got == "" {
+			t.Fatal("expected GitHub API version header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{
+  "tag_name": "v0.2.0",
+  "name": "v0.2.0",
+  "html_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/tag/v0.2.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-07-02T00:00:00Z",
+  "assets": [
+    {
+      "name": "remote-dev-skillkit-v0.2.0-darwin-arm64.tar.gz",
+      "browser_download_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/download/v0.2.0/remote-dev-skillkit-v0.2.0-darwin-arm64.tar.gz",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 123,
+      "content_type": "application/gzip"
+    },
+    {
+      "name": "release-bundle.json",
+      "browser_download_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/download/v0.2.0/release-bundle.json",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 456,
+      "content_type": "application/json"
+    }
+  ]
+}`)
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"update", "check",
+		"--repo", "EitanWong/remote-dev-skillkit",
+		"--api-base-url", server.URL,
+		"--current-version", "v0.1.0",
+	}); err != nil {
+		t.Fatalf("expected update check to pass: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"schema_version": "rdev.update-check.v1"`) ||
+		!strings.Contains(stdout.String(), `"latest_version": "v0.2.0"`) ||
+		!strings.Contains(stdout.String(), `"update_available": true`) {
+		t.Fatalf("unexpected update check output: %s", stdout.String())
+	}
+}
+
+func TestUpdatePlanSelectsPlatformArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{
+  "tag_name": "v0.2.0",
+  "name": "v0.2.0",
+  "html_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/tag/v0.2.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-07-02T00:00:00Z",
+  "assets": [
+    {
+      "name": "remote-dev-skillkit-v0.2.0-linux-amd64.tar.gz",
+      "browser_download_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/download/v0.2.0/remote-dev-skillkit-v0.2.0-linux-amd64.tar.gz",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 123
+    },
+    {
+      "name": "remote-dev-skillkit-v0.2.0-windows-amd64.zip",
+      "browser_download_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/download/v0.2.0/remote-dev-skillkit-v0.2.0-windows-amd64.zip",
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "size": 234
+    },
+    {
+      "name": "release-bundle.json",
+      "browser_download_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/download/v0.2.0/release-bundle.json",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 456
+    }
+  ]
+}`)
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"update", "plan",
+		"--repo", "EitanWong/remote-dev-skillkit",
+		"--api-base-url", server.URL,
+		"--current-version", "v0.1.0",
+		"--platform", "linux/amd64",
+	}); err != nil {
+		t.Fatalf("expected update plan to pass: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"schema_version": "rdev.update-plan.v1"`) ||
+		!strings.Contains(stdout.String(), `"platform": "linux/amd64"`) ||
+		!strings.Contains(stdout.String(), "remote-dev-skillkit-v0.2.0-linux-amd64.tar.gz") ||
+		!strings.Contains(stdout.String(), "rdev release verify-bundle") ||
+		!strings.Contains(stdout.String(), `"plan_is_dry_run"`) {
+		t.Fatalf("unexpected update plan output: %s", stdout.String())
+	}
+}
+
 func writeCLIArtifactForTest(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
@@ -15,6 +16,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
@@ -153,6 +155,10 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.explainShellPolicy(params.Arguments)
 	case "rdev.enrollment.verify_certificate":
 		data, err = s.verifyEnrollmentCertificate(params.Arguments)
+	case "rdev.update.check":
+		data, err = s.updateCheck(params.Arguments)
+	case "rdev.update.plan":
+		data, err = s.updatePlan(params.Arguments)
 	case "rdev.adapter.verify_result":
 		data, err = s.verifyAdapterResult(params.Arguments)
 	case "rdev.adapter.verify_lifecycle":
@@ -168,6 +174,28 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		return nil, err
 	}
 	return toolResult(data)
+}
+
+func (s Server) updateCheck(args map[string]any) (any, error) {
+	return update.CheckLatest(context.Background(), http.DefaultClient, update.Options{
+		Repo:           stringArg(args, "repo", update.DefaultRepo),
+		APIBaseURL:     stringArg(args, "api_base_url", update.DefaultAPIBaseURL),
+		CurrentVersion: stringArg(args, "current_version", buildinfo.Version),
+	})
+}
+
+func (s Server) updatePlan(args map[string]any) (any, error) {
+	opts := update.Options{
+		Repo:           stringArg(args, "repo", update.DefaultRepo),
+		APIBaseURL:     stringArg(args, "api_base_url", update.DefaultAPIBaseURL),
+		CurrentVersion: stringArg(args, "current_version", buildinfo.Version),
+		Platform:       stringArg(args, "platform", ""),
+	}
+	check, err := update.CheckLatest(context.Background(), http.DefaultClient, opts)
+	if err != nil {
+		return check, err
+	}
+	return update.PlanFromCheck(check, opts), nil
 }
 
 func (s Server) createInvite(args map[string]any) (any, error) {

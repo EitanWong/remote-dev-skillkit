@@ -133,6 +133,72 @@ go run ./cmd/rdev skillkit install \
   --execute \
   > "$work_dir/skillkit-install-execute.json"
 
+python3 - "$work_dir/plan-output.json" "$work_dir/update-api" <<'PY'
+import json
+import pathlib
+import sys
+
+plan_output = json.loads(pathlib.Path(sys.argv[1]).read_text())
+plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
+api_root = pathlib.Path(sys.argv[2])
+release_dir = api_root / "repos" / plan["repo"] / "releases"
+release_dir.mkdir(parents=True, exist_ok=True)
+release = {
+    "tag_name": plan["tag"],
+    "name": plan["title"],
+    "html_url": f"https://github.com/{plan['repo']}/releases/tag/{plan['tag']}",
+    "draft": False,
+    "prerelease": False,
+    "published_at": "2026-07-02T00:00:00Z",
+    "assets": [
+        {
+            "name": asset["name"],
+            "browser_download_url": f"https://github.com/{plan['repo']}/releases/download/{plan['tag']}/{asset['name']}",
+            "digest": asset["sha256"],
+            "size": asset["size_bytes"],
+            "content_type": "application/octet-stream",
+        }
+        for asset in plan["assets"]
+    ],
+}
+(release_dir / "latest").write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
+PY
+cat > "$work_dir/update-api-server.py" <<'PY'
+import functools
+import http.server
+import pathlib
+import socketserver
+import sys
+
+root = pathlib.Path(sys.argv[1])
+port_file = pathlib.Path(sys.argv[2])
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+with socketserver.TCPServer(("127.0.0.1", 0), handler) as server:
+    port_file.write_text(str(server.server_address[1]), encoding="utf-8")
+    server.serve_forever()
+PY
+python3 "$work_dir/update-api-server.py" "$work_dir/update-api" "$work_dir/update-api-port" > "$work_dir/update-api-server.log" 2>&1 &
+update_api_pid=$!
+for _ in $(seq 1 50); do
+  update_api_port="$(cat "$work_dir/update-api-port" 2>/dev/null || true)"
+  if [[ -n "$update_api_port" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ -z "${update_api_port:-}" ]]; then
+  echo "update API smoke server did not start" >&2
+  exit 1
+fi
+go run ./cmd/rdev update plan \
+  --repo "$repo" \
+  --api-base-url "http://127.0.0.1:$update_api_port" \
+  --current-version "v0.0.0" \
+  --platform linux/amd64 \
+  > "$work_dir/update-plan.json"
+kill "$update_api_pid"
+wait "$update_api_pid" 2>/dev/null || true
+
 cp -R "$post_release_dir" "$work_dir/post-release-install-tampered"
 printf '\nNew-Service rdev\n' >> "$work_dir/post-release-install-tampered/verify-windows-amd64.ps1"
 if scripts/github/verify-post-release-install-plan.sh \
@@ -163,6 +229,7 @@ skillkit_verification = json.loads((root / "skillkit-verification.json").read_te
 skillkit_install_plan_verification = json.loads((root / "skillkit-install-plan-verification.json").read_text())
 skillkit_install_dry_run = json.loads((root / "skillkit-install-dry-run.json").read_text())
 skillkit_install_execute = json.loads((root / "skillkit-install-execute.json").read_text())
+update_plan = json.loads((root / "update-plan.json").read_text())
 skillkit_manifest = json.loads((pathlib.Path(skillkit_install_plan_output["bundle"]) / "manifest.json").read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
@@ -288,6 +355,12 @@ assert skillkit_install_execute["external_mutation"] is False, skillkit_install_
 install_target = pathlib.Path(skillkit_install_execute["target"])
 assert (install_target / "remote-vibe-coding" / "SKILL.md").is_file(), skillkit_install_execute
 assert (install_target / ".remote-dev-skillkit" / "mcp" / "tools.json").is_file(), skillkit_install_execute
+assert update_plan["schema_version"] == "rdev.update-plan.v1", update_plan
+assert update_plan["update_available"] is True, update_plan
+assert update_plan["platform"] == "linux/amd64", update_plan
+assert update_plan["selected_archive"]["name"].endswith("linux-amd64.tar.gz"), update_plan
+assert any("rdev release verify-bundle" in step for step in update_plan["verification_steps"]), update_plan
+assert any(check["name"] == "plan_is_dry_run" and check["passed"] is True for check in update_plan["checks"]), update_plan
 
 print(json.dumps({
     "ok": True,
@@ -312,6 +385,7 @@ print(json.dumps({
     "post_release_platforms": post_release_output["platform_count"],
     "skillkit_install_frameworks": skillkit_install_plan_output["framework_count"],
     "skillkit_install_executed": skillkit_install_execute["executed"],
+    "update_plan_smoke": True,
     "public_surface_audit": True,
     "dev_mtls_host_smoke": True,
     "wss_mtls_host_smoke": True,

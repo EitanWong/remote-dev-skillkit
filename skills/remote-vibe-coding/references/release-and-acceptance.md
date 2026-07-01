@@ -7,6 +7,10 @@ planning, platform candidates, or OS acceptance evidence.
 
 - For release-surface changes, expect the project check script and release
   smoke script to pass locally and in GitHub Actions before claiming readiness.
+- For installed agents or managed hosts, use `rdev update check` and
+  `rdev update plan` to discover newer GitHub Releases and produce reviewable
+  update steps. Treat update plans as dry-run evidence until an operator
+  approves the upgrade.
 - Before publishing artifacts or bootstrap download instructions, create and
   verify a signed release bundle using paths and root keys from the current
   release plan, not examples.
@@ -15,6 +19,9 @@ planning, platform candidates, or OS acceptance evidence.
 - Review the generated build manifest, SBOM, provenance, and checksums before
   preparing candidates.
 - Treat failed candidate verification as release-blocking.
+- Before replacing binaries or restarting managed services, verify the selected
+  archive checksum and signed `release-bundle.json` with the configured release
+  root, keep rollback artifacts, then run `rdev version` and `rdev doctor`.
 
 ## Skillkit Distribution
 

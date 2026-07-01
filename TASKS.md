@@ -68,6 +68,7 @@
 - [x] Refine the canonical perfect ending into a final delivery architecture with sealed contracts, component boundaries, host kernel layers, API surfaces, reliability rules, and close plan.
 - [x] Add post-release install verification planning from local GitHub Release dry-run plans.
 - [x] Add post-release install plan verification and tamper smoke coverage.
+- [x] Add GitHub latest-release update check and dry-run update planning for installed agents and hosts.
 - [x] Add trust lifecycle CLI for root/gateway key initialization, rotation, revocation, and bundle verification.
 - [x] Add final perfect-ending architecture refinement with product lines, mode separation, trust boundaries, protocol closure, and implementation spine.
 - [x] Add Linux systemd user-unit managed host lifecycle with safe install/status/dry-run control/uninstall commands.

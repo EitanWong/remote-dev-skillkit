@@ -9,6 +9,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +144,56 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	managedDevPlan, ok := structured["managed_development_plan"].(map[string]any)
 	if !ok || managedDevPlan["schema_version"] != "rdev.managed-development-plan.v1" || managedDevPlan["mode"] != "owned-long-running-developer-workstation" {
 		t.Fatalf("expected managed development plan, got %#v", structured)
+	}
+}
+
+func TestServerToolCallUpdatePlan(t *testing.T) {
+	releaseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{
+  "tag_name": "v0.2.0",
+  "name": "v0.2.0",
+  "html_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/tag/v0.2.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-07-02T00:00:00Z",
+  "assets": [
+    {
+      "name": "remote-dev-skillkit-v0.2.0-linux-amd64.tar.gz",
+      "browser_download_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/download/v0.2.0/remote-dev-skillkit-v0.2.0-linux-amd64.tar.gz",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 123
+    },
+    {
+      "name": "release-bundle.json",
+      "browser_download_url": "https://github.com/EitanWong/remote-dev-skillkit/releases/download/v0.2.0/release-bundle.json",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 456
+    }
+  ]
+}`)
+	}))
+	defer releaseServer.Close()
+
+	input := mcpRequestLine(t, "rdev.update.plan", map[string]any{
+		"repo":            "EitanWong/remote-dev-skillkit",
+		"api_base_url":    releaseServer.URL,
+		"current_version": "v0.1.0",
+		"platform":        "linux/amd64",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.update-plan.v1" ||
+		structured["platform"] != "linux/amd64" ||
+		structured["update_available"] != true {
+		t.Fatalf("unexpected update plan: %#v", structured)
 	}
 }
 

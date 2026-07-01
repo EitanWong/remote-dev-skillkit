@@ -114,6 +114,23 @@ folders plus `.remote-dev-skillkit/mcp/tools.json` and framework notes, and does
 not write MCP runtime configuration. Generic MCP agents must use `--target`
 explicitly.
 
+## Update Checks
+
+Installed agents and managed hosts can check GitHub for newer releases without
+changing local files:
+
+```bash
+rdev update check --repo EitanWong/remote-dev-skillkit
+rdev update plan --repo EitanWong/remote-dev-skillkit
+```
+
+`rdev update check` emits `rdev.update-check.v1`. `rdev update plan` emits
+`rdev.update-plan.v1`, selects the matching platform archive, and prints
+download/checksum/release-bundle verification steps. Treat the plan as dry-run
+evidence. Do not replace binaries, update services, or mutate agent framework
+configuration until the operator approves the upgrade and the selected archive
+and signed `release-bundle.json` verify against the configured release root.
+
 ## Generic Agent Runtime
 
 1. Install or build the `rdev` binary.

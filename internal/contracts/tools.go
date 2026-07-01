@@ -186,6 +186,27 @@ func Tools() []Tool {
 			}, []string{"root_public_key"}),
 		},
 		{
+			Name:        "rdev.update.check",
+			Description: "Check the latest GitHub Release for Remote Dev Skillkit and compare it with the installed version.",
+			Safety:      "Read-only GitHub release metadata lookup; does not download, install, or replace files.",
+			InputSchema: object(map[string]any{
+				"repo":            stringField(),
+				"api_base_url":    stringField(),
+				"current_version": stringField(),
+			}, nil),
+		},
+		{
+			Name:        "rdev.update.plan",
+			Description: "Create a dry-run update plan from the latest GitHub Release, including platform archive selection and verification steps.",
+			Safety:      "Read-only planning; does not download, install, replace binaries, restart services, or mutate configuration.",
+			InputSchema: object(map[string]any{
+				"repo":            stringField(),
+				"api_base_url":    stringField(),
+				"current_version": stringField(),
+				"platform":        stringField(),
+			}, nil),
+		},
+		{
 			Name:        "rdev.adapter.verify_result",
 			Description: "Verify an adapter result artifact against the public result-artifact conformance contract.",
 			Safety:      "Read-only artifact validation; does not execute on a host.",
