@@ -32,8 +32,13 @@ Use this skill before making changes on a target host.
   and directory existence checks.
 - Do not invent a gateway URL, ticket code, root key, release URL, user home
   path, or framework install path. If it cannot be discovered safely, ask.
-- Treat local examples such as `https://api.example.com/v1`, `/Users/example`,
-  `/home/example`, and `C:\Users\Alice` as placeholders, not deployment facts.
+- Keep path and configuration neutral. Do not assume a fixed checkout path,
+  user home, temp directory, workspace root, framework install directory,
+  gateway URL, or release artifact location. Resolve them from read-only
+  probes, active configuration, MCP/CLI output, manifest metadata, or explicit
+  human/operator confirmation.
+- Treat example domains, POSIX paths, Windows paths, and placeholder values as
+  documentation only, not deployment facts or defaults.
 
 ## Output
 

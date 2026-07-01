@@ -20,10 +20,19 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   roots, checksums, workspace roots, adapter choices, approval policies, or
   framework paths for real configuration. Example values are documentation
   only; do not invent values from them.
+- Keep path and configuration neutral. Do not assume a fixed checkout path,
+  user home, temp directory, workspace root, framework install directory,
+  gateway URL, repo owner/name, or release artifact location. Resolve values
+  from read-only probes, active configuration, MCP/CLI output, manifest
+  metadata, generated invite fields, or explicit human/operator confirmation.
 - If gateway, workspace, adapter, approval, release, or framework configuration
   is unclear after read-only probes, ask before generating commands.
-- For Windows temporary acceptance, prefer `rdev acceptance windows-temporary --release-bundle-url <url> --out <empty-dir> ...`, then verify it with `rdev acceptance verify-windows-temporary --plan <out>/windows-temporary-plan.json` before sending a one-command bootstrap to a target user.
-- After a real Windows temporary run, package release evidence with `rdev acceptance package-windows-temporary --plan <plan> --out <empty-dir> --transcript <file> --release-verification <file> --audit <file> --no-persistence-dir <dir> --approval-probes-dir <dir>`.
+- For Windows temporary acceptance, generate the plan using a confirmed release
+  bundle URL and output directory, then verify the emitted plan path before
+  sending a one-command bootstrap to a target user.
+- After a real Windows temporary run, package release evidence using the plan,
+  output directory, transcript, release verification, audit, no-persistence
+  evidence, and approval-probe paths produced or confirmed for that run.
 - For published Windows bootstrap artifacts, hash-pin `rdev-verify.exe` and prefer signed release bundle verification; use single host release manifests only for compatibility.
 - For PowerShell jobs, require `powershell.user`, use scoped commands with `allow_commands`, and do not bypass the target host's PowerShell execution policy.
 - Do not create hidden persistence.

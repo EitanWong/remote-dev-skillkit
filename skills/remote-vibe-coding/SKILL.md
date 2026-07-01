@@ -30,7 +30,17 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   progress tracking. Share concise auditable reasoning summaries, assumptions,
   confidence, and verification evidence with the human instead of private
   internal reasoning.
-- Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
+- Keep path and configuration neutral. Do not assume a fixed checkout path,
+  user home, temp directory, framework install directory, gateway URL, repo
+  owner/name, workspace root, or release artifact location. Resolve paths from
+  the active Skillkit manifest, current project root, environment probes, MCP
+  tool output, CLI flags, configured policy, or explicit human/operator
+  confirmation. Treat placeholders such as `<workspace>`, `<repo>`, `<dir>`,
+  `<url>`, and `<owner/repo>` as values to discover or ask for, never defaults.
+- Follow the canonical final safety loop documented by the project's
+  architecture decision layer: typed intent, signed host-bound envelope,
+  host-side validation, locked workspace, adapter execution, redacted evidence,
+  audit, and revocation.
 - Treat Remote Dev Skillkit as AI-native. The human should be able to say which
   machine needs help; the agent should probe local configuration, create an
   invite with MCP tool `rdev.invites.create` or CLI `rdev invite create`, hand
@@ -92,12 +102,15 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   downstream authorized hosts or devices through configured SSH, mesh, relay, or
   management APIs when the job policy grants `downstream.control.scoped` and
   evidence is captured.
-- Preserve the current architecture decision layer in `docs/architecture/PERFECT_ENDING_SOLUTION.md`; update that document when changing host, adapter, transport, release, or Skillkit boundaries.
+- Preserve the current architecture decision layer resolved from the project
+  documentation index or Skillkit manifest; update that document when changing
+  host, adapter, transport, release, or Skillkit boundaries.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Before creating a coding job, discover the available hosts, target OS,
-  workspace path, Git state, installed adapters, gateway/MCP configuration,
-  release trust inputs, and operator-approved capabilities. Probe with read-only checks
-  such as `rdev doctor`, `rdev.hosts.list`, `rdev.hosts.capabilities`,
+  workspace root, Git state, installed adapters, gateway/MCP configuration,
+  release trust inputs, and operator-approved capabilities from the active
+  context. Probe with read-only checks such as `rdev doctor`,
+  `rdev.hosts.list`, `rdev.hosts.capabilities`,
   `rdev mcp tools`, `git status`, `git rev-parse`, `command -v`, and `where`.
 - If gateway URL, ticket code, host identity, workspace root, adapter choice,
   release root, framework install path, or approval policy is unclear, ask the
@@ -124,18 +137,36 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - When canceling a running Codex, Claude Code, acpx, shell, or PowerShell job, expect the host to cooperatively cancel the local process, keep the gateway job in `canceled` state, and append cancellation evidence when available.
 - For adapter SDK or release-evidence runs, prefer starting managed or temporary hosts with `--capture-runtime-fixture` so shell, PowerShell, Codex, Claude Code, and acpx jobs append `rdev.adapter-runtime-fixture.v1` evidence in addition to their primary adapter result artifacts.
 - For new adapters, start with `rdev adapter scaffold`, implement the runtime lifecycle through `adapterkit.RunLifecycle`, then verify lifecycle, runtime, result, and cancellation evidence through MCP tools `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_runtime`, `rdev.adapter.verify_result`, and `rdev.adapter.verify_cancellation`, CLI commands `rdev adapter verify-lifecycle`, `rdev adapter verify-runtime`, `rdev adapter verify-result`, and `rdev adapter verify-cancellation`, or `pkg/adapterkit` conformance before exposing the adapter to agents; shell, PowerShell, Codex, Claude Code, and acpx are the reference fixtures.
-- Use `rdev acceptance managed-mac --out <empty-dir> --repo <repo>` before claiming the managed Mac coding golden path; review both `evidence/` and `approval-evidence/`.
-- Verify acceptance output with `rdev acceptance verify --report <out>/report.json` before treating it as release evidence.
-- Before publishing release artifacts or bootstrap download instructions, create and verify a signed release bundle with `rdev release create-bundle ...`, `rdev release verify-bundle --bundle <bundle> --root-public-key <root>`, and standalone `rdev-verify --bundle <bundle> --root-public-key <root>` when target-host bootstrap verification matters.
-- Build release artifacts with `scripts/release/build-artifacts.sh` and review `rdev.build-artifacts.v1`, `sbom.spdx.json`, `provenance.json`, and `checksums.txt` before preparing candidates; release smoke must use real binaries for bootstrap-critical artifacts such as `rdev-host.exe` and `rdev-verify.exe`.
-- For multi-platform releases, run `scripts/release/prepare-platform-candidates.sh --build-manifest <build-artifacts.json> ...` and review `rdev.platform-release-candidates.v1`; each platform candidate must verify independently before a public release plan is trusted.
-- Use `scripts/github/plan-platform-release.sh --platform-candidates <platform-candidates.json> --repo <owner/repo>` for multi-platform public release planning; review platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and generated `gh release` commands before any external mutation.
-- Before creating or mutating GitHub repositories, labels, milestones, issues, projects, or releases, run `scripts/github/audit-project-readiness.sh --repo <owner/repo> --out <path>` and review `rdev.github-project-readiness.v1`; the report must keep `external_mutation=false`.
+- Use managed Mac acceptance commands only with an operator-confirmed output
+  directory and repository path; review both evidence and approval-evidence
+  directories produced by the current run.
+- Verify acceptance output with the report path emitted by the current
+  acceptance command before treating it as release evidence.
+- Before publishing release artifacts or bootstrap download instructions,
+  create and verify a signed release bundle using paths and root keys from the
+  current release plan, not examples.
+- Build release artifacts through the project-provided release script resolved
+  from the current project root or Skillkit manifest, then review the generated
+  build manifest, SBOM, provenance, and checksums before preparing candidates.
+- For multi-platform releases, run the project-provided platform-candidate and
+  release-planning scripts resolved from the current project root or Skillkit
+  manifest; each platform candidate must verify independently before a public
+  release plan is trusted.
+- Before creating or mutating GitHub repositories, labels, milestones, issues,
+  projects, or releases, run the project-provided readiness audit with the
+  operator-confirmed repository id and output path; the report must keep
+  `external_mutation=false`.
 - Before publishing a GitHub Release or instructing users to install artifacts, run `rdev release prepare-candidate ...` and then `rdev release verify-candidate --candidate <dir|release-candidate.json>`; review `sbom.spdx.json`, `provenance.json`, package-relative paths, and verification output, and treat `ok=false` as release-blocking.
 - For agent-framework distribution, run `rdev skillkit export`, `rdev skillkit verify`, `rdev skillkit plan-install`, `rdev skillkit verify-install-plan`, and `rdev skillkit install` dry-run before telling users to install into Codex, Claude Code, Hermes, OpenClaw, OpenCode, or a generic MCP agent; review generated scripts and require `--execute` before local copying while keeping `external_mutation=false`.
-- Use `scripts/github/plan-release.sh --candidate <dir|release-candidate.json> --repo <owner/repo>` to create a local GitHub Release plan; do not run the generated `gh release` commands without explicit operator approval.
+- Use the project-provided release-planning script with the current candidate
+  path and operator-confirmed repository id to create a local GitHub Release
+  plan; do not run the generated `gh release` commands without explicit
+  operator approval.
 - For release-surface changes, expect `./scripts/check.sh` and `./scripts/ci/release-smoke.sh` to pass locally and in GitHub Actions before claiming release readiness.
-- For service-backed managed Mac acceptance, first generate and review `rdev acceptance managed-mac-service --out <empty-dir> --gateway <url> --ticket-code <code> --repo <repo>`; it must not auto-run `launchctl`. Use `rdev host service-control --execute` only after reviewing the generated plan.
+- For service-backed managed Mac acceptance, first generate and review a plan
+  using operator-confirmed output directory, gateway URL, ticket code, and repo
+  path; it must not auto-run `launchctl`. Use `rdev host service-control
+  --execute` only after reviewing the generated plan.
 - For Linux managed service work, use `rdev host install-service --platform linux` only as a reviewed systemd user-unit plan with release-bundle gate arguments; for release-evidence planning, run `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, then package real run evidence with `rdev acceptance package-linux-managed-service`. Do not claim real Linux managed-service support until a Linux host proves start/status/reboot-or-logout reconnect/job evidence/stop/uninstall acceptance.
 - For Windows managed service work, use `rdev host install-service --platform windows` only as a reviewed `sc.exe` command plan with `start= demand` and release-bundle gate arguments; for release-evidence planning, run `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`. Do not claim real Windows Service support until a clean Windows host proves create/status/start/reconnect/stop/uninstall acceptance.
 - Do not push, merge, deploy, or modify credentials without approval.

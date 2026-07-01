@@ -21,6 +21,10 @@ Use this skill before telling the user a remote job is complete.
 - Do not invent gateway URLs, paths, ticket codes, root keys, release URLs,
   checksums, workspace roots, adapter choices, or approval policies from
   examples or placeholders.
+- Keep path and configuration neutral. Evidence paths, workspace roots,
+  artifact locations, verifier paths, framework directories, and gateway URLs
+  must come from job metadata, current context, MCP/CLI output, manifest
+  metadata, or explicit human/operator confirmation.
 - Job reached a terminal state.
 - No pending approval requests remain.
 - Commands and exit codes are recorded.

@@ -119,6 +119,7 @@
 - [x] Add Agent engineering discipline to contribution rules and remote-vibe-coding skill guidance.
 - [x] Add clarification-first one-question-at-a-time rule to contribution rules and remote-vibe-coding skill guidance.
 - [x] Add deep reasoning discipline to contribution rules and remote-vibe-coding skill guidance without exposing private chain-of-thought.
+- [x] Add path/configuration neutrality rules to Skill guidance to avoid hardcoded path or environment coupling.
 
 ## Next
 

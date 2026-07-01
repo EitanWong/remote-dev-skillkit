@@ -81,6 +81,10 @@ manifest, transport, and approval steps.
   requirement decomposition, multiple hypotheses, assumption testing,
   risk-scaled analysis, progress tracking, and concise auditable reasoning
   summaries without exposing private chain-of-thought.
+- Added path/configuration neutrality rules to Skill guidance so agents resolve
+  checkout paths, workspace roots, framework directories, gateways, repos, and
+  release artifacts from manifests, probes, active configuration, or explicit
+  confirmation instead of hardcoded examples.
 
 ### Changed
 
@@ -123,6 +127,9 @@ manifest, transport, and approval steps.
 - Updated the remote-vibe-coding skill to internalize stronger reasoning
   practices for high-risk remote development work while keeping public outputs
   concise, evidence-based, and safe for open-source use.
+- Reduced path-coupled command examples in Skill guidance and reframed
+  placeholders as values that must be discovered or confirmed for the current
+  run.
 
 ### Verification
 
