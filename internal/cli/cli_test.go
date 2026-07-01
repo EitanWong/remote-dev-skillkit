@@ -75,6 +75,74 @@ func TestMCPToolsOutputsJSON(t *testing.T) {
 	}
 }
 
+func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	handler := httpapi.NewServer(gw).Handler()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--reason", "repair target host",
+		"--capabilities", "shell.user,codex.run,git.diff",
+		"--transport", "wss",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion    string   `json:"schema_version"`
+		GatewayURL       string   `json:"gateway_url"`
+		ManifestURL      string   `json:"manifest_url"`
+		HostCommand      string   `json:"host_command"`
+		HumanNextActions []string `json:"human_next_actions"`
+		AgentNextActions []string `json:"agent_next_actions"`
+		Ticket           struct {
+			Code         string   `json:"code"`
+			Capabilities []string `json:"capabilities"`
+		} `json:"ticket"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid invite JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.agent-invite.v1" {
+		t.Fatalf("unexpected schema: %#v", payload)
+	}
+	if payload.GatewayURL != server.URL {
+		t.Fatalf("expected gateway URL %q, got %#v", server.URL, payload.GatewayURL)
+	}
+	if !strings.Contains(payload.ManifestURL, "/v1/tickets/") || !strings.Contains(payload.HostCommand, "host serve --manifest-url") || !strings.Contains(payload.HostCommand, "--transport wss") {
+		t.Fatalf("invite should include manifest URL and WSS host command: %#v", payload)
+	}
+	if len(payload.HumanNextActions) != 1 || len(payload.AgentNextActions) == 0 {
+		t.Fatalf("invite should split human and agent actions: %#v", payload)
+	}
+	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
+		t.Fatalf("invite leaked local private path: %s", stdout.String())
+	}
+}
+
+func TestInviteCreateRequiresGateway(t *testing.T) {
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{"invite", "create", "--reason", "repair"})
+	if err == nil || !strings.Contains(err.Error(), "requires --gateway") {
+		t.Fatalf("expected gateway requirement, got %v", err)
+	}
+}
+
+func TestGatewayTicketsURLAcceptsAPIRoot(t *testing.T) {
+	if got := gatewayTicketsURL("https://api.example.com/v1"); got != "https://api.example.com/v1/tickets" {
+		t.Fatalf("unexpected API root tickets URL: %s", got)
+	}
+	if got := gatewayTicketsURL("https://api.example.com"); got != "https://api.example.com/v1/tickets" {
+		t.Fatalf("unexpected gateway root tickets URL: %s", got)
+	}
+}
+
 func TestOperatorAuthInitAndVerify(t *testing.T) {
 	dir := t.TempDir()
 	authPath := filepath.Join(dir, "operators.json")

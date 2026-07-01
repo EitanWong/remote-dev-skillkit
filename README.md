@@ -8,6 +8,11 @@ host-local policy, evidence bundles, and release verification so they can fix
 real development environments without being handed the keys to the whole
 building.
 
+The product is AI-native: the human talks to an agent, and the agent uses
+`rdev.invites.create`, `rdev.hosts.*`, and `rdev.jobs.*` to prepare the remote
+session, wait for the host, request approval when needed, run scoped work, and
+bring back evidence.
+
 Multilingual quick starts: [English](README.md), [简体中文](docs/i18n/README.zh-CN.md), [Español](docs/i18n/README.es.md), [Français](docs/i18n/README.fr.md), [Deutsch](docs/i18n/README.de.md), [日本語](docs/i18n/README.ja.md), [한국어](docs/i18n/README.ko.md), [Português](docs/i18n/README.pt-BR.md), [हिन्दी](docs/i18n/README.hi.md), [العربية](docs/i18n/README.ar.md), [Русский](docs/i18n/README.ru.md).
 
 ## What It Does
@@ -95,6 +100,29 @@ For other frameworks, swap `codex` and the target directory for the plan that
 
 For the full installer contract, framework notes, and safe deployment rules, see
 [Skillkit Install](docs/operations/SKILLKIT_INSTALL.md).
+
+## Agent-First Remote Session
+
+When a machine needs help, the agent should create an invite instead of asking
+the human to assemble flags by hand:
+
+```bash
+rdev invite create \
+  --gateway https://api.example.com/v1 \
+  --reason "repair target development environment" \
+  --capabilities shell.user,codex.run,git.diff \
+  --transport wss
+```
+
+The JSON output includes `schema_version: rdev.agent-invite.v1`, a short-lived
+ticket, the manifest URL, a copyable `host_command`, and the next MCP tools the
+agent should call. The human action is intentionally small: run `host_command`
+on the target computer and approve the host when policy requires it. The agent
+does the waiting, probing, job creation, status tracking, and evidence review.
+
+MCP-capable agents can call `rdev.invites.create` directly through
+`rdev mcp serve`; no private server addresses or local paths are baked into the
+project.
 
 ## Try It Locally
 

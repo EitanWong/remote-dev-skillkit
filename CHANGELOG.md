@@ -4,6 +4,36 @@ All notable local development changes are recorded here. This repository has
 not been pushed to a public GitHub remote yet; release publication still
 requires explicit operator approval.
 
+## 0.1.4-dev
+
+Current phase: Agent-first remote session invites are implemented so AI agents
+can create a target-host connection plan without hand-assembling ticket,
+manifest, transport, and approval steps.
+
+### Added
+
+- Added `rdev.agent-invite.v1` invite plans with gateway URL, join URL,
+  manifest URL, short-lived ticket, WSS host command, human next actions, Agent
+  next actions, and MCP tool hints.
+- Added `rdev invite create` for creating a real gateway-backed invite through
+  `POST /v1/tickets` without printing operator tokens.
+- Added MCP tool `rdev.invites.create` so Codex, Claude Code, Hermes,
+  OpenClaw/OpenCode, and generic MCP agents can start the remote-host workflow
+  directly from conversation.
+
+### Changed
+
+- Updated the remote-vibe-coding skill to make invite creation the preferred
+  first step when no suitable host is already active.
+- Updated README, MCP stdio, and dev-gateway docs to describe the AI-native
+  flow: the human runs only the generated target-host command and approves when
+  policy requires it; the Agent handles discovery, waiting, job dispatch,
+  status, and evidence.
+
+### Verification
+
+- Targeted invite, MCP, and tool-contract tests pass locally.
+
 ## 0.1.3-dev
 
 Current phase: production WSS/mTLS host transport, hosted storage/auth

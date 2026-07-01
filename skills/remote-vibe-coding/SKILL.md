@@ -10,6 +10,12 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 ## Rules
 
 - Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
+- Treat Remote Dev Skillkit as AI-native. The human should be able to say which
+  machine needs help; the agent should probe local configuration, create an
+  invite with MCP tool `rdev.invites.create` or CLI `rdev invite create`, hand
+  the generated `host_command` to the human for the target machine, wait for the
+  host to appear, request approval only when needed, then dispatch scoped jobs
+  and collect evidence.
 - Preserve the current architecture decision layer in `docs/architecture/PERFECT_ENDING_SOLUTION.md`; update that document when changing host, adapter, transport, release, or Skillkit boundaries.
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Before creating a coding job, discover the available hosts, target OS,
@@ -63,12 +69,17 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 
 1. Discover the local runtime, MCP tools, gateway configuration, and candidate
    host list.
-2. Inspect host OS, workspace, capabilities, adapters, and approval policy.
-3. Ask for any missing gateway, host, workspace, release, adapter, or approval
+2. If no suitable host is active, create an invite with `rdev.invites.create`
+   or `rdev invite create` and ask the human to run only the generated
+   `host_command` on the target machine.
+3. Wait for the host with `rdev.hosts.list`; approve it with
+   `rdev.hosts.approve` only after the operator confirms the host is expected.
+4. Inspect host OS, workspace, capabilities, adapters, and approval policy.
+5. Ask for any missing gateway, host, workspace, release, adapter, or approval
    configuration that cannot be safely discovered.
-4. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
-5. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
-6. Create a job with workspace policy.
-7. Stream status until completion.
-8. Inspect artifacts and audit events.
-9. Request approval before push/merge/deploy.
+6. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
+7. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
+8. Create a job with workspace policy.
+9. Stream status until completion.
+10. Inspect artifacts and audit events.
+11. Request approval before push/merge/deploy.

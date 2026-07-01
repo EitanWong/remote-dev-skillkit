@@ -10,6 +10,22 @@ type Tool struct {
 func Tools() []Tool {
 	return []Tool{
 		{
+			Name:        "rdev.invites.create",
+			Description: "Create an Agent-first remote session invite with a ticket, manifest URL, target-host command, and next MCP actions.",
+			Safety:      "Creates an access path and target-host command; does not execute on the host.",
+			InputSchema: object(map[string]any{
+				"gateway_url":           stringField(),
+				"mode":                  enum("attended-temporary", "managed", "break-glass"),
+				"ttl_seconds":           integer(60, 86400),
+				"capabilities":          stringArray(),
+				"reason":                stringField(),
+				"transport":             enum("wss"),
+				"rdev_command":          stringField(),
+				"once":                  boolField(),
+				"require_host_approval": boolField(),
+			}, []string{"gateway_url", "reason"}),
+		},
+		{
 			Name:        "rdev.tickets.create",
 			Description: "Create a short-lived support or remote development ticket for a target host.",
 			Safety:      "Creates access path; does not execute on host.",

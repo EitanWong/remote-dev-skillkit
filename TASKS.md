@@ -106,6 +106,7 @@
 - [x] Add hosted storage/auth foundation with gateway state-store provider boundary, file-backed provider verification, hosted EdDSA JWT operator auth, and combined local/hosted role authorization.
 - [x] Add production enrollment authority lifecycle evidence for key custody, fleet renewal plans, and emergency drill packages.
 - [x] Add production WSS/mTLS host job transport with WebSocket job delivery, completion/failure/artifact acknowledgements, and TLS/mTLS client certificate reuse.
+- [x] Add AI-native Agent invite workflow with `rdev.agent-invite.v1`, `rdev invite create`, and MCP tool `rdev.invites.create`.
 
 ## Next
 

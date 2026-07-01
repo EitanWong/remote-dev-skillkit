@@ -1,110 +1,704 @@
 {
-  "version": "0.0.1",
   "tools": [
+    {
+      "name": "rdev.invites.create",
+      "description": "Create an Agent-first remote session invite with a ticket, manifest URL, target-host command, and next MCP actions.",
+      "safety": "Creates an access path and target-host command; does not execute on the host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "gateway_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "attended-temporary",
+              "managed",
+              "break-glass"
+            ],
+            "type": "string"
+          },
+          "once": {
+            "type": "boolean"
+          },
+          "rdev_command": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "require_host_approval": {
+            "type": "boolean"
+          },
+          "transport": {
+            "enum": [
+              "wss"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gateway_url",
+          "reason"
+        ],
+        "type": "object"
+      }
+    },
     {
       "name": "rdev.tickets.create",
       "description": "Create a short-lived support or remote development ticket for a target host.",
-      "safety": "Creates access path; does not execute on host."
+      "safety": "Creates access path; does not execute on host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "attended-temporary",
+              "managed",
+              "break-glass"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "ttl_seconds",
+          "reason"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.tickets.revoke",
       "description": "Revoke a support ticket and prevent new host enrollment through it.",
-      "safety": "Revocation only."
+      "safety": "Revocation only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ticket_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket_id",
+          "reason"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.hosts.list",
       "description": "List enrolled or pending hosts visible to the operator.",
-      "safety": "Read-only."
+      "safety": "Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "pending",
+              "active",
+              "revoked",
+              "offline"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     },
     {
       "name": "rdev.hosts.capabilities",
       "description": "Inspect detected and approved capabilities for one host.",
-      "safety": "Read-only."
+      "safety": "Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.hosts.approve",
       "description": "Approve a pending host for a ticket-scoped policy.",
-      "safety": "Access-granting; requires operator approval."
+      "safety": "Access-granting; requires operator approval.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ticket_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "ticket_id",
+          "capabilities"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.hosts.revoke",
       "description": "Revoke host access and disconnect active sessions.",
-      "safety": "Revocation only."
+      "safety": "Revocation only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "reason"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.jobs.create",
       "description": "Create a signed, policy-bound remote job for an approved host.",
-      "safety": "May execute on host after policy checks."
+      "safety": "May execute on host after policy checks.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "enum": [
+              "shell",
+              "powershell",
+              "acpx",
+              "codex",
+              "claude-code"
+            ],
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "intent": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "policy": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "host_id",
+          "adapter",
+          "intent",
+          "policy"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.jobs.status",
       "description": "Read status and latest events for a remote job.",
-      "safety": "Read-only."
+      "safety": "Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.jobs.cancel",
       "description": "Request cooperative cancellation of a running job.",
-      "safety": "Cancellation only."
+      "safety": "Cancellation only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "reason"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.jobs.approve",
       "description": "Approve a pending high-risk job action such as elevation or package install.",
-      "safety": "Dangerous-action approval."
+      "safety": "Dangerous-action approval.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "approved",
+              "denied"
+            ],
+            "type": "string"
+          },
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "approval_id",
+          "decision",
+          "reason"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.artifacts.list",
       "description": "List artifacts produced by a job.",
-      "safety": "Read-only metadata."
+      "safety": "Read-only metadata.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.artifacts.read",
       "description": "Read an artifact produced by a job.",
-      "safety": "Read-only; may expose sensitive job output."
+      "safety": "Read-only; may expose sensitive job output.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.artifacts.export_bundle",
       "description": "Export a reviewable evidence bundle for one job, including manifest, checksums, envelope, artifacts, and audit slice.",
-      "safety": "Read-only evidence export; may expose sensitive job output."
+      "safety": "Read-only evidence export; may expose sensitive job output.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.audit.query",
       "description": "Query redacted audit events for tickets, hosts, and jobs.",
-      "safety": "Read-only audit access."
+      "safety": "Read-only audit access.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.policy.explain",
       "description": "Explain whether a requested action would be allowed by policy.",
-      "safety": "Read-only policy simulation."
+      "safety": "Read-only policy simulation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "attended-temporary",
+              "managed",
+              "break-glass"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "capability"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.policy.explain_shell",
       "description": "Explain whether a shell job policy is structurally allowed before creating a signed job.",
-      "safety": "Read-only policy simulation; host still re-validates before execution."
+      "safety": "Read-only policy simulation; host still re-validates before execution.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "attended-temporary",
+              "managed",
+              "break-glass"
+            ],
+            "type": "string"
+          },
+          "policy": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "mode",
+          "policy"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.enrollment.verify_certificate",
       "description": "Verify a host enrollment certificate and optional signed revocation list against a pinned enrollment root before trusting a host registration.",
-      "safety": "Read-only certificate and revocation validation; does not issue certificates or grant host access."
+      "safety": "Read-only certificate and revocation validation; does not issue certificates or grant host access.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "certificate_json": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "revocations_artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "revocations_json": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "root_public_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "verify_at": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_public_key"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.adapter.verify_result",
       "description": "Verify an adapter result artifact against the public result-artifact conformance contract.",
-      "safety": "Read-only artifact validation; does not execute on a host."
+      "safety": "Read-only artifact validation; does not execute on a host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_json": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "command_fields": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reject_secret_patterns": {
+            "type": "boolean"
+          },
+          "require_redaction": {
+            "type": "boolean"
+          },
+          "require_timing": {
+            "type": "boolean"
+          },
+          "required_string_fields": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "adapter",
+          "schema"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.adapter.verify_lifecycle",
       "description": "Verify an adapter lifecycle manifest against the public Adapter SDK lifecycle conformance contract.",
-      "safety": "Read-only manifest validation; does not execute on a host."
+      "safety": "Read-only manifest validation; does not execute on a host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_json": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reject_secret_patterns": {
+            "type": "boolean"
+          },
+          "require_cancellation": {
+            "type": "boolean"
+          },
+          "require_result_schema": {
+            "type": "boolean"
+          },
+          "require_safety": {
+            "type": "boolean"
+          },
+          "required_phases": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "adapter"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.adapter.verify_cancellation",
       "description": "Verify an adapter cancellation result artifact against the public cancellation conformance contract.",
-      "safety": "Read-only artifact validation; does not execute on a host."
+      "safety": "Read-only artifact validation; does not execute on a host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_json": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "command_fields": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reject_secret_patterns": {
+            "type": "boolean"
+          },
+          "require_redaction": {
+            "type": "boolean"
+          },
+          "require_timing": {
+            "type": "boolean"
+          },
+          "required_string_fields": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "adapter",
+          "schema"
+        ],
+        "type": "object"
+      }
     },
     {
       "name": "rdev.adapter.verify_runtime",
       "description": "Verify an adapter runtime fixture generated by the public Adapter SDK lifecycle runner.",
-      "safety": "Read-only fixture validation; does not execute on a host."
+      "safety": "Read-only fixture validation; does not execute on a host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_json": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "require_cancellation": {
+            "type": "boolean"
+          },
+          "require_cleanup": {
+            "type": "boolean"
+          },
+          "require_result_artifact": {
+            "type": "boolean"
+          },
+          "require_successful": {
+            "type": "boolean"
+          },
+          "required_phases": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "adapter"
+        ],
+        "type": "object"
+      }
     }
-  ]
+  ],
+  "version": "0.0.1"
 }

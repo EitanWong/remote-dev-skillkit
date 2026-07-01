@@ -67,6 +67,36 @@ func TestServerToolCallCreateTicket(t *testing.T) {
 	}
 }
 
+func TestServerToolCallCreateInvite(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.invites.create", map[string]any{
+		"gateway_url":  "https://api.example.com/v1",
+		"mode":         "attended-temporary",
+		"ttl_seconds":  600,
+		"reason":       "repair target host",
+		"capabilities": []string{"shell.user", "codex.run"},
+		"transport":    "wss",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.agent-invite.v1" {
+		t.Fatalf("expected agent invite schema, got %#v", structured)
+	}
+	hostCommand, ok := structured["host_command"].(string)
+	if !ok || !strings.Contains(hostCommand, "host serve --manifest-url https://api.example.com/v1/tickets/") || !strings.Contains(hostCommand, "--transport wss") {
+		t.Fatalf("expected target host WSS command, got %#v", structured)
+	}
+	if _, ok := structured["agent_next_actions"].([]any); !ok {
+		t.Fatalf("expected agent next actions, got %#v", structured)
+	}
+}
+
 func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "test")

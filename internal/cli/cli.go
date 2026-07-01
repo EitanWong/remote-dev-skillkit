@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/acceptance"
+	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
@@ -75,6 +76,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.mcp(args[1:])
 	case "host":
 		return a.host(ctx, args[1:])
+	case "invite":
+		return a.invite(ctx, args[1:])
 	case "ticket":
 		return a.ticket(args[1:])
 	case "policy":
@@ -2809,6 +2812,142 @@ func (a App) ticketCreate(mode model.HostMode, ttlSeconds int, reason, capList s
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func (a App) invite(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing invite subcommand")
+	}
+
+	switch args[0] {
+	case "create":
+		fs := flag.NewFlagSet("invite create", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway", "", "gateway base URL; required so the invite points at a real control plane")
+		mode := fs.String("mode", string(model.HostModeAttendedTemporary), "ticket mode: attended-temporary, managed, or break-glass")
+		ttl := fs.Int("ttl-seconds", 7200, "ticket TTL in seconds")
+		reason := fs.String("reason", "remote support", "ticket reason")
+		capList := fs.String("capabilities", "", "comma-separated capabilities; defaults to temporary-mode capabilities")
+		transport := fs.String("transport", "wss", "host job transport, usually wss")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
+		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path to run on the target host")
+		once := fs.Bool("once", false, "ask the target host process to exit after one job")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.inviteCreate(ctx, inviteCreateOptions{
+			GatewayURL:        *gatewayURL,
+			Mode:              model.HostMode(*mode),
+			TTLSeconds:        *ttl,
+			Reason:            *reason,
+			Capabilities:      splitCapabilities(*capList),
+			Transport:         *transport,
+			OperatorTokenFile: *operatorTokenFile,
+			RdevCommand:       *rdevCommand,
+			Once:              *once,
+		})
+	default:
+		return fmt.Errorf("unknown invite subcommand %q", args[0])
+	}
+}
+
+type inviteCreateOptions struct {
+	GatewayURL        string
+	Mode              model.HostMode
+	TTLSeconds        int
+	Reason            string
+	Capabilities      []string
+	Transport         string
+	OperatorTokenFile string
+	RdevCommand       string
+	Once              bool
+}
+
+func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
+	if strings.TrimSpace(opts.GatewayURL) == "" {
+		return fmt.Errorf("invite create requires --gateway; run rdev doctor and ask the operator which gateway to use if unclear")
+	}
+	if !opts.Mode.Valid() {
+		return fmt.Errorf("unsupported ticket mode %q", opts.Mode)
+	}
+	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
+		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+	}
+	payload, err := createGatewayInviteTicket(ctx, http.DefaultClient, opts)
+	if err != nil {
+		return err
+	}
+	invite, err := agentinvite.New(agentinvite.Options{
+		GatewayURL:          opts.GatewayURL,
+		JoinURL:             payload.JoinURL,
+		ManifestURL:         payload.ManifestURL,
+		Ticket:              payload.Ticket,
+		Transport:           opts.Transport,
+		Once:                opts.Once,
+		RequireHostApproval: true,
+		RdevCommand:         opts.RdevCommand,
+	})
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(invite)
+}
+
+type gatewayInviteTicketPayload struct {
+	Ticket      model.Ticket `json:"ticket"`
+	JoinURL     string       `json:"joinUrl"`
+	ManifestURL string       `json:"manifestUrl"`
+	Error       string       `json:"error"`
+}
+
+func createGatewayInviteTicket(ctx context.Context, client *http.Client, opts inviteCreateOptions) (gatewayInviteTicketPayload, error) {
+	body, err := json.Marshal(map[string]any{
+		"mode":         opts.Mode,
+		"ttl_seconds":  opts.TTLSeconds,
+		"reason":       opts.Reason,
+		"capabilities": opts.Capabilities,
+	})
+	if err != nil {
+		return gatewayInviteTicketPayload{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, gatewayTicketsURL(opts.GatewayURL), bytes.NewReader(body))
+	if err != nil {
+		return gatewayInviteTicketPayload{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if opts.OperatorTokenFile != "" {
+		token, err := readTokenFile(opts.OperatorTokenFile)
+		if err != nil {
+			return gatewayInviteTicketPayload{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := doGatewayRequest(client, req)
+	if err != nil {
+		return gatewayInviteTicketPayload{}, err
+	}
+	defer resp.Body.Close()
+	var payload gatewayInviteTicketPayload
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return gatewayInviteTicketPayload{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if payload.Error == "" {
+			payload.Error = resp.Status
+		}
+		return gatewayInviteTicketPayload{}, fmt.Errorf("create invite ticket failed: %s", payload.Error)
+	}
+	return payload, nil
+}
+
+func gatewayTicketsURL(gatewayURL string) string {
+	base := strings.TrimRight(gatewayURL, "/")
+	if strings.HasSuffix(base, "/v1") {
+		return base + "/tickets"
+	}
+	return base + "/v1/tickets"
 }
 
 func (a App) policy(args []string) error {

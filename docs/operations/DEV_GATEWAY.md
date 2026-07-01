@@ -167,14 +167,25 @@ rdev host serve \
 
 For the same host path over local mTLS, switch the gateway URL to `https://127.0.0.1:<port>` and add `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`.
 
-Or they can consume the signed join manifest, which carries the ticket code, gateway URL, trust bundle and trust fingerprint:
+Agents should normally create an invite first. This asks the gateway for a
+ticket and returns a copyable target-host command plus the MCP next actions:
+
+```bash
+rdev invite create \
+  --gateway http://127.0.0.1:8787 \
+  --reason "repair target development environment" \
+  --capabilities shell.user,codex.run,git.diff \
+  --transport wss
+```
+
+The target host command in the invite consumes the signed join manifest, which
+carries the ticket code, gateway URL, trust bundle, and trust fingerprint:
 
 ```bash
 rdev host serve \
-  --mode temporary \
   --manifest-url http://127.0.0.1:8787/v1/tickets/<ticket_code>/manifest \
   --manifest-root-public-key manifest-dev:<base64url_ed25519_public_key> \
-  --once=false
+  --transport wss
 ```
 
 ## Endpoints

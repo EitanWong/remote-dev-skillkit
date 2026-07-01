@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
@@ -118,6 +119,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	}
 	var data any
 	switch params.Name {
+	case "rdev.invites.create":
+		data, err = s.createInvite(params.Arguments)
 	case "rdev.tickets.create":
 		data, err = s.createTicket(params.Arguments)
 	case "rdev.tickets.revoke":
@@ -165,6 +168,30 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		return nil, err
 	}
 	return toolResult(data)
+}
+
+func (s Server) createInvite(args map[string]any) (any, error) {
+	mode := model.HostMode(stringArg(args, "mode", string(model.HostModeAttendedTemporary)))
+	ttl := intArg(args, "ttl_seconds", 7200)
+	reason := stringArg(args, "reason", "remote support")
+	capabilities := stringSliceArg(args, "capabilities")
+	ticket, err := s.Gateway.CreateTicket(mode, ttl, capabilities, reason)
+	if err != nil {
+		return nil, err
+	}
+	gatewayURL := requiredString(args, "gateway_url")
+	invite, err := agentinvite.New(agentinvite.Options{
+		GatewayURL:          gatewayURL,
+		Ticket:              ticket,
+		Transport:           stringArg(args, "transport", "wss"),
+		Once:                boolArg(args, "once", false),
+		RequireHostApproval: boolArg(args, "require_host_approval", true),
+		RdevCommand:         stringArg(args, "rdev_command", "rdev"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return invite, nil
 }
 
 func (s Server) createTicket(args map[string]any) (any, error) {

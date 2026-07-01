@@ -34,6 +34,9 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 	if !seen["rdev.adapter.verify_cancellation"] {
 		t.Fatal("expected adapter cancellation verification tool")
 	}
+	if !seen["rdev.invites.create"] {
+		t.Fatal("expected agent-first invite creation tool")
+	}
 }
 
 func TestJobsCreateAdapterEnumIncludesClaudeCode(t *testing.T) {
