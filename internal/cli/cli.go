@@ -275,12 +275,13 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		gatewayURL := fs.String("gateway", "", "gateway base URL")
 		rootPublicKey := fs.String("root-public-key", "", "enrollment root public key, formatted key_id:base64url_public_key")
+		issuerTokenFile := fs.String("issuer-token-file", "", "optional file containing bearer token for protected enrollment revocation fetch")
 		out := fs.String("out", "", "output signed enrollment revocation list JSON path")
 		force := fs.Bool("force", false, "overwrite output revocation list")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		return a.enrollmentFetchRevocations(ctx, *gatewayURL, *rootPublicKey, *out, *force)
+		return a.enrollmentFetchRevocations(ctx, *gatewayURL, *rootPublicKey, *issuerTokenFile, *out, *force)
 	default:
 		return fmt.Errorf("unknown enrollment subcommand %q", args[0])
 	}
@@ -1236,7 +1237,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key for host-side enrollment revocation refresh, formatted key_id:base64url_public_key")
 		fetchEnrollmentRevocations := fs.Bool("fetch-enrollment-revocations", false, "fetch and verify signed enrollment revocations from the gateway before registration")
 		renewEnrollmentCertificate := fs.Bool("renew-enrollment-certificate", false, "renew the enrollment certificate from the gateway before registration when it is near expiry")
-		enrollmentIssuerTokenFile := fs.String("enrollment-issuer-token-file", "", "optional file containing bearer token for protected hosted enrollment renewal")
+		enrollmentIssuerTokenFile := fs.String("enrollment-issuer-token-file", "", "optional file containing bearer token for protected hosted enrollment renewal or revocation refresh")
 		enrollmentRenewBefore := fs.Duration("enrollment-renew-before", 24*time.Hour, "renew enrollment certificate when it expires within this duration")
 		enrollmentRenewValidMinutes := fs.Int("enrollment-renew-valid-minutes", 60, "renewed enrollment certificate validity window in minutes")
 		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
@@ -1504,8 +1505,8 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		}
 	} else if strings.TrimSpace(opts.EnrollmentRootPublicKey) != "" && !opts.FetchEnrollmentRevocations {
 		return fmt.Errorf("--fetch-enrollment-revocations or --renew-enrollment-certificate is required when --enrollment-root-public-key is provided")
-	} else if strings.TrimSpace(opts.EnrollmentIssuerTokenFile) != "" {
-		return fmt.Errorf("--renew-enrollment-certificate is required when --enrollment-issuer-token-file is provided")
+	} else if strings.TrimSpace(opts.EnrollmentIssuerTokenFile) != "" && !opts.FetchEnrollmentRevocations {
+		return fmt.Errorf("--renew-enrollment-certificate or --fetch-enrollment-revocations is required when --enrollment-issuer-token-file is provided")
 	}
 	if opts.Transport == "" {
 		opts.Transport = "poll"
@@ -1606,7 +1607,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 			}
 		}
 		if opts.FetchEnrollmentRevocations {
-			revocations, root, err := fetchEnrollmentRevocationsWithClient(ctx, gatewayClient, opts.GatewayURL, opts.EnrollmentRootPublicKey)
+			revocations, root, err := fetchEnrollmentRevocationsWithClient(ctx, gatewayClient, opts.GatewayURL, opts.EnrollmentRootPublicKey, opts.EnrollmentIssuerTokenFile)
 			if err != nil {
 				return err
 			}
@@ -3919,7 +3920,7 @@ func (a App) enrollmentVerifyRevocations(revocationsPath, rootPublicKey string) 
 	return enc.Encode(payload)
 }
 
-func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPublicKey, outPath string, force bool) error {
+func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPublicKey, issuerTokenFile, outPath string, force bool) error {
 	if gatewayURL == "" {
 		return fmt.Errorf("gateway is required")
 	}
@@ -3929,7 +3930,7 @@ func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPub
 	if outPath == "" {
 		return fmt.Errorf("out is required")
 	}
-	revocations, root, err := fetchEnrollmentRevocations(ctx, gatewayURL, rootPublicKey)
+	revocations, root, err := fetchEnrollmentRevocations(ctx, gatewayURL, rootPublicKey, issuerTokenFile)
 	if err != nil {
 		return err
 	}
@@ -5824,11 +5825,11 @@ func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL
 	return payload.TrustBundle, nil
 }
 
-func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
-	return fetchEnrollmentRevocationsWithClient(ctx, http.DefaultClient, gatewayURL, rootPublicKey)
+func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey, issuerTokenFile string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
+	return fetchEnrollmentRevocationsWithClient(ctx, http.DefaultClient, gatewayURL, rootPublicKey, issuerTokenFile)
 }
 
-func fetchEnrollmentRevocationsWithClient(ctx context.Context, client *http.Client, gatewayURL, rootPublicKey string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
+func fetchEnrollmentRevocationsWithClient(ctx context.Context, client *http.Client, gatewayURL, rootPublicKey, issuerTokenFile string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
 	root, err := parseRootPublicKey(rootPublicKey)
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
@@ -5840,7 +5841,14 @@ func fetchEnrollmentRevocationsWithClient(ctx context.Context, client *http.Clie
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
 	}
-	resp, err := client.Do(req)
+	if issuerTokenFile != "" {
+		token, err := readTokenFile(issuerTokenFile)
+		if err != nil {
+			return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
 	}

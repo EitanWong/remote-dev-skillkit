@@ -98,7 +98,10 @@ required_files = [
     "LICENSE",
     "CHANGELOG.md",
     "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
     "TASKS.md",
+    "docs/project/PROJECT_STRUCTURE.md",
     "docs/project/GITHUB_PROJECT_MANAGEMENT.md",
     "docs/project/ROADMAP.md",
     "docs/project/ACCEPTANCE_TESTS.md",
@@ -117,8 +120,22 @@ required_files = [
     "scripts/github/verify-post-release-install-plan.sh",
 ]
 
+required_i18n_files = [
+    "docs/i18n/README.md",
+    "docs/i18n/README.zh-CN.md",
+    "docs/i18n/README.es.md",
+    "docs/i18n/README.fr.md",
+    "docs/i18n/README.de.md",
+    "docs/i18n/README.ja.md",
+    "docs/i18n/README.ko.md",
+    "docs/i18n/README.pt-BR.md",
+    "docs/i18n/README.hi.md",
+    "docs/i18n/README.ar.md",
+    "docs/i18n/README.ru.md",
+]
+
 file_entries = []
-for rel in required_files:
+for rel in required_files + required_i18n_files:
     path = repo_root / rel
     exists = path.is_file()
     add(f"file:{rel}", exists, "present" if exists else "missing")
@@ -142,6 +159,27 @@ add("bootstrap_dry_run_completed", "GitHub project bootstrap dry-run completed" 
 workflow = (repo_root / ".github/workflows/ci.yml").read_text() if (repo_root / ".github/workflows/ci.yml").is_file() else ""
 add("ci_runs_check_script", "./scripts/check.sh" in workflow, "")
 add("ci_runs_release_smoke", "./scripts/ci/release-smoke.sh" in workflow, "")
+
+readme = (repo_root / "README.md").read_text() if (repo_root / "README.md").is_file() else ""
+for phrase in [
+    "Multilingual quick starts",
+    "Project Structure",
+    "Apache-2.0",
+    "Codex",
+    "Claude Code",
+    "Hermes",
+    "OpenClaw/OpenCode",
+]:
+    add("readme:" + phrase, phrase in readme, phrase)
+
+i18n_index = (repo_root / "docs/i18n/README.md").read_text() if (repo_root / "docs/i18n/README.md").is_file() else ""
+add("i18n_language_count", sum(1 for rel in required_i18n_files if (repo_root / rel).is_file()) >= 10, f"files={sum(1 for rel in required_i18n_files if (repo_root / rel).is_file())}")
+for rel in required_i18n_files[1:]:
+    add("i18n_index:" + rel, pathlib.Path(rel).name in i18n_index, rel)
+
+project_structure = (repo_root / "docs/project/PROJECT_STRUCTURE.md").read_text() if (repo_root / "docs/project/PROJECT_STRUCTURE.md").is_file() else ""
+for phrase in ["cmd/", "internal/", "pkg/adapterkit/", "skills/", "Public Repository Hygiene"]:
+    add("project_structure:" + phrase, phrase in project_structure, phrase)
 
 project_doc = (repo_root / "docs/project/GITHUB_PROJECT_MANAGEMENT.md").read_text() if (repo_root / "docs/project/GITHUB_PROJECT_MANAGEMENT.md").is_file() else ""
 for phrase in [

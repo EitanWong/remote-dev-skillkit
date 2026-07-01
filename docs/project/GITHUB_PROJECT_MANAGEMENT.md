@@ -31,17 +31,28 @@ The report uses schema `rdev.github-project-readiness.v1`, runs
 templates, CI workflow, and GitHub/release planning scripts, and preserves
 `external_mutation=false`.
 
+The audit also checks public-project hygiene: `CONTRIBUTING.md`,
+`CODE_OF_CONDUCT.md`, `docs/project/PROJECT_STRUCTURE.md`, multilingual quick
+starts under `docs/i18n/`, and README links for Codex, Claude Code, Hermes,
+OpenClaw/OpenCode, Apache-2.0, project structure, and multilingual entry points.
+
 Recommended remote repository:
 
 ```text
 EitanWong/remote-dev-skillkit
 ```
 
-Recommended visibility while the safety model is still pre-v1:
+Recommended visibility for the current open-source launch target:
 
 ```text
-private
+public
 ```
+
+Real Windows, Linux, and Mac acceptance evidence remains required before making
+platform-production claims. Eitan will collect that target-machine evidence
+manually; public launch readiness should still keep the acceptance-plan and
+evidence-package tooling visible so external contributors can reproduce the
+checks.
 
 ## Project Board Model
 
@@ -295,7 +306,7 @@ command previews. It does not create a release or upload assets.
 Recommended sequence after explicit approval:
 
 ```bash
-gh repo create EitanWong/remote-dev-skillkit --private --source . --remote origin --push
+gh repo create EitanWong/remote-dev-skillkit --public --source . --remote origin --push
 scripts/github/bootstrap-project.sh EitanWong/remote-dev-skillkit
 ```
 
@@ -307,11 +318,11 @@ git push -u origin main
 scripts/github/bootstrap-project.sh EitanWong/remote-dev-skillkit
 ```
 
-After public launch, switch visibility deliberately:
+If a private staging repository was used earlier, switch visibility deliberately:
 
 ```bash
 gh repo edit EitanWong/remote-dev-skillkit --visibility public
 ```
 
-Do this only after the security policy, release signing, acceptance transcripts,
-and install docs match the shipped behavior.
+Do this only after the security policy, release signing, manual acceptance
+evidence status, and install docs match the shipped behavior.

@@ -16,12 +16,12 @@ go test ./internal/cli \
   > "$work_dir/dev-mtls-host-smoke.txt"
 
 go test ./internal/model ./internal/cli ./internal/httpapi \
-  -run 'TestHostEnrollmentRevocationListAllowsEmptyBaseline|TestEnrollmentInitRevocationsWritesEmptyVerifiedList|TestEnrollmentRevocationsEndpointReturnsEmptyBaseline' \
+  -run 'TestHostEnrollmentRevocationListAllowsEmptyBaseline|TestEnrollmentInitRevocationsWritesEmptyVerifiedList|TestEnrollmentRevocationsEndpointReturnsEmptyBaseline|TestEnrollmentRevocationsEndpointRequiresIssuerToken' \
   -count=1 \
   > "$work_dir/enrollment-revocation-baseline-smoke.txt"
 
 go test ./internal/cli \
-  -run 'TestHostServeFetchesEnrollmentRevocationsBeforeRegistration|TestHostServeReportsFetchedEnrollmentRevocations|TestHostServeRequiresExplicitEnrollmentRevocationFetch' \
+  -run 'TestHostServeFetchesEnrollmentRevocationsBeforeRegistration|TestHostServeReportsFetchedEnrollmentRevocations|TestHostServeSendsIssuerTokenWhenFetchingEnrollmentRevocations|TestHostServeRequiresExplicitEnrollmentRevocationFetch|TestEnrollmentFetchRevocationsSendsIssuerTokenFromFile' \
   -count=1 \
   > "$work_dir/enrollment-host-revocation-refresh-smoke.txt"
 
@@ -238,6 +238,7 @@ print(json.dumps({
     "dev_mtls_host_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,
+    "enrollment_revocation_auth_smoke": True,
     "enrollment_host_renewal_smoke": True,
     "enrollment_renewal_smoke": True,
     "enrollment_hosted_renewal_smoke": True,

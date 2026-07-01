@@ -71,6 +71,10 @@ func (s Server) getTrustBundle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) getEnrollmentRevocations(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeEnrollmentIssuer(r) {
+		writeError(w, http.StatusUnauthorized, "enrollment issuer token is required")
+		return
+	}
 	revocations, ok := s.Gateway.EnrollmentRevocations()
 	if !ok {
 		writeError(w, http.StatusNotFound, "enrollment revocations not configured")

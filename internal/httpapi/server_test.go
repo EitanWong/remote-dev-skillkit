@@ -243,6 +243,43 @@ func TestEnrollmentRevocationsEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
+func TestEnrollmentRevocationsEndpointRequiresIssuerToken(t *testing.T) {
+	now := time.Date(2026, 7, 1, 13, 0, 0, 0, time.UTC)
+	publicKey, privateKey := httpTestKeyPair(t)
+	revocations, err := model.SignHostEnrollmentRevocationList(nil, "enrollment-root", privateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentRoot(model.NewTrustBundle("enrollment-root", publicKey)).
+		WithEnrollmentRevocations(revocations)
+	server := NewServer(gw)
+	server.EnrollmentIssuerToken = "issuer-secret"
+	handler := server.Handler()
+
+	for _, tc := range []struct {
+		name   string
+		auth   string
+		status int
+	}{
+		{name: "missing", status: http.StatusUnauthorized},
+		{name: "wrong", auth: "Bearer wrong-secret", status: http.StatusUnauthorized},
+		{name: "valid", auth: "Bearer issuer-secret", status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v1/enrollment/revocations", nil)
+			if tc.auth != "" {
+				req.Header.Set("Authorization", tc.auth)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("expected %d, got %d: %s", tc.status, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestEnrollmentCertificatesEndpointIssuesVerifiedCertificate(t *testing.T) {
 	now := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
 	issuerPublicKey, issuerPrivateKey := httpTestKeyPair(t)

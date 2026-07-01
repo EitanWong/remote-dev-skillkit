@@ -1276,6 +1276,68 @@ func TestHostServeReportsFetchedEnrollmentRevocations(t *testing.T) {
 	}
 }
 
+func TestHostServeSendsIssuerTokenWhenFetchingEnrollmentRevocations(t *testing.T) {
+	dir := t.TempDir()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := model.NewTicket(model.HostModeAttendedTemporary, 600, capabilities, "certified temporary host", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePath, rootPublicKey, root, _, issuerPrivateKey := writeHostServeEnrollmentCertificateFixture(t, dir, ticket, "token-host")
+	now := time.Now().UTC().Add(-time.Minute)
+	revocations, err := model.SignHostEnrollmentRevocationList(nil, root.SigningKeyID, issuerPrivateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(dir, "issuer-token.txt")
+	if err := os.WriteFile(tokenPath, []byte("issuer-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seenAuthorization := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/enrollment/revocations":
+			seenAuthorization = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]any{"revocations": revocations})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/hosts/register":
+			var registration model.HostRegistration
+			if err := json.NewDecoder(r.Body).Decode(&registration); err != nil {
+				t.Fatalf("invalid registration body: %v", err)
+			}
+			host, err := model.NewHost(ticket, registration, time.Now())
+			if err != nil {
+				t.Fatalf("registration should verify: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"host": host})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--ticket-code", ticket.Code,
+		"--identity-store", filepath.Join(dir, "identity", "host.json"),
+		"--identity-key-id", "host-test",
+		"--enrollment-certificate", certificatePath,
+		"--fetch-enrollment-revocations",
+		"--enrollment-root-public-key", rootPublicKey,
+		"--enrollment-issuer-token-file", tokenPath,
+		"--name", "token-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenAuthorization != "Bearer issuer-secret" {
+		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
+	}
+}
+
 func TestHostServeRequiresExplicitEnrollmentRevocationFetch(t *testing.T) {
 	dir := t.TempDir()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -1546,6 +1608,51 @@ func TestEnrollmentFetchRevocationsWritesVerifiedList(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "signature mismatch") {
 		t.Fatalf("expected wrong root to reject fetched revocations, got %v", err)
+	}
+}
+
+func TestEnrollmentFetchRevocationsSendsIssuerTokenFromFile(t *testing.T) {
+	now := time.Now().UTC().Add(-time.Minute)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocations, err := model.SignHostEnrollmentRevocationList(nil, "enrollment-root", privateKey, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenAuthorization := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuthorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/enrollment/revocations" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"revocations": revocations})
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "issuer-token.txt")
+	if err := os.WriteFile(tokenPath, []byte("issuer-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "revocations", "revocations.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "fetch-revocations",
+		"--gateway", server.URL,
+		"--root-public-key", encodeRootPublicKey("enrollment-root", publicKey),
+		"--issuer-token-file", tokenPath,
+		"--out", outPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenAuthorization != "Bearer issuer-secret" {
+		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) {
+		t.Fatalf("expected ok fetch output, got %s", stdout.String())
 	}
 }
 
