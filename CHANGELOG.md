@@ -65,6 +65,10 @@ manifest, transport, and approval steps.
   stable protocol keys, commands, paths, schemas, and checksums.
 - Added language-aware join page matching through `?lang=` and
   `Accept-Language` for the repository's supported quick-start languages.
+- Added `rdev.managed-development-plan.v1` to invite output for owned
+  long-running developer workstations, covering managed mode, service-backed
+  lifecycle plans, reconnect proof, workspace locks, release gates, enrollment
+  renewal, revocation refresh, and evidence bundles.
 
 ### Changed
 
@@ -97,6 +101,8 @@ manifest, transport, and approval steps.
   locks, redaction, approvals, audit, and evidence.
 - Documented target-host language matching for skills, MCP summaries, bootstrap
   instructions, approvals, job status, and evidence summaries.
+- Documented the long-running owned-workstation workflow for recurring Agent
+  development work on the operator's own Mac, Windows PC, or Linux machine.
 
 ### Verification
 

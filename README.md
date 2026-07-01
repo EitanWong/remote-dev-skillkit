@@ -158,6 +158,14 @@ localize customer instructions, skills, MCP summaries, approval prompts, job
 status, and evidence summaries. Protocol keys, schema versions, commands,
 paths, JSON fields, checksums, and code blocks stay unchanged.
 
+For your own computer or workstation fleet, invite output includes
+`managed_development_plan`. That path is built for long-running development:
+managed host mode, `--once=false`, service-backed restart plans,
+`--transport auto`, release-bundle startup gates, enrollment renewal,
+revocation refresh, workspace locks, Git worktrees, host-local context caches,
+evidence bundles, and reconnect proof. Temporary customer sessions stay light;
+owned developer machines get the durable treatment.
+
 `--transport auto` is the field-friendly default: the host tries outbound WSS
 first, falls back to HTTPS long-poll when WebSocket upgrades are blocked, and
 keeps short polling as the maximum-compatibility path for stubborn networks.
@@ -192,6 +200,28 @@ heuristic discovery from that vantage point, inventory reachable devices, use
 configured SSH/mesh/relay/API paths, and control downstream authorized hosts or
 devices when the job policy grants `downstream.control.scoped`. Every downstream
 action is still tied to the task intent and captured as evidence.
+
+## Long-Running Development
+
+For stable ongoing work on your own machine, use managed mode instead of
+attended temporary mode. Generate a reviewed service plan for the target OS,
+start it explicitly, then let the Agent use MCP to select that host, lock a
+workspace, run Codex/Claude/acpx/shell/PowerShell jobs, review artifacts, and
+keep evidence.
+
+```bash
+rdev host install-service \
+  --platform macos \
+  --gateway https://api.example.com/v1 \
+  --ticket-code ABCD-1234 \
+  --workspace-lock-store ~/.rdev/host/workspace-locks \
+  --plist-out ~/Library/LaunchAgents/com.remote-dev-skillkit.host.plist
+```
+
+macOS uses reviewed LaunchAgent plans, Linux uses reviewed systemd user-unit
+plans, and Windows uses reviewed Service Control Manager command plans. Service
+start/stop stays explicit and reviewable so long-running Agent work is reliable
+without becoming mysterious.
 
 ## Try It Locally
 

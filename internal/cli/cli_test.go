@@ -181,6 +181,14 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 			LocalizedSurfaces  []string `json:"localized_surfaces"`
 			FallbackOrder      []string `json:"fallback_order"`
 		} `json:"localization_plan"`
+		ManagedDevPlan struct {
+			SchemaVersion       string   `json:"schema_version"`
+			Mode                string   `json:"mode"`
+			HostModes           []string `json:"host_modes"`
+			ServiceSurfaces     []string `json:"service_surfaces"`
+			ReliabilityControls []string `json:"reliability_controls"`
+			WorkspaceControls   []string `json:"workspace_controls"`
+		} `json:"managed_development_plan"`
 		HostCommand        string   `json:"host_command"`
 		FallbackCommands   []string `json:"fallback_commands"`
 		HumanNextActions   []string `json:"human_next_actions"`
@@ -250,6 +258,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if !slices.Contains(payload.LocalizationPlan.SupportedLanguages, "zh-CN") || !slices.Contains(payload.LocalizationPlan.SupportedLanguages, "ar") || len(payload.LocalizationPlan.DetectionSources) == 0 || len(payload.LocalizationPlan.LocalizedSurfaces) == 0 || len(payload.LocalizationPlan.FallbackOrder) == 0 {
 		t.Fatalf("localization plan should define languages, detection, surfaces, and fallback: %#v", payload.LocalizationPlan)
+	}
+	if payload.ManagedDevPlan.SchemaVersion != "rdev.managed-development-plan.v1" || payload.ManagedDevPlan.Mode != "owned-long-running-developer-workstation" {
+		t.Fatalf("invite should include managed development plan: %#v", payload.ManagedDevPlan)
+	}
+	if !slices.Contains(payload.ManagedDevPlan.HostModes, "managed") || len(payload.ManagedDevPlan.ServiceSurfaces) == 0 || len(payload.ManagedDevPlan.ReliabilityControls) == 0 || len(payload.ManagedDevPlan.WorkspaceControls) == 0 {
+		t.Fatalf("managed development plan should define modes, service surfaces, reliability, and workspace controls: %#v", payload.ManagedDevPlan)
 	}
 	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())

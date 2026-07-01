@@ -41,6 +41,7 @@ type Invite struct {
 	ProvisioningPlan    ProvisioningPlan  `json:"agent_provisioning_plan"`
 	CollaborationPlan   CollaborationPlan `json:"agent_collaboration_plan"`
 	LocalizationPlan    LocalizationPlan  `json:"localization_plan"`
+	ManagedDevPlan      ManagedDevPlan    `json:"managed_development_plan"`
 	HostCommand         string            `json:"host_command"`
 	FallbackCommands    []string          `json:"fallback_commands"`
 	HumanNextActions    []string          `json:"human_next_actions"`
@@ -171,6 +172,19 @@ type LocalizationPlan struct {
 	EvidenceRequired   []string `json:"evidence_required"`
 }
 
+type ManagedDevPlan struct {
+	SchemaVersion       string   `json:"schema_version"`
+	Mode                string   `json:"mode"`
+	BestFor             []string `json:"best_for"`
+	HostModes           []string `json:"host_modes"`
+	ServiceSurfaces     []string `json:"service_surfaces"`
+	ReliabilityControls []string `json:"reliability_controls"`
+	WorkspaceControls   []string `json:"workspace_controls"`
+	MaintenanceControls []string `json:"maintenance_controls"`
+	AgentRules          []string `json:"agent_rules"`
+	EvidenceRequired    []string `json:"evidence_required"`
+}
+
 func New(opts Options) (Invite, error) {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
@@ -232,6 +246,7 @@ func New(opts Options) (Invite, error) {
 	provisioningPlan := newProvisioningPlan()
 	collaborationPlan := newCollaborationPlan()
 	localizationPlan := newLocalizationPlan()
+	managedDevPlan := newManagedDevPlan()
 	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
 
 	agentActions := []string{
@@ -260,6 +275,7 @@ func New(opts Options) (Invite, error) {
 		ProvisioningPlan:  provisioningPlan,
 		CollaborationPlan: collaborationPlan,
 		LocalizationPlan:  localizationPlan,
+		ManagedDevPlan:    managedDevPlan,
 		HostCommand:       hostCommand,
 		FallbackCommands:  fallbackCommands,
 		HumanNextActions: []string{
@@ -279,6 +295,7 @@ func New(opts Options) (Invite, error) {
 			"Let the host detect missing skills, MCP tools, adapters, language runtimes, package managers, and project dependencies; install user-scoped missing pieces automatically when policy allows, and ask before elevation or external mutation.",
 			"Discover local or configured Agent peers, including A2A-compatible agents, when collaboration can help; delegate only through signed jobs, scoped policy, approvals, redaction, and evidence.",
 			"Detect the target host language and localize customer bootstrap, skills, MCP responses, job summaries, approval prompts, and evidence summaries; fall back predictably when a locale is unavailable.",
+			"For owned long-running development machines, prefer managed mode with service-backed restart, release gates, enrollment renewal, revocation refresh, workspace locks, host-local context, and reconnect evidence.",
 		},
 		MCPTools: map[string]string{
 			"list_hosts":    "rdev.hosts.list",
@@ -290,6 +307,71 @@ func New(opts Options) (Invite, error) {
 		RequiresHumanAction: []string{"target-host-consent", "operator-approval-when-required"},
 		CreatedAt:           createdAt,
 	}, nil
+}
+
+func newManagedDevPlan() ManagedDevPlan {
+	return ManagedDevPlan{
+		SchemaVersion: "rdev.managed-development-plan.v1",
+		Mode:          "owned-long-running-developer-workstation",
+		BestFor: []string{
+			"operator-owned Macs, Windows PCs, and Linux workstations",
+			"long-running coding, debugging, testing, refactoring, and repository maintenance",
+			"recurring Agent work on stable local projects",
+			"host-local context caches, dependency caches, and durable evidence stores",
+		},
+		HostModes: []string{
+			"managed",
+			"attended-temporary for one-off customer support",
+		},
+		ServiceSurfaces: []string{
+			"macOS LaunchAgent plan with explicit launchctl start/inspect/stop",
+			"Linux systemd user service plan with explicit systemctl --user lifecycle",
+			"Windows Service reviewed sc.exe plan with explicit start/stop/delete",
+			"foreground managed process for development smoke tests",
+		},
+		ReliabilityControls: []string{
+			"--once=false for continuous host loops",
+			"--transport auto for WSS, HTTPS long-poll, then short-poll fallback",
+			"service restart or KeepAlive where supported by the reviewed service surface",
+			"signed release-bundle startup gate before registration",
+			"host enrollment certificate renewal before expiry",
+			"signed revocation refresh before registration",
+			"trust-bundle sequence and rollback checks",
+			"reconnect proof after service restart, logout, or reboot acceptance",
+		},
+		WorkspaceControls: []string{
+			"workspace locks for one-writer protection",
+			"Git worktree preparation for coding jobs",
+			"host-local project indexes and context slices",
+			"adapter-specific evidence for Codex, Claude Code, acpx, shell, and PowerShell",
+			"approval gates before push, merge, deploy, publish, credential, service, or external-resource changes",
+		},
+		MaintenanceControls: []string{
+			"periodic rdev doctor and host capability probes",
+			"release-bundle verification before host upgrades",
+			"Skillkit and MCP tool contract verification after updates",
+			"artifact, audit, context-cache, and dependency-cache retention policy",
+			"safe uninstall or service stop plan retained with the managed host",
+		},
+		AgentRules: []string{
+			"treat owned long-running developer machines as managed hosts, not customer temporary hosts",
+			"keep the host visible and controllable through normal OS service controls",
+			"store project context and large evidence on the host; keep server context indexed and on demand",
+			"reuse verified host-local tools and caches before reinstalling dependencies",
+			"collect evidence for reconnects, service lifecycle, workspace locks, jobs, approvals, and upgrades",
+			"ask before enabling persistence on a third-party or customer machine",
+		},
+		EvidenceRequired: []string{
+			"managed host registration and approval",
+			"service plan or foreground managed command",
+			"release-gate verification output",
+			"workspace lock acquire and release evidence",
+			"adapter result artifacts and test evidence",
+			"audit slice and evidence bundle",
+			"reconnect transcript for service-backed claims",
+			"safe stop or uninstall instructions",
+		},
+	}
 }
 
 func newLocalizationPlan() LocalizationPlan {

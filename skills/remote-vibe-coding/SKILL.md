@@ -49,6 +49,13 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   prompts, job summaries, skill guidance, MCP summaries, and evidence summaries.
   Keep protocol keys, schema versions, commands, paths, JSON fields, checksums,
   and code blocks unchanged.
+- Treat `managed_development_plan` as mandatory owned-workstation discipline.
+  For the operator's own Mac, Windows PC, or Linux workstation, prefer managed
+  mode for recurring development work. Use reviewed LaunchAgent/systemd/Windows
+  Service plans or a foreground managed smoke process, `--once=false`,
+  `--transport auto`, release gates, enrollment renewal, revocation refresh,
+  workspace locks, Git worktrees, host-local context, reconnect evidence, and
+  safe stop/uninstall instructions.
 - Prefer `--transport auto` for unknown or hostile networks. It attempts WSS,
   then HTTPS long-poll, then short polling, all as outbound target-host
   connections. If the host does not appear, ask about proxy requirements, TLS
@@ -135,9 +142,12 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
    delegate bounded subtasks only when their advertised capabilities fit.
 9. Follow `localization_plan`: select the target-side language and localize
    user-facing prompts, summaries, and evidence text.
-10. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
-11. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
-12. Create a job with workspace policy.
-13. Stream status until completion.
-14. Inspect artifacts and audit events.
-15. Request approval before push/merge/deploy.
+10. Follow `managed_development_plan` for owned long-running workstations:
+    confirm managed mode, service/reconnect state, workspace locks, release
+    gates, and host-local context before recurring coding work.
+11. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
+12. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
+13. Create a job with workspace policy.
+14. Stream status until completion.
+15. Inspect artifacts and audit events.
+16. Request approval before push/merge/deploy.

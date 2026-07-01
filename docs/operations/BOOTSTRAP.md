@@ -166,6 +166,13 @@ Agent should also inspect the target OS locale and user language settings, then
 localize target-side instructions and approval text. Commands, paths, schema
 keys, checksums, and code blocks are not translated.
 
+`managed_development_plan` defines the long-running owned-workstation rule.
+For machines controlled by the operator, prefer managed mode with explicit
+service plans, `--once=false`, `--transport auto`, release-bundle startup
+verification, enrollment renewal, revocation refresh, workspace locks, Git
+worktrees, host-local context caches, reconnect proof, audit slices, and
+evidence bundles. This is separate from attended temporary customer support.
+
 The development gateway serves:
 
 ```text

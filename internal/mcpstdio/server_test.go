@@ -138,6 +138,10 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || localizationPlan["schema_version"] != "rdev.localization-plan.v1" || localizationPlan["mode"] != "target-host-language-auto" {
 		t.Fatalf("expected localization plan, got %#v", structured)
 	}
+	managedDevPlan, ok := structured["managed_development_plan"].(map[string]any)
+	if !ok || managedDevPlan["schema_version"] != "rdev.managed-development-plan.v1" || managedDevPlan["mode"] != "owned-long-running-developer-workstation" {
+		t.Fatalf("expected managed development plan, got %#v", structured)
+	}
 }
 
 func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {

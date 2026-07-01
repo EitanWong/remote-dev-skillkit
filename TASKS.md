@@ -115,6 +115,7 @@
 - [x] Add adaptive host-local provisioning plan so agents can probe and install verified skills, MCP tools, adapters, and dependencies on the target host when policy allows.
 - [x] Add A2A-aware peer-Agent collaboration plan so target-host AI tools can assist through bounded signed jobs, policy, approvals, and evidence.
 - [x] Add target-host language matching plan and localized join page support for supported project languages.
+- [x] Add managed development plan for stable long-running Agent work on operator-owned workstations.
 
 ## Next
 

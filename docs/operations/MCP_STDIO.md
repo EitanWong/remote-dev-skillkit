@@ -19,7 +19,8 @@ Agent-first session tools include:
 It creates a ticket and returns a manifest URL, `host_command`,
 `transport_plan`, `connection_plan`, `customer_bootstrap`,
 `host_context_plan`, `agent_provisioning_plan`,
-`agent_collaboration_plan`, `localization_plan`, `fallback_commands`, `authority_profile`,
+`agent_collaboration_plan`, `localization_plan`,
+`managed_development_plan`, `fallback_commands`, `authority_profile`,
 `connectivity_checks`, `human_next_actions`, and `agent_next_actions`. Agents
 should call this before asking a human to connect a new target host. The command
 still requires consent on the target machine; it does not execute remotely by
@@ -67,6 +68,14 @@ AppleLanguages, Linux locale settings, and operator preferences. User-facing
 instructions, approvals, summaries, and evidence should use the selected BCP 47
 language. Protocol keys, schema versions, capability ids, command names, paths,
 JSON field names, checksums, and code blocks must remain stable and untranslated.
+
+The `managed_development_plan` is the standard for owned long-running
+developer workstations. MCP clients should prefer managed mode for machines
+owned by the operator and expected to do recurring development work. The plan
+points agents toward reviewed LaunchAgent, systemd user service, or Windows
+Service surfaces, `--once=false`, `--transport auto`, release-bundle startup
+gates, enrollment renewal, revocation refresh, trust-bundle rollback checks,
+workspace locks, Git worktrees, reconnect proof, and evidence bundles.
 
 The `connection_plan` separates native support from agent-managed paths:
 implemented native paths are outbound WSS/mTLS, HTTPS long-poll, HTTPS
