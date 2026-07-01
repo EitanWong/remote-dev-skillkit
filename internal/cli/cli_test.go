@@ -33,6 +33,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
@@ -100,6 +101,58 @@ func TestOperatorAuthInitAndVerify(t *testing.T) {
 	}
 	if !strings.Contains(verifyOut.String(), `"ok": true`) {
 		t.Fatalf("expected verify ok, got %s", verifyOut.String())
+	}
+}
+
+func TestOperatorAuthVerifyHosted(t *testing.T) {
+	publicKey, _, err := operatorauth.GenerateHostedKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authPath := filepath.Join(t.TempDir(), "hosted-auth.json")
+	authFile := operatorauth.HostedFile{
+		SchemaVersion: operatorauth.HostedSchemaVersion,
+		Issuer:        "https://auth.example.com/",
+		Audience:      "rdev-gateway",
+		Keys: []operatorauth.HostedAuthKey{{
+			KeyID:     "operator-key",
+			PublicKey: operatorauth.EncodePublicKey(publicKey),
+		}},
+	}
+	content, err := json.Marshal(authFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"operator-auth", "verify-hosted", "--auth", authPath}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) || !strings.Contains(stdout.String(), `"key_count": 1`) {
+		t.Fatalf("unexpected hosted verify output: %s", stdout.String())
+	}
+}
+
+func TestGatewayStorageVerifyRejectsUnknownProvider(t *testing.T) {
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{"gateway", "storage", "verify", "--provider", "unknown", "--path", filepath.Join(t.TempDir(), "state.json")})
+	if err == nil || !strings.Contains(err.Error(), "unsupported gateway storage provider") {
+		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+}
+
+func TestGatewayStorageVerifyFileProvider(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := app.Run(context.Background(), []string{"gateway", "storage", "verify", "--provider", "file", "--path", path}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) || !strings.Contains(stdout.String(), "file:"+path) {
+		t.Fatalf("unexpected storage verify output: %s", stdout.String())
 	}
 }
 
@@ -1734,6 +1787,92 @@ func TestEnrollmentInitRevocationsWritesEmptyVerifiedList(t *testing.T) {
 	}
 }
 
+func TestEnrollmentLifecycleKeyCustodyWritesRecord(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(t.TempDir(), "custody.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "lifecycle", "key-custody",
+		"--root-public-key", encodeRootPublicKey("enrollment-root", publicKey),
+		"--custodian", "release-team",
+		"--provider", "kms",
+		"--rotation-days", "30",
+		"--out", outPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) || !strings.Contains(readFileForTest(t, outPath), `"schema_version": "rdev.enrollment-key-custody.v1"`) {
+		t.Fatalf("unexpected key custody output: %s", stdout.String())
+	}
+}
+
+func TestEnrollmentLifecycleFleetRenewalPlanRequiresRevocations(t *testing.T) {
+	certificatesPath := filepath.Join(t.TempDir(), "certificates.json")
+	if err := os.WriteFile(certificatesPath, []byte(`{"certificates":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"enrollment", "lifecycle", "fleet-renewal-plan",
+		"--certificates", certificatesPath,
+		"--root-public-key", encodeRootPublicKey("enrollment-root", publicKey),
+	})
+	if err == nil || !strings.Contains(err.Error(), "revocations are required by policy") {
+		t.Fatalf("expected missing revocations to fail, got %v", err)
+	}
+}
+
+func TestEnrollmentLifecycleEmergencyDrillWritesEvidence(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "enrollment-root.json")
+	revocationsPath := filepath.Join(dir, "revocations.json")
+	initOut := bytes.Buffer{}
+	initApp := NewApp(&initOut, &bytes.Buffer{})
+	if err := initApp.Run(context.Background(), []string{
+		"enrollment", "init-revocations",
+		"--out", revocationsPath,
+		"--key", keyPath,
+		"--key-id", "enrollment-root",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var initPayload struct {
+		RootPublicKey string `json:"root_public_key"`
+	}
+	if err := json.Unmarshal(initOut.Bytes(), &initPayload); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "drill.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"enrollment", "lifecycle", "emergency-drill",
+		"--name", "root-compromise-drill",
+		"--scenario", "enrollment-root-compromise",
+		"--operator-role", "admin",
+		"--root-public-key", initPayload.RootPublicKey,
+		"--revocations", revocationsPath,
+		"--out", outPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"ok": true`) || !strings.Contains(readFileForTest(t, outPath), `"schema_version": "rdev.enrollment-emergency-drill.v1"`) {
+		t.Fatalf("unexpected emergency drill output: %s", stdout.String())
+	}
+	if strings.Contains(readFileForTest(t, outPath), dir) {
+		t.Fatalf("drill evidence leaked local temp path: %s", readFileForTest(t, outPath))
+	}
+}
+
 func TestEnrollmentIssueCertificateWritesVerifiedGatewayCertificate(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
@@ -2464,6 +2603,63 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 	}
 }
 
+func TestHostServeWSSCompletesDevJob(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "wss-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL: server.URL,
+		Transport:  "wss",
+		MaxJobs:    1,
+	}, nil, host.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
+	}
+	completed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected job succeeded, got %s", completed.Status)
+	}
+	if artifacts := gw.Artifacts(job.ID); len(artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(artifacts))
+	}
+}
+
 func TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -2523,6 +2719,82 @@ func TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
+	}, client, host.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
+	}
+	completed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected job succeeded, got %s", completed.Status)
+	}
+}
+
+func TestHostServeWSSCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "wss-mtls-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	material := writeGatewayTLSMaterial(t)
+	config, err := gatewayTLSConfig(gatewayServeOptions{
+		TLSCertPath:  material.ServerCert,
+		TLSKeyPath:   material.ServerKey,
+		ClientCAPath: material.CACert,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(httpapi.NewServer(gw).Handler())
+	server.TLS = config
+	server.StartTLS()
+	defer server.Close()
+	client, err := gatewayHTTPClient(hostServeOptions{
+		GatewayCACertPath:     material.CACert,
+		GatewayClientCertPath: material.ClientCert,
+		GatewayClientKeyPath:  material.ClientKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:            server.URL,
+		Transport:             "wss",
+		MaxJobs:               1,
+		GatewayCACertPath:     material.CACert,
+		GatewayClientCertPath: material.ClientCert,
+		GatewayClientKeyPath:  material.ClientKey,
 	}, client, host.ID, "")
 	if err != nil {
 		t.Fatal(err)
@@ -3673,7 +3945,7 @@ func TestGatewayServeStateRequiresSigningKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected gateway serve --state without --signing-key to fail")
 	}
-	if !strings.Contains(err.Error(), "--state requires --signing-key") {
+	if !strings.Contains(err.Error(), "persistent storage requires --signing-key") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

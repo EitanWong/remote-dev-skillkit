@@ -31,6 +31,9 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Development signed job envelopes.
 - Demonstrable local temporary session.
 - Development HTTPS long-poll host job transport.
+- Production WSS host job transport through `rdev host serve --transport wss`
+  and `GET /v1/ws/hosts/{host_id}`, including completion/failure/artifact
+  acknowledgements and mTLS client certificate reuse.
 - Development gateway TLS/mTLS listener through `rdev gateway serve --dev --tls-cert --tls-key [--client-ca]`, requiring client certificates when a client CA is configured while preserving signed-envelope and host-local authorization semantics.
 - Host-side local dev gateway HTTPS/mTLS client support through `rdev host serve --gateway-ca [--gateway-client-cert --gateway-client-key]`, covering join manifests, registration, trust refresh, polling, completion, failure, and artifact appends over local HTTPS/mTLS.
 - Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, cooperative cancellation, output caps, and failure reporting.
@@ -39,6 +42,13 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Signed host registration proofs for identity-bearing registrations.
 - Host enrollment certificate primitive through `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`, binding ticket code, mode, host metadata, capabilities, identity fingerprint, validity window, and enrollment root signature before registration when configured.
 - Local operator auth foundation through `rdev.operator-auth.v1`, `rdev operator-auth init`, `rdev operator-auth verify`, and `rdev gateway serve --dev --operator-auth`, with hashed bearer-token storage and `admin` / `operator` / `issuer` / `auditor` role gates for control-plane and enrollment endpoints.
+- Hosted operator auth foundation through `rdev.hosted-operator-auth.v1`,
+  `rdev operator-auth verify-hosted`, and `rdev gateway serve --dev
+  --hosted-operator-auth`, with generic EdDSA JWT issuer/audience/key/role
+  validation and no provider-specific hardcoded domains.
+- Gateway state-store provider boundary through `--storage-provider`,
+  `--storage-path`, and `rdev gateway storage verify`, with the built-in file
+  provider preserving `rdev.gateway-snapshot.v1`.
 - Dev hosted enrollment issuance primitive through `POST /v1/enrollment/certificates`, `rdev gateway serve --dev --enrollment-key`, and `rdev enrollment issue-certificate --gateway ... --root-public-key ...`, issuing pinned-root-verified certificates from a configured gateway issuer while preventing requested certificate capabilities from exceeding the ticket capabilities.
 - Operator-auth protection for dev hosted enrollment issuance through `rdev gateway serve --dev --operator-auth` and `rdev enrollment issue-certificate --operator-token-file`, keeping tokens out of command output while requiring an `issuer` role token.
 - Local enrollment certificate renewal primitive through `rdev enrollment renew-certificate`, preserving the existing certificate scope, requiring the current certificate to verify, optionally checking signed revocation lists before renewal, and emitting a new certificate fingerprint and validity window.
@@ -49,6 +59,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Operator-auth protection for dev hosted enrollment revocation refresh, using `--operator-auth` on the gateway and `--operator-token-file` on CLI and host fetch paths.
 - Host-side hosted enrollment revocation refresh through `rdev host serve --fetch-enrollment-revocations --enrollment-root-public-key`, requiring pinned enrollment-root verification of the signed gateway list and local certificate before registration, then refusing locally revoked certificates before sending the registration payload.
 - Agent-side enrollment certificate verification through MCP tool `rdev.enrollment.verify_certificate`, returning `rdev.enrollment-certificate-verification.v1` reports so Skillkit workflows can reject missing, expired, wrong-root, tampered, stale-revocation-list, or revoked certificates before trusting a host registration.
+- Enrollment authority lifecycle evidence through `rdev enrollment lifecycle
+  key-custody`, `fleet-renewal-plan`, and `emergency-drill`, producing
+  `rdev.enrollment-key-custody.v1`,
+  `rdev.enrollment-fleet-renewal-plan.v1`, and
+  `rdev.enrollment-emergency-drill.v1`.
 - Trust-bundle key rotation/revocation flow.
 - Trust lifecycle operator workflow through `rdev trust init`, `rdev trust rotate`, `rdev trust revoke`, and `rdev trust verify`, producing signed trust bundles with sequence, previous-hash, key rotation, key retirement, revocation, and pinned-root verification.
 - Host-bound trust bundle update checks for managed host refresh.
@@ -144,11 +159,12 @@ Exit gate: an operator's managed Mac reconnects after reboot, an agent selects i
 - Linux libsecret protected-store references for managed host identity/trust persistence on hosts with `secret-tool` and a reachable Secret Service.
 - Linux keyctl protected-store references for headless managed host identity/trust runtime storage on hosts with a user keyring; real reboot persistence/reconnect proof remains a separate acceptance gate.
 - Hardware-backed or fleet-managed protected stores beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, Linux keyctl, and file-backed paths.
-- Full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, signed empty revocation baseline, and dev revocation-list distribution primitives, including production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
+- Optional third-party hosted storage/auth provider integrations beyond the
+  built-in file provider and provider-neutral hosted JWT verifier.
 - ACP/acpx adapter MVP.
 - Artifact streaming.
-- Durable hosted storage.
-- Production WSS transport with HTTPS polling fallback beyond the current dev gateway TLS/mTLS client/listener path.
+- Durable third-party hosted storage provider packages beyond the current
+  provider boundary.
 
 Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, Windows Service has real install/start/reconnect/stop/uninstall acceptance evidence beyond dry-run plans, and a new adapter can be added without bypassing policy.
 

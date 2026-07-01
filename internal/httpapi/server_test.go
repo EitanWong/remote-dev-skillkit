@@ -1033,6 +1033,38 @@ func TestServerStateSnapshotPersistsGatewayMutations(t *testing.T) {
 	}
 }
 
+func TestServerStateStorePersistsGatewayMutations(t *testing.T) {
+	now := time.Date(2026, 6, 30, 18, 30, 0, 0, time.UTC)
+	publicKey, privateKey := httpTestKeyPair(t)
+	store, err := gateway.NewFileStateStore(filepath.Join(t.TempDir(), "gateway", "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
+	handler := NewServerWithStateStore(gw, store).Handler()
+	host := registerAndApproveHost(t, handler)
+
+	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"stored demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
+	jobRec := httptest.NewRecorder()
+	handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+
+	restartedGateway := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
+	snapshot, ok, err := store.LoadInto(restartedGateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected store load")
+	}
+	if len(snapshot.Jobs) != 1 || snapshot.Jobs[0].Intent != "stored demo" {
+		t.Fatalf("expected persisted job, got %#v", snapshot.Jobs)
+	}
+}
+
 func TestHostJobsNextLongPollWaitsForJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)

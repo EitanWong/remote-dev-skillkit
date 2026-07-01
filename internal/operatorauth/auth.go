@@ -39,6 +39,7 @@ type File struct {
 
 type Authorizer struct {
 	principals []Principal
+	hosted     []*HostedIssuer
 }
 
 type InitResult struct {
@@ -75,6 +76,32 @@ func New(principals []Principal) (*Authorizer, error) {
 		normalized = append(normalized, principal)
 	}
 	return &Authorizer{principals: normalized}, nil
+}
+
+func NewCombined(principals []Principal, hosted ...*HostedIssuer) (*Authorizer, error) {
+	if len(principals) == 0 && len(hosted) == 0 {
+		return nil, fmt.Errorf("operator auth requires at least one principal or hosted issuer")
+	}
+	var auth *Authorizer
+	if len(principals) > 0 {
+		created, err := New(principals)
+		if err != nil {
+			return nil, err
+		}
+		auth = created
+	} else {
+		auth = &Authorizer{}
+	}
+	for _, issuer := range hosted {
+		if issuer == nil || !issuer.Enabled() {
+			continue
+		}
+		auth.hosted = append(auth.hosted, issuer)
+	}
+	if len(auth.principals) == 0 && len(auth.hosted) == 0 {
+		return nil, fmt.Errorf("operator auth requires at least one enabled auth source")
+	}
+	return auth, nil
 }
 
 func Load(path string) (*Authorizer, File, error) {
@@ -195,7 +222,7 @@ func WriteTokenFiles(dir string, tokens map[string]string, force bool) error {
 }
 
 func (a *Authorizer) Enabled() bool {
-	return a != nil && len(a.principals) > 0
+	return a != nil && (len(a.principals) > 0 || len(a.hosted) > 0)
 }
 
 func (a *Authorizer) AuthorizeBearer(header string, allowedRoles ...string) bool {
@@ -216,6 +243,11 @@ func (a *Authorizer) AuthorizeBearer(header string, allowedRoles ...string) bool
 			continue
 		}
 		return principalHasRole(principal, allowedRoles)
+	}
+	for _, hosted := range a.hosted {
+		if hosted.AuthorizeBearer(header, allowedRoles...) {
+			return true
+		}
 	}
 	return false
 }

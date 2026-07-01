@@ -4,12 +4,83 @@ All notable local development changes are recorded here. This repository has
 not been pushed to a public GitHub remote yet; release publication still
 requires explicit operator approval.
 
+## 0.1.3-dev
+
+Current phase: production WSS/mTLS host transport, hosted storage/auth
+foundation, and enrollment authority lifecycle evidence are implemented for
+local release validation. External GitHub publication and real
+Windows/Linux/macOS acceptance runs still require explicit operator approval.
+
+### Added
+
+- Added WSS host job transport through `rdev host serve --transport wss` and
+  `GET /v1/ws/hosts/{host_id}`, including WebSocket acknowledgements for job
+  completion, failure, and artifact persistence.
+- Wired WSS over the same gateway TLS/mTLS client configuration used by HTTPS
+  registration, trust refresh, polling, completion, failure, and artifact
+  upload.
+- Added gateway state-store abstraction plus `--storage-provider file`,
+  `--storage-path`, and `rdev gateway storage verify` so hosted storage
+  providers have a clean implementation boundary.
+- Added hosted operator auth via generic EdDSA JWT verifier configuration
+  (`rdev.hosted-operator-auth.v1`) and `rdev operator-auth verify-hosted`,
+  with issuer, audience, key id, expiry, not-before, and role-claim checks.
+- Added enrollment authority lifecycle evidence commands under
+  `rdev enrollment lifecycle`: key custody records, fleet renewal plans, and
+  emergency drill evidence.
+
+### Changed
+
+- `rdev host serve` no longer describes foreground registration as lacking WSS
+  transport when a gateway and ticket are supplied.
+- Gateway persistence is now routed through a state-store interface while
+  preserving the existing JSON snapshot provider.
+
+### Verification
+
+- Targeted WSS, WSS/mTLS, hosted auth, storage provider, and enrollment
+  lifecycle tests pass.
+
+### Remaining Gates
+
+- Real clean Windows temporary acceptance evidence.
+- Real managed Mac LaunchAgent acceptance evidence.
+- Real Linux systemd reboot/reconnect acceptance evidence.
+- Real Windows Service install/start/reconnect/stop/uninstall acceptance
+  evidence.
+- Optional third-party hosted storage provider plugins beyond the built-in
+  file-backed provider boundary.
+- Final external GitHub publication after explicit approval.
+
+## 0.1.2-dev
+
+Enrollment authority lifecycle operations pass.
+
+### Added
+
+- Added `rdev.enrollment-key-custody.v1` records for key custody owner,
+  provider, rotation window, dual-control, and break-glass requirements.
+- Added `rdev.enrollment-fleet-renewal-plan.v1` for renewal windows, expired
+  certificates, revoked certificates, and per-host renewal decisions.
+- Added `rdev.enrollment-emergency-drill.v1` for emergency revocation drill
+  evidence without leaking local paths.
+
+## 0.1.1-dev
+
+Hosted storage/auth foundation pass.
+
+### Added
+
+- Added gateway state-store provider interface and built-in file provider.
+- Added `rdev gateway storage verify`.
+- Added hosted operator auth configuration and EdDSA JWT role verifier.
+
 ## 0.1.0-dev
 
 Current phase: local safety kernel, open-source packaging, public-readiness
-hardening, and local production-like operator auth. The project is not claiming
-production hosted transport or real Windows/Linux/macOS acceptance completion
-yet.
+hardening, and local production-like operator auth. This stage did not yet
+claim production WSS transport, hosted storage/auth foundation, enrollment
+lifecycle evidence, or real Windows/Linux/macOS acceptance completion.
 
 ### Added
 

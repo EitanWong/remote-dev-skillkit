@@ -2,7 +2,13 @@
 
 `rdev gateway serve --dev` starts a local HTTP or HTTPS gateway backed by the same in-memory state machine used by `rdev mcp serve`.
 
-This is a development surface only. It is not the production WSS host transport and binds to `127.0.0.1` by default. Plain HTTP does not authenticate requests. When `--tls-cert` and `--tls-key` are set, the dev gateway serves HTTPS. When `--client-ca` is also set, the dev gateway requires and verifies client certificates signed by that CA.
+This surface is suitable for local production-style validation and binds to
+`127.0.0.1` by default. Plain HTTP does not authenticate requests. When
+`--tls-cert` and `--tls-key` are set, the gateway serves HTTPS. When
+`--client-ca` is also set, the gateway requires and verifies client
+certificates signed by that CA. Host job transport supports short polling,
+long polling, and WSS; WSS reuses the same TLS/mTLS client settings as the
+HTTPS API.
 
 ## Operator Auth
 
@@ -31,6 +37,45 @@ is enabled, control-plane mutations require an `admin` or `operator` token;
 enrollment issuance, hosted renewal, and hosted revocation fetch require an
 `admin` or `issuer` token; audit/read-only operator views require an `admin`,
 `operator`, or `auditor` token.
+
+Hosted operator auth can be configured with an EdDSA JWT issuer file:
+
+```bash
+rdev operator-auth verify-hosted \
+  --auth .rdev/operator-auth/hosted-operators.json
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --hosted-operator-auth .rdev/operator-auth/hosted-operators.json
+```
+
+The hosted auth file uses schema `rdev.hosted-operator-auth.v1` and validates
+issuer, audience, key id, `exp`, `nbf`, and role claims. It is provider-neutral:
+the project does not hardcode Okta, Auth0, cloud domains, private hosts, or
+operator paths.
+
+## Storage
+
+Gateway state persistence is routed through a state-store provider boundary.
+The built-in provider is `file`; future hosted providers should implement the
+same load/save contract instead of changing HTTP handlers.
+
+```bash
+rdev gateway storage verify \
+  --provider file \
+  --path .rdev/gateway/state.json
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --storage-provider file \
+  --storage-path .rdev/gateway/state.json
+```
+
+`--state` remains a convenience alias for the file provider path.
 
 ## Start
 
@@ -72,6 +117,25 @@ rdev host serve \
 ```
 
 `--gateway-client-cert` and `--gateway-client-key` must be provided together. The host uses the same gateway HTTP client for join-manifest fetches, registration, host approval waits, trust-bundle fetches, trust-store refreshes, job polling, job cancellation checks, completion, failure, and artifact appends. `rdev host serve` still limits ticket-based registration to local dev gateways (`http://127.0.0.1:<port>`, `http://localhost:<port>`, `https://127.0.0.1:<port>`, or `https://localhost:<port>`); public production gateway registration remains a future transport/authentication surface.
+
+Use WSS for the production host job channel:
+
+```bash
+rdev host serve \
+  --mode managed \
+  --gateway https://127.0.0.1:8787 \
+  --transport wss \
+  --gateway-ca .rdev/tls/gateway-ca.pem \
+  --gateway-client-cert .rdev/tls/host-client.pem \
+  --gateway-client-key .rdev/tls/host-client-key.pem \
+  --ticket-code ABCD-1234 \
+  --once=false
+```
+
+WSS job messages carry signed job envelopes exactly like polling. The transport
+does not grant job authority; host-side envelope verification, trust pins,
+nonce replay protection, enrollment certificates, approval tokens, workspace
+locks, and adapter policy still decide whether work can run.
 
 When `--signing-key` is set, the dev gateway creates or reuses an Ed25519 signing key file with `0600` permissions and prints its public-key fingerprint:
 
@@ -127,6 +191,7 @@ rdev host serve \
 - `POST /v1/hosts/{host_id}/approve`
 - `POST /v1/hosts/{host_id}/revoke`
 - `GET /v1/hosts/{host_id}/trust-bundle/update?current_sequence=<n>&current_hash=<sha256:...>`
+- `GET /v1/ws/hosts/{host_id}`
 - `POST /v1/jobs`
 - `GET /v1/jobs/{job_id}`
 - `GET /v1/jobs/{job_id}/artifacts`
@@ -214,6 +279,41 @@ rdev trust verify \
 The trust CLI writes local `rdev.trust-bundle.v1` files only. It does not push
 updates to a gateway. Use the dev `POST /v1/trust-bundle` endpoint or future
 production trust distribution after the bundle has been reviewed and verified.
+
+## Enrollment Lifecycle
+
+Production enrollment authority operations produce reviewable evidence:
+
+```bash
+rdev enrollment lifecycle key-custody \
+  --root-public-key enrollment-root:... \
+  --custodian platform-security \
+  --provider kms \
+  --rotation-days 90 \
+  --out .rdev/enrollment/key-custody.json
+
+rdev enrollment lifecycle fleet-renewal-plan \
+  --certificates .rdev/enrollment/fleet-certificates.json \
+  --revocations .rdev/enrollment/revocations.json \
+  --root-public-key enrollment-root:... \
+  --renew-before 24h \
+  --renew-valid-for 24h \
+  --out .rdev/enrollment/fleet-renewal-plan.json
+
+rdev enrollment lifecycle emergency-drill \
+  --name enrollment-root-compromise-drill \
+  --scenario enrollment-root-compromise \
+  --operator-role admin \
+  --root-public-key enrollment-root:... \
+  --revocations .rdev/enrollment/revocations.json \
+  --out .rdev/enrollment/emergency-drill.json
+```
+
+The schemas are `rdev.enrollment-key-custody.v1`,
+`rdev.enrollment-fleet-renewal-plan.v1`, and
+`rdev.enrollment-emergency-drill.v1`. Drill evidence stores a hashed reference
+for local revocation paths so generated public artifacts do not expose private
+machine paths.
 
 Register a foreground temporary host:
 
@@ -981,17 +1081,17 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 
 ## Limitations
 
-- In-memory state by default. `--state` adds a restart-safe development JSON snapshot, but it is not a production database, lock manager, backup policy, or multi-node storage layer.
-- No production WSS/mTLS host transport. Development HTTPS long-poll and the optional dev gateway TLS/mTLS client/listener path are available for local outbound-channel and certificate preflight testing.
-- No production hosted identity provider integration. `--operator-auth` adds local hashed-token role gates for production-like preflight, but it is not OIDC/SAML/SCIM, SSO, organization membership sync, audit-retention policy, or hosted multi-tenant auth.
-- No production TLS lifecycle, ACME/cert rotation, public gateway auth, or WSS session protocol. The dev TLS/mTLS path only loads local PEM files on the gateway and host, and the listener enforces client certificates when `--client-ca` is configured.
+- In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot, but the built-in file provider is not a multi-node database, distributed lock manager, or backup policy.
+- WSS/mTLS host job transport is implemented for local release validation through `--transport wss`, `--tls-cert`, `--tls-key`, `--client-ca`, `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`. Real NAT, proxy, and platform-service acceptance still require target-environment evidence.
+- Hosted operator auth is provider-neutral EdDSA JWT verification. It is not a bundled OIDC/SAML/SCIM connector, SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
+- TLS lifecycle automation such as ACME issuance, certificate rotation, and public gateway deployment remains operator-managed. The gateway and host load explicit PEM material and enforce client certificates when `--client-ca` is configured.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
 - If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
 - `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode. They are durable across process restarts only when `--state` is enabled with the matching persistent `--signing-key`.
 - `--trust-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available.
-- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; when `--enrollment-root-public-key` is configured, registrations must also include `rdev.host-enrollment-certificate.v1`; when `--enrollment-revocations` is configured, the gateway accepts signed empty revocation baselines, rejects certificates listed in non-empty signed `rdev.host-enrollment-revocations.v1` files, rejects hosted renewal for revoked current certificates, and can require the operator auth token before serving revocation refreshes. Full production enrollment authority lifecycle, production operator identity and roles, fleet renewal policy, hosted revocation distribution, key custody, and emergency drills remain future production gates.
+- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; when `--enrollment-root-public-key` is configured, registrations must also include `rdev.host-enrollment-certificate.v1`; when `--enrollment-revocations` is configured, the gateway accepts signed empty revocation baselines, rejects certificates listed in non-empty signed `rdev.host-enrollment-revocations.v1` files, rejects hosted renewal for revoked current certificates, and can require the operator auth token before serving revocation refreshes. Enrollment authority lifecycle evidence is available through `rdev enrollment lifecycle ...`; real organization-specific custody approvals and emergency runbooks remain operator-owned.
 - `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
 - Linux systemd support currently writes and controls user units, `rdev acceptance linux-managed-service` can verify a release-evidence plan, and `rdev acceptance package-linux-managed-service` can archive real run evidence. Real managed Linux acceptance still needs reboot/reconnect evidence from a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

@@ -103,6 +103,9 @@
 - [x] Add host-side hosted enrollment revocation refresh with `rdev host serve --fetch-enrollment-revocations --enrollment-root-public-key`, including local certificate signature verification and pre-registration revoked-certificate rejection.
 - [x] Protect hosted enrollment revocation refresh with operator auth, `rdev enrollment fetch-revocations --operator-token-file`, and `rdev host serve --operator-token-file`.
 - [x] Add local GitHub project readiness audit with `rdev.github-project-readiness.v1` and wire it into release smoke without external mutation.
+- [x] Add hosted storage/auth foundation with gateway state-store provider boundary, file-backed provider verification, hosted EdDSA JWT operator auth, and combined local/hosted role authorization.
+- [x] Add production enrollment authority lifecycle evidence for key custody, fleet renewal plans, and emergency drill packages.
+- [x] Add production WSS/mTLS host job transport with WebSocket job delivery, completion/failure/artifact acknowledgements, and TLS/mTLS client certificate reuse.
 
 ## Next
 
@@ -188,10 +191,10 @@
 
 ## Later
 
-- [ ] Add production WSS/mTLS host transport beyond the dev gateway TLS/mTLS client/listener path.
+- [x] Add production WSS/mTLS host transport beyond the dev gateway TLS/mTLS client/listener path.
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
 - [ ] Add hardware-backed or fleet-managed protected host identity/trust storage beyond Keychain, DPAPI, libsecret, keyctl, and local files.
-- [ ] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
+- [x] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.

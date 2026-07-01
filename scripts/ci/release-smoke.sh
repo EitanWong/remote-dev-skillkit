@@ -17,6 +17,21 @@ go test ./internal/cli \
   -count=1 \
   > "$work_dir/dev-mtls-host-smoke.txt"
 
+go test ./internal/wsproto ./internal/cli \
+  -run 'TestHTTPToWebSocketURL|TestUpgradeAndDialExchangeJSON|TestHostServeWSSCompletesDevJob|TestHostServeWSSCompletesDevJobWithLocalMTLSGateway' \
+  -count=1 \
+  > "$work_dir/wss-mtls-host-smoke.txt"
+
+go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal/cli \
+  -run 'TestFileStateStoreRoundTrip|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
+  -count=1 \
+  > "$work_dir/hosted-storage-auth-smoke.txt"
+
+go test ./internal/enrollmentlifecycle ./internal/cli \
+  -run 'TestBuildFleetRenewalPlan|TestEnrollmentLifecycleKeyCustodyWritesRecord|TestEnrollmentLifecycleFleetRenewalPlanRequiresRevocations|TestEnrollmentLifecycleEmergencyDrillWritesEvidence' \
+  -count=1 \
+  > "$work_dir/enrollment-lifecycle-smoke.txt"
+
 go test ./internal/model ./internal/cli ./internal/httpapi \
   -run 'TestHostEnrollmentRevocationListAllowsEmptyBaseline|TestEnrollmentInitRevocationsWritesEmptyVerifiedList|TestEnrollmentRevocationsEndpointReturnsEmptyBaseline|TestEnrollmentRevocationsEndpointRequiresIssuerToken' \
   -count=1 \
@@ -289,6 +304,9 @@ print(json.dumps({
     "skillkit_install_executed": skillkit_install_execute["executed"],
     "public_surface_audit": True,
     "dev_mtls_host_smoke": True,
+    "wss_mtls_host_smoke": True,
+    "hosted_storage_auth_smoke": True,
+    "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,
     "enrollment_revocation_auth_smoke": True,

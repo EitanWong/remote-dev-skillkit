@@ -14,11 +14,13 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
+	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 )
 
 type Server struct {
 	Gateway      *gateway.MemoryGateway
 	StatePath    string
+	StateStore   gateway.StateStore
 	OperatorAuth *operatorauth.Authorizer
 	stateMu      *sync.Mutex
 }
@@ -28,11 +30,31 @@ func NewServer(gw *gateway.MemoryGateway) Server {
 }
 
 func NewServerWithState(gw *gateway.MemoryGateway, statePath string) Server {
-	return Server{Gateway: gw, StatePath: statePath, stateMu: &sync.Mutex{}}
+	if strings.TrimSpace(statePath) == "" {
+		return NewServer(gw)
+	}
+	store, _ := gateway.NewFileStateStore(statePath)
+	server := NewServerWithStateStore(gw, store)
+	server.StatePath = statePath
+	return server
+}
+
+func NewServerWithStateStore(gw *gateway.MemoryGateway, store gateway.StateStore) Server {
+	return Server{Gateway: gw, StateStore: store, stateMu: &sync.Mutex{}}
 }
 
 func NewServerWithOperatorAuth(gw *gateway.MemoryGateway, statePath string, auth *operatorauth.Authorizer) Server {
-	return Server{Gateway: gw, StatePath: statePath, OperatorAuth: auth, stateMu: &sync.Mutex{}}
+	if strings.TrimSpace(statePath) == "" {
+		return NewServerWithOperatorAuthAndStateStore(gw, nil, auth)
+	}
+	store, _ := gateway.NewFileStateStore(statePath)
+	server := NewServerWithOperatorAuthAndStateStore(gw, store, auth)
+	server.StatePath = statePath
+	return server
+}
+
+func NewServerWithOperatorAuthAndStateStore(gw *gateway.MemoryGateway, store gateway.StateStore, auth *operatorauth.Authorizer) Server {
+	return Server{Gateway: gw, StateStore: store, OperatorAuth: auth, stateMu: &sync.Mutex{}}
 }
 
 func (s Server) Handler() http.Handler {
@@ -49,6 +71,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
 	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
 	mux.HandleFunc("GET /v1/hosts/", s.hostSubresource)
+	mux.HandleFunc("GET /v1/ws/hosts/", s.hostWebSocket)
 	mux.HandleFunc("POST /v1/hosts/", s.hostAction)
 	mux.HandleFunc("POST /v1/jobs", s.createJob)
 	mux.HandleFunc("GET /v1/jobs/", s.getJob)
@@ -56,6 +79,100 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/artifacts/", s.getArtifact)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
 	return mux
+}
+
+func (s Server) hostWebSocket(w http.ResponseWriter, r *http.Request) {
+	hostID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/ws/hosts/"), "/")
+	if hostID == "" {
+		writeError(w, http.StatusNotFound, "unknown websocket host endpoint")
+		return
+	}
+	conn, err := wsproto.Upgrade(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	defer conn.Close()
+	for {
+		job, ok, err := s.nextJobForHost(r.Context(), hostID, 60*time.Second)
+		if err != nil {
+			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+			return
+		}
+		if !ok {
+			if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageNoop, HostID: hostID}); err != nil {
+				return
+			}
+			continue
+		}
+		if !s.persistStateNoResponse() {
+			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
+			return
+		}
+		if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageJob, HostID: hostID, JobID: job.ID, Job: &job}); err != nil {
+			return
+		}
+	responseLoop:
+		for {
+			var msg wsproto.Message
+			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+			if msg.HostID == "" {
+				msg.HostID = hostID
+			}
+			if msg.JobID == "" {
+				msg.JobID = job.ID
+			}
+			if msg.HostID != hostID || msg.JobID != job.ID {
+				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "websocket job response host or job mismatch"})
+				return
+			}
+			switch msg.Type {
+			case wsproto.MessageComplete:
+				if _, _, err := s.Gateway.CompleteJobForHost(hostID, job.ID, msg.ArtifactContent); err != nil {
+					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+					return
+				}
+				if !s.persistStateNoResponse() {
+					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
+					return
+				}
+				if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageComplete, HostID: hostID, JobID: job.ID}); err != nil {
+					return
+				}
+				break responseLoop
+			case wsproto.MessageFail:
+				if _, _, err := s.Gateway.FailJobForHostWithArtifact(hostID, job.ID, msg.Reason, msg.ArtifactContent); err != nil {
+					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+					return
+				}
+				if !s.persistStateNoResponse() {
+					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
+					return
+				}
+				if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageFail, HostID: hostID, JobID: job.ID}); err != nil {
+					return
+				}
+				break responseLoop
+			case wsproto.MessageArtifact:
+				if _, _, err := s.Gateway.AppendJobArtifactForHost(hostID, job.ID, msg.ArtifactContent); err != nil {
+					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+					return
+				}
+				if !s.persistStateNoResponse() {
+					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
+					return
+				}
+				if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageArtifact, HostID: hostID, JobID: job.ID}); err != nil {
+					return
+				}
+			default:
+				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "unsupported websocket message type"})
+				return
+			}
+		}
+	}
 }
 
 func (s Server) health(w http.ResponseWriter, r *http.Request) {
@@ -644,18 +761,39 @@ func (s Server) authorizeOperator(r *http.Request, roles ...string) bool {
 }
 
 func (s Server) persistState(w http.ResponseWriter) bool {
-	if strings.TrimSpace(s.StatePath) == "" {
-		return true
+	if err := s.persistStateInternal(); err != nil {
+		writeError(w, http.StatusInternalServerError, "persist gateway state: "+err.Error())
+		return false
+	}
+	return true
+}
+
+func (s Server) persistStateNoResponse() bool {
+	return s.persistStateInternal() == nil
+}
+
+func (s Server) persistStateInternal() error {
+	if s.StateStore == nil {
+		if strings.TrimSpace(s.StatePath) == "" {
+			return nil
+		}
+		store, err := gateway.NewFileStateStore(s.StatePath)
+		if err != nil {
+			return fmt.Errorf("configure gateway state store: %w", err)
+		}
+		s.StateStore = store
+	}
+	if s.StateStore == nil {
+		return nil
 	}
 	if s.stateMu != nil {
 		s.stateMu.Lock()
 		defer s.stateMu.Unlock()
 	}
-	if _, err := s.Gateway.SaveSnapshot(s.StatePath); err != nil {
-		writeError(w, http.StatusInternalServerError, "persist gateway state: "+err.Error())
-		return false
+	if _, err := s.StateStore.SaveFrom(s.Gateway); err != nil {
+		return err
 	}
-	return true
+	return nil
 }
 
 func parseLongPollWait(r *http.Request) (time.Duration, error) {

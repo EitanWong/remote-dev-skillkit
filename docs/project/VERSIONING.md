@@ -10,9 +10,12 @@ Before v1.0.0:
 - Development versions are staged as `0.0.N-dev` until the first public
   readiness line. Each `0.0.N-dev` marks one coherent engineering gate, not a
   calendar snapshot.
-- `0.1.0-dev` is reserved for the current public-readiness line after the local
-  safety kernel, Skillkit packaging, release evidence, public-surface audits,
-  and local operator-auth foundation exist.
+- `0.1.0-dev` marks the public-readiness line after the local safety kernel,
+  Skillkit packaging, release evidence, public-surface audits, and local
+  operator-auth foundation exist.
+- `0.1.1-dev` marks hosted storage/auth foundation.
+- `0.1.2-dev` marks enrollment authority lifecycle evidence.
+- `0.1.3-dev` marks production WSS/mTLS host transport.
 
 Compatibility promises:
 

@@ -25,6 +25,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
+	"github.com/EitanWong/remote-dev-skillkit/internal/enrollmentlifecycle"
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
@@ -44,6 +45,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
+	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
@@ -287,8 +289,65 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.enrollmentFetchRevocations(ctx, *gatewayURL, *rootPublicKey, *operatorTokenFile, *out, *force)
+	case "lifecycle":
+		return a.enrollmentLifecycle(args[1:])
 	default:
 		return fmt.Errorf("unknown enrollment subcommand %q", args[0])
+	}
+}
+
+func (a App) enrollmentLifecycle(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing enrollment lifecycle subcommand")
+	}
+	switch args[0] {
+	case "key-custody":
+		fs := flag.NewFlagSet("enrollment lifecycle key-custody", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		rootPublicKey := fs.String("root-public-key", "", "enrollment root public key, formatted key_id:base64url_public_key")
+		custodian := fs.String("custodian", "", "operator or team responsible for enrollment root custody")
+		provider := fs.String("provider", "", "custody provider, for example kms, hsm, secret-manager, or offline")
+		rotationDays := fs.Int("rotation-days", 90, "key custody review and rotation interval in days")
+		dualControl := fs.Bool("dual-control", true, "require two-person control for enrollment root operations")
+		breakGlass := fs.Bool("break-glass-required", true, "require a documented break-glass path")
+		out := fs.String("out", "", "output key custody record JSON path")
+		force := fs.Bool("force", false, "overwrite output key custody record")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentLifecycleKeyCustody(*rootPublicKey, *custodian, *provider, *rotationDays, *dualControl, *breakGlass, *out, *force)
+	case "fleet-renewal-plan":
+		fs := flag.NewFlagSet("enrollment lifecycle fleet-renewal-plan", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		certificates := fs.String("certificates", "", "JSON file containing an array or {certificates:[...]} enrollment certificates")
+		revocations := fs.String("revocations", "", "optional signed enrollment revocation list JSON path")
+		rootPublicKey := fs.String("root-public-key", "", "enrollment root public key, formatted key_id:base64url_public_key")
+		renewBefore := fs.Duration("renew-before", 24*time.Hour, "renew certificates expiring within this duration")
+		renewValidFor := fs.Duration("renew-valid-for", 24*time.Hour, "target renewed certificate validity")
+		maxSkew := fs.Duration("max-skew", 30*time.Second, "maximum clock skew allowed when classifying expiry")
+		requireRevocations := fs.Bool("require-revocations", true, "require a signed revocation list input")
+		out := fs.String("out", "", "output fleet renewal plan JSON path")
+		force := fs.Bool("force", false, "overwrite output fleet renewal plan")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentLifecycleFleetRenewalPlan(*certificates, *revocations, *rootPublicKey, *renewBefore, *renewValidFor, *maxSkew, *requireRevocations, *out, *force)
+	case "emergency-drill":
+		fs := flag.NewFlagSet("enrollment lifecycle emergency-drill", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		name := fs.String("name", "", "drill name")
+		scenario := fs.String("scenario", "", "emergency scenario, for example enrollment-root-compromise")
+		operatorRole := fs.String("operator-role", operatorauth.RoleAdmin, "operator role responsible for the drill")
+		rootPublicKey := fs.String("root-public-key", "", "enrollment root public key, formatted key_id:base64url_public_key")
+		revocations := fs.String("revocations", "", "signed enrollment revocation list JSON path")
+		out := fs.String("out", "", "output emergency drill evidence JSON path")
+		force := fs.Bool("force", false, "overwrite output emergency drill evidence")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.enrollmentLifecycleEmergencyDrill(*name, *scenario, *operatorRole, *rootPublicKey, *revocations, *out, *force)
+	default:
+		return fmt.Errorf("unknown enrollment lifecycle subcommand %q", args[0])
 	}
 }
 
@@ -483,6 +542,8 @@ type gatewayServeOptions struct {
 	Addr                    string
 	AuditLog                string
 	StatePath               string
+	StorageProvider         string
+	StoragePath             string
 	SigningKeyPath          string
 	SigningKeyID            string
 	ManifestSigningKeyPath  string
@@ -495,6 +556,7 @@ type gatewayServeOptions struct {
 	TLSKeyPath              string
 	ClientCAPath            string
 	OperatorAuthPath        string
+	HostedOperatorAuthPath  string
 }
 
 func (a App) operatorAuth(args []string) error {
@@ -520,6 +582,14 @@ func (a App) operatorAuth(args []string) error {
 			return err
 		}
 		return a.operatorAuthVerify(*authFile)
+	case "verify-hosted":
+		fs := flag.NewFlagSet("operator-auth verify-hosted", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		authFile := fs.String("auth", "", "hosted operator auth JSON path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.operatorAuthVerifyHosted(*authFile)
 	default:
 		return fmt.Errorf("unknown operator-auth subcommand %q", args[0])
 	}
@@ -579,6 +649,32 @@ func (a App) operatorAuthVerify(authFile string) error {
 		"principal_count": len(file.Principals),
 		"role_counts":     roleCounts,
 		"hash_alg":        file.HashAlg,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) operatorAuthVerifyHosted(authFile string) error {
+	if strings.TrimSpace(authFile) == "" {
+		return fmt.Errorf("--auth is required")
+	}
+	_, file, err := operatorauth.LoadHosted(authFile)
+	if err != nil {
+		return err
+	}
+	rolesClaim := strings.TrimSpace(file.RolesClaim)
+	if rolesClaim == "" {
+		rolesClaim = "roles"
+	}
+	payload := map[string]any{
+		"schema_version": file.SchemaVersion,
+		"auth_file":      authFile,
+		"ok":             true,
+		"issuer":         file.Issuer,
+		"audience":       file.Audience,
+		"roles_claim":    rolesClaim,
+		"key_count":      len(file.Keys),
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1314,7 +1410,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
 		name := fs.String("name", "", "host display name; defaults to detected hostname")
 		once := fs.Bool("once", true, "register once and exit after printing status")
-		transport := fs.String("transport", "poll", "host job transport: poll or long-poll")
+		transport := fs.String("transport", "poll", "host job transport: poll, long-poll, or wss")
 		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
 		longPollTimeout := fs.Duration("long-poll-timeout", 25*time.Second, "long-poll wait duration when --transport=long-poll")
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
@@ -1605,7 +1701,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		opts.Transport = "poll"
 	}
 	switch opts.Transport {
-	case "poll", "long-poll":
+	case "poll", "long-poll", "wss":
 	default:
 		return fmt.Errorf("unsupported host transport %q", opts.Transport)
 	}
@@ -1629,7 +1725,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if opts.TicketCode == "" {
 		_, err := fmt.Fprintf(
 			a.Stdout,
-			"rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --gateway and --ticket-code to register with a local dev gateway, or --manifest-url for a signed join manifest; production transport is not implemented yet\n",
+			"rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --gateway and --ticket-code to register with a local gateway, or --manifest-url for a signed join manifest\n",
 			opts.Mode,
 			opts.GatewayURL,
 		)
@@ -1738,8 +1834,9 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 			"proof_schema":       proof.SchemaVersion,
 			"registration_proof": true,
 		},
-		"status": "registered-pending-approval",
-		"note":   "local development registration only; WSS transport is not implemented yet",
+		"status":    "registered-pending-approval",
+		"transport": opts.Transport,
+		"note":      "registered with gateway; job transport starts after host approval when --once=false",
 	}
 	if registration.EnrollmentCertificate != nil {
 		enrollmentSummary := map[string]any{
@@ -1770,7 +1867,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if _, err := waitForHostActive(ctx, gatewayClient, opts.GatewayURL, host.ID, opts.ApprovalTimeout, opts.PollInterval); err != nil {
 		return err
 	}
-	processed, err := a.pollAndRunDevJobs(ctx, opts, gatewayClient, host.ID, identity.Fingerprint())
+	processed, err := a.runHostJobs(ctx, opts, gatewayClient, host.ID, identity.Fingerprint())
 	if err != nil {
 		return err
 	}
@@ -1809,11 +1906,24 @@ func verifyHostReleaseGate(opts hostServeOptions) (*hostReleaseGateResult, error
 }
 
 func gatewayHTTPClient(opts hostServeOptions) (*http.Client, error) {
+	tlsConfig, err := gatewayTLSClientConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	if tlsConfig == nil {
+		return http.DefaultClient, nil
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Transport: transport}, nil
+}
+
+func gatewayTLSClientConfig(opts hostServeOptions) (*tls.Config, error) {
 	if (opts.GatewayClientCertPath == "") != (opts.GatewayClientKeyPath == "") {
 		return nil, fmt.Errorf("host serve gateway mTLS requires both --gateway-client-cert and --gateway-client-key")
 	}
 	if opts.GatewayCACertPath == "" && opts.GatewayClientCertPath == "" {
-		return http.DefaultClient, nil
+		return nil, nil
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if opts.GatewayCACertPath != "" {
@@ -1834,9 +1944,7 @@ func gatewayHTTPClient(opts hostServeOptions) (*http.Client, error) {
 		}
 		tlsConfig.Certificates = []tls.Certificate{certificate}
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = tlsConfig
-	return &http.Client{Transport: transport}, nil
+	return tlsConfig, nil
 }
 
 func isLocalDevGatewayURL(value string) bool {
@@ -2824,6 +2932,8 @@ func (a App) gateway(args []string) error {
 		addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 		auditLog := fs.String("audit-log", "", "optional JSONL audit log path")
 		statePath := fs.String("state", "", "optional development gateway JSON snapshot path; requires --signing-key")
+		storageProvider := fs.String("storage-provider", "", "gateway state storage provider: file")
+		storagePath := fs.String("storage-path", "", "gateway state storage path for --storage-provider=file")
 		signingKey := fs.String("signing-key", "", "optional persistent Ed25519 signing key file")
 		signingKeyID := fs.String("signing-key-id", signing.DefaultKeyID, "signing key id for new or existing signing key file")
 		manifestSigningKey := fs.String("manifest-signing-key", "", "optional Ed25519 key file for signing join manifests")
@@ -2836,6 +2946,7 @@ func (a App) gateway(args []string) error {
 		tlsKey := fs.String("tls-key", "", "optional TLS server private key PEM path for the development gateway")
 		clientCA := fs.String("client-ca", "", "optional client CA PEM path; when set, require and verify client certificates")
 		operatorAuth := fs.String("operator-auth", "", "optional operator auth JSON file requiring bearer tokens for control-plane APIs")
+		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -2846,6 +2957,8 @@ func (a App) gateway(args []string) error {
 			Addr:                    *addr,
 			AuditLog:                *auditLog,
 			StatePath:               *statePath,
+			StorageProvider:         *storageProvider,
+			StoragePath:             *storagePath,
 			SigningKeyPath:          *signingKey,
 			SigningKeyID:            *signingKeyID,
 			ManifestSigningKeyPath:  *manifestSigningKey,
@@ -2858,10 +2971,43 @@ func (a App) gateway(args []string) error {
 			TLSKeyPath:              *tlsKey,
 			ClientCAPath:            *clientCA,
 			OperatorAuthPath:        *operatorAuth,
+			HostedOperatorAuthPath:  *hostedOperatorAuth,
 		})
+	case "storage":
+		if len(args) < 2 {
+			return fmt.Errorf("missing gateway storage subcommand")
+		}
+		switch args[1] {
+		case "verify":
+			fs := flag.NewFlagSet("gateway storage verify", flag.ContinueOnError)
+			fs.SetOutput(a.Stderr)
+			provider := fs.String("provider", gateway.FileStateStoreProvider, "gateway state storage provider: file")
+			path := fs.String("path", "", "gateway state storage path for provider=file")
+			if err := fs.Parse(args[2:]); err != nil {
+				return err
+			}
+			return a.gatewayStorageVerify(*provider, *path)
+		default:
+			return fmt.Errorf("unknown gateway storage subcommand %q", args[1])
+		}
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
 	}
+}
+
+func (a App) gatewayStorageVerify(provider, path string) error {
+	store, err := newGatewayStateStore(provider, path)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"provider": strings.TrimSpace(provider),
+		"store":    store.Describe(),
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
 func (a App) audit(args []string) error {
@@ -3353,8 +3499,12 @@ func (a App) release(args []string) error {
 }
 
 func (a App) gatewayServeDev(opts gatewayServeOptions) error {
-	if opts.StatePath != "" && opts.SigningKeyPath == "" {
-		return fmt.Errorf("gateway serve --state requires --signing-key so restored job envelopes keep the same trust root")
+	store, err := gatewayStateStore(opts)
+	if err != nil {
+		return err
+	}
+	if store != nil && opts.SigningKeyPath == "" {
+		return fmt.Errorf("gateway serve persistent storage requires --signing-key so restored job envelopes keep the same trust root")
 	}
 	key, created, err := signing.LoadOrCreate(opts.SigningKeyPath, opts.SigningKeyID)
 	if err != nil {
@@ -3413,15 +3563,15 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		}
 		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment root id=%s fingerprint=%s\n", root.SigningKeyID, fingerprint)
 	}
-	if opts.StatePath != "" {
-		snapshot, loaded, err := gw.LoadSnapshotIfExists(opts.StatePath)
+	if store != nil {
+		snapshot, loaded, err := store.LoadInto(gw)
 		if err != nil {
 			return err
 		}
 		if loaded {
-			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot loaded from %s tickets=%d hosts=%d jobs=%d audit=%d\n", opts.StatePath, len(snapshot.Tickets), len(snapshot.Hosts), len(snapshot.Jobs), len(snapshot.Audit))
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state loaded from %s tickets=%d hosts=%d jobs=%d audit=%d\n", store.Describe(), len(snapshot.Tickets), len(snapshot.Hosts), len(snapshot.Jobs), len(snapshot.Audit))
 		} else {
-			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state snapshot will be created at %s\n", opts.StatePath)
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway state will be created at %s\n", store.Describe())
 		}
 	}
 	if opts.ManifestSigningKeyPath != "" {
@@ -3442,15 +3592,33 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		gw.WithAuditSink(&store)
 	}
 	var auth *operatorauth.Authorizer
+	var principals []operatorauth.Principal
 	if opts.OperatorAuthPath != "" {
 		loadedAuth, file, err := operatorauth.Load(opts.OperatorAuthPath)
 		if err != nil {
 			return err
 		}
 		auth = loadedAuth
+		principals = file.Principals
 		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway operator auth loaded from %s principals=%d\n", opts.OperatorAuthPath, len(file.Principals))
 	}
-	server := httpapi.NewServerWithOperatorAuth(gw, opts.StatePath, auth)
+	var hostedIssuers []*operatorauth.HostedIssuer
+	if opts.HostedOperatorAuthPath != "" {
+		hosted, file, err := operatorauth.LoadHosted(opts.HostedOperatorAuthPath)
+		if err != nil {
+			return err
+		}
+		hostedIssuers = append(hostedIssuers, hosted)
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway hosted operator auth loaded from %s issuer=%s audience=%s keys=%d\n", opts.HostedOperatorAuthPath, file.Issuer, file.Audience, len(file.Keys))
+	}
+	if len(hostedIssuers) > 0 {
+		combined, err := operatorauth.NewCombined(principals, hostedIssuers...)
+		if err != nil {
+			return err
+		}
+		auth = combined
+	}
+	server := httpapi.NewServerWithOperatorAuthAndStateStore(gw, store, auth)
 	if opts.SigningKeyPath != "" {
 		action := "loaded"
 		if created {
@@ -3517,6 +3685,34 @@ func listenAndServeGateway(addr string, handler http.Handler, tlsConfig *tls.Con
 		return server.ListenAndServeTLS("", "")
 	}
 	return server.ListenAndServe()
+}
+
+func gatewayStateStore(opts gatewayServeOptions) (gateway.StateStore, error) {
+	provider := strings.TrimSpace(opts.StorageProvider)
+	path := strings.TrimSpace(opts.StoragePath)
+	statePath := strings.TrimSpace(opts.StatePath)
+	if provider == "" && path == "" && statePath == "" {
+		return nil, nil
+	}
+	if statePath != "" && path != "" && statePath != path {
+		return nil, fmt.Errorf("gateway serve accepts either --state or --storage-path, not two different paths")
+	}
+	if provider == "" {
+		provider = gateway.FileStateStoreProvider
+	}
+	if path == "" {
+		path = statePath
+	}
+	return newGatewayStateStore(provider, path)
+}
+
+func newGatewayStateStore(provider, path string) (gateway.StateStore, error) {
+	switch strings.TrimSpace(provider) {
+	case gateway.FileStateStoreProvider:
+		return gateway.NewFileStateStore(path)
+	default:
+		return nil, fmt.Errorf("unsupported gateway storage provider %q", provider)
+	}
 }
 
 func (a App) enrollmentSignCertificate(opts enrollmentSignCertificateOptions) error {
@@ -4047,6 +4243,123 @@ func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPub
 		"revoked_certificate_count": len(revocations.RevokedCertificates),
 		"generated_at":              revocations.GeneratedAt,
 		"not_after":                 revocations.NotAfter,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) enrollmentLifecycleKeyCustody(rootPublicKey, custodian, provider string, rotationDays int, dualControl, breakGlass bool, outPath string, force bool) error {
+	root, err := parseRootPublicKey(rootPublicKey)
+	if err != nil {
+		return err
+	}
+	record, err := enrollmentlifecycle.NewKeyCustodyRecord(root, custodian, provider, rotationDays, dualControl, breakGlass, time.Now())
+	if err != nil {
+		return err
+	}
+	if outPath != "" {
+		if err := enrollmentlifecycle.WriteJSON(outPath, record, force); err != nil {
+			return err
+		}
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"schema":   record.SchemaVersion,
+		"record":   record,
+		"out_path": outPath,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) enrollmentLifecycleFleetRenewalPlan(certificatesPath, revocationsPath, rootPublicKey string, renewBefore, renewValidFor, maxSkew time.Duration, requireRevocations bool, outPath string, force bool) error {
+	if strings.TrimSpace(certificatesPath) == "" {
+		return fmt.Errorf("certificates is required")
+	}
+	root, err := parseRootPublicKey(rootPublicKey)
+	if err != nil {
+		return err
+	}
+	certificates, err := enrollmentlifecycle.ReadCertificateSet(certificatesPath)
+	if err != nil {
+		return err
+	}
+	for _, certificate := range certificates {
+		if err := model.VerifyHostEnrollmentCertificateSignature(certificate, root, time.Now()); err != nil {
+			return err
+		}
+	}
+	var revocations *model.HostEnrollmentRevocationList
+	if strings.TrimSpace(revocationsPath) != "" {
+		list, err := readEnrollmentRevocationListFile(revocationsPath)
+		if err != nil {
+			return err
+		}
+		if err := model.VerifyHostEnrollmentRevocationListSignature(list, root, time.Now()); err != nil {
+			return err
+		}
+		revocations = &list
+	}
+	plan, err := enrollmentlifecycle.BuildFleetRenewalPlan(certificates, revocations, enrollmentlifecycle.FleetRenewalPolicy{
+		RootPublicKey:      rootPublicKey,
+		RenewBefore:        renewBefore,
+		RenewValidFor:      renewValidFor,
+		MaximumSkew:        maxSkew,
+		RequireRevocations: requireRevocations,
+	}, time.Now())
+	if err != nil {
+		return err
+	}
+	if outPath != "" {
+		if err := enrollmentlifecycle.WriteJSON(outPath, plan, force); err != nil {
+			return err
+		}
+	}
+	payload := map[string]any{
+		"ok":       true,
+		"schema":   plan.SchemaVersion,
+		"plan":     plan,
+		"out_path": outPath,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) enrollmentLifecycleEmergencyDrill(name, scenario, operatorRole, rootPublicKey, revocationsPath, outPath string, force bool) error {
+	if rootPublicKey != "" {
+		if _, err := parseRootPublicKey(rootPublicKey); err != nil {
+			return err
+		}
+	}
+	var revocations *model.HostEnrollmentRevocationList
+	if strings.TrimSpace(revocationsPath) != "" {
+		root, err := parseRootPublicKey(rootPublicKey)
+		if err != nil {
+			return err
+		}
+		list, err := readEnrollmentRevocationListFile(revocationsPath)
+		if err != nil {
+			return err
+		}
+		if err := model.VerifyHostEnrollmentRevocationListSignature(list, root, time.Now()); err != nil {
+			return err
+		}
+		revocations = &list
+	}
+	drill := enrollmentlifecycle.NewEmergencyDrill(name, scenario, operatorRole, rootPublicKey, revocationsPath, revocations, time.Now())
+	if outPath != "" {
+		if err := enrollmentlifecycle.WriteJSON(outPath, drill, force); err != nil {
+			return err
+		}
+	}
+	payload := map[string]any{
+		"ok":       drill.Passed,
+		"schema":   drill.SchemaVersion,
+		"drill":    drill,
+		"out_path": outPath,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -5587,6 +5900,17 @@ func registerHost(ctx context.Context, client *http.Client, gatewayURL string, r
 }
 
 func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+	return a.runHostJobs(ctx, opts, client, hostID, identityFingerprint)
+}
+
+func (a App) runHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+	if strings.TrimSpace(opts.Transport) == "wss" {
+		return a.runWSSHostJobs(ctx, opts, client, hostID, identityFingerprint)
+	}
+	return a.runPollingHostJobs(ctx, opts, client, hostID, identityFingerprint)
+}
+
+func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
 	maxJobs := opts.MaxJobs
 	if maxJobs <= 0 {
 		maxJobs = 1
@@ -5702,6 +6026,102 @@ func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, clien
 		processed++
 	}
 	return processed, nil
+}
+
+func (a App) runWSSHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+	maxJobs := opts.MaxJobs
+	if maxJobs <= 0 {
+		maxJobs = 1
+	}
+	trust, err := fetchHostTrust(ctx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
+	if err != nil {
+		return 0, err
+	}
+	trust.NonceStore = hostNonceStore(opts.NonceStorePath)
+	trust.ApprovalStore = hostApprovalStore(opts.ApprovalStorePath)
+	trust.WorkspaceLockStore = opts.WorkspaceLockStore
+	trust.CaptureRuntimeFixture = opts.CaptureRuntimeFixture
+	wsURL, err := wsproto.HTTPToWebSocketURL(opts.GatewayURL, "/v1/ws/hosts/"+url.PathEscape(hostID))
+	if err != nil {
+		return 0, err
+	}
+	tlsConfig, err := gatewayTLSClientConfig(opts)
+	if err != nil {
+		return 0, err
+	}
+	conn, err := wsproto.Dial(ctx, wsURL, tlsConfig)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	processed := 0
+	for processed < maxJobs {
+		var msg wsproto.Message
+		if err := conn.ReadJSON(&msg); err != nil {
+			return processed, err
+		}
+		switch msg.Type {
+		case wsproto.MessageNoop:
+			continue
+		case wsproto.MessageError:
+			return processed, fmt.Errorf("gateway websocket error: %s", msg.Error)
+		case wsproto.MessageJob:
+			if msg.Job == nil {
+				return processed, fmt.Errorf("gateway websocket job message missing job")
+			}
+			result, err := trust.RunDevJob(ctx, hostID, identityFingerprint, *msg.Job, time.Now())
+			response := wsproto.Message{
+				Type:            wsproto.MessageComplete,
+				HostID:          hostID,
+				JobID:           msg.Job.ID,
+				ArtifactContent: result.ArtifactContent,
+			}
+			if err != nil {
+				response.Type = wsproto.MessageFail
+				response.Reason = err.Error()
+			}
+			if result.RuntimeFixtureContent != "" {
+				if err := conn.WriteJSON(wsproto.Message{
+					Type:            wsproto.MessageArtifact,
+					HostID:          hostID,
+					JobID:           msg.Job.ID,
+					ArtifactContent: result.RuntimeFixtureContent,
+				}); err != nil {
+					return processed, err
+				}
+				if err := readWSSAck(conn, wsproto.MessageArtifact, hostID, msg.Job.ID); err != nil {
+					return processed, err
+				}
+			}
+			if err := conn.WriteJSON(response); err != nil {
+				return processed, err
+			}
+			if err := readWSSAck(conn, response.Type, hostID, msg.Job.ID); err != nil {
+				return processed, err
+			}
+			processed++
+			if err != nil {
+				return processed, err
+			}
+		default:
+			return processed, fmt.Errorf("unsupported websocket message type %q", msg.Type)
+		}
+	}
+	return processed, nil
+}
+
+func readWSSAck(conn *wsproto.Conn, expectedType, hostID, jobID string) error {
+	var ack wsproto.Message
+	if err := conn.ReadJSON(&ack); err != nil {
+		return err
+	}
+	if ack.Type == wsproto.MessageError {
+		return fmt.Errorf("gateway websocket error: %s", ack.Error)
+	}
+	if ack.Type != expectedType || ack.HostID != hostID || ack.JobID != jobID {
+		return fmt.Errorf("unexpected websocket ack type=%q host=%q job=%q", ack.Type, ack.HostID, ack.JobID)
+	}
+	return nil
 }
 
 func cancellationPollInterval(interval time.Duration) time.Duration {

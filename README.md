@@ -116,11 +116,14 @@ Already implemented: the `rdev` CLI, local dev gateway, MCP stdio server,
 Skillkit export/verify/install planning, signed job envelopes, trust bundles,
 host enrollment certificates, revocations, workspace locks, approval gates,
 audit/evidence export, release bundle verification, SBOM/provenance support, and
-adapter paths for shell, PowerShell, Codex, Claude Code, and ACP/acpx.
+adapter paths for shell, PowerShell, Codex, Claude Code, and ACP/acpx. The
+current line also includes WSS/mTLS host job transport, hosted-auth verifier
+configuration, a storage-provider boundary, and enrollment authority lifecycle
+evidence commands.
 
 Still gated before a production-grade hosted release: real platform acceptance
-evidence for Windows/Linux/macOS service modes, production WSS/mTLS, full hosted
-enrollment authority operations, and final external GitHub publishing steps.
+evidence for Windows/Linux/macOS service modes, optional third-party hosted
+storage provider packages, and final external GitHub publishing steps.
 
 ## Documentation Map
 
