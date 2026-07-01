@@ -1,205 +1,104 @@
 ---
 name: remote-vibe-coding
-description: Use when an agent needs to delegate coding work to an enrolled host running Codex, Claude Code, OpenCode, acpx, tmux, shell, or PowerShell adapters.
+description: Use when an agent needs to delegate coding, repair, setup, or development work to an enrolled Remote Dev Skillkit host through Codex, Claude Code, OpenCode/OpenClaw, Hermes, acpx, tmux, shell, or PowerShell adapters.
 ---
 
 # Remote Vibe Coding
 
-Use this skill to run coding tasks on an enrolled host while keeping work policy-bound and auditable.
+Use this skill when a human wants an AI agent to work on a remote or managed
+host while preserving consent, host-local policy, approvals, evidence, and
+revocation.
 
-## Rules
+## Non-Negotiables
 
-- Follow the Agent engineering discipline: read existing interfaces before
-  acting; ask when requirements, authority, or risk are unclear; confirm
-  business intent instead of inventing it; reuse existing APIs, schemas, skills,
-  MCP tools, adapters, and patterns before creating new surfaces; verify with
-  tests and release/readiness checks; preserve the architecture; be honest
-  about unknowns; and refactor cautiously with scoped, reversible changes.
-- Before giving a final plan or answer for ambiguous or high-impact work, ask
-  the human one question at a time. Continue from each answer with the next
-  single question until there is about 95% confidence in the real goal,
-  constraints, and success criteria, then provide the plan or execute the
-  scoped work.
-- Use deep reasoning discipline without exposing private chain-of-thought.
-  Rephrase the task internally, separate explicit requirements from inferred
-  ones, map knowns and unknowns, keep multiple hypotheses alive, verify against
-  source/contracts/schemas/docs, and revise when evidence changes the plan.
-  Scale depth to risk: simple fixes can stay lightweight, while transport,
-  enrollment, hosted auth/storage, customer bootstrap, remote-control,
-  release, and security-sensitive work require deliberate analysis and
-  progress tracking. Share concise auditable reasoning summaries, assumptions,
-  confidence, and verification evidence with the human instead of private
-  internal reasoning.
-- Keep path and configuration neutral. Do not assume a fixed checkout path,
-  user home, temp directory, framework install directory, gateway URL, repo
-  owner/name, workspace root, or release artifact location. Resolve paths from
-  the active Skillkit manifest, current project root, environment probes, MCP
-  tool output, CLI flags, configured policy, or explicit human/operator
-  confirmation. Treat placeholders such as `<workspace>`, `<repo>`, `<dir>`,
-  `<url>`, and `<owner/repo>` as values to discover or ask for, never defaults.
-- Follow the canonical final safety loop documented by the project's
-  architecture decision layer: typed intent, signed host-bound envelope,
+- Read before guessing: inspect existing source, contracts, schemas, docs, MCP
+  tools, and host state before choosing commands.
+- Ask when unclear: for ambiguous or high-impact work, ask one human question at
+  a time until the goal, constraints, authority, and success criteria are about
+  95% clear.
+- Keep reasoning disciplined but private: use requirement decomposition,
+  multiple hypotheses, assumption checks, risk-scaled analysis, and progress
+  tracking; share concise reasoning summaries, assumptions, confidence, and
+  verification evidence instead of private internal reasoning.
+- Stay path/config neutral: never assume a checkout path, user home, temp
+  directory, framework directory, gateway URL, repo id, workspace root, release
+  artifact, ticket code, root key, or approval policy. Resolve values from the
+  active Skillkit manifest, current project root, read-only probes, MCP/CLI
+  output, configured policy, generated invite fields, or explicit
+  human/operator confirmation.
+- Treat placeholders such as `<workspace>`, `<repo>`, `<dir>`, `<url>`, and
+  `<owner/repo>` as values to discover or ask for, never defaults.
+- Do not invent real configuration from examples, placeholders, memory, or
+  guesses when gateway, workspace, framework, release, adapter, host, repo, or
+  approval details are unclear.
+- Preserve the safety kernel: typed intent, signed host-bound envelope,
   host-side validation, locked workspace, adapter execution, redacted evidence,
   audit, and revocation.
-- Treat Remote Dev Skillkit as AI-native. The human should be able to say which
-  machine needs help; the agent should probe local configuration, create an
-  invite with MCP tool `rdev.invites.create` or CLI `rdev invite create`, hand
-  the generated `customer_bootstrap.customer_link` or `host_command` to the
-  human for the target machine, wait for the host to appear, request approval
-  only when needed, then dispatch scoped jobs and collect evidence.
-- For customer support, prefer `customer_bootstrap.customer_link`. It gives the
-  target-side user a visible page and platform bootstrap command, while the
-  agent handles the rest of the lifecycle: watch hosts, approve the expected
-  host when policy requires, run scoped repair jobs, export evidence, and revoke
-  the ticket. Do not request background persistence or OS policy weakening for
-  temporary customer sessions.
-- Treat `host_context_plan` as mandatory context discipline. Keep environment
-  probes, project structure, requirement notes, transcripts, large logs, and
-  evidence on the remote host by default. Load only indexed, redacted,
-  task-relevant slices into the Agent server context, and prefer host-side
-  search or summarization before requesting raw content.
-- Treat `agent_provisioning_plan` as mandatory setup discipline. Probe target
-  host skills, MCP tool contracts, adapters, shells, package managers, language
-  runtimes, project lockfiles, framework paths, proxy settings, permissions,
-  and trust roots before installing anything. The Agent may autonomously install
-  verified user-scoped or workspace-scoped skills, tools, adapter helpers, and
-  project dependencies when policy allows. It must ask before elevation,
-  system-wide packages, services, credentials, firewall changes, external
-  accounts, paid resources, publish/deploy/push, or persistent security-policy
-  changes.
-- Treat `agent_collaboration_plan` as mandatory peer-Agent discipline. Discover
-  configured A2A Agent Cards, local MCP servers, and installed Agent CLIs when
-  collaboration can help. Delegate only bounded subtasks, keep host-local
-  context slices narrow, and treat peer Agents as adapters or collaborators, not
-  authorization roots. Peer work must produce messages, task status, artifacts,
-  checksums, redaction metadata, and audit-linked evidence.
-- Treat `localization_plan` as mandatory language discipline. Detect the target
-  host/customer language from explicit preference, browser hints, OS locale,
-  Windows UI culture, macOS AppleLanguages, Linux locale settings, and
-  environment variables. Localize customer-facing instructions, approval
-  prompts, job summaries, skill guidance, MCP summaries, and evidence summaries.
-  Keep protocol keys, schema versions, commands, paths, JSON fields, checksums,
-  and code blocks unchanged.
-- Treat `managed_development_plan` as mandatory owned-workstation discipline.
-  For the operator's own Mac, Windows PC, or Linux workstation, prefer managed
-  mode for recurring development work. Use reviewed LaunchAgent/systemd/Windows
-  Service plans or a foreground managed smoke process, `--once=false`,
-  `--transport auto`, release gates, enrollment renewal, revocation refresh,
-  workspace locks, Git worktrees, host-local context, reconnect evidence, and
-  safe stop/uninstall instructions.
-- Prefer `--transport auto` for unknown or hostile networks. It attempts WSS,
-  then HTTPS long-poll, then short polling, all as outbound target-host
-  connections. If the host does not appear, ask about proxy requirements, TLS
-  interception, blocked outbound 443, DNS failure, captive portals, VPN
-  requirements, or use configured relay/mesh/SSH paths before asking.
-- When the target host and Agent gateway may be on the same LAN, ask for or
-  derive a LAN-reachable gateway URL. Agents may inspect local interfaces,
-  routes, DNS/mDNS, proxy settings, SSH config, and installed mesh tooling, and
-  may run scoped private-network reachability probes. Treat relay, mesh/VPN, and
-  SSH tunnel paths as connectivity only and never as authorization to run work.
-- When `authority_profile=max-control`, the approved remote host may act as the
-  Agent's field workstation. It may discover reachable devices and control
-  downstream authorized hosts or devices through configured SSH, mesh, relay, or
-  management APIs when the job policy grants `downstream.control.scoped` and
-  evidence is captured.
-- Preserve the current architecture decision layer resolved from the project
-  documentation index or Skillkit manifest; update that document when changing
-  host, adapter, transport, release, or Skillkit boundaries.
-- Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
-- Before creating a coding job, discover the available hosts, target OS,
-  workspace root, Git state, installed adapters, gateway/MCP configuration,
-  release trust inputs, and operator-approved capabilities from the active
-  context. Probe with read-only checks such as `rdev doctor`,
-  `rdev.hosts.list`, `rdev.hosts.capabilities`,
-  `rdev mcp tools`, `git status`, `git rev-parse`, `command -v`, and `where`.
-- If gateway URL, ticket code, host identity, workspace root, adapter choice,
-  release root, framework install path, or approval policy is unclear, ask the
-  user or operator before proceeding. Do not infer real values from examples.
-- Never invent unclear gateway, workspace, adapter, release, framework, or
-  approval configuration from placeholder examples.
-- Adapt to the detected system: use LaunchAgent planning on macOS, systemd user
-  units on Linux, Windows Service plans on Windows, PowerShell only when present,
-  and shell/Codex/Claude/acpx only when the host advertises those capabilities.
-- Prefer ACP/acpx adapters over raw PTY scraping when available.
-- Lock a workspace before starting a coding job.
-- Use a branch or worktree for code changes.
-- Prefer hosts started with `--workspace-lock-store` for coding jobs.
-- For HTTPS, mTLS, or WSS gateway drills, start the gateway with `--tls-cert --tls-key [--client-ca]` and start hosts with `--gateway-ca` plus `--gateway-client-cert --gateway-client-key` when client certificates are required; use `--transport auto` for field reliability or `--transport wss` when specifically validating WebSocket job delivery. Treat transport authentication as connectivity identity only, not job authorization.
-- Treat Codex, Claude Code, ACP, shell, and PowerShell as adapters behind the signed-job/evidence/approval contract.
-- Before trusting a managed or temporary host registration that includes an enrollment certificate, verify it with MCP tool `rdev.enrollment.verify_certificate` or CLI `rdev enrollment verify-certificate`; when requesting or renewing a certificate from a configured gateway, use `rdev enrollment issue-certificate --root-public-key ...` or `rdev enrollment renew-certificate --gateway ... --root-public-key ...` so returned certificates are pinned-root verified before local write, and include `--operator-token-file` when the gateway was started with `--operator-auth`. Initialize signed empty revocation baselines with `rdev enrollment init-revocations`, renew expiring local certificates with `rdev enrollment renew-certificate --revocations ...`, append later revocations with `rdev enrollment revoke-certificate --current`, and when a gateway exposes signed revocations, fetch them with `rdev enrollment fetch-revocations --root-public-key ... [--operator-token-file ...]` and include `revocations_json` / `revocations_artifact_id` or `--revocations`. Hosts that register with an enrollment certificate should use `rdev host serve --renew-enrollment-certificate --enrollment-root-public-key ...` for near-expiry hosted renewal and `rdev host serve --fetch-enrollment-revocations --enrollment-root-public-key ... [--operator-token-file ...]` when the gateway publishes signed revocations, so the host verifies the local certificate, refreshes it before expiry, and refuses revoked certificates before registration. Certificate and revocation verification are read-only and never grant host access by themselves.
-- For enrollment authority operations, produce machine-readable evidence with `rdev enrollment lifecycle key-custody`, `rdev enrollment lifecycle fleet-renewal-plan`, and `rdev enrollment lifecycle emergency-drill`; do not store private keys, private hostnames, or local machine paths in public evidence.
-- For Codex MVP jobs, require `codex.run` and `git.diff`, use a locked workspace/worktree, and expect `rdev.codex-result.v1` artifacts with Git status, diff/stat, and verification command evidence.
-- For Claude Code MVP jobs, require `claude-code.run` and `git.diff`, use a locked workspace/worktree, and expect `rdev.claude-code-result.v1` artifacts with Claude Code output, Git status, diff/stat, and verification command evidence. The default command is `claude -p <prompt>`; signed payloads may override `claude_code_command` and `claude_code_args` for deterministic or custom hosts.
-- For ACP/acpx MVP jobs, require `acpx.run` and `git.diff`, use a locked workspace/worktree, and expect `rdev.acpx-result.v1` artifacts with acpx output, Git status, diff/stat, and verification command evidence. The default command is `acpx --cwd <workspace> codex exec <prompt>`; signed payloads may override `acpx_command`, `acpx_agent`, and `acpx_args` because upstream acpx is still alpha.
-- Prefer `go test -json` when verifying Go projects so Codex artifacts include `rdev.test-report.v1` summaries.
-- For shell, PowerShell, Codex, Claude Code, or acpx jobs that may install packages, request elevation, control GUI, manage services, push, merge, deploy, publish, change credentials, or change execution policy, expect `rdev.approval-required.v1` before execution unless a matching approval token is present.
-- For PowerShell MVP jobs, require `powershell.user`, provide an explicit `command`, allowlist `pwsh`, `powershell`, `powershell.exe`, or the exact signed payload `powershell_command`, and expect `rdev.powershell-result.v1` evidence. Do not ask the adapter to bypass execution policy.
-- When canceling a running Codex, Claude Code, acpx, shell, or PowerShell job, expect the host to cooperatively cancel the local process, keep the gateway job in `canceled` state, and append cancellation evidence when available.
-- For adapter SDK or release-evidence runs, prefer starting managed or temporary hosts with `--capture-runtime-fixture` so shell, PowerShell, Codex, Claude Code, and acpx jobs append `rdev.adapter-runtime-fixture.v1` evidence in addition to their primary adapter result artifacts.
-- For new adapters, start with `rdev adapter scaffold`, implement the runtime lifecycle through `adapterkit.RunLifecycle`, then verify lifecycle, runtime, result, and cancellation evidence through MCP tools `rdev.adapter.verify_lifecycle`, `rdev.adapter.verify_runtime`, `rdev.adapter.verify_result`, and `rdev.adapter.verify_cancellation`, CLI commands `rdev adapter verify-lifecycle`, `rdev adapter verify-runtime`, `rdev adapter verify-result`, and `rdev adapter verify-cancellation`, or `pkg/adapterkit` conformance before exposing the adapter to agents; shell, PowerShell, Codex, Claude Code, and acpx are the reference fixtures.
-- Use managed Mac acceptance commands only with an operator-confirmed output
-  directory and repository path; review both evidence and approval-evidence
-  directories produced by the current run.
-- Verify acceptance output with the report path emitted by the current
-  acceptance command before treating it as release evidence.
-- Before publishing release artifacts or bootstrap download instructions,
-  create and verify a signed release bundle using paths and root keys from the
-  current release plan, not examples.
-- Build release artifacts through the project-provided release script resolved
-  from the current project root or Skillkit manifest, then review the generated
-  build manifest, SBOM, provenance, and checksums before preparing candidates.
-- For multi-platform releases, run the project-provided platform-candidate and
-  release-planning scripts resolved from the current project root or Skillkit
-  manifest; each platform candidate must verify independently before a public
-  release plan is trusted.
-- Before creating or mutating GitHub repositories, labels, milestones, issues,
-  projects, or releases, run the project-provided readiness audit with the
-  operator-confirmed repository id and output path; the report must keep
-  `external_mutation=false`.
-- Before publishing a GitHub Release or instructing users to install artifacts, run `rdev release prepare-candidate ...` and then `rdev release verify-candidate --candidate <dir|release-candidate.json>`; review `sbom.spdx.json`, `provenance.json`, package-relative paths, and verification output, and treat `ok=false` as release-blocking.
-- For agent-framework distribution, run `rdev skillkit export`, `rdev skillkit verify`, `rdev skillkit plan-install`, `rdev skillkit verify-install-plan`, and `rdev skillkit install` dry-run before telling users to install into Codex, Claude Code, Hermes, OpenClaw, OpenCode, or a generic MCP agent; review generated scripts and require `--execute` before local copying while keeping `external_mutation=false`.
-- Use the project-provided release-planning script with the current candidate
-  path and operator-confirmed repository id to create a local GitHub Release
-  plan; do not run the generated `gh release` commands without explicit
-  operator approval.
-- For release-surface changes, expect `./scripts/check.sh` and `./scripts/ci/release-smoke.sh` to pass locally and in GitHub Actions before claiming release readiness.
-- For service-backed managed Mac acceptance, first generate and review a plan
-  using operator-confirmed output directory, gateway URL, ticket code, and repo
-  path; it must not auto-run `launchctl`. Use `rdev host service-control
-  --execute` only after reviewing the generated plan.
-- For Linux managed service work, use `rdev host install-service --platform linux` only as a reviewed systemd user-unit plan with release-bundle gate arguments; for release-evidence planning, run `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, then package real run evidence with `rdev acceptance package-linux-managed-service`. Do not claim real Linux managed-service support until a Linux host proves start/status/reboot-or-logout reconnect/job evidence/stop/uninstall acceptance.
-- For Windows managed service work, use `rdev host install-service --platform windows` only as a reviewed `sc.exe` command plan with `start= demand` and release-bundle gate arguments; for release-evidence planning, run `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`. Do not claim real Windows Service support until a clean Windows host proves create/status/start/reconnect/stop/uninstall acceptance.
-- Do not push, merge, deploy, or modify credentials without approval.
-- Return evidence: diff summary, tests run, exit codes, and artifacts.
+- Do not request hidden persistence, unrestricted shell access, OS policy
+  weakening, credential scraping, UAC/sudo bypass, or unapproved external
+  mutation.
 
-## Workflow
+## First Move
 
-1. Discover the local runtime, MCP tools, gateway configuration, and candidate
-   host list.
-2. If no suitable host is active, create an invite with `rdev.invites.create`
-   or `rdev invite create` and ask the human to open
-   `customer_bootstrap.customer_link` on the target machine, or run
-   `host_command` directly when a page is not needed.
-3. Wait for the host with `rdev.hosts.list`; approve it with
-   `rdev.hosts.approve` only after the operator confirms the host is expected.
-4. Inspect host OS, workspace, capabilities, adapters, and approval policy.
-5. Ask for any missing gateway, host, workspace, release, adapter, or approval
-   configuration that cannot be safely discovered.
-6. Follow `host_context_plan`: request only the context slice needed for the
-   next step, using host-side indexes, summaries, search, or artifact ids.
-7. Follow `agent_provisioning_plan`: detect missing skills/tools/dependencies,
-   install verified user/workspace-scoped pieces when allowed, and collect
-   evidence for every setup action.
-8. Follow `agent_collaboration_plan`: discover A2A/MCP/local Agent peers and
-   delegate bounded subtasks only when their advertised capabilities fit.
-9. Follow `localization_plan`: select the target-side language and localize
-   user-facing prompts, summaries, and evidence text.
-10. Follow `managed_development_plan` for owned long-running workstations:
-    confirm managed mode, service/reconnect state, workspace locks, release
-    gates, and host-local context before recurring coding work.
-11. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
-12. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
-13. Create a job with workspace policy.
-14. Stream status until completion.
-15. Inspect artifacts and audit events.
-16. Request approval before push/merge/deploy.
+1. Discover local runtime, available MCP tools, gateway configuration, candidate
+   hosts, and current task intent.
+2. If no suitable host is active, create an invite with `rdev.invites.create` or
+   `rdev invite create`; prefer `customer_bootstrap.customer_link` for attended
+   support, or `host_command` when a page is unnecessary.
+3. Wait for the host, then approve it only after the operator confirms it is the
+   expected machine.
+4. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
+   policy, release trust inputs, and language/locale.
+5. Ask for missing gateway, host, workspace, release, adapter, framework, repo,
+   or approval configuration that cannot be safely discovered.
+
+## Core Flow
+
+1. Follow `host_context_plan`: keep environment probes, project structure,
+   requirements, transcripts, large logs, and evidence on the target host; load
+   only indexed, redacted, task-relevant slices.
+2. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
+   runtimes, package managers, lockfiles, framework paths, proxies,
+   permissions, and trust roots before installing anything.
+3. Follow `agent_collaboration_plan`: discover A2A Agent Cards, local MCP
+   servers, and installed Agent CLIs only when collaboration can help; treat
+   peers as bounded collaborators, not authorization roots.
+4. Follow `localization_plan`: localize customer-facing prompts, summaries, and
+   evidence while keeping protocol keys, commands, paths, checksums, schemas,
+   and code blocks stable.
+5. Select the least-powerful adapter that can complete the task: `acpx`,
+   `codex`, `claude-code`, `shell`, or `powershell`.
+6. Lock the workspace, use a branch or worktree for code changes, create the
+   signed job, stream status, inspect artifacts/audit, and request approval
+   before push, merge, deploy, publish, credentials, elevation, GUI, service, or
+   destructive filesystem actions.
+
+## Load References Only When Needed
+
+- For restrictive networks, LAN cases, relay/mesh/SSH decisions, max-control
+  discovery, or owned long-running workstations, read
+  [connectivity-and-managed-hosts.md](references/connectivity-and-managed-hosts.md).
+- For enrollment certificates, hosted renewal, revocation refresh, key custody,
+  fleet renewal, or emergency drills, read
+  [enrollment-lifecycle.md](references/enrollment-lifecycle.md).
+- For Codex, Claude Code, acpx, shell, PowerShell, adapter conformance,
+  cancellation, runtime fixtures, or result evidence, read
+  [adapter-jobs.md](references/adapter-jobs.md).
+- For release candidates, Skillkit distribution, GitHub release planning,
+  platform candidates, or Windows/macOS/Linux acceptance evidence, read
+  [release-and-acceptance.md](references/release-and-acceptance.md).
+
+Do not preload every reference. Pick the smallest reference set that matches the
+current task.
+
+## Completion
+
+Return a compact evidence report:
+
+- what changed;
+- host and adapter used;
+- approvals requested or consumed;
+- tests/checks run and exit status;
+- artifacts or audit records reviewed;
+- residual risk;
+- whether host/ticket revocation or managed-service cleanup remains.

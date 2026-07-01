@@ -85,6 +85,9 @@ manifest, transport, and approval steps.
   checkout paths, workspace roots, framework directories, gateways, repos, and
   release artifacts from manifests, probes, active configuration, or explicit
   confirmation instead of hardcoded examples.
+- Added progressive-disclosure references for the core remote-vibe-coding Skill:
+  connectivity/managed hosts, enrollment lifecycle, adapter jobs, and
+  release/acceptance details now load only when the task needs them.
 
 ### Changed
 
@@ -130,6 +133,9 @@ manifest, transport, and approval steps.
 - Reduced path-coupled command examples in Skill guidance and reframed
   placeholders as values that must be discovered or confirmed for the current
   run.
+- Reworked the core remote-vibe-coding Skill into a shorter routing-oriented
+  entrypoint with non-negotiables, first move, core flow, reference selection,
+  and completion evidence.
 
 ### Verification
 
