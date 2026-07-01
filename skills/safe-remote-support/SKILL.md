@@ -15,10 +15,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   using them.
 - Before creating tickets, launchers, service plans, or jobs, determine the
   target OS, shell, installed `rdev` binary, gateway or join URL, ticket source,
-  workspace path, framework install path, release-verification inputs, and
-  operator-approved capabilities. Probe
-  read-only when available; ask a concise follow-up when any required value is
-  ambiguous.
+  workspace path, framework install path, network reachability, proxy/DNS
+  state, NAT/firewall/CGNAT constraints, SSH configuration, installed
+  tunnel/mesh tools, release-verification inputs, and operator-approved
+  capabilities. Probe read-only when available; ask a concise follow-up when
+  any required value is ambiguous.
 - Do not substitute placeholder domains, user paths, ticket codes, release
   roots, checksums, workspace roots, adapter choices, approval policies, or
   framework paths for real configuration. Example values are documentation
@@ -29,7 +30,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   from read-only probes, active configuration, MCP/CLI output, manifest
   metadata, generated invite fields, or explicit human/operator confirmation.
 - If gateway, workspace, adapter, approval, release, or framework configuration
-  is unclear after read-only probes, ask before generating commands.
+  is unclear after read-only probes, ask before generating commands. If a
+  tunnel or mesh path is needed, prefer existing or open-source/free options
+  before paid relays, and ask before privileged, persistent, firewall, DNS,
+  cloud, or security-policy changes.
 - For Windows temporary acceptance, generate the plan using a confirmed release
   bundle URL and output directory, then verify the emitted plan path before
   sending a one-command bootstrap to a target user.

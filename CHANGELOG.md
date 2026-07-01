@@ -69,6 +69,15 @@ manifest, transport, and approval steps.
   long-running developer workstations, covering managed mode, service-backed
   lifecycle plans, reconnect proof, workspace locks, release gates, enrollment
   renewal, revocation refresh, and evidence bundles.
+- Added adaptive tunnel-selection guidance to the Agent Bootstrap Prompt,
+  README quick starts, generated Skillkit install docs, and install-plan
+  scripts. Agents now probe network reachability, proxy/DNS state,
+  NAT/firewall/CGNAT constraints, SSH config, and installed tunnel/mesh tools
+  before choosing a remote-host connection mode.
+- Added an open-source/free-first relay policy for restrictive networks:
+  agents should prefer existing or suitable frp, Chisel, headscale, or
+  WireGuard paths before asking for paid hosted relays, and must ask before
+  privileged, persistent, firewall, DNS, cloud, or security-policy changes.
 - Added Agent engineering discipline to contribution and Skill guidance:
   read before guessing, confirm before ambiguous execution, reuse before
   creating, verify before claiming, preserve architecture, admit unknowns, and

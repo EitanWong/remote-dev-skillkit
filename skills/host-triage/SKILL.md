@@ -20,6 +20,8 @@ may be stale.
 - Shell and PowerShell availability.
 - Git, SSH, package manager, Codex, Claude, acpx.
 - Network reachability to the configured Remote Dev Skillkit gateway or join URL.
+- Proxy/DNS state, NAT/firewall/CGNAT constraints, SSH configuration, installed
+  tunnel or mesh tools, and available connection modes.
 - Workspace boundaries.
 - Existing security tools or enterprise restrictions.
 - Installed service managers or launch surfaces: LaunchAgent/launchd, systemd
@@ -37,7 +39,8 @@ may be stale.
   `sw_vers`, `ver`, `id`, `whoami`, `command -v`, `where`, `git rev-parse`,
   and directory existence checks.
 - Do not invent a gateway URL, ticket code, root key, release URL, user home
-  path, or framework install path. If it cannot be discovered safely, ask.
+  path, framework install path, tunnel choice, mesh choice, or approval policy.
+  If it cannot be discovered safely, ask.
 - Keep path and configuration neutral. Do not assume a fixed checkout path,
   user home, temp directory, workspace root, framework install directory,
   gateway URL, or release artifact location. Resolve them from read-only

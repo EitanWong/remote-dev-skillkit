@@ -131,6 +131,7 @@
 - [x] Add a copy-paste Agent Bootstrap Prompt so Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents can clone the repository, read the full bootstrap instructions, install, and connect Remote Dev Skillkit by probing their own runtime.
 - [x] Synchronize multilingual quick starts with the copy-paste Agent Bootstrap Prompt and audit the translated entry.
 - [x] Make Agent bootstrap installation local-first so personal-computer installs use `rdev mcp serve` without requiring a hosted gateway URL, while remote-host workflows probe and choose the best available connection mode.
+- [x] Extend Agent bootstrap and Skillkit install contracts with network reachability, proxy/DNS, NAT/firewall/CGNAT, SSH, and tunnel/mesh tool probes; prefer existing or open-source/free tunnel options such as frp, Chisel, headscale, and WireGuard before paid relays.
 
 ## Next
 

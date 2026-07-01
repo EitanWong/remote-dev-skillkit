@@ -36,6 +36,12 @@ Rules:
   connection mode: local dev gateway, LAN-reachable gateway, hosted gateway,
   relay/mesh/VPN, or SSH tunnel. Ask before using paid, external, privileged,
   persistent, or security-policy-changing resources.
+- If NAT, firewall, CGNAT, or missing public DNS prevents direct hosted/LAN
+  reachability, evaluate tunneling or mesh options automatically. Prefer
+  open-source and free options first, such as frp, Chisel, headscale/Tailscale
+  compatible mesh, or WireGuard, when they fit the operator's environment.
+  Treat managed commercial tunnels as fallback choices that need explicit
+  approval.
 - If a required value is unclear, ask exactly one short question, wait for the
   answer, then continue.
 - Do not hardcode private server addresses, personal paths, secrets, dates, or
@@ -79,15 +85,32 @@ Steps:
 11. Configure this agent's MCP client to run `rdev mcp serve`, or produce the
    exact MCP config snippet and file path if the framework requires manual
    review. Do not silently overwrite existing MCP config.
-12. Verify the installed skill folders exist, verify `.remote-dev-skillkit/mcp/tools.json`
+12. If the user wants to control a remote host, build a connection-mode plan:
+    - If the Agent and host are on the same machine, use local MCP stdio and
+      local/dev gateway flows.
+    - If the Agent and host share a LAN or VPN, prefer a LAN-reachable gateway
+      URL and outbound host connection.
+    - If SSH to a reachable machine is already configured and authorized,
+      consider an SSH tunnel.
+    - If NAT/firewall/CGNAT blocks reachability, prefer open-source/free tunnel
+      or mesh options first: frp for reverse proxy/NAT traversal, Chisel for
+      HTTP(S)-based TCP/UDP tunneling, headscale when a self-hosted
+      Tailscale-compatible control plane is appropriate, or WireGuard for a
+      direct VPN. Probe whether these are already installed before suggesting
+      installation.
+    - If no open/free option is viable, ask before using paid hosted relay,
+      cloud tunnel, DNS, firewall, service, or persistent network changes.
+13. Verify the installed skill folders exist, verify `.remote-dev-skillkit/mcp/tools.json`
     exists, and run any available framework command that lists skills or MCP
     tools.
-13. Report:
+14. Report:
     - detected framework
     - installed skill target
     - whether MCP was configured or the exact snippet I need to add
     - verification commands run
     - selected connection mode for local use
+    - selected remote connection mode, if remote-host work was requested
+    - whether any tunnel/mesh/relay is needed, which option was chosen, and why
     - whether a hosted gateway is absent, optional, configured, or still needed
       for the remote-host workflow I asked for
     - any remaining values I must provide before using real remote sessions
@@ -146,3 +169,31 @@ For hosted gateway deployments, the agent may include `--gateway-url
 https://api.example.com/v1` during export, replacing the placeholder with the
 operator-provided gateway. For personal-machine installs, it should leave the
 gateway unset and configure local MCP stdio.
+
+## Connection Mode Selection
+
+The agent should choose the simplest working path, in this order:
+
+1. Local Agent install only: use `rdev mcp serve`; no gateway required.
+2. Local/dev session on one machine: use the local dev gateway and loopback.
+3. Shared LAN/VPN: use a LAN-reachable gateway URL and outbound host transport.
+4. Existing authorized SSH path: use an SSH tunnel if it avoids new services.
+5. NAT/firewall/CGNAT: prefer open-source/free tunnel or mesh tools before
+   paid hosted services.
+6. Hosted/public gateway: use when the operator already has one or explicitly
+   approves creating one.
+
+Open-source/free candidates to consider before paid relay services:
+
+- frp: reverse proxy for exposing services behind NAT/firewall, with TCP, UDP,
+  HTTP, HTTPS, and P2P support. Source: https://github.com/fatedier/frp
+- Chisel: TCP/UDP tunnel over HTTP, useful when HTTP(S) egress is available.
+  Source: https://github.com/jpillora/chisel
+- headscale: self-hosted implementation of the Tailscale control server for
+  mesh-style connectivity. Source: https://github.com/juanfont/headscale
+- WireGuard: open-source VPN tunnel. Source: https://www.wireguard.com/
+
+Before installing or enabling any tunnel/mesh component, the agent must inspect
+what already exists, prefer temporary or user-scoped configuration, verify
+download/source provenance, and ask before privileged, persistent, paid,
+firewall, DNS, cloud, or security-policy changes.

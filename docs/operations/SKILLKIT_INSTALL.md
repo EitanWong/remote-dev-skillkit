@@ -64,18 +64,24 @@ bundle into any agent runtime until verification returns `ok=true` and
 
 Agents using this Skillkit must discover their environment before acting. They
 should inspect the installed `rdev` binary, MCP tools, target OS, shell,
-available service manager, gateway configuration, workspace path, installed
-agent adapters, and current permissions. If a gateway URL, ticket code, root
-key, release URL, checksum, framework install path, workspace root, adapter
-choice, or approval policy cannot be discovered safely, the agent must ask a
-short follow-up question instead of inventing a value.
+available service manager, gateway configuration, network reachability,
+proxy/DNS state, NAT/firewall/CGNAT hints, SSH config, installed tunnel/mesh
+tools, workspace path, installed agent adapters, and current permissions. If a
+gateway URL, ticket code, root key, release URL, checksum, framework install
+path, workspace root, adapter choice, tunnel/mesh approval, or approval policy
+cannot be discovered safely, the agent must ask a short follow-up question
+instead of inventing a value.
 
 For local Agent installs on a personal computer, gateway configuration can be
 absent. The Agent should configure local MCP stdio through `rdev mcp serve` and
 defer gateway selection until a real remote-host workflow needs one. When remote
 hosts are needed, the Agent should choose among local dev gateway, LAN-reachable
-gateway, hosted gateway, relay/mesh/VPN, or SSH tunnel based on the probed
-environment and operator policy.
+gateway, hosted gateway, SSH tunnel, or relay/mesh/VPN based on the probed
+environment and operator policy. If direct reachability is blocked by NAT,
+firewall, CGNAT, proxy, or DNS constraints, prefer already-configured or
+open-source/free tunnel and mesh options before paid hosted relay services.
+Candidate tools include frp, Chisel, headscale, and WireGuard; probe existing
+installation and source provenance before suggesting any install.
 
 Examples such as `https://api.example.com/v1`, `/Users/example`,
 `/home/example`, and `C:\Users\Alice` are placeholders. Runtime agents must

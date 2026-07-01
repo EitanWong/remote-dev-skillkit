@@ -26,14 +26,18 @@ read the prompt from:
 https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
 
 Probe my OS, shell, Git, Go, `rdev`, current agent framework, skill directory,
-MCP config, and available connection modes before acting. If a required value is
-unclear, ask me one short question instead of guessing. For a personal computer
-agent install, use local MCP stdio with `rdev mcp serve`; do not require a
-hosted gateway URL. When remote hosts are needed, auto-select the safest
-available mode: local dev gateway, LAN-reachable gateway, hosted gateway,
-relay/mesh/VPN, or SSH tunnel. Dry-run before execute. Do not hardcode private
-paths, secrets, or server addresses; treat `https://api.example.com/v1` only as
-optional hosted-gateway placeholder metadata.
+MCP config, network reachability, proxy/DNS state, NAT/firewall/CGNAT hints,
+SSH config, installed tunnel/mesh tools, and available connection modes before
+acting. If a required value is unclear, ask me one short question instead of
+guessing. For a personal computer agent install, use local MCP stdio with
+`rdev mcp serve`; do not require a hosted gateway URL. When remote hosts are
+needed, auto-select the safest working mode: local dev gateway, LAN-reachable
+gateway, hosted gateway, SSH tunnel, or relay/mesh/VPN. If tunneling is needed,
+prefer open-source/free options first, such as frp, Chisel, headscale, or
+WireGuard, after probing what is already installed. Dry-run before execute. Do
+not hardcode private paths, secrets, or server addresses; treat
+`https://api.example.com/v1` only as optional hosted-gateway placeholder
+metadata.
 ```
 
 Полный prompt для копирования: [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md).

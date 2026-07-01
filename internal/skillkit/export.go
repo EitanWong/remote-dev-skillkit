@@ -370,11 +370,13 @@ func adaptiveConfigurationContract() string {
 	return strings.Join([]string{
 		"## Adaptive Configuration Contract",
 		"",
-		"Agents using this Skillkit must discover their environment before acting. They should probe the installed `rdev` binary with `rdev doctor`, inspect MCP tools with `rdev mcp tools`, and check the target OS, shell, available service manager, gateway configuration, workspace path, installed agent adapters, framework install path, current permissions, and available connection modes.",
+		"Agents using this Skillkit must discover their environment before acting. They should probe the installed `rdev` binary with `rdev doctor`, inspect MCP tools with `rdev mcp tools`, and check the target OS, shell, available service manager, gateway configuration, network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints, SSH configuration, installed tunnel or mesh tools, workspace path, installed agent adapters, framework install path, current permissions, and available connection modes.",
 		"",
-		"If a gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy cannot be discovered safely, the agent must ask a short follow-up question instead of inventing a value.",
+		"If a gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, tunnel or mesh approval, or approval policy cannot be discovered safely, the agent must ask a short follow-up question instead of inventing a value.",
 		"",
-		"For local Agent installs on a personal computer, gateway configuration may be absent. Use local MCP stdio with `rdev mcp serve`; choose a gateway only when a remote-host workflow needs local dev, LAN, hosted, relay/mesh/VPN, or SSH-tunnel connectivity.",
+		"For local Agent installs on a personal computer, gateway configuration may be absent. Use local MCP stdio with `rdev mcp serve`; choose a gateway only when a remote-host workflow needs local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN connectivity.",
+		"",
+		"If NAT, firewall, CGNAT, proxy, or DNS constraints block direct reachability, prefer already-configured or open-source/free tunnel and mesh options before paid relays. Candidate tools include frp, Chisel, headscale, and WireGuard; probe what is already installed and verify source provenance before suggesting installation.",
 		"",
 		"Examples such as `https://api.example.com/v1`, `/Users/example`, `/home/example`, and `C:\\Users\\Alice` are placeholders. Runtime agents must replace them with operator-provided or detected values.",
 	}, "\n")

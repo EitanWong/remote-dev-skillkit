@@ -653,6 +653,11 @@ func assertAdaptiveConfigurationContract(t *testing.T, contract AdaptiveConfigur
 		"target OS and shell",
 		"service manager",
 		"gateway configuration",
+		"network reachability",
+		"proxy and DNS state",
+		"NAT/firewall/CGNAT constraints",
+		"SSH configuration",
+		"installed tunnel or mesh tools",
 		"available connection modes",
 		"workspace path",
 		"framework install path",
@@ -670,6 +675,7 @@ func assertAdaptiveConfigurationContract(t *testing.T, contract AdaptiveConfigur
 		"framework install path",
 		"workspace root",
 		"adapter choice",
+		"tunnel or mesh approval",
 		"approval policy",
 	} {
 		if !containsString(contract.AskIfUnclear, want) {

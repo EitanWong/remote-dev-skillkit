@@ -31,6 +31,12 @@ revocation.
 - Do not invent real configuration from examples, placeholders, memory, or
   guesses when gateway, workspace, framework, release, adapter, host, repo, or
   approval details are unclear.
+- Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
+  SSH configuration, installed tunnel/mesh tools, and available connection
+  modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
+  paths. Prefer existing or open-source/free tunnel/mesh options before paid
+  relays, and ask before privileged, persistent, firewall, DNS, cloud, or
+  security-policy changes.
 - Maintain dynamic Skill runtime memory for discovered environment facts,
   configuration paths, host capabilities, adapter availability, and operator
   preferences. Read it before repeating probes, refresh stale entries, and keep
@@ -44,8 +50,8 @@ revocation.
 
 ## First Move
 
-1. Discover local runtime, available MCP tools, gateway configuration, candidate
-   hosts, and current task intent.
+1. Discover local runtime, available MCP tools, gateway configuration, network
+   reachability, candidate hosts, and current task intent.
 2. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
 3. If no suitable host is active, create an invite with `rdev.invites.create` or
@@ -56,7 +62,8 @@ revocation.
 5. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
    policy, release trust inputs, and language/locale.
 6. Ask for missing gateway, host, workspace, release, adapter, framework, repo,
-   or approval configuration that cannot be safely discovered.
+   tunnel/mesh approval, or approval configuration that cannot be safely
+   discovered.
 
 ## Core Flow
 

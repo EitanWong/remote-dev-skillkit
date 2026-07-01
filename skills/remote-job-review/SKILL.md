@@ -15,11 +15,11 @@ Use this skill before telling the user a remote job is complete.
   facts are written back only after evidence review.
 - Before declaring completion, probe read-only context such as `rdev doctor`,
   `rdev mcp tools`, job status, artifact listings, audit exports, workspace
-  path, framework install path, and verifier availability when those details are
-  not already explicit.
+  path, framework install path, network reachability, tunnel/mesh selection,
+  and verifier availability when those details are not already explicit.
 - If job id, gateway, workspace, evidence bundle path, artifact location,
-  adapter choice, approval policy, framework install path, or expected verifier
-  is unclear, ask before declaring completion.
+  adapter choice, tunnel/mesh approval, approval policy, framework install
+  path, or expected verifier is unclear, ask before declaring completion.
 - Do not invent gateway URLs, paths, ticket codes, root keys, release URLs,
   checksums, workspace roots, adapter choices, or approval policies from
   examples or placeholders.
@@ -27,6 +27,8 @@ Use this skill before telling the user a remote job is complete.
   artifact locations, verifier paths, framework directories, and gateway URLs
   must come from job metadata, current context, MCP/CLI output, manifest
   metadata, or explicit human/operator confirmation.
+- Treat relay, tunnel, mesh, VPN, SSH, proxy, and DNS facts as evidence-backed
+  connectivity context, not assumed defaults.
 - Job reached a terminal state.
 - No pending approval requests remain.
 - Commands and exit codes are recorded.

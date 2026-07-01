@@ -16,6 +16,16 @@ max-control discovery, or long-running owned workstations.
 - Agents may inspect local interfaces, routes, DNS/mDNS, proxy settings, SSH
   config, and installed mesh tooling, and may run scoped private-network
   reachability probes.
+- If NAT, firewall, CGNAT, missing public DNS, or restrictive egress blocks
+  direct LAN/hosted reachability, evaluate already-configured tunnel or mesh
+  paths automatically. Prefer open-source/free options before paid relays:
+  frp for reverse proxy/NAT traversal, Chisel for HTTP(S)-based TCP/UDP
+  tunneling, headscale for a self-hosted Tailscale-compatible control plane,
+  and WireGuard for direct VPN tunnels.
+- Before installing or enabling tunnel/mesh components, verify source
+  provenance, prefer temporary/user-scoped configuration, and ask before
+  privileged, persistent, paid, firewall, DNS, cloud, or security-policy
+  changes.
 - Relay, mesh/VPN, and SSH tunnel paths are connectivity only. They never
   replace target consent, host approval, signed jobs, local policy checks, or
   evidence.
