@@ -110,6 +110,9 @@
 - [x] Add auto transport fallback planning and runtime fallback from WSS to HTTPS long-poll to short polling for restrictive networks.
 - [x] Add Agent connection protocol matrix with LAN scope, scoped discovery plan, and agent-managed relay/mesh/SSH connectivity candidates.
 - [x] Add max-control Agent authority profile for remote-host-assisted discovery and downstream authorized device control.
+- [x] Add one-link attended customer bootstrap with join page, platform bootstrap scripts, invite `customer_bootstrap`, and Agent follow-up instructions.
+- [x] Add host-context-first progressive disclosure plan so remote host environment, project structure, requirements, logs, and evidence stay on the host while agents load indexed slices on demand.
+- [x] Add adaptive host-local provisioning plan so agents can probe and install verified skills, MCP tools, adapters, and dependencies on the target host when policy allows.
 
 ## Next
 

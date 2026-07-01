@@ -116,10 +116,31 @@ rdev invite create \
 
 The JSON output includes `schema_version: rdev.agent-invite.v1`, a short-lived
 ticket, the manifest URL, a copyable `host_command`, a transport fallback plan,
-and the next MCP tools the agent should call. The human action is intentionally
-small: run `host_command` on the target computer and approve the host when
-policy requires it. The agent does the waiting, probing, job creation, status
-tracking, and evidence review.
+`customer_bootstrap`, and the next MCP tools the agent should call. The human
+action is intentionally small: open the generated customer link on the target
+computer, run the visible platform command, and approve the host when policy
+requires it. The agent does the waiting, probing, job creation, status tracking,
+evidence review, and revocation.
+
+For customer support, send the invite's `customer_bootstrap.customer_link`.
+The join page serves inspectable `/bootstrap.sh` and `/bootstrap.ps1` helpers
+that start a visible attended host session with `--transport auto`. They do not
+create hidden persistence, weaken OS policy, or open inbound firewall ports.
+
+Invite output also includes `host_context_plan`. Remote Dev Skillkit is
+host-context-first: environment probes, project file trees, requirement notes,
+logs, transcripts, and large evidence stay on the remote host by default. The
+Agent server should keep only indexes, summaries, checksums, and artifact IDs,
+then load exact slices on demand. Tiny context, sharp tools, fewer headaches.
+
+For setup drift, invite output includes `agent_provisioning_plan`. Agents should
+probe the target host for installed skills, MCP tools, adapters, runtimes,
+package managers, lockfiles, framework paths, proxy settings, and permissions.
+When something is missing, they may install verified user-scoped or
+workspace-scoped skills/tools/dependencies automatically when policy allows.
+Elevation, services, credentials, firewall changes, external accounts, paid
+resources, publish/deploy/push actions, and security-policy mutation require an
+approval gate and evidence.
 
 `--transport auto` is the field-friendly default: the host tries outbound WSS
 first, falls back to HTTPS long-poll when WebSocket upgrades are blocked, and
@@ -206,6 +227,11 @@ storage provider packages, and final external GitHub publishing steps.
 - No silent privilege escalation.
 - No private server address or personal path baked into the public project.
 - No unrestricted agent shell by default.
+- No dumping whole remote repositories, environment snapshots, logs, or
+  customer context into the Agent server by default; use host-side indexes and
+  progressive disclosure.
+- No blind dependency or tool installation: probe first, install from verified
+  sources, prefer host-local/user/workspace scope, and record evidence.
 - Every serious remote job must be signed, policy-checked, auditable, and
   revocable.
 - Destructive actions and high-risk capabilities need explicit approval gates.

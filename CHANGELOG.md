@@ -43,6 +43,20 @@ manifest, transport, and approval steps.
 - Added capability vocabulary for `network.discovery.scoped`,
   `network.probe.lan`, `relay.use`, `mesh.use`, `ssh.tunnel`, and
   `downstream.control.scoped`.
+- Added `rdev.customer-bootstrap.v1` inside invite output so agents can send a
+  customer link, one-line platform commands, target-side steps, agent follow-up
+  actions, and revocation instructions without hand-assembling bootstrap text.
+- Added development gateway join resources at `/join/<ticket>`,
+  `/join/<ticket>/bootstrap.sh`, and `/join/<ticket>/bootstrap.ps1` for visible
+  attended target-host startup with `--transport auto`.
+- Added `rdev.host-context-plan.v1` to invite output so agents keep remote
+  environment, project structure, requirement notes, logs, transcripts, and
+  large evidence on the host while loading only indexed slices or artifact
+  references into Agent server context.
+- Added `rdev.agent-provisioning-plan.v1` to invite output so agents can
+  detect target-host skills, MCP tools, adapters, runtimes, package managers,
+  project dependencies, framework paths, proxies, and permissions, then install
+  verified user/workspace-scoped missing pieces when policy allows.
 
 ### Changed
 
@@ -61,12 +75,22 @@ manifest, transport, and approval steps.
 - Documented max-control behavior for using the remote host as a field control
   point over reachable downstream devices while keeping evidence requirements
   and task-intent boundaries explicit.
+- Updated README, MCP stdio, bootstrap, and remote-vibe-coding docs to prefer
+  the one-link customer bootstrap flow for support sessions while preserving
+  visible consent, auditability, and revocation.
+- Documented host-context-first progressive disclosure as the standard
+  AI-native context model for remote sessions.
+- Documented adaptive host-local provisioning for skills, MCP tools,
+  dependencies, and adapter helpers with approval gates for elevated,
+  system-wide, credential, service, firewall, external, paid, publish, deploy,
+  push, or persistent security-policy changes.
 
 ### Verification
 
 - Targeted invite, MCP, and tool-contract tests pass locally.
 - Host runtime auto-transport fallback is covered by a test that fails WSS and
   completes the job over HTTPS long-poll.
+- Join page and platform bootstrap script handlers are covered by HTTP tests.
 
 ## 0.1.3-dev
 

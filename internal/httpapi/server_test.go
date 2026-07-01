@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,33 @@ func TestCreateTicketAndAudit(t *testing.T) {
 	}
 	if !bytes.Contains(auditRec.Body.Bytes(), []byte("ticket.create")) {
 		t.Fatalf("expected audit response to include ticket.create, got %s", auditRec.Body.String())
+	}
+}
+
+func TestJoinPageAndBootstrapScripts(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+
+	ticket := createTicket(t, handler)
+	for _, tc := range []struct {
+		path     string
+		contains []string
+	}{
+		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "bootstrap.sh", "bootstrap.ps1"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"rdev host serve", "--manifest-url", "--transport auto", "--once=false"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"rdev host serve", "--manifest-url", "--transport auto", "--once=false"}},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s expected 200, got %d: %s", tc.path, rec.Code, rec.Body.String())
+		}
+		for _, want := range tc.contains {
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Fatalf("%s expected %q in body:\n%s", tc.path, want, rec.Body.String())
+			}
+		}
 	}
 }
 

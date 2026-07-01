@@ -17,13 +17,39 @@ Agent-first session tools include:
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
-`transport_plan`, `connection_plan`, `fallback_commands`,
-`authority_profile`, `connectivity_checks`, `human_next_actions`, and
-`agent_next_actions`. Agents should call this before asking a human to connect a
-new target host. The command still requires consent on the target machine; it
-does not execute remotely by itself. The default transport is `auto`, which
-tries WSS first and falls back to HTTPS long-poll and then short polling when
-restrictive networks block WebSocket upgrades or long-held requests.
+`transport_plan`, `connection_plan`, `customer_bootstrap`,
+`host_context_plan`, `agent_provisioning_plan`, `fallback_commands`, `authority_profile`,
+`connectivity_checks`, `human_next_actions`, and `agent_next_actions`. Agents
+should call this before asking a human to connect a new target host. The command
+still requires consent on the target machine; it does not execute remotely by
+itself. The default transport is `auto`, which tries WSS first and falls back to
+HTTPS long-poll and then short polling when restrictive networks block
+WebSocket upgrades or long-held requests.
+
+For customer support flows, prefer `customer_bootstrap.customer_link` over
+manually copying host flags. The join page provides visible, inspectable
+platform bootstrap commands for the target machine. Agents should treat those
+commands as attended consented startup, then watch `rdev.hosts.list`, approve
+the expected host when policy requires approval, run scoped jobs, export
+evidence, and revoke the ticket when finished.
+
+The `host_context_plan` is the standard for AI-native context management. It
+sets `storage_location=remote-host-first` and
+`server_context_budget=index-and-on-demand-slices`. Agents should keep project
+structure, environment probes, requirement notes, transcripts, logs, and large
+evidence on the host; the gateway should expose only host ids, workspace
+handles, artifact ids, checksums, sizes, redaction metadata, and freshness
+timestamps until the agent explicitly requests a slice.
+
+The `agent_provisioning_plan` is the standard for adaptive target-host setup.
+MCP clients should detect installed Skillkit skills, MCP tool contracts,
+adapters, shells, package managers, language runtimes, project lockfiles,
+framework paths, proxy settings, permissions, and trust roots before installing
+anything. Policy may allow user-scoped or workspace-scoped installation of
+verified skills, MCP metadata, adapter helpers, and project dependencies. It
+must ask for approval before elevation, system-wide packages, services,
+credentials, firewall changes, external accounts, paid resources, publish,
+deploy, push, or security-policy mutation.
 
 The `connection_plan` separates native support from agent-managed paths:
 implemented native paths are outbound WSS/mTLS, HTTPS long-poll, HTTPS

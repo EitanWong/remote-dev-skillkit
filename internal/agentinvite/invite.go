@@ -36,6 +36,9 @@ type Invite struct {
 	TransportPlan       TransportPlan     `json:"transport_plan"`
 	ConnectionPlan      ConnectionPlan    `json:"connection_plan"`
 	AuthorityProfile    AuthorityProfile  `json:"authority_profile"`
+	CustomerBootstrap   CustomerBootstrap `json:"customer_bootstrap"`
+	HostContextPlan     HostContextPlan   `json:"host_context_plan"`
+	ProvisioningPlan    ProvisioningPlan  `json:"agent_provisioning_plan"`
 	HostCommand         string            `json:"host_command"`
 	FallbackCommands    []string          `json:"fallback_commands"`
 	HumanNextActions    []string          `json:"human_next_actions"`
@@ -109,6 +112,41 @@ type AuthorityScope struct {
 	Requirements []string `json:"requirements"`
 }
 
+type CustomerBootstrap struct {
+	SchemaVersion          string            `json:"schema_version"`
+	CustomerLink           string            `json:"customer_link"`
+	ConsentMode            string            `json:"consent_mode"`
+	AutomationLevel        string            `json:"automation_level"`
+	OneLineCommands        map[string]string `json:"one_line_commands"`
+	InstallPrerequisites   []string          `json:"install_prerequisites"`
+	CustomerSteps          []string          `json:"customer_steps"`
+	AgentAfterConnect      []string          `json:"agent_after_connect"`
+	RevocationInstructions []string          `json:"revocation_instructions"`
+}
+
+type HostContextPlan struct {
+	SchemaVersion         string   `json:"schema_version"`
+	StorageLocation       string   `json:"storage_location"`
+	ServerContextBudget   string   `json:"server_context_budget"`
+	ProgressiveDisclosure []string `json:"progressive_disclosure"`
+	HostLocalStores       []string `json:"host_local_stores"`
+	GatewayIndexes        []string `json:"gateway_indexes"`
+	AgentRules            []string `json:"agent_rules"`
+	RedactionRules        []string `json:"redaction_rules"`
+}
+
+type ProvisioningPlan struct {
+	SchemaVersion       string   `json:"schema_version"`
+	Mode                string   `json:"mode"`
+	DiscoveryTargets    []string `json:"discovery_targets"`
+	AutoInstallAllowed  []string `json:"auto_install_allowed"`
+	InstallScopes       []string `json:"install_scopes"`
+	ApprovalRequiredFor []string `json:"approval_required_for"`
+	PreferredSources    []string `json:"preferred_sources"`
+	AgentRules          []string `json:"agent_rules"`
+	EvidenceRequired    []string `json:"evidence_required"`
+}
+
 func New(opts Options) (Invite, error) {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
@@ -165,6 +203,9 @@ func New(opts Options) (Invite, error) {
 	transportPlan := newTransportPlan(rdevCommand, manifestURL, transport, opts.Once)
 	connectionPlan := newConnectionPlan(gatewayURL, networkScope)
 	authority := newAuthorityProfile(authorityProfile)
+	customerBootstrap := newCustomerBootstrap(joinURL)
+	hostContextPlan := newHostContextPlan()
+	provisioningPlan := newProvisioningPlan()
 	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
 
 	agentActions := []string{
@@ -179,17 +220,20 @@ func New(opts Options) (Invite, error) {
 	}
 
 	return Invite{
-		SchemaVersion:    SchemaVersion,
-		GatewayURL:       gatewayURL,
-		JoinURL:          joinURL,
-		ManifestURL:      manifestURL,
-		Ticket:           opts.Ticket,
-		Transport:        transport,
-		TransportPlan:    transportPlan,
-		ConnectionPlan:   connectionPlan,
-		AuthorityProfile: authority,
-		HostCommand:      hostCommand,
-		FallbackCommands: fallbackCommands,
+		SchemaVersion:     SchemaVersion,
+		GatewayURL:        gatewayURL,
+		JoinURL:           joinURL,
+		ManifestURL:       manifestURL,
+		Ticket:            opts.Ticket,
+		Transport:         transport,
+		TransportPlan:     transportPlan,
+		ConnectionPlan:    connectionPlan,
+		AuthorityProfile:  authority,
+		CustomerBootstrap: customerBootstrap,
+		HostContextPlan:   hostContextPlan,
+		ProvisioningPlan:  provisioningPlan,
+		HostCommand:       hostCommand,
+		FallbackCommands:  fallbackCommands,
 		HumanNextActions: []string{
 			"Run host_command on the target machine that needs help.",
 			"If the target network blocks WebSocket traffic, use the first fallback command that the Agent recommends.",
@@ -203,6 +247,8 @@ func New(opts Options) (Invite, error) {
 			"If the Agent and target are on the same LAN, probe scoped local/LAN reachability and prefer a LAN-reachable gateway URL before relay, mesh, or SSH.",
 			"Use mTLS, SSH, mesh, relay, or proxy inputs automatically when they are already configured in the environment; ask only when required values cannot be discovered.",
 			"When authority_profile permits downstream control, the connected host may act as the field workstation for discovering and controlling other reachable authorized devices.",
+			"Keep remote environment, project structure, requirement notes, and large evidence on the host; load only indexed slices or artifact references into the Agent server context.",
+			"Let the host detect missing skills, MCP tools, adapters, language runtimes, package managers, and project dependencies; install user-scoped missing pieces automatically when policy allows, and ask before elevation or external mutation.",
 		},
 		MCPTools: map[string]string{
 			"list_hosts":    "rdev.hosts.list",
@@ -214,6 +260,140 @@ func New(opts Options) (Invite, error) {
 		RequiresHumanAction: []string{"target-host-consent", "operator-approval-when-required"},
 		CreatedAt:           createdAt,
 	}, nil
+}
+
+func newHostContextPlan() HostContextPlan {
+	return HostContextPlan{
+		SchemaVersion:       "rdev.host-context-plan.v1",
+		StorageLocation:     "remote-host-first",
+		ServerContextBudget: "index-and-on-demand-slices",
+		ProgressiveDisclosure: []string{
+			"start with host summary, workspace roots, adapter inventory, and active task intent",
+			"request file tree slices only for the selected workspace and depth",
+			"request environment/configuration details only when needed for the current job",
+			"request file contents, logs, command output, and evidence artifacts by explicit path, query, or artifact id",
+			"evict or summarize stale slices after the job step is complete",
+		},
+		HostLocalStores: []string{
+			"environment probes",
+			"workspace indexes",
+			"project file tree snapshots",
+			"requirement and task notes",
+			"adapter transcripts",
+			"large logs and evidence artifacts",
+		},
+		GatewayIndexes: []string{
+			"host id and status",
+			"workspace root handles",
+			"artifact ids, checksums, sizes, and redaction metadata",
+			"context slice ids and freshness timestamps",
+		},
+		AgentRules: []string{
+			"do not dump whole repositories or full environment snapshots into server context",
+			"prefer host-side search, indexing, and summarization before requesting raw content",
+			"ask when the workspace, config source, credential boundary, or retention policy is unclear",
+			"use signed jobs for context collection so host policy, redaction, audit, and approval gates apply",
+		},
+		RedactionRules: []string{
+			"redact secrets, tokens, private keys, customer identifiers, and private hostnames before upload",
+			"store sensitive raw context on the host when possible and upload only redacted summaries or references",
+			"include checksums and freshness metadata so later slices can be verified without reloading everything",
+		},
+	}
+}
+
+func newProvisioningPlan() ProvisioningPlan {
+	return ProvisioningPlan{
+		SchemaVersion: "rdev.agent-provisioning-plan.v1",
+		Mode:          "adaptive-host-local",
+		DiscoveryTargets: []string{
+			"installed rdev binary and version",
+			"installed Skillkit skills and MCP tool contract",
+			"available adapters: codex, claude-code, acpx, shell, powershell",
+			"OS, shell, service manager, package managers, and PATH",
+			"project language runtimes and dependency manifests",
+			"workspace permissions, disk space, network/proxy settings, and trust roots",
+		},
+		AutoInstallAllowed: []string{
+			"user-scoped Skillkit skills from a verified bundle",
+			"user-scoped MCP tool metadata from a verified bundle",
+			"project-local development dependencies declared by lockfiles or manifests",
+			"adapter shims or helper binaries from verified release artifacts",
+			"cache directories and host-local context indexes under the approved workspace or rdev data root",
+		},
+		InstallScopes: []string{
+			"remote-host-local",
+			"user-scoped-by-default",
+			"workspace-scoped-when-project-specific",
+			"managed-service-scoped-only-after-operator-approval",
+		},
+		ApprovalRequiredFor: []string{
+			"administrator or root elevation",
+			"system-wide package installation",
+			"service, daemon, LaunchAgent, systemd, registry, or login-item changes",
+			"credential, token, SSH key, certificate, or secret-manager mutation",
+			"external account creation, paid API use, publishing, pushing, deploying, or firewall changes",
+			"execution policy or security product configuration changes beyond process-scoped bootstrap flags",
+		},
+		PreferredSources: []string{
+			"verified Remote Dev Skillkit bundle",
+			"signed rdev release artifacts and release bundle",
+			"project lockfiles and package manifests",
+			"operator-provided internal mirrors or package registries",
+			"already-installed host tools discovered at runtime",
+		},
+		AgentRules: []string{
+			"probe before installing; reuse working host-local tools when versions satisfy the task",
+			"prefer user-scoped or workspace-scoped installs over system-wide installs",
+			"verify checksums, signatures, bundle manifests, and lockfiles before execution",
+			"record every install, version, source, checksum, and command as evidence",
+			"do not assume framework paths; detect Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP locations or ask",
+			"ask when install scope, package source, credential boundary, or approval policy is unclear",
+		},
+		EvidenceRequired: []string{
+			"preflight detection result",
+			"install plan with scope and source",
+			"verification output for downloaded or copied artifacts",
+			"commands run and exit codes",
+			"post-install capability report",
+			"redacted logs and artifact ids",
+		},
+	}
+}
+
+func newCustomerBootstrap(joinURL string) CustomerBootstrap {
+	bootstrapBase := strings.TrimRight(joinURL, "/")
+	return CustomerBootstrap{
+		SchemaVersion:   "rdev.customer-bootstrap.v1",
+		CustomerLink:    joinURL,
+		ConsentMode:     "attended-visible-consent",
+		AutomationLevel: "one-link-minimal-steps-after-consent",
+		OneLineCommands: map[string]string{
+			"macos_linux_sh":     "curl -fsSL " + shellQuote(bootstrapBase+"/bootstrap.sh") + " | sh",
+			"windows_powershell": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powershellSingleQuoteValue(bootstrapBase+"/bootstrap.ps1") + "' | iex\"",
+		},
+		InstallPrerequisites: []string{
+			"rdev binary is installed or made available by the published bootstrap package",
+			"target user runs the visible bootstrap command on the machine that needs help",
+			"outbound HTTPS or configured fallback connectivity to the gateway",
+		},
+		CustomerSteps: []string{
+			"Open customer_link on the target machine.",
+			"Run the platform command shown on that page.",
+			"Keep the visible host session running until the Agent reports completion.",
+		},
+		AgentAfterConnect: []string{
+			"watch rdev.hosts.list until the host appears",
+			"approve the expected host when policy requires approval",
+			"run max-control discovery and repair jobs scoped to the support request",
+			"export evidence and revoke the ticket when finished",
+		},
+		RevocationInstructions: []string{
+			"revoke the ticket with rdev.tickets.revoke or the gateway API",
+			"stop the visible host process on the target machine",
+			"remove any temporary bootstrap files created by the published installer package",
+		},
+	}
 }
 
 func defaultManifestURL(gatewayURL, ticketCode string) string {
@@ -606,4 +786,8 @@ func shellQuote(value string) string {
 		return value
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func powershellSingleQuoteValue(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }

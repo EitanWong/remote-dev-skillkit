@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"strconv"
 	"strings"
@@ -68,6 +69,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/trust-bundle", s.updateTrustBundle)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
+	mux.HandleFunc("GET /join/", s.join)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
 	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
 	mux.HandleFunc("GET /v1/hosts/", s.hostSubresource)
@@ -386,6 +388,93 @@ func (s Server) ticketSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"manifest": manifest})
+}
+
+func (s Server) join(w http.ResponseWriter, r *http.Request) {
+	code, resource, ok := splitJoinPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown join endpoint")
+		return
+	}
+	manifestURL := requestBaseURL(r) + "/v1/tickets/" + code + "/manifest"
+	if _, err := s.Gateway.JoinManifest(code, requestBaseURL(r), requestBaseURL(r)+"/join/"+code); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	switch resource {
+	case "":
+		s.joinPage(w, r, code, manifestURL)
+	case "bootstrap.sh":
+		writeShellBootstrap(w, manifestURL)
+	case "bootstrap.ps1":
+		writePowerShellBootstrap(w, manifestURL)
+	default:
+		writeError(w, http.StatusNotFound, "unknown join resource")
+	}
+}
+
+func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestURL string) {
+	joinBase := strings.TrimRight(requestBaseURL(r), "/") + "/join/" + code
+	shellCommand := "curl -fsSL " + shellQuote(joinBase+"/bootstrap.sh") + " | sh"
+	powerShellCommand := "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' | iex\""
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Remote Dev Skillkit Join</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.45; max-width: 860px; }
+    code, pre { background: #f4f4f5; border-radius: 6px; padding: .2rem .35rem; }
+    pre { padding: 1rem; overflow-x: auto; }
+    .note { border-left: 4px solid #2563eb; padding-left: 1rem; color: #1f2937; }
+  </style>
+</head>
+<body>
+  <h1>Connect This Machine</h1>
+  <p class="note">Run one command on the computer that needs help. The connection is visible, outbound-only, revocable, and scoped to this support ticket.</p>
+  <h2>macOS / Linux</h2>
+  <pre><code>%s</code></pre>
+  <h2>Windows PowerShell</h2>
+  <pre><code>%s</code></pre>
+  <h2>What Happens Next</h2>
+  <ol>
+    <li>The bootstrap checks for <code>rdev</code>.</li>
+    <li>It starts a visible attended host session with <code>--transport auto</code>.</li>
+    <li>The Agent waits for the host, approves it when policy requires, and runs scoped repair jobs.</li>
+  </ol>
+  <p>Manifest: <code>%s</code></p>
+</body>
+</html>`, html.EscapeString(shellCommand), html.EscapeString(powerShellCommand), html.EscapeString(manifestURL))
+}
+
+func writeShellBootstrap(w http.ResponseWriter, manifestURL string) {
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `#!/bin/sh
+set -eu
+if ! command -v rdev >/dev/null 2>&1; then
+  echo "rdev is required. Install the verified rdev release package, then run this bootstrap again." >&2
+  exit 127
+fi
+echo "Starting visible Remote Dev Skillkit host session..."
+exec rdev host serve --manifest-url %s --transport auto --once=false
+`, shellQuote(manifestURL))
+}
+
+func writePowerShellBootstrap(w http.ResponseWriter, manifestURL string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `$ErrorActionPreference = 'Stop'
+if (-not (Get-Command rdev -ErrorAction SilentlyContinue)) {
+  Write-Error "rdev is required. Install the verified rdev release package, then run this bootstrap again."
+  exit 127
+}
+Write-Host "Starting visible Remote Dev Skillkit host session..."
+& rdev host serve --manifest-url '%s' --transport auto --once=false
+`, powerShellSingleQuoteValue(manifestURL))
 }
 
 func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {
@@ -850,6 +939,21 @@ func splitTicketSubresource(path string) (code string, resource string, ok bool)
 	return parts[0], parts[1], true
 }
 
+func splitJoinPath(path string) (code string, resource string, ok bool) {
+	rest := strings.TrimPrefix(path, "/join/")
+	if rest == path {
+		return "", "", false
+	}
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 1 && parts[0] != "" {
+		return parts[0], "", true
+	}
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return parts[0], parts[1], true
+	}
+	return "", "", false
+}
+
 func splitHostID(path string) (hostID string, ok bool) {
 	rest := strings.TrimPrefix(path, "/v1/hosts/")
 	if rest == path {
@@ -860,6 +964,20 @@ func splitHostID(path string) (hostID string, ok bool) {
 		return "", false
 	}
 	return parts[0], true
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(value, " \t\n'\"\\$`;&|<>*?()[]{}!") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func powerShellSingleQuoteValue(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }
 
 func splitHostSubresource(path string) (hostID string, resource string, action string, ok bool) {

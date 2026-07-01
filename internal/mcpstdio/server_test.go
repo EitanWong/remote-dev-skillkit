@@ -118,6 +118,18 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || authority["schema_version"] != "rdev.agent-authority.v1" || authority["profile"] != "max-control" {
 		t.Fatalf("expected max-control authority profile, got %#v", structured)
 	}
+	customerBootstrap, ok := structured["customer_bootstrap"].(map[string]any)
+	if !ok || customerBootstrap["schema_version"] != "rdev.customer-bootstrap.v1" {
+		t.Fatalf("expected customer bootstrap, got %#v", structured)
+	}
+	hostContextPlan, ok := structured["host_context_plan"].(map[string]any)
+	if !ok || hostContextPlan["schema_version"] != "rdev.host-context-plan.v1" || hostContextPlan["storage_location"] != "remote-host-first" {
+		t.Fatalf("expected host context plan, got %#v", structured)
+	}
+	provisioningPlan, ok := structured["agent_provisioning_plan"].(map[string]any)
+	if !ok || provisioningPlan["schema_version"] != "rdev.agent-provisioning-plan.v1" || provisioningPlan["mode"] != "adaptive-host-local" {
+		t.Fatalf("expected agent provisioning plan, got %#v", structured)
+	}
 }
 
 func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {

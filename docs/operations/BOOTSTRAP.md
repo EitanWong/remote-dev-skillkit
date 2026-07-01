@@ -121,6 +121,59 @@ When it is present, `rdev-host` verifies the join manifest with that pinned root
 - Admin elevation only via normal OS prompts.
 - Clear stop and uninstall instructions.
 
+## Agent-Created Customer Link
+
+Agents should create customer-facing bootstrap links with `rdev.invites.create`
+or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
+`customer_bootstrap`:
+
+- `customer_link`: the page to send to the target-side user;
+- `one_line_commands`: inspectable macOS/Linux and Windows commands;
+- `customer_steps`: the minimal target-side actions;
+- `agent_after_connect`: the actions the agent should perform after the host
+  appears;
+- `revocation_instructions`: how to stop the session and revoke access.
+
+The same invite also includes `host_context_plan`, which tells agents to keep
+remote environment details, project file structure, requirement notes,
+transcripts, logs, and large evidence on the target host by default. The Agent
+server should keep small indexes and request exact context slices only when a
+job step needs them.
+
+`agent_provisioning_plan` defines the companion setup rule. After the host
+connects, the Agent may probe installed skills, MCP tools, adapters, language
+runtimes, package managers, project dependency manifests, framework paths,
+network/proxy settings, and permissions. If missing setup is needed for the
+support task, the Agent should prefer verified, user-scoped or workspace-scoped
+installs on the target host and record the install plan, source, checksum,
+commands, exit codes, and post-install capability report as evidence. It should
+pause for approval before elevation, system-wide packages, service changes,
+credential changes, firewall changes, external account mutation, paid resource
+use, or publish/deploy/push actions.
+
+The development gateway serves:
+
+```text
+/join/<ticket>
+/join/<ticket>/bootstrap.sh
+/join/<ticket>/bootstrap.ps1
+```
+
+These helpers currently require a verified `rdev` release package to be
+available on the target machine, then run a visible attended host session:
+
+```bash
+rdev host serve --manifest-url <manifest-url> --transport auto --once=false
+```
+
+This is the one-link customer path for support and debugging. It is an attended
+temporary session: no background service is installed, no persistent execution
+policy is changed, and no persistence is created by the temporary bootstrap.
+The Windows one-line command may use process-scoped
+`-ExecutionPolicy Bypass` so the bootstrap can run in locked-down default shell
+contexts, but it must not call `Set-ExecutionPolicy` or change machine/user
+policy.
+
 ## Managed Device Flow
 
 Managed service installation is a separate explicit step:

@@ -143,6 +143,28 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 				ID string `json:"id"`
 			} `json:"control_paths"`
 		} `json:"authority_profile"`
+		CustomerBootstrap struct {
+			SchemaVersion   string            `json:"schema_version"`
+			CustomerLink    string            `json:"customer_link"`
+			AutomationLevel string            `json:"automation_level"`
+			OneLineCommands map[string]string `json:"one_line_commands"`
+			CustomerSteps   []string          `json:"customer_steps"`
+		} `json:"customer_bootstrap"`
+		HostContextPlan struct {
+			SchemaVersion         string   `json:"schema_version"`
+			StorageLocation       string   `json:"storage_location"`
+			ServerContextBudget   string   `json:"server_context_budget"`
+			ProgressiveDisclosure []string `json:"progressive_disclosure"`
+			HostLocalStores       []string `json:"host_local_stores"`
+			GatewayIndexes        []string `json:"gateway_indexes"`
+		} `json:"host_context_plan"`
+		ProvisioningPlan struct {
+			SchemaVersion       string   `json:"schema_version"`
+			Mode                string   `json:"mode"`
+			DiscoveryTargets    []string `json:"discovery_targets"`
+			AutoInstallAllowed  []string `json:"auto_install_allowed"`
+			ApprovalRequiredFor []string `json:"approval_required_for"`
+		} `json:"agent_provisioning_plan"`
 		HostCommand        string   `json:"host_command"`
 		FallbackCommands   []string `json:"fallback_commands"`
 		HumanNextActions   []string `json:"human_next_actions"`
@@ -182,6 +204,24 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if len(payload.AuthorityProfile.ControlPaths) < 3 || !slices.Contains(payload.AuthorityProfile.RequiredCapabilities, "downstream.control.scoped") {
 		t.Fatalf("max-control profile should include downstream control paths and capability: %#v", payload.AuthorityProfile)
+	}
+	if payload.CustomerBootstrap.SchemaVersion != "rdev.customer-bootstrap.v1" || payload.CustomerBootstrap.CustomerLink == "" || len(payload.CustomerBootstrap.OneLineCommands) < 2 {
+		t.Fatalf("invite should include customer bootstrap: %#v", payload.CustomerBootstrap)
+	}
+	if !strings.Contains(payload.CustomerBootstrap.OneLineCommands["macos_linux_sh"], "/join/") || !strings.Contains(payload.CustomerBootstrap.OneLineCommands["windows_powershell"], "bootstrap.ps1") {
+		t.Fatalf("customer bootstrap should include one-link commands: %#v", payload.CustomerBootstrap.OneLineCommands)
+	}
+	if payload.HostContextPlan.SchemaVersion != "rdev.host-context-plan.v1" || payload.HostContextPlan.StorageLocation != "remote-host-first" || payload.HostContextPlan.ServerContextBudget != "index-and-on-demand-slices" {
+		t.Fatalf("invite should include host context plan: %#v", payload.HostContextPlan)
+	}
+	if len(payload.HostContextPlan.ProgressiveDisclosure) == 0 || len(payload.HostContextPlan.HostLocalStores) == 0 || len(payload.HostContextPlan.GatewayIndexes) == 0 {
+		t.Fatalf("host context plan should define progressive disclosure and indexes: %#v", payload.HostContextPlan)
+	}
+	if payload.ProvisioningPlan.SchemaVersion != "rdev.agent-provisioning-plan.v1" || payload.ProvisioningPlan.Mode != "adaptive-host-local" {
+		t.Fatalf("invite should include agent provisioning plan: %#v", payload.ProvisioningPlan)
+	}
+	if len(payload.ProvisioningPlan.DiscoveryTargets) == 0 || len(payload.ProvisioningPlan.AutoInstallAllowed) == 0 || len(payload.ProvisioningPlan.ApprovalRequiredFor) == 0 {
+		t.Fatalf("provisioning plan should define discovery, auto-install, and approval rules: %#v", payload.ProvisioningPlan)
 	}
 	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())

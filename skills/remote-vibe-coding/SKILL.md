@@ -13,9 +13,29 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Treat Remote Dev Skillkit as AI-native. The human should be able to say which
   machine needs help; the agent should probe local configuration, create an
   invite with MCP tool `rdev.invites.create` or CLI `rdev invite create`, hand
-  the generated `host_command` to the human for the target machine, wait for the
-  host to appear, request approval only when needed, then dispatch scoped jobs
-  and collect evidence.
+  the generated `customer_bootstrap.customer_link` or `host_command` to the
+  human for the target machine, wait for the host to appear, request approval
+  only when needed, then dispatch scoped jobs and collect evidence.
+- For customer support, prefer `customer_bootstrap.customer_link`. It gives the
+  target-side user a visible page and platform bootstrap command, while the
+  agent handles the rest of the lifecycle: watch hosts, approve the expected
+  host when policy requires, run scoped repair jobs, export evidence, and revoke
+  the ticket. Do not request background persistence or OS policy weakening for
+  temporary customer sessions.
+- Treat `host_context_plan` as mandatory context discipline. Keep environment
+  probes, project structure, requirement notes, transcripts, large logs, and
+  evidence on the remote host by default. Load only indexed, redacted,
+  task-relevant slices into the Agent server context, and prefer host-side
+  search or summarization before requesting raw content.
+- Treat `agent_provisioning_plan` as mandatory setup discipline. Probe target
+  host skills, MCP tool contracts, adapters, shells, package managers, language
+  runtimes, project lockfiles, framework paths, proxy settings, permissions,
+  and trust roots before installing anything. The Agent may autonomously install
+  verified user-scoped or workspace-scoped skills, tools, adapter helpers, and
+  project dependencies when policy allows. It must ask before elevation,
+  system-wide packages, services, credentials, firewall changes, external
+  accounts, paid resources, publish/deploy/push, or persistent security-policy
+  changes.
 - Prefer `--transport auto` for unknown or hostile networks. It attempts WSS,
   then HTTPS long-poll, then short polling, all as outbound target-host
   connections. If the host does not appear, ask about proxy requirements, TLS
@@ -85,16 +105,22 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 1. Discover the local runtime, MCP tools, gateway configuration, and candidate
    host list.
 2. If no suitable host is active, create an invite with `rdev.invites.create`
-   or `rdev invite create` and ask the human to run only the generated
-   `host_command` on the target machine.
+   or `rdev invite create` and ask the human to open
+   `customer_bootstrap.customer_link` on the target machine, or run
+   `host_command` directly when a page is not needed.
 3. Wait for the host with `rdev.hosts.list`; approve it with
    `rdev.hosts.approve` only after the operator confirms the host is expected.
 4. Inspect host OS, workspace, capabilities, adapters, and approval policy.
 5. Ask for any missing gateway, host, workspace, release, adapter, or approval
    configuration that cannot be safely discovered.
-6. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
-7. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
-8. Create a job with workspace policy.
-9. Stream status until completion.
-10. Inspect artifacts and audit events.
-11. Request approval before push/merge/deploy.
+6. Follow `host_context_plan`: request only the context slice needed for the
+   next step, using host-side indexes, summaries, search, or artifact ids.
+7. Follow `agent_provisioning_plan`: detect missing skills/tools/dependencies,
+   install verified user/workspace-scoped pieces when allowed, and collect
+   evidence for every setup action.
+8. Select an adapter: `acpx`, `codex`, `claude-code`, `shell`, or `powershell`.
+9. Prepare isolation with `rdev workspace prepare-worktree` when using local CLI workflows.
+10. Create a job with workspace policy.
+11. Stream status until completion.
+12. Inspect artifacts and audit events.
+13. Request approval before push/merge/deploy.
