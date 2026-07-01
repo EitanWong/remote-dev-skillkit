@@ -3994,6 +3994,10 @@ func TestSkillkitExportWritesInstallBundle(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"schema": "rdev.skillkit-bundle.v1"`) {
 		t.Fatalf("expected skillkit schema output, got %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), `"adaptive_configuration_schema": "rdev.adaptive-configuration-contract.v1"`) ||
+		!strings.Contains(stdout.String(), `"adaptive_configuration_required": true`) {
+		t.Fatalf("expected adaptive configuration output, got %s", stdout.String())
+	}
 	for _, path := range []string{
 		"manifest.json",
 		"INSTALL.md",
@@ -4032,6 +4036,9 @@ func TestSkillkitVerifyChecksInstallBundle(t *testing.T) {
 	}
 	if !strings.Contains(verifyStdout.String(), `"ok": true`) || !strings.Contains(verifyStdout.String(), `"schema": "rdev.skillkit-bundle-verification.v1"`) {
 		t.Fatalf("expected skillkit verification output, got %s", verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"adaptive_configuration_verified": true`) {
+		t.Fatalf("expected adaptive configuration verification, got %s", verifyStdout.String())
 	}
 
 	if err := os.WriteFile(filepath.Join(out, "skills", "host-triage", "SKILL.md"), []byte("tampered\n"), 0o600); err != nil {
@@ -4078,6 +4085,9 @@ func TestSkillkitPlanInstallAndVerifyInstallPlan(t *testing.T) {
 	if !strings.Contains(planStdout.String(), `"schema": "rdev.skillkit-install-plan.v1"`) || !strings.Contains(planStdout.String(), `"external_mutation": false`) {
 		t.Fatalf("expected structured install plan output, got %s", planStdout.String())
 	}
+	if !strings.Contains(planStdout.String(), `"adaptive_configuration_schema": "rdev.adaptive-configuration-contract.v1"`) {
+		t.Fatalf("expected adaptive configuration plan output, got %s", planStdout.String())
+	}
 	for _, path := range []string{
 		"install-plan.json",
 		"INSTALL_COMMANDS.md",
@@ -4101,6 +4111,9 @@ func TestSkillkitPlanInstallAndVerifyInstallPlan(t *testing.T) {
 	}
 	if !strings.Contains(verifyStdout.String(), `"ok": true`) || !strings.Contains(verifyStdout.String(), `"schema": "rdev.skillkit-install-plan-verification.v1"`) {
 		t.Fatalf("expected install plan verification output, got %s", verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"adaptive_configuration_verified": true`) {
+		t.Fatalf("expected adaptive configuration install-plan verification, got %s", verifyStdout.String())
 	}
 }
 

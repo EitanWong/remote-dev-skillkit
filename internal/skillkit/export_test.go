@@ -30,6 +30,7 @@ func TestExportWritesInstallableSkillkitBundle(t *testing.T) {
 	if manifest.GatewayURL != "https://api.example.com/v1" {
 		t.Fatalf("unexpected gateway URL %q", manifest.GatewayURL)
 	}
+	assertAdaptiveConfigurationContract(t, manifest.AdaptiveConfiguration)
 	for _, skill := range []string{"safe-remote-support", "host-triage", "remote-job-review", "remote-vibe-coding"} {
 		if !hasSkill(manifest, skill) {
 			t.Fatalf("expected skill %q in manifest: %#v", skill, manifest.Skills)
@@ -58,7 +59,7 @@ func TestExportWritesInstallableSkillkitBundle(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Adaptive Configuration Contract",
-		"inspect the installed `rdev` binary",
+		"probe the installed `rdev` binary",
 		"must ask a short follow-up question instead of inventing a value",
 		"Examples such as `https://api.example.com/v1`, `/Users/example`, `/home/example`, and `C:\\Users\\Alice` are placeholders",
 	} {
@@ -69,7 +70,7 @@ func TestExportWritesInstallableSkillkitBundle(t *testing.T) {
 	codexDoc := readFile(t, filepath.Join(out, "frameworks", "codex.md"))
 	for _, want := range []string{
 		"probe the installed `rdev` binary",
-		"it must ask instead of inventing a value",
+		"must ask a short follow-up question instead of inventing a value",
 		"framework install path",
 	} {
 		if !strings.Contains(codexDoc, want) {
@@ -87,6 +88,7 @@ func TestExportWritesInstallableSkillkitBundle(t *testing.T) {
 	if !hasFile(onDisk, "mcp/tools.json") {
 		t.Fatalf("manifest should include mcp/tools.json: %#v", onDisk.Files)
 	}
+	assertAdaptiveConfigurationContract(t, onDisk.AdaptiveConfiguration)
 }
 
 func TestExportRejectsNonEmptyOutputDirectory(t *testing.T) {
@@ -159,6 +161,12 @@ func TestVerifyAcceptsExportedBundle(t *testing.T) {
 	if report.FilesVerified == 0 {
 		t.Fatalf("expected verified files")
 	}
+	if !checkPassed(report.Checks, "adaptive_configuration_contract") {
+		t.Fatalf("expected adaptive configuration contract check: %#v", report.Checks)
+	}
+	if !checkPassed(report.Checks, "required_skills_keep_adaptive_contract") {
+		t.Fatalf("expected required skills adaptive contract check: %#v", report.Checks)
+	}
 }
 
 func minimalSkillSourceRoot(t *testing.T) string {
@@ -218,6 +226,7 @@ func TestPlanInstallGeneratesVerifiableFrameworkScripts(t *testing.T) {
 	if plan.ExternalMutation {
 		t.Fatal("install planning must not mutate external state")
 	}
+	assertAdaptiveConfigurationContract(t, plan.AdaptiveConfiguration)
 	for _, framework := range []string{"codex", "hermes", "generic-mcp-agent"} {
 		if !hasFrameworkInstallPlan(plan, framework) {
 			t.Fatalf("missing framework install plan %q: %#v", framework, plan.Frameworks)
@@ -227,9 +236,23 @@ func TestPlanInstallGeneratesVerifiableFrameworkScripts(t *testing.T) {
 	if !strings.Contains(codexScript, "skillkit verify --bundle") || !strings.Contains(codexScript, "RDEV_SKILLKIT_FORCE") {
 		t.Fatalf("codex script should verify and refuse overwrite by default:\n%s", codexScript)
 	}
+	if !strings.Contains(codexScript, "rdev doctor") || !strings.Contains(codexScript, "ask instead of inventing") {
+		t.Fatalf("codex script should preserve adaptive configuration guidance:\n%s", codexScript)
+	}
 	genericScript := readFile(t, filepath.Join(out, "install-generic-mcp-agent.sh"))
 	if !strings.Contains(genericScript, "Set RDEV_GENERIC_AGENT_SKILLS_DIR") {
 		t.Fatalf("generic script should require explicit target env:\n%s", genericScript)
+	}
+	installCommands := readFile(t, filepath.Join(out, "INSTALL_COMMANDS.md"))
+	for _, want := range []string{
+		"Adaptive Configuration Contract",
+		"rdev doctor",
+		"rdev mcp tools",
+		"ask a short follow-up question instead of inventing a value",
+	} {
+		if !strings.Contains(installCommands, want) {
+			t.Fatalf("expected install commands to contain %q, got %s", want, installCommands)
+		}
 	}
 
 	report, err := VerifyInstallPlan(filepath.Join(out, "install-plan.json"), now)
@@ -244,6 +267,12 @@ func TestPlanInstallGeneratesVerifiableFrameworkScripts(t *testing.T) {
 	}
 	if report.FilesVerified == 0 || report.FrameworksVerified != 3 {
 		t.Fatalf("unexpected verification counts: files=%d frameworks=%d", report.FilesVerified, report.FrameworksVerified)
+	}
+	if !checkPassed(report.Checks, "adaptive_configuration_contract") {
+		t.Fatalf("expected install plan adaptive contract check: %#v", report.Checks)
+	}
+	if !checkPassed(report.Checks, "install_commands_keep_adaptive_contract") {
+		t.Fatalf("expected install commands adaptive contract check: %#v", report.Checks)
 	}
 }
 
@@ -592,6 +621,67 @@ func readFile(t *testing.T, path string) string {
 func checkDetailContains(checks []VerificationCheck, name, value string) bool {
 	for _, check := range checks {
 		if check.Name == name && strings.Contains(check.Detail, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func checkPassed(checks []VerificationCheck, name string) bool {
+	for _, check := range checks {
+		if check.Name == name && check.Passed {
+			return true
+		}
+	}
+	return false
+}
+
+func assertAdaptiveConfigurationContract(t *testing.T, contract AdaptiveConfigurationContract) {
+	t.Helper()
+	if contract.SchemaVersion != AdaptiveConfigurationSchemaVersion {
+		t.Fatalf("unexpected adaptive configuration schema %q", contract.SchemaVersion)
+	}
+	if !contract.Required {
+		t.Fatal("adaptive configuration contract must be required")
+	}
+	for _, want := range []string{
+		"rdev doctor",
+		"rdev mcp tools",
+		"target OS and shell",
+		"service manager",
+		"gateway configuration",
+		"workspace path",
+		"framework install path",
+	} {
+		if !containsString(contract.ProbeBeforeActing, want) {
+			t.Fatalf("adaptive configuration probes missing %q: %#v", want, contract.ProbeBeforeActing)
+		}
+	}
+	for _, want := range []string{
+		"gateway URL",
+		"ticket code",
+		"root key",
+		"release URL",
+		"checksum",
+		"framework install path",
+		"workspace root",
+		"adapter choice",
+		"approval policy",
+	} {
+		if !containsString(contract.AskIfUnclear, want) {
+			t.Fatalf("adaptive configuration ask list missing %q: %#v", want, contract.AskIfUnclear)
+		}
+	}
+	for _, want := range []string{"https://api.example.com/v1", "/Users/example", "/home/example", `C:\Users\Alice`} {
+		if !containsString(contract.Placeholders, want) {
+			t.Fatalf("adaptive configuration placeholders missing %q: %#v", want, contract.Placeholders)
+		}
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}

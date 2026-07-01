@@ -19,7 +19,9 @@
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.
 - [ ] Export and verify the Skillkit bundle with `rdev skillkit export` and `rdev skillkit verify`.
+- [ ] Confirm the Skillkit manifest and verification output include `rdev.adaptive-configuration-contract.v1` / `adaptive_configuration_verified=true`, and that required skills still tell agents to probe the environment first and ask when configuration is unclear.
 - [ ] Generate and verify a framework install plan with `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`; archive `rdev.skillkit-install-plan.v1`, `rdev.skillkit-install-plan-verification.v1`, `INSTALL_COMMANDS.md`, and generated scripts.
+- [ ] Confirm the Skillkit install plan and generated scripts keep the adaptive configuration contract for `rdev doctor`, `rdev mcp tools`, OS/shell, service manager, gateway, workspace, adapters, framework paths, permissions, and ask-if-unclear behavior.
 - [ ] Run `rdev skillkit install` dry-run and execute smoke into a temporary target directory; archive `rdev.skillkit-install-report.v1` outputs proving `external_mutation=false`.
 - [ ] Prepare and verify per-platform candidates with `scripts/release/prepare-platform-candidates.sh`.
 - [ ] Review `rdev.platform-release-candidates.v1`.

@@ -55,6 +55,7 @@
 - [x] Add host-side local dev gateway HTTPS/mTLS client flags for registration, trust fetches, polling, completion, and join-manifest fetches.
 - [x] Add portable agent Skillkit bundle export for mainstream frameworks.
 - [x] Add Skillkit bundle verification for mainstream framework installation.
+- [x] Add machine-readable adaptive configuration contract to Skillkit bundles and install plans so agents probe environment first and ask when gateway/workspace/framework/adapter/approval configuration is unclear.
 - [x] Add local release candidate packaging for open-source publication.
 - [x] Refine the canonical perfect ending into a final control-plane blueprint, product cuts, release ladder, and remaining gap ledger.
 - [x] Add GitHub Release dry-run planning from verified release candidates.

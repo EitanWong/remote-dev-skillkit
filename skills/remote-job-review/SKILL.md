@@ -11,8 +11,16 @@ Use this skill before telling the user a remote job is complete.
 
 - Evidence source is known: job id, gateway, bundle path, artifact ids, and
   audit source are explicit or discovered from the current context.
-- If job id, gateway, evidence bundle path, artifact location, or expected
-  verifier is unclear, ask before declaring completion.
+- Before declaring completion, probe read-only context such as `rdev doctor`,
+  `rdev mcp tools`, job status, artifact listings, audit exports, workspace
+  path, framework install path, and verifier availability when those details are
+  not already explicit.
+- If job id, gateway, workspace, evidence bundle path, artifact location,
+  adapter choice, approval policy, framework install path, or expected verifier
+  is unclear, ask before declaring completion.
+- Do not invent gateway URLs, paths, ticket codes, root keys, release URLs,
+  checksums, workspace roots, adapter choices, or approval policies from
+  examples or placeholders.
 - Job reached a terminal state.
 - No pending approval requests remain.
 - Commands and exit codes are recorded.

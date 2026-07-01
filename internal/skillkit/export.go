@@ -25,12 +25,13 @@ type ExportOptions struct {
 }
 
 type Manifest struct {
-	SchemaVersion string       `json:"schema_version"`
-	GeneratedAt   time.Time    `json:"generated_at"`
-	GatewayURL    string       `json:"gateway_url,omitempty"`
-	Skills        []SkillEntry `json:"skills"`
-	Frameworks    []string     `json:"frameworks"`
-	Files         []FileEntry  `json:"files"`
+	SchemaVersion         string                        `json:"schema_version"`
+	GeneratedAt           time.Time                     `json:"generated_at"`
+	GatewayURL            string                        `json:"gateway_url,omitempty"`
+	AdaptiveConfiguration AdaptiveConfigurationContract `json:"adaptive_configuration"`
+	Skills                []SkillEntry                  `json:"skills"`
+	Frameworks            []string                      `json:"frameworks"`
+	Files                 []FileEntry                   `json:"files"`
 }
 
 type SkillEntry struct {
@@ -84,12 +85,13 @@ func Export(opts ExportOptions) (Manifest, error) {
 	sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	manifest := Manifest{
-		SchemaVersion: ManifestSchemaVersion,
-		GeneratedAt:   opts.GeneratedAt.UTC(),
-		GatewayURL:    opts.GatewayURL,
-		Skills:        skills,
-		Frameworks:    append([]string(nil), DefaultFrameworks...),
-		Files:         files,
+		SchemaVersion:         ManifestSchemaVersion,
+		GeneratedAt:           opts.GeneratedAt.UTC(),
+		GatewayURL:            opts.GatewayURL,
+		AdaptiveConfiguration: defaultAdaptiveConfigurationContract(),
+		Skills:                skills,
+		Frameworks:            append([]string(nil), DefaultFrameworks...),
+		Files:                 files,
 	}
 	content, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -350,7 +352,9 @@ func frameworkDoc(name, gatewayURL string) string {
 		"   %s",
 		"   ```",
 		"",
-		"6. Keep the adaptive configuration contract active: the agent should probe the installed `rdev` binary, MCP tools, OS, shell, service manager, gateway, workspace, adapters, framework path, and permissions before acting. If gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy is unclear, it must ask instead of inventing a value.",
+		adaptiveConfigurationContract(),
+		"",
+		"6. Keep this contract active after installation.",
 		"7. Ask the agent to use `host-triage` first, then `safe-remote-support` or `remote-vibe-coding`, and finally `remote-job-review`.",
 		"",
 		"## Required Review Step",
@@ -364,7 +368,7 @@ func adaptiveConfigurationContract() string {
 	return strings.Join([]string{
 		"## Adaptive Configuration Contract",
 		"",
-		"Agents using this Skillkit must discover their environment before acting. They should inspect the installed `rdev` binary, MCP tools, target OS, shell, available service manager, gateway configuration, workspace path, installed agent adapters, framework install path, and current permissions.",
+		"Agents using this Skillkit must discover their environment before acting. They should probe the installed `rdev` binary with `rdev doctor`, inspect MCP tools with `rdev mcp tools`, and check the target OS, shell, available service manager, gateway configuration, workspace path, installed agent adapters, framework install path, and current permissions.",
 		"",
 		"If a gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy cannot be discovered safely, the agent must ask a short follow-up question instead of inventing a value.",
 		"",

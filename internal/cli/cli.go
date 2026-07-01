@@ -5099,14 +5099,16 @@ func (a App) skillkitExport(sourceRoot, outPath, gatewayURL string) error {
 		return err
 	}
 	payload := map[string]any{
-		"ok":          true,
-		"out":         outPath,
-		"schema":      manifest.SchemaVersion,
-		"skill_count": len(manifest.Skills),
-		"file_count":  len(manifest.Files),
-		"frameworks":  manifest.Frameworks,
-		"manifest":    filepath.Join(outPath, "manifest.json"),
-		"gateway_url": manifest.GatewayURL,
+		"ok":                              true,
+		"out":                             outPath,
+		"schema":                          manifest.SchemaVersion,
+		"skill_count":                     len(manifest.Skills),
+		"file_count":                      len(manifest.Files),
+		"frameworks":                      manifest.Frameworks,
+		"manifest":                        filepath.Join(outPath, "manifest.json"),
+		"gateway_url":                     manifest.GatewayURL,
+		"adaptive_configuration_schema":   manifest.AdaptiveConfiguration.SchemaVersion,
+		"adaptive_configuration_required": manifest.AdaptiveConfiguration.Required,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -5122,16 +5124,17 @@ func (a App) skillkitVerify(bundleDir string) error {
 		return err
 	}
 	payload := map[string]any{
-		"ok":                  report.OK(),
-		"schema":              report.SchemaVersion,
-		"bundle":              report.BundleDir,
-		"manifest":            report.ManifestPath,
-		"manifest_schema":     report.ManifestSchema,
-		"checks":              report.Checks,
-		"files_verified":      report.FilesVerified,
-		"skills_verified":     report.SkillsVerified,
-		"frameworks_verified": report.FrameworksVerified,
-		"recommended_actions": report.RecommendedActions,
+		"ok":                              report.OK(),
+		"schema":                          report.SchemaVersion,
+		"bundle":                          report.BundleDir,
+		"manifest":                        report.ManifestPath,
+		"manifest_schema":                 report.ManifestSchema,
+		"checks":                          report.Checks,
+		"files_verified":                  report.FilesVerified,
+		"skills_verified":                 report.SkillsVerified,
+		"frameworks_verified":             report.FrameworksVerified,
+		"adaptive_configuration_verified": checkPassedByName(report.Checks, "adaptive_configuration_contract"),
+		"recommended_actions":             report.RecommendedActions,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -5165,18 +5168,19 @@ func (a App) skillkitPlanInstall(bundleDir, outPath, frameworks, rdevCommand str
 		return err
 	}
 	payload := map[string]any{
-		"ok":                true,
-		"schema":            plan.SchemaVersion,
-		"bundle":            plan.BundleDir,
-		"out":               plan.OutDir,
-		"plan":              filepath.Join(plan.OutDir, "install-plan.json"),
-		"external_mutation": plan.ExternalMutation,
-		"framework_count":   len(plan.Frameworks),
-		"frameworks":        installPlanFrameworkNames(plan.Frameworks),
-		"file_count":        len(plan.Files),
-		"install_commands":  filepath.Join(plan.OutDir, "INSTALL_COMMANDS.md"),
-		"recommended_steps": plan.RecommendedNextSteps,
-		"bundle_verify_ok":  plan.BundleVerification.OK(),
+		"ok":                            true,
+		"schema":                        plan.SchemaVersion,
+		"bundle":                        plan.BundleDir,
+		"out":                           plan.OutDir,
+		"plan":                          filepath.Join(plan.OutDir, "install-plan.json"),
+		"external_mutation":             plan.ExternalMutation,
+		"framework_count":               len(plan.Frameworks),
+		"frameworks":                    installPlanFrameworkNames(plan.Frameworks),
+		"file_count":                    len(plan.Files),
+		"install_commands":              filepath.Join(plan.OutDir, "INSTALL_COMMANDS.md"),
+		"recommended_steps":             plan.RecommendedNextSteps,
+		"bundle_verify_ok":              plan.BundleVerification.OK(),
+		"adaptive_configuration_schema": plan.AdaptiveConfiguration.SchemaVersion,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -5192,15 +5196,16 @@ func (a App) skillkitVerifyInstallPlan(planPath string) error {
 		return err
 	}
 	payload := map[string]any{
-		"ok":                  report.OK(),
-		"schema":              report.SchemaVersion,
-		"plan":                report.PlanPath,
-		"plan_schema":         report.PlanSchema,
-		"checks":              report.Checks,
-		"files_verified":      report.FilesVerified,
-		"frameworks_verified": report.FrameworksVerified,
-		"bundle_verify_ok":    report.BundleVerification.OK(),
-		"recommended_actions": report.RecommendedActions,
+		"ok":                              report.OK(),
+		"schema":                          report.SchemaVersion,
+		"plan":                            report.PlanPath,
+		"plan_schema":                     report.PlanSchema,
+		"checks":                          report.Checks,
+		"files_verified":                  report.FilesVerified,
+		"frameworks_verified":             report.FrameworksVerified,
+		"bundle_verify_ok":                report.BundleVerification.OK(),
+		"adaptive_configuration_verified": checkPassedByName(report.Checks, "adaptive_configuration_contract"),
+		"recommended_actions":             report.RecommendedActions,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -5267,6 +5272,15 @@ func installPlanFrameworkNames(plans []skillkit.FrameworkInstallPlan) []string {
 		names = append(names, plan.Framework)
 	}
 	return names
+}
+
+func checkPassedByName(checks []skillkit.VerificationCheck, name string) bool {
+	for _, check := range checks {
+		if check.Name == name && check.Passed {
+			return true
+		}
+	}
+	return false
 }
 
 func (a App) workspaceLock(opts workspace.LockOptions) error {

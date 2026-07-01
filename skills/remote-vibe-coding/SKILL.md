@@ -14,12 +14,14 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
 - Preserve the final control-plane split: agents request typed work, the gateway governs, the host verifies locally, adapters execute only inside bounds, and proof comes from verifiers and evidence.
 - Before creating a coding job, discover the available hosts, target OS,
   workspace path, Git state, installed adapters, gateway/MCP configuration,
-  release trust inputs, and operator-approved capabilities. Use read-only probes
+  release trust inputs, and operator-approved capabilities. Probe with read-only checks
   such as `rdev doctor`, `rdev.hosts.list`, `rdev.hosts.capabilities`,
   `rdev mcp tools`, `git status`, `git rev-parse`, `command -v`, and `where`.
 - If gateway URL, ticket code, host identity, workspace root, adapter choice,
   release root, framework install path, or approval policy is unclear, ask the
   user or operator before proceeding. Do not infer real values from examples.
+- Never invent unclear gateway, workspace, adapter, release, framework, or
+  approval configuration from placeholder examples.
 - Adapt to the detected system: use LaunchAgent planning on macOS, systemd user
   units on Linux, Windows Service plans on Windows, PowerShell only when present,
   and shell/Codex/Claude/acpx only when the host advertises those capabilities.

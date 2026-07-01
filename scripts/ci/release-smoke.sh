@@ -144,6 +144,7 @@ skillkit_install_plan_output = json.loads((root / "skillkit-install-plan-output.
 skillkit_install_plan_verification = json.loads((root / "skillkit-install-plan-verification.json").read_text())
 skillkit_install_dry_run = json.loads((root / "skillkit-install-dry-run.json").read_text())
 skillkit_install_execute = json.loads((root / "skillkit-install-execute.json").read_text())
+skillkit_manifest = json.loads((pathlib.Path(skillkit_install_plan_output["bundle"]) / "manifest.json").read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
 assert build["ok"] is True, build
@@ -214,10 +215,18 @@ assert skillkit_install_plan_output["schema"] == "rdev.skillkit-install-plan.v1"
 assert skillkit_install_plan_output["ok"] is True, skillkit_install_plan_output
 assert skillkit_install_plan_output["external_mutation"] is False, skillkit_install_plan_output
 assert skillkit_install_plan_output["framework_count"] == 6, skillkit_install_plan_output
+assert skillkit_manifest["adaptive_configuration"]["schema_version"] == "rdev.adaptive-configuration-contract.v1", skillkit_manifest
+assert skillkit_manifest["adaptive_configuration"]["required"] is True, skillkit_manifest
+assert "rdev doctor" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
+assert "rdev mcp tools" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
+assert "framework install path" in skillkit_manifest["adaptive_configuration"]["ask_if_unclear"], skillkit_manifest
+assert "https://api.example.com/v1" in skillkit_manifest["adaptive_configuration"]["placeholders"], skillkit_manifest
+assert skillkit_install_plan_output["adaptive_configuration_schema"] == "rdev.adaptive-configuration-contract.v1", skillkit_install_plan_output
 assert skillkit_install_plan_verification["schema"] == "rdev.skillkit-install-plan-verification.v1", skillkit_install_plan_verification
 assert skillkit_install_plan_verification["ok"] is True, skillkit_install_plan_verification
 assert skillkit_install_plan_verification["bundle_verify_ok"] is True, skillkit_install_plan_verification
 assert skillkit_install_plan_verification["frameworks_verified"] == 6, skillkit_install_plan_verification
+assert skillkit_install_plan_verification["adaptive_configuration_verified"] is True, skillkit_install_plan_verification
 assert skillkit_install_dry_run["schema"] == "rdev.skillkit-install-report.v1", skillkit_install_dry_run
 assert skillkit_install_dry_run["ok"] is True, skillkit_install_dry_run
 assert skillkit_install_dry_run["execute"] is False, skillkit_install_dry_run
@@ -248,6 +257,7 @@ print(json.dumps({
     "skillkit_install_plan_schema": skillkit_install_plan_output["schema"],
     "skillkit_install_plan_verification_schema": skillkit_install_plan_verification["schema"],
     "skillkit_install_report_schema": skillkit_install_execute["schema"],
+    "skillkit_adaptive_configuration": True,
     "planned_platforms": plan_output["platform_count"],
     "github_project_seed_issues": github_project_readiness["bootstrap_dry_run"]["seed_issues"],
     "post_release_platforms": post_release_output["platform_count"],

@@ -57,6 +57,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Gateway/API evidence bundle export directly from job ids.
 - Skillkit bundle export for agent runtimes and mainstream framework notes.
 - Skillkit bundle verification for required skills, required framework notes, file checksums, safe paths, and unlisted-file detection.
+- Skillkit adaptive configuration contract through `rdev.adaptive-configuration-contract.v1`, requiring agents to probe `rdev`, MCP tools, OS/shell, service manager, gateway, workspace, adapters, framework paths, and permissions before acting, and to ask when configuration is unclear instead of inventing values.
 - Skillkit framework install planning and verification through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`, generating reviewed shell/PowerShell scripts for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents without external mutation or hidden config writes.
 - Skillkit direct install through `rdev skillkit install`, dry-running by default, requiring `--execute` before local copy, refusing existing skill conflicts unless `--force`, and preserving `external_mutation=false`.
 - Release candidate packaging that stages built artifacts, signed manifests, signed release bundle, verified Skillkit bundle, SPDX 2.3 SBOM, checksums, and `release-candidate.json`.

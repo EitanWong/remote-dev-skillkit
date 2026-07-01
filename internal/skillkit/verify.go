@@ -88,6 +88,7 @@ func Verify(opts VerifyOptions) (VerificationReport, error) {
 	}
 	report.ManifestSchema = manifest.SchemaVersion
 	add("manifest_schema", manifest.SchemaVersion == ManifestSchemaVersion, manifest.SchemaVersion)
+	add("adaptive_configuration_contract", adaptiveContractFailure(manifest.AdaptiveConfiguration) == "", adaptiveContractFailure(manifest.AdaptiveConfiguration))
 	add("file_entries_present", len(manifest.Files) > 0, fmt.Sprintf("%d", len(manifest.Files)))
 	add("skills_present", len(manifest.Skills) > 0, fmt.Sprintf("%d", len(manifest.Skills)))
 	add("frameworks_present", len(manifest.Frameworks) > 0, fmt.Sprintf("%d", len(manifest.Frameworks)))
@@ -123,6 +124,7 @@ func Verify(opts VerifyOptions) (VerificationReport, error) {
 	report.SkillsVerified = len(manifest.Skills)
 	add("required_skills_present", skillFailures == "", skillFailures)
 	add("skill_paths_match_names", skillPathFailures(manifest) == "", skillPathFailures(manifest))
+	add("required_skills_keep_adaptive_contract", skillsAdaptiveContractFailures(bundleDir, manifest) == "", skillsAdaptiveContractFailures(bundleDir, manifest))
 
 	frameworkFailures := missingStrings(DefaultFrameworks, manifest.Frameworks)
 	report.FrameworksVerified = len(manifest.Frameworks)
@@ -130,6 +132,7 @@ func Verify(opts VerifyOptions) (VerificationReport, error) {
 
 	requiredFileFailures := missingRequiredFiles(seenFiles)
 	add("required_install_files_present", requiredFileFailures == "", requiredFileFailures)
+	add("install_doc_keeps_adaptive_contract", installDocAdaptiveContractFailures(bundleDir, manifest) == "", installDocAdaptiveContractFailures(bundleDir, manifest))
 
 	if !report.OK() {
 		report.RecommendedActions = failedSkillkitVerificationActions()
@@ -201,6 +204,50 @@ func skillPathFailures(manifest Manifest) string {
 		expected := filepath.ToSlash(filepath.Join("skills", skill.Name, "SKILL.md"))
 		if skill.Path != expected {
 			failures = append(failures, skill.Name)
+		}
+	}
+	sort.Strings(failures)
+	return strings.Join(failures, ",")
+}
+
+func skillsAdaptiveContractFailures(bundleDir string, manifest Manifest) string {
+	required := map[string]bool{
+		"safe-remote-support": true,
+		"host-triage":         true,
+		"remote-vibe-coding":  true,
+		"remote-job-review":   true,
+	}
+	var failures []string
+	for _, skill := range manifest.Skills {
+		if !required[skill.Name] || !safeBundlePath(skill.Path) {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(bundleDir, filepath.FromSlash(skill.Path)))
+		if err != nil || !skillKeepsAdaptiveContract(string(content)) {
+			failures = append(failures, skill.Name)
+		}
+	}
+	sort.Strings(failures)
+	return strings.Join(failures, ",")
+}
+
+func installDocAdaptiveContractFailures(bundleDir string, manifest Manifest) string {
+	var failures []string
+	for _, path := range []string{
+		"INSTALL.md",
+		"frameworks/codex.md",
+		"frameworks/claude-code.md",
+		"frameworks/hermes.md",
+		"frameworks/openclaw-opencode.md",
+		"frameworks/generic-mcp-agent.md",
+	} {
+		if !safeBundlePath(path) {
+			failures = append(failures, path)
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(bundleDir, filepath.FromSlash(path)))
+		if err != nil || !textKeepsAdaptiveContract(string(content)) {
+			failures = append(failures, path)
 		}
 	}
 	sort.Strings(failures)

@@ -26,15 +26,16 @@ type InstallPlanOptions struct {
 }
 
 type InstallPlan struct {
-	SchemaVersion        string                 `json:"schema_version"`
-	GeneratedAt          time.Time              `json:"generated_at"`
-	BundleDir            string                 `json:"bundle_dir"`
-	OutDir               string                 `json:"out_dir"`
-	ExternalMutation     bool                   `json:"external_mutation"`
-	BundleVerification   VerificationReport     `json:"bundle_verification"`
-	Frameworks           []FrameworkInstallPlan `json:"frameworks"`
-	Files                []FileEntry            `json:"files"`
-	RecommendedNextSteps []string               `json:"recommended_next_steps"`
+	SchemaVersion         string                        `json:"schema_version"`
+	GeneratedAt           time.Time                     `json:"generated_at"`
+	BundleDir             string                        `json:"bundle_dir"`
+	OutDir                string                        `json:"out_dir"`
+	ExternalMutation      bool                          `json:"external_mutation"`
+	AdaptiveConfiguration AdaptiveConfigurationContract `json:"adaptive_configuration"`
+	BundleVerification    VerificationReport            `json:"bundle_verification"`
+	Frameworks            []FrameworkInstallPlan        `json:"frameworks"`
+	Files                 []FileEntry                   `json:"files"`
+	RecommendedNextSteps  []string                      `json:"recommended_next_steps"`
 }
 
 type FrameworkInstallPlan struct {
@@ -146,6 +147,8 @@ func PlanInstall(opts InstallPlanOptions) (InstallPlan, error) {
 			ReviewNotes: []string{
 				"Review the script before running it.",
 				"The script verifies the bundle before copying skills.",
+				"Before asking an agent to use the installed skills, probe rdev doctor, rdev mcp tools, OS/shell, service manager, gateway, workspace, adapters, framework path, and permissions.",
+				"If gateway, ticket, root key, release URL, checksum, framework path, workspace, adapter, or approval policy is unclear, ask instead of inventing a value.",
 				"Set " + spec.TargetEnv + " to override the target skill directory.",
 				"Set RDEV_SKILLKIT_FORCE=1 only after reviewing any existing skill directory conflict.",
 			},
@@ -158,17 +161,20 @@ func PlanInstall(opts InstallPlanOptions) (InstallPlan, error) {
 	files = append(files, commandsEntry)
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	plan := InstallPlan{
-		SchemaVersion:      InstallPlanSchemaVersion,
-		GeneratedAt:        opts.GeneratedAt.UTC(),
-		BundleDir:          bundleDir,
-		OutDir:             outDir,
-		ExternalMutation:   false,
-		BundleVerification: verification,
-		Frameworks:         plans,
-		Files:              files,
+		SchemaVersion:         InstallPlanSchemaVersion,
+		GeneratedAt:           opts.GeneratedAt.UTC(),
+		BundleDir:             bundleDir,
+		OutDir:                outDir,
+		ExternalMutation:      false,
+		AdaptiveConfiguration: defaultAdaptiveConfigurationContract(),
+		BundleVerification:    verification,
+		Frameworks:            plans,
+		Files:                 files,
 		RecommendedNextSteps: []string{
 			"Run rdev skillkit verify-install-plan --plan " + filepath.Join(outDir, "install-plan.json") + " before running any generated script.",
 			"Run only the script for the agent framework you are installing.",
+			"Probe the environment with rdev doctor and rdev mcp tools before asking an agent to operate the installed skills.",
+			"Ask a short follow-up question whenever gateway, ticket, release, framework path, workspace, adapter, or approval policy cannot be discovered safely.",
 			"Configure the agent MCP client to execute: " + opts.RdevCommand + " mcp serve.",
 		},
 	}
@@ -218,6 +224,7 @@ func VerifyInstallPlan(planPath string, generatedAt time.Time) (InstallPlanVerif
 	report.PlanSchema = plan.SchemaVersion
 	add("plan_schema", plan.SchemaVersion == InstallPlanSchemaVersion, plan.SchemaVersion)
 	add("external_mutation_false", !plan.ExternalMutation, fmt.Sprintf("%t", plan.ExternalMutation))
+	add("adaptive_configuration_contract", adaptiveContractFailure(plan.AdaptiveConfiguration) == "", adaptiveContractFailure(plan.AdaptiveConfiguration))
 	add("frameworks_present", len(plan.Frameworks) > 0, fmt.Sprintf("%d", len(plan.Frameworks)))
 	add("files_present", len(plan.Files) > 0, fmt.Sprintf("%d", len(plan.Files)))
 	bundleVerification, err := Verify(VerifyOptions{BundleDir: plan.BundleDir, GeneratedAt: generatedAt})
@@ -252,6 +259,8 @@ func VerifyInstallPlan(planPath string, generatedAt time.Time) (InstallPlanVerif
 	add("install_scripts_present", installScriptsPresent(planDir, plan.Frameworks) == "", installScriptsPresent(planDir, plan.Frameworks))
 	add("install_scripts_no_forbidden_mutation", installScriptsForbiddenMutation(planDir, plan.Frameworks) == "", installScriptsForbiddenMutation(planDir, plan.Frameworks))
 	add("install_scripts_verify_bundle_first", installScriptsRequireBundleVerify(planDir, plan.Frameworks) == "", installScriptsRequireBundleVerify(planDir, plan.Frameworks))
+	add("install_scripts_keep_adaptive_contract", installScriptsKeepAdaptiveContract(planDir, plan.Frameworks) == "", installScriptsKeepAdaptiveContract(planDir, plan.Frameworks))
+	add("install_commands_keep_adaptive_contract", installCommandsKeepAdaptiveContract(planDir) == "", installCommandsKeepAdaptiveContract(planDir))
 	if !report.OK() {
 		report.RecommendedActions = failedInstallPlanActions()
 	}
@@ -434,6 +443,9 @@ func shellInstallScript(bundleDir, rdevCommand string, spec frameworkInstallSpec
 		targetLine,
 		`if [ -z "$TARGET_DIR" ]; then echo "Set ` + spec.TargetEnv + ` to your agent skills directory." >&2; exit 1; fi`,
 		`"$RDEV_BIN" skillkit verify --bundle "$BUNDLE_DIR" >/dev/null`,
+		`printf '%s\n' "Adaptive Configuration Contract: before using these skills, probe: rdev doctor; rdev mcp tools; OS/shell; service manager; gateway; workspace; adapters; framework install path; permissions."`,
+		`printf '%s\n' "If gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy is unclear, ask instead of inventing a value."`,
+		`printf '%s\n' "Examples such as https://api.example.com/v1, /Users/example, /home/example, and C:\Users\Alice are placeholders."`,
 		`mkdir -p "$TARGET_DIR"`,
 		`for skill in ` + strings.Join(shellQuotedValues(skills), " ") + `; do`,
 		`  if [ -e "$TARGET_DIR/$skill" ] && [ "${RDEV_SKILLKIT_FORCE:-0}" != "1" ]; then`,
@@ -465,6 +477,9 @@ func powerShellInstallScript(bundleDir, rdevCommand string, spec frameworkInstal
 		targetBlock,
 		`if ([string]::IsNullOrWhiteSpace($TargetDir)) { throw "Set ` + spec.TargetEnv + ` to your agent skills directory." }`,
 		`& $RdevBin skillkit verify --bundle $BundleDir | Out-Null`,
+		`Write-Output "Adaptive Configuration Contract: before using these skills, probe: rdev doctor; rdev mcp tools; OS/shell; service manager; gateway; workspace; adapters; framework install path; permissions."`,
+		`Write-Output "If gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy is unclear, ask instead of inventing a value."`,
+		`Write-Output "Examples such as https://api.example.com/v1, /Users/example, /home/example, and C:\Users\Alice are placeholders."`,
 		`New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null`,
 		`$Skills = @(` + strings.Join(powerShellQuotedValues(skills), ", ") + `)`,
 		`foreach ($Skill in $Skills) {`,
@@ -502,6 +517,14 @@ func installCommandsDoc(bundleDir, rdevCommand string, plans []FrameworkInstallP
 		"```text",
 		bundleDir,
 		"```",
+		"",
+		"## Adaptive Configuration Contract",
+		"",
+		"Before using the installed skills, probe the runtime with `rdev doctor`, `rdev mcp tools`, OS/shell checks, service-manager checks, gateway configuration checks, workspace inspection, adapter detection, framework install-path checks, and permission checks.",
+		"",
+		"If gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, or approval policy is unclear, ask a short follow-up question instead of inventing a value.",
+		"",
+		"Examples such as `https://api.example.com/v1`, `/Users/example`, `/home/example`, and `C:\\Users\\Alice` are placeholders.",
 		"",
 		"## Framework Scripts",
 		"",
@@ -625,6 +648,34 @@ func installScriptsRequireBundleVerify(planDir string, plans []FrameworkInstallP
 	}
 	sort.Strings(failures)
 	return strings.Join(failures, ",")
+}
+
+func installScriptsKeepAdaptiveContract(planDir string, plans []FrameworkInstallPlan) string {
+	var failures []string
+	for _, plan := range plans {
+		for _, script := range []string{plan.ShellScript, plan.PowerShellScript} {
+			content, err := os.ReadFile(filepath.Join(planDir, filepath.FromSlash(script)))
+			if err != nil {
+				continue
+			}
+			if !textKeepsAdaptiveContract(string(content)) {
+				failures = append(failures, script)
+			}
+		}
+	}
+	sort.Strings(failures)
+	return strings.Join(failures, ",")
+}
+
+func installCommandsKeepAdaptiveContract(planDir string) string {
+	content, err := os.ReadFile(filepath.Join(planDir, "INSTALL_COMMANDS.md"))
+	if err != nil {
+		return errorString(err)
+	}
+	if !textKeepsAdaptiveContract(string(content)) {
+		return "INSTALL_COMMANDS.md"
+	}
+	return ""
 }
 
 func failedInstallPlanActions() []string {

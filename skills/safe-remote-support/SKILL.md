@@ -12,12 +12,16 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Use attended temporary mode for third-party machines.
 - Before creating tickets, launchers, service plans, or jobs, determine the
   target OS, shell, installed `rdev` binary, gateway or join URL, ticket source,
-  release-verification inputs, and operator-approved capabilities. Probe
+  workspace path, framework install path, release-verification inputs, and
+  operator-approved capabilities. Probe
   read-only when available; ask a concise follow-up when any required value is
   ambiguous.
 - Do not substitute placeholder domains, user paths, ticket codes, release
-  roots, checksums, or framework paths for real configuration. Example values
-  are documentation only.
+  roots, checksums, workspace roots, adapter choices, approval policies, or
+  framework paths for real configuration. Example values are documentation
+  only; do not invent values from them.
+- If gateway, workspace, adapter, approval, release, or framework configuration
+  is unclear after read-only probes, ask before generating commands.
 - For Windows temporary acceptance, prefer `rdev acceptance windows-temporary --release-bundle-url <url> --out <empty-dir> ...`, then verify it with `rdev acceptance verify-windows-temporary --plan <out>/windows-temporary-plan.json` before sending a one-command bootstrap to a target user.
 - After a real Windows temporary run, package release evidence with `rdev acceptance package-windows-temporary --plan <plan> --out <empty-dir> --transcript <file> --release-verification <file> --audit <file> --no-persistence-dir <dir> --approval-probes-dir <dir>`.
 - For published Windows bootstrap artifacts, hash-pin `rdev-verify.exe` and prefer signed release bundle verification; use single host release manifests only for compatibility.
@@ -32,7 +36,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 ## Workflow
 
 1. Discover local context: available `rdev`, MCP tools, gateway configuration,
-   target OS, shell, release bundle/verifier inputs, and approved support mode.
+   target OS, shell, workspace path, framework install path, release
+   bundle/verifier inputs, and approved support mode.
 2. Ask for missing gateway, ticket, release, checksum, root key, or target-user
    details before generating commands.
 3. Create a ticket with `rdev.tickets.create`.

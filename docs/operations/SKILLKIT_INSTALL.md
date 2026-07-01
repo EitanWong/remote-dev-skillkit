@@ -36,6 +36,8 @@ rdev skillkit install \
 The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
 
 - `manifest.json` with checksums and skill metadata;
+- machine-readable `adaptive_configuration` metadata with schema
+  `rdev.adaptive-configuration-contract.v1`;
 - `skills/` with the agent-loadable workflows;
 - `mcp/tools.json` with the stable tool contract metadata;
 - `INSTALL.md` with generic install steps;
@@ -43,8 +45,10 @@ The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
 
 Verification emits schema `rdev.skillkit-bundle-verification.v1` and checks the
 manifest schema, required skills, required framework notes, safe relative paths,
-listed file SHA-256/size, and absence of unlisted bundle files. Do not install a
-bundle into any agent runtime until verification returns `ok=true`.
+listed file SHA-256/size, the adaptive configuration contract, required skill
+probe/ask guidance, and absence of unlisted bundle files. Do not install a
+bundle into any agent runtime until verification returns `ok=true` and
+`adaptive_configuration_verified=true`.
 
 ## Adaptive Configuration Contract
 
@@ -62,18 +66,21 @@ replace them with operator-provided or detected values.
 
 `rdev skillkit plan-install` adds a second, reviewable layer for mainstream
 agent runtimes. It writes `rdev.skillkit-install-plan.v1`, `INSTALL_COMMANDS.md`,
-and per-framework shell/PowerShell scripts. The command does not modify Codex,
+and per-framework shell/PowerShell scripts. The plan also includes
+`adaptive_configuration` so automation can see the required probes and
+ask-if-unclear fields without scraping prose. The command does not modify Codex,
 Claude Code, Hermes, OpenClaw, OpenCode, generic MCP agents, or user home
 configuration by itself. Generated scripts verify the bundle before copying,
-refuse to overwrite existing skill directories unless `RDEV_SKILLKIT_FORCE=1`
-is set, and leave MCP configuration as an explicit review step with
-`rdev mcp serve`.
+print the adaptive configuration contract, refuse to overwrite existing skill
+directories unless `RDEV_SKILLKIT_FORCE=1` is set, and leave MCP configuration
+as an explicit review step with `rdev mcp serve`.
 
 `rdev skillkit verify-install-plan` emits
 `rdev.skillkit-install-plan-verification.v1` and checks the plan schema, bundle
-verification, listed script SHA-256/size, required scripts, no forbidden
-external mutation, bundle-verification calls, and absence of unlisted files in
-the install-plan directory. Treat `ok=false` as installation-blocking.
+verification, adaptive configuration contract, listed script SHA-256/size,
+required scripts, no forbidden external mutation, bundle-verification calls,
+script/install-command adaptive guidance, and absence of unlisted files in the
+install-plan directory. Treat `ok=false` as installation-blocking.
 
 `rdev skillkit install` is the direct installer path. It defaults to dry-run and
 emits `rdev.skillkit-install-report.v1`; no files are copied until `--execute`
