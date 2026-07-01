@@ -198,7 +198,7 @@ The agent requests a ticket through MCP:
   "reason": "repair Windows development environment",
   "ttl_seconds": 1800,
   "requested_capabilities": ["fs.read", "fs.write.scoped", "shell.user", "process.inspect"],
-  "operator_id": "eitan"
+  "operator_id": "operator-example"
 }
 ```
 
