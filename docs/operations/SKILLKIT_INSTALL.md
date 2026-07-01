@@ -4,6 +4,12 @@ Remote Dev Skillkit is meant to be installable by many agent runtimes without re
 
 The portable install surface is a generated bundle:
 
+If you want your current AI agent to perform the setup, start with the
+[Agent Bootstrap Prompt](AGENT_BOOTSTRAP_PROMPT.md). It gives Codex, Claude
+Code, Hermes, OpenClaw/OpenCode, or a generic MCP-capable agent a copy-paste
+workflow for probing the environment, building `rdev`, exporting/verifying the
+bundle, installing the matching skills, and preparing MCP configuration.
+
 ```bash
 rdev skillkit export \
   --source-root . \

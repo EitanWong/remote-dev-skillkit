@@ -61,6 +61,31 @@ and what proof comes back.
 
 ## Install Fast
 
+### Let Your Agent Install It
+
+Already inside Codex, Claude Code, Hermes, OpenClaw/OpenCode, or another
+MCP-capable agent? Copy this into the agent:
+
+```text
+Install and connect Remote Dev Skillkit for this agent runtime.
+
+Repository: https://github.com/EitanWong/remote-dev-skillkit
+
+Probe my OS, shell, installed Go/Git/rdev, current agent framework, skill
+directory, and MCP config before acting. If a required value is unclear, ask me
+one short question instead of guessing. Clone the repo, install or run `rdev`,
+export and verify the Skillkit bundle, generate and verify an install plan for
+codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent, dry-run the
+matching `rdev skillkit install`, then execute only when the target directory is
+clear and safe. Configure MCP to run `rdev mcp serve` or give me the exact config
+snippet if manual review is required. Do not hardcode private paths, secrets, or
+server addresses; use `https://api.example.com/v1` only as placeholder metadata
+until I provide a real gateway URL.
+```
+
+For the full copy-paste prompt, see
+[Agent Bootstrap Prompt](docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
+
 From a checkout:
 
 ```bash
@@ -258,6 +283,7 @@ storage provider packages, and final external GitHub publishing steps.
 |---|---|
 | Repository layout and package boundaries | [Project Structure](docs/project/PROJECT_STRUCTURE.md) |
 | Project direction and release gates | [Roadmap](docs/project/ROADMAP.md) |
+| Copy-paste install prompt for agents | [Agent Bootstrap Prompt](docs/operations/AGENT_BOOTSTRAP_PROMPT.md) |
 | One-shot Skillkit packaging and installation | [Skillkit Install](docs/operations/SKILLKIT_INSTALL.md) |
 | MCP stdio integration | [MCP Stdio](docs/operations/MCP_STDIO.md) |
 | Local development gateway | [Development Gateway](docs/operations/DEV_GATEWAY.md) |

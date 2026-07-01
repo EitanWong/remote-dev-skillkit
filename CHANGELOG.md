@@ -107,6 +107,10 @@ manifest, transport, and approval steps.
 - Added release-smoke verification that exported Skillkit bundles pass
   `rdev skillkit verify --bundle` and include passing `skill_agents_metadata`
   checks before install-plan validation.
+- Added an Agent Bootstrap Prompt so developers can copy one prompt into Codex,
+  Claude Code, Hermes, OpenClaw/OpenCode, or a generic MCP agent and have the
+  agent probe, install, verify, and prepare MCP integration for Remote Dev
+  Skillkit.
 
 ### Changed
 
@@ -173,6 +177,8 @@ manifest, transport, and approval steps.
 - Promoted Skill metadata verification into the release-smoke acceptance path,
   making installability, Harness metadata, and bundle verification one
   continuous gate.
+- Updated README and Skillkit install docs to surface the agent-facing install
+  path before manual checkout commands.
 
 ### Verification
 
