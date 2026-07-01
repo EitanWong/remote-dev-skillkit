@@ -88,6 +88,9 @@ manifest, transport, and approval steps.
 - Added progressive-disclosure references for the core remote-vibe-coding Skill:
   connectivity/managed hosts, enrollment lifecycle, adapter jobs, and
   release/acceptance details now load only when the task needs them.
+- Added Skill runtime memory guidance for dynamically retaining discovered
+  environment facts, configuration paths, host capabilities, adapter/tool
+  availability, and operator preferences outside the public repository.
 
 ### Changed
 
@@ -136,6 +139,9 @@ manifest, transport, and approval steps.
 - Reworked the core remote-vibe-coding Skill into a shorter routing-oriented
   entrypoint with non-negotiables, first move, core flow, reference selection,
   and completion evidence.
+- Updated the remote-vibe-coding Skill flow so agents read safe runtime memory
+  before repeating probes and write scoped, redacted memory after useful
+  discoveries.
 
 ### Verification
 

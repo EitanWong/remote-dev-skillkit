@@ -31,6 +31,10 @@ revocation.
 - Do not invent real configuration from examples, placeholders, memory, or
   guesses when gateway, workspace, framework, release, adapter, host, repo, or
   approval details are unclear.
+- Maintain dynamic Skill runtime memory for discovered environment facts,
+  configuration paths, host capabilities, adapter availability, and operator
+  preferences. Read it before repeating probes, refresh stale entries, and keep
+  it host/workspace scoped, redacted, auditable, and outside the public repo.
 - Preserve the safety kernel: typed intent, signed host-bound envelope,
   host-side validation, locked workspace, adapter execution, redacted evidence,
   audit, and revocation.
@@ -42,21 +46,24 @@ revocation.
 
 1. Discover local runtime, available MCP tools, gateway configuration, candidate
    hosts, and current task intent.
-2. If no suitable host is active, create an invite with `rdev.invites.create` or
+2. Load relevant Skill runtime memory, then verify or refresh any stale facts
+   before using them for commands, paths, approvals, or release decisions.
+3. If no suitable host is active, create an invite with `rdev.invites.create` or
    `rdev invite create`; prefer `customer_bootstrap.customer_link` for attended
    support, or `host_command` when a page is unnecessary.
-3. Wait for the host, then approve it only after the operator confirms it is the
+4. Wait for the host, then approve it only after the operator confirms it is the
    expected machine.
-4. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
+5. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
    policy, release trust inputs, and language/locale.
-5. Ask for missing gateway, host, workspace, release, adapter, framework, repo,
+6. Ask for missing gateway, host, workspace, release, adapter, framework, repo,
    or approval configuration that cannot be safely discovered.
 
 ## Core Flow
 
 1. Follow `host_context_plan`: keep environment probes, project structure,
    requirements, transcripts, large logs, and evidence on the target host; load
-   only indexed, redacted, task-relevant slices.
+   only indexed, redacted, task-relevant slices. Persist reusable discoveries
+   into Skill runtime memory when they are safe to retain.
 2. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
    runtimes, package managers, lockfiles, framework paths, proxies,
    permissions, and trust roots before installing anything.
@@ -84,6 +91,8 @@ revocation.
 - For Codex, Claude Code, acpx, shell, PowerShell, adapter conformance,
   cancellation, runtime fixtures, or result evidence, read
   [adapter-jobs.md](references/adapter-jobs.md).
+- For dynamic memory locations, record schema, redaction, refresh, invalidation,
+  and update rules, read [runtime-memory.md](references/runtime-memory.md).
 - For release candidates, Skillkit distribution, GitHub release planning,
   platform candidates, or Windows/macOS/Linux acceptance evidence, read
   [release-and-acceptance.md](references/release-and-acceptance.md).
