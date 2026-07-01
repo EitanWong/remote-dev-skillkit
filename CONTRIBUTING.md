@@ -18,6 +18,24 @@ opening a pull request.
 
 ## Contribution Rules
 
+- Follow the Agent engineering discipline:
+  - Be ashamed of guessing interfaces; be proud of reading the source,
+    contracts, docs, schemas, and tests first.
+  - Be ashamed of vague execution; be proud of asking for confirmation when
+    requirements, environment, authority, or risk are unclear.
+  - Be ashamed of inventing business intent; be proud of getting human
+    confirmation for product goals, customer impact, and policy decisions.
+  - Be ashamed of creating unnecessary interfaces; be proud of reusing existing
+    APIs, protocol objects, skills, MCP tools, adapters, and project patterns.
+  - Be ashamed of skipping verification; be proud of proactively running
+    focused tests, full tests, release smoke, readiness checks, and privacy
+    scans when relevant.
+  - Be ashamed of breaking architecture; be proud of following the signed-job,
+    host-policy, approval, evidence, audit, and release-trust contracts.
+  - Be ashamed of pretending to understand; be proud of saying what is unknown
+    and how it will be checked.
+  - Be ashamed of blind modification; be proud of cautious refactoring that is
+    scoped, reversible, reviewed by tests, and aligned with existing structure.
 - Keep temporary support visible, foreground, revocable, and non-persistent.
 - Keep managed service mode explicit, inspectable, stoppable, and uninstallable.
 - Do not add hidden persistence, inbound public listeners on target hosts, UAC or

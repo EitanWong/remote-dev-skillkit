@@ -116,6 +116,7 @@
 - [x] Add A2A-aware peer-Agent collaboration plan so target-host AI tools can assist through bounded signed jobs, policy, approvals, and evidence.
 - [x] Add target-host language matching plan and localized join page support for supported project languages.
 - [x] Add managed development plan for stable long-running Agent work on operator-owned workstations.
+- [x] Add Agent engineering discipline to contribution rules and remote-vibe-coding skill guidance.
 
 ## Next
 

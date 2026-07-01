@@ -69,6 +69,10 @@ manifest, transport, and approval steps.
   long-running developer workstations, covering managed mode, service-backed
   lifecycle plans, reconnect proof, workspace locks, release gates, enrollment
   renewal, revocation refresh, and evidence bundles.
+- Added Agent engineering discipline to contribution and Skill guidance:
+  read before guessing, confirm before ambiguous execution, reuse before
+  creating, verify before claiming, preserve architecture, admit unknowns, and
+  refactor cautiously.
 
 ### Changed
 
@@ -103,6 +107,8 @@ manifest, transport, and approval steps.
   instructions, approvals, job status, and evidence summaries.
 - Documented the long-running owned-workstation workflow for recurring Agent
   development work on the operator's own Mac, Windows PC, or Linux machine.
+- Documented the project's anti-guesswork contribution standard for Agent-led
+  development.
 
 ### Verification
 
