@@ -36,6 +36,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/service"
@@ -80,6 +81,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.demo(args[1:])
 	case "gateway":
 		return a.gateway(args[1:])
+	case "operator-auth":
+		return a.operatorAuth(args[1:])
 	case "release":
 		return a.release(args[1:])
 	case "enrollment":
@@ -125,7 +128,7 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 		identityPublicKey := fs.String("identity-public-key", "", "host identity public key")
 		identityFingerprint := fs.String("identity-fingerprint", "", "host identity fingerprint")
 		capabilities := fs.String("capabilities", "", "comma-separated authorized capabilities; defaults to ticket capabilities")
-		issuerTokenFile := fs.String("issuer-token-file", "", "optional file containing bearer token for protected enrollment issuance")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token with issuer role")
 		validMinutes := fs.Int("valid-minutes", 60, "certificate validity window in minutes")
 		force := fs.Bool("force", false, "overwrite output certificate")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -143,7 +146,7 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 			IdentityPublicKey:   *identityPublicKey,
 			IdentityFingerprint: *identityFingerprint,
 			Capabilities:        splitCapabilities(*capabilities),
-			IssuerTokenFile:     *issuerTokenFile,
+			OperatorTokenFile:   *operatorTokenFile,
 			ValidMinutes:        *validMinutes,
 			Force:               *force,
 		})
@@ -201,7 +204,7 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 		keyID := fs.String("key-id", "enrollment-root", "enrollment root signing key id")
 		gatewayURL := fs.String("gateway", "", "optional gateway base URL for hosted renewal")
 		rootPublicKey := fs.String("root-public-key", "", "expected enrollment root public key for hosted renewal, formatted key_id:base64url_public_key")
-		issuerTokenFile := fs.String("issuer-token-file", "", "optional file containing bearer token for protected hosted renewal")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token with issuer role")
 		certificatePath := fs.String("certificate", "", "current enrollment certificate JSON path to renew")
 		revocationsPath := fs.String("revocations", "", "optional signed enrollment revocation list JSON path checked before renewal")
 		validMinutes := fs.Int("valid-minutes", 60, "renewed certificate validity window in minutes")
@@ -210,16 +213,16 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.enrollmentRenewCertificate(enrollmentRenewCertificateOptions{
-			OutPath:         *out,
-			KeyPath:         *keyPath,
-			KeyID:           *keyID,
-			GatewayURL:      *gatewayURL,
-			RootPublicKey:   *rootPublicKey,
-			IssuerTokenFile: *issuerTokenFile,
-			CertificatePath: *certificatePath,
-			RevocationsPath: *revocationsPath,
-			ValidMinutes:    *validMinutes,
-			Force:           *force,
+			OutPath:           *out,
+			KeyPath:           *keyPath,
+			KeyID:             *keyID,
+			GatewayURL:        *gatewayURL,
+			RootPublicKey:     *rootPublicKey,
+			OperatorTokenFile: *operatorTokenFile,
+			CertificatePath:   *certificatePath,
+			RevocationsPath:   *revocationsPath,
+			ValidMinutes:      *validMinutes,
+			Force:             *force,
 		})
 	case "revoke-certificate":
 		fs := flag.NewFlagSet("enrollment revoke-certificate", flag.ContinueOnError)
@@ -277,13 +280,13 @@ func (a App) enrollment(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		gatewayURL := fs.String("gateway", "", "gateway base URL")
 		rootPublicKey := fs.String("root-public-key", "", "enrollment root public key, formatted key_id:base64url_public_key")
-		issuerTokenFile := fs.String("issuer-token-file", "", "optional file containing bearer token for protected enrollment revocation fetch")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token with issuer role")
 		out := fs.String("out", "", "output signed enrollment revocation list JSON path")
 		force := fs.Bool("force", false, "overwrite output revocation list")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		return a.enrollmentFetchRevocations(ctx, *gatewayURL, *rootPublicKey, *issuerTokenFile, *out, *force)
+		return a.enrollmentFetchRevocations(ctx, *gatewayURL, *rootPublicKey, *operatorTokenFile, *out, *force)
 	default:
 		return fmt.Errorf("unknown enrollment subcommand %q", args[0])
 	}
@@ -318,7 +321,7 @@ type enrollmentIssueCertificateOptions struct {
 	IdentityPublicKey   string
 	IdentityFingerprint string
 	Capabilities        []string
-	IssuerTokenFile     string
+	OperatorTokenFile   string
 	ValidMinutes        int
 	Force               bool
 }
@@ -335,16 +338,16 @@ type enrollmentRevokeCertificateOptions struct {
 }
 
 type enrollmentRenewCertificateOptions struct {
-	OutPath         string
-	KeyPath         string
-	KeyID           string
-	GatewayURL      string
-	RootPublicKey   string
-	IssuerTokenFile string
-	CertificatePath string
-	RevocationsPath string
-	ValidMinutes    int
-	Force           bool
+	OutPath           string
+	KeyPath           string
+	KeyID             string
+	GatewayURL        string
+	RootPublicKey     string
+	OperatorTokenFile string
+	CertificatePath   string
+	RevocationsPath   string
+	ValidMinutes      int
+	Force             bool
 }
 
 type enrollmentInitRevocationsOptions struct {
@@ -477,21 +480,109 @@ type trustRevokeOptions struct {
 }
 
 type gatewayServeOptions struct {
-	Addr                      string
-	AuditLog                  string
-	StatePath                 string
-	SigningKeyPath            string
-	SigningKeyID              string
-	ManifestSigningKeyPath    string
-	ManifestSigningKeyID      string
-	EnrollmentRootPublicKey   string
-	EnrollmentKeyPath         string
-	EnrollmentKeyID           string
-	EnrollmentIssuerTokenFile string
-	EnrollmentRevocations     string
-	TLSCertPath               string
-	TLSKeyPath                string
-	ClientCAPath              string
+	Addr                    string
+	AuditLog                string
+	StatePath               string
+	SigningKeyPath          string
+	SigningKeyID            string
+	ManifestSigningKeyPath  string
+	ManifestSigningKeyID    string
+	EnrollmentRootPublicKey string
+	EnrollmentKeyPath       string
+	EnrollmentKeyID         string
+	EnrollmentRevocations   string
+	TLSCertPath             string
+	TLSKeyPath              string
+	ClientCAPath            string
+	OperatorAuthPath        string
+}
+
+func (a App) operatorAuth(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing operator-auth subcommand")
+	}
+	switch args[0] {
+	case "init":
+		fs := flag.NewFlagSet("operator-auth init", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "operator auth JSON path")
+		tokenDir := fs.String("token-dir", "", "directory for generated bearer token files")
+		force := fs.Bool("force", false, "overwrite existing auth and token files")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.operatorAuthInit(*out, *tokenDir, *force)
+	case "verify":
+		fs := flag.NewFlagSet("operator-auth verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		authFile := fs.String("auth", "", "operator auth JSON path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.operatorAuthVerify(*authFile)
+	default:
+		return fmt.Errorf("unknown operator-auth subcommand %q", args[0])
+	}
+}
+
+func (a App) operatorAuthInit(outPath, tokenDir string, force bool) error {
+	if strings.TrimSpace(outPath) == "" {
+		return fmt.Errorf("--out is required")
+	}
+	if strings.TrimSpace(tokenDir) == "" {
+		return fmt.Errorf("--token-dir is required")
+	}
+	result, err := operatorauth.InitDefault(time.Now())
+	if err != nil {
+		return err
+	}
+	if err := operatorauth.WriteFile(outPath, result.File, force); err != nil {
+		return err
+	}
+	if err := operatorauth.WriteTokenFiles(tokenDir, result.Tokens, force); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"schema_version":        operatorauth.SchemaVersion,
+		"auth_file":             outPath,
+		"token_dir":             tokenDir,
+		"principal_count":       len(result.File.Principals),
+		"roles":                 []string{operatorauth.RoleAdmin, operatorauth.RoleOperator, operatorauth.RoleIssuer, operatorauth.RoleAuditor},
+		"tokens_written":        true,
+		"tokens_redacted":       true,
+		"auth_file_sensitive":   false,
+		"token_files_sensitive": true,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) operatorAuthVerify(authFile string) error {
+	if strings.TrimSpace(authFile) == "" {
+		return fmt.Errorf("--auth is required")
+	}
+	_, file, err := operatorauth.Load(authFile)
+	if err != nil {
+		return err
+	}
+	roleCounts := map[string]int{}
+	for _, principal := range file.Principals {
+		for _, role := range principal.Roles {
+			roleCounts[role]++
+		}
+	}
+	payload := map[string]any{
+		"schema_version":  operatorauth.SchemaVersion,
+		"auth_file":       authFile,
+		"ok":              true,
+		"principal_count": len(file.Principals),
+		"role_counts":     roleCounts,
+		"hash_alg":        file.HashAlg,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
 func (a App) acceptance(ctx context.Context, args []string) error {
@@ -1239,7 +1330,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key for host-side enrollment revocation refresh, formatted key_id:base64url_public_key")
 		fetchEnrollmentRevocations := fs.Bool("fetch-enrollment-revocations", false, "fetch and verify signed enrollment revocations from the gateway before registration")
 		renewEnrollmentCertificate := fs.Bool("renew-enrollment-certificate", false, "renew the enrollment certificate from the gateway before registration when it is near expiry")
-		enrollmentIssuerTokenFile := fs.String("enrollment-issuer-token-file", "", "optional file containing bearer token for protected hosted enrollment renewal or revocation refresh")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token with issuer role for hosted renewal or revocation refresh")
 		enrollmentRenewBefore := fs.Duration("enrollment-renew-before", 24*time.Hour, "renew enrollment certificate when it expires within this duration")
 		enrollmentRenewValidMinutes := fs.Int("enrollment-renew-valid-minutes", 60, "renewed enrollment certificate validity window in minutes")
 		nonceStore := fs.String("nonce-store", "", "optional local host nonce replay cache path")
@@ -1276,7 +1367,7 @@ func (a App) host(ctx context.Context, args []string) error {
 			EnrollmentRootPublicKey:     *enrollmentRootPublicKey,
 			FetchEnrollmentRevocations:  *fetchEnrollmentRevocations,
 			RenewEnrollmentCertificate:  *renewEnrollmentCertificate,
-			EnrollmentIssuerTokenFile:   *enrollmentIssuerTokenFile,
+			OperatorTokenFile:           *operatorTokenFile,
 			EnrollmentRenewBefore:       *enrollmentRenewBefore,
 			EnrollmentRenewValidMinutes: *enrollmentRenewValidMinutes,
 			NonceStorePath:              *nonceStore,
@@ -1416,7 +1507,7 @@ type hostServeOptions struct {
 	EnrollmentRootPublicKey     string
 	FetchEnrollmentRevocations  bool
 	RenewEnrollmentCertificate  bool
-	EnrollmentIssuerTokenFile   string
+	OperatorTokenFile           string
 	EnrollmentRenewBefore       time.Duration
 	EnrollmentRenewValidMinutes int
 	NonceStorePath              string
@@ -1507,8 +1598,8 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		}
 	} else if strings.TrimSpace(opts.EnrollmentRootPublicKey) != "" && !opts.FetchEnrollmentRevocations {
 		return fmt.Errorf("--fetch-enrollment-revocations or --renew-enrollment-certificate is required when --enrollment-root-public-key is provided")
-	} else if strings.TrimSpace(opts.EnrollmentIssuerTokenFile) != "" && !opts.FetchEnrollmentRevocations {
-		return fmt.Errorf("--renew-enrollment-certificate or --fetch-enrollment-revocations is required when --enrollment-issuer-token-file is provided")
+	} else if strings.TrimSpace(opts.OperatorTokenFile) != "" && !opts.FetchEnrollmentRevocations {
+		return fmt.Errorf("--renew-enrollment-certificate or --fetch-enrollment-revocations is required when --operator-token-file is provided")
 	}
 	if opts.Transport == "" {
 		opts.Transport = "poll"
@@ -1595,9 +1686,9 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 			}
 			if !now.Add(opts.EnrollmentRenewBefore).Before(certificate.NotAfter.UTC()) {
 				renewed, previousFingerprint, fingerprint, err := renewEnrollmentCertificateFromGateway(ctx, gatewayClient, opts.GatewayURL, certificate, enrollmentRenewCertificateOptions{
-					RootPublicKey:   opts.EnrollmentRootPublicKey,
-					IssuerTokenFile: opts.EnrollmentIssuerTokenFile,
-					ValidMinutes:    opts.EnrollmentRenewValidMinutes,
+					RootPublicKey:     opts.EnrollmentRootPublicKey,
+					OperatorTokenFile: opts.OperatorTokenFile,
+					ValidMinutes:      opts.EnrollmentRenewValidMinutes,
 				})
 				if err != nil {
 					return err
@@ -1612,7 +1703,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 			}
 		}
 		if opts.FetchEnrollmentRevocations {
-			revocations, root, err := fetchEnrollmentRevocationsWithClient(ctx, gatewayClient, opts.GatewayURL, opts.EnrollmentRootPublicKey, opts.EnrollmentIssuerTokenFile)
+			revocations, root, err := fetchEnrollmentRevocationsWithClient(ctx, gatewayClient, opts.GatewayURL, opts.EnrollmentRootPublicKey, opts.OperatorTokenFile)
 			if err != nil {
 				return err
 			}
@@ -2740,11 +2831,11 @@ func (a App) gateway(args []string) error {
 		enrollmentRootPublicKey := fs.String("enrollment-root-public-key", "", "optional enrollment root public key; when set, host registration requires rdev.host-enrollment-certificate.v1")
 		enrollmentKey := fs.String("enrollment-key", "", "optional Ed25519 enrollment root signing key file for dev hosted certificate issuance")
 		enrollmentKeyID := fs.String("enrollment-key-id", "enrollment-root", "enrollment root signing key id for new or existing enrollment key file")
-		enrollmentIssuerTokenFile := fs.String("enrollment-issuer-token-file", "", "optional file containing bearer token required by POST /v1/enrollment/certificates")
 		enrollmentRevocations := fs.String("enrollment-revocations", "", "optional signed enrollment revocation list JSON path")
 		tlsCert := fs.String("tls-cert", "", "optional TLS server certificate PEM path for the development gateway")
 		tlsKey := fs.String("tls-key", "", "optional TLS server private key PEM path for the development gateway")
 		clientCA := fs.String("client-ca", "", "optional client CA PEM path; when set, require and verify client certificates")
+		operatorAuth := fs.String("operator-auth", "", "optional operator auth JSON file requiring bearer tokens for control-plane APIs")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -2752,21 +2843,21 @@ func (a App) gateway(args []string) error {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
 		return a.gatewayServeDev(gatewayServeOptions{
-			Addr:                      *addr,
-			AuditLog:                  *auditLog,
-			StatePath:                 *statePath,
-			SigningKeyPath:            *signingKey,
-			SigningKeyID:              *signingKeyID,
-			ManifestSigningKeyPath:    *manifestSigningKey,
-			ManifestSigningKeyID:      *manifestSigningKeyID,
-			EnrollmentRootPublicKey:   *enrollmentRootPublicKey,
-			EnrollmentKeyPath:         *enrollmentKey,
-			EnrollmentKeyID:           *enrollmentKeyID,
-			EnrollmentIssuerTokenFile: *enrollmentIssuerTokenFile,
-			EnrollmentRevocations:     *enrollmentRevocations,
-			TLSCertPath:               *tlsCert,
-			TLSKeyPath:                *tlsKey,
-			ClientCAPath:              *clientCA,
+			Addr:                    *addr,
+			AuditLog:                *auditLog,
+			StatePath:               *statePath,
+			SigningKeyPath:          *signingKey,
+			SigningKeyID:            *signingKeyID,
+			ManifestSigningKeyPath:  *manifestSigningKey,
+			ManifestSigningKeyID:    *manifestSigningKeyID,
+			EnrollmentRootPublicKey: *enrollmentRootPublicKey,
+			EnrollmentKeyPath:       *enrollmentKey,
+			EnrollmentKeyID:         *enrollmentKeyID,
+			EnrollmentRevocations:   *enrollmentRevocations,
+			TLSCertPath:             *tlsCert,
+			TLSKeyPath:              *tlsKey,
+			ClientCAPath:            *clientCA,
+			OperatorAuthPath:        *operatorAuth,
 		})
 	default:
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
@@ -3350,16 +3441,16 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		store := audit.NewJSONLStore(opts.AuditLog)
 		gw.WithAuditSink(&store)
 	}
-	enrollmentIssuerToken := ""
-	if opts.EnrollmentIssuerTokenFile != "" {
-		token, err := readTokenFile(opts.EnrollmentIssuerTokenFile)
+	var auth *operatorauth.Authorizer
+	if opts.OperatorAuthPath != "" {
+		loadedAuth, file, err := operatorauth.Load(opts.OperatorAuthPath)
 		if err != nil {
 			return err
 		}
-		enrollmentIssuerToken = token
-		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway enrollment issuer token loaded from %s\n", opts.EnrollmentIssuerTokenFile)
+		auth = loadedAuth
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway operator auth loaded from %s principals=%d\n", opts.OperatorAuthPath, len(file.Principals))
 	}
-	server := httpapi.NewServerWithOptions(gw, opts.StatePath, enrollmentIssuerToken)
+	server := httpapi.NewServerWithOperatorAuth(gw, opts.StatePath, auth)
 	if opts.SigningKeyPath != "" {
 		action := "loaded"
 		if created {
@@ -3929,7 +4020,7 @@ func (a App) enrollmentVerifyRevocations(revocationsPath, rootPublicKey string) 
 	return enc.Encode(payload)
 }
 
-func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPublicKey, issuerTokenFile, outPath string, force bool) error {
+func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPublicKey, operatorTokenFile, outPath string, force bool) error {
 	if gatewayURL == "" {
 		return fmt.Errorf("gateway is required")
 	}
@@ -3939,7 +4030,7 @@ func (a App) enrollmentFetchRevocations(ctx context.Context, gatewayURL, rootPub
 	if outPath == "" {
 		return fmt.Errorf("out is required")
 	}
-	revocations, root, err := fetchEnrollmentRevocations(ctx, gatewayURL, rootPublicKey, issuerTokenFile)
+	revocations, root, err := fetchEnrollmentRevocations(ctx, gatewayURL, rootPublicKey, operatorTokenFile)
 	if err != nil {
 		return err
 	}
@@ -5370,11 +5461,13 @@ Usage:
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
   rdev adapter verify-cancellation --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
-  rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --issuer-token-file issuer-token.txt
+  rdev operator-auth init --out .rdev/operator-auth/operators.json --token-dir .rdev/operator-auth/tokens
+  rdev operator-auth verify --auth .rdev/operator-auth/operators.json
+  rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --operator-token-file operator-token.txt
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
   rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-renewed.json --key .rdev/keys/enrollment-root.json --revocations revocations.json
-  rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-hosted-renewed.json --gateway http://127.0.0.1:8787 --root-public-key enrollment-root:... --issuer-token-file issuer-token.txt
+  rdev enrollment renew-certificate --certificate host-enrollment.json --out host-enrollment-hosted-renewed.json --gateway http://127.0.0.1:8787 --root-public-key enrollment-root:... --operator-token-file operator-token.txt
   rdev enrollment init-revocations --out revocations.json --key .rdev/keys/enrollment-root.json
   rdev enrollment revoke-certificate --out revocations.json --key .rdev/keys/enrollment-root.json --certificate host-enrollment.json --reason "host retired"
   rdev enrollment verify-revocations --revocations revocations.json --root-public-key enrollment-root:...
@@ -5850,11 +5943,11 @@ func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL
 	return payload.TrustBundle, nil
 }
 
-func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey, issuerTokenFile string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
-	return fetchEnrollmentRevocationsWithClient(ctx, http.DefaultClient, gatewayURL, rootPublicKey, issuerTokenFile)
+func fetchEnrollmentRevocations(ctx context.Context, gatewayURL, rootPublicKey, operatorTokenFile string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
+	return fetchEnrollmentRevocationsWithClient(ctx, http.DefaultClient, gatewayURL, rootPublicKey, operatorTokenFile)
 }
 
-func fetchEnrollmentRevocationsWithClient(ctx context.Context, client *http.Client, gatewayURL, rootPublicKey, issuerTokenFile string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
+func fetchEnrollmentRevocationsWithClient(ctx context.Context, client *http.Client, gatewayURL, rootPublicKey, operatorTokenFile string) (model.HostEnrollmentRevocationList, model.TrustBundle, error) {
 	root, err := parseRootPublicKey(rootPublicKey)
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
@@ -5866,8 +5959,8 @@ func fetchEnrollmentRevocationsWithClient(ctx context.Context, client *http.Clie
 	if err != nil {
 		return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
 	}
-	if issuerTokenFile != "" {
-		token, err := readTokenFile(issuerTokenFile)
+	if operatorTokenFile != "" {
+		token, err := readTokenFile(operatorTokenFile)
 		if err != nil {
 			return model.HostEnrollmentRevocationList{}, model.TrustBundle{}, err
 		}
@@ -5917,8 +6010,8 @@ func issueEnrollmentCertificate(ctx context.Context, gatewayURL string, opts enr
 		return issuedEnrollmentCertificatePayload{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if opts.IssuerTokenFile != "" {
-		token, err := readTokenFile(opts.IssuerTokenFile)
+	if opts.OperatorTokenFile != "" {
+		token, err := readTokenFile(opts.OperatorTokenFile)
 		if err != nil {
 			return issuedEnrollmentCertificatePayload{}, err
 		}
@@ -5955,8 +6048,8 @@ func renewEnrollmentCertificate(ctx context.Context, client *http.Client, gatewa
 		return renewedEnrollmentCertificatePayload{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if opts.IssuerTokenFile != "" {
-		token, err := readTokenFile(opts.IssuerTokenFile)
+	if opts.OperatorTokenFile != "" {
+		token, err := readTokenFile(opts.OperatorTokenFile)
 		if err != nil {
 			return renewedEnrollmentCertificatePayload{}, err
 		}

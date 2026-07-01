@@ -296,7 +296,7 @@ print(json.dumps({
     "enrollment_renewal_smoke": True,
     "enrollment_hosted_renewal_smoke": True,
     "enrollment_issuance_smoke": True,
-    "enrollment_issuer_token_smoke": True,
+    "enrollment_operator_auth_smoke": True,
     "asset_count": len(plan["assets"]),
     "candidate_sbom": True,
     "candidate_provenance": True,

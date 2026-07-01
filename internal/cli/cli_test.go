@@ -74,6 +74,35 @@ func TestMCPToolsOutputsJSON(t *testing.T) {
 	}
 }
 
+func TestOperatorAuthInitAndVerify(t *testing.T) {
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "operators.json")
+	tokenDir := filepath.Join(dir, "tokens")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	if err := app.Run(context.Background(), []string{"operator-auth", "init", "--out", authPath, "--token-dir", tokenDir}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "rdev_") {
+		t.Fatalf("init output should not print bearer tokens: %s", stdout.String())
+	}
+	for _, name := range []string{"admin", "operator", "issuer", "auditor"} {
+		if _, err := os.Stat(filepath.Join(tokenDir, name+".token")); err != nil {
+			t.Fatalf("expected %s token file: %v", name, err)
+		}
+	}
+
+	var verifyOut bytes.Buffer
+	verifyApp := NewApp(&verifyOut, &bytes.Buffer{})
+	if err := verifyApp.Run(context.Background(), []string{"operator-auth", "verify", "--auth", authPath}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyOut.String(), `"ok": true`) {
+		t.Fatalf("expected verify ok, got %s", verifyOut.String())
+	}
+}
+
 func TestMCPServeProcessesInitialize(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1276,7 +1305,7 @@ func TestHostServeReportsFetchedEnrollmentRevocations(t *testing.T) {
 	}
 }
 
-func TestHostServeSendsIssuerTokenWhenFetchingEnrollmentRevocations(t *testing.T) {
+func TestHostServeSendsOperatorTokenWhenFetchingEnrollmentRevocations(t *testing.T) {
 	dir := t.TempDir()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
 	ticket, err := model.NewTicket(model.HostModeAttendedTemporary, 600, capabilities, "certified temporary host", time.Now())
@@ -1289,8 +1318,8 @@ func TestHostServeSendsIssuerTokenWhenFetchingEnrollmentRevocations(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenPath := filepath.Join(dir, "issuer-token.txt")
-	if err := os.WriteFile(tokenPath, []byte("issuer-secret\n"), 0o600); err != nil {
+	tokenPath := filepath.Join(dir, "operator-token.txt")
+	if err := os.WriteFile(tokenPath, []byte("operator-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	seenAuthorization := ""
@@ -1327,13 +1356,13 @@ func TestHostServeSendsIssuerTokenWhenFetchingEnrollmentRevocations(t *testing.T
 		"--enrollment-certificate", certificatePath,
 		"--fetch-enrollment-revocations",
 		"--enrollment-root-public-key", rootPublicKey,
-		"--enrollment-issuer-token-file", tokenPath,
+		"--operator-token-file", tokenPath,
 		"--name", "token-host",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seenAuthorization != "Bearer issuer-secret" {
+	if seenAuthorization != "Bearer operator-secret" {
 		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
 	}
 }
@@ -1611,7 +1640,7 @@ func TestEnrollmentFetchRevocationsWritesVerifiedList(t *testing.T) {
 	}
 }
 
-func TestEnrollmentFetchRevocationsSendsIssuerTokenFromFile(t *testing.T) {
+func TestEnrollmentFetchRevocationsSendsOperatorTokenFromFile(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Minute)
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -1631,8 +1660,8 @@ func TestEnrollmentFetchRevocationsSendsIssuerTokenFromFile(t *testing.T) {
 	}))
 	defer server.Close()
 	dir := t.TempDir()
-	tokenPath := filepath.Join(dir, "issuer-token.txt")
-	if err := os.WriteFile(tokenPath, []byte("issuer-secret\n"), 0o600); err != nil {
+	tokenPath := filepath.Join(dir, "operator-token.txt")
+	if err := os.WriteFile(tokenPath, []byte("operator-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(dir, "revocations", "revocations.json")
@@ -1642,13 +1671,13 @@ func TestEnrollmentFetchRevocationsSendsIssuerTokenFromFile(t *testing.T) {
 		"enrollment", "fetch-revocations",
 		"--gateway", server.URL,
 		"--root-public-key", encodeRootPublicKey("enrollment-root", publicKey),
-		"--issuer-token-file", tokenPath,
+		"--operator-token-file", tokenPath,
 		"--out", outPath,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seenAuthorization != "Bearer issuer-secret" {
+	if seenAuthorization != "Bearer operator-secret" {
 		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
 	}
 	if !strings.Contains(stdout.String(), `"ok": true`) {
@@ -1831,7 +1860,7 @@ func TestEnrollmentIssueCertificateRejectsWrongPinnedRoot(t *testing.T) {
 	}
 }
 
-func TestEnrollmentIssueCertificateSendsIssuerTokenFromFile(t *testing.T) {
+func TestEnrollmentIssueCertificateSendsOperatorTokenFromFile(t *testing.T) {
 	now := time.Now().UTC()
 	issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -1879,8 +1908,8 @@ func TestEnrollmentIssueCertificateSendsIssuerTokenFromFile(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	tokenPath := filepath.Join(t.TempDir(), "issuer-token.txt")
-	if err := os.WriteFile(tokenPath, []byte(" issuer-secret\n"), 0o600); err != nil {
+	tokenPath := filepath.Join(t.TempDir(), "operator-token.txt")
+	if err := os.WriteFile(tokenPath, []byte(" operator-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(t.TempDir(), "certs", "host-enrollment.json")
@@ -1897,12 +1926,12 @@ func TestEnrollmentIssueCertificateSendsIssuerTokenFromFile(t *testing.T) {
 		"--identity-key-id", identity.KeyID,
 		"--identity-public-key", identity.EncodedPublicKey(),
 		"--identity-fingerprint", identity.Fingerprint(),
-		"--issuer-token-file", tokenPath,
+		"--operator-token-file", tokenPath,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seenAuthorization != "Bearer issuer-secret" {
+	if seenAuthorization != "Bearer operator-secret" {
 		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
 	}
 	if _, err := readEnrollmentCertificateFile(outPath); err != nil {
@@ -2101,8 +2130,8 @@ func TestEnrollmentRenewCertificateFromGatewayWritesVerifiedCertificate(t *testi
 	if err := writeEnrollmentCertificateFile(certificatePath, certificate, false); err != nil {
 		t.Fatal(err)
 	}
-	tokenPath := filepath.Join(t.TempDir(), "issuer-token.txt")
-	if err := os.WriteFile(tokenPath, []byte("issuer-secret\n"), 0o600); err != nil {
+	tokenPath := filepath.Join(t.TempDir(), "operator-token.txt")
+	if err := os.WriteFile(tokenPath, []byte("operator-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(t.TempDir(), "certs", "host-enrollment-renewed.json")
@@ -2114,13 +2143,13 @@ func TestEnrollmentRenewCertificateFromGatewayWritesVerifiedCertificate(t *testi
 		"--out", outPath,
 		"--gateway", server.URL,
 		"--root-public-key", encodeRootPublicKey(root.SigningKeyID, issuerPublicKey),
-		"--issuer-token-file", tokenPath,
+		"--operator-token-file", tokenPath,
 		"--valid-minutes", "120",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seenAuthorization != "Bearer issuer-secret" {
+	if seenAuthorization != "Bearer operator-secret" {
 		t.Fatalf("expected bearer token header, got %q", seenAuthorization)
 	}
 	var payload struct {

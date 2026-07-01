@@ -18,6 +18,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 )
 
 func TestCreateTicketAndAudit(t *testing.T) {
@@ -47,6 +48,104 @@ func TestCreateTicketAndAudit(t *testing.T) {
 	}
 	if !bytes.Contains(auditRec.Body.Bytes(), []byte("ticket.create")) {
 		t.Fatalf("expected audit response to include ticket.create, got %s", auditRec.Body.String())
+	}
+}
+
+func TestOperatorAuthProtectsControlPlaneMutations(t *testing.T) {
+	auth, err := operatorauth.New([]operatorauth.Principal{
+		{ID: "operator", Roles: []string{operatorauth.RoleOperator}, TokenHash: operatorauth.HashToken("operator-token")},
+		{ID: "auditor", Roles: []string{operatorauth.RoleAuditor}, TokenHash: operatorauth.HashToken("auditor-token")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServerWithOperatorAuth(gateway.NewMemoryGateway(), "", auth)
+	handler := server.Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewBufferString(`{"reason":"protected"}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for missing token, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewBufferString(`{"reason":"protected"}`))
+	req.Header.Set("Authorization", "Bearer auditor-token")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for auditor mutation, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewBufferString(`{"reason":"protected"}`))
+	req.Header.Set("Authorization", "Bearer operator-token")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for operator, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
+	req.Header.Set("Authorization", "Bearer auditor-token")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for auditor read, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOperatorAuthIssuerCanUseEnrollmentButNotTickets(t *testing.T) {
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	issuerPublicKey, issuerPrivateKey := httpTestKeyPair(t)
+	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
+		WithEnrollmentIssuer(root, issuerPrivateKey)
+	ticket, err := gw.CreateTicket(model.HostModeManaged, 600, []string{"shell.user"}, "managed enrollment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := operatorauth.New([]operatorauth.Principal{{
+		ID:        "issuer",
+		Roles:     []string{operatorauth.RoleIssuer},
+		TokenHash: operatorauth.HashToken("operator-token"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOperatorAuth(gw, "", auth).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewBufferString(`{"reason":"should fail"}`))
+	req.Header.Set("Authorization", "Bearer operator-token")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected issuer ticket mutation to fail, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	hostPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"ticket_code":          ticket.Code,
+		"name":                 "managed-host",
+		"os":                   "linux",
+		"arch":                 "amd64",
+		"capabilities":         []string{"shell.user"},
+		"identity_key_id":      "host-test",
+		"identity_public_key":  base64.RawURLEncoding.EncodeToString(hostPublicKey),
+		"identity_fingerprint": httpHostIdentityFingerprint(hostPublicKey),
+		"valid_minutes":        30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/v1/enrollment/certificates", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer operator-token")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected issuer enrollment success, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -243,7 +342,7 @@ func TestEnrollmentRevocationsEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
-func TestEnrollmentRevocationsEndpointRequiresIssuerToken(t *testing.T) {
+func TestEnrollmentRevocationsEndpointRequiresOperatorIssuerRole(t *testing.T) {
 	now := time.Date(2026, 7, 1, 13, 0, 0, 0, time.UTC)
 	publicKey, privateKey := httpTestKeyPair(t)
 	revocations, err := model.SignHostEnrollmentRevocationList(nil, "enrollment-root", privateKey, now, time.Hour)
@@ -253,9 +352,7 @@ func TestEnrollmentRevocationsEndpointRequiresIssuerToken(t *testing.T) {
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now }).
 		WithEnrollmentRoot(model.NewTrustBundle("enrollment-root", publicKey)).
 		WithEnrollmentRevocations(revocations)
-	server := NewServer(gw)
-	server.EnrollmentIssuerToken = "issuer-secret"
-	handler := server.Handler()
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
 
 	for _, tc := range []struct {
 		name   string
@@ -264,6 +361,7 @@ func TestEnrollmentRevocationsEndpointRequiresIssuerToken(t *testing.T) {
 	}{
 		{name: "missing", status: http.StatusUnauthorized},
 		{name: "wrong", auth: "Bearer wrong-secret", status: http.StatusUnauthorized},
+		{name: "operator role only", auth: "Bearer operator-secret", status: http.StatusUnauthorized},
 		{name: "valid", auth: "Bearer issuer-secret", status: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -354,7 +452,7 @@ func TestEnrollmentCertificatesEndpointRequiresIssuer(t *testing.T) {
 	}
 }
 
-func TestEnrollmentCertificatesEndpointRequiresIssuerToken(t *testing.T) {
+func TestEnrollmentCertificatesEndpointRequiresOperatorIssuerRole(t *testing.T) {
 	now := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
 	issuerPublicKey, issuerPrivateKey := httpTestKeyPair(t)
 	root := model.NewTrustBundle("enrollment-root", issuerPublicKey)
@@ -382,9 +480,7 @@ func TestEnrollmentCertificatesEndpointRequiresIssuerToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(gw)
-	server.EnrollmentIssuerToken = "issuer-secret"
-	handler := server.Handler()
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
 
 	for _, tc := range []struct {
 		name   string
@@ -393,6 +489,7 @@ func TestEnrollmentCertificatesEndpointRequiresIssuerToken(t *testing.T) {
 	}{
 		{name: "missing", status: http.StatusUnauthorized},
 		{name: "wrong", auth: "Bearer wrong-secret", status: http.StatusUnauthorized},
+		{name: "operator role only", auth: "Bearer operator-secret", status: http.StatusUnauthorized},
 		{name: "valid", auth: "Bearer issuer-secret", status: http.StatusCreated},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -450,9 +547,7 @@ func TestEnrollmentCertificatesRenewEndpointRenewsVerifiedCertificate(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(gw)
-	server.EnrollmentIssuerToken = "issuer-secret"
-	handler := server.Handler()
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/enrollment/certificates/renew", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer issuer-secret")
@@ -1241,6 +1336,19 @@ func httpTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 		t.Fatal(err)
 	}
 	return publicKey, privateKey
+}
+
+func httpTestOperatorAuth(t *testing.T) *operatorauth.Authorizer {
+	t.Helper()
+	auth, err := operatorauth.New([]operatorauth.Principal{
+		{ID: "operator", Roles: []string{operatorauth.RoleOperator}, TokenHash: operatorauth.HashToken("operator-secret")},
+		{ID: "issuer", Roles: []string{operatorauth.RoleIssuer}, TokenHash: operatorauth.HashToken("issuer-secret")},
+		{ID: "auditor", Roles: []string{operatorauth.RoleAuditor}, TokenHash: operatorauth.HashToken("auditor-secret")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return auth
 }
 
 func httpHostIdentityFingerprint(publicKey ed25519.PublicKey) string {

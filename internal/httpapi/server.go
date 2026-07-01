@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,13 +13,14 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 )
 
 type Server struct {
-	Gateway               *gateway.MemoryGateway
-	StatePath             string
-	EnrollmentIssuerToken string
-	stateMu               *sync.Mutex
+	Gateway      *gateway.MemoryGateway
+	StatePath    string
+	OperatorAuth *operatorauth.Authorizer
+	stateMu      *sync.Mutex
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
@@ -31,8 +31,8 @@ func NewServerWithState(gw *gateway.MemoryGateway, statePath string) Server {
 	return Server{Gateway: gw, StatePath: statePath, stateMu: &sync.Mutex{}}
 }
 
-func NewServerWithOptions(gw *gateway.MemoryGateway, statePath, enrollmentIssuerToken string) Server {
-	return Server{Gateway: gw, StatePath: statePath, EnrollmentIssuerToken: enrollmentIssuerToken, stateMu: &sync.Mutex{}}
+func NewServerWithOperatorAuth(gw *gateway.MemoryGateway, statePath string, auth *operatorauth.Authorizer) Server {
+	return Server{Gateway: gw, StatePath: statePath, OperatorAuth: auth, stateMu: &sync.Mutex{}}
 }
 
 func (s Server) Handler() http.Handler {
@@ -72,7 +72,7 @@ func (s Server) getTrustBundle(w http.ResponseWriter, r *http.Request) {
 
 func (s Server) getEnrollmentRevocations(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeEnrollmentIssuer(r) {
-		writeError(w, http.StatusUnauthorized, "enrollment issuer token is required")
+		writeError(w, http.StatusUnauthorized, "operator issuer role is required")
 		return
 	}
 	revocations, ok := s.Gateway.EnrollmentRevocations()
@@ -85,7 +85,7 @@ func (s Server) getEnrollmentRevocations(w http.ResponseWriter, r *http.Request)
 
 func (s Server) issueEnrollmentCertificate(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeEnrollmentIssuer(r) {
-		writeError(w, http.StatusUnauthorized, "enrollment issuer token is required")
+		writeError(w, http.StatusUnauthorized, "operator issuer role is required")
 		return
 	}
 	var req struct {
@@ -143,7 +143,7 @@ func (s Server) issueEnrollmentCertificate(w http.ResponseWriter, r *http.Reques
 
 func (s Server) renewEnrollmentCertificate(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeEnrollmentIssuer(r) {
-		writeError(w, http.StatusUnauthorized, "enrollment issuer token is required")
+		writeError(w, http.StatusUnauthorized, "operator issuer role is required")
 		return
 	}
 	var req struct {
@@ -192,20 +192,14 @@ func (s Server) renewEnrollmentCertificate(w http.ResponseWriter, r *http.Reques
 }
 
 func (s Server) authorizeEnrollmentIssuer(r *http.Request) bool {
-	token := strings.TrimSpace(s.EnrollmentIssuerToken)
-	if token == "" {
-		return true
-	}
-	const prefix = "Bearer "
-	header := r.Header.Get("Authorization")
-	if !strings.HasPrefix(header, prefix) {
-		return false
-	}
-	provided := strings.TrimSpace(strings.TrimPrefix(header, prefix))
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+	return s.authorizeOperator(r, operatorauth.RoleIssuer)
 }
 
 func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "operator role is required")
+		return
+	}
 	var req struct {
 		TrustBundle model.SignedTrustBundle `json:"trust_bundle"`
 	}
@@ -225,6 +219,10 @@ func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "operator role is required")
+		return
+	}
 	var req struct {
 		Mode         model.HostMode `json:"mode"`
 		TTLSeconds   int            `json:"ttl_seconds"`
@@ -274,6 +272,10 @@ func (s Server) ticketSubresource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "auditor role is required")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"hosts": s.Gateway.Hosts(r.URL.Query().Get("status")),
 	})
@@ -297,6 +299,10 @@ func (s Server) registerHost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "operator role is required")
+		return
+	}
 	hostID, action, ok := splitHostAction(r.URL.Path)
 	if !ok {
 		writeError(w, http.StatusNotFound, "unknown host endpoint")
@@ -348,6 +354,10 @@ func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
 
 func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
 	if hostID, ok := splitHostID(r.URL.Path); ok {
+		if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+			writeError(w, http.StatusForbidden, "auditor role is required")
+			return
+		}
 		host, err := s.Gateway.Host(hostID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -425,6 +435,10 @@ func (s Server) nextJobForHost(ctx context.Context, hostID string, wait time.Dur
 }
 
 func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "operator role is required")
+		return
+	}
 	var req struct {
 		HostID  string         `json:"host_id"`
 		Adapter string         `json:"adapter"`
@@ -447,6 +461,10 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) getJob(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "auditor role is required")
+		return
+	}
 	if jobID, resource, ok := splitJobSubresource(r.URL.Path); ok {
 		switch resource {
 		case "artifacts":
@@ -472,6 +490,10 @@ func (s Server) getJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) getArtifact(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "auditor role is required")
+		return
+	}
 	artifactID, ok := splitArtifactID(r.URL.Path)
 	if !ok {
 		writeError(w, http.StatusNotFound, "unknown artifact endpoint")
@@ -486,6 +508,10 @@ func (s Server) getArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) exportJobEvidenceBundle(w http.ResponseWriter, r *http.Request, jobID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "operator role is required")
+		return
+	}
 	out := r.URL.Query().Get("out")
 	if out == "" {
 		writeError(w, http.StatusBadRequest, "out query parameter is required")
@@ -601,9 +627,20 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) listAudit(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "auditor role is required")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": s.Gateway.AuditEvents(),
 	})
+}
+
+func (s Server) authorizeOperator(r *http.Request, roles ...string) bool {
+	if !s.OperatorAuth.Enabled() {
+		return true
+	}
+	return s.OperatorAuth.AuthorizeBearer(r.Header.Get("Authorization"), roles...)
 }
 
 func (s Server) persistState(w http.ResponseWriter) bool {
