@@ -130,6 +130,7 @@
 - [x] Wire Skillkit bundle verification and `skill_agents_metadata` acceptance into release smoke.
 - [x] Add a copy-paste Agent Bootstrap Prompt so Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents can clone the repository, read the full bootstrap instructions, install, and connect Remote Dev Skillkit by probing their own runtime.
 - [x] Synchronize multilingual quick starts with the copy-paste Agent Bootstrap Prompt and audit the translated entry.
+- [x] Make Agent bootstrap installation local-first so personal-computer installs use `rdev mcp serve` without requiring a hosted gateway URL, while remote-host workflows probe and choose the best available connection mode.
 
 ## Next
 

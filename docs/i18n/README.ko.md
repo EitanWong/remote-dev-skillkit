@@ -26,10 +26,14 @@ read the prompt from:
 https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
 
 Probe my OS, shell, Git, Go, `rdev`, current agent framework, skill directory,
-and MCP config before acting. If a required value is unclear, ask me one short
-question instead of guessing. Dry-run before execute. Do not hardcode private
-paths, secrets, or server addresses; use `https://api.example.com/v1` only as
-placeholder metadata until I provide a real gateway URL.
+MCP config, and available connection modes before acting. If a required value is
+unclear, ask me one short question instead of guessing. For a personal computer
+agent install, use local MCP stdio with `rdev mcp serve`; do not require a
+hosted gateway URL. When remote hosts are needed, auto-select the safest
+available mode: local dev gateway, LAN-reachable gateway, hosted gateway,
+relay/mesh/VPN, or SSH tunnel. Dry-run before execute. Do not hardcode private
+paths, secrets, or server addresses; treat `https://api.example.com/v1` only as
+optional hosted-gateway placeholder metadata.
 ```
 
 전체 복사-붙여넣기 Prompt: [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md).
@@ -42,7 +46,7 @@ rdev doctor
 Skillkit bundle을 내보내고 검증합니다:
 
 ```bash
-rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
+rdev skillkit export --source-root . --out dist/remote-dev-skillkit
 rdev skillkit verify --bundle dist/remote-dev-skillkit
 ```
 

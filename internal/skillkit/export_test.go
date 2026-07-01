@@ -653,6 +653,7 @@ func assertAdaptiveConfigurationContract(t *testing.T, contract AdaptiveConfigur
 		"target OS and shell",
 		"service manager",
 		"gateway configuration",
+		"available connection modes",
 		"workspace path",
 		"framework install path",
 	} {

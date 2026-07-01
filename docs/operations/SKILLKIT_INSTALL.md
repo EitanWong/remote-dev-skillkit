@@ -13,8 +13,7 @@ bundle, installing the matching skills, and preparing MCP configuration.
 ```bash
 rdev skillkit export \
   --source-root . \
-  --out dist/remote-dev-skillkit \
-  --gateway-url https://api.example.com/v1
+  --out dist/remote-dev-skillkit
 
 rdev skillkit verify \
   --bundle dist/remote-dev-skillkit
@@ -38,6 +37,11 @@ rdev skillkit install \
   --target "$HOME/.codex/skills" \
   --execute
 ```
+
+For personal-computer Agent installs, no hosted gateway URL is required. Install
+the skills and configure local MCP stdio with `rdev mcp serve`. Add
+`--gateway-url https://api.example.com/v1` only when you already have a hosted
+gateway and want that URL recorded as bundle metadata.
 
 The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
 
@@ -65,6 +69,13 @@ agent adapters, and current permissions. If a gateway URL, ticket code, root
 key, release URL, checksum, framework install path, workspace root, adapter
 choice, or approval policy cannot be discovered safely, the agent must ask a
 short follow-up question instead of inventing a value.
+
+For local Agent installs on a personal computer, gateway configuration can be
+absent. The Agent should configure local MCP stdio through `rdev mcp serve` and
+defer gateway selection until a real remote-host workflow needs one. When remote
+hosts are needed, the Agent should choose among local dev gateway, LAN-reachable
+gateway, hosted gateway, relay/mesh/VPN, or SSH tunnel based on the probed
+environment and operator policy.
 
 Examples such as `https://api.example.com/v1`, `/Users/example`,
 `/home/example`, and `C:\Users\Alice` are placeholders. Runtime agents must
@@ -103,7 +114,7 @@ explicitly.
 2. Verify the exported or downloaded bundle with `rdev skillkit verify --bundle <bundle-dir>`.
 3. Generate and verify an install plan with `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
 4. Run `rdev skillkit install --framework <name> --target <dir>` first as a dry-run, then re-run with `--execute`, or run only the reviewed script for the target runtime. Generic MCP agents must set an explicit target.
-5. Configure MCP stdio with `rdev mcp serve`, or configure MCP HTTP/API against the deployed gateway.
+5. Configure MCP stdio with `rdev mcp serve` for local Agent installs, or configure MCP HTTP/API against a deployed gateway when one exists.
 6. Keep these skills installed together:
    - `safe-remote-support`;
    - `host-triage`;
@@ -115,7 +126,7 @@ explicitly.
 
 - Codex: install the skill folders into the Codex skill path and configure the MCP command to run `rdev mcp serve`.
 - Claude Code: install the skill files as project or user instructions and configure MCP stdio/HTTP through the runtime's MCP surface.
-- Hermes: install the skills into the Hermes agent profile and point tools at the deployed rdev gateway.
+- Hermes: install the skills into the Hermes agent profile and use local MCP stdio or a deployed rdev gateway, depending on the detected environment.
 - OpenClaw/OpenCode: install the same skill folders and MCP tool contract; no Hermes-only dependency is required.
 - Generic MCP agents: use `mcp/tools.json` as the stable schema reference and call the rdev MCP server.
 

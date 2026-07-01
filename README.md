@@ -78,10 +78,14 @@ read the prompt from:
 https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
 
 Probe my OS, shell, Git, Go, `rdev`, current agent framework, skill directory,
-and MCP config before acting. If a required value is unclear, ask me one short
-question instead of guessing. Dry-run before execute. Do not hardcode private
-paths, secrets, or server addresses; use `https://api.example.com/v1` only as
-placeholder metadata until I provide a real gateway URL.
+MCP config, and available connection modes before acting. If a required value is
+unclear, ask me one short question instead of guessing. For a personal computer
+agent install, use local MCP stdio with `rdev mcp serve`; do not require a
+hosted gateway URL. When remote hosts are needed, auto-select the safest
+available mode: local dev gateway, LAN-reachable gateway, hosted gateway,
+relay/mesh/VPN, or SSH tunnel. Dry-run before execute. Do not hardcode private
+paths, secrets, or server addresses; treat `https://api.example.com/v1` only as
+optional hosted-gateway placeholder metadata.
 ```
 
 For the full copy-paste prompt, see
@@ -94,11 +98,18 @@ go install ./cmd/rdev
 rdev doctor
 ```
 
-Export and verify a portable Skillkit bundle:
+Export and verify a portable Skillkit bundle. A hosted gateway URL is optional;
+omit `--gateway-url` for local Agent installs that only need `rdev mcp serve`:
+
+```bash
+rdev skillkit export --source-root . --out dist/remote-dev-skillkit
+rdev skillkit verify --bundle dist/remote-dev-skillkit
+```
+
+If you already have a hosted gateway, include it as bundle metadata:
 
 ```bash
 rdev skillkit export --source-root . --out dist/remote-dev-skillkit --gateway-url https://api.example.com/v1
-rdev skillkit verify --bundle dist/remote-dev-skillkit
 ```
 
 Generate a reviewable install plan for mainstream agent frameworks:
@@ -139,6 +150,10 @@ rdev invite create \
   --capabilities shell.user,codex.run,git.diff \
   --transport auto
 ```
+
+If there is no hosted gateway yet, start locally with `rdev mcp serve` and
+`rdev demo local`, or ask the Agent to prepare a local dev gateway / LAN gateway
+plan before creating real remote-host invites.
 
 The JSON output includes `schema_version: rdev.agent-invite.v1`, a short-lived
 ticket, the manifest URL, a copyable `host_command`, a transport fallback plan,

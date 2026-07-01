@@ -264,6 +264,7 @@ assert skillkit_manifest["adaptive_configuration"]["schema_version"] == "rdev.ad
 assert skillkit_manifest["adaptive_configuration"]["required"] is True, skillkit_manifest
 assert "rdev doctor" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
 assert "rdev mcp tools" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
+assert "available connection modes" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
 assert "framework install path" in skillkit_manifest["adaptive_configuration"]["ask_if_unclear"], skillkit_manifest
 assert "https://api.example.com/v1" in skillkit_manifest["adaptive_configuration"]["placeholders"], skillkit_manifest
 assert skillkit_install_plan_output["adaptive_configuration_schema"] == "rdev.adaptive-configuration-contract.v1", skillkit_install_plan_output

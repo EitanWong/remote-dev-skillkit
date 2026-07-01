@@ -186,6 +186,10 @@ manifest, transport, and approval steps.
   agents to clone or update the repository first, read the full local
   `AGENT_BOOTSTRAP_PROMPT.md`, then continue with the verified installation
   workflow.
+- Made the Agent install path local-first: personal-computer installs now
+  default to local MCP stdio with `rdev mcp serve`, hosted gateway URLs are
+  optional metadata, and agents must probe available connection modes before
+  choosing local dev, LAN, hosted, relay/mesh/VPN, or SSH-tunnel paths.
 
 ### Verification
 

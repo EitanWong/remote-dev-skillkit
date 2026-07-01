@@ -30,6 +30,12 @@ Rules:
   executing the remaining steps.
 - Probe before acting. Do not guess paths, framework names, gateway URLs, or MCP
   config locations.
+- For a personal computer Agent install, default to local MCP stdio with
+  `rdev mcp serve`. A hosted gateway URL is optional, not required.
+- When remote hosts are needed, detect and choose the safest available
+  connection mode: local dev gateway, LAN-reachable gateway, hosted gateway,
+  relay/mesh/VPN, or SSH tunnel. Ask before using paid, external, privileged,
+  persistent, or security-policy-changing resources.
 - If a required value is unclear, ask exactly one short question, wait for the
   answer, then continue.
 - Do not hardcode private server addresses, personal paths, secrets, dates, or
@@ -54,9 +60,11 @@ Steps:
    - `rdev doctor`
    - `rdev mcp tools`
 6. Create and verify a portable Skillkit bundle from the checked-out repository.
-   If I have not provided a hosted gateway URL yet, use
-   `https://api.example.com/v1` only as a placeholder in local bundle metadata
-   and tell me that real remote sessions need my actual gateway URL later.
+   For local Agent installs, omit `--gateway-url`; local MCP stdio with
+   `rdev mcp serve` is enough to connect this Agent to the Skillkit tools. If I
+   have provided a hosted gateway URL, include it as bundle metadata. Treat
+   `https://api.example.com/v1` only as an optional hosted-gateway placeholder,
+   never as a required value.
 7. Generate and verify an install plan for all mainstream frameworks:
    `codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent`.
 8. Determine the correct skill/instruction target directory for this current
@@ -79,6 +87,9 @@ Steps:
     - installed skill target
     - whether MCP was configured or the exact snippet I need to add
     - verification commands run
+    - selected connection mode for local use
+    - whether a hosted gateway is absent, optional, configured, or still needed
+      for the remote-host workflow I asked for
     - any remaining values I must provide before using real remote sessions
 
 After installation, use `host-triage` before remote work, `remote-vibe-coding`
@@ -97,8 +108,7 @@ rdev mcp tools
 
 rdev skillkit export \
   --source-root . \
-  --out dist/remote-dev-skillkit \
-  --gateway-url https://api.example.com/v1
+  --out dist/remote-dev-skillkit
 
 rdev skillkit verify \
   --bundle dist/remote-dev-skillkit
@@ -131,3 +141,8 @@ rdev skillkit install \
 The framework and target path above are examples. Runtime agents must replace
 them with detected or confirmed values for Codex, Claude Code, Hermes,
 OpenClaw, OpenCode, or a generic MCP agent.
+
+For hosted gateway deployments, the agent may include `--gateway-url
+https://api.example.com/v1` during export, replacing the placeholder with the
+operator-provided gateway. For personal-machine installs, it should leave the
+gateway unset and configure local MCP stdio.
