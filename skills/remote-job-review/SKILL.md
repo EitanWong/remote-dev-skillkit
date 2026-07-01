@@ -1,6 +1,6 @@
 ---
 name: remote-job-review
-description: Use when an agent needs to review remote job output, audit records, artifacts, diffs, tests, and approval history before declaring a task complete.
+description: Use when an agent needs to review remote job status, output, audit records, artifacts, diffs, tests, runtime-memory updates, approvals, revocation state, or residual risk before declaring Remote Dev Skillkit work complete.
 ---
 
 # Remote Job Review
@@ -11,6 +11,8 @@ Use this skill before telling the user a remote job is complete.
 
 - Evidence source is known: job id, gateway, bundle path, artifact ids, and
   audit source are explicit or discovered from the current context.
+- Runtime memory used by the job is identified, and any newly discovered safe
+  facts are written back only after evidence review.
 - Before declaring completion, probe read-only context such as `rdev doctor`,
   `rdev mcp tools`, job status, artifact listings, audit exports, workspace
   path, framework install path, and verifier availability when those details are
@@ -35,13 +37,20 @@ Use this skill before telling the user a remote job is complete.
 - Residual risks are stated.
 - Host/ticket revocation status is known or a follow-up revocation action is
   recommended.
+- Runtime memory updates are scoped, redacted, and backed by artifact or audit
+  evidence; stale or conflicting memory is invalidated.
 
 ## Completion Format
 
-Report:
+Report with stable field names:
 
-- what changed;
-- verification evidence;
-- approvals used;
-- remaining risks;
-- whether host/ticket should be revoked.
+- `job_state`;
+- `what_changed`;
+- `verification_evidence`;
+- `approvals_used`;
+- `artifacts_reviewed`;
+- `audit_refs`;
+- `memory_updates`;
+- `remaining_risks`;
+- `revocation_or_cleanup`;
+- `final_recommendation`.

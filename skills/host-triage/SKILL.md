@@ -1,14 +1,17 @@
 ---
 name: host-triage
-description: Use when an agent needs to inspect a target host's OS, architecture, installed tools, permissions, network state, or readiness for remote development.
+description: Use when an agent needs to inspect or refresh a target host's OS, architecture, shell, service manager, installed tools, permissions, network state, runtime memory, or readiness for Remote Dev Skillkit work before choosing commands or creating jobs.
 ---
 
 # Host Triage
 
-Use this skill before making changes on a target host.
+Use this skill before making changes on a target host or when cached host facts
+may be stale.
 
 ## Triage Checklist
 
+- Load scoped Skill runtime memory first, then verify stale or high-impact facts
+  with read-only probes before relying on them.
 - If the target OS, shell, gateway, join URL, workspace path, service manager,
   installed agent framework, or permission level is unclear, inspect the
   environment first and ask a concise follow-up before choosing commands.
@@ -24,6 +27,9 @@ Use this skill before making changes on a target host.
   shell only.
 - Existing `rdev` binary, Skillkit files, MCP configuration, and relevant
   environment variables.
+- Existing runtime-memory root and safe reusable facts: gateway source,
+  workspace root, adapter availability, framework paths, proxy requirements,
+  release verifier inputs, approval policy, and prior residual risks.
 
 ## Adaptive Probes
 
@@ -39,12 +45,21 @@ Use this skill before making changes on a target host.
   human/operator confirmation.
 - Treat example domains, POSIX paths, Windows paths, and placeholder values as
   documentation only, not deployment facts or defaults.
+- Update scoped runtime memory after useful discoveries. Store only durable,
+  redacted facts with evidence references; do not store secrets, tokens,
+  private keys, raw transcripts, private hostnames, or full filesystem
+  inventories.
 
 ## Output
 
-Return a short readiness report with:
+Return a short readiness report with stable field names:
 
-- detected capabilities;
-- missing dependencies;
-- safe next action;
-- actions requiring approval.
+- `host_summary`;
+- `memory_used`;
+- `memory_updates`;
+- `detected_capabilities`;
+- `missing_dependencies`;
+- `safe_next_action`;
+- `requires_approval`;
+- `unknowns_to_ask`;
+- `evidence_refs`.

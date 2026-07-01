@@ -1,6 +1,6 @@
 ---
 name: safe-remote-support
-description: Use when an agent needs to create or operate a consent-based remote support session for a temporary or managed host through Remote Dev Skillkit.
+description: Use when an agent needs to create, operate, review, or revoke a consent-based Remote Dev Skillkit support session for a temporary customer host or managed owned host, including invite creation, visible bootstrap, scoped jobs, runtime memory, approvals, evidence, and cleanup.
 ---
 
 # Safe Remote Support
@@ -10,6 +10,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 ## Rules
 
 - Use attended temporary mode for third-party machines.
+- Load scoped runtime memory before creating a new support session, but verify
+  stale host, gateway, workspace, release, adapter, and approval facts before
+  using them.
 - Before creating tickets, launchers, service plans, or jobs, determine the
   target OS, shell, installed `rdev` binary, gateway or join URL, ticket source,
   workspace path, framework install path, release-verification inputs, and
@@ -41,25 +44,48 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Use approval gates for package installation, service modification, elevation, GUI control, credential access, push, deploy, or destructive filesystem actions.
 - Prefer short-lived tickets.
 - Always summarize evidence after a job: commands, exit codes, files changed, approvals, artifacts, and residual risk.
+- Write runtime memory only for reusable support facts that are safe to retain,
+  such as detected OS family, adapter availability, proxy requirement, verifier
+  availability, and approved workspace scope. Do not store customer secrets,
+  private hostnames, unredacted transcripts, ticket codes, operator tokens, or
+  broad filesystem inventories.
 
 ## Workflow
 
 1. Discover local context: available `rdev`, MCP tools, gateway configuration,
    target OS, shell, workspace path, framework install path, release
    bundle/verifier inputs, and approved support mode.
-2. Ask for missing gateway, ticket, release, checksum, root key, or target-user
+2. Read scoped runtime memory and verify stale or high-impact facts.
+3. Ask for missing gateway, ticket, release, checksum, root key, or target-user
    details before generating commands.
-3. Create a ticket with `rdev.tickets.create`.
-4. For Windows temporary support, generate and verify the acceptance plan, then review the launcher, release-verification requirements, no-persistence checks, and approval probes.
-5. Explain the join URL and visible consent screen.
-6. Wait for the host to appear pending.
-7. Ask the operator to approve the host with scoped capabilities.
-8. Inspect capabilities with `rdev.hosts.capabilities`.
-9. Create small scoped jobs with `rdev.jobs.create`.
-10. Use `rdev.jobs.approve` for dangerous actions.
-11. Read artifacts and audit evidence.
-12. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
-13. Package Windows acceptance evidence before claiming the run is release-ready.
+4. Create a ticket with `rdev.tickets.create`.
+5. For Windows temporary support, generate and verify the acceptance plan, then review the launcher, release-verification requirements, no-persistence checks, and approval probes.
+6. Explain the join URL and visible consent screen.
+7. Wait for the host to appear pending.
+8. Ask the operator to approve the host with scoped capabilities.
+9. Inspect capabilities with `rdev.hosts.capabilities`.
+10. Create small scoped jobs with `rdev.jobs.create`.
+11. Use `rdev.jobs.approve` for dangerous actions.
+12. Read artifacts and audit evidence.
+13. Update or invalidate runtime memory from reviewed evidence.
+14. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
+15. Package Windows acceptance evidence before claiming the run is release-ready.
+
+## Output
+
+Return stable field names:
+
+- `session_mode`;
+- `invite_or_ticket`;
+- `host_status`;
+- `capabilities`;
+- `approvals`;
+- `jobs_run`;
+- `memory_used`;
+- `memory_updates`;
+- `evidence_refs`;
+- `cleanup_or_revocation`;
+- `remaining_risk`.
 
 ## Default Temporary Capabilities
 

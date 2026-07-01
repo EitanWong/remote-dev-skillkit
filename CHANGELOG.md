@@ -91,6 +91,9 @@ manifest, transport, and approval steps.
 - Added Skill runtime memory guidance for dynamically retaining discovered
   environment facts, configuration paths, host capabilities, adapter/tool
   availability, and operator preferences outside the public repository.
+- Added runtime-memory and stable-output expectations to host triage, remote job
+  review, and safe remote support Skills so Agent/Harness runs can reuse safe
+  discoveries and summarize results consistently.
 
 ### Changed
 
@@ -142,6 +145,9 @@ manifest, transport, and approval steps.
 - Updated the remote-vibe-coding Skill flow so agents read safe runtime memory
   before repeating probes and write scoped, redacted memory after useful
   discoveries.
+- Tightened supporting Skills for professional Agent/Harness execution:
+  refreshed trigger descriptions, read-before-probe memory usage, scoped memory
+  writes, and stable report fields.
 
 ### Verification
 

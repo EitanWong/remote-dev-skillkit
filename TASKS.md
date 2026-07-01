@@ -122,6 +122,7 @@
 - [x] Add path/configuration neutrality rules to Skill guidance to avoid hardcoded path or environment coupling.
 - [x] Optimize remote-vibe-coding Skill with progressive-disclosure references and a concise core workflow.
 - [x] Add dynamic Skill runtime memory guidance for discovered environment facts and configuration paths.
+- [x] Improve supporting Skills with runtime-memory usage and Harness-friendly stable output fields.
 
 ## Next
 
