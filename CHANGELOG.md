@@ -73,6 +73,10 @@ manifest, transport, and approval steps.
   read before guessing, confirm before ambiguous execution, reuse before
   creating, verify before claiming, preserve architecture, admit unknowns, and
   refactor cautiously.
+- Added clarification-first response discipline to contribution and Skill
+  guidance: for ambiguous or high-impact work, ask one human question at a
+  time until the real goal, constraints, and success criteria are about 95%
+  clear before giving the final plan or answer.
 
 ### Changed
 
@@ -109,6 +113,9 @@ manifest, transport, and approval steps.
   development work on the operator's own Mac, Windows PC, or Linux machine.
 - Documented the project's anti-guesswork contribution standard for Agent-led
   development.
+- Updated the remote-vibe-coding skill so agents continue one-question-at-a-time
+  clarification before final planning or execution when the request is unclear
+  or high-impact.
 
 ### Verification
 

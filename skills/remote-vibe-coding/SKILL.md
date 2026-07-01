@@ -15,6 +15,11 @@ Use this skill to run coding tasks on an enrolled host while keeping work policy
   MCP tools, adapters, and patterns before creating new surfaces; verify with
   tests and release/readiness checks; preserve the architecture; be honest
   about unknowns; and refactor cautiously with scoped, reversible changes.
+- Before giving a final plan or answer for ambiguous or high-impact work, ask
+  the human one question at a time. Continue from each answer with the next
+  single question until there is about 95% confidence in the real goal,
+  constraints, and success criteria, then provide the plan or execute the
+  scoped work.
 - Follow the canonical final safety loop in `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound envelope, host-side validation, locked workspace, adapter execution, redacted evidence, audit, and revocation.
 - Treat Remote Dev Skillkit as AI-native. The human should be able to say which
   machine needs help; the agent should probe local configuration, create an

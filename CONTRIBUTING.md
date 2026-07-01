@@ -23,6 +23,10 @@ opening a pull request.
     contracts, docs, schemas, and tests first.
   - Be ashamed of vague execution; be proud of asking for confirmation when
     requirements, environment, authority, or risk are unclear.
+  - Before giving a final plan or answer for ambiguous or high-impact work, ask
+    the human one question at a time, continue from the answer with the next
+    single question, and proceed only when there is about 95% confidence in the
+    real goal, constraints, and success criteria.
   - Be ashamed of inventing business intent; be proud of getting human
     confirmation for product goals, customer impact, and policy decisions.
   - Be ashamed of creating unnecessary interfaces; be proud of reusing existing
