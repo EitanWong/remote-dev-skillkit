@@ -30,6 +30,8 @@ before acting. Ask one short question when a required value is unclear. For this
 personal computer, prefer local MCP stdio with `rdev mcp serve`; do not require a
 hosted gateway URL.
 
+If `rdev` is missing, do not stop. Recover it from an existing local rdev binary, build this checkout with `go install ./cmd/rdev`, use `go run ./cmd/rdev bootstrap agent-plan --repo-root .` as a temporary planner, or clone then build in a safe user/workspace location. After `rdev` works, run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan.
+
 When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
@@ -54,7 +56,7 @@ user-space helper is missing and an explicit URL/SHA-256 is approved, use
 `rdev deps install` or reviewed `RDEV_*_INSTALL_ACTION_JSON` metadata for
 user/workspace-scoped helper repair before helper startup; ask before
 privileged, persistent, paid, firewall, DNS, cloud, credential, route, or
-security-policy changes. Dry-run before execute. Do not hardcode private paths,
+security-policy changes. For company or third-party machines, ask for authorization first, then default to visible attended-temporary mode and let Connection Entry probes detect Windows/macOS/Linux. Dry-run before execute. Do not hardcode private paths,
 secrets, or server addresses; example URLs are placeholders only.
 ```
 
@@ -63,6 +65,7 @@ Prompt completo para copiar: [Agent Bootstrap Prompt](../operations/AGENT_BOOTST
 ```bash
 go install ./cmd/rdev
 rdev doctor
+rdev bootstrap agent-plan --repo-root .
 ```
 
 Exporte e verifique o bundle Skillkit:

@@ -35,6 +35,13 @@ revocation.
   host. Do not invent narrower surfaces such as customer links or connector
   package plans, and do not give humans raw ticket/root/gateway/transport
   assembly tasks.
+- If `rdev` is missing from PATH, do not stop at "not installed". Recover it
+  from the active checkout or safe clone: run `go install ./cmd/rdev`, or use
+  `go run ./cmd/rdev bootstrap agent-plan --repo-root .` as a temporary
+  planner, then resolve the final binary path before configuring MCP.
+- Run `rdev bootstrap agent-plan --repo-root .` when available and follow its
+  JSON plan for local MCP, `rdev` recovery, Connection Entry defaults, and
+  ask/auto-probe boundaries.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -62,9 +69,14 @@ revocation.
 
 1. Discover local runtime, available MCP tools, gateway configuration, network
    reachability, candidate hosts, and current task intent.
-2. Load relevant Skill runtime memory, then verify or refresh any stale facts
+2. Ensure `rdev` is usable. Try PATH, current executable, checkout build, and
+   safe clone/build recovery before asking the user for a path. Use
+   `rdev bootstrap agent-plan --repo-root .` or
+   `go run ./cmd/rdev bootstrap agent-plan --repo-root .` to get a
+   machine-readable install/connect plan.
+3. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
-3. If no suitable host is active, create an invite with `rdev.invites.create` or
+4. If no suitable host is active, create an invite with `rdev.invites.create` or
    `rdev invite create`; then materialize it with `rdev.connection_entry.plan`
    or `rdev connection-entry plan` before giving target-side instructions.
    Read `connection_entry.package_catalog` and the signed join manifest's
@@ -82,13 +94,15 @@ revocation.
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
-4. Wait for the host, then approve it only after the operator confirms it is the
+5. Wait for the host, then approve it only after the operator confirms it is the
    expected machine.
-5. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
+6. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
    policy, release trust inputs, and language/locale.
-6. Ask for missing gateway, host, workspace, release, adapter, framework, repo,
-   tunnel/mesh approval, or approval configuration that cannot be safely
-   discovered.
+7. Ask only for missing authorization, gateway, host, workspace, release,
+   adapter, framework, repo, tunnel/mesh approval, or approval configuration
+   that cannot be safely discovered. Do not ask for target OS, ticket, manifest
+   root, gateway, transport, release root, checksum, or helper argv assembly
+   when a Connection Entry can carry or discover those values.
 
 ## Core Flow
 
@@ -117,6 +131,10 @@ revocation.
    LaunchAgent, systemd user-service, or Windows Service package plan over
    hand-written service-manager commands; do not start or install the service
    until the operator explicitly approves the reviewed service-control steps.
+   For company or third-party machines, first ask only for authorization to run
+   a visible temporary support session. After confirmation, default to
+   attended-temporary mode, generate the Connection Entry, and let the join
+   page/package catalog/target-side probes detect Windows, macOS, or Linux.
 3. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
    runtimes, package managers, lockfiles, framework paths, proxies,
    permissions, and trust roots before installing anything.

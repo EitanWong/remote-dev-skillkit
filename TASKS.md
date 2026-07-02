@@ -145,6 +145,8 @@
 - [x] Make Agent bootstrap installation local-first so personal-computer installs use `rdev mcp serve` without requiring a hosted gateway URL, while remote-host workflows probe and choose the best available connection mode.
 - [x] Extend Agent bootstrap and Skillkit install contracts with network reachability, proxy/DNS, NAT/firewall/CGNAT, SSH, and tunnel/mesh tool probes; prefer existing or open-source/free tunnel options such as frp, Chisel, headscale, and WireGuard before paid relays.
 - [x] Implement the first executable restrictive-network Connection Entry runner path: native WSS/long-poll/poll first, then configured helper gateway overrides for relay, mesh, VPN, or SSH without exposing low-level flags to humans.
+- [x] Add machine-readable Agent bootstrap recovery planning through `rdev bootstrap agent-plan` so installed Agents can recover missing `rdev`, configure local MCP stdio, and apply safe remote-host defaults before asking humans for paths or low-level connection values.
+- [x] Tighten Skill and bootstrap guidance so company or third-party remote support asks only for authorization first, then defaults to visible attended-temporary Connection Entry while target-side probes detect Windows/macOS/Linux.
 
 ## Next
 

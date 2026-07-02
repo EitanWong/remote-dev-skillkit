@@ -1,5 +1,37 @@
 # Bootstrap Design
 
+## Agent Runtime Bootstrap
+
+Agent installation should be self-healing. If an installed Codex, Claude Code,
+Hermes, OpenClaw/OpenCode, or generic MCP agent cannot find `rdev`, it should
+not stop and ask the user to locate the binary. It should run the machine
+readable planner when possible:
+
+```bash
+rdev bootstrap agent-plan --repo-root .
+```
+
+If `rdev` is missing but the checkout exists, use:
+
+```bash
+go run ./cmd/rdev bootstrap agent-plan --repo-root .
+go install ./cmd/rdev
+```
+
+The planner emits `rdev.agent-bootstrap-plan.v1`, including local MCP stdio
+configuration, `rdev` recovery order, Skillkit install steps, remote-host
+defaults, ask-only-when boundaries, and forbidden actions. Agents should use it
+before asking for paths or choosing connection mode.
+
+For company or third-party machines, the only required first question is
+authorization: confirm that policy and the device owner allow a visible
+temporary Remote Dev Skillkit support session. After confirmation, agents should
+default to attended-temporary mode, create and materialize a Connection Entry,
+and let the join page, package catalog, and target-side probes detect
+Windows/macOS/Linux. They should not ask humans to assemble ticket codes,
+manifest roots, gateway URLs, transports, release roots, checksums, or helper
+commands.
+
 ## Temporary Windows Flow
 
 1. Operator creates a ticket.

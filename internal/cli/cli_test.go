@@ -75,6 +75,84 @@ func TestMCPToolsOutputsJSON(t *testing.T) {
 	}
 }
 
+func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := filepath.Dir(filepath.Dir(wd))
+
+	if err := app.Run(context.Background(), []string{"bootstrap", "agent-plan", "--repo-root", repoRoot, "--framework", "codex", "--remote-requested"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		Repo          string `json:"repo"`
+		Framework     string `json:"framework"`
+		RepoRootValid bool   `json:"repo_root_valid"`
+		LocalMCP      struct {
+			Mode       string   `json:"mode"`
+			Command    string   `json:"command"`
+			Args       []string `json:"args"`
+			GatewayURL string   `json:"gateway_url"`
+		} `json:"local_mcp"`
+		RecoveryOrder []struct {
+			ID      string   `json:"id"`
+			Status  string   `json:"status"`
+			Command []string `json:"command"`
+		} `json:"rdev_recovery_order"`
+		RemoteDefaults struct {
+			Requested          bool     `json:"requested"`
+			DefaultUnknownMode string   `json:"default_unknown_owner"`
+			FirstQuestion      string   `json:"first_human_question"`
+			SafeDefaults       []string `json:"safe_defaults"`
+		} `json:"remote_host_defaults"`
+		AskOnlyWhen      []string `json:"ask_only_when"`
+		DoNotAskFor      []string `json:"do_not_ask_for"`
+		ForbiddenActions []string `json:"forbidden_actions"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid bootstrap plan JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.agent-bootstrap-plan.v1" || payload.Repo != "EitanWong/remote-dev-skillkit" || payload.Framework != "codex" {
+		t.Fatalf("unexpected bootstrap plan identity: %#v", payload)
+	}
+	if !payload.RepoRootValid {
+		t.Fatalf("repo root should be valid for checkout bootstrap plan: %s", stdout.String())
+	}
+	if payload.LocalMCP.Mode != "stdio" || !slices.Contains(payload.LocalMCP.Args, "serve") || payload.LocalMCP.GatewayURL != "optional-for-local-agent-install" {
+		t.Fatalf("local agent install should default to MCP stdio without hosted gateway: %#v", payload.LocalMCP)
+	}
+	var recoveryIDs []string
+	for _, action := range payload.RecoveryOrder {
+		recoveryIDs = append(recoveryIDs, action.ID)
+	}
+	for _, expected := range []string{"use-existing-rdev", "build-from-checkout", "run-from-checkout-with-go", "clone-then-build", "signed-release-download"} {
+		if !slices.Contains(recoveryIDs, expected) {
+			t.Fatalf("missing recovery action %q in %#v", expected, recoveryIDs)
+		}
+	}
+	if !payload.RemoteDefaults.Requested ||
+		payload.RemoteDefaults.DefaultUnknownMode != string(model.HostModeAttendedTemporary) ||
+		!strings.Contains(payload.RemoteDefaults.FirstQuestion, "company policy") ||
+		!slices.Contains(payload.RemoteDefaults.SafeDefaults, "no hidden persistence") {
+		t.Fatalf("remote defaults should collapse decisions into visible temporary support: %#v", payload.RemoteDefaults)
+	}
+	joinedAsk := strings.Join(payload.AskOnlyWhen, "\n")
+	joinedDontAsk := strings.Join(payload.DoNotAskFor, "\n")
+	joinedForbidden := strings.Join(payload.ForbiddenActions, "\n")
+	if !strings.Contains(joinedAsk, "company or owner authorization") ||
+		!strings.Contains(joinedDontAsk, "target OS before generating a Connection Entry") ||
+		!strings.Contains(joinedDontAsk, "ticket code, manifest root, gateway URL") ||
+		!strings.Contains(joinedForbidden, "ExecutionPolicy Bypass") {
+		t.Fatalf("bootstrap plan should define ask boundaries and forbidden actions:\nask=%s\ndont=%s\nforbidden=%s", joinedAsk, joinedDontAsk, joinedForbidden)
+	}
+}
+
 func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()

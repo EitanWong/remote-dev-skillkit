@@ -44,6 +44,12 @@ required_patterns=(
   "do not require a"
   "hosted gateway URL"
   "network state"
+  'If `rdev` is missing, do not stop.'
+  'rdev bootstrap agent-plan --repo-root .'
+  'go run ./cmd/rdev bootstrap agent-plan --repo-root .'
+  'company or third-party machines'
+  'authorization first'
+  'detect Windows/macOS/Linux'
   "link, visible"
   "signed package"
   "low-level parameters in Agent/tool metadata"

@@ -29,6 +29,10 @@ may be stale.
   shell only.
 - Existing `rdev` binary, Skillkit files, MCP configuration, and relevant
   environment variables.
+- If `rdev` is missing, record it as recoverable before escalating: look for an
+  active checkout, current executable path, Go toolchain, and Git clone ability;
+  use `rdev bootstrap agent-plan --repo-root .` when available or
+  `go run ./cmd/rdev bootstrap agent-plan --repo-root .` from a checkout.
 - Existing runtime-memory root and safe reusable facts: gateway source,
   workspace root, adapter availability, framework paths, proxy requirements,
   release verifier inputs, approval policy, and prior residual risks.

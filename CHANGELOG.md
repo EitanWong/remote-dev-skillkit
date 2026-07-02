@@ -4,6 +4,34 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.11-dev
+
+Current phase: installed Agents now get a machine-readable bootstrap recovery
+plan so missing `rdev` binaries, local MCP setup, and remote-host first-contact
+decisions do not collapse into multi-question manual troubleshooting.
+
+### Added
+
+- Added `rdev bootstrap agent-plan` with schema
+  `rdev.agent-bootstrap-plan.v1`. The plan reports local MCP stdio config,
+  detected runtime facts, `rdev` recovery order, Skillkit install steps,
+  remote-host defaults, ask-only-when boundaries, forbidden actions, and stable
+  report fields.
+- Added regression coverage that requires the bootstrap plan to recover from
+  missing `rdev` via PATH/current executable, checkout build, Go run fallback,
+  safe clone/build, or signed release download after release verification.
+
+### Changed
+
+- Updated the Agent Bootstrap Prompt, README quick start, multilingual quick
+  starts, and core Skills so Agents do not stop when `rdev` is missing. They
+  must recover or produce the bootstrap plan before asking the user for paths.
+- Remote support guidance now defaults company or third-party hosts to visible
+  attended-temporary Connection Entries after one authorization confirmation.
+  Agents should let Connection Entry metadata and target-side probes detect
+  Windows/macOS/Linux instead of asking humans to choose OS, ticket, root,
+  gateway, transport, release, checksum, or helper command details.
+
 ## 0.1.10-dev
 
 Current phase: Connection Entry moved from package catalog plus script fallback

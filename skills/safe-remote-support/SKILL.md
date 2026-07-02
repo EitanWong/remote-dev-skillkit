@@ -10,6 +10,18 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 ## Rules
 
 - Use attended temporary mode for third-party machines.
+- For company or third-party machines, ask only for authorization first:
+  confirm that policy and the device owner allow a visible temporary Remote Dev
+  Skillkit support session. After confirmation, default to
+  attended-temporary, no-persistence mode and let Connection Entry probes detect
+  OS, architecture, shell, and connection path.
+- If `rdev` is not found, do not stop. Recover from PATH/current executable,
+  build the checkout with `go install ./cmd/rdev`, or use
+  `go run ./cmd/rdev bootstrap agent-plan --repo-root .` as a temporary
+  planner before asking the user for an `rdev` path.
+- Run `rdev bootstrap agent-plan --repo-root .` when available and use it as
+  the machine-readable contract for local MCP, `rdev` recovery, remote defaults,
+  and ask/auto-probe boundaries.
 - Load scoped runtime memory before creating a new support session, but verify
   stale host, gateway, workspace, release, adapter, and approval facts before
   using them.
@@ -20,6 +32,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   tunnel/mesh tools, release-verification inputs, and operator-approved
   capabilities. Probe read-only when available; ask a concise follow-up when
   any required value is ambiguous.
+- Do not ask the human to choose target OS, temporary-vs-managed mode, ticket
+  code, root key, gateway URL, transport, release root, checksum, or helper
+  command when the safe default or Connection Entry metadata can determine it.
+  Ask about managed persistence only when the target is operator-owned and
+  recurring access is requested.
 - Do not substitute placeholder domains, user paths, ticket codes, release
   roots, checksums, workspace roots, adapter choices, approval policies, or
   framework paths for real configuration. Example values are documentation
@@ -84,17 +101,24 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 1. Discover local context: available `rdev`, MCP tools, gateway configuration,
    target OS, shell, workspace path, framework install path, release
    bundle/verifier inputs, and approved support mode.
-2. Read scoped runtime memory and verify stale or high-impact facts.
-3. Ask for missing gateway, ticket, release, checksum, root key, or target-user
-   details before generating commands.
-4. Create an invite with `rdev.invites.create` when available so the Agent gets
+2. If `rdev` is unavailable, recover it from the checkout or safe clone before
+   asking for help; use `rdev bootstrap agent-plan --repo-root .` or
+   `go run ./cmd/rdev bootstrap agent-plan --repo-root .`.
+3. Read scoped runtime memory and verify stale or high-impact facts.
+4. Ask only for company/owner authorization first when the target is a
+   third-party or company machine. Use visible attended-temporary mode unless
+   the operator explicitly requests and approves managed persistence.
+5. Ask for missing gateway, release, root, or approval details only when they
+   cannot be supplied by the invite, signed manifest, Connection Entry plan, or
+   local probes.
+6. Create an invite with `rdev.invites.create` when available so the Agent gets
    `connection_entry`, `connection_entry_plan`, manifest root, and transport
    fallback instructions together.
-5. Materialize the invite with `rdev.connection_entry.plan` or
+7. Materialize the invite with `rdev.connection_entry.plan` or
    `rdev connection-entry plan`; review `mode_decision`, `human_surface`,
    package-catalog candidate choice, `agent_metadata`, `missing_inputs`, and
    `runner_plan`/`entry_package_plan`.
-6. Prefer the materialized Connection Entry runner when available. Dry-run it
+8. Prefer the materialized Connection Entry runner when available. Dry-run it
    with `rdev connection-entry run --runner-manifest ... --dry-run` to select
    direct, proxy, LAN, relay, mesh, VPN, or SSH-assisted connectivity before the
    target user starts the visible session. If the runner reports a configured
@@ -103,17 +127,17 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    temporary support, generate and verify the acceptance plan or connection
    entry package, then review the launcher, release-verification requirements,
    no-persistence checks, and approval probes.
-7. Explain the selected connection entry URL, visible script, or signed package
+9. Explain the selected connection entry URL, visible script, or signed package
    and visible consent screen.
-8. Wait for the host to appear pending.
-9. Ask the operator to approve the host with scoped capabilities.
-10. Inspect capabilities with `rdev.hosts.capabilities`.
-11. Create small scoped jobs with `rdev.jobs.create`.
-12. Use `rdev.jobs.approve` for dangerous actions.
-13. Read artifacts and audit evidence.
-14. Update or invalidate runtime memory from reviewed evidence.
-15. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
-16. Package Windows acceptance evidence before claiming the run is release-ready.
+10. Wait for the host to appear pending.
+11. Ask the operator to approve the host with scoped capabilities.
+12. Inspect capabilities with `rdev.hosts.capabilities`.
+13. Create small scoped jobs with `rdev.jobs.create`.
+14. Use `rdev.jobs.approve` for dangerous actions.
+15. Read artifacts and audit evidence.
+16. Update or invalidate runtime memory from reviewed evidence.
+17. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
+18. Package Windows acceptance evidence before claiming the run is release-ready.
 
 ## Output
 

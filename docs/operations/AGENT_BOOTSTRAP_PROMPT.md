@@ -32,6 +32,12 @@ Rules:
   config locations.
 - For a personal computer Agent install, default to local MCP stdio with
   `rdev mcp serve`. A hosted gateway URL is optional, not required.
+- If `rdev` is not found in PATH, do not stop at "rdev is not installed".
+  Recover in this order: use an already running/local rdev executable when
+  known, build from the checked-out repository with `go install ./cmd/rdev`, use
+  `go run ./cmd/rdev ...` as a temporary bootstrap fallback, clone then build if
+  no checkout exists, or use a signed GitHub Release only after release-bundle
+  verification is available.
 - When remote hosts are needed, detect and choose the safest available
   connection mode: local dev gateway, LAN-reachable gateway, hosted gateway,
   relay/mesh/VPN, or SSH tunnel. Ask before using paid, external, privileged,
@@ -44,6 +50,9 @@ Rules:
   approval.
 - If a required value is unclear, ask exactly one short question, wait for the
   answer, then continue.
+- Do not ask humans for values the Connection Entry can discover or carry:
+  target OS before join, ticket codes, manifest roots, gateway URLs, transport
+  flags, release roots, checksums, helper argv, or package-candidate selection.
 - Do not hardcode private server addresses, personal paths, secrets, dates, or
   machine-specific values.
 - Do not weaken OS security policy, create hidden persistence, or install
@@ -60,8 +69,13 @@ Steps:
    update only after checking for local changes.
 3. Read `docs/operations/AGENT_BOOTSTRAP_PROMPT.md`,
    `docs/operations/SKILLKIT_INSTALL.md`, and the README from the checkout.
-4. Check whether `rdev` is already installed with `rdev doctor`. If it is not
-   available, build/install the CLI with the repository's documented Go workflow.
+4. Check whether `rdev` is already installed with `rdev doctor`. If available,
+   run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan. If
+   `rdev` is not available, build/install the CLI with the repository's
+   documented Go workflow (`go install ./cmd/rdev`) or use
+   `go run ./cmd/rdev bootstrap agent-plan --repo-root .` as the temporary
+   bootstrap planner. Do not ask me where `rdev` is until PATH, current
+   executable, checkout build, and safe clone/build recovery have been tried.
 5. Run:
    - `rdev doctor`
    - `rdev mcp tools`
@@ -116,6 +130,13 @@ Steps:
     access; use `attended-temporary` for third-party or one-off repair machines.
     Ask one short question before managed mode when ownership or persistence
     approval is unclear.
+    If the remote machine is a company or third-party device, ask only the
+    authorization question first: "Please confirm that company policy and the
+    device owner allow a visible temporary Remote Dev Skillkit support session
+    on this machine." After confirmation, proceed with an attended-temporary
+    Connection Entry by default. Let the join page, package catalog, and
+    target-side probes detect Windows/macOS/Linux instead of asking for OS
+    up front.
     - If the Agent and host are on the same machine, use local MCP stdio and
       local/dev gateway flows.
     - If the Agent and host share a LAN or VPN, prefer a LAN-reachable gateway
@@ -164,6 +185,7 @@ The agent should prefer these commands after it has a checkout:
 go install ./cmd/rdev
 rdev doctor
 rdev mcp tools
+rdev bootstrap agent-plan --repo-root .
 
 rdev skillkit export \
   --source-root . \

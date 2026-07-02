@@ -77,6 +77,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.version()
 	case "doctor":
 		return a.doctor(ctx)
+	case "bootstrap":
+		return a.bootstrap(ctx, args[1:])
 	case "mcp":
 		return a.mcp(args[1:])
 	case "host":
@@ -1501,6 +1503,200 @@ func (a App) doctor(ctx context.Context) error {
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(hostcap.Detect(ctx))
+}
+
+func (a App) bootstrap(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing bootstrap subcommand")
+	}
+	switch args[0] {
+	case "agent-plan":
+		fs := flag.NewFlagSet("bootstrap agent-plan", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
+		framework := fs.String("framework", "", "optional detected agent framework")
+		remoteRequested := fs.Bool("remote-requested", false, "include remote-host Connection Entry defaults")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return writeJSON(a.Stdout, buildAgentBootstrapPlan(ctx, *repoRoot, *framework, *remoteRequested))
+	default:
+		return fmt.Errorf("unknown bootstrap subcommand %q", args[0])
+	}
+}
+
+func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, remoteRequested bool) map[string]any {
+	rdevPath, _ := exec.LookPath("rdev")
+	currentExecutable, _ := os.Executable()
+	absRepoRoot, err := filepath.Abs(strings.TrimSpace(repoRoot))
+	if err != nil || strings.TrimSpace(repoRoot) == "" {
+		absRepoRoot = strings.TrimSpace(repoRoot)
+	}
+	repoLooksValid := pathExists(filepath.Join(absRepoRoot, "go.mod")) && pathExists(filepath.Join(absRepoRoot, "cmd", "rdev", "main.go"))
+	goPath, _ := exec.LookPath("go")
+	gitPath, _ := exec.LookPath("git")
+	detected := hostcap.Detect(ctx)
+	if strings.TrimSpace(framework) == "" {
+		framework = "unknown-probe-required"
+	}
+	if strings.TrimSpace(rdevPath) == "" && strings.TrimSpace(currentExecutable) != "" && strings.Contains(filepath.Base(currentExecutable), "rdev") {
+		rdevPath = currentExecutable
+	}
+	localMCPCommand := "rdev"
+	if strings.TrimSpace(rdevPath) != "" {
+		localMCPCommand = rdevPath
+	}
+	recoveryActions := []map[string]any{
+		{
+			"id":      "use-existing-rdev",
+			"status":  statusFromBool(strings.TrimSpace(rdevPath) != ""),
+			"command": []string{"rdev", "doctor"},
+			"notes":   []string{"Prefer an already installed rdev when it passes rdev doctor."},
+		},
+		{
+			"id":      "use-current-executable",
+			"status":  statusFromBool(strings.TrimSpace(currentExecutable) != "" && strings.Contains(filepath.Base(currentExecutable), "rdev")),
+			"command": []string{currentExecutable, "doctor"},
+			"notes":   []string{"When the agent is already running a local rdev binary outside PATH, use that absolute binary for MCP config."},
+		},
+		{
+			"id":      "build-from-checkout",
+			"status":  statusFromBool(repoLooksValid && strings.TrimSpace(goPath) != ""),
+			"command": []string{"go", "install", "./cmd/rdev"},
+			"cwd":     absRepoRoot,
+			"notes":   []string{"Use this when rdev is missing but Go and a clean checkout are available.", "Run rdev doctor after install and resolve the final binary path before editing MCP config."},
+		},
+		{
+			"id":      "run-from-checkout-with-go",
+			"status":  statusFromBool(repoLooksValid && strings.TrimSpace(goPath) != ""),
+			"command": []string{"go", "run", "./cmd/rdev", "doctor"},
+			"cwd":     absRepoRoot,
+			"notes":   []string{"Temporary fallback for bootstrap only; prefer go install before long-lived MCP stdio."},
+		},
+		{
+			"id":      "clone-then-build",
+			"status":  statusFromBool(strings.TrimSpace(gitPath) != "" && strings.TrimSpace(goPath) != ""),
+			"command": []string{"git", "clone", "https://github.com/EitanWong/remote-dev-skillkit", "<safe-user-or-workspace-dir>"},
+			"notes":   []string{"Use only when no current checkout exists. Inspect for local changes before updating an existing checkout."},
+		},
+		{
+			"id":      "signed-release-download",
+			"status":  "requires-published-release-and-release-root",
+			"command": []string{"rdev", "update", "plan", "--repo", "EitanWong/remote-dev-skillkit"},
+			"notes":   []string{"Use only after a signed GitHub Release exists and the release root is configured. Verify checksums and signed release-bundle.json before replacing binaries."},
+		},
+	}
+	askOnlyWhen := []string{
+		"company or owner authorization for remote support is not confirmed",
+		"managed persistence, service installation, firewall, DNS, route, driver, credential, paid relay, cloud, or security-policy change is needed",
+		"framework skill target or MCP config path remains ambiguous after read-only probes",
+		"gateway or relay credentials are required and cannot be discovered from approved local config",
+	}
+	doNotAskFor := []string{
+		"target OS before generating a Connection Entry; let package catalog, join page, and target-side probes select it",
+		"ticket code, manifest root, gateway URL, transport, release root, checksum, or helper argv assembly",
+		"temporary vs managed mode when ownership is clear; use attended-temporary for third-party/one-off and managed for owned recurring hosts",
+		"rdev path before trying PATH, current executable, checkout build, and safe clone/build recovery",
+	}
+	remoteDefaults := map[string]any{
+		"requested":             remoteRequested,
+		"default_unknown_owner": "attended-temporary",
+		"owned_recurring_mode":  "managed-after-explicit-persistence-approval",
+		"third_party_mode":      "attended-temporary",
+		"first_human_question":  "Please confirm that company policy and the device owner allow a visible temporary Remote Dev Skillkit support session on this machine.",
+		"agent_should_continue_after_confirmation": []string{
+			"create an invite",
+			"materialize a Connection Entry",
+			"give the target side only the selected link, visible launcher, visible script, or signed package",
+			"wait for pending host",
+			"ask operator to approve the expected machine with scoped capabilities",
+		},
+		"safe_defaults": []string{
+			"visible foreground session",
+			"no hidden persistence",
+			"no service installation",
+			"no execution-policy weakening",
+			"no UAC/sudo bypass",
+			"user-level shell and scoped filesystem access only until further approval",
+		},
+		"connection_selection": []string{
+			"local MCP stdio for this agent runtime",
+			"local/dev gateway for same-machine tests",
+			"LAN/private gateway when probes show reachability",
+			"hosted gateway when configured",
+			"existing authorized SSH tunnel",
+			"configured open-source/free relay or mesh helper such as frp, Chisel, headscale/Tailscale-compatible mesh, or WireGuard",
+		},
+	}
+	return map[string]any{
+		"schema_version":             "rdev.agent-bootstrap-plan.v1",
+		"ok":                         true,
+		"repo":                       "EitanWong/remote-dev-skillkit",
+		"repo_url":                   "https://github.com/EitanWong/remote-dev-skillkit",
+		"framework":                  framework,
+		"repo_root":                  absRepoRoot,
+		"repo_root_valid":            repoLooksValid,
+		"detected_os":                runtime.GOOS,
+		"detected_arch":              runtime.GOARCH,
+		"detected_host_capabilities": detected,
+		"rdev_path":                  rdevPath,
+		"current_executable":         currentExecutable,
+		"go_path":                    goPath,
+		"git_path":                   gitPath,
+		"local_mcp": map[string]any{
+			"mode":        "stdio",
+			"command":     localMCPCommand,
+			"args":        []string{"mcp", "serve"},
+			"gateway_url": "optional-for-local-agent-install",
+		},
+		"rdev_recovery_order": recoveryActions,
+		"skillkit_steps": []string{
+			"run rdev doctor",
+			"run rdev mcp tools",
+			"export Skillkit bundle without --gateway-url for local agent installs",
+			"verify Skillkit bundle",
+			"plan install for codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent",
+			"verify install plan",
+			"dry-run the matching rdev skillkit install",
+			"execute only when the target directory is clear and safe",
+		},
+		"remote_host_defaults": remoteDefaults,
+		"ask_only_when":        askOnlyWhen,
+		"do_not_ask_for":       doNotAskFor,
+		"forbidden_actions": []string{
+			"hidden installation",
+			"ExecutionPolicy Bypass or OS policy weakening",
+			"UAC/sudo bypass",
+			"unapproved service persistence",
+			"unapproved firewall/DNS/route/driver/cloud/paid relay mutation",
+			"hardcoded private paths, secrets, server addresses, ticket codes, or dates",
+		},
+		"report_fields": []string{
+			"rdev_recovered_by",
+			"framework",
+			"skill_target",
+			"mcp_configured_or_snippet",
+			"local_mcp_command",
+			"connection_entry_mode",
+			"remaining_required_human_decision",
+			"verification_commands",
+		},
+	}
+}
+
+func statusFromBool(ok bool) string {
+	if ok {
+		return "available"
+	}
+	return "unavailable"
+}
+
+func pathExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func (a App) mcp(args []string) error {
@@ -6176,6 +6372,7 @@ func (a App) printUsage() {
 Usage:
   rdev version
   rdev doctor
+  rdev bootstrap agent-plan --repo-root . --remote-requested
   rdev ticket create --mode attended-temporary --ttl-seconds 7200
   rdev policy explain --mode attended-temporary --capability shell.user
   rdev policy explain-shell --policy-json '{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}'
