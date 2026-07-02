@@ -12,6 +12,18 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev.connection-attempt-policy.v1` to
+  `rdev.support-session-created.v1`. Agents now receive the ordered target
+  Connection Entry URL list plus bounded timeout/retry settings, so they can
+  explain connection behavior without writing custom PowerShell, shell, relay,
+  or polling glue.
+- Added bounded target-side bootstrap attempts: Windows commands use
+  `Invoke-RestMethod -TimeoutSec`, and macOS/Linux commands use `curl`
+  connect/max-time/retry limits before trying the next Connection Entry URL.
+- Added MCP wait parameters to `rdev.support_session.status`
+  (`wait`, `timeout_seconds`, and `interval_millis`) so Agents can wait for the
+  target host through the standard tool and proactively report
+  `connected=true` without writing custom polling loops.
 - Added `gateway_url_candidates` to `rdev.support-session-prepare.v1`,
   `rdev.support-session-plan.v1`, and
   `rdev.support-session-connectivity-strategy.v1`. `rdev support-session

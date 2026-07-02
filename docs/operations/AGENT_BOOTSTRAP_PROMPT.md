@@ -123,7 +123,8 @@ Steps:
     `rdev support-session create` through the CLI, to create the session and
     obtain the ready target command, join URL, manifest root, real ticket code,
     and status watcher in one payload. The target command already tries ordered
-    Connection Entry URLs on the target machine; do not write your own
+    Connection Entry URLs on the target machine with the returned
+    `connection_attempt_policy` timeout/retry behavior; do not write your own
     PowerShell, shell, relay, or approval-polling fallback. If no suitable
     gateway is running yet, run `rdev support-session start` in a visible
     foreground terminal. It
@@ -136,10 +137,10 @@ Steps:
     only for review/debug planning or when the operator asks for the underlying
     gateway argv.
     After giving the target command to the human, call
-    `rdev.support_session.status` through MCP or
+    `rdev.support_session.status` with `wait=true` through MCP or
     `rdev support-session status --wait` through CLI. When the status returns
     `connected=true`, proactively tell me that the connection has been
-    established before creating any jobs.
+    established before creating any jobs. Do not write a custom polling loop.
     Do not write ad hoc PowerShell, shell, relay, nohup, approval, or bootstrap
     code when the plan can provide it. For lower-level package materialization
     or when `rdev.support_session.create` is not sufficient, use

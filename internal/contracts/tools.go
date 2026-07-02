@@ -43,7 +43,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.create",
-			Description: "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. The target command is the standardized fallback surface and can try ordered gateway URL candidates without Agent-authored scripts. Agents should prefer this high-level tool when the gateway is running; if no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+			Description: "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. The target command is the standardized fallback surface and can try ordered gateway URL candidates with bounded timeout/retry behavior without Agent-authored scripts. Agents should prefer this high-level tool when the gateway is running; if no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
 			Safety:      "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
 			InputSchema: object(map[string]any{
 				"gateway_url":         stringField(),
@@ -58,7 +58,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.plan",
-			Description: "Create a standardized Agent-native support session plan for review/debug access to gateway startup, recommended gateway URL candidates, verified helper assets, invite creation, localized target commands with built-in candidate fallback, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.create when a gateway is running and the foreground CLI command rdev support-session start when no gateway is running.",
+			Description: "Create a standardized Agent-native support session plan for review/debug access to gateway startup, recommended gateway URL candidates, verified helper assets, invite creation, localized target commands with built-in candidate fallback/timeout policy, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.create when a gateway is running and the foreground CLI command rdev support-session start when no gateway is running.",
 			Safety:      "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",
 			InputSchema: object(map[string]any{
 				"repo_root":    stringField(),
@@ -74,11 +74,14 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.status",
-			Description: "Read standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, or is still waiting.",
+			Description: "Read or wait on standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, timed out, or is still waiting.",
 			Safety:      "Read-only status check; does not approve hosts or execute jobs.",
 			InputSchema: object(map[string]any{
-				"ticket_code": stringField(),
-				"locale":      stringField(),
+				"ticket_code":     stringField(),
+				"locale":          stringField(),
+				"wait":            boolField(),
+				"timeout_seconds": integer(0, 3600),
+				"interval_millis": integer(100, 60000),
 			}, []string{"ticket_code"}),
 		},
 		{

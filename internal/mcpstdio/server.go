@@ -316,11 +316,33 @@ func (s Server) supportSessionPlan(args map[string]any) (any, error) {
 
 func (s Server) supportSessionStatus(args map[string]any) (any, error) {
 	ticketCode := requiredString(args, "ticket_code")
-	return supportsession.BuildStatus(supportsession.StatusOptions{
-		TicketCode: ticketCode,
-		Hosts:      s.Gateway.HostsForTicketCode(ticketCode, ""),
-		Locale:     stringArg(args, "locale", "auto"),
-	}), nil
+	wait := boolArg(args, "wait", false)
+	timeoutSeconds := intArg(args, "timeout_seconds", 120)
+	intervalMillis := intArg(args, "interval_millis", 1000)
+	if timeoutSeconds < 0 || timeoutSeconds > 3600 {
+		return nil, fmt.Errorf("timeout_seconds must be between 0 and 3600")
+	}
+	if intervalMillis < 100 || intervalMillis > 60000 {
+		return nil, fmt.Errorf("interval_millis must be between 100 and 60000")
+	}
+	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
+	for {
+		status := supportsession.BuildStatus(supportsession.StatusOptions{
+			TicketCode: ticketCode,
+			Hosts:      s.Gateway.HostsForTicketCode(ticketCode, ""),
+			Locale:     stringArg(args, "locale", "auto"),
+		})
+		if !wait || status["connected"] == true || status["status"] == "pending-approval" {
+			return status, nil
+		}
+		if timeoutSeconds > 0 && time.Now().After(deadline) {
+			status["ok"] = false
+			status["timed_out"] = true
+			status["next_action"] = "Keep waiting, or check gateway reachability, network path, and target command output."
+			return status, nil
+		}
+		time.Sleep(time.Duration(intervalMillis) * time.Millisecond)
+	}
 }
 
 func (s Server) connectionEntryPlan(args map[string]any) (any, error) {

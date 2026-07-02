@@ -367,12 +367,19 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 			URL         string `json:"url"`
 			Recommended bool   `json:"recommended"`
 		} `json:"gateway_url_candidates"`
-		TargetCommand         string            `json:"target_command"`
-		TargetCommands        map[string]string `json:"target_commands"`
-		WatchConnectionStatus []string          `json:"watch_connection_status"`
-		RecommendedSurface    string            `json:"recommended_surface"`
-		AutoApprove           bool              `json:"auto_approve"`
-		ManifestRootPublicKey string            `json:"manifest_root_public_key"`
+		TargetCommand           string            `json:"target_command"`
+		TargetCommands          map[string]string `json:"target_commands"`
+		WatchConnectionStatus   []string          `json:"watch_connection_status"`
+		ConnectionAttemptPolicy struct {
+			SchemaVersion             string `json:"schema_version"`
+			WindowsDownloadTimeoutSec int    `json:"windows_download_timeout_sec"`
+			CurlConnectTimeoutSec     int    `json:"curl_connect_timeout_sec"`
+			CurlMaxTimeSec            int    `json:"curl_max_time_sec"`
+			RetriesPerCandidate       int    `json:"retries_per_candidate"`
+		} `json:"connection_attempt_policy"`
+		RecommendedSurface    string `json:"recommended_surface"`
+		AutoApprove           bool   `json:"auto_approve"`
+		ManifestRootPublicKey string `json:"manifest_root_public_key"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid create JSON: %v\n%s", err, stdout.String())
@@ -390,13 +397,23 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	if !strings.Contains(payload.TargetCommand, payload.TicketCode) ||
 		!strings.Contains(payload.TargetCommand, "bootstrap.ps1") ||
 		!strings.Contains(payload.TargetCommand, "foreach ($u in $urls)") ||
+		!strings.Contains(payload.TargetCommand, "-TimeoutSec 10") ||
 		strings.Contains(payload.TargetCommand, "<ticket-code>") ||
 		strings.Contains(payload.TargetCommand, "ExecutionPolicy Bypass") {
 		t.Fatalf("target command should be ready and safe: %s", payload.TargetCommand)
 	}
 	if !strings.Contains(payload.TargetCommands["macos_linux"], payload.TicketCode) ||
-		!strings.Contains(payload.TargetCommands["macos_linux"], "for u in") {
+		!strings.Contains(payload.TargetCommands["macos_linux"], "for u in") ||
+		!strings.Contains(payload.TargetCommands["macos_linux"], "--connect-timeout 2") ||
+		!strings.Contains(payload.TargetCommands["macos_linux"], "--max-time 10") {
 		t.Fatalf("expected cross-platform command candidates with real ticket: %#v", payload.TargetCommands)
+	}
+	if payload.ConnectionAttemptPolicy.SchemaVersion != "rdev.connection-attempt-policy.v1" ||
+		payload.ConnectionAttemptPolicy.WindowsDownloadTimeoutSec != 10 ||
+		payload.ConnectionAttemptPolicy.CurlConnectTimeoutSec != 2 ||
+		payload.ConnectionAttemptPolicy.CurlMaxTimeSec != 10 ||
+		payload.ConnectionAttemptPolicy.RetriesPerCandidate != 1 {
+		t.Fatalf("expected bounded connection attempt policy, got %#v", payload.ConnectionAttemptPolicy)
 	}
 	watch := strings.Join(payload.WatchConnectionStatus, "\x00")
 	if !strings.Contains(watch, payload.TicketCode) ||

@@ -24,6 +24,14 @@ const PrepareSchemaVersion = "rdev.support-session-prepare.v1"
 const CreatedSchemaVersion = "rdev.support-session-created.v1"
 const StartedSchemaVersion = "rdev.support-session-started.v1"
 const StatusSchemaVersion = "rdev.support-session-status.v1"
+const ConnectionAttemptPolicySchemaVersion = "rdev.connection-attempt-policy.v1"
+
+const (
+	targetHTTPConnectTimeoutSeconds = 2
+	targetHTTPMaxTimeSeconds        = 10
+	targetHTTPRetries               = 1
+	targetHTTPRetryDelaySeconds     = 1
+)
 
 type Options struct {
 	RepoRoot    string
@@ -614,6 +622,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 	if len(joinURLs) == 0 && joinURL != "" {
 		joinURLs = []string{joinURL}
 	}
+	attemptPolicy := connectionAttemptPolicy(gatewayCandidates, joinURLs)
 	windowsCommand := windowsBootstrapCommand(joinURLs)
 	macLinuxCommand := macLinuxBootstrapCommand(joinURLs)
 	targetCommands := map[string]string{
@@ -639,37 +648,39 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"--locale", locale,
 	}
 	return map[string]any{
-		"schema_version":           CreatedSchemaVersion,
-		"ok":                       true,
-		"session_mode":             string(model.HostModeAttendedTemporary),
-		"intent":                   "agent-created-one-command-visible-support-session",
-		"gateway_url":              gatewayURL,
-		"gateway_url_candidates":   gatewayCandidates,
-		"ticket_code":              opts.Ticket.Code,
-		"ticket":                   opts.Ticket,
-		"join_url":                 joinURL,
-		"manifest_url":             manifestURL,
-		"manifest_root_public_key": opts.ManifestRootPublicKey,
-		"target":                   target,
-		"locale":                   locale,
-		"auto_approve":             opts.AutoApprove,
-		"recommended_surface":      recommendedSurface,
-		"target_command":           recommended,
-		"target_commands":          targetCommands,
-		"watch_connection_status":  statusCommand,
+		"schema_version":            CreatedSchemaVersion,
+		"ok":                        true,
+		"session_mode":              string(model.HostModeAttendedTemporary),
+		"intent":                    "agent-created-one-command-visible-support-session",
+		"gateway_url":               gatewayURL,
+		"gateway_url_candidates":    gatewayCandidates,
+		"ticket_code":               opts.Ticket.Code,
+		"ticket":                    opts.Ticket,
+		"join_url":                  joinURL,
+		"manifest_url":              manifestURL,
+		"manifest_root_public_key":  opts.ManifestRootPublicKey,
+		"target":                    target,
+		"locale":                    locale,
+		"auto_approve":              opts.AutoApprove,
+		"recommended_surface":       recommendedSurface,
+		"target_command":            recommended,
+		"target_commands":           targetCommands,
+		"connection_attempt_policy": attemptPolicy,
+		"watch_connection_status":   statusCommand,
 		"mcp_follow_up": []map[string]any{
 			{
 				"tool": "rdev.support_session.status",
 				"arguments": map[string]any{
 					"ticket_code": opts.Ticket.Code,
 					"locale":      locale,
+					"wait":        true,
 				},
 			},
 		},
 		"human_message": localizedCreatedMessage(locale),
 		"agent_flow": []string{
 			"give the target-side human only target_command or join_url",
-			"target_command already tries ordered gateway URL candidates; do not write your own fallback script",
+			"target_command already tries ordered gateway URL candidates with bounded per-candidate timeouts and retry policy; do not write your own fallback script",
 			"watch connection status with watch_connection_status or rdev.support_session.status",
 			"when connected=true, proactively report that the connection is established",
 			"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
@@ -716,14 +727,42 @@ func joinURLsForGatewayCandidates(candidates []GatewayURLCandidate, ticketCode s
 	return dedupeStrings(values)
 }
 
+func connectionAttemptPolicy(candidates []GatewayURLCandidate, joinURLs []string) map[string]any {
+	candidateReports := make([]map[string]any, 0, len(joinURLs))
+	for i, joinURL := range joinURLs {
+		report := map[string]any{
+			"order":    i + 1,
+			"join_url": joinURL,
+		}
+		if i < len(candidates) {
+			report["gateway_url"] = candidates[i].URL
+			report["kind"] = candidates[i].Kind
+			report["scope"] = candidates[i].Scope
+			report["recommended"] = candidates[i].Recommended
+		}
+		candidateReports = append(candidateReports, report)
+	}
+	return map[string]any{
+		"schema_version":               ConnectionAttemptPolicySchemaVersion,
+		"candidate_order":              candidateReports,
+		"windows_download_timeout_sec": targetHTTPMaxTimeSeconds,
+		"curl_connect_timeout_sec":     targetHTTPConnectTimeoutSeconds,
+		"curl_max_time_sec":            targetHTTPMaxTimeSeconds,
+		"retries_per_candidate":        targetHTTPRetries,
+		"retry_delay_sec":              targetHTTPRetryDelaySeconds,
+		"target_handoff":               "single visible command; target-side command owns URL fallback, timeout, retry, download, verification, and host startup",
+		"agent_rule":                   "do not rewrite, wrap, or expand target_command; watch the returned status tool/command instead",
+	}
+}
+
 func windowsBootstrapCommand(joinURLs []string) string {
 	urls := quotedPowerShellArrayValues(joinURLs, "/bootstrap.ps1")
-	return "powershell -NoProfile -Command \"$ErrorActionPreference='Stop'; $urls=@(" + strings.Join(urls, ",") + "); foreach ($u in $urls) { try { irm $u -UseBasicParsing | iex; exit 0 } catch { Write-Host ('rdev Connection Entry failed: ' + $u) } }; throw 'No reachable rdev Connection Entry URL'\""
+	return "powershell -NoProfile -Command \"$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $urls=@(" + strings.Join(urls, ",") + "); foreach ($u in $urls) { try { irm $u -UseBasicParsing -TimeoutSec " + strconv.Itoa(targetHTTPMaxTimeSeconds) + " | iex; exit 0 } catch { Write-Host ('rdev Connection Entry failed: ' + $u) } }; throw 'No reachable rdev Connection Entry URL'\""
 }
 
 func macLinuxBootstrapCommand(joinURLs []string) string {
 	urls := quotedShellArrayValues(joinURLs, "/bootstrap.sh")
-	return "sh -c 'set -eu; for u in " + strings.Join(urls, " ") + "; do if curl -fsSL \"$u\" | sh; then exit 0; fi; done; echo \"No reachable rdev Connection Entry URL\" >&2; exit 1'"
+	return "sh -c 'set -eu; t=\"${TMPDIR:-/tmp}/rdev-bootstrap-$$.sh\"; for u in " + strings.Join(urls, " ") + "; do if curl --connect-timeout " + strconv.Itoa(targetHTTPConnectTimeoutSeconds) + " --max-time " + strconv.Itoa(targetHTTPMaxTimeSeconds) + " --retry " + strconv.Itoa(targetHTTPRetries) + " --retry-delay " + strconv.Itoa(targetHTTPRetryDelaySeconds) + " -fsSL \"$u\" -o \"$t\" && sh \"$t\"; then rm -f \"$t\"; exit 0; fi; rm -f \"$t\"; done; echo \"No reachable rdev Connection Entry URL\" >&2; exit 1'"
 }
 
 func quotedPowerShellArrayValues(values []string, suffix string) []string {

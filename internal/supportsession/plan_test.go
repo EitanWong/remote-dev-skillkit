@@ -116,12 +116,36 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 	if !strings.Contains(created["target_command"].(string), "foreach ($u in $urls)") ||
 		!strings.Contains(created["target_command"].(string), "198.51.100.10") ||
+		!strings.Contains(created["target_command"].(string), "-TimeoutSec 10") ||
 		!strings.Contains(created["target_commands"].(map[string]string)["macos_linux"], "for u in") {
 		t.Fatalf("expected target command to try ordered gateway candidates: %#v", created["target_commands"])
+	}
+	macLinuxCommand := created["target_commands"].(map[string]string)["macos_linux"]
+	if !strings.Contains(macLinuxCommand, "--connect-timeout 2") ||
+		!strings.Contains(macLinuxCommand, "--max-time 10") ||
+		!strings.Contains(macLinuxCommand, "--retry 1") {
+		t.Fatalf("expected bounded curl fallback command, got %s", macLinuxCommand)
+	}
+	attemptPolicy := created["connection_attempt_policy"].(map[string]any)
+	if attemptPolicy["schema_version"] != ConnectionAttemptPolicySchemaVersion ||
+		attemptPolicy["windows_download_timeout_sec"] != 10 ||
+		attemptPolicy["curl_connect_timeout_sec"] != 2 ||
+		attemptPolicy["retries_per_candidate"] != 1 {
+		t.Fatalf("expected structured target attempt policy, got %#v", attemptPolicy)
+	}
+	candidateOrder := attemptPolicy["candidate_order"].([]map[string]any)
+	if len(candidateOrder) != 2 ||
+		candidateOrder[0]["join_url"] == "" ||
+		candidateOrder[1]["kind"] != "host" {
+		t.Fatalf("expected ordered candidate policy, got %#v", candidateOrder)
 	}
 	candidates := created["gateway_url_candidates"].([]GatewayURLCandidate)
 	if len(candidates) != 2 || !candidates[0].Recommended {
 		t.Fatalf("expected gateway candidates in created payload, got %#v", candidates)
+	}
+	followUp := created["mcp_follow_up"].([]map[string]any)
+	if len(followUp) == 0 || followUp[0]["arguments"].(map[string]any)["wait"] != true {
+		t.Fatalf("expected MCP follow-up to wait for the host, got %#v", followUp)
 	}
 	watch := strings.Join(created["watch_connection_status"].([]string), "\x00")
 	if !strings.Contains(watch, "ABCD-1234") ||

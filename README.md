@@ -101,10 +101,11 @@ testing. If a reachable gateway is already running, call
 `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
-payload. The target command already tries ordered gateway URL candidates; do
-not write a custom PowerShell, shell, relay, or polling fallback. If no gateway
-is running yet, run `rdev support-session start` in a
-visible foreground terminal; it auto-prepares verified Windows/macOS/Linux
+payload. The target command already tries ordered gateway URL candidates with
+bounded timeout/retry behavior; do not write a custom PowerShell, shell, relay,
+or polling fallback. If no gateway is running yet, run
+`rdev support-session start` in a visible foreground terminal; it auto-prepares
+verified Windows/macOS/Linux
 helper assets when a source checkout and Go are available, starts the local
 gateway, and prints the same ready session payload before listening. Use
 `rdev.support_session.plan` or `rdev support-session plan` only for review/debug
@@ -208,7 +209,8 @@ high-level entry creates the scoped attended-temporary ticket and returns
 `rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
 placeholders. The command itself loops through ordered Connection Entry URLs on
-the target machine, so fallback stays in `rdev` instead of Agent-written glue.
+the target machine with bounded timeouts/retries, so fallback stays in `rdev`
+instead of Agent-written glue.
 When `rdev`, gateway state, or target helper assets are unclear, the Agent
 should call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets` from a checkout. That returns

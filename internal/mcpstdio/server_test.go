@@ -310,9 +310,16 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 	if ticketCode == "" ||
 		!strings.Contains(targetCommand, ticketCode) ||
 		!strings.Contains(targetCommand, "foreach ($u in $urls)") ||
+		!strings.Contains(targetCommand, "-TimeoutSec 10") ||
 		strings.Contains(targetCommand, "<ticket-code>") ||
 		strings.Contains(targetCommand, "ExecutionPolicy Bypass") {
 		t.Fatalf("expected ready safe target command: ticket=%q command=%q", ticketCode, targetCommand)
+	}
+	attemptPolicy := structured["connection_attempt_policy"].(map[string]any)
+	if attemptPolicy["schema_version"] != "rdev.connection-attempt-policy.v1" ||
+		attemptPolicy["windows_download_timeout_sec"] != float64(10) ||
+		attemptPolicy["curl_connect_timeout_sec"] != float64(2) {
+		t.Fatalf("expected bounded connection attempt policy, got %#v", attemptPolicy)
 	}
 	if len(gatewayCandidates) == 0 {
 		t.Fatalf("expected created payload to carry gateway candidates: %#v", structured)
@@ -360,6 +367,31 @@ func TestServerToolCallSupportSessionStatus(t *testing.T) {
 		structured["status"] != "connected" ||
 		!strings.Contains(structured["feedback"].(string), "连接已经建立") {
 		t.Fatalf("expected connected support session status, got %#v", structured)
+	}
+}
+
+func TestServerToolCallSupportSessionStatusWaitTimeout(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.status", map[string]any{
+		"ticket_code":     "WAIT-1234",
+		"locale":          "en",
+		"wait":            true,
+		"timeout_seconds": 1,
+		"interval_millis": 100,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-status.v1" ||
+		structured["connected"] != false ||
+		structured["timed_out"] != true ||
+		structured["ok"] != false {
+		t.Fatalf("expected wait timeout status, got %#v", structured)
 	}
 }
 

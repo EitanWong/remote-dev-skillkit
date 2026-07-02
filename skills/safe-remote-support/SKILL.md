@@ -44,13 +44,15 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev support-session plan` only for review/debug planning before writing any
   gateway, PowerShell, relay, nohup, approval, or bootstrap steps.
 - Treat returned `target_command` as the standard fallback surface. It already
-  tries ordered gateway URL candidates on the target machine; do not wrap it in
+  tries ordered gateway URL candidates on the target machine with the returned
+  `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
 - After giving the target-side command, watch the session with
-  `rdev.support_session.status` or `rdev support-session status --wait`. When
-  `connected=true`, proactively tell the user the connection is established
-  before creating any jobs.
+  `rdev.support_session.status` using `wait=true` or
+  `rdev support-session status --wait`. When `connected=true`, proactively tell
+  the user the connection is established before creating any jobs. Do not write
+  custom polling loops.
 - Load scoped runtime memory before creating a new support session, but verify
   stale host, gateway, workspace, release, adapter, and approval facts before
   using them.
@@ -166,7 +168,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    no-persistence checks, and approval probes.
 10. Explain the selected connection entry URL, visible script, or signed package
    and visible consent screen.
-11. Watch `rdev.support_session.status` or
+11. Watch `rdev.support_session.status` with `wait=true` or
     `rdev support-session status --wait` until the host appears. If
     `connected=true`, report the localized `feedback` to the user immediately.
     If the standard attended-temporary

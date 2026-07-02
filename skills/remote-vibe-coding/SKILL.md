@@ -62,7 +62,8 @@ revocation.
   review/debug planning before creating custom gateway, shell, PowerShell,
   relay, nohup, approval, or bootstrap steps.
 - Treat returned `target_command` as the standard fallback surface. It already
-  tries ordered gateway URL candidates on the target machine; do not wrap it in
+  tries ordered gateway URL candidates on the target machine with the returned
+  `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
@@ -132,9 +133,10 @@ revocation.
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
-6. Watch the host with `rdev.support_session.status` or
+6. Watch the host with `rdev.support_session.status` using `wait=true` or
    `rdev support-session status --wait`. When `connected=true`, proactively
-   report the localized feedback to the user before creating jobs. If the
+   report the localized feedback to the user before creating jobs. Do not write
+   custom polling loops. If the
    standard attended-temporary auto-approval contract activated it, verify it is
    the expected machine before creating jobs; otherwise approve it only after
    the operator confirms it is expected.

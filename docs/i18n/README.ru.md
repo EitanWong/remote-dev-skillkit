@@ -48,14 +48,15 @@ same-machine only. If a reachable gateway is already running, call
 through CLI to get the ready target command, join URL, real ticket code,
 manifest root, scoped auto-approval state, and status watch command in one
 payload. The target command already tries ordered Connection Entry URLs on the
-target machine, so do not write custom fallback scripts. If no gateway is
+target machine with bounded timeout/retry behavior, so do not write custom
+fallback scripts. If no gateway is
 running yet, run `rdev support-session start` in a visible foreground terminal;
 it prepares verified helper assets when possible, starts the local gateway,
 selects a target-usable gateway URL candidate, and prints the same ready session
 payload before listening. Use
 `rdev.support_session.plan` or `rdev support-session plan` only
 for review/debug planning. After giving the target-machine command, watch
-`rdev.support_session.status` or `rdev support-session status --wait`; when
+`rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; when
 `connected=true`, proactively tell me the connection has been established before
 creating jobs. Use
 `rdev.invites.create`, then materialize it with `rdev.connection_entry.plan` or
