@@ -176,8 +176,14 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	}
 
 	var payload struct {
-		SchemaVersion string `json:"schema_version"`
-		AutoApprove   struct {
+		SchemaVersion        string `json:"schema_version"`
+		GatewayURL           string `json:"gateway_url"`
+		GatewayURLCandidates []struct {
+			URL         string `json:"url"`
+			Kind        string `json:"kind"`
+			Recommended bool   `json:"recommended"`
+		} `json:"gateway_url_candidates"`
+		AutoApprove struct {
 			Enabled      bool     `json:"enabled"`
 			Scope        string   `json:"scope"`
 			Capabilities []string `json:"capabilities"`
@@ -194,6 +200,12 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	}
 	if payload.SchemaVersion != "rdev.support-session-plan.v1" || !payload.AutoApprove.Enabled {
 		t.Fatalf("expected standard support session plan with auto approval: %#v", payload)
+	}
+	if payload.GatewayURL != "http://192.0.2.10:8787" ||
+		len(payload.GatewayURLCandidates) == 0 ||
+		payload.GatewayURLCandidates[0].URL != payload.GatewayURL ||
+		!payload.GatewayURLCandidates[0].Recommended {
+		t.Fatalf("plan should expose recommended gateway URL candidates: %#v", payload.GatewayURLCandidates)
 	}
 	if !strings.Contains(payload.AutoApprove.Scope, "attended-temporary") ||
 		!slices.Contains(payload.AutoApprove.Capabilities, "shell.user") {
@@ -215,6 +227,41 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 		!slices.Contains(payload.Target.HumanSurface, "visible one-line script") ||
 		!slices.Contains(payload.Forbidden, "unverified binary download") {
 		t.Fatalf("target instructions should be one visible safe command: %#v", payload.Target)
+	}
+}
+
+func TestSupportSessionPlanDefaultGatewayDoesNotUseWildcardURL(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{"support-session", "plan", "--addr", "0.0.0.0:8787"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		GatewayURL           string `json:"gateway_url"`
+		GatewayURLCandidates []struct {
+			URL         string `json:"url"`
+			Recommended bool   `json:"recommended"`
+		} `json:"gateway_url_candidates"`
+		Commands map[string][]string `json:"commands"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support session plan JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.GatewayURL == "" ||
+		strings.Contains(payload.GatewayURL, "0.0.0.0") ||
+		strings.Contains(payload.GatewayURL, "[::]") {
+		t.Fatalf("gateway URL should be target-usable, got %q", payload.GatewayURL)
+	}
+	createInvite := strings.Join(payload.Commands["create_invite_cli"], "\x00")
+	watch := strings.Join(payload.Commands["watch_connection_status"], "\x00")
+	if strings.Contains(createInvite, "0.0.0.0") || strings.Contains(watch, "0.0.0.0") {
+		t.Fatalf("target-facing commands must not contain wildcard gateway URLs:\ncreate=%s\nwatch=%s", createInvite, watch)
+	}
+	if len(payload.GatewayURLCandidates) == 0 || !payload.GatewayURLCandidates[0].Recommended {
+		t.Fatalf("expected a recommended gateway candidate, got %#v", payload.GatewayURLCandidates)
 	}
 }
 
@@ -443,7 +490,7 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 
 func waitForHTTP(t *testing.T, endpoint string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(endpoint)

@@ -12,6 +12,13 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `gateway_url_candidates` to `rdev.support-session-prepare.v1`,
+  `rdev.support-session-plan.v1`, and
+  `rdev.support-session-connectivity-strategy.v1`. `rdev support-session
+  prepare`, `plan`, and `start` now derive target-usable gateway URLs from the
+  listen address and local private interfaces, preserve explicit gateway
+  overrides, and avoid handing remote targets wildcard addresses such as
+  `0.0.0.0`.
 - Added `rdev support-session prepare` and MCP tool
   `rdev.support_session.prepare` with schema
   `rdev.support-session-prepare.v1`. Fresh Agents can now inspect local `rdev`
@@ -67,6 +74,10 @@ metadata, status watching, or approval polling by hand.
 
 ### Changed
 
+- `rdev support-session prepare` and `rdev support-session start` now default
+  the listen address to `0.0.0.0:8787` while selecting a recommended private/LAN
+  or explicit gateway URL for target commands. Loopback remains available but is
+  marked same-machine only.
 - Updated README, MCP docs, Agent Bootstrap Prompt, i18n quick starts, and core
   Skills so fresh Agents call support-session prepare when `rdev`, gateway
   state, helper assets, or connectivity are unclear; prefer the standard

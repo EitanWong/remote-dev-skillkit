@@ -37,20 +37,25 @@ ticket/root/gateway/transport values or write replacement bootstrap code.
 `structuredContent`. Fresh Agent sessions should call it when local `rdev`,
 gateway state, helper assets, or one-command target readiness is unclear. It
 reports the detected OS/arch, Go/Git/`rdev` paths, resolved repo/work dirs,
-gateway URL defaults, Windows/macOS/Linux helper asset URLs and SHA-256 hashes,
-`connection_readiness`, `missing_inputs`, and standard recovery actions. By
-default it is read-only. With `build_assets=true`, it builds local helper
-binaries from the checked-out source so target bootstraps can download verified
-helpers when the target machine does not already have `rdev`.
+gateway URL candidates, Windows/macOS/Linux helper asset URLs and SHA-256
+hashes, `connection_readiness`, `missing_inputs`, and standard recovery
+actions. Agents should use the `recommended=true` item from
+`gateway_url_candidates` for target-side commands and should not ask humans to
+assemble gateway URLs. Wildcard listen addresses such as `0.0.0.0` are never a
+target URL; loopback candidates are same-machine only. By default it is
+read-only. With `build_assets=true`, it builds local helper binaries from the
+checked-out source so target bootstraps can download verified helpers when the
+target machine does not already have `rdev`.
 
 When no suitable gateway is running yet, Agents should run
 `rdev support-session start` as a visible foreground CLI process. It starts the
 local gateway, creates the attended-temporary ticket, prints
 `rdev.support-session-started.v1` with an embedded
 `rdev.support-session-created.v1`, includes `asset_report` and
-`connection_readiness`, then keeps serving until interrupted. This is a CLI
-foreground process rather than an MCP tool because MCP calls should not hide or
-orphan a long-running gateway.
+`connection_readiness`, includes the same recommended gateway URL candidates,
+then keeps serving until interrupted. This is a CLI foreground process rather
+than an MCP tool because MCP calls should not hide or orphan a long-running
+gateway.
 
 `rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
 `structuredContent`. Agents should call it before inventing any gateway,
@@ -59,6 +64,8 @@ steps when they need review/debug access to the underlying gateway argv. The
 plan returns:
 
 - build commands for a local `rdev` plus Windows/macOS/Linux helper binaries;
+- recommended gateway URL candidates derived from the listen address and local
+  private interfaces, with explicit gateway overrides preserved;
 - a gateway start argv with state, signing keys, audit log, and verified helper
   asset flags;
 - HTTP and CLI invite creation commands with scoped attended-temporary

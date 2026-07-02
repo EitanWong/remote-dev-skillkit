@@ -114,8 +114,11 @@ Steps:
     first call `rdev.support_session.prepare` through MCP or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
     `connection_readiness`, `asset_report`, `missing_inputs`, and
-    `standard_recovery` fields instead of writing custom setup code. If a
-    reachable gateway is already running, first call
+    `standard_recovery` fields instead of writing custom setup code. Use its
+    recommended `gateway_url_candidates` entry for target-side commands instead
+    of asking me to choose a gateway URL; never hand a remote target `0.0.0.0`
+    or loopback unless the target is the same machine. If a reachable gateway is
+    already running, first call
     `rdev.support_session.create` through MCP, or
     `rdev support-session create` through the CLI, to create the session and
     obtain the ready target command, join URL, manifest root, real ticket code,
@@ -124,10 +127,11 @@ Steps:
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
     are available, starts the local gateway, and prints
     `rdev.support-session-started.v1` with the embedded ready target command,
-    join URL, real ticket code, manifest root, status watcher, asset report, and
-    connection readiness before listening. Use `rdev.support_session.plan` or
-    `rdev support-session plan` only for review/debug planning or when the
-    operator asks for the underlying gateway argv.
+    join URL, real ticket code, manifest root, status watcher, asset report,
+    recommended gateway URL candidates, and connection readiness before
+    listening. Use `rdev.support_session.plan` or `rdev support-session plan`
+    only for review/debug planning or when the operator asks for the underlying
+    gateway argv.
     After giving the target command to the human, call
     `rdev.support_session.status` through MCP or
     `rdev support-session status --wait` through CLI. When the status returns

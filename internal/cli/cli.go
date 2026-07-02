@@ -1718,8 +1718,8 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
 		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
-		addr := fs.String("addr", "127.0.0.1:8787", "foreground gateway listen address")
-		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to http://<addr>")
+		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
+		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to the best local candidate for --addr")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
 		buildAssets := fs.Bool("build-assets", false, "build missing platform rdev helper assets from the checkout")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -1736,8 +1736,8 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 	case "start":
 		fs := flag.NewFlagSet("support-session start", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		addr := fs.String("addr", "127.0.0.1:8787", "foreground gateway listen address")
-		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to http://<addr>")
+		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
+		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to the best local candidate for --addr")
 		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
 		reason := fs.String("reason", "visible temporary remote support", "support session reason")
@@ -1884,12 +1884,9 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	addr := strings.TrimSpace(opts.Addr)
 	if addr == "" {
-		addr = "127.0.0.1:8787"
+		addr = "0.0.0.0:8787"
 	}
-	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
-	if gatewayURL == "" {
-		gatewayURL = "http://" + addr
-	}
+	gatewayURL, _ := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
 	workDir := strings.TrimSpace(opts.WorkDir)
 	if workDir == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -6911,9 +6908,9 @@ Usage:
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256> --execute
-  rdev support-session start --addr 127.0.0.1:8787 --gateway-url http://127.0.0.1:8787 --target auto --locale auto
+  rdev support-session start --target auto --locale auto
   rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto
-  rdev support-session plan --gateway-url http://127.0.0.1:8787 --target auto --locale auto
+  rdev support-session plan --addr 0.0.0.0:8787 --target auto --locale auto
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
   rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party

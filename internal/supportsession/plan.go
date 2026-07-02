@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -42,6 +44,16 @@ type PrepareOptions struct {
 	GatewayURL  string
 	Target      string
 	BuildAssets bool
+}
+
+type GatewayURLCandidate struct {
+	URL         string `json:"url"`
+	Kind        string `json:"kind"`
+	Scope       string `json:"scope"`
+	Host        string `json:"host"`
+	Port        string `json:"port"`
+	Recommended bool   `json:"recommended"`
+	Reason      string `json:"reason"`
 }
 
 type StatusOptions struct {
@@ -112,12 +124,9 @@ func BuildStarted(opts StartedOptions) map[string]any {
 func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 	addr := strings.TrimSpace(opts.Addr)
 	if addr == "" {
-		addr = "127.0.0.1:8787"
+		addr = "0.0.0.0:8787"
 	}
-	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
-	if gatewayURL == "" {
-		gatewayURL = "http://" + addr
-	}
+	gatewayURL, gatewayCandidates := ResolveGatewayURL(addr, opts.GatewayURL)
 	repoRootInput := strings.TrimSpace(opts.RepoRoot)
 	if repoRootInput == "" {
 		repoRootInput = "."
@@ -233,6 +242,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"local_rdev_usable":             localRdevUsable,
 		"target_bootstrap_self_repair":  allAssetsReady,
 		"gateway_url":                   gatewayURL,
+		"gateway_url_candidates":        gatewayCandidates,
 		"target":                        target,
 		"human_gets_one_command":        true,
 		"auto_approval_contract":        "attended-temporary first host only when created by support-session start/create",
@@ -245,14 +255,15 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"do not write custom PowerShell, relay, approval polling, ticket substitution, or bootstrap glue",
 	}
 	return map[string]any{
-		"schema_version":  PrepareSchemaVersion,
-		"ok":              true,
-		"repo_root":       repoRoot,
-		"repo_root_valid": repoValid,
-		"work_dir":        workDir,
-		"bin_dir":         binDir,
-		"addr":            addr,
-		"gateway_url":     gatewayURL,
+		"schema_version":         PrepareSchemaVersion,
+		"ok":                     true,
+		"repo_root":              repoRoot,
+		"repo_root_valid":        repoValid,
+		"work_dir":               workDir,
+		"bin_dir":                binDir,
+		"addr":                   addr,
+		"gateway_url":            gatewayURL,
+		"gateway_url_candidates": gatewayCandidates,
 		"detected": map[string]any{
 			"os":                 runtime.GOOS,
 			"arch":               runtime.GOARCH,
@@ -268,24 +279,25 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			"all_ready":      allAssetsReady,
 			"assets":         assetReports,
 		},
-		"connectivity_strategy":  connectivityStrategy(gatewayURL, target),
+		"connectivity_strategy":  connectivityStrategy(gatewayURL, target, gatewayCandidates),
 		"connection_readiness":   connectionReadiness,
 		"missing_inputs":         missingInputs,
 		"standard_recovery":      recoveryActions,
 		"target_handoff_policy":  "give the target-side human only the generated target_command or join_url",
 		"forbidden":              []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
 		"recommended_next_step":  recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
-		"command_to_start":       []string{"rdev", "support-session", "start", "--gateway-url", gatewayURL, "--target", target},
-		"command_to_prepare_all": []string{"rdev", "support-session", "prepare", "--build-assets", "--gateway-url", gatewayURL, "--target", target},
+		"command_to_start":       []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_prepare_all": []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
 	}, nil
 }
 
-func connectivityStrategy(gatewayURL, target string) map[string]any {
+func connectivityStrategy(gatewayURL, target string, gatewayCandidates []GatewayURLCandidate) map[string]any {
 	return map[string]any{
-		"schema_version": "rdev.support-session-connectivity-strategy.v1",
-		"intent":         "adaptive-connectivity-with-automatic-native-fallback-and-configured-helper-escalation",
-		"gateway_url":    gatewayURL,
-		"target":         target,
+		"schema_version":         "rdev.support-session-connectivity-strategy.v1",
+		"intent":                 "adaptive-connectivity-with-automatic-native-fallback-and-configured-helper-escalation",
+		"gateway_url":            gatewayURL,
+		"gateway_url_candidates": gatewayCandidates,
+		"target":                 target,
 		"selection_order": []string{
 			"same-machine-local-mcp",
 			"native-direct-gateway",
@@ -346,6 +358,214 @@ func standardRecoveryActions(actions []string) []string {
 		"if helper assets are missing, rerun rdev support-session start from a valid checkout so target bootstraps can download verified helpers",
 		"ask one concise question only when authorization, persistence approval, privileged network changes, or a real gateway/relay credential is required",
 	}
+}
+
+func ResolveGatewayURL(addr, explicitGatewayURL string) (string, []GatewayURLCandidate) {
+	candidates := GatewayURLCandidatesFromIPs(addr, explicitGatewayURL, localInterfaceIPs())
+	for _, candidate := range candidates {
+		if candidate.Recommended {
+			return candidate.URL, candidates
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0].URL, candidates
+	}
+	return strings.TrimRight(strings.TrimSpace(explicitGatewayURL), "/"), candidates
+}
+
+func GatewayURLCandidatesFromIPs(addr, explicitGatewayURL string, ips []net.IP) []GatewayURLCandidate {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		addr = "0.0.0.0:8787"
+	}
+	host, port := splitListenAddress(addr)
+	if port == "" {
+		port = "8787"
+	}
+	explicit := strings.TrimRight(strings.TrimSpace(explicitGatewayURL), "/")
+	candidates := make([]GatewayURLCandidate, 0, 2+len(ips))
+	if explicit != "" {
+		candidates = append(candidates, candidateFromURL(explicit, "explicit", "operator-provided", true, "explicit gateway_url supplied by the Agent/operator"))
+	}
+	if isWildcardHost(host) {
+		for _, ip := range sortedPrivateIPs(ips) {
+			url := "http://" + net.JoinHostPort(ip.String(), port)
+			candidates = append(candidates, GatewayURLCandidate{
+				URL:         url,
+				Kind:        "lan-private",
+				Scope:       "LAN/VPN/routed-private-network",
+				Host:        ip.String(),
+				Port:        port,
+				Recommended: explicit == "" && !hasRecommendedGatewayCandidate(candidates),
+				Reason:      "listen address is wildcard; this private interface address is more useful for target machines than 0.0.0.0",
+			})
+		}
+		loopbackURL := "http://" + net.JoinHostPort("127.0.0.1", port)
+		candidates = append(candidates, GatewayURLCandidate{
+			URL:         loopbackURL,
+			Kind:        "loopback",
+			Scope:       "same-machine-only",
+			Host:        "127.0.0.1",
+			Port:        port,
+			Recommended: explicit == "" && !hasRecommendedGatewayCandidate(candidates),
+			Reason:      "fallback for same-machine testing only; remote target machines cannot use this URL",
+		})
+		return dedupeGatewayCandidates(candidates)
+	}
+	urlHost := host
+	if urlHost == "" {
+		urlHost = "127.0.0.1"
+	}
+	scope := "host-specific"
+	kind := "host"
+	reason := "listen address names a concrete host"
+	if isLoopbackHost(urlHost) {
+		scope = "same-machine-only"
+		kind = "loopback"
+		reason = "loopback is only suitable when the target is this same machine"
+	}
+	candidates = append(candidates, GatewayURLCandidate{
+		URL:         "http://" + net.JoinHostPort(urlHost, port),
+		Kind:        kind,
+		Scope:       scope,
+		Host:        urlHost,
+		Port:        port,
+		Recommended: explicit == "",
+		Reason:      reason,
+	})
+	return dedupeGatewayCandidates(candidates)
+}
+
+func splitListenAddress(addr string) (string, string) {
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		return strings.Trim(host, "[]"), port
+	}
+	if strings.HasPrefix(addr, ":") {
+		return "", strings.TrimPrefix(addr, ":")
+	}
+	if strings.Count(addr, ":") == 0 {
+		return addr, ""
+	}
+	return strings.Trim(addr, "[]"), ""
+}
+
+func candidateFromURL(rawURL, kind, scope string, recommended bool, reason string) GatewayURLCandidate {
+	host := ""
+	port := ""
+	withoutScheme := strings.TrimPrefix(strings.TrimPrefix(rawURL, "http://"), "https://")
+	if parsedHost, parsedPort, err := net.SplitHostPort(withoutScheme); err == nil {
+		host = strings.Trim(parsedHost, "[]")
+		port = parsedPort
+	}
+	return GatewayURLCandidate{
+		URL:         rawURL,
+		Kind:        kind,
+		Scope:       scope,
+		Host:        host,
+		Port:        port,
+		Recommended: recommended,
+		Reason:      reason,
+	}
+}
+
+func localInterfaceIPs() []net.IP {
+	var out []net.IP
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch value := addr.(type) {
+			case *net.IPNet:
+				ip = value.IP
+			case *net.IPAddr:
+				ip = value.IP
+			}
+			if ip == nil || !ip.IsPrivate() {
+				continue
+			}
+			out = append(out, normalizeIP(ip))
+		}
+	}
+	return out
+}
+
+func sortedPrivateIPs(ips []net.IP) []net.IP {
+	values := make([]net.IP, 0, len(ips))
+	seen := map[string]bool{}
+	for _, ip := range ips {
+		ip = normalizeIP(ip)
+		if ip == nil || !ip.IsPrivate() {
+			continue
+		}
+		key := ip.String()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		values = append(values, ip)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		left4 := values[i].To4() != nil
+		right4 := values[j].To4() != nil
+		if left4 != right4 {
+			return left4
+		}
+		return values[i].String() < values[j].String()
+	})
+	return values
+}
+
+func normalizeIP(ip net.IP) net.IP {
+	if ip == nil {
+		return nil
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4
+	}
+	return ip
+}
+
+func isWildcardHost(host string) bool {
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	return host == "" || host == "0.0.0.0" || host == "::" || host == "[::]"
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func hasRecommendedGatewayCandidate(candidates []GatewayURLCandidate) bool {
+	for _, candidate := range candidates {
+		if candidate.Recommended {
+			return true
+		}
+	}
+	return false
+}
+
+func dedupeGatewayCandidates(candidates []GatewayURLCandidate) []GatewayURLCandidate {
+	out := make([]GatewayURLCandidate, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.URL) == "" || seen[candidate.URL] {
+			continue
+		}
+		seen[candidate.URL] = true
+		out = append(out, candidate)
+	}
+	return out
 }
 
 func BuildCreated(opts CreatedOptions) map[string]any {
@@ -445,14 +665,11 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 		workDir = filepath.Join(repoRoot, "work", "rdev-support-session")
 	}
 	workDir, _ = filepath.Abs(workDir)
-	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
-	if gatewayURL == "" {
-		gatewayURL = "http://<reachable-gateway-host>:8787"
-	}
 	addr := strings.TrimSpace(opts.Addr)
 	if addr == "" {
 		addr = "0.0.0.0:8787"
 	}
+	gatewayURL, gatewayCandidates := ResolveGatewayURL(addr, opts.GatewayURL)
 	target := strings.TrimSpace(opts.Target)
 	if target == "" {
 		target = "auto"
@@ -493,14 +710,15 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 		},
 	})
 	return map[string]any{
-		"schema_version": PlanSchemaVersion,
-		"ok":             true,
-		"intent":         "one-command-visible-attended-temporary-connection-entry",
-		"repo_root":      repoRoot,
-		"work_dir":       workDir,
-		"target":         target,
-		"locale":         locale,
-		"gateway_url":    gatewayURL,
+		"schema_version":         PlanSchemaVersion,
+		"ok":                     true,
+		"intent":                 "one-command-visible-attended-temporary-connection-entry",
+		"repo_root":              repoRoot,
+		"work_dir":               workDir,
+		"target":                 target,
+		"locale":                 locale,
+		"gateway_url":            gatewayURL,
+		"gateway_url_candidates": gatewayCandidates,
 		"auto_approve": map[string]any{
 			"enabled":        opts.AutoApprove,
 			"scope":          "attended-temporary tickets created by this standard plan only",

@@ -194,7 +194,7 @@ func (s Server) supportSessionPrepare(args map[string]any) (any, error) {
 		RepoRoot:    stringArg(args, "repo_root", "."),
 		WorkDir:     stringArg(args, "work_dir", ""),
 		GatewayURL:  stringArg(args, "gateway_url", ""),
-		Addr:        stringArg(args, "addr", "127.0.0.1:8787"),
+		Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
 		Target:      stringArg(args, "target", "auto"),
 		BuildAssets: boolArg(args, "build_assets", false),
 	})

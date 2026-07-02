@@ -48,14 +48,17 @@ revocation.
   `rdev support-session prepare --build-assets` from a checkout. Follow its
   `standard_recovery`, `asset_report`, and `connection_readiness` fields
   instead of writing custom PowerShell, approval polling, ticket substitution,
-  relay, or bootstrap glue.
+  relay, or bootstrap glue. Use the recommended `gateway_url_candidates` item
+  for target-side commands. Never send a remote target a wildcard listen
+  address such as `0.0.0.0`, and treat loopback as same-machine only.
 - For a new support session with an already reachable gateway, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
   yet, run `rdev support-session start` in a visible foreground terminal. It
-  starts the gateway and prints the same ready session payload before listening.
-  Use `rdev.support_session.plan` or `rdev support-session plan` only for
+  starts the gateway, chooses a target-usable gateway URL candidate, and prints
+  the same ready session payload before listening. Use
+  `rdev.support_session.plan` or `rdev support-session plan` only for
   review/debug planning before creating custom gateway, shell, PowerShell,
   relay, nohup, approval, or bootstrap steps.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
@@ -93,8 +96,10 @@ revocation.
 3. If the user wants to connect a target machine, call
    `rdev.support_session.prepare` or run `rdev support-session prepare` to
    verify one-command support-session readiness. If helper assets are missing
-   and a checkout plus Go are available, use `--build-assets`; do not write
-   custom PowerShell, ticket substitution, approval polling, or relay glue.
+   and a checkout plus Go are available, use `--build-assets`; use the returned
+   `gateway_url_candidates` recommendation for target-side commands; do not
+   write custom PowerShell, ticket substitution, approval polling, or relay
+   glue.
 4. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
 5. If no suitable host is active and a reachable gateway already exists, create

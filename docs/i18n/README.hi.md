@@ -41,14 +41,17 @@ or target helper assets are unclear, first call `rdev.support_session.prepare`
 through MCP or run `rdev support-session prepare --build-assets` from the
 checkout. Follow its `connection_readiness`, `asset_report`, `missing_inputs`,
 and `standard_recovery` fields instead of writing custom bootstrap, approval, or
-relay glue. If a reachable gateway is already running, call
+relay glue. Use the recommended `gateway_url_candidates` entry for target-side
+commands; never send a remote target `0.0.0.0`, and treat loopback as
+same-machine only. If a reachable gateway is already running, call
 `rdev.support_session.create` through MCP or `rdev support-session create`
 through CLI to get the ready target command, join URL, real ticket code,
 manifest root, scoped auto-approval state, and status watch command in one
 payload. If no gateway is running yet, run `rdev support-session start` in a
 visible foreground terminal; it prepares verified helper assets when possible,
-starts the local gateway, and prints the same ready session payload before
-listening. Use `rdev.support_session.plan` or `rdev support-session plan` only
+starts the local gateway, selects a target-usable gateway URL candidate, and
+prints the same ready session payload before listening. Use
+`rdev.support_session.plan` or `rdev support-session plan` only
 for review/debug planning. After giving the target-machine command, watch
 `rdev.support_session.status` or `rdev support-session status --wait`; when
 `connected=true`, proactively tell me the connection has been established before

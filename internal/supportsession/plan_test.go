@@ -2,6 +2,7 @@ package supportsession
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,41 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
+
+func TestGatewayURLCandidatesPreferPrivateAddressForWildcardListen(t *testing.T) {
+	firstPrivate := net.IPv4(10, 8, 0, 5)
+	secondPrivate := net.IPv4(172, 16, 4, 9)
+	firstPrivateURL := "http://" + net.JoinHostPort(firstPrivate.String(), "8787")
+	candidates := GatewayURLCandidatesFromIPs("0.0.0.0:8787", "", []net.IP{
+		net.ParseIP("203.0.113.10"),
+		secondPrivate,
+		firstPrivate,
+	})
+
+	if len(candidates) < 2 {
+		t.Fatalf("expected LAN and loopback candidates, got %#v", candidates)
+	}
+	if candidates[0].URL != firstPrivateURL ||
+		!candidates[0].Recommended ||
+		candidates[0].Kind != "lan-private" {
+		t.Fatalf("expected sorted private LAN recommendation, got %#v", candidates)
+	}
+	for _, candidate := range candidates {
+		if strings.Contains(candidate.URL, "0.0.0.0") || strings.Contains(candidate.URL, "203.0.113.10") {
+			t.Fatalf("candidate should not expose wildcard or non-private test IP: %#v", candidate)
+		}
+	}
+}
+
+func TestGatewayURLCandidatesRespectExplicitGateway(t *testing.T) {
+	gatewayURL, candidates := ResolveGatewayURL("0.0.0.0:8787", "https://gateway.example.test/rdev")
+	if gatewayURL != "https://gateway.example.test/rdev" {
+		t.Fatalf("expected explicit gateway to win, got %q", gatewayURL)
+	}
+	if len(candidates) == 0 || !candidates[0].Recommended || candidates[0].Kind != "explicit" {
+		t.Fatalf("expected explicit candidate to be recommended, got %#v", candidates)
+	}
+}
 
 func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "support")
@@ -43,6 +79,10 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	watch := strings.Join(anyStrings(commands["watch_connection_status"].([]string)), "\x00")
 	if !strings.Contains(watch, "support-session") || !strings.Contains(watch, "status") || !strings.Contains(watch, "--wait") {
 		t.Fatalf("expected status watch command, got %s", watch)
+	}
+	gatewayCandidates := plan["gateway_url_candidates"].([]GatewayURLCandidate)
+	if len(gatewayCandidates) == 0 || gatewayCandidates[0].URL != "http://192.0.2.10:8787" || !gatewayCandidates[0].Recommended {
+		t.Fatalf("expected explicit gateway candidate, got %#v", gatewayCandidates)
 	}
 	target := plan["target_user_instructions"].(map[string]any)
 	if !strings.Contains(target["message"].(string), "目标电脑") ||
@@ -157,6 +197,9 @@ func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
 	readiness := prepare["connection_readiness"].(map[string]any)
 	if readiness["target_bootstrap_self_repair"] != true || readiness["human_gets_one_command"] != true {
 		t.Fatalf("expected one-command target bootstrap readiness, got %#v", readiness)
+	}
+	if readiness["gateway_url"] != "http://127.0.0.1:8787" {
+		t.Fatalf("expected explicit gateway in readiness, got %#v", readiness)
 	}
 	connectivity := prepare["connectivity_strategy"].(map[string]any)
 	order := connectivity["selection_order"].([]string)

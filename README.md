@@ -94,9 +94,11 @@ computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. If `rdev`, the gateway, or helper assets are
 unclear, first call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets`; follow its standard recovery
-actions instead of writing custom bootstrap, approval, or relay glue. If a
-reachable gateway is
-already running, call `rdev.support_session.create` through MCP or
+actions and use its recommended `gateway_url_candidates` entry instead of
+asking me to choose or assemble a gateway URL. Never give a remote target
+`0.0.0.0` or same-machine loopback unless this is explicitly same-machine
+testing. If a reachable gateway is already running, call
+`rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
 payload. If no gateway is running yet, run `rdev support-session start` in a
@@ -207,7 +209,9 @@ placeholders. When `rdev`, gateway state, or target helper assets are unclear,
 the Agent should call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets` from a checkout. That returns
 `rdev.support-session-prepare.v1` with local recovery, helper asset hashes,
-one-command target readiness, and standard recovery actions. If no gateway is
+one-command target readiness, `gateway_url_candidates`, and standard recovery
+actions. The Agent should use the recommended gateway candidate for target-side
+commands and keep raw address selection out of human chat. If no gateway is
 running yet, the Agent should run `rdev support-session start` in a visible
 foreground terminal; that command auto-prepares verified helper assets when
 possible, starts the local gateway, and prints
@@ -226,13 +230,11 @@ or checksums.
 
 ```bash
 rdev support-session prepare \
-  --gateway-url http://<reachable-gateway-host>:8787 \
   --target auto \
   --build-assets
 
 rdev support-session start \
   --addr 0.0.0.0:8787 \
-  --gateway-url http://<reachable-gateway-host>:8787 \
   --target auto \
   --locale auto
 
