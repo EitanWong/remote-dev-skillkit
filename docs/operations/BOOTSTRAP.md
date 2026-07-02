@@ -156,6 +156,8 @@ instructions. That materializes the invite into
 - Agent-only metadata such as ticket, gateway, manifest root, transport, release,
   and checksum inputs;
 - missing release inputs that must be provided before packaging is ready;
+- `runner_plan` with the self-contained Connection Entry runner manifest,
+  launcher, helper policy, and connection-path selection order;
 - `entry_package_plan` when a platform package/launcher plan can be generated.
 
 The same payload includes `connection_entry_plan.target_selection_policy`.
@@ -166,10 +168,32 @@ one short operator question before creating a managed entry.
 
 When an agent provides an empty `out_dir`, the MCP and CLI materializers write a
 target-side `CONNECTION_ENTRY.md`, the machine-readable
-`connection-entry-plan.json`, and any generated launcher/package planning files.
-Those generated files are the target-side handoff; ticket, gateway, root,
-transport, release, and checksum values remain inside the plan for Agent/tool
-use.
+`connection-entry-plan.json`, a `connection-entry-runner/` directory with
+`connection-entry-runner.json`, a visible platform launcher, and any additional
+launcher/package planning files. Those generated files are the target-side
+handoff; ticket, gateway, root, transport, release, relay, mesh, VPN, SSH, and
+checksum values remain inside the plan for Agent/tool use.
+
+The runner is real executable product surface, not only documentation. On the
+target side it can be dry-run with:
+
+```sh
+rdev connection-entry run --runner-manifest connection-entry-runner.json --dry-run
+```
+
+Without `--dry-run`, it probes direct gateway reachability first, lets
+`rdev host serve --transport auto` handle WSS, HTTPS long-poll, and short-poll
+fallback, then considers already configured helper paths. Helper paths are
+selected only when both the tool and an explicit gateway override are present,
+for example `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
+`RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL`. The runner may reuse existing
+SSH/frp/Chisel/headscale/Tailscale-compatible/WireGuard routing. When an
+approved dependency install action is present, it can also invoke
+`rdev deps install` to download, SHA-256 verify, unpack, and use user/workspace
+scoped helper binaries such as `chisel` or `frpc` without changing PATH,
+installing services, or mutating firewall/DNS/routes. Creating credentials,
+changing routes, firewall, DNS, paid/cloud resources, mesh/VPN service
+enrollment, drivers, or persistent services remains an approval-gated follow-up.
 
 For Windows attended temporary support, the current package implementation wraps
 the existing Windows temporary acceptance plan as
@@ -178,8 +202,8 @@ the same package surface now wraps reviewed macOS LaunchAgent, Linux systemd
 user-service, and Windows Service plans. The materializer writes those plans and
 service files for review; it does not start, install, persist, or uninstall a
 service unless the operator later runs the explicit service-control commands.
-Future LAN, hosted, relay, mesh, SSH, and VPN package planners must attach to
-the same generic Connection Entry Package Plan surface rather than creating new
+LAN, hosted, relay, mesh, SSH, and VPN planners now attach to the same generic
+Connection Entry runner and Package Plan surface rather than creating new
 human-facing parameter lists.
 
 Agents should treat `connection_entry_plan` as the universal connection

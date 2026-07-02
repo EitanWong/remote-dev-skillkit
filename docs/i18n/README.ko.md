@@ -38,14 +38,22 @@ gateway, transport, release, or checksum flags. Use `rdev.invites.create`, then
 materialize it with `rdev.connection_entry.plan` or `rdev connection-entry plan`.
 Read `connection_entry.package_catalog` and the signed join manifest
 `package_catalog` to select the target OS/architecture package candidate.
-Give the target side only the selected link, visible script, or signed package;
-if package assets are not published yet, use the visible fallback script. Keep
-low-level parameters in Agent/tool metadata. Choose `managed` for my own
+Give the target side only the selected link, visible runner/launcher,
+visible script, or signed package. Prefer the materialized Connection Entry
+runner when `runner_plan` is available; dry-run it before execute when network
+reliability is uncertain. If release package assets are not published yet, use
+the visible fallback script. Keep low-level parameters in Agent/tool metadata. Choose `managed` for my own
 long-running machines and `attended-temporary` for third-party or one-off repair
 machines by following `connection_entry_plan.target_selection_policy`.
-Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed;
-prefer existing, open-source/free options such as frp, Chisel, headscale, or
-WireGuard; ask before privileged, persistent, paid, firewall, DNS, cloud, or
+Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed. Use
+existing open-source/free options through configured helper gateway overrides such
+as `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
+`RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` when unambiguous; prefer frp,
+Chisel, headscale-compatible mesh, or WireGuard before paid relays. If a
+user-space helper is missing and an explicit URL/SHA-256 is approved, use
+`rdev deps install` or reviewed `RDEV_*_INSTALL_ACTION_JSON` metadata for
+user/workspace-scoped helper repair before helper startup; ask before
+privileged, persistent, paid, firewall, DNS, cloud, credential, route, or
 security-policy changes. Dry-run before execute. Do not hardcode private paths,
 secrets, or server addresses; example URLs are placeholders only.
 ```

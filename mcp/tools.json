@@ -82,7 +82,7 @@
     },
     {
       "name": "rdev.connection_entry.plan",
-      "description": "Materialize an invite into the universal Connection Entry handoff and Connection Entry Package Plan. Humans receive only a link, visible script, or signed package; ticket, gateway, manifest root, transport, release, and checksum values stay in Agent/tool metadata.",
+      "description": "Materialize an invite into the universal Connection Entry handoff and self-contained Connection Entry runner package. Humans receive only a link, visible launcher, or signed package; ticket, gateway, manifest root, transport, release, relay, mesh, VPN, SSH, checksum, helper startup, and approved dependency install values stay in Agent/tool metadata.",
       "safety": "Planning only; writes no remote state and does not execute on the target host.",
       "inputSchema": {
         "additionalProperties": false,
@@ -182,6 +182,17 @@
             "type": "string"
           },
           "windows_verifier_sha256": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_arch": {
+            "enum": [
+              "amd64",
+              "arm64"
+            ],
+            "type": "string"
+          },
+          "rdev_command": {
             "minLength": 1,
             "type": "string"
           }

@@ -55,6 +55,12 @@ func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	if plan.EntryPackagePlan != nil {
 		t.Fatalf("missing release inputs should not generate entry package plan: %#v", plan.EntryPackagePlan)
 	}
+	if plan.RunnerPlan == nil ||
+		plan.RunnerPlan.PackageMode != "self-contained-connection-entry-runner" ||
+		plan.RunnerPlan.ManifestPath != "" ||
+		!slices.Contains(plan.RunnerPlan.SelectionOrder, "existing-frp-or-chisel-relay") {
+		t.Fatalf("no out dir should still return an unwritten runner plan: %#v", plan.RunnerPlan)
+	}
 }
 
 func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
@@ -89,6 +95,17 @@ func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
 	if plan.EntryPackagePlan == nil || !plan.EntryPackagePlan.OK || !fileExists(plan.EntryPackagePlan.LauncherPath) {
 		t.Fatalf("expected generated entry package plan: %#v", plan.EntryPackagePlan)
 	}
+	if plan.RunnerPlan == nil ||
+		plan.RunnerManifestSchema != "rdev.connection-entry.runner.v1" ||
+		plan.RunnerPlan.SchemaVersion != "rdev.connection-entry.runner.v1" ||
+		!fileExists(plan.RunnerPlan.ManifestPath) ||
+		!fileExists(plan.RunnerPlan.LauncherPath) ||
+		!slices.Contains(plan.RunnerPlan.SelectionOrder, "existing-frp-or-chisel-relay") {
+		t.Fatalf("expected self-contained runner package plan: %#v", plan.RunnerPlan)
+	}
+	if !slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "manifest_root_public_key") {
+		t.Fatalf("expected runner package to keep raw metadata agent-only: %#v", plan.EntryPackagePlan)
+	}
 	if plan.EntryPackagePlan.SchemaVersion != EntryPackagePlanSchemaVersion ||
 		plan.EntryPackagePlan.TargetOS != "windows" ||
 		plan.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" {
@@ -122,8 +139,10 @@ func TestFromInviteReportsMissingManagedInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.EntryPackagePlan != nil {
-		t.Fatalf("missing managed inputs should not generate package plan: %#v", plan.EntryPackagePlan)
+	if plan.EntryPackagePlan == nil ||
+		plan.EntryPackagePlan.PlatformPlanKind != "connection-entry-runner" ||
+		plan.RunnerPlan == nil {
+		t.Fatalf("missing managed service inputs should still generate the foreground runner package plan: %#v", plan)
 	}
 	for _, expected := range []string{"managed_binary_path", "release_bundle_path", "release_root_public_key"} {
 		if !slices.Contains(plan.MissingInputs, expected) {

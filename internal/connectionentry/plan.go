@@ -13,6 +13,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/acceptance"
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
+	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
@@ -44,6 +45,8 @@ type Options struct {
 	WindowsBootstrapScriptSHA256   string
 	WindowsBootstrapScriptPath     string
 	HostName                       string
+	TargetArch                     string
+	RdevCommand                    string
 	Force                          bool
 	Now                            time.Time
 }
@@ -70,6 +73,8 @@ type Plan struct {
 	HumanSteps             []string          `json:"human_steps"`
 	AgentSteps             []string          `json:"agent_steps"`
 	NetworkStrategy        []string          `json:"network_strategy"`
+	RunnerManifestSchema   string            `json:"runner_manifest_schema"`
+	RunnerPlan             *RunnerPlan       `json:"runner_plan,omitempty"`
 	Checks                 []Check           `json:"checks"`
 	MissingInputs          []string          `json:"missing_inputs,omitempty"`
 	GeneratedFiles         []GeneratedFile   `json:"generated_files,omitempty"`
@@ -100,6 +105,21 @@ type EntryPackagePlan struct {
 	HumanEntryPoint     string             `json:"human_entry_point,omitempty"`
 	AgentOnlyParameters []string           `json:"agent_only_parameters"`
 	Checks              []acceptance.Check `json:"checks"`
+}
+
+type RunnerPlan struct {
+	SchemaVersion   string                            `json:"schema_version"`
+	ManifestPath    string                            `json:"manifest_path,omitempty"`
+	LauncherPath    string                            `json:"launcher_path,omitempty"`
+	PlanPath        string                            `json:"plan_path,omitempty"`
+	TargetOS        string                            `json:"target_os"`
+	TargetArch      string                            `json:"target_arch"`
+	PackageMode     string                            `json:"package_mode"`
+	OK              bool                              `json:"ok"`
+	SelectionOrder  []string                          `json:"selection_order"`
+	ConnectionPaths []connectionrunner.ConnectionPath `json:"connection_paths"`
+	HelperPolicy    connectionrunner.HelperPolicy     `json:"helper_policy"`
+	Checks          []acceptance.Check                `json:"checks"`
 }
 
 func FromInvite(opts Options) (Plan, error) {
@@ -156,8 +176,10 @@ func FromInvite(opts Options) (Plan, error) {
 		HumanSteps:             humanSteps(invite, sessionMode, targetOS),
 		AgentSteps:             agentSteps(invite, sessionMode),
 		NetworkStrategy:        invite.ConnectionEntryPlan.NetworkStrategy,
+		RunnerManifestSchema:   connectionrunner.ManifestSchemaVersion,
 	}
 	plan.Checks = buildChecks(invite, plan, entryCommand)
+	addRunnerPlan(&plan, invite, opts, outDir)
 	if targetOS == "windows" && sessionMode == string(model.HostModeAttendedTemporary) {
 		addWindowsEntryPackagePlan(&plan, invite, opts, outDir)
 	}
@@ -348,6 +370,87 @@ func buildChecks(invite agentinvite.Invite, plan Plan, entryCommand string) []Ch
 func validURL(value string) bool {
 	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
+}
+
+func addRunnerPlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
+	pkg, err := connectionrunner.Build(connectionrunner.Options{
+		Invite:       invite,
+		OutDir:       runnerOutDir(outDir),
+		TargetOS:     plan.TargetOS,
+		TargetArch:   opts.TargetArch,
+		SessionMode:  plan.SessionMode,
+		RdevCommand:  opts.RdevCommand,
+		HostName:     opts.HostName,
+		GeneratedAt:  plan.GeneratedAt,
+		WritePackage: outDir != "",
+	})
+	if err != nil {
+		plan.MissingInputs = append(plan.MissingInputs, "connection_entry_runner_error: "+err.Error())
+		plan.Checks = append(plan.Checks, Check{Name: "connection_entry_runner", Passed: false, Detail: err.Error()})
+		return
+	}
+	checks := runnerChecksToAcceptance(pkg.Checks)
+	plan.RunnerPlan = &RunnerPlan{
+		SchemaVersion:   pkg.Manifest.SchemaVersion,
+		ManifestPath:    pkg.ManifestPath,
+		LauncherPath:    pkg.LauncherPath,
+		PlanPath:        pkg.PlanPath,
+		TargetOS:        pkg.Manifest.TargetOS,
+		TargetArch:      pkg.Manifest.TargetArch,
+		PackageMode:     "self-contained-connection-entry-runner",
+		OK:              allAcceptanceChecksPassed(checks),
+		SelectionOrder:  pkg.Plan.SelectionOrder,
+		ConnectionPaths: pkg.Manifest.ConnectionPaths,
+		HelperPolicy:    pkg.Manifest.HelperPolicy,
+		Checks:          checks,
+	}
+	if outDir != "" {
+		plan.GeneratedFiles = append(plan.GeneratedFiles,
+			GeneratedFile{Path: pkg.ManifestPath, Purpose: "self-contained Connection Entry runner manifest with agent-only connection metadata"},
+			GeneratedFile{Path: pkg.LauncherPath, Purpose: "visible target-side launcher that runs the Connection Entry runner"},
+			GeneratedFile{Path: pkg.PlanPath, Purpose: "reviewable Connection Entry runner package plan and helper policy"},
+		)
+	}
+	plan.Checks = append(plan.Checks, Check{Name: "connection_entry_runner", Passed: plan.RunnerPlan.OK, Detail: pkg.ManifestPath})
+	if plan.EntryPackagePlan == nil && outDir != "" {
+		plan.EntryPackagePlan = &EntryPackagePlan{
+			SchemaVersion:      EntryPackagePlanSchemaVersion,
+			TargetOS:           plan.TargetOS,
+			SessionMode:        plan.SessionMode,
+			PackageMode:        "self-contained-connection-entry-runner",
+			OK:                 plan.RunnerPlan.OK,
+			PlanPath:           pkg.PlanPath,
+			LauncherPath:       pkg.LauncherPath,
+			PlatformPlanSchema: pkg.Manifest.SchemaVersion,
+			PlatformPlanKind:   "connection-entry-runner",
+			HumanEntryPoint:    "run the visible Connection Entry launcher; the runner probes and selects direct, proxy, relay, mesh, VPN, or SSH-assisted connectivity",
+			AgentOnlyParameters: []string{
+				"manifest_url",
+				"manifest_root_public_key",
+				"gateway_url",
+				"ticket_code",
+				"transport_preference",
+				"relay_or_mesh_credentials",
+				"ssh_identity",
+			},
+			Checks: checks,
+		}
+	}
+}
+
+func runnerOutDir(outDir string) string {
+	if outDir == "" {
+		return ""
+	}
+	return filepath.Join(outDir, "connection-entry-runner")
+}
+
+func runnerChecksToAcceptance(checks []connectionrunner.Check) []acceptance.Check {
+	values := make([]acceptance.Check, 0, len(checks))
+	for _, check := range checks {
+		values = append(values, acceptance.Check{Name: check.Name, Passed: check.Passed, Detail: check.Detail})
+	}
+	return values
 }
 
 func addWindowsEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {

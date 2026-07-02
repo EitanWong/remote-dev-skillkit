@@ -116,6 +116,8 @@
 - [x] Promote Connection Entry to the universal target-side handoff contract with machine-readable invite/materialization fields, required Agent flow, MCP/CLI tests, docs, Skills, and i18n prompts so all remote-host scenarios use invite plus materialized package plan instead of customer/connector-specific names or human-assembled low-level parameters.
 - [x] Add machine-readable Connection Entry target-selection policy so Agents choose `managed` for owned long-running machines and `attended-temporary` for third-party or one-off machines before materialization, asking only when ownership or persistence approval is ambiguous.
 - [x] Add signed package-aware Connection Entry catalog metadata with Windows/macOS/Linux candidates, visible script fallbacks, join page recommendation, invite output, signed join manifest coverage, and regression tests so Agents select target OS packages without human flag assembly.
+- [x] Add self-contained Connection Entry runner package surface with runner manifest, visible launcher, dry-run path selection, direct/LAN/proxy/native fallback probes, and configured SSH/frp/Chisel/headscale/Tailscale/WireGuard helper gateway overrides.
+- [x] Add real runner execution for approved helper startup and user/workspace-scoped dependency repair through structured `RDEV_*_START_ARGV_JSON`, `RDEV_*_INSTALL_ACTION_JSON`, and `rdev deps install` for SHA-256 verified Chisel/frpc helper installs.
 - [x] Auto-include manifest root public keys in gateway ticket responses, Agent invite host commands, MCP invite output, and join bootstrap scripts so target users do not copy trust roots from chat.
 - [x] Allow signed-manifest-verified LAN/private and HTTPS gateway registration while keeping raw `--gateway --ticket-code` registration local-dev only.
 - [x] Add max-control Agent authority profile for remote-host-assisted discovery and downstream authorized device control.
@@ -142,6 +144,7 @@
 - [x] Synchronize multilingual quick starts with the copy-paste Agent Bootstrap Prompt and audit the translated entry.
 - [x] Make Agent bootstrap installation local-first so personal-computer installs use `rdev mcp serve` without requiring a hosted gateway URL, while remote-host workflows probe and choose the best available connection mode.
 - [x] Extend Agent bootstrap and Skillkit install contracts with network reachability, proxy/DNS, NAT/firewall/CGNAT, SSH, and tunnel/mesh tool probes; prefer existing or open-source/free tunnel options such as frp, Chisel, headscale, and WireGuard before paid relays.
+- [x] Implement the first executable restrictive-network Connection Entry runner path: native WSS/long-poll/poll first, then configured helper gateway overrides for relay, mesh, VPN, or SSH without exposing low-level flags to humans.
 
 ## Next
 
@@ -232,6 +235,8 @@
 - [ ] Add hardware-backed or fleet-managed protected host identity/trust storage beyond Keychain, DPAPI, libsecret, keyctl, and local files.
 - [x] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
+- [ ] Add published signed per-platform Connection Entry release archives that bundle rdev, release metadata, runner manifest, checksums, and platform launchers.
+- [ ] Add real restrictive-network acceptance evidence for frp, Chisel, headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel paths across Windows/macOS/Linux.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.
 - [x] Add Linux managed-service acceptance package generation for start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence.

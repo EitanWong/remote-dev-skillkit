@@ -34,6 +34,12 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   tunnel or mesh path is needed, prefer existing or open-source/free options
   before paid relays, and ask before privileged, persistent, firewall, DNS,
   cloud, or security-policy changes.
+- If a missing user-space helper blocks an otherwise approved connection path,
+  use only `rdev deps install` or a reviewed `RDEV_*_INSTALL_ACTION_JSON` with
+  explicit URL, SHA-256, target platform, and user/workspace scope. Do not use
+  hidden installation, execution-policy bypass, shell command-string wrappers,
+  elevation, services/drivers, firewall/DNS/route mutation, or credential
+  creation without explicit approval.
 - For Windows temporary acceptance, generate the plan using a confirmed release
   bundle URL and output directory, then verify the emitted plan path before
   sending a one-command bootstrap to a target user.
@@ -87,10 +93,16 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 5. Materialize the invite with `rdev.connection_entry.plan` or
    `rdev connection-entry plan`; review `mode_decision`, `human_surface`,
    package-catalog candidate choice, `agent_metadata`, `missing_inputs`, and
-   `entry_package_plan`.
-6. For Windows temporary support, generate and verify the acceptance plan or
-   connection entry package, then review the launcher, release-verification
-   requirements, no-persistence checks, and approval probes.
+   `runner_plan`/`entry_package_plan`.
+6. Prefer the materialized Connection Entry runner when available. Dry-run it
+   with `rdev connection-entry run --runner-manifest ... --dry-run` to select
+   direct, proxy, LAN, relay, mesh, VPN, or SSH-assisted connectivity before the
+   target user starts the visible session. If the runner reports a configured
+   user/workspace dependency install action, let it install, verify, and use the
+   helper binary, then record the install report as evidence. For Windows
+   temporary support, generate and verify the acceptance plan or connection
+   entry package, then review the launcher, release-verification requirements,
+   no-persistence checks, and approval probes.
 7. Explain the selected connection entry URL, visible script, or signed package
    and visible consent screen.
 8. Wait for the host to appear pending.

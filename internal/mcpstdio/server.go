@@ -234,6 +234,7 @@ func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
 		InviteJSON:                     requiredString(args, "invite_json"),
 		OutDir:                         stringArg(args, "out_dir", ""),
 		TargetOS:                       stringArg(args, "target_os", ""),
+		TargetArch:                     stringArg(args, "target_arch", ""),
 		Ownership:                      stringArg(args, "ownership", ""),
 		SessionMode:                    stringArg(args, "session_mode", ""),
 		ReleaseBundleURL:               stringArg(args, "release_bundle_url", ""),
@@ -252,6 +253,7 @@ func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
 		WindowsBootstrapScriptURL:      stringArg(args, "windows_bootstrap_script_url", ""),
 		WindowsBootstrapScriptSHA256:   stringArg(args, "windows_bootstrap_script_sha256", ""),
 		HostName:                       stringArg(args, "host_name", ""),
+		RdevCommand:                    stringArg(args, "rdev_command", ""),
 		Force:                          boolArg(args, "force", false),
 	})
 }

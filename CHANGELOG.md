@@ -4,6 +4,59 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.10-dev
+
+Current phase: Connection Entry moved from package catalog plus script fallback
+planning to a real self-contained runner package surface. Relay, mesh, VPN, and
+SSH-assisted connectivity are now represented as executable runner paths with
+runtime probes and approval boundaries instead of documentation-only guidance.
+
+### Added
+
+- Added `rdev.connection-entry.runner.v1` and
+  `rdev.connection-entry.runner-plan.v1` through the new `internal/connectionrunner`
+  package.
+- Added generated runner artifacts under materialized Connection Entries:
+  `connection-entry-runner.json`, a visible platform launcher, and
+  `connection-entry-runner-plan.json`.
+- Added `rdev connection-entry run --runner-manifest ...` so a target-side
+  package can dry-run/probe or start the selected connection path instead of
+  making humans assemble ticket/root/gateway/transport flags.
+- Added runtime path selection for direct gateway, LAN/private gateway,
+  proxy-aware HTTPS, manifest-only native fallback, existing SSH tunnels,
+  existing frp/Chisel relay, existing headscale/Tailscale-compatible mesh, and
+  existing WireGuard VPN.
+- Added gateway override support for configured helper paths through
+  `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, and
+  `RDEV_SSH_GATEWAY_URL`.
+- Added approved helper startup and dependency install metadata for runner paths:
+  `RDEV_*_START_ARGV_JSON` starts already-approved helper argv, and
+  `RDEV_*_INSTALL_ACTION_JSON` lets the runner repair missing user/workspace
+  helper dependencies before starting the helper.
+- Added `rdev deps install` plus `internal/depsinstall` for reviewed
+  user/workspace-scoped helper installs. It downloads from an explicit URL,
+  verifies SHA-256, unpacks `chisel` or `frpc`, and leaves PATH, services,
+  firewall, DNS, routes, drivers, and OS policy unchanged.
+- Added regression tests for runner package generation, dry-run path selection,
+  manual-action reporting when every path is blocked, helper gateway override
+  selection, helper startup, dependency installation, unsafe install rejection,
+  and host registration with a signed manifest plus explicit reachable gateway
+  override.
+
+### Changed
+
+- `rdev.connection_entry.plan` and `rdev connection-entry plan` now return
+  `runner_plan` and can write a self-contained runner package even when a
+  platform-specific signed release archive is not yet available.
+- Host registration keeps an explicit reachable gateway override after signed
+  manifest verification so relay, mesh, VPN, SSH tunnel, or LAN gateway paths
+  are not overwritten by the manifest's original gateway URL.
+- README, bootstrap docs, and core Skills now describe the runner as the default
+  package surface. User/workspace-scoped helper installs can be automated when
+  URL and checksum are explicit; credential creation, firewall, DNS, route,
+  cloud, paid relay, privileged, service/driver, and persistent changes remain
+  approval-gated.
+
 ## 0.1.9-dev
 
 Current phase: Connection Entry now carries package-aware OS selection metadata

@@ -29,11 +29,12 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.connection_entry.plan",
-			Description: "Materialize an invite into the universal Connection Entry handoff and Connection Entry Package Plan. Humans receive only a link, visible script, or signed package; ticket, gateway, manifest root, transport, release, and checksum values stay in Agent/tool metadata.",
+			Description: "Materialize an invite into the universal Connection Entry handoff and self-contained Connection Entry runner package. Humans receive only a link, visible launcher, or signed package; ticket, gateway, manifest root, transport, release, relay, mesh, VPN, SSH, checksum, helper startup, and approved dependency install values stay in Agent/tool metadata.",
 			Safety:      "Planning only; writes no remote state and does not execute on the target host.",
 			InputSchema: object(map[string]any{
 				"invite_json":                       stringField(),
 				"target_os":                         enum("windows", "darwin", "linux"),
+				"target_arch":                       enum("amd64", "arm64"),
 				"ownership":                         enum("owned", "third-party"),
 				"session_mode":                      enum("attended-temporary", "managed", "break-glass"),
 				"release_bundle_url":                stringField(),
@@ -53,6 +54,7 @@ func Tools() []Tool {
 				"windows_bootstrap_script_url":      stringField(),
 				"windows_bootstrap_script_sha256":   stringField(),
 				"host_name":                         stringField(),
+				"rdev_command":                      stringField(),
 				"force":                             boolField(),
 			}, []string{"invite_json"}),
 		},

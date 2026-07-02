@@ -27,7 +27,9 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionentry"
+	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
+	"github.com/EitanWong/remote-dev-skillkit/internal/depsinstall"
 	"github.com/EitanWong/remote-dev-skillkit/internal/enrollmentlifecycle"
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
@@ -97,6 +99,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.release(args[1:])
 	case "update":
 		return a.update(ctx, args[1:])
+	case "deps":
+		return a.deps(ctx, args[1:])
 	case "enrollment":
 		return a.enrollment(ctx, args[1:])
 	case "trust":
@@ -182,6 +186,58 @@ func (a App) update(ctx context.Context, args []string) error {
 		return writeJSON(a.Stdout, plan)
 	default:
 		return fmt.Errorf("unknown update subcommand %q", args[0])
+	}
+}
+
+func (a App) deps(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing deps subcommand")
+	}
+	switch args[0] {
+	case "install":
+		fs := flag.NewFlagSet("deps install", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		tool := fs.String("tool", "", "dependency tool to install: chisel or frpc")
+		scope := fs.String("scope", "user", "install scope: user or workspace")
+		version := fs.String("version", "", "optional dependency version label")
+		platform := fs.String("platform", runtime.GOOS+"/"+runtime.GOARCH, "target platform, for example linux/amd64")
+		downloadURL := fs.String("url", "", "download URL for the reviewed helper archive or binary")
+		expectedSHA256 := fs.String("expected-sha256", "", "expected SHA-256 for the download")
+		installDir := fs.String("install-dir", "", "optional install directory; defaults to a user or workspace rdev tools dir")
+		execute := fs.Bool("execute", false, "download, verify, and install; omitted means plan-only")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *tool == "" && fs.NArg() > 0 {
+			*tool = fs.Arg(0)
+		}
+		report, err := depsinstall.Install(ctx, http.DefaultClient, depsinstall.Options{
+			Tool:           *tool,
+			Scope:          *scope,
+			Version:        *version,
+			Platform:       *platform,
+			URL:            *downloadURL,
+			ExpectedSHA256: *expectedSHA256,
+			InstallDir:     *installDir,
+			Execute:        *execute,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSON(a.Stdout, map[string]any{
+			"ok":                  report.OK(),
+			"schema":              report.SchemaVersion,
+			"tool":                report.Tool,
+			"scope":               report.Scope,
+			"platform":            report.Platform,
+			"execute":             report.Execute,
+			"executed":            report.Executed,
+			"installed_binary":    report.InstalledBinary,
+			"dependency_report":   report,
+			"recommended_actions": report.RecommendedActions,
+		})
+	default:
+		return fmt.Errorf("unknown deps subcommand %q", args[0])
 	}
 }
 
@@ -1792,7 +1848,9 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		if err != nil {
 			return err
 		}
-		opts.GatewayURL = manifest.GatewayURL
+		if strings.TrimSpace(opts.GatewayURL) == "" {
+			opts.GatewayURL = manifest.GatewayURL
+		}
 		opts.TicketCode = manifest.TicketCode
 		opts.TrustPin = manifest.TrustFingerprint
 	}
@@ -2950,6 +3008,8 @@ func (a App) connectionEntry(args []string) error {
 		windowsBootstrapScriptSHA256 := fs.String("windows-bootstrap-script-sha256", "", "expected SHA-256 for windows-temporary.ps1")
 		windowsBootstrapScriptPath := fs.String("windows-bootstrap-script", "", "local windows-temporary.ps1 path; defaults to scripts/bootstrap/windows-temporary.ps1")
 		hostName := fs.String("host-name", "", "optional target host display name")
+		targetArch := fs.String("target-arch", runtime.GOARCH, "target architecture: amd64 or arm64")
+		rdevCommand := fs.String("rdev-command", "rdev", "rdev command embedded in the generated Connection Entry runner launcher")
 		force := fs.Bool("force", false, "overwrite generated nested Windows launcher files when supported")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -2977,6 +3037,8 @@ func (a App) connectionEntry(args []string) error {
 			WindowsBootstrapScriptSHA256:   *windowsBootstrapScriptSHA256,
 			WindowsBootstrapScriptPath:     *windowsBootstrapScriptPath,
 			HostName:                       *hostName,
+			TargetArch:                     *targetArch,
+			RdevCommand:                    *rdevCommand,
 			Force:                          *force,
 		})
 		if err != nil {
@@ -2989,8 +3051,39 @@ func (a App) connectionEntry(args []string) error {
 			"out":                plan.OutDir,
 			"human_message":      plan.HumanMessagePath,
 			"entry_package_plan": plan.EntryPackagePlan,
+			"runner_plan":        plan.RunnerPlan,
 			"missing_inputs":     plan.MissingInputs,
 			"generated_files":    plan.GeneratedFiles,
+		})
+	case "run":
+		fs := flag.NewFlagSet("connection-entry run", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		manifestPath := fs.String("runner-manifest", "", "Connection Entry runner manifest path")
+		rdevCommand := fs.String("rdev-command", "rdev", "rdev command to execute for host serve")
+		dryRun := fs.Bool("dry-run", false, "probe and print selected path without starting host serve")
+		probeTimeout := fs.Duration("probe-timeout", 5*time.Second, "per-path gateway probe timeout")
+		extraHostArgs := fs.String("host-args", "", "optional comma-separated extra rdev host serve args")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		result, err := connectionrunner.Run(connectionrunner.RunOptions{
+			ManifestPath:  *manifestPath,
+			RdevCommand:   *rdevCommand,
+			DryRun:        *dryRun,
+			ProbeTimeout:  *probeTimeout,
+			ExtraHostArgs: splitCapabilities(*extraHostArgs),
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSON(a.Stdout, map[string]any{
+			"ok":                     result.SelectedPath != "" && len(result.ManualActionRequired) == 0,
+			"schema":                 result.SchemaVersion,
+			"runner_result":          result,
+			"selected_path":          result.SelectedPath,
+			"selected_transport":     result.SelectedTransport,
+			"manual_action_required": result.ManualActionRequired,
+			"approval_required":      result.ApprovalRequired,
 		})
 	default:
 		return fmt.Errorf("unknown connection-entry subcommand %q", args[0])
@@ -6103,8 +6196,12 @@ Usage:
   rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
   rdev update check --repo EitanWong/remote-dev-skillkit
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
+  rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
+  rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256> --execute
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
   rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party
+  rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --dry-run
+  RDEV_RELAY_GATEWAY_URL=http://127.0.0.1:8787 rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json
   rdev connection-entry plan --invite invite.json --out managed-entry --target-os linux --ownership owned --managed-binary /opt/rdev/rdev --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:...
   rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1

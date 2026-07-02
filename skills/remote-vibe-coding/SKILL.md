@@ -41,6 +41,12 @@ revocation.
   paths. Prefer existing or open-source/free tunnel/mesh options before paid
   relays, and ask before privileged, persistent, firewall, DNS, cloud, or
   security-policy changes.
+- If a selected path lacks a user-space helper, use only reviewed dependency
+  install actions or `rdev deps install` with an explicit download URL,
+  expected SHA-256, target platform, and user/workspace scope. Do not invent
+  install commands, use shell command strings, weaken execution policy, elevate,
+  install services/drivers, or mutate firewall/DNS/routes without explicit
+  approval.
 - Maintain dynamic Skill runtime memory for discovered environment facts,
   configuration paths, host capabilities, adapter availability, and operator
   preferences. Read it before repeating probes, refresh stale entries, and keep
@@ -63,11 +69,19 @@ revocation.
    or `rdev connection-entry plan` before giving target-side instructions.
    Read `connection_entry.package_catalog` and the signed join manifest's
    `package_catalog`, select the target OS/architecture candidate from probes,
-   and use the visible script fallback when package assets or release inputs are
+   and prefer the materialized self-contained Connection Entry runner when
+   `runner_plan` is available. Dry-run the runner with
+   `rdev connection-entry run --runner-manifest ... --dry-run` when network
+   reliability is uncertain; it probes direct gateway, proxy, LAN, relay, mesh,
+   VPN, and SSH-assisted paths before starting `rdev host serve`. When the plan
+   includes approved `RDEV_*_INSTALL_ACTION_JSON` metadata, let the runner
+   install and verify user/workspace helper binaries before helper startup. Use
+   the visible script fallback when release package assets or release inputs are
    missing. Present only the selected
-   `connection_entry.entry_url`, visible script, or signed package to the
+   `connection_entry.entry_url`, visible launcher, visible script, or signed package to the
    target-side human, and treat `host_command`, ticket, gateway, root, release,
-   checksum, and transport values as Agent/package metadata.
+   checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
+   metadata.
 4. Wait for the host, then approve it only after the operator confirms it is the
    expected machine.
 5. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
@@ -95,9 +109,9 @@ revocation.
    manifest `package_catalog` as the OS/architecture selection source; package
    status `planned-release-asset-required` means use the visible fallback script
    and report missing release inputs to the operator. Use the materialized
-   `entry_package_plan` as the
-   generic package surface for Windows, macOS, Linux, managed-service, LAN,
-   hosted, relay, or mesh variants; if packaging is not ready, report
+   `runner_plan` and `entry_package_plan` as the generic package surface for
+   Windows, macOS, Linux, managed-service, LAN, hosted, relay, mesh, VPN, or SSH
+   variants; if packaging is not ready, report
    `missing_inputs` to the operator and keep target-side instructions limited to
    a Connection Entry. For owned managed machines, prefer the generated reviewed
    LaunchAgent, systemd user-service, or Windows Service package plan over

@@ -3012,6 +3012,42 @@ func TestHostServeRegistersWithJoinManifest(t *testing.T) {
 	}
 }
 
+func TestHostServePreservesGatewayOverrideWithJoinManifest(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--gateway", server.URL,
+		"--manifest-url", server.URL + "/v1/tickets/" + ticket.Code + "/manifest",
+		"--name", "override-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Gateway string `json:"gateway"`
+		Host    struct {
+			Name string `json:"name"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Gateway != server.URL || payload.Host.Name != "override-host" {
+		t.Fatalf("expected explicit gateway override to survive manifest verification, got %#v", payload)
+	}
+}
+
 func TestHostServeRegistersWithJoinManifestRoot(t *testing.T) {
 	gatewayPublicKey, gatewayPrivateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -5855,6 +5891,27 @@ func TestUpdatePlanSelectsPlatformArchive(t *testing.T) {
 		!strings.Contains(stdout.String(), "rdev release verify-bundle") ||
 		!strings.Contains(stdout.String(), `"plan_is_dry_run"`) {
 		t.Fatalf("unexpected update plan output: %s", stdout.String())
+	}
+}
+
+func TestDepsInstallPlanOnlyOutputsReport(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"deps", "install",
+		"--tool", "chisel",
+		"--scope", "user",
+		"--platform", "linux/amd64",
+		"--url", "https://example.com/chisel.tar.gz",
+		"--expected-sha256", strings.Repeat("d", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), `"schema": "rdev.dependency-install-report.v1"`) ||
+		!strings.Contains(stdout.String(), `"tool": "chisel"`) ||
+		!strings.Contains(stdout.String(), `"execute": false`) ||
+		!strings.Contains(stdout.String(), `"no_privileged_install"`) {
+		t.Fatalf("unexpected deps install output: %s", stdout.String())
 	}
 }
 

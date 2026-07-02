@@ -190,10 +190,12 @@ ticket, the manifest URL, the pinned manifest root, a machine-readable
 `connection_entry_plan.target_selection_policy`, and the next MCP tools the
 agent should call. The Agent then materializes the invite with
 `rdev.connection_entry.plan` or
-`rdev connection-entry plan`. That produces a **Connection Entry Package Plan**
-(`rdev.connection-entry.package-plan.v1`): human-facing entry surfaces,
-Agent-only connection metadata, owned-vs-third-party mode selection, missing
-release inputs, and platform package planning. The package catalog is also
+`rdev connection-entry plan`. That now produces a **self-contained Connection
+Entry runner package** (`rdev.connection-entry.runner.v1`) plus the generic
+`rdev.connection-entry.package-plan.v1`: a runner manifest, visible launcher,
+direct/proxy/LAN/relay/mesh/VPN/SSH path selection, human-facing entry
+surfaces, Agent-only connection metadata, owned-vs-third-party mode selection,
+missing release inputs, and platform package planning. The package catalog is also
 embedded in the signed join manifest as `package_catalog`, so an Agent can
 verify the manifest, select the Windows/macOS/Linux candidate from target OS and
 architecture probes, and fall back to the visible script when release package
@@ -206,11 +208,23 @@ creation, status tracking, evidence review, and revocation.
 `connection_entry` is the universal target-side entry point. The join page
 serves inspectable `/bootstrap.sh` and `/bootstrap.ps1` helpers that start a
 visible host session with the pinned `--manifest-root-public-key` and
-`--transport auto`. The page also publishes a visible Agent Package Catalog and
-browser-side recommended entry for the target OS. Real signed per-platform
-packages still require release assets; until those are available, the fallback
-scripts remain visible and inspectable. They do not create hidden persistence,
-weaken OS policy, or open inbound firewall ports.
+`--transport auto`. A materialized runner package can also be launched with
+`rdev connection-entry run --runner-manifest connection-entry-runner.json`; it
+probes gateway reachability, standard proxy settings, LAN/private routes, and
+already configured open-source/free helper paths such as SSH, frp, Chisel,
+headscale/Tailscale-compatible mesh, and WireGuard. It uses direct WSS/HTTPS
+fallback first, then configured helper gateway overrides such as
+`RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
+`RDEV_SSH_GATEWAY_URL` when they are unambiguous. If an approved user-scoped
+install action is present, the runner can use `rdev deps install` to download,
+SHA-256 verify, unpack, and use helper binaries such as `chisel` or `frpc` from
+a user/workspace tools directory without changing PATH or installing services.
+Creating credentials, changing firewall/DNS/routes, starting persistent
+connectivity, installing mesh/VPN drivers or services, or using paid/cloud
+relays still requires explicit approval. Real signed
+per-platform release archives still require release assets, but the runner
+contract is now real code rather than a script-only fallback plan. It does not
+create hidden persistence, weaken OS policy, or open inbound firewall ports.
 
 `connection_entry_plan.target_selection_policy` tells the Agent how to choose
 the right shape. If the target is your own personal or fleet machine, the Agent
