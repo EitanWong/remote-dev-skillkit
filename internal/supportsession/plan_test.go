@@ -320,6 +320,24 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 	}
 }
 
+func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
+	status := BuildStatus(StatusOptions{
+		TicketCode: "WAIT-1234",
+		Locale:     "en",
+	})
+
+	recovery := status["connection_recovery"].(map[string]any)
+	actions := strings.Join(anyStrings(recovery["agent_next_actions"].([]string)), "\n")
+	forbidden := strings.Join(anyStrings(recovery["forbidden"].([]string)), "\n")
+	if recovery["schema_version"] != ConnectionRecoverySchemaVersion ||
+		recovery["status"] != "waiting" ||
+		!strings.Contains(actions, "rdev.support_session.prepare") ||
+		!strings.Contains(actions, "instead of writing ad hoc network scripts") ||
+		!strings.Contains(forbidden, "Agent-authored PowerShell or shell relay scripts") {
+		t.Fatalf("expected standard connection recovery contract, got %#v", recovery)
+	}
+}
+
 func anyStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	out = append(out, values...)

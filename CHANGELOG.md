@@ -31,6 +31,12 @@ metadata, status watching, or approval polling by hand.
 - Added `user_handoff.auto_target_rule` so unknown target platforms have a
   stable Agent rule: send the join URL first, and use returned platform
   commands only when the human needs a terminal command or cannot open the page.
+- Added `rdev.support-session-connection-recovery.v1` to
+  `rdev.support-session-status.v1`. Status and wait-timeout payloads now tell
+  Agents which standard tools to call next, which human checks are safe, and
+  which recovery improvisations are forbidden, so failed first contact does not
+  turn into hand-written PowerShell, shell, relay, bootstrap, or approval
+  polling code.
 - Added `gateway_url_candidates` to `rdev.support-session-prepare.v1`,
   `rdev.support-session-plan.v1`, and
   `rdev.support-session-connectivity-strategy.v1`. `rdev support-session

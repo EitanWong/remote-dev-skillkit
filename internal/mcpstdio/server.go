@@ -339,6 +339,13 @@ func (s Server) supportSessionStatus(args map[string]any) (any, error) {
 			status["ok"] = false
 			status["timed_out"] = true
 			status["next_action"] = "Keep waiting, or check gateway reachability, network path, and target command output."
+			statusText, _ := status["status"].(string)
+			status["connection_recovery"] = supportsession.BuildConnectionRecovery(supportsession.ConnectionRecoveryOptions{
+				Status:     statusText,
+				TicketCode: ticketCode,
+				Locale:     stringArg(args, "locale", "auto"),
+				TimedOut:   true,
+			})
 			return status, nil
 		}
 		time.Sleep(time.Duration(intervalMillis) * time.Millisecond)

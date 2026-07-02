@@ -601,6 +601,49 @@ func TestSupportSessionStatusReportsConnectionFeedback(t *testing.T) {
 	}
 }
 
+func TestSupportSessionStatusWaitTimeoutIncludesRecovery(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "visible support")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := httpapi.NewServer(gw).Handler()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"support-session", "status",
+		"--gateway-url", server.URL,
+		"--ticket-code", ticket.Code,
+		"--wait",
+		"--timeout", "1ms",
+		"--interval", "1ms",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		OK                 bool           `json:"ok"`
+		TimedOut           bool           `json:"timed_out"`
+		ConnectionRecovery map[string]any `json:"connection_recovery"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid status JSON: %v\n%s", err, stdout.String())
+	}
+	actions, _ := payload.ConnectionRecovery["agent_next_actions"].([]any)
+	forbidden, _ := payload.ConnectionRecovery["forbidden"].([]any)
+	if payload.OK ||
+		!payload.TimedOut ||
+		payload.ConnectionRecovery["schema_version"] != "rdev.support-session-connection-recovery.v1" ||
+		payload.ConnectionRecovery["timed_out"] != true ||
+		!strings.Contains(strings.Join(anyStrings(actions), "\n"), "connection-entry failure") ||
+		!strings.Contains(strings.Join(anyStrings(forbidden), "\n"), "Agent-authored PowerShell") {
+		t.Fatalf("expected wait timeout recovery contract, got %#v", payload)
+	}
+}
+
 func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()
@@ -7860,4 +7903,14 @@ func waitForJobStatus(t *testing.T, gw *gateway.MemoryGateway, jobID string, sta
 		t.Fatal(err)
 	}
 	t.Fatalf("timed out waiting for job %s status %s, got %s", jobID, status, job.Status)
+}
+
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text, ok := value.(string); ok {
+			out = append(out, text)
+		}
+	}
+	return out
 }

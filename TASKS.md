@@ -132,6 +132,7 @@
 - [x] Add MCP wait support to `rdev.support_session.status` so Agents can wait for connection feedback through the standard tool instead of writing custom polling loops.
 - [x] Add `rdev.support-session-user-handoff.v1` so Agents can send a localized message plus exact copy-paste command/link to humans without rewriting the target command.
 - [x] Add `user_handoff.auto_target_rule` so Agents handle unknown target OS by sending the join URL first and using returned platform commands only when needed.
+- [x] Add `rdev.support-session-connection-recovery.v1` to status and wait-timeout payloads so Agents recover failed first contact through standard `rdev` tools instead of writing custom PowerShell, shell, relay, approval-polling, or bootstrap code.
 - [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.
 - [ ] Run real fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode acceptance to confirm the Agent calls `rdev.support_session.create` when a gateway is reachable, uses `rdev support-session start` when no gateway exists, reserves `rdev.support_session.plan` for review/debug, and never invents gateway/bootstrap code.
 - [x] Auto-include manifest root public keys in gateway ticket responses, Agent invite host commands, MCP invite output, and join bootstrap scripts so target users do not copy trust roots from chat.

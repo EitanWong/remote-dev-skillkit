@@ -2112,6 +2112,13 @@ func supportSessionStatus(ctx context.Context, client *http.Client, opts support
 			status["ok"] = false
 			status["timed_out"] = true
 			status["next_action"] = "Keep waiting, or check gateway reachability, network path, and target command output."
+			statusText, _ := status["status"].(string)
+			status["connection_recovery"] = supportsession.BuildConnectionRecovery(supportsession.ConnectionRecoveryOptions{
+				Status:     statusText,
+				TicketCode: opts.TicketCode,
+				Locale:     opts.Locale,
+				TimedOut:   true,
+			})
 			return status, nil
 		}
 		timer := time.NewTimer(opts.Interval)

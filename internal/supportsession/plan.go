@@ -26,6 +26,7 @@ const StartedSchemaVersion = "rdev.support-session-started.v1"
 const StatusSchemaVersion = "rdev.support-session-status.v1"
 const ConnectionAttemptPolicySchemaVersion = "rdev.connection-attempt-policy.v1"
 const UserHandoffSchemaVersion = "rdev.support-session-user-handoff.v1"
+const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recovery.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -1051,14 +1052,115 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		"waiting":        waiting,
 		"feedback":       localizedStatusFeedback(status, locale),
 		"next_action":    localizedStatusNextAction(status, locale),
-		"active_hosts":   active,
-		"pending_hosts":  pending,
-		"revoked_hosts":  revoked,
+		"connection_recovery": BuildConnectionRecovery(ConnectionRecoveryOptions{
+			Status:     status,
+			TicketCode: ticketCode,
+			Locale:     locale,
+			TimedOut:   false,
+		}),
+		"active_hosts":  active,
+		"pending_hosts": pending,
+		"revoked_hosts": revoked,
 		"host_count": map[string]int{
 			"active":  len(active),
 			"pending": len(pending),
 			"revoked": len(revoked),
 			"total":   len(hosts),
+		},
+	}
+}
+
+type ConnectionRecoveryOptions struct {
+	Status     string
+	TicketCode string
+	Locale     string
+	TimedOut   bool
+}
+
+func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
+	status := strings.TrimSpace(opts.Status)
+	if status == "" {
+		status = "waiting"
+	}
+	locale := strings.TrimSpace(opts.Locale)
+	if locale == "" {
+		locale = "auto"
+	}
+	ticketCode := strings.TrimSpace(opts.TicketCode)
+	agentActions := []string{}
+	humanChecks := []string{}
+	switch status {
+	case "connected":
+		agentActions = []string{
+			"tell the user the connection is established",
+			"inspect host capabilities before creating the smallest scoped job",
+			"review audit and evidence after each job",
+		}
+	case "pending-approval":
+		agentActions = []string{
+			"approve only the expected host when policy requires approval",
+			"wait briefly for auto-approval synchronization when this is a standard attended-temporary session",
+			"do not ask the target-side human for ticket, root, gateway, or transport values",
+		}
+	case "revoked":
+		agentActions = []string{
+			"create a new Connection Entry with rdev.support_session.create or rdev support-session start",
+			"send only the new user_handoff message plus copy_paste value to the human",
+			"do not reuse old ticket, manifest root, gateway, or transport metadata",
+		}
+	default:
+		agentActions = []string{
+			"keep using rdev.support_session.status with wait=true or rdev support-session status --wait",
+			"if the original user_handoff is still valid, resend user_handoff.message plus user_handoff.copy_paste verbatim",
+			"if the target cannot reach the join URL or every gateway candidate times out, run rdev.support_session.prepare or rdev support-session prepare --build-assets, then create a fresh Connection Entry",
+			"use the returned gateway_url_candidates, connection_attempt_policy, runner_plan, or standard_recovery fields instead of writing ad hoc network scripts",
+		}
+		humanChecks = []string{
+			"keep the visible target-side command window open",
+			"open the Connection Entry join URL on the target machine if the terminal command failed",
+			"copy the visible error output only when the standard command reports a failure",
+		}
+	}
+	if status != "waiting" && status != "" {
+		humanChecks = append(humanChecks, "do not copy raw ticket, root key, gateway, transport, release, or checksum values")
+	}
+	reason := "standard status-specific recovery"
+	if opts.TimedOut {
+		reason = "standard wait timeout recovery"
+		if status == "waiting" {
+			agentActions = append([]string{
+				"treat this as a connection-entry failure to reach or run, not as permission to improvise scripts",
+			}, agentActions...)
+		}
+	}
+	return map[string]any{
+		"schema_version": ConnectionRecoverySchemaVersion,
+		"status":         status,
+		"ticket_code":    ticketCode,
+		"timed_out":      opts.TimedOut,
+		"reason":         reason,
+		"agent_rule":     localizedConnectionRecoveryAgentRule(locale),
+		"agent_next_actions": append(agentActions, []string{
+			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud relay use, credentials, or unclear ownership",
+		}...),
+		"human_checks": humanChecks,
+		"standard_tools": []string{
+			"rdev.support_session.status",
+			"rdev support-session status --wait",
+			"rdev.support_session.prepare",
+			"rdev support-session prepare --build-assets",
+			"rdev.support_session.create",
+			"rdev support-session start",
+			"rdev.connection_entry.plan",
+			"rdev connection-entry run --dry-run",
+		},
+		"forbidden": []string{
+			"Agent-authored PowerShell or shell relay scripts",
+			"manual ticket/root/gateway/transport assembly for target humans",
+			"ExecutionPolicy Bypass",
+			"hidden install",
+			"UAC or sudo bypass",
+			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit approval",
 		},
 	}
 }
@@ -1151,6 +1253,15 @@ func localizedStatusNextAction(status, locale string) string {
 		default:
 			return "Keep waiting, or check gateway reachability, network path, and target command output."
 		}
+	}
+}
+
+func localizedConnectionRecoveryAgentRule(locale string) string {
+	switch locale {
+	case "zh-CN", "zh":
+		return "使用返回的 Connection Entry、user_handoff、status、prepare、runner 字段恢复连接；不要编写临时 PowerShell、shell、relay、审批轮询或 bootstrap 代码，也不要让人类拼 ticket/root/gateway/transport。"
+	default:
+		return "Recover connection setup through returned Connection Entry, user_handoff, status, prepare, and runner fields; do not write ad hoc PowerShell, shell, relay, approval-polling, or bootstrap code, and do not ask humans to assemble ticket/root/gateway/transport values."
 	}
 }
 

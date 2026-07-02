@@ -121,7 +121,13 @@ approval bypass and is rejected for managed or break-glass tickets.
 `interval_millis`. Agents should use the MCP wait mode or the CLI
 `rdev support-session status --wait` instead of writing their own polling loop.
 When the returned status has `connected=true`, immediately tell the user the
-connection is established before creating jobs.
+connection is established before creating jobs. Status payloads also include
+`connection_recovery` with schema
+`rdev.support-session-connection-recovery.v1`; when the session is still
+waiting, revoked, pending approval, or the wait call times out, Agents must
+follow that structured recovery plan and its `standard_tools`/`forbidden`
+fields instead of authoring custom PowerShell, shell, relay, approval-polling,
+or bootstrap code.
 
 For every new target host, use `connection_entry.entry_url` or a signed
 connection entry package over manually copying host flags. The join page

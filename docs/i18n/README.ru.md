@@ -61,7 +61,9 @@ payload before listening. Use
 for review/debug planning. After giving the target-machine command, watch
 `rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; when
 `connected=true`, proactively tell me the connection has been established before
-creating jobs. Use
+creating jobs. If waiting times out or the target does not appear, read
+`connection_recovery` and follow its standard tools instead of writing custom
+recovery scripts. Use
 `rdev.invites.create`, then materialize it with `rdev.connection_entry.plan` or
 `rdev connection-entry plan` only when lower-level invite materialization is
 needed.

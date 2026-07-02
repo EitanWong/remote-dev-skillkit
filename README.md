@@ -113,7 +113,9 @@ gateway, and prints the same ready session payload before listening. Use
 planning. After giving me the target-machine command, watch
 `rdev.support_session.status`
 or `rdev support-session status --wait`; when `connected=true`, tell me the
-connection has been established before creating jobs.
+connection has been established before creating jobs. If waiting times out or
+the target does not appear, read the returned `connection_recovery` field and
+follow its standard tools instead of writing custom recovery scripts.
 Do not ask humans to assemble ticket, root, gateway, transport, release, or
 checksum flags. Use `rdev.invites.create`, then materialize it with
 `rdev.connection_entry.plan` or `rdev connection-entry plan`.

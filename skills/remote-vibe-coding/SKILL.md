@@ -72,6 +72,11 @@ revocation.
 - When `user_handoff.target` is `auto`, follow `user_handoff.auto_target_rule`:
   send the join URL first, and use the returned Windows or macOS/Linux command
   only if the human asks for a terminal command or cannot open the page.
+- When `rdev.support_session.status` or `rdev support-session status --wait`
+  returns `waiting`, `pending-approval`, `revoked`, or `timed_out=true`, read
+  `connection_recovery` and follow its `agent_next_actions`,
+  `standard_tools`, and `forbidden` fields. Do not invent target-side recovery
+  scripts or ask the human for raw ticket/root/gateway/transport values.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -144,7 +149,9 @@ revocation.
 6. Watch the host with `rdev.support_session.status` using `wait=true` or
    `rdev support-session status --wait`. When `connected=true`, proactively
    report the localized feedback to the user before creating jobs. Do not write
-   custom polling loops. If the
+   custom polling loops. If the wait times out or the target does not appear,
+   follow `connection_recovery` instead of writing PowerShell, shell, relay,
+   approval, or bootstrap glue. If the
    standard attended-temporary auto-approval contract activated it, verify it is
    the expected machine before creating jobs; otherwise approve it only after
    the operator confirms it is expected.

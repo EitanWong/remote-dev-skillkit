@@ -401,6 +401,16 @@ func TestServerToolCallSupportSessionStatusWaitTimeout(t *testing.T) {
 		structured["ok"] != false {
 		t.Fatalf("expected wait timeout status, got %#v", structured)
 	}
+	recovery := structured["connection_recovery"].(map[string]any)
+	actions := strings.Join(anyStrings(recovery["agent_next_actions"].([]any)), "\n")
+	forbidden := strings.Join(anyStrings(recovery["forbidden"].([]any)), "\n")
+	if recovery["schema_version"] != "rdev.support-session-connection-recovery.v1" ||
+		recovery["timed_out"] != true ||
+		!strings.Contains(actions, "connection-entry failure") ||
+		!strings.Contains(actions, "rdev.support_session.prepare") ||
+		!strings.Contains(forbidden, "Agent-authored PowerShell") {
+		t.Fatalf("expected timeout recovery contract, got %#v", recovery)
+	}
 }
 
 func TestServerToolCallConnectionEntryPlan(t *testing.T) {

@@ -145,7 +145,10 @@ Steps:
     `rdev.support_session.status` with `wait=true` through MCP or
     `rdev support-session status --wait` through CLI. When the status returns
     `connected=true`, proactively tell me that the connection has been
-    established before creating any jobs. Do not write a custom polling loop.
+    established before creating any jobs. If status waiting times out or the
+    target does not appear, read `connection_recovery` and follow its
+    `agent_next_actions`, `standard_tools`, and `forbidden` fields. Do not
+    write a custom polling loop.
     Do not write ad hoc PowerShell, shell, relay, nohup, approval, or bootstrap
     code when the plan can provide it. For lower-level package materialization
     or when `rdev.support_session.create` is not sufficient, use

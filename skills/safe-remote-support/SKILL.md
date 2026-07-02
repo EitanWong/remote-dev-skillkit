@@ -58,7 +58,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev.support_session.status` using `wait=true` or
   `rdev support-session status --wait`. When `connected=true`, proactively tell
   the user the connection is established before creating any jobs. Do not write
-  custom polling loops.
+  custom polling loops. If the target does not appear or the wait call returns
+  `timed_out=true`, read `connection_recovery` and follow its
+  `agent_next_actions`, `standard_tools`, and `forbidden` fields instead of
+  inventing PowerShell, shell, relay, approval-polling, or bootstrap code.
 - Load scoped runtime memory before creating a new support session, but verify
   stale host, gateway, workspace, release, adapter, and approval facts before
   using them.
@@ -178,6 +181,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 11. Watch `rdev.support_session.status` with `wait=true` or
     `rdev support-session status --wait` until the host appears. If
     `connected=true`, report the localized `feedback` to the user immediately.
+    If the wait times out or status is not progressing, follow the returned
+    `connection_recovery` contract instead of writing custom recovery scripts.
     If the standard attended-temporary
     auto-approval contract was enabled, verify the host is active and expected;
     otherwise approve it with scoped capabilities.
