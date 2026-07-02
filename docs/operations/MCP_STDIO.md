@@ -30,8 +30,10 @@ LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
 already running. It creates the scoped attended-temporary ticket and returns a
 ready target-machine command, join URL, manifest URL, pinned manifest root,
 ticket code, and status watcher command. The returned command strings have the
-real ticket code already filled in; Agents must not ask humans to assemble
-ticket/root/gateway/transport values or write replacement bootstrap code.
+real ticket code already filled in. The target command is the standard fallback
+surface: it can try ordered Connection Entry URLs on the target machine before
+failing, so Agents must not write replacement PowerShell, shell, relay, approval
+polling, or bootstrap code.
 
 `rdev.support_session.prepare` returns `rdev.support-session-prepare.v1` in
 `structuredContent`. Fresh Agent sessions should call it when local `rdev`,
@@ -53,9 +55,9 @@ local gateway, creates the attended-temporary ticket, prints
 `rdev.support-session-started.v1` with an embedded
 `rdev.support-session-created.v1`, includes `asset_report` and
 `connection_readiness`, includes the same recommended gateway URL candidates,
-then keeps serving until interrupted. This is a CLI foreground process rather
-than an MCP tool because MCP calls should not hide or orphan a long-running
-gateway.
+and emits target commands that try those ordered candidates before failing.
+This is a CLI foreground process rather than an MCP tool because MCP calls
+should not hide or orphan a long-running gateway.
 
 `rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
 `structuredContent`. Agents should call it before inventing any gateway,

@@ -127,6 +127,7 @@
 - [x] Add target-side bootstrap self-repair for missing `rdev` through configured gateway `/assets` helper downloads with SHA-256 verification for Windows/macOS/Linux.
 - [x] Add first-host-only attended-temporary auto-approval metadata for standard visible Connection Entries, with audit events and regression coverage.
 - [x] Add support-session `gateway_url_candidates` and default wildcard listen handling so fresh Agents use a recommended target-usable gateway URL derived from explicit config or local private interfaces instead of sending `0.0.0.0`/loopback to remote hosts.
+- [x] Add ordered gateway-candidate fallback directly into `rdev.support-session-created.v1` target commands so target-side one-liners try known Connection Entry URLs before failing and Agents do not write ad hoc PowerShell/shell fallback scripts.
 - [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.
 - [ ] Run real fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode acceptance to confirm the Agent calls `rdev.support_session.create` when a gateway is reachable, uses `rdev support-session start` when no gateway exists, reserves `rdev.support_session.plan` for review/debug, and never invents gateway/bootstrap code.
 - [x] Auto-include manifest root public keys in gateway ticket responses, Agent invite host commands, MCP invite output, and join bootstrap scripts so target users do not copy trust roots from chat.

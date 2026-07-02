@@ -94,7 +94,11 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 
 func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	created := BuildCreated(CreatedOptions{
-		GatewayURL:            "http://192.0.2.10:8787",
+		GatewayURL: "http://192.0.2.10:8787",
+		GatewayURLCandidates: []GatewayURLCandidate{
+			{URL: "http://192.0.2.10:8787", Kind: "explicit", Recommended: true},
+			{URL: "http://198.51.100.10:8787", Kind: "host"},
+		},
 		ManifestRootPublicKey: "manifest-root:abc",
 		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
 		Target:                "windows",
@@ -109,6 +113,15 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		strings.Contains(created["target_command"].(string), "<ticket-code>") ||
 		strings.Contains(created["target_command"].(string), "ExecutionPolicy Bypass") {
 		t.Fatalf("expected ready Windows command without unsafe placeholders: %#v", created)
+	}
+	if !strings.Contains(created["target_command"].(string), "foreach ($u in $urls)") ||
+		!strings.Contains(created["target_command"].(string), "198.51.100.10") ||
+		!strings.Contains(created["target_commands"].(map[string]string)["macos_linux"], "for u in") {
+		t.Fatalf("expected target command to try ordered gateway candidates: %#v", created["target_commands"])
+	}
+	candidates := created["gateway_url_candidates"].([]GatewayURLCandidate)
+	if len(candidates) != 2 || !candidates[0].Recommended {
+		t.Fatalf("expected gateway candidates in created payload, got %#v", candidates)
 	}
 	watch := strings.Join(created["watch_connection_status"].([]string), "\x00")
 	if !strings.Contains(watch, "ABCD-1234") ||

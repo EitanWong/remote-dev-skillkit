@@ -1912,6 +1912,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if err != nil {
 		return err
 	}
+	gatewayCandidates, _ := prepared["gateway_url_candidates"].([]supportsession.GatewayURLCandidate)
 	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
 		return err
 	}
@@ -1977,6 +1978,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
+		GatewayURLCandidates:  gatewayCandidates,
 		Ticket:                ticket,
 		ManifestRootPublicKey: rootPublicKeyString(gw.ManifestRoot()),
 		Target:                opts.Target,
@@ -2026,6 +2028,7 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 	}
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            opts.GatewayURL,
+		GatewayURLCandidates:  []supportsession.GatewayURLCandidate{{URL: strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"), Kind: "explicit", Scope: "operator-provided", Recommended: true, Reason: "support-session create gateway URL"}},
 		JoinURL:               payload.JoinURL,
 		ManifestURL:           payload.ManifestURL,
 		ManifestRootPublicKey: payload.ManifestRootPublicKey,

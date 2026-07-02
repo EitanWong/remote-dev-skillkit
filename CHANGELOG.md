@@ -19,6 +19,11 @@ metadata, status watching, or approval polling by hand.
   listen address and local private interfaces, preserve explicit gateway
   overrides, and avoid handing remote targets wildcard addresses such as
   `0.0.0.0`.
+- Added ordered candidate fallback inside `rdev.support-session-created.v1`
+  target commands. The Windows and macOS/Linux one-line commands now try the
+  ordered Connection Entry URLs on the target machine before failing, so Agents
+  should not write custom PowerShell, shell, relay, ticket substitution,
+  bootstrap, or approval-polling glue.
 - Added `rdev support-session prepare` and MCP tool
   `rdev.support_session.prepare` with schema
   `rdev.support-session-prepare.v1`. Fresh Agents can now inspect local `rdev`

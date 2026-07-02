@@ -43,6 +43,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   before listening. Use `rdev.support_session.plan` or
   `rdev support-session plan` only for review/debug planning before writing any
   gateway, PowerShell, relay, nohup, approval, or bootstrap steps.
+- Treat returned `target_command` as the standard fallback surface. It already
+  tries ordered gateway URL candidates on the target machine; do not wrap it in
+  Agent-authored PowerShell, shell, relay, ticket substitution, approval
+  polling, or bootstrap scripts.
 - After giving the target-side command, watch the session with
   `rdev.support_session.status` or `rdev support-session status --wait`. When
   `connected=true`, proactively tell the user the connection is established

@@ -306,11 +306,16 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 	}
 	ticketCode, _ := structured["ticket_code"].(string)
 	targetCommand, _ := structured["target_command"].(string)
+	gatewayCandidates, _ := structured["gateway_url_candidates"].([]any)
 	if ticketCode == "" ||
 		!strings.Contains(targetCommand, ticketCode) ||
+		!strings.Contains(targetCommand, "foreach ($u in $urls)") ||
 		strings.Contains(targetCommand, "<ticket-code>") ||
 		strings.Contains(targetCommand, "ExecutionPolicy Bypass") {
 		t.Fatalf("expected ready safe target command: ticket=%q command=%q", ticketCode, targetCommand)
+	}
+	if len(gatewayCandidates) == 0 {
+		t.Fatalf("expected created payload to carry gateway candidates: %#v", structured)
 	}
 	watch := strings.Join(anyStrings(structured["watch_connection_status"].([]any)), "\x00")
 	if !strings.Contains(watch, ticketCode) ||

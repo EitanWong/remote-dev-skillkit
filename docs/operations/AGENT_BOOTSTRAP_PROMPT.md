@@ -122,8 +122,11 @@ Steps:
     `rdev.support_session.create` through MCP, or
     `rdev support-session create` through the CLI, to create the session and
     obtain the ready target command, join URL, manifest root, real ticket code,
-    and status watcher in one payload. If no suitable gateway is running yet,
-    run `rdev support-session start` in a visible foreground terminal. It
+    and status watcher in one payload. The target command already tries ordered
+    Connection Entry URLs on the target machine; do not write your own
+    PowerShell, shell, relay, or approval-polling fallback. If no suitable
+    gateway is running yet, run `rdev support-session start` in a visible
+    foreground terminal. It
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
     are available, starts the local gateway, and prints
     `rdev.support-session-started.v1` with the embedded ready target command,
@@ -137,7 +140,7 @@ Steps:
     `rdev support-session status --wait` through CLI. When the status returns
     `connected=true`, proactively tell me that the connection has been
     established before creating any jobs.
-    Do not write ad hoc PowerShell, shell relay, nohup, approval, or bootstrap
+    Do not write ad hoc PowerShell, shell, relay, nohup, approval, or bootstrap
     code when the plan can provide it. For lower-level package materialization
     or when `rdev.support_session.create` is not sufficient, use
     `rdev.invites.create` or `rdev invite create` so the Agent receives

@@ -361,8 +361,12 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	}
 
 	var payload struct {
-		SchemaVersion         string            `json:"schema_version"`
-		TicketCode            string            `json:"ticket_code"`
+		SchemaVersion        string `json:"schema_version"`
+		TicketCode           string `json:"ticket_code"`
+		GatewayURLCandidates []struct {
+			URL         string `json:"url"`
+			Recommended bool   `json:"recommended"`
+		} `json:"gateway_url_candidates"`
 		TargetCommand         string            `json:"target_command"`
 		TargetCommands        map[string]string `json:"target_commands"`
 		WatchConnectionStatus []string          `json:"watch_connection_status"`
@@ -380,13 +384,18 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.ManifestRootPublicKey == "" {
 		t.Fatalf("unexpected support-session create payload: %#v", payload)
 	}
+	if len(payload.GatewayURLCandidates) == 0 || !payload.GatewayURLCandidates[0].Recommended {
+		t.Fatalf("expected created payload to carry gateway candidates, got %#v", payload.GatewayURLCandidates)
+	}
 	if !strings.Contains(payload.TargetCommand, payload.TicketCode) ||
 		!strings.Contains(payload.TargetCommand, "bootstrap.ps1") ||
+		!strings.Contains(payload.TargetCommand, "foreach ($u in $urls)") ||
 		strings.Contains(payload.TargetCommand, "<ticket-code>") ||
 		strings.Contains(payload.TargetCommand, "ExecutionPolicy Bypass") {
 		t.Fatalf("target command should be ready and safe: %s", payload.TargetCommand)
 	}
-	if !strings.Contains(payload.TargetCommands["macos_linux"], payload.TicketCode) {
+	if !strings.Contains(payload.TargetCommands["macos_linux"], payload.TicketCode) ||
+		!strings.Contains(payload.TargetCommands["macos_linux"], "for u in") {
 		t.Fatalf("expected cross-platform command candidates with real ticket: %#v", payload.TargetCommands)
 	}
 	watch := strings.Join(payload.WatchConnectionStatus, "\x00")

@@ -61,6 +61,10 @@ revocation.
   `rdev.support_session.plan` or `rdev support-session plan` only for
   review/debug planning before creating custom gateway, shell, PowerShell,
   relay, nohup, approval, or bootstrap steps.
+- Treat returned `target_command` as the standard fallback surface. It already
+  tries ordered gateway URL candidates on the target machine; do not wrap it in
+  Agent-authored PowerShell, shell, relay, ticket substitution, approval
+  polling, or bootstrap scripts.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
