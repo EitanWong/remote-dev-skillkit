@@ -429,6 +429,16 @@ func TestServerToolCallSupportSessionStatus(t *testing.T) {
 		!strings.Contains(structured["feedback"].(string), "连接已经建立") {
 		t.Fatalf("expected connected support session status, got %#v", structured)
 	}
+	next := structured["connected_next_steps"].(map[string]any)
+	calls := next["mcp_next_calls"].([]any)
+	if next["schema_version"] != "rdev.support-session-connected-next-steps.v1" ||
+		next["connected"] != true ||
+		next["host_id"] == "" ||
+		!strings.Contains(next["user_report"].(string), "连接已经建立") ||
+		len(calls) != 1 ||
+		calls[0].(map[string]any)["tool"] != "rdev.hosts.capabilities" {
+		t.Fatalf("expected connected next-step contract, got %#v", next)
+	}
 }
 
 func TestServerToolCallSupportSessionStatusWaitTimeout(t *testing.T) {

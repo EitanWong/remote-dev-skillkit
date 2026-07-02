@@ -449,6 +449,17 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 			CurlMaxTimeSec            int    `json:"curl_max_time_sec"`
 			RetriesPerCandidate       int    `json:"retries_per_candidate"`
 		} `json:"connection_attempt_policy"`
+		TargetBootstrapRequirements struct {
+			SchemaVersion  string   `json:"schema_version"`
+			RequiredAssets []string `json:"required_assets"`
+			StandardFix    []string `json:"standard_fix"`
+			Forbidden      []string `json:"forbidden"`
+		} `json:"target_bootstrap_requirements"`
+		TargetBootstrapReadiness struct {
+			SchemaVersion string `json:"schema_version"`
+			AllReady      bool   `json:"all_ready"`
+			AgentRule     string `json:"agent_rule"`
+		} `json:"target_bootstrap_readiness"`
 		RecommendedSurface    string `json:"recommended_surface"`
 		AutoApprove           bool   `json:"auto_approve"`
 		ManifestRootPublicKey string `json:"manifest_root_public_key"`
@@ -486,6 +497,17 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.ConnectionAttemptPolicy.CurlMaxTimeSec != 10 ||
 		payload.ConnectionAttemptPolicy.RetriesPerCandidate != 1 {
 		t.Fatalf("expected bounded connection attempt policy, got %#v", payload.ConnectionAttemptPolicy)
+	}
+	if payload.TargetBootstrapRequirements.SchemaVersion != "rdev.support-session-target-bootstrap-requirements.v1" ||
+		!slices.Contains(payload.TargetBootstrapRequirements.RequiredAssets, "rdev-windows-amd64.exe") ||
+		!slices.Contains(payload.TargetBootstrapRequirements.StandardFix, "rdev support-session start") ||
+		!slices.Contains(payload.TargetBootstrapRequirements.Forbidden, "using ExecutionPolicy Bypass") {
+		t.Fatalf("expected Windows bootstrap requirements and standard recovery, got %#v", payload.TargetBootstrapRequirements)
+	}
+	if payload.TargetBootstrapReadiness.SchemaVersion != "rdev.support-session-target-bootstrap-readiness.v1" ||
+		payload.TargetBootstrapReadiness.AllReady ||
+		!strings.Contains(payload.TargetBootstrapReadiness.AgentRule, "support-session start") {
+		t.Fatalf("expected create to report missing gateway helper assets, got %#v", payload.TargetBootstrapReadiness)
 	}
 	if payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
 		payload.UserHandoff.CopyPasteKind != "windows" ||
@@ -529,6 +551,14 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		})
 	}()
 	waitForHTTP(t, gatewayURL+"/healthz")
+	resp, err := http.Get(gatewayURL + "/assets/rdev-windows-amd64.exe.sha256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("support-session start should serve Windows helper hash, got %s", resp.Status)
+	}
 	cancel()
 	err = <-errCh
 	if !errors.Is(err, context.Canceled) {
@@ -593,6 +623,24 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	}
 }
 
+func TestGatewayAssetConfigUsesDirectoryWithExplicitOverrides(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bin")
+	override := filepath.Join(t.TempDir(), "custom-rdev.exe")
+	assets := gatewayAssetConfig(gatewayServeOptions{
+		RdevAssetsDir:        dir,
+		RdevWindowsAMD64Path: override,
+	})
+	if assets.RdevWindowsAMD64Path != override {
+		t.Fatalf("explicit Windows helper should override assets dir: %#v", assets)
+	}
+	if assets.RdevDarwinARM64Path != filepath.Join(dir, "rdev-darwin-arm64") ||
+		assets.RdevDarwinAMD64Path != filepath.Join(dir, "rdev-darwin-amd64") ||
+		assets.RdevLinuxAMD64Path != filepath.Join(dir, "rdev-linux-amd64") ||
+		assets.RdevLinuxARM64Path != filepath.Join(dir, "rdev-linux-arm64") {
+		t.Fatalf("assets dir should populate platform helper paths: %#v", assets)
+	}
+}
+
 func waitForHTTP(t *testing.T, endpoint string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
@@ -653,6 +701,16 @@ func TestSupportSessionStatusReportsConnectionFeedback(t *testing.T) {
 		Status        string `json:"status"`
 		Feedback      string `json:"feedback"`
 		NextAction    string `json:"next_action"`
+		ConnectedNext struct {
+			SchemaVersion string `json:"schema_version"`
+			Connected     bool   `json:"connected"`
+			HostID        string `json:"host_id"`
+			UserReport    string `json:"user_report"`
+			MCPNextCalls  []struct {
+				Tool      string         `json:"tool"`
+				Arguments map[string]any `json:"arguments"`
+			} `json:"mcp_next_calls"`
+		} `json:"connected_next_steps"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid status JSON: %v\n%s", err, stdout.String())
@@ -663,6 +721,14 @@ func TestSupportSessionStatusReportsConnectionFeedback(t *testing.T) {
 		!strings.Contains(payload.Feedback, "连接已经建立") ||
 		!strings.Contains(payload.NextAction, "汇报连接已建立") {
 		t.Fatalf("unexpected support-session status: %#v", payload)
+	}
+	if payload.ConnectedNext.SchemaVersion != "rdev.support-session-connected-next-steps.v1" ||
+		!payload.ConnectedNext.Connected ||
+		payload.ConnectedNext.HostID == "" ||
+		!strings.Contains(payload.ConnectedNext.UserReport, "连接已经建立") ||
+		len(payload.ConnectedNext.MCPNextCalls) != 1 ||
+		payload.ConnectedNext.MCPNextCalls[0].Tool != "rdev.hosts.capabilities" {
+		t.Fatalf("unexpected connected next-step contract: %#v", payload.ConnectedNext)
 	}
 }
 

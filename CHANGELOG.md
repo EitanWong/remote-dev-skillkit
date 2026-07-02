@@ -44,6 +44,20 @@ metadata, status watching, or approval polling by hand.
   which recovery improvisations are forbidden, so failed first contact does not
   turn into hand-written PowerShell, shell, relay, bootstrap, or approval
   polling code.
+- Added `rdev.support-session-connected-next-steps.v1` to
+  `rdev.support-session-status.v1`. When `connected=true`, Agents now receive a
+  ready user report plus the next standard `rdev.hosts.capabilities` follow-up,
+  so they can proactively tell the user the connection is established and
+  inspect capabilities before creating the smallest scoped job.
+- Added `rdev.support-session-target-bootstrap-requirements.v1` to
+  `rdev.support-session-created.v1` and CLI-side
+  `rdev.support-session-target-bootstrap-readiness.v1` probing. Fresh Agents can
+  detect that an existing gateway lacks verified helper assets before sending a
+  Windows/macOS/Linux terminal command, then recover through
+  `rdev support-session start` or `rdev support-session prepare --build-assets`
+  instead of asking the target user to install `rdev` manually.
+- Added `rdev gateway serve --rdev-assets-dir` as a lower-level convenience for
+  explicitly managed dev gateways that need to serve all platform helper assets.
 - Added `gateway_url_candidates` to `rdev.support-session-prepare.v1`,
   `rdev.support-session-plan.v1`, and
   `rdev.support-session-connectivity-strategy.v1`. `rdev support-session
@@ -119,7 +133,12 @@ metadata, status watching, or approval polling by hand.
   Skills so fresh Agents call support-session handoff first, then follow the
   returned create/start route. Prepare is used when readiness is unclear,
   planner access is reserved for review/debug, and the standard status watcher
-  remains required before claiming the remote host is connected.
+  remains required before claiming the remote host is connected. Connected
+  status now also drives the capability-inspection step before job creation.
+- Docs and Skills now explicitly forbid manually combining
+  `rdev gateway serve` plus `rdev invite create` for ordinary support sessions,
+  because that path can omit verified bootstrap helper assets and recreate the
+  clean-Windows "rdev is required" failure.
 - Windows join commands no longer use `ExecutionPolicy Bypass`.
 - Development gateway plans now carry all configured helper asset paths for
   Windows amd64, macOS arm64/amd64, and Linux amd64/arm64.

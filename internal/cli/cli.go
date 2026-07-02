@@ -693,6 +693,7 @@ type gatewayServeOptions struct {
 	ClientCAPath            string
 	OperatorAuthPath        string
 	HostedOperatorAuthPath  string
+	RdevAssetsDir           string
 	RdevWindowsAMD64Path    string
 	RdevDarwinARM64Path     string
 	RdevDarwinAMD64Path     string
@@ -2058,18 +2059,96 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 		return err
 	}
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
-		GatewayURL:            opts.GatewayURL,
-		GatewayURLCandidates:  []supportsession.GatewayURLCandidate{{URL: strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"), Kind: "explicit", Scope: "operator-provided", Recommended: true, Reason: "support-session create gateway URL"}},
-		JoinURL:               payload.JoinURL,
-		ManifestURL:           payload.ManifestURL,
-		ManifestRootPublicKey: payload.ManifestRootPublicKey,
-		Ticket:                payload.Ticket,
-		Target:                opts.Target,
-		Locale:                opts.Locale,
-		RdevCommand:           opts.RdevCommand,
-		AutoApprove:           opts.AutoApprove,
+		GatewayURL:               opts.GatewayURL,
+		GatewayURLCandidates:     []supportsession.GatewayURLCandidate{{URL: strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"), Kind: "explicit", Scope: "operator-provided", Recommended: true, Reason: "support-session create gateway URL"}},
+		JoinURL:                  payload.JoinURL,
+		ManifestURL:              payload.ManifestURL,
+		ManifestRootPublicKey:    payload.ManifestRootPublicKey,
+		Ticket:                   payload.Ticket,
+		Target:                   opts.Target,
+		Locale:                   opts.Locale,
+		RdevCommand:              opts.RdevCommand,
+		AutoApprove:              opts.AutoApprove,
+		TargetBootstrapReadiness: probeTargetBootstrapReadiness(ctx, http.DefaultClient, opts.GatewayURL, opts.Target),
 	})
 	return writeJSON(a.Stdout, created)
+}
+
+func probeTargetBootstrapReadiness(ctx context.Context, client *http.Client, gatewayURL, target string) map[string]any {
+	target = normalizeSupportSessionTarget(target)
+	assets := supportSessionRequiredAssets(target)
+	results := make([]map[string]any, 0, len(assets))
+	allReady := true
+	for _, asset := range assets {
+		status := probeGatewayAsset(ctx, client, gatewayURL, asset)
+		if status["ok"] != true {
+			allReady = false
+		}
+		results = append(results, status)
+	}
+	return map[string]any{
+		"schema_version": "rdev.support-session-target-bootstrap-readiness.v1",
+		"target":         target,
+		"all_ready":      allReady,
+		"probed":         len(assets) > 0,
+		"assets":         results,
+		"agent_rule":     "if all_ready is false for a platform terminal command, run rdev support-session start or prepare --build-assets instead of asking the target user to install rdev manually",
+	}
+}
+
+func supportSessionRequiredAssets(target string) []string {
+	switch target {
+	case "windows":
+		return []string{"rdev-windows-amd64.exe.sha256"}
+	case "macos":
+		return []string{"rdev-darwin-arm64.sha256", "rdev-darwin-amd64.sha256"}
+	case "linux":
+		return []string{"rdev-linux-amd64.sha256", "rdev-linux-arm64.sha256"}
+	default:
+		return []string{"rdev-windows-amd64.exe.sha256", "rdev-darwin-arm64.sha256", "rdev-darwin-amd64.sha256", "rdev-linux-amd64.sha256", "rdev-linux-arm64.sha256"}
+	}
+}
+
+func probeGatewayAsset(ctx context.Context, client *http.Client, gatewayURL, asset string) map[string]any {
+	endpoint := strings.TrimRight(strings.TrimSpace(gatewayURL), "/") + "/assets/" + asset
+	report := map[string]any{
+		"asset": asset,
+		"url":   endpoint,
+		"ok":    false,
+	}
+	if strings.TrimSpace(gatewayURL) == "" {
+		report["error"] = "gateway_url is required"
+		return report
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		report["error"] = err.Error()
+		return report
+	}
+	resp, err := doGatewayRequest(client, req)
+	if err != nil {
+		report["error"] = err.Error()
+		return report
+	}
+	defer resp.Body.Close()
+	report["status_code"] = resp.StatusCode
+	report["ok"] = resp.StatusCode >= 200 && resp.StatusCode < 300
+	return report
+}
+
+func normalizeSupportSessionTarget(target string) string {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "windows", "win":
+		return "windows"
+	case "macos", "darwin", "mac":
+		return "macos"
+	case "linux":
+		return "linux"
+	default:
+		return "auto"
+	}
 }
 
 func prepareSupportSessionEnvironment(ctx context.Context, opts supportSessionPrepareOptions) (map[string]any, error) {
@@ -4079,6 +4158,7 @@ func (a App) gateway(args []string) error {
 		clientCA := fs.String("client-ca", "", "optional client CA PEM path; when set, require and verify client certificates")
 		operatorAuth := fs.String("operator-auth", "", "optional operator auth JSON file requiring bearer tokens for control-plane APIs")
 		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
+		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
 		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
 		rdevDarwinARM64 := fs.String("rdev-darwin-arm64", "", "optional rdev helper served to macOS arm64 Connection Entry bootstraps")
 		rdevDarwinAMD64 := fs.String("rdev-darwin-amd64", "", "optional rdev helper served to macOS amd64 Connection Entry bootstraps")
@@ -4109,6 +4189,7 @@ func (a App) gateway(args []string) error {
 			ClientCAPath:            *clientCA,
 			OperatorAuthPath:        *operatorAuth,
 			HostedOperatorAuthPath:  *hostedOperatorAuth,
+			RdevAssetsDir:           *rdevAssetsDir,
 			RdevWindowsAMD64Path:    *rdevWindowsAMD64,
 			RdevDarwinARM64Path:     *rdevDarwinARM64,
 			RdevDarwinAMD64Path:     *rdevDarwinAMD64,
@@ -4761,13 +4842,7 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		auth = combined
 	}
 	server := httpapi.NewServerWithOperatorAuthAndStateStore(gw, store, auth)
-	server.Assets = httpapi.AssetConfig{
-		RdevWindowsAMD64Path: opts.RdevWindowsAMD64Path,
-		RdevDarwinARM64Path:  opts.RdevDarwinARM64Path,
-		RdevDarwinAMD64Path:  opts.RdevDarwinAMD64Path,
-		RdevLinuxAMD64Path:   opts.RdevLinuxAMD64Path,
-		RdevLinuxARM64Path:   opts.RdevLinuxARM64Path,
-	}
+	server.Assets = gatewayAssetConfig(opts)
 	if opts.SigningKeyPath != "" {
 		action := "loaded"
 		if created {
@@ -4789,6 +4864,33 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 	}
 	_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev listening on %s://%s\n", scheme, opts.Addr)
 	return listenAndServeGateway(opts.Addr, server.Handler(), tlsConfig)
+}
+
+func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
+	assets := httpapi.AssetConfig{}
+	if dir := strings.TrimSpace(opts.RdevAssetsDir); dir != "" {
+		assets.RdevWindowsAMD64Path = filepath.Join(dir, "rdev-windows-amd64.exe")
+		assets.RdevDarwinARM64Path = filepath.Join(dir, "rdev-darwin-arm64")
+		assets.RdevDarwinAMD64Path = filepath.Join(dir, "rdev-darwin-amd64")
+		assets.RdevLinuxAMD64Path = filepath.Join(dir, "rdev-linux-amd64")
+		assets.RdevLinuxARM64Path = filepath.Join(dir, "rdev-linux-arm64")
+	}
+	if strings.TrimSpace(opts.RdevWindowsAMD64Path) != "" {
+		assets.RdevWindowsAMD64Path = opts.RdevWindowsAMD64Path
+	}
+	if strings.TrimSpace(opts.RdevDarwinARM64Path) != "" {
+		assets.RdevDarwinARM64Path = opts.RdevDarwinARM64Path
+	}
+	if strings.TrimSpace(opts.RdevDarwinAMD64Path) != "" {
+		assets.RdevDarwinAMD64Path = opts.RdevDarwinAMD64Path
+	}
+	if strings.TrimSpace(opts.RdevLinuxAMD64Path) != "" {
+		assets.RdevLinuxAMD64Path = opts.RdevLinuxAMD64Path
+	}
+	if strings.TrimSpace(opts.RdevLinuxARM64Path) != "" {
+		assets.RdevLinuxARM64Path = opts.RdevLinuxARM64Path
+	}
+	return assets
 }
 
 func gatewayTLSConfig(opts gatewayServeOptions) (*tls.Config, error) {

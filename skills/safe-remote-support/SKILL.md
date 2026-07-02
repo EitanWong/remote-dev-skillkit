@@ -60,11 +60,22 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - When `user_handoff.target` is `auto`, follow `user_handoff.auto_target_rule`:
   send the join URL first, and use the returned Windows or macOS/Linux command
   only if the human asks for a terminal command or cannot open the page.
+- Read `target_bootstrap_requirements` and, for CLI-created sessions,
+  `target_bootstrap_readiness` before sending a platform terminal command from
+  an existing gateway. If readiness is false, recover with
+  `rdev support-session start` or `rdev support-session prepare --build-assets`
+  instead of asking the target-side human to install `rdev` manually or writing
+  a custom downloader.
+- Do not manually combine `rdev gateway serve` plus `rdev invite create` for
+  ordinary support sessions. That low-level path can omit verified bootstrap
+  helper assets. If a dev gateway must be started by hand, configure
+  `--rdev-assets-dir` or platform-specific helper asset flags first.
 - After giving the target-side command, watch the session with
   `rdev.support_session.status` using `wait=true` or
   `rdev support-session status --wait`. When `connected=true`, proactively tell
-  the user the connection is established before creating any jobs. Do not write
-  custom polling loops. If the target does not appear or the wait call returns
+  the user the connection is established using `connected_next_steps.user_report`,
+  inspect `rdev.hosts.capabilities`, and create only the smallest scoped job for
+  the user's task. Do not write custom polling loops. If the target does not appear or the wait call returns
   `timed_out=true`, read `connection_recovery` and follow its
   `agent_next_actions`, `standard_tools`, and `forbidden` fields instead of
   inventing PowerShell, shell, relay, approval-polling, or bootstrap code.
@@ -186,7 +197,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    and visible consent screen.
 11. Watch `rdev.support_session.status` with `wait=true` or
     `rdev support-session status --wait` until the host appears. If
-    `connected=true`, report the localized `feedback` to the user immediately.
+    `connected=true`, report `connected_next_steps.user_report` to the user
+    immediately, then inspect capabilities before creating jobs.
     If the wait times out or status is not progressing, follow the returned
     `connection_recovery` contract instead of writing custom recovery scripts.
     If the standard attended-temporary

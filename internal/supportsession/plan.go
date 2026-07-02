@@ -28,6 +28,7 @@ const StatusSchemaVersion = "rdev.support-session-status.v1"
 const ConnectionAttemptPolicySchemaVersion = "rdev.connection-attempt-policy.v1"
 const UserHandoffSchemaVersion = "rdev.support-session-user-handoff.v1"
 const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recovery.v1"
+const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-steps.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -192,16 +193,17 @@ type StatusOptions struct {
 }
 
 type CreatedOptions struct {
-	GatewayURL            string
-	GatewayURLCandidates  []GatewayURLCandidate
-	JoinURL               string
-	ManifestURL           string
-	ManifestRootPublicKey string
-	Ticket                model.Ticket
-	Target                string
-	Locale                string
-	RdevCommand           string
-	AutoApprove           bool
+	GatewayURL               string
+	GatewayURLCandidates     []GatewayURLCandidate
+	JoinURL                  string
+	ManifestURL              string
+	ManifestRootPublicKey    string
+	Ticket                   model.Ticket
+	Target                   string
+	Locale                   string
+	RdevCommand              string
+	AutoApprove              bool
+	TargetBootstrapReadiness any
 }
 
 type StartedOptions struct {
@@ -746,6 +748,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 	attemptPolicy := connectionAttemptPolicy(gatewayCandidates, joinURLs)
 	windowsCommand := windowsBootstrapCommand(joinURLs)
 	macLinuxCommand := macLinuxBootstrapCommand(joinURLs)
+	bootstrapRequirements := bootstrapRequirements(target)
 	targetCommands := map[string]string{
 		"windows":     windowsCommand,
 		"macos_linux": macLinuxCommand,
@@ -769,26 +772,28 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"--locale", locale,
 	}
 	return map[string]any{
-		"schema_version":            CreatedSchemaVersion,
-		"ok":                        true,
-		"session_mode":              string(model.HostModeAttendedTemporary),
-		"intent":                    "agent-created-one-command-visible-support-session",
-		"gateway_url":               gatewayURL,
-		"gateway_url_candidates":    gatewayCandidates,
-		"ticket_code":               opts.Ticket.Code,
-		"ticket":                    opts.Ticket,
-		"join_url":                  joinURL,
-		"manifest_url":              manifestURL,
-		"manifest_root_public_key":  opts.ManifestRootPublicKey,
-		"target":                    target,
-		"locale":                    locale,
-		"auto_approve":              opts.AutoApprove,
-		"recommended_surface":       recommendedSurface,
-		"target_command":            recommended,
-		"target_commands":           targetCommands,
-		"user_handoff":              userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
-		"connection_attempt_policy": attemptPolicy,
-		"watch_connection_status":   statusCommand,
+		"schema_version":                CreatedSchemaVersion,
+		"ok":                            true,
+		"session_mode":                  string(model.HostModeAttendedTemporary),
+		"intent":                        "agent-created-one-command-visible-support-session",
+		"gateway_url":                   gatewayURL,
+		"gateway_url_candidates":        gatewayCandidates,
+		"ticket_code":                   opts.Ticket.Code,
+		"ticket":                        opts.Ticket,
+		"join_url":                      joinURL,
+		"manifest_url":                  manifestURL,
+		"manifest_root_public_key":      opts.ManifestRootPublicKey,
+		"target":                        target,
+		"locale":                        locale,
+		"auto_approve":                  opts.AutoApprove,
+		"recommended_surface":           recommendedSurface,
+		"target_command":                recommended,
+		"target_commands":               targetCommands,
+		"user_handoff":                  userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
+		"connection_attempt_policy":     attemptPolicy,
+		"target_bootstrap_requirements": bootstrapRequirements,
+		"target_bootstrap_readiness":    opts.TargetBootstrapReadiness,
+		"watch_connection_status":       statusCommand,
 		"mcp_follow_up": []map[string]any{
 			{
 				"tool": "rdev.support_session.status",
@@ -803,6 +808,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"agent_flow": []string{
 			"give the target-side human only target_command or join_url",
 			"target_command already tries ordered gateway URL candidates with bounded per-candidate timeouts and retry policy; do not write your own fallback script",
+			"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
 			"watch connection status with watch_connection_status or rdev.support_session.status",
 			"when connected=true, proactively report that the connection is established",
 			"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
@@ -899,6 +905,28 @@ func connectionAttemptPolicy(candidates []GatewayURLCandidate, joinURLs []string
 		"target_handoff":               "single visible command; target-side command owns URL fallback, timeout, retry, download, verification, and host startup",
 		"agent_rule":                   "do not rewrite, wrap, or expand target_command; watch the returned status tool/command instead",
 	}
+}
+
+func bootstrapRequirements(target string) map[string]any {
+	requirements := map[string]any{
+		"schema_version": "rdev.support-session-target-bootstrap-requirements.v1",
+		"target":         target,
+		"agent_rule":     "support-session start prepares these helper assets automatically; if using an existing gateway, verify the relevant /assets endpoints before sending a platform command",
+		"standard_fix":   []string{"rdev support-session prepare --build-assets", "rdev support-session start"},
+		"forbidden":      []string{"telling the target user to install rdev manually as the first recovery step", "writing an ad hoc bootstrap downloader", "using ExecutionPolicy Bypass"},
+	}
+	switch target {
+	case "windows":
+		requirements["required_assets"] = []string{"rdev-windows-amd64.exe", "rdev-windows-amd64.exe.sha256"}
+		requirements["verification"] = []string{"GET /assets/rdev-windows-amd64.exe.sha256 must return 200", "GET /assets/rdev-windows-amd64.exe must return 200"}
+	case "macos", "linux":
+		requirements["required_assets"] = []string{"matching rdev-<os>-<arch> helper", "matching .sha256"}
+		requirements["verification"] = []string{"GET /assets/<helper>.sha256 must return 200", "GET /assets/<helper> must return 200"}
+	default:
+		requirements["required_assets"] = []string{"matching Windows/macOS/Linux rdev helper", "matching .sha256"}
+		requirements["verification"] = []string{"send join_url first, or verify platform assets before sending a platform terminal command"}
+	}
+	return requirements
 }
 
 func windowsBootstrapCommand(joinURLs []string) string {
@@ -1171,6 +1199,11 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		"waiting":        waiting,
 		"feedback":       localizedStatusFeedback(status, locale),
 		"next_action":    localizedStatusNextAction(status, locale),
+		"connected_next_steps": BuildConnectedNextSteps(ConnectedNextStepsOptions{
+			Status: status,
+			Hosts:  active,
+			Locale: locale,
+		}),
 		"connection_recovery": BuildConnectionRecovery(ConnectionRecoveryOptions{
 			Status:     status,
 			TicketCode: ticketCode,
@@ -1187,6 +1220,84 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			"total":   len(hosts),
 		},
 	}
+}
+
+type ConnectedNextStepsOptions struct {
+	Status string
+	Hosts  []model.Host
+	Locale string
+}
+
+func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
+	connected := opts.Status == "connected" && len(opts.Hosts) > 0
+	hostID := ""
+	hostName := ""
+	capabilities := []string{}
+	if connected {
+		host := opts.Hosts[0]
+		hostID = host.ID
+		hostName = host.Name
+		capabilities = append([]string(nil), host.Capabilities...)
+	}
+	report := "Connection established. I can see the target host and will inspect capabilities before starting scoped work."
+	switch opts.Locale {
+	case "zh-CN", "zh":
+		report = "连接已经建立。我已经看到目标主机，会先检查能力范围，再创建最小权限任务。"
+	}
+	actions := []string{}
+	if connected {
+		actions = []string{
+			"send user_report to the user before creating jobs",
+			"inspect host capabilities with rdev.hosts.capabilities",
+			"create the smallest scoped job only after the user's task intent is clear",
+			"export or review evidence before declaring the remote work complete",
+		}
+	} else {
+		report = ""
+	}
+	var mcpNextCalls any
+	var cliNextCommands any
+	if connected {
+		mcpNextCalls = connectedNextMCPCalls(hostID)
+		cliNextCommands = connectedNextCLICommands(hostID)
+	}
+	return map[string]any{
+		"schema_version":     ConnectedNextStepsSchemaVersion,
+		"connected":          connected,
+		"host_id":            hostID,
+		"host_name":          hostName,
+		"capabilities":       capabilities,
+		"user_report":        report,
+		"agent_next_actions": actions,
+		"mcp_next_calls":     mcpNextCalls,
+		"cli_next_commands":  cliNextCommands,
+		"forbidden": []string{
+			"creating a broad shell job before inspecting capabilities",
+			"claiming work is complete before reviewing job evidence",
+			"asking the user for ticket/root/gateway/transport after connected=true",
+		},
+	}
+}
+
+func connectedNextMCPCalls(hostID string) []map[string]any {
+	if strings.TrimSpace(hostID) == "" {
+		return nil
+	}
+	return []map[string]any{
+		{
+			"tool": "rdev.hosts.capabilities",
+			"arguments": map[string]any{
+				"host_id": hostID,
+			},
+		},
+	}
+}
+
+func connectedNextCLICommands(hostID string) [][]string {
+	if strings.TrimSpace(hostID) == "" {
+		return nil
+	}
+	return [][]string{{"rdev", "hosts", "capabilities", "--host-id", hostID}}
 }
 
 type ConnectionRecoveryOptions struct {

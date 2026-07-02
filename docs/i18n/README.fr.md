@@ -50,7 +50,7 @@ same-machine only. If a reachable gateway is already running, call
 `rdev.support_session.create` through MCP or `rdev support-session create`
 through CLI to get the ready target command, join URL, real ticket code,
 manifest root, scoped auto-approval state, and status watch command in one
-payload. Prefer `user_handoff.message` plus `user_handoff.copy_paste` for
+payload. Read `target_bootstrap_requirements` and, for CLI-created sessions, `target_bootstrap_readiness`; if readiness is false for a platform command, recover with `rdev support-session start` or `rdev support-session prepare --build-assets` instead of asking the target-side human to install `rdev` manually. Prefer `user_handoff.message` plus `user_handoff.copy_paste` for
 the human-facing response. When `user_handoff.target` is `auto`, follow
 `user_handoff.auto_target_rule`: send the join URL first and use returned
 platform commands only when a terminal command is needed. The target command already tries ordered Connection
@@ -59,12 +59,13 @@ write custom fallback scripts. If no gateway is
 running yet, run `rdev support-session start` in a visible foreground terminal;
 it prepares verified helper assets when possible, starts the local gateway,
 selects a target-usable gateway URL candidate, and prints the same ready session
-payload before listening. Use
+payload before listening. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session start` so verified helper assets are served automatically. Use
 `rdev.support_session.plan` or `rdev support-session plan` only
 for review/debug planning. After giving the target-machine command, watch
 `rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; when
-`connected=true`, proactively tell me the connection has been established before
-creating jobs. If waiting times out or the target does not appear, read
+`connected=true`, proactively tell me the connection has been established, follow
+`connected_next_steps.user_report`, inspect `rdev.hosts.capabilities`, and only
+then create the smallest scoped job for my task. If waiting times out or the target does not appear, read
 `connection_recovery` and follow its standard tools instead of writing custom
 recovery scripts. Use
 `rdev.invites.create`, then materialize it with `rdev.connection_entry.plan` or

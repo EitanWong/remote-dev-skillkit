@@ -50,7 +50,13 @@ code. It also includes `user_handoff` with a localized `message` and exact
 `copy_paste` value; Agents should send that to the human verbatim. When
 `user_handoff.target` is `auto`, Agents should follow
 `user_handoff.auto_target_rule`: send the join URL first, then use the returned
-platform command only when a terminal command is needed.
+platform command only when a terminal command is needed. The payload also
+includes `target_bootstrap_requirements`; CLI-created sessions can include
+`target_bootstrap_readiness` after probing gateway `/assets` endpoints. If an
+existing gateway cannot serve the verified helper assets for the selected
+platform, Agents should recover with `rdev support-session start` or
+`rdev support-session prepare --build-assets` instead of asking the target-side
+human to install `rdev` manually.
 
 `rdev.support_session.prepare` returns `rdev.support-session-prepare.v1` in
 `structuredContent`. Fresh Agent sessions should call handoff first, then call
@@ -78,6 +84,11 @@ The embedded `connection_attempt_policy` is the only place Agents should read
 target-side timeout/retry behavior from.
 This is a CLI foreground process rather than an MCP tool because MCP calls
 should not hide or orphan a long-running gateway.
+Agents should not manually combine `rdev gateway serve` and `rdev invite create`
+for ordinary support sessions; that low-level path can omit bootstrap helper
+assets. If a dev gateway is intentionally started by hand, configure
+`--rdev-assets-dir` or the platform-specific `--rdev-*` asset flags before
+issuing target-side commands.
 
 `rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
 `structuredContent`. Agents should call it before inventing any gateway,
@@ -133,7 +144,12 @@ approval bypass and is rejected for managed or break-glass tickets.
 `interval_millis`. Agents should use the MCP wait mode or the CLI
 `rdev support-session status --wait` instead of writing their own polling loop.
 When the returned status has `connected=true`, immediately tell the user the
-connection is established before creating jobs. Status payloads also include
+connection is established before creating jobs. Status payloads include
+`connected_next_steps` with schema
+`rdev.support-session-connected-next-steps.v1`; when connected, Agents should
+send `connected_next_steps.user_report`, call the listed
+`rdev.hosts.capabilities` follow-up, then create only the smallest scoped job
+matching the user's task. Status payloads also include
 `connection_recovery` with schema
 `rdev.support-session-connection-recovery.v1`; when the session is still
 waiting, revoked, pending approval, or the wait call times out, Agents must

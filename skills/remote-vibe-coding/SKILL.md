@@ -78,11 +78,25 @@ revocation.
 - When `user_handoff.target` is `auto`, follow `user_handoff.auto_target_rule`:
   send the join URL first, and use the returned Windows or macOS/Linux command
   only if the human asks for a terminal command or cannot open the page.
+- Read `target_bootstrap_requirements` and, for CLI-created sessions,
+  `target_bootstrap_readiness` before sending a platform terminal command from
+  an existing gateway. If readiness is false, recover with
+  `rdev support-session start` or `rdev support-session prepare --build-assets`
+  instead of asking the target-side human to install `rdev` manually or writing
+  a custom downloader.
+- Do not manually combine `rdev gateway serve` plus `rdev invite create` for
+  ordinary support sessions. That low-level path can omit verified bootstrap
+  helper assets. If a dev gateway must be started by hand, configure
+  `--rdev-assets-dir` or platform-specific helper asset flags first.
 - When `rdev.support_session.status` or `rdev support-session status --wait`
   returns `waiting`, `pending-approval`, `revoked`, or `timed_out=true`, read
   `connection_recovery` and follow its `agent_next_actions`,
   `standard_tools`, and `forbidden` fields. Do not invent target-side recovery
   scripts or ask the human for raw ticket/root/gateway/transport values.
+- When status returns `connected=true`, immediately send
+  `connected_next_steps.user_report` to the user, call the listed
+  `rdev.hosts.capabilities` follow-up, then create only the smallest scoped job
+  matching the user's task.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -154,8 +168,9 @@ revocation.
    metadata.
 6. Watch the host with `rdev.support_session.status` using `wait=true` or
    `rdev support-session status --wait`. When `connected=true`, proactively
-   report the localized feedback to the user before creating jobs. Do not write
-   custom polling loops. If the wait times out or the target does not appear,
+   report `connected_next_steps.user_report` to the user, inspect
+   `rdev.hosts.capabilities`, and only then create the smallest scoped job. Do
+   not write custom polling loops. If the wait times out or the target does not appear,
    follow `connection_recovery` instead of writing PowerShell, shell, relay,
    approval, or bootstrap glue. If the
    standard attended-temporary auto-approval contract activated it, verify it is

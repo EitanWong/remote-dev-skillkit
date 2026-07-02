@@ -104,9 +104,15 @@ testing. If a reachable gateway is already running, call
 `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
-payload. The target command already tries ordered gateway URL candidates with
-bounded timeout/retry behavior; do not write a custom PowerShell, shell, relay,
-or polling fallback. Prefer `user_handoff.message` plus
+payload. It also returns `target_bootstrap_requirements` and, for CLI calls,
+`target_bootstrap_readiness`, so the Agent can detect whether an existing
+gateway can serve verified helper assets for clean targets that do not already
+have `rdev`. If readiness is false for a platform command, run
+`rdev support-session start` or `rdev support-session prepare --build-assets`
+instead of asking the target-side human to install `rdev` manually. The target
+command already tries ordered gateway URL candidates with bounded timeout/retry
+behavior; do not write a custom PowerShell, shell, relay, or polling fallback.
+Prefer `user_handoff.message` plus
 `user_handoff.copy_paste` when telling me what to run. If no gateway is running
 yet, run `rdev support-session start` in a visible foreground terminal; it
 auto-prepares verified Windows/macOS/Linux
@@ -116,7 +122,10 @@ gateway, and prints the same ready session payload before listening. Use
 planning. After giving me the target-machine command, watch
 `rdev.support_session.status`
 or `rdev support-session status --wait`; when `connected=true`, tell me the
-connection has been established before creating jobs. If waiting times out or
+connection has been established before creating jobs. Then follow
+`connected_next_steps`: report `user_report`, inspect
+`rdev.hosts.capabilities`, and create only the smallest scoped job for my task.
+If waiting times out or
 the target does not appear, read the returned `connection_recovery` field and
 follow its standard tools instead of writing custom recovery scripts.
 Do not ask humans to assemble ticket, root, gateway, transport, release, or
@@ -217,7 +226,13 @@ run the returned foreground `rdev support-session start` command when no
 gateway is running. The created/started session then returns
 `rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
-placeholders. The command itself loops through ordered Connection Entry URLs on
+placeholders. It also includes `target_bootstrap_requirements` and, for CLI
+create calls against an existing gateway, `target_bootstrap_readiness`. Those
+fields prevent the common failure where a manually started gateway has no
+downloadable `rdev` helper for a clean Windows target. If readiness is false,
+use the standard `support-session start` or `prepare --build-assets` path
+instead of inventing an install script or telling the target user to assemble
+prerequisites. The command itself loops through ordered Connection Entry URLs on
 the target machine with bounded timeouts/retries, so fallback stays in `rdev`
 instead of Agent-written glue. The same payload includes
 `user_handoff.message` and `user_handoff.copy_paste`, which is the exact
@@ -240,6 +255,9 @@ possible, starts the local gateway, and prints
 should use `rdev.support_session.plan` or `rdev support-session plan` only for
 review/debug planning. The Agent should not write its own PowerShell, relay,
 nohup, ticket, root, gateway, transport, status polling, or approval glue.
+If an operator intentionally starts a low-level dev gateway, prefer
+`--rdev-assets-dir <dir>` over five individual helper flags so `/assets`
+contains the verified Windows/macOS/Linux bootstrap helpers.
 
 For lower-level package materialization, the Agent creates an invite and
 materializes it before asking anyone on the target side to do anything. The

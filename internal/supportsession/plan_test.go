@@ -360,6 +360,17 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 		!strings.Contains(status["feedback"].(string), "连接已经建立") {
 		t.Fatalf("expected connected localized status, got %#v", status)
 	}
+	next := status["connected_next_steps"].(map[string]any)
+	calls := next["mcp_next_calls"].([]map[string]any)
+	if next["schema_version"] != ConnectedNextStepsSchemaVersion ||
+		next["connected"] != true ||
+		next["host_id"] != "host_1" ||
+		!strings.Contains(next["user_report"].(string), "连接已经建立") ||
+		len(calls) != 1 ||
+		calls[0]["tool"] != "rdev.hosts.capabilities" ||
+		calls[0]["arguments"].(map[string]any)["host_id"] != "host_1" {
+		t.Fatalf("expected connected next-step contract, got %#v", next)
+	}
 }
 
 func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
@@ -377,6 +388,13 @@ func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
 		!strings.Contains(actions, "instead of writing ad hoc network scripts") ||
 		!strings.Contains(forbidden, "Agent-authored PowerShell or shell relay scripts") {
 		t.Fatalf("expected standard connection recovery contract, got %#v", recovery)
+	}
+	next := status["connected_next_steps"].(map[string]any)
+	if next["schema_version"] != ConnectedNextStepsSchemaVersion ||
+		next["connected"] != false ||
+		next["host_id"] != "" ||
+		next["mcp_next_calls"] != nil {
+		t.Fatalf("waiting status should not invent connected next calls, got %#v", next)
 	}
 }
 

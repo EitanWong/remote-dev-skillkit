@@ -134,7 +134,13 @@ Steps:
     to run on the target machine. When `user_handoff.target` is `auto`, follow
     `user_handoff.auto_target_rule`: send the join URL first, and use the
     returned platform command only if I ask for a terminal command or cannot
-    open the page. If no suitable
+    open the page. Also read `target_bootstrap_requirements` and, for CLI
+    create calls, `target_bootstrap_readiness`. If an existing gateway cannot
+    serve the verified helper assets for the selected platform, use the
+    standard `rdev support-session start` or
+    `rdev support-session prepare --build-assets` recovery path instead of
+    asking the target-side human to install `rdev` manually or writing a custom
+    downloader. If no suitable
     gateway is running yet, run `rdev support-session start` in a visible
     foreground terminal. It
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
@@ -149,12 +155,19 @@ Steps:
     `rdev.support_session.status` with `wait=true` through MCP or
     `rdev support-session status --wait` through CLI. When the status returns
     `connected=true`, proactively tell me that the connection has been
-    established before creating any jobs. If status waiting times out or the
+    established before creating any jobs. Then follow `connected_next_steps`:
+    send `user_report`, inspect `rdev.hosts.capabilities`, and create only the
+    smallest scoped job for my task. If status waiting times out or the
     target does not appear, read `connection_recovery` and follow its
     `agent_next_actions`, `standard_tools`, and `forbidden` fields. Do not
     write a custom polling loop.
     Do not write ad hoc PowerShell, shell, relay, nohup, approval, or bootstrap
-    code when the plan can provide it. For lower-level package materialization
+    code when the plan can provide it. Do not manually combine
+    `rdev gateway serve` plus `rdev invite create` for a normal support session;
+    that path can miss verified bootstrap helper assets. If a low-level dev
+    gateway is explicitly required, configure helper assets with
+    `--rdev-assets-dir` or the platform-specific asset flags before generating
+    human-facing target commands. For lower-level package materialization
     or when `rdev.support_session.create` is not sufficient, use
     `rdev.invites.create` or `rdev invite create` so the Agent receives
     `connection_entry`, `connection_entry.package_catalog`,
