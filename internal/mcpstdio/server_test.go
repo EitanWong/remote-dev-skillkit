@@ -321,6 +321,14 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 		attemptPolicy["curl_connect_timeout_sec"] != float64(2) {
 		t.Fatalf("expected bounded connection attempt policy, got %#v", attemptPolicy)
 	}
+	handoff := structured["user_handoff"].(map[string]any)
+	if handoff["schema_version"] != "rdev.support-session-user-handoff.v1" ||
+		handoff["copy_paste_kind"] != "windows" ||
+		handoff["copy_paste"] != targetCommand ||
+		!strings.Contains(handoff["message"].(string), "目标电脑") ||
+		!strings.Contains(handoff["agent_next_step"].(string), "wait=true") {
+		t.Fatalf("expected ready user handoff, got %#v", handoff)
+	}
 	if len(gatewayCandidates) == 0 {
 		t.Fatalf("expected created payload to carry gateway candidates: %#v", structured)
 	}

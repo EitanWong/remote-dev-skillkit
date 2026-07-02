@@ -66,6 +66,9 @@ revocation.
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
+  telling the human what to run on the target machine. Do not rewrite the
+  command or ask the human to assemble values.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -113,7 +116,8 @@ revocation.
    `target_command` or `join_url`, then watch the returned status command. If
    no gateway is running yet, run `rdev support-session start` in a visible
    foreground terminal and use the embedded `session.target_command` or
-   `session.join_url`. Use `rdev.support_session.plan` or
+   `session.join_url`; when `user_handoff` is present, send its localized
+   `message` plus `copy_paste` verbatim. Use `rdev.support_session.plan` or
    `rdev support-session plan` only for review/debug planning. For lower-level
    package materialization only, create an invite with `rdev.invites.create` or
    `rdev invite create`, and materialize it with `rdev.connection_entry.plan`

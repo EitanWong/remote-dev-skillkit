@@ -43,7 +43,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.create",
-			Description: "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. The target command is the standardized fallback surface and can try ordered gateway URL candidates with bounded timeout/retry behavior without Agent-authored scripts. Agents should prefer this high-level tool when the gateway is running; if no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+			Description: "Create an attended temporary support session through an already reachable gateway and return a ready user_handoff, target command, and status watcher. The target command is the standardized fallback surface and can try ordered gateway URL candidates with bounded timeout/retry behavior without Agent-authored scripts. Agents should prefer user_handoff.message plus user_handoff.copy_paste for the human-facing response. If no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
 			Safety:      "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
 			InputSchema: object(map[string]any{
 				"gateway_url":         stringField(),

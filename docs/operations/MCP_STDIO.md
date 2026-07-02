@@ -35,7 +35,8 @@ surface: it can try ordered Connection Entry URLs on the target machine with
 bounded per-candidate timeout/retry behavior before failing. The payload also
 includes `connection_attempt_policy`, so Agents can explain the behavior without
 writing replacement PowerShell, shell, relay, approval polling, or bootstrap
-code.
+code. It also includes `user_handoff` with a localized `message` and exact
+`copy_paste` value; Agents should send that to the human verbatim.
 
 `rdev.support_session.prepare` returns `rdev.support-session-prepare.v1` in
 `structuredContent`. Fresh Agent sessions should call it when local `rdev`,

@@ -367,9 +367,16 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 			URL         string `json:"url"`
 			Recommended bool   `json:"recommended"`
 		} `json:"gateway_url_candidates"`
-		TargetCommand           string            `json:"target_command"`
-		TargetCommands          map[string]string `json:"target_commands"`
-		WatchConnectionStatus   []string          `json:"watch_connection_status"`
+		TargetCommand         string            `json:"target_command"`
+		TargetCommands        map[string]string `json:"target_commands"`
+		WatchConnectionStatus []string          `json:"watch_connection_status"`
+		UserHandoff           struct {
+			SchemaVersion string `json:"schema_version"`
+			CopyPasteKind string `json:"copy_paste_kind"`
+			CopyPaste     string `json:"copy_paste"`
+			Message       string `json:"message"`
+			AgentNextStep string `json:"agent_next_step"`
+		} `json:"user_handoff"`
 		ConnectionAttemptPolicy struct {
 			SchemaVersion             string `json:"schema_version"`
 			WindowsDownloadTimeoutSec int    `json:"windows_download_timeout_sec"`
@@ -414,6 +421,13 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.ConnectionAttemptPolicy.CurlMaxTimeSec != 10 ||
 		payload.ConnectionAttemptPolicy.RetriesPerCandidate != 1 {
 		t.Fatalf("expected bounded connection attempt policy, got %#v", payload.ConnectionAttemptPolicy)
+	}
+	if payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
+		payload.UserHandoff.CopyPasteKind != "windows" ||
+		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
+		!strings.Contains(payload.UserHandoff.Message, "目标电脑") ||
+		!strings.Contains(payload.UserHandoff.AgentNextStep, "wait=true") {
+		t.Fatalf("expected ready user handoff, got %#v", payload.UserHandoff)
 	}
 	watch := strings.Join(payload.WatchConnectionStatus, "\x00")
 	if !strings.Contains(watch, payload.TicketCode) ||

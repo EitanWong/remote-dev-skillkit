@@ -48,6 +48,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
+  telling the human what to run on the target machine. Do not rewrite the
+  command or ask the human to assemble values.
 - After giving the target-side command, watch the session with
   `rdev.support_session.status` using `wait=true` or
   `rdev support-session status --wait`. When `connected=true`, proactively tell
@@ -144,7 +147,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    local probes.
 6. If a reachable gateway exists, create the standard support session with
    `rdev.support_session.create` or `rdev support-session create`; send only the
-   returned `target_command` or `join_url` to the target-side human. If no
+   returned `user_handoff.copy_paste`, `target_command`, or `join_url` to the
+   target-side human. If no
    gateway exists, run `rdev support-session start` in a visible foreground
    terminal and send only the embedded `session.target_command` or
    `session.join_url`. Use `rdev.support_session.plan` or

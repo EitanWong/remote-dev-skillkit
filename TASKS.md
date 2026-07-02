@@ -130,6 +130,7 @@
 - [x] Add ordered gateway-candidate fallback directly into `rdev.support-session-created.v1` target commands so target-side one-liners try known Connection Entry URLs before failing and Agents do not write ad hoc PowerShell/shell fallback scripts.
 - [x] Add `rdev.connection-attempt-policy.v1` and bounded target-side timeout/retry behavior so Windows/macOS/Linux one-liners fail over quickly instead of hanging on a dead gateway candidate.
 - [x] Add MCP wait support to `rdev.support_session.status` so Agents can wait for connection feedback through the standard tool instead of writing custom polling loops.
+- [x] Add `rdev.support-session-user-handoff.v1` so Agents can send a localized message plus exact copy-paste command/link to humans without rewriting the target command.
 - [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.
 - [ ] Run real fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode acceptance to confirm the Agent calls `rdev.support_session.create` when a gateway is reachable, uses `rdev support-session start` when no gateway exists, reserves `rdev.support_session.plan` for review/debug, and never invents gateway/bootstrap code.
 - [x] Auto-include manifest root public keys in gateway ticket responses, Agent invite host commands, MCP invite output, and join bootstrap scripts so target users do not copy trust roots from chat.

@@ -120,6 +120,15 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(created["target_commands"].(map[string]string)["macos_linux"], "for u in") {
 		t.Fatalf("expected target command to try ordered gateway candidates: %#v", created["target_commands"])
 	}
+	handoff := created["user_handoff"].(map[string]any)
+	if handoff["schema_version"] != UserHandoffSchemaVersion ||
+		handoff["copy_paste_kind"] != "windows" ||
+		handoff["copy_paste"] != created["target_command"] ||
+		!strings.Contains(handoff["message"].(string), "目标电脑") ||
+		!strings.Contains(handoff["agent_next_step"].(string), "wait=true") ||
+		!strings.Contains(handoff["agent_rule"].(string), "do not rewrite") {
+		t.Fatalf("expected ready localized user handoff, got %#v", handoff)
+	}
 	macLinuxCommand := created["target_commands"].(map[string]string)["macos_linux"]
 	if !strings.Contains(macLinuxCommand, "--connect-timeout 2") ||
 		!strings.Contains(macLinuxCommand, "--max-time 10") ||

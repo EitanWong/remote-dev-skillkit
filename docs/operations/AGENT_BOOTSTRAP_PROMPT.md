@@ -125,7 +125,9 @@ Steps:
     and status watcher in one payload. The target command already tries ordered
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
-    PowerShell, shell, relay, or approval-polling fallback. If no suitable
+    PowerShell, shell, relay, or approval-polling fallback. Prefer
+    `user_handoff.message` plus `user_handoff.copy_paste` when telling me what
+    to run on the target machine. If no suitable
     gateway is running yet, run `rdev support-session start` in a visible
     foreground terminal. It
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
