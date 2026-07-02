@@ -106,9 +106,11 @@ Steps:
     script, or a signed package. Keep low-level connection parameters in
     Agent/tool metadata and report `missing_inputs` when package materialization
     needs more release data.
-    Select host mode from ownership and duration: use `managed` for my own
-    personal/fleet machines that need durable development access; use
-    `attended-temporary` for third-party or one-off repair machines.
+    Select host mode with `connection_entry_plan.target_selection_policy`: use
+    `managed` for my own personal/fleet machines that need durable development
+    access; use `attended-temporary` for third-party or one-off repair machines.
+    Ask one short question before managed mode when ownership or persistence
+    approval is unclear.
     - If the Agent and host are on the same machine, use local MCP stdio and
       local/dev gateway flows.
     - If the Agent and host share a LAN or VPN, prefer a LAN-reachable gateway

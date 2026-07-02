@@ -132,6 +132,16 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || !containsAnyString(flow, "materialize the invite with rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions") {
 		t.Fatalf("expected required materialization flow, got %#v", connectionEntryPlan)
 	}
+	selectionPolicy, ok := connectionEntryPlan["target_selection_policy"].(map[string]any)
+	if !ok ||
+		selectionPolicy["schema_version"] != "rdev.target-selection-policy.v1" ||
+		selectionPolicy["default_owned_mode"] != "managed" ||
+		selectionPolicy["default_third_party_mode"] != "attended-temporary" {
+		t.Fatalf("expected target selection policy, got %#v", connectionEntryPlan)
+	}
+	if rules, ok := selectionPolicy["agent_rules"].([]any); !ok || !containsAnyString(rules, "never make target-side humans choose between ticket, root, gateway, transport, release, or checksum values") {
+		t.Fatalf("expected no-manual-assembly target selection rule, got %#v", selectionPolicy)
+	}
 	implemented, ok := connectionPlan["implemented"].([]any)
 	if !ok || len(implemented) < 4 {
 		t.Fatalf("expected implemented connection protocols, got %#v", connectionPlan)

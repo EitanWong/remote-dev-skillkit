@@ -79,22 +79,23 @@ revocation.
    requirements, transcripts, large logs, and evidence on the target host; load
    only indexed, redacted, task-relevant slices. Persist reusable discoveries
    into Skill runtime memory when they are safe to retain.
-2. Follow `connection_entry_plan` for every new connection: if the target is
-   operator-owned or expected to support recurring Agent development, choose
-   managed mode with an explicit reviewed service lifecycle; if it is
-   third-party or one-off repair, choose attended-temporary mode with no
-   persistence by default. Prefer a signed self-contained connection entry
-   package with the target-platform `rdev` binary, release bundle, manifest URL,
-   pinned manifest root, visible launcher, and `--transport auto` before asking
-   a human to install prerequisites or copy flags. Use the materialized
-   `entry_package_plan` as the generic package surface for Windows, macOS,
-   Linux, managed-service, LAN, hosted, relay, or mesh variants; if packaging is
-   not ready, report `missing_inputs` to the operator and keep target-side
-   instructions limited to a Connection Entry. For owned managed machines,
-   prefer the generated reviewed LaunchAgent, systemd user-service, or Windows
-   Service package plan over hand-written service-manager commands; do not start
-   or install the service until the operator explicitly approves the reviewed
-   service-control steps.
+2. Follow `connection_entry_plan.target_selection_policy` for every new
+   connection: if the target is operator-owned or expected to support recurring
+   Agent development, choose managed mode with an explicit reviewed service
+   lifecycle; if it is third-party or one-off repair, choose attended-temporary
+   mode with no persistence by default. If ownership or persistence approval is
+   unclear, ask one short question before creating a managed entry. Prefer a
+   signed self-contained connection entry package with the target-platform
+   `rdev` binary, release bundle, manifest URL, pinned manifest root, visible
+   launcher, and `--transport auto` before asking a human to install
+   prerequisites or copy flags. Use the materialized `entry_package_plan` as the
+   generic package surface for Windows, macOS, Linux, managed-service, LAN,
+   hosted, relay, or mesh variants; if packaging is not ready, report
+   `missing_inputs` to the operator and keep target-side instructions limited to
+   a Connection Entry. For owned managed machines, prefer the generated reviewed
+   LaunchAgent, systemd user-service, or Windows Service package plan over
+   hand-written service-manager commands; do not start or install the service
+   until the operator explicitly approves the reviewed service-control steps.
 3. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
    runtimes, package managers, lockfiles, framework paths, proxies,
    permissions, and trust roots before installing anything.

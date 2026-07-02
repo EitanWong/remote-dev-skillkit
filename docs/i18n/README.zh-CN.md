@@ -39,7 +39,8 @@ materialize it with `rdev.connection_entry.plan` or `rdev connection-entry plan`
 Give the target side only the selected link, visible script, or signed package;
 keep low-level parameters in Agent/tool metadata. Choose `managed` for my own
 long-running machines and `attended-temporary` for third-party or one-off repair
-machines. Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed;
+machines by following `connection_entry_plan.target_selection_policy`.
+Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed;
 prefer existing, open-source/free options such as frp, Chisel, headscale, or
 WireGuard; ask before privileged, persistent, paid, firewall, DNS, cloud, or
 security-policy changes. Dry-run before execute. Do not hardcode private paths,

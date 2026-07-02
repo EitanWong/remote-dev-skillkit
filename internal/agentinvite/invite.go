@@ -133,21 +133,33 @@ type ConnectionEntry struct {
 }
 
 type ConnectionEntryPlan struct {
-	SchemaVersion      string   `json:"schema_version"`
-	Mode               string   `json:"mode"`
-	PackagePlanSchema  string   `json:"package_plan_schema"`
-	BestFor            []string `json:"best_for"`
-	EntryModes         []string `json:"entry_modes"`
-	ModeSelection      []string `json:"mode_selection"`
-	RequiredAgentFlow  []string `json:"required_agent_flow"`
-	PackageFormats     []string `json:"package_formats"`
-	RequiredContents   []string `json:"required_contents"`
-	RuntimeFlow        []string `json:"runtime_flow"`
-	NetworkStrategy    []string `json:"network_strategy"`
-	PrivilegeStrategy  []string `json:"privilege_strategy"`
-	AgentRules         []string `json:"agent_rules"`
-	EvidenceRequired   []string `json:"evidence_required"`
-	ImplementationGaps []string `json:"implementation_gaps"`
+	SchemaVersion         string                `json:"schema_version"`
+	Mode                  string                `json:"mode"`
+	PackagePlanSchema     string                `json:"package_plan_schema"`
+	BestFor               []string              `json:"best_for"`
+	EntryModes            []string              `json:"entry_modes"`
+	TargetSelectionPolicy TargetSelectionPolicy `json:"target_selection_policy"`
+	ModeSelection         []string              `json:"mode_selection"`
+	RequiredAgentFlow     []string              `json:"required_agent_flow"`
+	PackageFormats        []string              `json:"package_formats"`
+	RequiredContents      []string              `json:"required_contents"`
+	RuntimeFlow           []string              `json:"runtime_flow"`
+	NetworkStrategy       []string              `json:"network_strategy"`
+	PrivilegeStrategy     []string              `json:"privilege_strategy"`
+	AgentRules            []string              `json:"agent_rules"`
+	EvidenceRequired      []string              `json:"evidence_required"`
+	ImplementationGaps    []string              `json:"implementation_gaps"`
+}
+
+type TargetSelectionPolicy struct {
+	SchemaVersion         string   `json:"schema_version"`
+	DecisionOwner         string   `json:"decision_owner"`
+	DefaultOwnedMode      string   `json:"default_owned_mode"`
+	DefaultThirdPartyMode string   `json:"default_third_party_mode"`
+	OwnedSignals          []string `json:"owned_signals"`
+	ThirdPartySignals     []string `json:"third_party_signals"`
+	AskWhen               []string `json:"ask_when"`
+	AgentRules            []string `json:"agent_rules"`
 }
 
 type HostContextPlan struct {
@@ -663,6 +675,7 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"managed for operator-owned personal or fleet machines that need durable development access",
 			"break-glass only when operator policy explicitly permits a short-lived emergency session",
 		},
+		TargetSelectionPolicy: newTargetSelectionPolicy(),
 		ModeSelection: []string{
 			"if the machine is operator-owned or expected to support recurring Agent development work, select managed mode and plan an explicit visible service lifecycle",
 			"if the machine belongs to someone else or the session is one-off support, select attended-temporary mode with no persistence by default",
@@ -735,6 +748,37 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"serve package-aware connection entry pages that choose the target OS package automatically",
 			"add end-to-end Windows clean-machine acceptance evidence for one-run connection entry startup",
 			"add relay/mesh adapter execution paths for environments where direct outbound gateway access fails",
+		},
+	}
+}
+
+func newTargetSelectionPolicy() TargetSelectionPolicy {
+	return TargetSelectionPolicy{
+		SchemaVersion:         "rdev.target-selection-policy.v1",
+		DecisionOwner:         "agent-after-probing-and-when-needed-operator-confirmation",
+		DefaultOwnedMode:      "managed",
+		DefaultThirdPartyMode: "attended-temporary",
+		OwnedSignals: []string{
+			"the operator says this is my computer, personal workstation, company workstation, or managed fleet host",
+			"the task requires recurring Agent development, long-running maintenance, reconnect after restart, or durable workspace context",
+			"an existing owned-host inventory, enrollment certificate, managed service record, or operator policy identifies the machine as managed",
+		},
+		ThirdPartySignals: []string{
+			"the machine belongs to a customer, friend, vendor, or other third party",
+			"the task is one-off repair, debugging, setup, or short-lived support",
+			"the operator has not explicitly approved persistent service lifecycle or owned-host enrollment",
+		},
+		AskWhen: []string{
+			"ownership is ambiguous and the selected mode would create persistence",
+			"the user requests long-term access on a third-party machine",
+			"the repair appears to require administrator/root privileges, service installation, firewall, DNS, cloud, paid relay, or security-policy changes",
+		},
+		AgentRules: []string{
+			"decide the target mode from ownership, duration, and persistence approval before materializing the Connection Entry",
+			"use managed only for owned or formally managed machines with explicit durable-access approval",
+			"use attended-temporary for third-party or one-off machines by default",
+			"ask exactly one short question when the mode cannot be decided safely from probes, inventory, or the operator's request",
+			"never make target-side humans choose between ticket, root, gateway, transport, release, or checksum values",
 		},
 	}
 }

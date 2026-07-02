@@ -152,6 +152,12 @@ instructions. That materializes the invite into
 - missing release inputs that must be provided before packaging is ready;
 - `entry_package_plan` when a platform package/launcher plan can be generated.
 
+The same payload includes `connection_entry_plan.target_selection_policy`.
+Agents should use it before materialization: owned personal or fleet machines
+default to `managed`, third-party or one-off machines default to
+`attended-temporary`, and ambiguous ownership or persistence approval requires
+one short operator question before creating a managed entry.
+
 When an agent provides an empty `out_dir`, the MCP and CLI materializers write a
 target-side `CONNECTION_ENTRY.md`, the machine-readable
 `connection-entry-plan.json`, and any generated launcher/package planning files.
@@ -170,14 +176,12 @@ Future LAN, hosted, relay, mesh, SSH, and VPN package planners must attach to
 the same generic Connection Entry Package Plan surface rather than creating new
 human-facing parameter lists.
 
-The same invite includes `connection_entry_plan`. Agents should use it as the
-universal connection decision contract rather than exposing ticket codes,
-gateway URLs, manifest roots, or transport flags to a human. For an
-operator-owned personal or fleet machine, choose managed mode and create an
-explicit reviewed service lifecycle with release gates, enrollment renewal,
-revocation refresh, reconnect proof, and stop/uninstall instructions. For a
-third-party or one-off repair machine, choose attended-temporary mode and keep
-the session visible with no persistence by default.
+Agents should treat `connection_entry_plan` as the universal connection
+decision contract rather than exposing ticket codes, gateway URLs, manifest
+roots, or transport flags to a human. For a managed owned host, the plan should
+include release gates, enrollment renewal, revocation refresh, reconnect proof,
+and stop/uninstall instructions. For attended temporary support, the plan should
+keep the session visible with no persistence by default.
 
 The same invite also includes `host_context_plan`, which tells agents to keep
 remote environment details, project file structure, requirement notes,

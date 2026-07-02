@@ -39,8 +39,10 @@ For every new target host, use `connection_entry.entry_url` or a signed
 connection entry package over manually copying host flags. The join page
 provides visible, inspectable platform bootstrap commands for the target
 machine. Agents should treat those commands as consented startup, then choose
-the correct host mode: `managed` for operator-owned machines that need durable
-development access, or `attended-temporary` for third-party or one-off repair.
+the correct host mode from `connection_entry_plan.target_selection_policy`:
+`managed` for operator-owned machines that need durable development access, or
+`attended-temporary` for third-party or one-off repair. If ownership or
+persistence approval is unclear, ask one short question before managed mode.
 After the host connects, the Agent watches `rdev.hosts.list`, approves the
 expected host when policy requires approval, runs scoped jobs, exports evidence,
 and revokes or stops the session when finished.

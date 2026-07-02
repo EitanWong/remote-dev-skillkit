@@ -154,10 +154,20 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 			HumanSteps      []string          `json:"human_steps"`
 		} `json:"connection_entry"`
 		ConnectionEntryPlan struct {
-			SchemaVersion      string   `json:"schema_version"`
-			Mode               string   `json:"mode"`
-			PackagePlanSchema  string   `json:"package_plan_schema"`
-			EntryModes         []string `json:"entry_modes"`
+			SchemaVersion         string   `json:"schema_version"`
+			Mode                  string   `json:"mode"`
+			PackagePlanSchema     string   `json:"package_plan_schema"`
+			EntryModes            []string `json:"entry_modes"`
+			TargetSelectionPolicy struct {
+				SchemaVersion         string   `json:"schema_version"`
+				DecisionOwner         string   `json:"decision_owner"`
+				DefaultOwnedMode      string   `json:"default_owned_mode"`
+				DefaultThirdPartyMode string   `json:"default_third_party_mode"`
+				OwnedSignals          []string `json:"owned_signals"`
+				ThirdPartySignals     []string `json:"third_party_signals"`
+				AskWhen               []string `json:"ask_when"`
+				AgentRules            []string `json:"agent_rules"`
+			} `json:"target_selection_policy"`
 			ModeSelection      []string `json:"mode_selection"`
 			RequiredAgentFlow  []string `json:"required_agent_flow"`
 			PackageFormats     []string `json:"package_formats"`
@@ -275,6 +285,13 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 		t.Fatalf("invite should include connection entry plan: %#v", payload.ConnectionEntryPlan)
 	}
 	if len(payload.ConnectionEntryPlan.EntryModes) < 2 ||
+		payload.ConnectionEntryPlan.TargetSelectionPolicy.SchemaVersion != "rdev.target-selection-policy.v1" ||
+		payload.ConnectionEntryPlan.TargetSelectionPolicy.DefaultOwnedMode != "managed" ||
+		payload.ConnectionEntryPlan.TargetSelectionPolicy.DefaultThirdPartyMode != "attended-temporary" ||
+		len(payload.ConnectionEntryPlan.TargetSelectionPolicy.OwnedSignals) == 0 ||
+		len(payload.ConnectionEntryPlan.TargetSelectionPolicy.ThirdPartySignals) == 0 ||
+		len(payload.ConnectionEntryPlan.TargetSelectionPolicy.AskWhen) == 0 ||
+		len(payload.ConnectionEntryPlan.TargetSelectionPolicy.AgentRules) == 0 ||
 		len(payload.ConnectionEntryPlan.ModeSelection) == 0 ||
 		len(payload.ConnectionEntryPlan.RequiredAgentFlow) == 0 ||
 		len(payload.ConnectionEntryPlan.PackageFormats) < 3 ||

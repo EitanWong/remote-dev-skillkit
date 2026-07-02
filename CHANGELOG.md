@@ -4,6 +4,32 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.8-dev
+
+Current phase: Connection Entry now carries an explicit target-selection policy
+so Agents choose durable managed mode for owned machines and attended temporary
+mode for third-party or one-off machines without asking humans to assemble
+low-level connection flags.
+
+### Added
+
+- Added `connection_entry_plan.target_selection_policy` with
+  `rdev.target-selection-policy.v1`, owned/third-party signals, default modes,
+  Agent rules, and ask-when boundaries for ambiguous ownership or persistence.
+- Added CLI and MCP regression tests that require invite output to expose the
+  target-selection policy and keep raw ticket/root/gateway/transport/release
+  choices out of the target-side handoff.
+
+### Changed
+
+- Updated README, Agent Bootstrap Prompt, operations docs, multilingual quick
+  starts, and the core remote-vibe-coding Skill so all scenarios start from an
+  Agent-created Connection Entry, not a human-assembled ticket/root/gateway
+  command.
+- Moved the README remote-session flow toward plain-language Agent requests and
+  kept low-level invite commands as implementation detail for agents and
+  developer docs.
+
 ## 0.1.7-dev
 
 Current phase: Connection Entry is now the universal remote-host handoff
