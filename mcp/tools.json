@@ -85,7 +85,7 @@
     },
     {
       "name": "rdev.support_session.create",
-      "description": "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. Agents should prefer this high-level tool when the gateway is running, instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+      "description": "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. Agents should prefer this high-level tool when the gateway is running; if no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
       "safety": "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
       "inputSchema": {
         "additionalProperties": false,
@@ -136,7 +136,7 @@
     },
     {
       "name": "rdev.support_session.plan",
-      "description": "Create a standardized Agent-native support session plan that builds or locates rdev, starts a gateway with verified helper assets, creates a scoped attended-temporary invite, and returns localized one-command target instructions. Agents should use this before writing any ad hoc bootstrap, relay, or approval steps.",
+      "description": "Create a standardized Agent-native support session plan for review/debug access to gateway startup, verified helper assets, invite creation, localized target commands, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.create when a gateway is running and the foreground CLI command rdev support-session start when no gateway is running.",
       "safety": "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",
       "inputSchema": {
         "additionalProperties": false,

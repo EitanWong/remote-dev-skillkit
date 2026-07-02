@@ -95,9 +95,11 @@ or VPN-assisted connectivity. If a reachable gateway is already running, first
 call `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
-payload. If no gateway is running yet, call `rdev.support_session.plan` or
-`rdev support-session plan` to prepare one. After giving me the target-machine
-command, watch `rdev.support_session.status`
+payload. If no gateway is running yet, run `rdev support-session start` in a
+visible foreground terminal; it starts the local gateway and prints the same
+ready session payload before listening. Use `rdev.support_session.plan` or
+`rdev support-session plan` only for review/debug planning. After giving me the
+target-machine command, watch `rdev.support_session.status`
 or `rdev support-session status --wait`; when `connected=true`, tell me the
 connection has been established before creating jobs.
 Do not ask humans to assemble ticket, root, gateway, transport, release, or
@@ -195,10 +197,13 @@ The Agent should start with `rdev.support_session.create` or
 high-level entry creates the scoped attended-temporary ticket and returns
 `rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
-placeholders. The Agent should use `rdev.support_session.plan` or
-`rdev support-session plan` only when it still needs to prepare or start the
-gateway. The Agent should not write its own PowerShell, relay, nohup, ticket,
-root, gateway, transport, status polling, or approval glue.
+placeholders. If no gateway is running yet, the Agent should run
+`rdev support-session start` in a visible foreground terminal; that command
+starts the local gateway and prints `rdev.support-session-started.v1` with the
+embedded ready session. The Agent should use `rdev.support_session.plan` or
+`rdev support-session plan` only for review/debug planning. The Agent should
+not write its own PowerShell, relay, nohup, ticket, root, gateway, transport,
+status polling, or approval glue.
 
 For lower-level package materialization, the Agent creates an invite and
 materializes it before asking anyone on the target side to do anything. The
@@ -209,6 +214,12 @@ hand-assemble ticket codes, root keys, gateway URLs, transports, release roots,
 or checksums.
 
 ```bash
+rdev support-session start \
+  --addr 0.0.0.0:8787 \
+  --gateway-url http://<reachable-gateway-host>:8787 \
+  --target auto \
+  --locale auto
+
 rdev support-session create \
   --gateway-url http://<reachable-gateway-host>:8787 \
   --target auto \

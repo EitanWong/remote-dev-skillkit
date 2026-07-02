@@ -32,10 +32,19 @@ ticket code, and status watcher command. The returned command strings have the
 real ticket code already filled in; Agents must not ask humans to assemble
 ticket/root/gateway/transport values or write replacement bootstrap code.
 
+When no suitable gateway is running yet, Agents should run
+`rdev support-session start` as a visible foreground CLI process. It starts the
+local gateway, creates the attended-temporary ticket, prints
+`rdev.support-session-started.v1` with an embedded
+`rdev.support-session-created.v1`, then keeps serving until interrupted. This is
+a CLI foreground process rather than an MCP tool because MCP calls should not
+hide or orphan a long-running gateway.
+
 `rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
 `structuredContent`. Agents should call it before inventing any gateway,
 PowerShell, relay, nohup, ticket, root, transport, approval, or helper install
-steps when no suitable gateway is running yet. The plan returns:
+steps when they need review/debug access to the underlying gateway argv. The
+plan returns:
 
 - build commands for a local `rdev` plus Windows/macOS/Linux helper binaries;
 - a gateway start argv with state, signing keys, audit log, and verified helper

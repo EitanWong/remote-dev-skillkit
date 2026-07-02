@@ -28,8 +28,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   one-command session package: it already includes the target command, join URL,
   real ticket code, manifest root, status watcher, and scoped
   attended-temporary auto-approval state. If no gateway is running yet, call
-  `rdev.support_session.plan` or `rdev support-session plan` before writing any
-  gateway, PowerShell, relay, nohup, approval, or bootstrap steps.
+  `rdev support-session start` in a visible foreground terminal; it starts the
+  gateway and prints the same ready session payload before listening. Use
+  `rdev.support_session.plan` or `rdev support-session plan` only for
+  review/debug planning before writing any gateway, PowerShell, relay, nohup,
+  approval, or bootstrap steps.
 - After giving the target-side command, watch the session with
   `rdev.support_session.status` or `rdev support-session status --wait`. When
   `connected=true`, proactively tell the user the connection is established
@@ -126,9 +129,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 6. If a reachable gateway exists, create the standard support session with
    `rdev.support_session.create` or `rdev support-session create`; send only the
    returned `target_command` or `join_url` to the target-side human. If no
-   gateway exists, create the standard support session plan with
-   `rdev.support_session.plan` or `rdev support-session plan`; execute only
-   reviewed argv steps from that plan.
+   gateway exists, run `rdev support-session start` in a visible foreground
+   terminal and send only the embedded `session.target_command` or
+   `session.join_url`. Use `rdev.support_session.plan` or
+   `rdev support-session plan` only for review/debug planning.
 7. For lower-level package materialization only, create an invite with
    `rdev.invites.create` when available so the Agent gets `connection_entry`,
    `connection_entry_plan`, manifest root, and transport fallback instructions

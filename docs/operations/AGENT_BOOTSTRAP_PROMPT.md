@@ -115,10 +115,12 @@ Steps:
     `rdev support-session create` through the CLI, to create the session and
     obtain the ready target command, join URL, manifest root, real ticket code,
     and status watcher in one payload. If no suitable gateway is running yet,
-    call `rdev.support_session.plan` or `rdev support-session plan` to obtain
-    the standard gateway startup argv, verified helper assets, invite creation
-    commands, localized target-user command, and scoped attended-temporary
-    auto-approval contract.
+    run `rdev support-session start` in a visible foreground terminal. It starts
+    the local gateway and prints `rdev.support-session-started.v1` with the
+    embedded ready target command, join URL, real ticket code, manifest root,
+    and status watcher before listening. Use `rdev.support_session.plan` or
+    `rdev support-session plan` only for review/debug planning or when the
+    operator asks for the underlying gateway argv.
     After giving the target command to the human, call
     `rdev.support_session.status` through MCP or
     `rdev support-session status --wait` through CLI. When the status returns

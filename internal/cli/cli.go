@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -1712,6 +1713,32 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		return fmt.Errorf("missing support-session subcommand")
 	}
 	switch args[0] {
+	case "start":
+		fs := flag.NewFlagSet("support-session start", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		addr := fs.String("addr", "127.0.0.1:8787", "foreground gateway listen address")
+		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to http://<addr>")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
+		reason := fs.String("reason", "visible temporary remote support", "support session reason")
+		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
+		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
+		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
+		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.supportSessionStart(ctx, supportSessionStartOptions{
+			Addr:        *addr,
+			GatewayURL:  *gatewayURL,
+			WorkDir:     *workDir,
+			Target:      *target,
+			Reason:      *reason,
+			TTLSeconds:  *ttl,
+			AutoApprove: *autoApprove,
+			Locale:      *locale,
+			RdevCommand: *rdevCommand,
+		})
 	case "create":
 		fs := flag.NewFlagSet("support-session create", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1791,6 +1818,18 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 	}
 }
 
+type supportSessionStartOptions struct {
+	Addr        string
+	GatewayURL  string
+	WorkDir     string
+	Target      string
+	Reason      string
+	TTLSeconds  int
+	AutoApprove bool
+	Locale      string
+	RdevCommand string
+}
+
 type supportSessionCreateOptions struct {
 	GatewayURL        string
 	Target            string
@@ -1800,6 +1839,107 @@ type supportSessionCreateOptions struct {
 	Locale            string
 	OperatorTokenFile string
 	RdevCommand       string
+}
+
+func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOptions) error {
+	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
+		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+	}
+	addr := strings.TrimSpace(opts.Addr)
+	if addr == "" {
+		addr = "127.0.0.1:8787"
+	}
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if gatewayURL == "" {
+		gatewayURL = "http://" + addr
+	}
+	workDir := strings.TrimSpace(opts.WorkDir)
+	if workDir == "" {
+		workDir = filepath.Join(".", "work", "rdev-support-session")
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "keys"), 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "gateway"), 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "audit"), 0o700); err != nil {
+		return err
+	}
+	signingKeyPath := filepath.Join(workDir, ".rdev", "keys", "gateway-signing-key.json")
+	manifestKeyPath := filepath.Join(workDir, ".rdev", "keys", "manifest-root-key.json")
+	statePath := filepath.Join(workDir, ".rdev", "gateway", "state.json")
+	auditLogPath := filepath.Join(workDir, ".rdev", "audit", "events.jsonl")
+	key, _, err := signing.LoadOrCreate(signingKeyPath, signing.DefaultKeyID)
+	if err != nil {
+		return err
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
+	store, err := gateway.NewFileStateStore(statePath)
+	if err != nil {
+		return err
+	}
+	if _, _, err := store.LoadInto(gw); err != nil {
+		return err
+	}
+	manifestKey, _, err := signing.LoadOrCreate(manifestKeyPath, "manifest-dev")
+	if err != nil {
+		return err
+	}
+	gw.WithManifestSigningKey(manifestKey.ID, manifestKey.PublicKey, manifestKey.PrivateKey)
+	auditStore := audit.NewJSONLStore(auditLogPath)
+	gw.WithAuditSink(&auditStore)
+	metadata := map[string]string{
+		"connection_entry":  "standard-visible",
+		"approval_contract": "target-consent-scoped-ticket",
+	}
+	if opts.AutoApprove {
+		metadata["auto_approve"] = "attended-temporary"
+	}
+	ticket, err := gw.CreateTicketWithMetadata(
+		model.HostModeAttendedTemporary,
+		opts.TTLSeconds,
+		cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
+		opts.Reason,
+		metadata,
+	)
+	if err != nil {
+		return err
+	}
+	if _, err := store.SaveFrom(gw); err != nil {
+		return err
+	}
+	server := httpapi.NewServerWithStateStore(gw, store)
+	server.Assets = httpapi.AssetConfig{
+		RdevWindowsAMD64Path: filepath.Join(workDir, "bin", "rdev-windows-amd64.exe"),
+		RdevDarwinARM64Path:  filepath.Join(workDir, "bin", "rdev-darwin-arm64"),
+		RdevDarwinAMD64Path:  filepath.Join(workDir, "bin", "rdev-darwin-amd64"),
+		RdevLinuxAMD64Path:   filepath.Join(workDir, "bin", "rdev-linux-amd64"),
+		RdevLinuxARM64Path:   filepath.Join(workDir, "bin", "rdev-linux-arm64"),
+	}
+	created := supportsession.BuildCreated(supportsession.CreatedOptions{
+		GatewayURL:            gatewayURL,
+		Ticket:                ticket,
+		ManifestRootPublicKey: rootPublicKeyString(gw.ManifestRoot()),
+		Target:                opts.Target,
+		Locale:                opts.Locale,
+		RdevCommand:           opts.RdevCommand,
+		AutoApprove:           opts.AutoApprove,
+	})
+	started := supportsession.BuildStarted(supportsession.StartedOptions{
+		Addr:       addr,
+		GatewayURL: gatewayURL,
+		WorkDir:    workDir,
+		Created:    created,
+	})
+	if err := writeJSON(a.Stdout, started); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
+	return listenAndServeGatewayContext(ctx, addr, server.Handler(), nil)
 }
 
 func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreateOptions) error {
@@ -1846,6 +1986,13 @@ func cliPolicyCapabilitiesToStrings(caps []policy.Capability) []string {
 		values = append(values, string(cap))
 	}
 	return values
+}
+
+func rootPublicKeyString(root model.TrustBundle) string {
+	if root.SigningKeyID == "" || root.PublicKey == "" {
+		return ""
+	}
+	return root.SigningKeyID + ":" + root.PublicKey
 }
 
 type supportSessionStatusOptions struct {
@@ -4555,15 +4702,41 @@ func gatewayTLSConfig(opts gatewayServeOptions) (*tls.Config, error) {
 }
 
 func listenAndServeGateway(addr string, handler http.Handler, tlsConfig *tls.Config) error {
+	return listenAndServeGatewayContext(context.Background(), addr, handler, tlsConfig)
+}
+
+func listenAndServeGatewayContext(ctx context.Context, addr string, handler http.Handler, tlsConfig *tls.Config) error {
 	server := &http.Server{
 		Addr:      addr,
 		Handler:   handler,
 		TLSConfig: tlsConfig,
 	}
-	if tlsConfig != nil {
-		return server.ListenAndServeTLS("", "")
+	errCh := make(chan error, 1)
+	go func() {
+		if tlsConfig != nil {
+			errCh <- server.ListenAndServeTLS("", "")
+			return
+		}
+		errCh <- server.ListenAndServe()
+	}()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		err := <-errCh
+		if err == nil || errors.Is(err, http.ErrServerClosed) {
+			return ctx.Err()
+		}
+		return err
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
 	}
-	return server.ListenAndServe()
 }
 
 func gatewayStateStore(opts gatewayServeOptions) (gateway.StateStore, error) {
@@ -6653,6 +6826,7 @@ Usage:
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256> --execute
+  rdev support-session start --addr 127.0.0.1:8787 --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session plan --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto

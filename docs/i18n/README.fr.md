@@ -40,9 +40,12 @@ gateway, transport, release, or checksum flags. If a reachable gateway is
 already running, first call `rdev.support_session.create` through MCP or
 `rdev support-session create` through CLI to get the ready target command, join
 URL, real ticket code, manifest root, scoped auto-approval state, and status
-watch command in one payload. If no gateway is running yet, call
-`rdev.support_session.plan` or `rdev support-session plan` to prepare one.
-After giving the target-machine command, watch `rdev.support_session.status` or
+watch command in one payload. If no gateway is running yet, run
+`rdev support-session start` in a visible foreground terminal; it starts the
+local gateway and prints the same ready session payload before listening. Use
+`rdev.support_session.plan` or `rdev support-session plan` only for review/debug
+planning. After giving the target-machine command, watch
+`rdev.support_session.status` or
 `rdev support-session status --wait`; when `connected=true`, proactively tell me
 the connection has been established before creating jobs. Use
 `rdev.invites.create`, then materialize it with `rdev.connection_entry.plan` or

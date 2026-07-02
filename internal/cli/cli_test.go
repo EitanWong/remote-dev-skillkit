@@ -274,6 +274,97 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	}
 }
 
+func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gatewayURL := "http://" + addr
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- app.Run(ctx, []string{
+			"support-session", "start",
+			"--addr", addr,
+			"--gateway-url", gatewayURL,
+			"--work-dir", filepath.Join(t.TempDir(), "support"),
+			"--target", "windows",
+			"--locale", "zh-CN",
+		})
+	}()
+	waitForHTTP(t, gatewayURL+"/healthz")
+	cancel()
+	err = <-errCh
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
+
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		Gateway       struct {
+			Addr       string `json:"addr"`
+			GatewayURL string `json:"gateway_url"`
+			Lifecycle  string `json:"lifecycle"`
+		} `json:"gateway"`
+		Session struct {
+			SchemaVersion         string   `json:"schema_version"`
+			TicketCode            string   `json:"ticket_code"`
+			TargetCommand         string   `json:"target_command"`
+			WatchConnectionStatus []string `json:"watch_connection_status"`
+			AutoApprove           bool     `json:"auto_approve"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid start JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-started.v1" ||
+		payload.Gateway.Addr != addr ||
+		payload.Gateway.GatewayURL != gatewayURL ||
+		payload.Gateway.Lifecycle != "foreground-visible-process" {
+		t.Fatalf("unexpected started payload: %#v", payload)
+	}
+	if payload.Session.SchemaVersion != "rdev.support-session-created.v1" ||
+		payload.Session.TicketCode == "" ||
+		!payload.Session.AutoApprove ||
+		!strings.Contains(payload.Session.TargetCommand, payload.Session.TicketCode) ||
+		strings.Contains(payload.Session.TargetCommand, "<ticket-code>") ||
+		strings.Contains(payload.Session.TargetCommand, "ExecutionPolicy Bypass") {
+		t.Fatalf("expected ready embedded session, got %#v", payload.Session)
+	}
+	watch := strings.Join(payload.Session.WatchConnectionStatus, "\x00")
+	if !strings.Contains(watch, payload.Session.TicketCode) || !strings.Contains(watch, "--wait") {
+		t.Fatalf("expected ready watcher, got %#v", payload.Session.WatchConnectionStatus)
+	}
+}
+
+func waitForHTTP(t *testing.T, endpoint string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(endpoint)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+				return
+			}
+			lastErr = fmt.Errorf("status %s", resp.Status)
+		} else {
+			lastErr = err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s: %v", endpoint, lastErr)
+}
+
 func TestSupportSessionStatusReportsConnectionFeedback(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()

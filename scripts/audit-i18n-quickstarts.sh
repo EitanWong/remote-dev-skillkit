@@ -37,6 +37,7 @@ required_patterns=(
   "rdev.support_session.create"
   "rdev.support_session.plan"
   "rdev.support_session.status"
+  "rdev support-session start"
   "rdev support-session create"
   "rdev support-session plan"
   "rdev support-session status --wait"

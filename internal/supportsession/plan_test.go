@@ -82,6 +82,40 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 }
 
+func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
+	created := BuildCreated(CreatedOptions{
+		GatewayURL: "http://127.0.0.1:8787",
+		Ticket:     model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:     "linux",
+		Locale:     "en",
+	})
+	started := BuildStarted(StartedOptions{
+		Addr:       "127.0.0.1:8787",
+		GatewayURL: "http://127.0.0.1:8787",
+		WorkDir:    "work/rdev-support-session",
+		Created:    created,
+	})
+
+	if started["schema_version"] != StartedSchemaVersion || started["ok"] != true {
+		t.Fatalf("unexpected started payload: %#v", started)
+	}
+	session := started["session"].(map[string]any)
+	if session["schema_version"] != CreatedSchemaVersion ||
+		!strings.Contains(session["target_command"].(string), "ABCD-1234") {
+		t.Fatalf("expected embedded created session, got %#v", session)
+	}
+	gateway := started["gateway"].(map[string]any)
+	if gateway["lifecycle"] != "foreground-visible-process" ||
+		!strings.Contains(gateway["stop"].(string), "interrupt") {
+		t.Fatalf("expected visible foreground gateway lifecycle, got %#v", gateway)
+	}
+	forbidden := strings.Join(started["forbidden"].([]string), "\n")
+	if !strings.Contains(forbidden, "background hidden gateway") ||
+		!strings.Contains(forbidden, "ExecutionPolicy Bypass") {
+		t.Fatalf("expected start guardrails, got %s", forbidden)
+	}
+}
+
 func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 	status := BuildStatus(StatusOptions{
 		TicketCode: "ABCD-1234",
