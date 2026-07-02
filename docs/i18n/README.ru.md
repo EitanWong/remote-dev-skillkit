@@ -48,7 +48,9 @@ same-machine only. If a reachable gateway is already running, call
 through CLI to get the ready target command, join URL, real ticket code,
 manifest root, scoped auto-approval state, and status watch command in one
 payload. Prefer `user_handoff.message` plus `user_handoff.copy_paste` for
-the human-facing response. The target command already tries ordered Connection
+the human-facing response. When `user_handoff.target` is `auto`, follow
+`user_handoff.auto_target_rule`: send the join URL first and use returned
+platform commands only when a terminal command is needed. The target command already tries ordered Connection
 Entry URLs on the target machine with bounded timeout/retry behavior, so do not
 write custom fallback scripts. If no gateway is
 running yet, run `rdev support-session start` in a visible foreground terminal;

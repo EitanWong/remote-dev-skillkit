@@ -51,6 +51,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
   telling the human what to run on the target machine. Do not rewrite the
   command or ask the human to assemble values.
+- When `user_handoff.target` is `auto`, follow `user_handoff.auto_target_rule`:
+  send the join URL first, and use the returned Windows or macOS/Linux command
+  only if the human asks for a terminal command or cannot open the page.
 - After giving the target-side command, watch the session with
   `rdev.support_session.status` using `wait=true` or
   `rdev support-session status --wait`. When `connected=true`, proactively tell

@@ -213,7 +213,10 @@ placeholders. The command itself loops through ordered Connection Entry URLs on
 the target machine with bounded timeouts/retries, so fallback stays in `rdev`
 instead of Agent-written glue. The same payload includes
 `user_handoff.message` and `user_handoff.copy_paste`, which is the exact
-human-facing text and command/link the Agent should send.
+human-facing text and command/link the Agent should send. When the target OS is
+unknown, `user_handoff.auto_target_rule` tells the Agent to send the join URL
+first and use the returned platform command only when the human asks for a
+terminal command or cannot open the page.
 When `rdev`, gateway state, or target helper assets are unclear, the Agent
 should call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets` from a checkout. That returns

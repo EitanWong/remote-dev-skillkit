@@ -127,7 +127,10 @@ Steps:
     `connection_attempt_policy` timeout/retry behavior; do not write your own
     PowerShell, shell, relay, or approval-polling fallback. Prefer
     `user_handoff.message` plus `user_handoff.copy_paste` when telling me what
-    to run on the target machine. If no suitable
+    to run on the target machine. When `user_handoff.target` is `auto`, follow
+    `user_handoff.auto_target_rule`: send the join URL first, and use the
+    returned platform command only if I ask for a terminal command or cannot
+    open the page. If no suitable
     gateway is running yet, run `rdev support-session start` in a visible
     foreground terminal. It
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go

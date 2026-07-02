@@ -169,6 +169,30 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 }
 
+func TestBuildCreatedAutoTargetReturnsJoinURLHandoffWithCommandFallbacks(t *testing.T) {
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "http://192.0.2.10:8787",
+		ManifestRootPublicKey: "manifest-root:abc",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "auto",
+		Locale:                "en",
+		AutoApprove:           true,
+	})
+
+	if created["recommended_surface"] != "join_url" ||
+		created["target_command"] != "http://192.0.2.10:8787/join/ABCD-1234" {
+		t.Fatalf("expected auto target to recommend join URL, got %#v", created)
+	}
+	handoff := created["user_handoff"].(map[string]any)
+	if handoff["copy_paste_kind"] != "join_url" ||
+		handoff["copy_paste"] != created["join_url"] ||
+		!strings.Contains(handoff["auto_target_rule"].(string), "target platform is unknown") ||
+		!strings.Contains(handoff["windows_command"].(string), "bootstrap.ps1") ||
+		!strings.Contains(handoff["macos_linux_command"].(string), "bootstrap.sh") {
+		t.Fatalf("expected auto target handoff with command fallbacks, got %#v", handoff)
+	}
+}
+
 func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	created := BuildCreated(CreatedOptions{
 		GatewayURL: "http://127.0.0.1:8787",

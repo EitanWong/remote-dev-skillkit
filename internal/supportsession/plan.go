@@ -707,9 +707,17 @@ func userHandoff(locale, target, surface, copyPaste, joinURL string, targetComma
 		"message":             localizedUserHandoffMessage(locale, surface),
 		"windows_command":     targetCommands["windows"],
 		"macos_linux_command": targetCommands["macos_linux"],
+		"auto_target_rule":    autoTargetHandoffRule(target),
 		"agent_next_step":     "send message plus copy_paste to the user, then call rdev.support_session.status with wait=true",
 		"agent_rule":          "do not rewrite copy_paste, do not ask the user to assemble ticket/root/gateway/transport, and do not add custom polling",
 	}
+}
+
+func autoTargetHandoffRule(target string) string {
+	if target != "auto" {
+		return "target platform is selected; send copy_paste verbatim"
+	}
+	return "target platform is unknown; send the join_url copy_paste first because the join page selects OS-specific visible commands, and use windows_command or macos_linux_command only if the human asks for a terminal command or cannot open the page"
 }
 
 func normalizeCreatedGatewayCandidates(gatewayURL string, candidates []GatewayURLCandidate) []GatewayURLCandidate {

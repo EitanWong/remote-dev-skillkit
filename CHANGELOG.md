@@ -28,6 +28,9 @@ metadata, status watching, or approval polling by hand.
   `rdev.support-session-created.v1`. Agents now receive a localized
   `user_handoff.message` plus exact `user_handoff.copy_paste` value to send to
   the human, reducing model-dependent rewrites of the target command.
+- Added `user_handoff.auto_target_rule` so unknown target platforms have a
+  stable Agent rule: send the join URL first, and use returned platform
+  commands only when the human needs a terminal command or cannot open the page.
 - Added `gateway_url_candidates` to `rdev.support-session-prepare.v1`,
   `rdev.support-session-plan.v1`, and
   `rdev.support-session-connectivity-strategy.v1`. `rdev support-session
