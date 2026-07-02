@@ -119,17 +119,18 @@ type AuthorityScope struct {
 }
 
 type ConnectionEntry struct {
-	SchemaVersion          string            `json:"schema_version"`
-	HandoffName            string            `json:"handoff_name"`
-	HandoffContract        []string          `json:"handoff_contract"`
-	EntryURL               string            `json:"entry_url"`
-	ConsentMode            string            `json:"consent_mode"`
-	AutomationLevel        string            `json:"automation_level"`
-	OneLineCommands        map[string]string `json:"one_line_commands"`
-	InstallPrerequisites   []string          `json:"install_prerequisites"`
-	HumanSteps             []string          `json:"human_steps"`
-	AgentAfterConnect      []string          `json:"agent_after_connect"`
-	RevocationInstructions []string          `json:"revocation_instructions"`
+	SchemaVersion          string                              `json:"schema_version"`
+	HandoffName            string                              `json:"handoff_name"`
+	HandoffContract        []string                            `json:"handoff_contract"`
+	EntryURL               string                              `json:"entry_url"`
+	ConsentMode            string                              `json:"consent_mode"`
+	AutomationLevel        string                              `json:"automation_level"`
+	PackageCatalog         model.ConnectionEntryPackageCatalog `json:"package_catalog"`
+	OneLineCommands        map[string]string                   `json:"one_line_commands"`
+	InstallPrerequisites   []string                            `json:"install_prerequisites"`
+	HumanSteps             []string                            `json:"human_steps"`
+	AgentAfterConnect      []string                            `json:"agent_after_connect"`
+	RevocationInstructions []string                            `json:"revocation_instructions"`
 }
 
 type ConnectionEntryPlan struct {
@@ -629,6 +630,7 @@ func newConnectionEntry(joinURL string) ConnectionEntry {
 		EntryURL:        joinURL,
 		ConsentMode:     "attended-visible-consent",
 		AutomationLevel: "one-entry-minimal-steps-after-consent",
+		PackageCatalog:  model.NewConnectionEntryPackageCatalog(joinURL),
 		OneLineCommands: map[string]string{
 			"macos_linux_sh":     "curl -fsSL " + shellQuote(bootstrapBase+"/bootstrap.sh") + " | sh",
 			"windows_powershell": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powershellSingleQuoteValue(bootstrapBase+"/bootstrap.ps1") + "' | iex\"",
@@ -669,6 +671,7 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"operator-owned workstations that should become stable long-running managed development hosts",
 			"cross-subnet LAN, VPN, NAT, firewall, proxy, and CGNAT environments where the entry must choose the best outbound path",
 			"owned workstations that need a quick attended bootstrap before an explicit managed-service plan is approved",
+			"package-aware join pages where the Agent or browser chooses the target OS package or visible script fallback",
 		},
 		EntryModes: []string{
 			"attended-temporary for third-party, one-off, or time-boxed repair",
@@ -704,9 +707,11 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"transport preference: " + placeholderIfEmpty(transport, "auto"),
 			"visible stop/revoke instructions and local cleanup notes",
 			"managed-mode service plan only when the operator explicitly approves persistent owned-host access",
+			"package catalog with per-OS package candidates and visible script fallbacks",
 		},
 		RuntimeFlow: []string{
 			"show the target-side user the session purpose, gateway, ticket expiry, requested capabilities, and stop instructions before connecting",
+			"detect target OS and architecture from Agent probes, browser hints, inventory, or a single operator answer before selecting a package candidate",
 			"verify the package checksum and signed release bundle before executing the host binary",
 			"fetch and verify the join manifest with the pinned manifest root before trusting ticket, gateway, or job-signing metadata",
 			"select attended-temporary or managed mode from ownership, recurrence, and persistence policy before registering",
@@ -745,7 +750,6 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 		},
 		ImplementationGaps: []string{
 			"publish per-platform connection entry packages as release assets",
-			"serve package-aware connection entry pages that choose the target OS package automatically",
 			"add end-to-end Windows clean-machine acceptance evidence for one-run connection entry startup",
 			"add relay/mesh adapter execution paths for environments where direct outbound gateway access fails",
 		},

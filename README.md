@@ -186,23 +186,31 @@ persistent changes when probes show they are needed and the operator approves.
 The JSON output includes `schema_version: rdev.agent-invite.v1`, a short-lived
 ticket, the manifest URL, the pinned manifest root, a machine-readable
 `host_command`, a transport fallback plan, `connection_entry`,
+`connection_entry.package_catalog`,
 `connection_entry_plan.target_selection_policy`, and the next MCP tools the
 agent should call. The Agent then materializes the invite with
 `rdev.connection_entry.plan` or
 `rdev connection-entry plan`. That produces a **Connection Entry Package Plan**
 (`rdev.connection-entry.package-plan.v1`): human-facing entry surfaces,
 Agent-only connection metadata, owned-vs-third-party mode selection, missing
-release inputs, and platform package planning. The target side opens the
-generated `connection_entry.entry_url` or runs the signed connection entry
-package on the target computer, then approves the host when policy requires it.
+release inputs, and platform package planning. The package catalog is also
+embedded in the signed join manifest as `package_catalog`, so an Agent can
+verify the manifest, select the Windows/macOS/Linux candidate from target OS and
+architecture probes, and fall back to the visible script when release package
+assets are not published yet. The target side opens the generated
+`connection_entry.entry_url` or runs the signed connection entry package on the
+target computer, then approves the host when policy requires it.
 The agent does the waiting, probing, mode selection, package planning, job
 creation, status tracking, evidence review, and revocation.
 
 `connection_entry` is the universal target-side entry point. The join page
 serves inspectable `/bootstrap.sh` and `/bootstrap.ps1` helpers that start a
 visible host session with the pinned `--manifest-root-public-key` and
-`--transport auto`. They do not create hidden persistence, weaken OS policy, or
-open inbound firewall ports.
+`--transport auto`. The page also publishes a visible Agent Package Catalog and
+browser-side recommended entry for the target OS. Real signed per-platform
+packages still require release assets; until those are available, the fallback
+scripts remain visible and inspectable. They do not create hidden persistence,
+weaken OS policy, or open inbound firewall ports.
 
 `connection_entry_plan.target_selection_policy` tells the Agent how to choose
 the right shape. If the target is your own personal or fleet machine, the Agent

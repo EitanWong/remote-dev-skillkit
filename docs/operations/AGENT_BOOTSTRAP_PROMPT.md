@@ -98,14 +98,19 @@ Steps:
     codes, manifest roots, gateway URLs, transports, release roots, or checksum
     flags. After the viable gateway/transport path is known, use
     `rdev.invites.create` or `rdev invite create` so the Agent receives
-    `connection_entry`, `connection_entry_plan`, manifest root, and transport
-    fallback instructions together. Then call `rdev.connection_entry.plan`
+    `connection_entry`, `connection_entry.package_catalog`,
+    `connection_entry_plan`, manifest root, and transport fallback instructions
+    together. Verify the signed join manifest, read its `package_catalog`, and
+    use target OS/architecture probes to select the package candidate. Then call
+    `rdev.connection_entry.plan`
     through MCP or `rdev connection-entry plan` through the CLI to materialize
     the generic Connection Entry Package Plan. Present the target-side human
     with only the selected human surface: `connection_entry.entry_url`, a visible
-    script, or a signed package. Keep low-level connection parameters in
-    Agent/tool metadata and report `missing_inputs` when package materialization
-    needs more release data.
+    script, or a signed package. When package assets are not published or
+    release inputs are missing, use the catalog's visible script fallback rather
+    than asking the target-side human to assemble raw values. Keep low-level
+    connection parameters in Agent/tool metadata and report `missing_inputs`
+    when package materialization needs more release data.
     Select host mode with `connection_entry_plan.target_selection_policy`: use
     `managed` for my own personal/fleet machines that need durable development
     access; use `attended-temporary` for third-party or one-off repair machines.

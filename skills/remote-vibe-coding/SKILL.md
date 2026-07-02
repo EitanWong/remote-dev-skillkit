@@ -61,7 +61,10 @@ revocation.
 3. If no suitable host is active, create an invite with `rdev.invites.create` or
    `rdev invite create`; then materialize it with `rdev.connection_entry.plan`
    or `rdev connection-entry plan` before giving target-side instructions.
-   Present only the selected
+   Read `connection_entry.package_catalog` and the signed join manifest's
+   `package_catalog`, select the target OS/architecture candidate from probes,
+   and use the visible script fallback when package assets or release inputs are
+   missing. Present only the selected
    `connection_entry.entry_url`, visible script, or signed package to the
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, and transport values as Agent/package metadata.
@@ -88,7 +91,11 @@ revocation.
    signed self-contained connection entry package with the target-platform
    `rdev` binary, release bundle, manifest URL, pinned manifest root, visible
    launcher, and `--transport auto` before asking a human to install
-   prerequisites or copy flags. Use the materialized `entry_package_plan` as the
+   prerequisites or copy flags. Use `connection_entry.package_catalog` and
+   manifest `package_catalog` as the OS/architecture selection source; package
+   status `planned-release-asset-required` means use the visible fallback script
+   and report missing release inputs to the operator. Use the materialized
+   `entry_package_plan` as the
    generic package surface for Windows, macOS, Linux, managed-service, LAN,
    hosted, relay, or mesh variants; if packaging is not ready, report
    `missing_inputs` to the operator and keep target-side instructions limited to

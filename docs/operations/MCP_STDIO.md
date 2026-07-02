@@ -24,7 +24,7 @@ LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
 `transport_plan`, `connection_plan`, `connection_entry`,
-`connection_entry_plan`,
+`connection_entry.package_catalog`, `connection_entry_plan`,
 `host_context_plan`, `agent_provisioning_plan`,
 `agent_collaboration_plan`, `localization_plan`,
 `managed_development_plan`, `fallback_commands`, `authority_profile`,
@@ -38,23 +38,29 @@ WebSocket upgrades or long-held requests.
 For every new target host, use `connection_entry.entry_url` or a signed
 connection entry package over manually copying host flags. The join page
 provides visible, inspectable platform bootstrap commands for the target
-machine. Agents should treat those commands as consented startup, then choose
-the correct host mode from `connection_entry_plan.target_selection_policy`:
-`managed` for operator-owned machines that need durable development access, or
-`attended-temporary` for third-party or one-off repair. If ownership or
-persistence approval is unclear, ask one short question before managed mode.
-After the host connects, the Agent watches `rdev.hosts.list`, approves the
-expected host when policy requires approval, runs scoped jobs, exports evidence,
-and revokes or stops the session when finished.
+machine. Agents should verify the signed join manifest, read its
+`package_catalog`, and select a package candidate from target OS/architecture
+probes. When package assets are not published or release inputs are missing,
+use the catalog's visible script fallback instead of asking a human to assemble
+raw connection values. Agents should treat those commands as consented startup,
+then choose the correct host mode from
+`connection_entry_plan.target_selection_policy`: `managed` for operator-owned
+machines that need durable development access, or `attended-temporary` for
+third-party or one-off repair. If ownership or persistence approval is unclear,
+ask one short question before managed mode. After the host connects, the Agent
+watches `rdev.hosts.list`, approves the expected host when policy requires
+approval, runs scoped jobs, exports evidence, and revokes or stops the session
+when finished.
 
 `rdev.connection_entry.plan` turns an invite into
 `rdev.connection-entry.materialization-plan.v1`. MCP clients should call it
 before showing target-side instructions. It returns the selected
 ownership/session-mode decision, human-facing surfaces, Agent-only metadata,
-network strategy, missing release inputs, and, when enough release material is
-available, an `rdev.connection-entry.package-plan.v1` wrapper around the
-platform package/launcher plan. When the agent supplies `out_dir`, the MCP tool
-also writes `CONNECTION_ENTRY.md`, `connection-entry-plan.json`, and generated
+network strategy, package-catalog candidate choice, missing release inputs, and,
+when enough release material is available, an
+`rdev.connection-entry.package-plan.v1` wrapper around the platform
+package/launcher plan. When the agent supplies `out_dir`, the MCP tool also
+writes `CONNECTION_ENTRY.md`, `connection-entry-plan.json`, and generated
 launcher/package planning files into that empty directory. Target-side humans
 receive only the selected Connection Entry surface. Ticket codes, manifest
 roots, gateway URLs, transport preferences, release roots, and checksums stay in

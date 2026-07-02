@@ -4,6 +4,37 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.9-dev
+
+Current phase: Connection Entry now carries package-aware OS selection metadata
+through invite output, join pages, and signed join manifests so Agents can pick
+a target package or visible fallback script without asking humans to assemble
+ticket/root/gateway/transport values.
+
+### Added
+
+- Added `rdev.connection-entry.package-catalog.v1` with Windows, macOS, and
+  Linux package candidates, architecture hints, planned release-asset status,
+  visible `/bootstrap.sh` or `/bootstrap.ps1` fallbacks, and required release
+  inputs for signed packages.
+- Added `connection_entry.package_catalog` to Agent invite output and
+  `package_catalog` to signed `rdev.join-manifest.v1` so package selection
+  metadata is covered by manifest signature verification.
+- Added a package-aware join page section with a recommended entry and visible
+  Agent Package Catalog JSON for browser or Agent OS selection.
+- Added regression tests for invite, MCP, CLI, join page, manifest endpoint,
+  and package-catalog tampering.
+
+### Changed
+
+- Updated README, bootstrap docs, MCP docs, Agent Bootstrap Prompt, and core
+  Skills so Agents read the package catalog, select candidates from target
+  OS/architecture probes, and use visible script fallback when release package
+  assets are not published yet.
+- Kept package status honest: real signed per-platform Connection Entry
+  packages still require published release assets, checksums, signed release
+  bundles, and release roots.
+
 ## 0.1.8-dev
 
 Current phase: Connection Entry now carries an explicit target-selection policy

@@ -37,6 +37,15 @@ func TestJoinManifestSignsAndVerifies(t *testing.T) {
 	if manifest.TrustFingerprint == "" {
 		t.Fatal("trust fingerprint should be set")
 	}
+	if manifest.PackageCatalog.SchemaVersion != ConnectionEntryPackageCatalogSchemaVersion {
+		t.Fatalf("expected package catalog schema, got %#v", manifest.PackageCatalog)
+	}
+	if len(manifest.PackageCatalog.Candidates) == 0 {
+		t.Fatalf("expected package catalog candidates, got %#v", manifest.PackageCatalog)
+	}
+	if manifest.PackageCatalog.Candidates[0].FallbackScriptURL == "" {
+		t.Fatalf("expected fallback script URL, got %#v", manifest.PackageCatalog.Candidates[0])
+	}
 }
 
 func TestJoinManifestVerifiesWithSeparateTrustRoot(t *testing.T) {
@@ -104,6 +113,35 @@ func TestJoinManifestRejectsTampering(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest.GatewayURL = "http://evil.example"
+	if err := manifest.Verify(now); !errors.Is(err, ErrJoinManifestSignature) {
+		t.Fatalf("expected signature error, got %v", err)
+	}
+}
+
+func TestJoinManifestRejectsPackageCatalogTampering(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	ticket, err := NewTicket(HostModeAttendedTemporary, 600, []string{"shell.user"}, "repair", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := NewJoinManifest(ticket, JoinManifestSpec{
+		GatewayURL:   "http://127.0.0.1:8787",
+		JoinURL:      "http://127.0.0.1:8787/join/" + ticket.Code,
+		Trust:        NewTrustBundle("test-key", publicKey),
+		SigningKeyID: "test-key",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err = manifest.Sign(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.PackageCatalog.Candidates[0].PackageStatus = "available"
 	if err := manifest.Verify(now); !errors.Is(err, ErrJoinManifestSignature) {
 		t.Fatalf("expected signature error, got %v", err)
 	}

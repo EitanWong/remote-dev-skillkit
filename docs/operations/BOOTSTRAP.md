@@ -134,6 +134,9 @@ or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
 `connection_entry`:
 
 - `entry_url`: the page to open on the target machine;
+- `package_catalog`: per-OS package candidates, package availability status,
+  fallback script URLs, and release inputs the Agent needs before selecting a
+  signed package;
 - `one_line_commands`: inspectable macOS/Linux and Windows commands;
 - `human_steps`: the minimal target-side actions;
 - `agent_after_connect`: the actions the agent should perform after the host
@@ -146,6 +149,9 @@ instructions. That materializes the invite into
 `rdev.connection-entry.materialization-plan.v1`, including:
 
 - the selected ownership/session-mode decision;
+- the target OS/architecture package candidate selected from
+  `connection_entry.package_catalog` or the signed join manifest's
+  `package_catalog`;
 - human-facing entry surfaces such as link, visible script, or signed package;
 - Agent-only metadata such as ticket, gateway, manifest root, transport, release,
   and checksum inputs;
@@ -248,15 +254,19 @@ policy. The bootstrap script now carries the pinned
 roots, ticket codes, gateway URLs, or transport flags from chat.
 
 For new target-host connections, agents should prefer the invite's
-`connection_entry_plan` when release assets are available. The connection entry
-package is the no-prerequisite path: one platform-specific bundle with
-`rdev`/`rdev-host`, signed release-bundle evidence, the join manifest URL, the
-pinned manifest root, visible stop/revoke instructions, and `--transport auto`
-fallback. It should probe WSS, HTTPS long-poll, short-poll, LAN/private gateway
-reachability, and already configured proxy/relay/mesh/SSH paths before asking
-the human for more network details. Elevation is allowed only through normal
-UAC/sudo/system prompts for a signed job that needs it, and the approval must be
-recorded as evidence.
+`connection_entry.package_catalog` and the signed join manifest's
+`package_catalog` before choosing a target package. The connection entry package
+is the no-prerequisite path when release assets are published: one
+platform-specific bundle with `rdev`/`rdev-host`, signed release-bundle
+evidence, the join manifest URL, the pinned manifest root, visible stop/revoke
+instructions, and `--transport auto` fallback. If package assets are not
+published or release inputs are missing, the Agent should use the catalog's
+visible `/bootstrap.sh` or `/bootstrap.ps1` fallback rather than asking the
+target-side human to assemble raw values. It should probe WSS, HTTPS long-poll,
+short-poll, LAN/private gateway reachability, and already configured
+proxy/relay/mesh/SSH paths before asking the human for more network details.
+Elevation is allowed only through normal UAC/sudo/system prompts for a signed
+job that needs it, and the approval must be recorded as evidence.
 
 ## Managed Device Flow
 

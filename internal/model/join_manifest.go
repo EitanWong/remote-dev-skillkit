@@ -23,30 +23,32 @@ type JoinManifestBootstrap struct {
 }
 
 type JoinManifest struct {
-	SchemaVersion    string                `json:"schema_version"`
-	TicketID         string                `json:"ticket_id"`
-	TicketCode       string                `json:"ticket_code"`
-	Mode             HostMode              `json:"mode"`
-	Reason           string                `json:"reason"`
-	Capabilities     []string              `json:"capabilities"`
-	IssuedAt         time.Time             `json:"issued_at"`
-	ExpiresAt        time.Time             `json:"expires_at"`
-	GatewayURL       string                `json:"gateway_url"`
-	JoinURL          string                `json:"join_url"`
-	Trust            TrustBundle           `json:"trust"`
-	TrustFingerprint string                `json:"trust_fingerprint"`
-	Bootstrap        JoinManifestBootstrap `json:"bootstrap,omitempty"`
-	SigningAlg       string                `json:"signing_alg"`
-	SigningKeyID     string                `json:"signing_key_id"`
-	Signature        string                `json:"signature,omitempty"`
+	SchemaVersion    string                        `json:"schema_version"`
+	TicketID         string                        `json:"ticket_id"`
+	TicketCode       string                        `json:"ticket_code"`
+	Mode             HostMode                      `json:"mode"`
+	Reason           string                        `json:"reason"`
+	Capabilities     []string                      `json:"capabilities"`
+	IssuedAt         time.Time                     `json:"issued_at"`
+	ExpiresAt        time.Time                     `json:"expires_at"`
+	GatewayURL       string                        `json:"gateway_url"`
+	JoinURL          string                        `json:"join_url"`
+	Trust            TrustBundle                   `json:"trust"`
+	TrustFingerprint string                        `json:"trust_fingerprint"`
+	Bootstrap        JoinManifestBootstrap         `json:"bootstrap,omitempty"`
+	PackageCatalog   ConnectionEntryPackageCatalog `json:"package_catalog,omitempty"`
+	SigningAlg       string                        `json:"signing_alg"`
+	SigningKeyID     string                        `json:"signing_key_id"`
+	Signature        string                        `json:"signature,omitempty"`
 }
 
 type JoinManifestSpec struct {
-	GatewayURL   string
-	JoinURL      string
-	Trust        TrustBundle
-	Bootstrap    JoinManifestBootstrap
-	SigningKeyID string
+	GatewayURL     string
+	JoinURL        string
+	Trust          TrustBundle
+	Bootstrap      JoinManifestBootstrap
+	PackageCatalog ConnectionEntryPackageCatalog
+	SigningKeyID   string
 }
 
 func NewJoinManifest(ticket Ticket, spec JoinManifestSpec, now time.Time) (JoinManifest, error) {
@@ -66,6 +68,9 @@ func NewJoinManifest(ticket Ticket, spec JoinManifestSpec, now time.Time) (JoinM
 	if err != nil {
 		return JoinManifest{}, err
 	}
+	if spec.PackageCatalog.SchemaVersion == "" {
+		spec.PackageCatalog = NewConnectionEntryPackageCatalog(spec.JoinURL)
+	}
 	return JoinManifest{
 		SchemaVersion:    JoinManifestSchemaVersion,
 		TicketID:         ticket.ID,
@@ -80,6 +85,7 @@ func NewJoinManifest(ticket Ticket, spec JoinManifestSpec, now time.Time) (JoinM
 		Trust:            spec.Trust,
 		TrustFingerprint: fingerprint,
 		Bootstrap:        spec.Bootstrap,
+		PackageCatalog:   spec.PackageCatalog,
 		SigningAlg:       JobEnvelopeSigningAlg,
 		SigningKeyID:     spec.SigningKeyID,
 	}, nil
@@ -147,6 +153,9 @@ func (m JoinManifest) validateForSigning() error {
 	}
 	if m.SigningAlg != JobEnvelopeSigningAlg || m.SigningKeyID == "" {
 		return fmt.Errorf("%w: unsupported signing metadata", ErrJoinManifestInvalid)
+	}
+	if m.PackageCatalog.SchemaVersion != "" && m.PackageCatalog.SchemaVersion != ConnectionEntryPackageCatalogSchemaVersion {
+		return fmt.Errorf("%w: unsupported package catalog schema", ErrJoinManifestInvalid)
 	}
 	fingerprint, err := m.Trust.Fingerprint()
 	if err != nil {

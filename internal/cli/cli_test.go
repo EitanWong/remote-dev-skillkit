@@ -145,11 +145,19 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 			} `json:"control_paths"`
 		} `json:"authority_profile"`
 		ConnectionEntry struct {
-			SchemaVersion   string            `json:"schema_version"`
-			HandoffName     string            `json:"handoff_name"`
-			HandoffContract []string          `json:"handoff_contract"`
-			EntryURL        string            `json:"entry_url"`
-			AutomationLevel string            `json:"automation_level"`
+			SchemaVersion   string   `json:"schema_version"`
+			HandoffName     string   `json:"handoff_name"`
+			HandoffContract []string `json:"handoff_contract"`
+			EntryURL        string   `json:"entry_url"`
+			AutomationLevel string   `json:"automation_level"`
+			PackageCatalog  struct {
+				SchemaVersion string `json:"schema_version"`
+				Candidates    []struct {
+					ID                   string `json:"id"`
+					PackageStatus        string `json:"package_status"`
+					FallbackScriptStatus string `json:"fallback_script_status"`
+				} `json:"candidates"`
+			} `json:"package_catalog"`
 			OneLineCommands map[string]string `json:"one_line_commands"`
 			HumanSteps      []string          `json:"human_steps"`
 		} `json:"connection_entry"`
@@ -275,6 +283,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if !slices.Contains(payload.ConnectionEntry.HandoffContract, "Target-side humans must not assemble ticket codes, gateway URLs, manifest roots, transports, release roots, or checksums by hand.") {
 		t.Fatalf("connection entry should define the universal handoff contract: %#v", payload.ConnectionEntry.HandoffContract)
+	}
+	if payload.ConnectionEntry.PackageCatalog.SchemaVersion != model.ConnectionEntryPackageCatalogSchemaVersion ||
+		len(payload.ConnectionEntry.PackageCatalog.Candidates) == 0 ||
+		payload.ConnectionEntry.PackageCatalog.Candidates[0].PackageStatus != "planned-release-asset-required" ||
+		payload.ConnectionEntry.PackageCatalog.Candidates[0].FallbackScriptStatus != "available" {
+		t.Fatalf("connection entry should include package catalog candidates: %#v", payload.ConnectionEntry.PackageCatalog)
 	}
 	if !strings.Contains(payload.ConnectionEntry.OneLineCommands["macos_linux_sh"], "/join/") || !strings.Contains(payload.ConnectionEntry.OneLineCommands["windows_powershell"], "bootstrap.ps1") {
 		t.Fatalf("connection entry should include one-link commands: %#v", payload.ConnectionEntry.OneLineCommands)

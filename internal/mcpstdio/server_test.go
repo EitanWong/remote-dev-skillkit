@@ -162,6 +162,14 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || connectionEntry["schema_version"] != "rdev.connection-entry.v1" || connectionEntry["handoff_name"] != "Connection Entry" {
 		t.Fatalf("expected connection entry, got %#v", structured)
 	}
+	packageCatalog, ok := connectionEntry["package_catalog"].(map[string]any)
+	if !ok || packageCatalog["schema_version"] != model.ConnectionEntryPackageCatalogSchemaVersion {
+		t.Fatalf("expected package catalog in connection entry, got %#v", connectionEntry)
+	}
+	candidates, ok := packageCatalog["candidates"].([]any)
+	if !ok || len(candidates) == 0 {
+		t.Fatalf("expected package catalog candidates, got %#v", packageCatalog)
+	}
 	handoffContract, ok := connectionEntry["handoff_contract"].([]any)
 	if !ok || !containsAnyString(handoffContract, "Target-side humans must not assemble ticket codes, gateway URLs, manifest roots, transports, release roots, or checksums by hand.") {
 		t.Fatalf("expected universal handoff contract, got %#v", connectionEntry)

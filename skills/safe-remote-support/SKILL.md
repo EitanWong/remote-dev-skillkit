@@ -41,6 +41,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   package or package-aware join link from the invite's `connection_entry_plan`
   before asking a human to install prerequisites, copy ticket codes, copy
   manifest roots, or hand-assemble network flags.
+- Use `connection_entry.package_catalog` and the signed join manifest's
+  `package_catalog` to select the target OS/architecture candidate. If package
+  status shows planned assets or release inputs are missing, use the visible
+  script fallback and report missing inputs to the operator instead of asking
+  the target-side human to assemble raw parameters.
 - For every new target host, create an invite first and then materialize it with
   `rdev.connection_entry.plan` or `rdev connection-entry plan` before sending
   target-side instructions. Treat Connection Entry as the universal handoff
@@ -81,7 +86,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    fallback instructions together.
 5. Materialize the invite with `rdev.connection_entry.plan` or
    `rdev connection-entry plan`; review `mode_decision`, `human_surface`,
-   `agent_metadata`, `missing_inputs`, and `entry_package_plan`.
+   package-catalog candidate choice, `agent_metadata`, `missing_inputs`, and
+   `entry_package_plan`.
 6. For Windows temporary support, generate and verify the acceptance plan or
    connection entry package, then review the launcher, release-verification
    requirements, no-persistence checks, and approval probes.

@@ -423,6 +423,9 @@ func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestU
 	joinBase := strings.TrimRight(requestBaseURL(r), "/") + "/join/" + code
 	shellCommand := "curl -fsSL " + shellQuote(joinBase+"/bootstrap.sh") + " | sh"
 	powerShellCommand := "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' | iex\""
+	packageCatalog := model.NewConnectionEntryPackageCatalog(joinBase)
+	packageCatalogJSON, _ := json.Marshal(packageCatalog)
+	packageCatalogScript := strings.ReplaceAll(string(packageCatalogJSON), "</", "<\\/")
 	locale := joinLocale(r)
 	copy := joinCopy(locale)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -435,65 +438,131 @@ func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestU
   <title>%s</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.45; max-width: 860px; }
-    code, pre { background: #f4f4f5; border-radius: 6px; padding: .2rem .35rem; }
-    pre { padding: 1rem; overflow-x: auto; }
-    .note { border-left: 4px solid #2563eb; padding-left: 1rem; color: #1f2937; }
-  </style>
-</head>
-<body>
-  <h1>%s</h1>
-  <p class="note">%s</p>
-  <h2>macOS / Linux</h2>
-  <pre><code>%s</code></pre>
-  <h2>Windows PowerShell</h2>
-  <pre><code>%s</code></pre>
-  <h2>%s</h2>
-  <ol>
+	    code, pre { background: #f4f4f5; border-radius: 6px; padding: .2rem .35rem; }
+	    pre { padding: 1rem; overflow-x: auto; }
+	    .note { border-left: 4px solid #2563eb; padding-left: 1rem; color: #1f2937; }
+	    .entry { border: 1px solid #d4d4d8; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+	    .status { color: #52525b; }
+	  </style>
+	</head>
+	<body>
+	  <h1>%s</h1>
+	  <p class="note">%s</p>
+	  <section class="entry" id="selected-entry">
+	    <h2>%s</h2>
+	    <p class="status" id="selected-status">%s</p>
+	    <pre><code id="selected-command">%s</code></pre>
+	  </section>
+	  <h2>macOS / Linux</h2>
+	  <pre><code>%s</code></pre>
+	  <h2>Windows PowerShell</h2>
+	  <pre><code>%s</code></pre>
+	  <h2>%s</h2>
+	  <pre><code id="package-catalog-json">%s</code></pre>
+	  <h2>%s</h2>
+	  <ol>
+	    <li>%s</li>
     <li>%s</li>
     <li>%s</li>
-    <li>%s</li>
-  </ol>
-  <p>Manifest: <code>%s</code></p>
-</body>
-</html>`,
+	  </ol>
+	  <p>Manifest: <code>%s</code></p>
+	  <script type="application/json" id="package-catalog">%s</script>
+	  <script>
+	    (() => {
+	      const catalog = JSON.parse(document.getElementById("package-catalog").textContent);
+	      const ua = navigator.userAgent || "";
+	      const platform = navigator.platform || "";
+	      const haystack = (ua + " " + platform).toLowerCase();
+	      const candidate = (catalog.candidates || []).find((item) =>
+	        item.selection_hints && item.selection_hints.some((hint) =>
+	          haystack.includes(String(hint).toLowerCase())
+	        )
+	      );
+	      const status = document.getElementById("selected-status");
+	      const command = document.getElementById("selected-command");
+	      if (!candidate) {
+	        status.textContent = "Could not detect this OS. Use the macOS/Linux or Windows command below.";
+	        return;
+	      }
+	      status.textContent = candidate.label + ": package " + candidate.package_status + "; using visible " + candidate.fallback_script_status + " script fallback.";
+	      if (candidate.target_os === "windows") {
+	        command.textContent = %q;
+	      } else {
+	        command.textContent = %q;
+	      }
+	    })();
+	  </script>
+	</body>
+	</html>`,
 		html.EscapeString(locale),
 		html.EscapeString(copy.Title),
 		html.EscapeString(copy.Heading),
 		html.EscapeString(copy.Note),
+		html.EscapeString(copy.SelectedHeading),
+		html.EscapeString(copy.SelectedStatus),
+		html.EscapeString(copy.SelectedCommand),
 		html.EscapeString(shellCommand),
 		html.EscapeString(powerShellCommand),
+		html.EscapeString(copy.PackageCatalogHeading),
+		html.EscapeString(string(packageCatalogJSON)),
 		html.EscapeString(copy.NextHeading),
 		copy.StepCheck,
 		copy.StepStart,
 		copy.StepAgent,
 		html.EscapeString(manifestURL),
+		packageCatalogScript,
+		powerShellCommand,
+		shellCommand,
 	)
 }
 
 type joinPageCopy struct {
-	Title       string
-	Heading     string
-	Note        string
-	NextHeading string
-	StepCheck   string
-	StepStart   string
-	StepAgent   string
+	Title                 string
+	Heading               string
+	Note                  string
+	SelectedHeading       string
+	SelectedStatus        string
+	SelectedCommand       string
+	PackageCatalogHeading string
+	NextHeading           string
+	StepCheck             string
+	StepStart             string
+	StepAgent             string
 }
 
 func joinCopy(locale string) joinPageCopy {
+	withDefaults := func(copy joinPageCopy) joinPageCopy {
+		if copy.SelectedHeading == "" {
+			copy.SelectedHeading = "Recommended Entry"
+		}
+		if copy.SelectedStatus == "" {
+			copy.SelectedStatus = "Detecting this machine and selecting the best available entry."
+		}
+		if copy.SelectedCommand == "" {
+			copy.SelectedCommand = "If detection is unavailable, choose the macOS/Linux or Windows command below."
+		}
+		if copy.PackageCatalogHeading == "" {
+			copy.PackageCatalogHeading = "Agent Package Catalog"
+		}
+		return copy
+	}
 	switch locale {
 	case "zh-CN":
-		return joinPageCopy{
-			Title:       "Remote Dev Skillkit 连接",
-			Heading:     "连接这台机器",
-			Note:        "在需要帮助的电脑上运行一条命令。连接是可见、仅出站、可撤销，并且限定在此支持工单内。",
-			NextHeading: "接下来会发生什么",
-			StepCheck:   `启动脚本会检查 <code>rdev</code>。`,
-			StepStart:   `它会用 <code>--transport auto</code> 启动一个可见的协助式主机会话。`,
-			StepAgent:   "Agent 会等待主机上线，在策略需要时完成批准，然后运行受限的修复任务。",
-		}
+		return withDefaults(joinPageCopy{
+			Title:                 "Remote Dev Skillkit 连接",
+			Heading:               "连接这台机器",
+			Note:                  "在需要帮助的电脑上运行一条命令。连接是可见、仅出站、可撤销，并且限定在此支持工单内。",
+			SelectedHeading:       "推荐入口",
+			SelectedStatus:        "正在识别这台机器，并选择最合适的连接入口。",
+			SelectedCommand:       "如果无法自动识别，请使用下面的 macOS/Linux 或 Windows 命令。",
+			PackageCatalogHeading: "Agent 包目录",
+			NextHeading:           "接下来会发生什么",
+			StepCheck:             `启动脚本会检查 <code>rdev</code>。`,
+			StepStart:             `它会用 <code>--transport auto</code> 启动一个可见的协助式主机会话。`,
+			StepAgent:             "Agent 会等待主机上线，在策略需要时完成批准，然后运行受限的修复任务。",
+		})
 	case "es":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "Conectar Esta Maquina",
 			Note:        "Ejecuta un comando en el equipo que necesita ayuda. La conexion es visible, solo saliente, revocable y limitada a este ticket.",
@@ -501,9 +570,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `El bootstrap comprueba <code>rdev</code>.`,
 			StepStart:   `Inicia una sesion visible con <code>--transport auto</code>.`,
 			StepAgent:   "El Agent espera el host, lo aprueba si la politica lo requiere y ejecuta trabajos de reparacion limitados.",
-		}
+		})
 	case "fr":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "Connecter Cette Machine",
 			Note:        "Executez une commande sur l'ordinateur a aider. La connexion est visible, sortante uniquement, revocable et limitee a ce ticket.",
@@ -511,9 +580,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `Le bootstrap verifie <code>rdev</code>.`,
 			StepStart:   `Il demarre une session visible avec <code>--transport auto</code>.`,
 			StepAgent:   "L'Agent attend le host, l'approuve si la politique l'exige, puis execute des reparations limitees.",
-		}
+		})
 	case "de":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "Diese Maschine Verbinden",
 			Note:        "Fuhre einen Befehl auf dem Computer aus, der Hilfe braucht. Die Verbindung ist sichtbar, nur ausgehend, widerrufbar und auf dieses Ticket begrenzt.",
@@ -521,9 +590,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `Der Bootstrap pruft <code>rdev</code>.`,
 			StepStart:   `Er startet eine sichtbare Sitzung mit <code>--transport auto</code>.`,
 			StepAgent:   "Der Agent wartet auf den Host, genehmigt ihn falls erforderlich und startet begrenzte Reparaturjobs.",
-		}
+		})
 	case "ja":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "このマシンを接続",
 			Note:        "サポートが必要なコンピューターで 1 つのコマンドを実行します。接続は可視、アウトバウンドのみ、取り消し可能で、このサポートチケットに限定されます。",
@@ -531,9 +600,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `bootstrap は <code>rdev</code> を確認します。`,
 			StepStart:   `<code>--transport auto</code> で可視のホストセッションを開始します。`,
 			StepAgent:   "Agent はホストを待ち、ポリシーが必要とする場合に承認し、限定された修復ジョブを実行します。",
-		}
+		})
 	case "ko":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "이 머신 연결",
 			Note:        "도움이 필요한 컴퓨터에서 명령 하나를 실행합니다. 연결은 보이는 방식이며, 아웃바운드 전용이고, 철회 가능하며, 이 지원 티켓 범위로 제한됩니다.",
@@ -541,9 +610,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `bootstrap 이 <code>rdev</code> 를 확인합니다.`,
 			StepStart:   `<code>--transport auto</code> 로 보이는 호스트 세션을 시작합니다.`,
 			StepAgent:   "Agent 는 호스트를 기다리고, 정책상 필요하면 승인한 뒤 제한된 복구 작업을 실행합니다.",
-		}
+		})
 	case "pt-BR":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "Conectar Esta Maquina",
 			Note:        "Execute um comando no computador que precisa de ajuda. A conexao e visivel, somente de saida, revogavel e limitada a este ticket.",
@@ -551,9 +620,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `O bootstrap verifica <code>rdev</code>.`,
 			StepStart:   `Ele inicia uma sessao visivel com <code>--transport auto</code>.`,
 			StepAgent:   "O Agent aguarda o host, aprova quando a politica exige e executa tarefas de reparo limitadas.",
-		}
+		})
 	case "hi":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "इस मशीन को कनेक्ट करें",
 			Note:        "जिस कंप्यूटर को मदद चाहिए उस पर एक कमांड चलाएं। कनेक्शन दिखने वाला, केवल outbound, revoke करने योग्य, और इस support ticket तक सीमित है।",
@@ -561,9 +630,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `bootstrap <code>rdev</code> जांचता है।`,
 			StepStart:   `यह <code>--transport auto</code> के साथ visible host session शुरू करता है।`,
 			StepAgent:   "Agent host का इंतजार करता है, policy की जरूरत पर approve करता है, और scoped repair jobs चलाता है।",
-		}
+		})
 	case "ar":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "توصيل هذا الجهاز",
 			Note:        "شغّل أمرا واحدا على الكمبيوتر الذي يحتاج إلى مساعدة. الاتصال ظاهر، صادر فقط، قابل للإلغاء، ومحدود بتذكرة الدعم هذه.",
@@ -571,9 +640,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `يتحقق bootstrap من <code>rdev</code>.`,
 			StepStart:   `يبدأ جلسة host مرئية باستخدام <code>--transport auto</code>.`,
 			StepAgent:   "ينتظر Agent ظهور host، ويوافق عليه عند الحاجة حسب السياسة، ثم يشغل مهام إصلاح محددة النطاق.",
-		}
+		})
 	case "ru":
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "Подключить Эту Машину",
 			Note:        "Выполните одну команду на компьютере, которому нужна помощь. Подключение видимое, только исходящее, отзывное и ограничено этим тикетом.",
@@ -581,9 +650,9 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `bootstrap проверит <code>rdev</code>.`,
 			StepStart:   `Он запустит видимую сессию host с <code>--transport auto</code>.`,
 			StepAgent:   "Agent дождется host, выполнит approval при необходимости и запустит ограниченные repair jobs.",
-		}
+		})
 	default:
-		return joinPageCopy{
+		return withDefaults(joinPageCopy{
 			Title:       "Remote Dev Skillkit Join",
 			Heading:     "Connect This Machine",
 			Note:        "Run one command on the computer that needs help. The connection is visible, outbound-only, revocable, and scoped to this support ticket.",
@@ -591,7 +660,7 @@ func joinCopy(locale string) joinPageCopy {
 			StepCheck:   `The bootstrap checks for <code>rdev</code>.`,
 			StepStart:   `It starts a visible attended host session with <code>--transport auto</code>.`,
 			StepAgent:   "The Agent waits for the host, approves it when policy requires, and runs scoped repair jobs.",
-		}
+		})
 	}
 }
 

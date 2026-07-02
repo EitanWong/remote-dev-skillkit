@@ -62,8 +62,8 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		accept   string
 		contains []string
 	}{
-		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "bootstrap.sh", "bootstrap.ps1"}},
-		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "接下来会发生什么", "bootstrap.ps1"}},
+		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1"}},
+		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "推荐入口", "Agent 包目录", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
 		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"rdev host serve", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
 		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"rdev host serve", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
@@ -761,6 +761,12 @@ func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 	}
 	if payload.ManifestRootPublicKey == "" {
 		t.Fatal("manifest endpoint should include the pinned manifest root public key")
+	}
+	if payload.Manifest.PackageCatalog.SchemaVersion != model.ConnectionEntryPackageCatalogSchemaVersion {
+		t.Fatalf("expected package catalog in join manifest, got %#v", payload.Manifest.PackageCatalog)
+	}
+	if len(payload.Manifest.PackageCatalog.Candidates) == 0 {
+		t.Fatalf("expected package catalog candidates, got %#v", payload.Manifest.PackageCatalog)
 	}
 	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)

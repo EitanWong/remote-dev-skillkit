@@ -36,8 +36,11 @@ computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
 gateway, transport, release, or checksum flags. Use `rdev.invites.create`, then
 materialize it with `rdev.connection_entry.plan` or `rdev connection-entry plan`.
+Read `connection_entry.package_catalog` and the signed join manifest
+`package_catalog` to select the target OS/architecture package candidate.
 Give the target side only the selected link, visible script, or signed package;
-keep low-level parameters in Agent/tool metadata. Choose `managed` for my own
+if package assets are not published yet, use the visible fallback script. Keep
+low-level parameters in Agent/tool metadata. Choose `managed` for my own
 long-running machines and `attended-temporary` for third-party or one-off repair
 machines by following `connection_entry_plan.target_selection_policy`.
 Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed;
