@@ -92,6 +92,48 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	}
 }
 
+func TestBuildHandoffRoutesFreshAgentToStandardEntry(t *testing.T) {
+	handoff := BuildHandoff(HandoffOptions{
+		GatewayURL:  "https://gateway.example.test",
+		Target:      "windows",
+		Reason:      "repair workstation",
+		TTLSeconds:  600,
+		AutoApprove: true,
+		Locale:      "zh-CN",
+		RdevCommand: "rdev",
+	})
+
+	args := handoff["mcp_next_arguments"].(map[string]any)
+	forbidden := strings.Join(anyStrings(handoff["forbidden"].([]string)), "\n")
+	if handoff["schema_version"] != HandoffSchemaVersion ||
+		handoff["selected_path"] != "create-with-reachable-gateway" ||
+		handoff["mcp_next_tool"] != "rdev.support_session.create" ||
+		args["gateway_url"] != "https://gateway.example.test" ||
+		args["target"] != "windows" ||
+		!strings.Contains(handoff["agent_next_step"].(string), "rdev.support_session.create") ||
+		!strings.Contains(forbidden, "Agent-authored PowerShell or shell bootstrap/recovery scripts") {
+		t.Fatalf("expected create handoff route, got %#v", handoff)
+	}
+}
+
+func TestBuildHandoffRoutesMissingGatewayToForegroundStart(t *testing.T) {
+	handoff := BuildHandoff(HandoffOptions{
+		Addr:        "0.0.0.0:8787",
+		Target:      "auto",
+		AutoApprove: true,
+		RdevCommand: "rdev",
+	})
+
+	startCommand := strings.Join(anyStrings(handoff["foreground_start_command"].([]string)), "\x00")
+	if handoff["schema_version"] != HandoffSchemaVersion ||
+		handoff["selected_path"] != "start-foreground-gateway" ||
+		handoff["mcp_next_tool"] != "" ||
+		!strings.Contains(startCommand, "support-session\x00start") ||
+		!strings.Contains(handoff["agent_rule"].(string), "do not choose support-session plan") {
+		t.Fatalf("expected foreground start handoff route, got %#v", handoff)
+	}
+}
+
 func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	created := BuildCreated(CreatedOptions{
 		GatewayURL: "http://192.0.2.10:8787",

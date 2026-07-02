@@ -21,6 +21,7 @@ import (
 
 const PlanSchemaVersion = "rdev.support-session-plan.v1"
 const PrepareSchemaVersion = "rdev.support-session-prepare.v1"
+const HandoffSchemaVersion = "rdev.support-session-handoff.v1"
 const CreatedSchemaVersion = "rdev.support-session-created.v1"
 const StartedSchemaVersion = "rdev.support-session-started.v1"
 const StatusSchemaVersion = "rdev.support-session-status.v1"
@@ -56,6 +57,19 @@ type PrepareOptions struct {
 	BuildAssets bool
 }
 
+type HandoffOptions struct {
+	RepoRoot    string
+	WorkDir     string
+	Addr        string
+	GatewayURL  string
+	Target      string
+	Reason      string
+	TTLSeconds  int
+	AutoApprove bool
+	Locale      string
+	RdevCommand string
+}
+
 type GatewayURLCandidate struct {
 	URL         string `json:"url"`
 	Kind        string `json:"kind"`
@@ -64,6 +78,111 @@ type GatewayURLCandidate struct {
 	Port        string `json:"port"`
 	Recommended bool   `json:"recommended"`
 	Reason      string `json:"reason"`
+}
+
+func BuildHandoff(opts HandoffOptions) map[string]any {
+	addr := strings.TrimSpace(opts.Addr)
+	if addr == "" {
+		addr = "0.0.0.0:8787"
+	}
+	gatewayURL, gatewayCandidates := ResolveGatewayURL(addr, opts.GatewayURL)
+	target := normalizeTarget(opts.Target)
+	locale := strings.TrimSpace(opts.Locale)
+	if locale == "" {
+		locale = "auto"
+	}
+	reason := strings.TrimSpace(opts.Reason)
+	if reason == "" {
+		reason = "visible temporary remote support"
+	}
+	ttl := opts.TTLSeconds
+	if ttl == 0 {
+		ttl = 7200
+	}
+	rdevCommand := strings.TrimSpace(opts.RdevCommand)
+	if rdevCommand == "" {
+		rdevCommand = "rdev"
+	}
+	repoRoot := strings.TrimSpace(opts.RepoRoot)
+	if repoRoot == "" {
+		repoRoot = "."
+	}
+	workDir := strings.TrimSpace(opts.WorkDir)
+	selectedPath := "start-foreground-gateway"
+	agentNextStep := "run foreground_start_command in a visible terminal, then send the returned user_handoff.message plus user_handoff.copy_paste"
+	mcpNextTool := ""
+	if strings.TrimSpace(opts.GatewayURL) != "" {
+		selectedPath = "create-with-reachable-gateway"
+		agentNextStep = "call rdev.support_session.create with mcp_next_arguments, then send the returned user_handoff.message plus user_handoff.copy_paste"
+		mcpNextTool = "rdev.support_session.create"
+	}
+	createArgs := map[string]any{
+		"gateway_url":  strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"),
+		"target":       target,
+		"reason":       reason,
+		"ttl_seconds":  ttl,
+		"auto_approve": opts.AutoApprove,
+		"locale":       locale,
+		"rdev_command": rdevCommand,
+	}
+	startCommand := []string{
+		rdevCommand, "support-session", "start",
+		"--addr", addr,
+		"--target", target,
+		"--reason", reason,
+		"--ttl-seconds", strconv.Itoa(ttl),
+		"--locale", locale,
+		"--rdev-command", rdevCommand,
+	}
+	if workDir != "" {
+		startCommand = append(startCommand, "--work-dir", workDir)
+	}
+	if gatewayURL != "" {
+		startCommand = append(startCommand, "--gateway-url", gatewayURL)
+	}
+	if opts.AutoApprove {
+		startCommand = append(startCommand, "--auto-approve")
+	} else {
+		startCommand = append(startCommand, "--auto-approve=false")
+	}
+	return map[string]any{
+		"schema_version":           HandoffSchemaVersion,
+		"ok":                       true,
+		"intent":                   "single-agent-decision-for-one-command-visible-support-session",
+		"selected_path":            selectedPath,
+		"agent_next_step":          agentNextStep,
+		"mcp_next_tool":            mcpNextTool,
+		"mcp_next_arguments":       createArgs,
+		"foreground_start_command": startCommand,
+		"prepare_command": []string{
+			rdevCommand, "support-session", "prepare",
+			"--build-assets",
+			"--repo-root", repoRoot,
+			"--addr", addr,
+			"--gateway-url", gatewayURL,
+			"--target", target,
+		},
+		"status_watch_rule":      "after sending the returned user_handoff to the human, call rdev.support_session.status with wait=true; when connected=true, proactively report the connection is established",
+		"recovery_rule":          "if create/start/status fails or times out, read connection_recovery or rerun rdev.support_session.prepare; do not write custom recovery scripts",
+		"gateway_url":            gatewayURL,
+		"gateway_url_candidates": gatewayCandidates,
+		"target":                 target,
+		"locale":                 locale,
+		"auto_approve": map[string]any{
+			"enabled": opts.AutoApprove,
+			"scope":   "attended-temporary first host only for this standard visible session",
+		},
+		"human_surface_rule": "humans receive only user_handoff.message plus user_handoff.copy_paste from the next tool output",
+		"agent_rule":         "use this handoff result as the first routing decision; do not choose support-session plan or write shell/PowerShell/bootstrap/relay glue unless this contract explicitly asks for a standard rdev command",
+		"forbidden": []string{
+			"manual ticket/root/gateway/transport assembly for target humans",
+			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
+			"ExecutionPolicy Bypass",
+			"hidden install",
+			"UAC or sudo bypass",
+			"service, firewall, DNS, route, credential, paid relay, or cloud changes without explicit approval",
+		},
+	}
 }
 
 type StatusOptions struct {

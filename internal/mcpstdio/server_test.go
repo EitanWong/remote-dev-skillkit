@@ -246,6 +246,59 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 	}
 }
 
+func TestServerToolCallSupportSessionHandoff(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.handoff", map[string]any{
+		"gateway_url":  "http://192.0.2.44:8787",
+		"target":       "windows",
+		"reason":       "company computer support",
+		"auto_approve": true,
+		"locale":       "zh-CN",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	args := structured["mcp_next_arguments"].(map[string]any)
+	forbidden := strings.Join(anyStrings(structured["forbidden"].([]any)), "\n")
+	if structured["schema_version"] != "rdev.support-session-handoff.v1" ||
+		structured["selected_path"] != "create-with-reachable-gateway" ||
+		structured["mcp_next_tool"] != "rdev.support_session.create" ||
+		args["gateway_url"] != "http://192.0.2.44:8787" ||
+		args["target"] != "windows" ||
+		!strings.Contains(structured["agent_next_step"].(string), "user_handoff") ||
+		!strings.Contains(forbidden, "Agent-authored PowerShell") {
+		t.Fatalf("expected support-session handoff contract, got %#v", structured)
+	}
+}
+
+func TestServerToolCallSupportSessionHandoffWithoutGatewayUsesStart(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.handoff", map[string]any{
+		"target": "auto",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	startCommand := strings.Join(anyStrings(structured["foreground_start_command"].([]any)), "\x00")
+	if structured["schema_version"] != "rdev.support-session-handoff.v1" ||
+		structured["selected_path"] != "start-foreground-gateway" ||
+		structured["mcp_next_tool"] != "" ||
+		!strings.Contains(startCommand, "support-session\x00start") ||
+		!strings.Contains(structured["agent_rule"].(string), "do not choose support-session plan") {
+		t.Fatalf("expected foreground start handoff, got %#v", structured)
+	}
+}
+
 func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.prepare", map[string]any{
 		"repo_root":   ".",

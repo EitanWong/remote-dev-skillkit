@@ -91,8 +91,11 @@ run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan.
 When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
-or VPN-assisted connectivity. If `rdev`, the gateway, or helper assets are
-unclear, first call `rdev.support_session.prepare` or run
+or VPN-assisted connectivity. First call `rdev.support_session.handoff` or run
+`rdev support-session handoff`; follow its `selected_path`,
+`mcp_next_tool`, `mcp_next_arguments`, or `foreground_start_command` instead of
+guessing whether to prepare, create, start, or plan. If `rdev`, the gateway, or helper assets are
+unclear, call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets`; follow its standard recovery
 actions and use its recommended `gateway_url_candidates` entry instead of
 asking me to choose or assemble a gateway URL. Never give a remote target
@@ -206,9 +209,12 @@ create a Connection Entry, choose the right connection mode, and give the target
 side only the link, visible script, or signed package it should run.
 ```
 
-The Agent should start with `rdev.support_session.create` or
-`rdev support-session create` when a reachable gateway is already running. That
-high-level entry creates the scoped attended-temporary ticket and returns
+The Agent should start with `rdev.support_session.handoff` or
+`rdev support-session handoff`. That first-contact contract returns
+`rdev.support-session-handoff.v1` and chooses the next standard path: call
+`rdev.support_session.create` when a reachable gateway is already running, or
+run the returned foreground `rdev support-session start` command when no
+gateway is running. The created/started session then returns
 `rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
 placeholders. The command itself loops through ordered Connection Entry URLs on
@@ -219,7 +225,8 @@ human-facing text and command/link the Agent should send. When the target OS is
 unknown, `user_handoff.auto_target_rule` tells the Agent to send the join URL
 first and use the returned platform command only when the human asks for a
 terminal command or cannot open the page.
-When `rdev`, gateway state, or target helper assets are unclear, the Agent
+When the handoff/readiness output shows `rdev`, gateway state, or target helper
+assets are unclear, the Agent
 should call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets` from a checkout. That returns
 `rdev.support-session-prepare.v1` with local recovery, helper asset hashes,

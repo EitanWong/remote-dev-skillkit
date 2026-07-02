@@ -29,6 +29,23 @@ func Tools() []Tool {
 			}, []string{"gateway_url", "reason"}),
 		},
 		{
+			Name:        "rdev.support_session.handoff",
+			Description: "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided, call rdev.support_session.create next; if not, run the returned foreground rdev support-session start command. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
+			Safety:      "Planning only; does not create tickets, start a gateway, approve hosts, execute on the target host, or install persistence.",
+			InputSchema: object(map[string]any{
+				"repo_root":    stringField(),
+				"work_dir":     stringField(),
+				"gateway_url":  stringField(),
+				"addr":         stringField(),
+				"target":       enum("auto", "windows", "macos", "linux"),
+				"reason":       stringField(),
+				"ttl_seconds":  integer(60, 86400),
+				"auto_approve": boolField(),
+				"locale":       stringField(),
+				"rdev_command": stringField(),
+			}, nil),
+		},
+		{
 			Name:        "rdev.support_session.prepare",
 			Description: "Inspect a fresh Agent runtime for one-command support-session readiness: local rdev recovery, Go/Git checkout state, gateway URL candidates, platform helper asset availability, target bootstrap self-repair, and standard recovery actions. Agents should call this before improvising setup when rdev or gateway state is unclear, then use the recommended gateway_url_candidates entry instead of asking humans to assemble gateway values.",
 			Safety:      "Read-only by default; with build_assets=true it builds local helper binaries from the checked-out source but does not create tickets, start a gateway, approve hosts, or execute on a target machine.",

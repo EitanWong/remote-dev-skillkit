@@ -110,8 +110,12 @@ Steps:
     durable workstation, third-party temporary repair, LAN, hosted, relay, mesh,
     SSH, or VPN-assisted connectivity. Do not ask a human to assemble ticket
     codes, manifest roots, gateway URLs, transports, release roots, or checksum
-    flags. If local `rdev`, gateway state, or target helper assets are unclear,
-    first call `rdev.support_session.prepare` through MCP or run
+    flags. First call `rdev.support_session.handoff` through MCP or run
+    `rdev support-session handoff`; follow its `selected_path`,
+    `mcp_next_tool`, `mcp_next_arguments`, or `foreground_start_command`
+    instead of guessing whether to prepare, create, start, or plan. If local
+    `rdev`, gateway state, or target helper assets are unclear, call
+    `rdev.support_session.prepare` through MCP or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
     `connection_readiness`, `asset_report`, `missing_inputs`, and
     `standard_recovery` fields instead of writing custom setup code. Use its

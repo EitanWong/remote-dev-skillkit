@@ -12,6 +12,13 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev.support-session-handoff.v1` through CLI
+  `rdev support-session handoff` and MCP tool `rdev.support_session.handoff`.
+  Fresh Agents now get one standard first-contact decision: call
+  `rdev.support_session.create` when a gateway URL is already reachable, or run
+  the returned foreground `rdev support-session start` command when no gateway
+  is running. This reduces model-dependent guessing between prepare, create,
+  start, plan, and ad hoc bootstrap scripts.
 - Added `rdev.connection-attempt-policy.v1` to
   `rdev.support-session-created.v1`. Agents now receive the ordered target
   Connection Entry URL list plus bounded timeout/retry settings, so they can
@@ -109,12 +116,10 @@ metadata, status watching, or approval polling by hand.
   or explicit gateway URL for target commands. Loopback remains available but is
   marked same-machine only.
 - Updated README, MCP docs, Agent Bootstrap Prompt, i18n quick starts, and core
-  Skills so fresh Agents call support-session prepare when `rdev`, gateway
-  state, helper assets, or connectivity are unclear; prefer the standard
-  support-session creator when a gateway is available; use foreground
-  `rdev support-session start` when no gateway is running; reserve the planner
-  for review/debug; and call the standard status watcher before claiming the
-  remote host is connected.
+  Skills so fresh Agents call support-session handoff first, then follow the
+  returned create/start route. Prepare is used when readiness is unclear,
+  planner access is reserved for review/debug, and the standard status watcher
+  remains required before claiming the remote host is connected.
 - Windows join commands no longer use `ExecutionPolicy Bypass`.
 - Development gateway plans now carry all configured helper asset paths for
   Windows amd64, macOS arm64/amd64, and Linux amd64/arm64.

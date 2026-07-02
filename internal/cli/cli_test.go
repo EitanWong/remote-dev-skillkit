@@ -230,6 +230,71 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	}
 }
 
+func TestSupportSessionHandoffSelectsCreateWhenGatewayExists(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{
+		"support-session", "handoff",
+		"--gateway-url", "http://192.0.2.10:8787",
+		"--target", "windows",
+		"--reason", "company computer support",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion    string         `json:"schema_version"`
+		SelectedPath     string         `json:"selected_path"`
+		MCPNextTool      string         `json:"mcp_next_tool"`
+		MCPNextArguments map[string]any `json:"mcp_next_arguments"`
+		AgentNextStep    string         `json:"agent_next_step"`
+		Forbidden        []string       `json:"forbidden"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support session handoff JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-handoff.v1" ||
+		payload.SelectedPath != "create-with-reachable-gateway" ||
+		payload.MCPNextTool != "rdev.support_session.create" ||
+		payload.MCPNextArguments["gateway_url"] != "http://192.0.2.10:8787" ||
+		payload.MCPNextArguments["target"] != "windows" ||
+		!strings.Contains(payload.AgentNextStep, "user_handoff") ||
+		!slices.Contains(payload.Forbidden, "Agent-authored PowerShell or shell bootstrap/recovery scripts") {
+		t.Fatalf("expected create handoff route, got %#v", payload)
+	}
+}
+
+func TestSupportSessionHandoffSelectsForegroundStartWithoutGateway(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{"support-session", "handoff", "--target", "auto"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion          string   `json:"schema_version"`
+		SelectedPath           string   `json:"selected_path"`
+		MCPNextTool            string   `json:"mcp_next_tool"`
+		ForegroundStartCommand []string `json:"foreground_start_command"`
+		AgentRule              string   `json:"agent_rule"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support session handoff JSON: %v\n%s", err, stdout.String())
+	}
+	startCommand := strings.Join(payload.ForegroundStartCommand, "\x00")
+	if payload.SchemaVersion != "rdev.support-session-handoff.v1" ||
+		payload.SelectedPath != "start-foreground-gateway" ||
+		payload.MCPNextTool != "" ||
+		!strings.Contains(startCommand, "support-session\x00start") ||
+		!strings.Contains(payload.AgentRule, "do not choose support-session plan") {
+		t.Fatalf("expected foreground start handoff route, got %#v", payload)
+	}
+}
+
 func TestSupportSessionPlanDefaultGatewayDoesNotUseWildcardURL(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

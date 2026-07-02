@@ -1713,6 +1713,37 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		return fmt.Errorf("missing support-session subcommand")
 	}
 	switch args[0] {
+	case "handoff":
+		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
+		gatewayURL := fs.String("gateway-url", "", "already reachable gateway URL; omit when no gateway is running")
+		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
+		reason := fs.String("reason", "visible temporary remote support", "support session reason")
+		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
+		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
+		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
+		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *ttl < 60 || *ttl > 86400 {
+			return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+		}
+		return writeJSON(a.Stdout, supportsession.BuildHandoff(supportsession.HandoffOptions{
+			RepoRoot:    *repoRoot,
+			WorkDir:     *workDir,
+			Addr:        *addr,
+			GatewayURL:  *gatewayURL,
+			Target:      *target,
+			Reason:      *reason,
+			TTLSeconds:  *ttl,
+			AutoApprove: *autoApprove,
+			Locale:      *locale,
+			RdevCommand: *rdevCommand,
+		}))
 	case "prepare":
 		fs := flag.NewFlagSet("support-session prepare", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -6918,6 +6949,7 @@ Usage:
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256> --execute
+  rdev support-session handoff --target auto --locale auto
   rdev support-session start --target auto --locale auto
   rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session plan --addr 0.0.0.0:8787 --target auto --locale auto

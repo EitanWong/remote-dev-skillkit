@@ -126,6 +126,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
+	case "rdev.support_session.handoff":
+		data, err = s.supportSessionHandoff(params.Arguments)
 	case "rdev.support_session.prepare":
 		data, err = s.supportSessionPrepare(params.Arguments)
 	case "rdev.support_session.create":
@@ -187,6 +189,25 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		return nil, err
 	}
 	return toolResult(data)
+}
+
+func (s Server) supportSessionHandoff(args map[string]any) (any, error) {
+	ttl := intArg(args, "ttl_seconds", 7200)
+	if ttl < 60 || ttl > 86400 {
+		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
+	}
+	return supportsession.BuildHandoff(supportsession.HandoffOptions{
+		RepoRoot:    stringArg(args, "repo_root", "."),
+		WorkDir:     stringArg(args, "work_dir", ""),
+		Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
+		GatewayURL:  stringArg(args, "gateway_url", ""),
+		Target:      stringArg(args, "target", "auto"),
+		Reason:      stringArg(args, "reason", "visible temporary remote support"),
+		TTLSeconds:  ttl,
+		AutoApprove: boolArg(args, "auto_approve", true),
+		Locale:      stringArg(args, "locale", "auto"),
+		RdevCommand: stringArg(args, "rdev_command", "rdev"),
+	}), nil
 }
 
 func (s Server) supportSessionPrepare(args map[string]any) (any, error) {

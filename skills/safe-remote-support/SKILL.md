@@ -22,6 +22,12 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Run `rdev bootstrap agent-plan --repo-root .` when available and use it as
   the machine-readable contract for local MCP, `rdev` recovery, remote defaults,
   and ask/auto-probe boundaries.
+- When a fresh Agent session is asked to connect a machine, first call
+  `rdev.support_session.handoff` or run `rdev support-session handoff`. Follow
+  `selected_path`, `mcp_next_tool`, `mcp_next_arguments`, or
+  `foreground_start_command` instead of guessing between prepare, create,
+  start, and plan. Use `rdev.support_session.plan` only when the handoff,
+  operator, or debug workflow explicitly asks for review-level planning.
 - If local `rdev`, gateway state, or target helper assets are unclear, call
   `rdev.support_session.prepare` or run
   `rdev support-session prepare --build-assets` from a checkout. Treat

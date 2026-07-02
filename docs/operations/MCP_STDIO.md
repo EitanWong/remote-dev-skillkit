@@ -13,6 +13,7 @@ The server currently uses an in-memory gateway. It is suitable for local integra
 
 Agent-first session tools include:
 
+- `rdev.support_session.handoff`
 - `rdev.support_session.prepare`
 - `rdev.support_session.plan`
 - `rdev.support_session.create`
@@ -24,6 +25,16 @@ Connection Entry is the universal target-side handoff. MCP clients should not
 invent narrower public names such as customer link or connector package plan:
 the same contract covers owned managed hosts, third-party temporary support,
 LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
+
+`rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
+`structuredContent`. Fresh Agents should call it first when a human says
+"connect a computer" or similar. If `gateway_url` is present, the handoff tells
+the Agent to call `rdev.support_session.create` next. If no gateway is present,
+the handoff returns a foreground `rdev support-session start` command to run in
+a visible terminal. Agents should follow `selected_path`,
+`mcp_next_tool`/`mcp_next_arguments`, and `foreground_start_command` instead of
+choosing between prepare/create/start/plan themselves or writing bootstrap,
+relay, approval-polling, or recovery scripts.
 
 `rdev.support_session.create` returns `rdev.support-session-created.v1` in
 `structuredContent`. Agents should prefer it when a reachable gateway is
@@ -42,8 +53,9 @@ code. It also includes `user_handoff` with a localized `message` and exact
 platform command only when a terminal command is needed.
 
 `rdev.support_session.prepare` returns `rdev.support-session-prepare.v1` in
-`structuredContent`. Fresh Agent sessions should call it when local `rdev`,
-gateway state, helper assets, or one-command target readiness is unclear. It
+`structuredContent`. Fresh Agent sessions should call handoff first, then call
+prepare when local `rdev`, gateway state, helper assets, or one-command target
+readiness is unclear. It
 reports the detected OS/arch, Go/Git/`rdev` paths, resolved repo/work dirs,
 gateway URL candidates, Windows/macOS/Linux helper asset URLs and SHA-256
 hashes, `connection_readiness`, `missing_inputs`, and standard recovery

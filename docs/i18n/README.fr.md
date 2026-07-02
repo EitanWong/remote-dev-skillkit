@@ -36,10 +36,13 @@ When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
-gateway, transport, release, or checksum flags. If local `rdev`, gateway state,
-or target helper assets are unclear, first call `rdev.support_session.prepare`
-through MCP or run `rdev support-session prepare --build-assets` from the
-checkout. Follow its `connection_readiness`, `asset_report`, `missing_inputs`,
+gateway, transport, release, or checksum flags. First call
+`rdev.support_session.handoff` through MCP or run `rdev support-session handoff`;
+follow `selected_path`, `mcp_next_tool`, `mcp_next_arguments`, or
+`foreground_start_command` instead of guessing whether to prepare, create, start,
+or plan. If local `rdev`, gateway state, or target helper assets are unclear,
+call `rdev.support_session.prepare` through MCP or run
+`rdev support-session prepare --build-assets` from the checkout. Follow its `connection_readiness`, `asset_report`, `missing_inputs`,
 and `standard_recovery` fields instead of writing custom bootstrap, approval, or
 relay glue. Use the recommended `gateway_url_candidates` entry for target-side
 commands; never send a remote target `0.0.0.0`, and treat loopback as

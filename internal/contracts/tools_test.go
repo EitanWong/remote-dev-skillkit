@@ -37,6 +37,9 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 	if !seen["rdev.invites.create"] {
 		t.Fatal("expected agent-first invite creation tool")
 	}
+	if !seen["rdev.support_session.handoff"] {
+		t.Fatal("expected support session handoff tool")
+	}
 	if !seen["rdev.update.check"] || !seen["rdev.update.plan"] {
 		t.Fatal("expected update check and plan tools")
 	}
