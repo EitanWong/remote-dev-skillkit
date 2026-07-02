@@ -41,6 +41,12 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   package or package-aware join link from the invite's `connection_entry_plan`
   before asking a human to install prerequisites, copy ticket codes, copy
   manifest roots, or hand-assemble network flags.
+- For every new target host, create an invite first and then materialize it with
+  `rdev.connection_entry.plan` or `rdev connection-entry plan`. Treat
+  `entry_package_plan` as the generic package surface for Windows, macOS, Linux,
+  managed, LAN, hosted, relay, or mesh variants. If release/package inputs are
+  missing, report those missing inputs to the operator instead of asking the
+  target-side human to assemble raw connection parameters.
 - After a real Windows temporary run, package release evidence using the plan,
   output directory, transcript, release verification, audit, no-persistence
   evidence, and approval-probe paths produced or confirmed for that run.
@@ -69,19 +75,23 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 4. Create an invite with `rdev.invites.create` when available so the Agent gets
    `connection_entry`, `connection_entry_plan`, manifest root, and transport
    fallback instructions together.
-5. For Windows temporary support, generate and verify the acceptance plan or
+5. Materialize the invite with `rdev.connection_entry.plan` or
+   `rdev connection-entry plan`; review `mode_decision`, `human_surface`,
+   `agent_metadata`, `missing_inputs`, and `entry_package_plan`.
+6. For Windows temporary support, generate and verify the acceptance plan or
    connection entry package, then review the launcher, release-verification
    requirements, no-persistence checks, and approval probes.
-6. Explain the connection entry URL or package and visible consent screen.
-7. Wait for the host to appear pending.
-8. Ask the operator to approve the host with scoped capabilities.
-9. Inspect capabilities with `rdev.hosts.capabilities`.
-10. Create small scoped jobs with `rdev.jobs.create`.
-11. Use `rdev.jobs.approve` for dangerous actions.
-12. Read artifacts and audit evidence.
-13. Update or invalidate runtime memory from reviewed evidence.
-14. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
-15. Package Windows acceptance evidence before claiming the run is release-ready.
+7. Explain the selected connection entry URL, visible script, or signed package
+   and visible consent screen.
+8. Wait for the host to appear pending.
+9. Ask the operator to approve the host with scoped capabilities.
+10. Inspect capabilities with `rdev.hosts.capabilities`.
+11. Create small scoped jobs with `rdev.jobs.create`.
+12. Use `rdev.jobs.approve` for dangerous actions.
+13. Read artifacts and audit evidence.
+14. Update or invalidate runtime memory from reviewed evidence.
+15. Revoke the ticket/host when finished and run no-persistence checks for temporary Windows hosts.
+16. Package Windows acceptance evidence before claiming the run is release-ready.
 
 ## Output
 
@@ -89,6 +99,7 @@ Return stable field names:
 
 - `session_mode`;
 - `invite_or_ticket`;
+- `connection_entry_plan`;
 - `host_status`;
 - `capabilities`;
 - `approvals`;

@@ -14,6 +14,7 @@ The server currently uses an in-memory gateway. It is suitable for local integra
 Agent-first session tools include:
 
 - `rdev.invites.create`
+- `rdev.connection_entry.plan`
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
@@ -38,6 +39,18 @@ development access, or `attended-temporary` for third-party or one-off repair.
 After the host connects, the Agent watches `rdev.hosts.list`, approves the
 expected host when policy requires approval, runs scoped jobs, exports evidence,
 and revokes or stops the session when finished.
+
+`rdev.connection_entry.plan` turns an invite into
+`rdev.connection-entry.materialization-plan.v1`. It returns the selected
+ownership/session-mode decision, human-facing surfaces, Agent-only metadata,
+network strategy, missing release inputs, and, when enough release material is
+available, an `rdev.connection-entry.package-plan.v1` wrapper around the
+platform package/launcher plan. When the agent supplies `out_dir`, the MCP tool
+also writes `CONNECTION_ENTRY.md`, `connection-entry-plan.json`, and generated
+launcher/package planning files into that empty directory. Target-side humans
+receive only the selected Connection Entry surface. Ticket codes, manifest
+roots, gateway URLs, transport preferences, release roots, and checksums stay in
+Agent/tool metadata.
 
 The `host_context_plan` is the standard for AI-native context management. It
 sets `storage_location=remote-host-first` and

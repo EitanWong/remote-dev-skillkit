@@ -11,6 +11,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
+	"github.com/EitanWong/remote-dev-skillkit/internal/connectionentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -123,6 +124,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
+	case "rdev.connection_entry.plan":
+		data, err = s.connectionEntryPlan(params.Arguments)
 	case "rdev.tickets.create":
 		data, err = s.createTicket(params.Arguments)
 	case "rdev.tickets.revoke":
@@ -224,6 +227,28 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 		return nil, err
 	}
 	return invite, nil
+}
+
+func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
+	return connectionentry.FromInvite(connectionentry.Options{
+		InviteJSON:                     requiredString(args, "invite_json"),
+		OutDir:                         stringArg(args, "out_dir", ""),
+		TargetOS:                       stringArg(args, "target_os", ""),
+		Ownership:                      stringArg(args, "ownership", ""),
+		SessionMode:                    stringArg(args, "session_mode", ""),
+		ReleaseBundleURL:               stringArg(args, "release_bundle_url", ""),
+		ReleaseBundleRequiredArtifacts: stringArg(args, "release_bundle_required_artifacts", ""),
+		ReleaseRootPublicKey:           stringArg(args, "release_root_public_key", ""),
+		WindowsHostDownloadURL:         stringArg(args, "windows_host_download_url", ""),
+		WindowsHostExpectedSHA256:      stringArg(args, "windows_host_sha256", ""),
+		WindowsVerifierDownloadURL:     stringArg(args, "windows_verifier_download_url", ""),
+		WindowsVerifierExpectedSHA256:  stringArg(args, "windows_verifier_sha256", ""),
+		WindowsBootstrapScriptPath:     stringArg(args, "windows_bootstrap_script", ""),
+		WindowsBootstrapScriptURL:      stringArg(args, "windows_bootstrap_script_url", ""),
+		WindowsBootstrapScriptSHA256:   stringArg(args, "windows_bootstrap_script_sha256", ""),
+		HostName:                       stringArg(args, "host_name", ""),
+		Force:                          boolArg(args, "force", false),
+	})
 }
 
 func (s Server) createTicket(args map[string]any) (any, error) {

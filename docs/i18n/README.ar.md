@@ -19,28 +19,28 @@ Bootstrap Remote Dev Skillkit for this agent runtime.
 
 Repository: https://github.com/EitanWong/remote-dev-skillkit
 
-First clone or update the repository in a safe user/workspace location. Then
-read `docs/operations/AGENT_BOOTSTRAP_PROMPT.md` from the checkout and follow
-that full prompt as the source of truth for installation. If cloning is blocked,
-read the prompt from:
+Clone or update the repository in a safe user/workspace location. Then read
+`docs/operations/AGENT_BOOTSTRAP_PROMPT.md` from the checkout and follow it as
+the source of truth. If cloning is blocked, read the prompt from:
 https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
 
-Probe my OS, shell, Git, Go, `rdev`, current agent framework, skill directory,
-MCP config, network reachability, proxy/DNS state, NAT/firewall/CGNAT hints,
-SSH config, installed tunnel/mesh tools, and available connection modes before
-acting. If a required value is unclear, ask me one short question instead of
-guessing. For a personal computer agent install, use local MCP stdio with
-`rdev mcp serve`; do not require a hosted gateway URL. When remote hosts are
-needed, auto-select the safest working mode: local dev gateway, LAN-reachable
-gateway, hosted gateway, SSH tunnel, or relay/mesh/VPN. For remote hosts, create
-an invite and present `connection_entry.entry_url` or a signed connection entry
-package instead of asking humans to assemble ticket, root, gateway, or transport
-flags. If tunneling is needed,
-prefer open-source/free options first, such as frp, Chisel, headscale, or
-WireGuard, after probing what is already installed. Dry-run before execute. Do
-not hardcode private paths, secrets, or server addresses; treat
-`https://api.example.com/v1` only as optional hosted-gateway placeholder
-metadata.
+Install the Skillkit and configure MCP for this agent. Probe OS, shell, Git, Go,
+`rdev`, current agent framework, skill directory, MCP config, and network state
+before acting. Ask one short question when a required value is unclear. For this
+personal computer, prefer local MCP stdio with `rdev mcp serve`; do not require a
+hosted gateway URL.
+
+When I ask you to work on another machine, create a Connection Entry. Do not ask
+humans to assemble ticket, root, gateway, or transport flags. Use
+`rdev.invites.create`, then `rdev.connection_entry.plan` or
+`rdev connection-entry plan`, and give the target side only a link, visible
+script, or signed package. Choose `managed` for my own long-running machines and
+`attended-temporary` for third-party or one-off repair machines. Auto-select
+LAN, hosted, SSH, relay, mesh, or VPN paths as needed; prefer existing,
+open-source/free options such as frp, Chisel, headscale, or WireGuard; ask before
+privileged, persistent, paid, firewall, DNS, cloud, or security-policy changes.
+Dry-run before execute. Do not hardcode private paths, secrets, or server
+addresses; example URLs are placeholders only.
 ```
 
 النص الكامل للنسخ: [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md).

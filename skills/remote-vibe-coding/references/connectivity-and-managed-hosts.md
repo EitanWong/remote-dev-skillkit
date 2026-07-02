@@ -29,6 +29,10 @@ max-control discovery, or long-running owned workstations.
 - Relay, mesh/VPN, and SSH tunnel paths are connectivity only. They never
   replace target consent, host approval, signed jobs, local policy checks, or
   evidence.
+- After choosing any connectivity path, return to the Connection Entry flow.
+  The target-side human receives a link, visible script, or signed package from
+  `connection_entry` / `entry_package_plan`; raw ticket, root, gateway,
+  transport, release, and checksum values stay in Agent metadata.
 
 ## Max-Control Profile
 

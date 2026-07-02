@@ -26,6 +26,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
+	"github.com/EitanWong/remote-dev-skillkit/internal/connectionentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/enrollmentlifecycle"
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
@@ -80,6 +81,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.host(ctx, args[1:])
 	case "invite":
 		return a.invite(ctx, args[1:])
+	case "connection-entry":
+		return a.connectionEntry(args[1:])
 	case "ticket":
 		return a.ticket(args[1:])
 	case "policy":
@@ -2915,6 +2918,73 @@ func (a App) ticketCreate(mode model.HostMode, ttlSeconds int, reason, capList s
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func (a App) connectionEntry(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing connection-entry subcommand")
+	}
+	switch args[0] {
+	case "plan":
+		fs := flag.NewFlagSet("connection-entry plan", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		invitePath := fs.String("invite", "", "invite JSON path from rdev invite create or rdev.invites.create")
+		inviteJSON := fs.String("invite-json", "", "inline invite JSON")
+		out := fs.String("out", "", "empty output directory for connection-entry materialization files")
+		targetOS := fs.String("target-os", runtime.GOOS, "target OS: windows, darwin, or linux")
+		ownership := fs.String("ownership", "", "target ownership: owned or third-party; inferred from invite mode when omitted")
+		sessionMode := fs.String("session-mode", "", "session mode override: attended-temporary, managed, or break-glass")
+		releaseBundleURL := fs.String("release-bundle-url", "", "signed release bundle index URL for target-side package verification")
+		releaseBundleRequiredArtifacts := fs.String("release-bundle-required-artifacts", "", "comma-separated artifact ids required in the release bundle")
+		releaseRootPublicKey := fs.String("release-root-public-key", "", "pinned release root public key")
+		windowsHostDownloadURL := fs.String("windows-host-download-url", "", "rdev-host.exe download URL for Windows temporary entry materialization")
+		windowsHostSHA256 := fs.String("windows-host-sha256", "", "expected SHA-256 for rdev-host.exe")
+		windowsVerifierDownloadURL := fs.String("windows-verifier-download-url", "", "rdev-verify.exe download URL")
+		windowsVerifierSHA256 := fs.String("windows-verifier-sha256", "", "expected SHA-256 for rdev-verify.exe")
+		windowsBootstrapScriptURL := fs.String("windows-bootstrap-script-url", "", "optional URL for downloading windows-temporary.ps1 on the target host")
+		windowsBootstrapScriptSHA256 := fs.String("windows-bootstrap-script-sha256", "", "expected SHA-256 for windows-temporary.ps1")
+		windowsBootstrapScriptPath := fs.String("windows-bootstrap-script", "", "local windows-temporary.ps1 path; defaults to scripts/bootstrap/windows-temporary.ps1")
+		hostName := fs.String("host-name", "", "optional target host display name")
+		force := fs.Bool("force", false, "overwrite generated nested Windows launcher files when supported")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		plan, err := connectionentry.FromInvite(connectionentry.Options{
+			InviteJSON:                     *inviteJSON,
+			InvitePath:                     *invitePath,
+			OutDir:                         *out,
+			TargetOS:                       *targetOS,
+			Ownership:                      *ownership,
+			SessionMode:                    *sessionMode,
+			ReleaseBundleURL:               *releaseBundleURL,
+			ReleaseBundleRequiredArtifacts: *releaseBundleRequiredArtifacts,
+			ReleaseRootPublicKey:           *releaseRootPublicKey,
+			WindowsHostDownloadURL:         *windowsHostDownloadURL,
+			WindowsHostExpectedSHA256:      *windowsHostSHA256,
+			WindowsVerifierDownloadURL:     *windowsVerifierDownloadURL,
+			WindowsVerifierExpectedSHA256:  *windowsVerifierSHA256,
+			WindowsBootstrapScriptURL:      *windowsBootstrapScriptURL,
+			WindowsBootstrapScriptSHA256:   *windowsBootstrapScriptSHA256,
+			WindowsBootstrapScriptPath:     *windowsBootstrapScriptPath,
+			HostName:                       *hostName,
+			Force:                          *force,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSON(a.Stdout, map[string]any{
+			"ok":                 connectionEntryChecksPassed(plan.Checks),
+			"schema":             plan.SchemaVersion,
+			"plan":               plan,
+			"out":                plan.OutDir,
+			"human_message":      plan.HumanMessagePath,
+			"entry_package_plan": plan.EntryPackagePlan,
+			"missing_inputs":     plan.MissingInputs,
+			"generated_files":    plan.GeneratedFiles,
+		})
+	default:
+		return fmt.Errorf("unknown connection-entry subcommand %q", args[0])
+	}
 }
 
 func (a App) invite(ctx context.Context, args []string) error {
@@ -6023,6 +6093,8 @@ Usage:
   rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
   rdev update check --repo EitanWong/remote-dev-skillkit
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
+  rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
+  rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party
   rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1
   rdev adapter verify-lifecycle --artifact examples/adapters/claude-code-lifecycle.json --adapter claude-code
@@ -7217,6 +7289,18 @@ func writeJSON(out io.Writer, value any) error {
 }
 
 func allAcceptanceChecksPassed(checks []acceptance.Check) bool {
+	if len(checks) == 0 {
+		return false
+	}
+	for _, check := range checks {
+		if !check.Passed {
+			return false
+		}
+	}
+	return true
+}
+
+func connectionEntryChecksPassed(checks []connectionentry.Check) bool {
 	if len(checks) == 0 {
 		return false
 	}

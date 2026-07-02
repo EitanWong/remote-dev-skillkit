@@ -16,6 +16,10 @@ Before v1.0.0:
 - `0.1.1-dev` marks hosted storage/auth foundation.
 - `0.1.2-dev` marks enrollment authority lifecycle evidence.
 - `0.1.3-dev` marks production WSS/mTLS host transport.
+- `0.1.4-dev` marks AI-native invite creation, auto transport fallback, and
+  connection-entry guidance.
+- `0.1.5-dev` marks universal Connection Entry materialization through MCP/CLI
+  and generic package-plan output.
 
 Compatibility promises:
 

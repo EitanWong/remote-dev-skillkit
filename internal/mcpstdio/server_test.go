@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +164,124 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	managedDevPlan, ok := structured["managed_development_plan"].(map[string]any)
 	if !ok || managedDevPlan["schema_version"] != "rdev.managed-development-plan.v1" || managedDevPlan["mode"] != "owned-long-running-developer-workstation" {
 		t.Fatalf("expected managed development plan, got %#v", structured)
+	}
+}
+
+func TestServerToolCallConnectionEntryPlan(t *testing.T) {
+	inviteInput := mcpRequestLine(t, "rdev.invites.create", map[string]any{
+		"gateway_url": "https://api.example.com/v1",
+		"mode":        "attended-temporary",
+		"ttl_seconds": 600,
+		"reason":      "repair target host",
+		"transport":   "auto",
+	})
+	var inviteOut bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+	if err := server.Serve(context.Background(), strings.NewReader(inviteInput), &inviteOut); err != nil {
+		t.Fatal(err)
+	}
+	inviteLines := responseLines(t, inviteOut.String())
+	inviteResult := inviteLines[0]["result"].(map[string]any)
+	inviteStructured := inviteResult["structuredContent"].(map[string]any)
+	inviteJSON, err := json.Marshal(inviteStructured)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := mcpRequestLine(t, "rdev.connection_entry.plan", map[string]any{
+		"invite_json": string(inviteJSON),
+		"target_os":   "windows",
+		"ownership":   "third-party",
+	})
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.connection-entry.materialization-plan.v1" ||
+		structured["session_mode"] != "attended-temporary" ||
+		structured["target_os"] != "windows" {
+		t.Fatalf("unexpected connection entry plan: %#v", structured)
+	}
+	if text, ok := structured["mode_decision"].(string); !ok || !strings.Contains(text, "attended-temporary") {
+		t.Fatalf("expected attended temporary mode decision, got %#v", structured)
+	}
+	if surface, ok := structured["human_surface"].([]any); !ok || !containsAnyString(surface, "connection_entry.entry_url") {
+		t.Fatalf("expected human connection entry surface, got %#v", structured)
+	}
+	if metadata, ok := structured["agent_metadata"].([]any); !ok || !containsAnyString(metadata, "manifest root public key") {
+		t.Fatalf("expected agent-only metadata, got %#v", structured)
+	}
+	if _, ok := structured["entry_package_plan"]; ok {
+		t.Fatalf("missing release inputs should not produce an entry package plan: %#v", structured)
+	}
+	missing, ok := structured["missing_inputs"].([]any)
+	if !ok || !containsAnyString(missing, "release_bundle_url") {
+		t.Fatalf("expected missing release inputs, got %#v", structured)
+	}
+}
+
+func TestServerToolCallConnectionEntryPlanWritesPackagePlan(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	inviteIn := mcpRequestLine(t, "rdev.invites.create", map[string]any{
+		"gateway_url": "https://api.example.com/v1",
+		"mode":        "attended-temporary",
+		"reason":      "repair target host",
+		"transport":   "auto",
+	})
+	var inviteOut bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(inviteIn), &inviteOut); err != nil {
+		t.Fatal(err)
+	}
+	inviteLines := responseLines(t, inviteOut.String())
+	inviteResult := inviteLines[0]["result"].(map[string]any)
+	inviteStructured := inviteResult["structuredContent"].(map[string]any)
+	inviteJSON, err := json.Marshal(inviteStructured)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bootstrap := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+	if err := os.WriteFile(bootstrap, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "entry")
+	input := mcpRequestLine(t, "rdev.connection_entry.plan", map[string]any{
+		"invite_json":                   string(inviteJSON),
+		"out_dir":                       outDir,
+		"target_os":                     "windows",
+		"ownership":                     "third-party",
+		"windows_bootstrap_script":      bootstrap,
+		"windows_host_download_url":     "https://agent.example.com/rdev-host.exe",
+		"windows_host_sha256":           strings.Repeat("a", 64),
+		"release_bundle_url":            "https://agent.example.com/release-bundle.json",
+		"release_root_public_key":       "release-root:" + strings.Repeat("b", 43),
+		"windows_verifier_download_url": "https://agent.example.com/rdev-verify.exe",
+		"windows_verifier_sha256":       strings.Repeat("c", 64),
+	})
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	packagePlan, ok := structured["entry_package_plan"].(map[string]any)
+	if !ok || packagePlan["schema_version"] != "rdev.connection-entry.package-plan.v1" {
+		t.Fatalf("expected generic entry package plan, got %#v", structured)
+	}
+	launcher, ok := packagePlan["launcher_path"].(string)
+	if !ok || !fileExistsForMCPTest(launcher) {
+		t.Fatalf("expected generated launcher path, got %#v", packagePlan)
+	}
+	humanMessage, ok := structured["human_message_path"].(string)
+	if !ok || !fileExistsForMCPTest(humanMessage) {
+		t.Fatalf("expected generated human message, got %#v", structured)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "connection-entry-plan.json")); err != nil {
+		t.Fatalf("expected materialized plan JSON: %v", err)
 	}
 }
 
@@ -642,4 +762,18 @@ func responseLines(t *testing.T, output string) []map[string]any {
 		responses = append(responses, decoded)
 	}
 	return responses
+}
+
+func containsAnyString(values []any, want string) bool {
+	for _, value := range values {
+		if text, ok := value.(string); ok && text == want {
+			return true
+		}
+	}
+	return false
+}
+
+func fileExistsForMCPTest(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

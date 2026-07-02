@@ -55,9 +55,11 @@ revocation.
 2. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
 3. If no suitable host is active, create an invite with `rdev.invites.create` or
-   `rdev invite create`; present `connection_entry.entry_url` or the invite's
-   `connection_entry_plan` package path to the target-side human, and treat
-   `host_command` as an Agent/debug implementation detail.
+   `rdev invite create`; then materialize it with `rdev.connection_entry.plan`
+   or `rdev connection-entry plan`. Present only the selected
+   `connection_entry.entry_url`, visible script, or signed package to the
+   target-side human, and treat `host_command`, ticket, gateway, root, release,
+   checksum, and transport values as Agent/package metadata.
 4. Wait for the host, then approve it only after the operator confirms it is the
    expected machine.
 5. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
@@ -79,7 +81,11 @@ revocation.
    persistence by default. Prefer a signed self-contained connection entry
    package with the target-platform `rdev` binary, release bundle, manifest URL,
    pinned manifest root, visible launcher, and `--transport auto` before asking
-   a human to install prerequisites or copy flags.
+   a human to install prerequisites or copy flags. Use the materialized
+   `entry_package_plan` as the generic package surface for Windows, macOS,
+   Linux, managed-service, LAN, hosted, relay, or mesh variants; if packaging is
+   not ready, report `missing_inputs` to the operator and keep target-side
+   instructions limited to a Connection Entry.
 3. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
    runtimes, package managers, lockfiles, framework paths, proxies,
    permissions, and trust roots before installing anything.

@@ -381,6 +381,90 @@ func TestInviteCreateLANScopeMarksLANReachability(t *testing.T) {
 	}
 }
 
+func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var inviteOut bytes.Buffer
+	inviteApp := NewApp(&inviteOut, &bytes.Buffer{})
+	if err := inviteApp.Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--reason", "repair target host",
+		"--transport", "auto",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	bootstrap := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+	if err := os.WriteFile(bootstrap, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "entry")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"connection-entry", "plan",
+		"--invite-json", inviteOut.String(),
+		"--out", outDir,
+		"--target-os", "windows",
+		"--ownership", "third-party",
+		"--windows-bootstrap-script", bootstrap,
+		"--windows-host-download-url", "https://agent.example.com/rdev-host.exe",
+		"--windows-host-sha256", strings.Repeat("a", 64),
+		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
+		"--release-root-public-key", "release-root:" + strings.Repeat("b", 43),
+		"--windows-verifier-download-url", "https://agent.example.com/rdev-verify.exe",
+		"--windows-verifier-sha256", strings.Repeat("c", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		OK               bool `json:"ok"`
+		EntryPackagePlan struct {
+			SchemaVersion       string   `json:"schema_version"`
+			TargetOS            string   `json:"target_os"`
+			SessionMode         string   `json:"session_mode"`
+			PlatformPlanKind    string   `json:"platform_plan_kind"`
+			LauncherPath        string   `json:"launcher_path"`
+			AgentOnlyParameters []string `json:"agent_only_parameters"`
+		} `json:"entry_package_plan"`
+		Plan struct {
+			ModeDecision  string   `json:"mode_decision"`
+			HumanSurface  []string `json:"human_surface"`
+			AgentMetadata []string `json:"agent_metadata"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid connection entry output: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected connection entry plan ok, got %s", stdout.String())
+	}
+	if payload.EntryPackagePlan.SchemaVersion != "rdev.connection-entry.package-plan.v1" ||
+		payload.EntryPackagePlan.TargetOS != "windows" ||
+		payload.EntryPackagePlan.SessionMode != string(model.HostModeAttendedTemporary) ||
+		payload.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" ||
+		!fileExistsForCLITest(payload.EntryPackagePlan.LauncherPath) {
+		t.Fatalf("expected generic entry package plan wrapping Windows temporary plan, got %#v", payload.EntryPackagePlan)
+	}
+	if !slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "ticket_code") ||
+		!slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "manifest_root_public_key") {
+		t.Fatalf("expected raw connection parameters to be agent-only, got %#v", payload.EntryPackagePlan.AgentOnlyParameters)
+	}
+	if !strings.Contains(payload.Plan.ModeDecision, "attended-temporary") ||
+		!slices.Contains(payload.Plan.HumanSurface, "connection_entry.entry_url") ||
+		!slices.Contains(payload.Plan.AgentMetadata, "gateway URL") {
+		t.Fatalf("expected universal mode decision and split human/agent surfaces, got %#v", payload.Plan)
+	}
+	if strings.Contains(stdout.String(), "customer_bootstrap") ||
+		strings.Contains(stdout.String(), "connector_package_plan") {
+		t.Fatalf("connection entry output should not use legacy customer/connector names: %s", stdout.String())
+	}
+}
+
 func TestInviteCreateRequiresGateway(t *testing.T) {
 	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
 	err := app.Run(context.Background(), []string{"invite", "create", "--reason", "repair"})
@@ -6795,6 +6879,11 @@ func readFileForTest(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(content)
+}
+
+func fileExistsForCLITest(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func writeWindowsPackageEvidenceForCLITest(t *testing.T, root, releaseVerification string) (string, string, string, string, string) {

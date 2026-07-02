@@ -4,6 +4,40 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.5-dev
+
+Current phase: universal Connection Entry materialization is implemented so
+agents can turn invites into target-side links, visible scripts, or signed
+package plans without handing humans ticket, manifest root, gateway, transport,
+release, or checksum parameters.
+
+### Added
+
+- Added `rdev.connection_entry.plan` MCP tool and `rdev connection-entry plan`
+  CLI command to materialize any invite into
+  `rdev.connection-entry.materialization-plan.v1`. The MCP tool also accepts an
+  `out_dir` plus platform release inputs so agents can generate
+  `CONNECTION_ENTRY.md`, `connection-entry-plan.json`, and launcher/package
+  planning files without dropping down to manual parameter assembly.
+- Added generic `rdev.connection-entry.package-plan.v1` output as the universal
+  Connection Entry Package Plan surface. It separates target-side human surfaces
+  from Agent-only ticket, gateway, manifest root, transport, release, and
+  checksum metadata, and currently wraps the Windows temporary acceptance plan
+  when release inputs are available.
+- Added mode-decision fields for Connection Entry materialization so agents can
+  consistently choose `managed` for operator-owned long-running machines and
+  `attended-temporary` for third-party or one-off repair machines.
+
+### Changed
+
+- Changed README, multilingual quick-start prompts, Agent Bootstrap Prompt, MCP
+  docs, bootstrap docs, and core Skills to say all new remote-host onboarding
+  should produce a Connection Entry link, visible script, or signed package
+  instead of handing humans raw ticket/root/gateway/transport values.
+- Changed remote-support guidance so missing package or release inputs are
+  reported to the operator through `missing_inputs`; target-side humans are not
+  asked to assemble low-level connection parameters.
+
 ## 0.1.4-dev
 
 Current phase: Agent-first remote session invites are implemented so AI agents

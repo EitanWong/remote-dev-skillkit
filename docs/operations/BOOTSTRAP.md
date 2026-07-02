@@ -135,6 +135,31 @@ or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
   appears;
 - `revocation_instructions`: how to stop the session and revoke access.
 
+After invite creation, agents should call `rdev.connection_entry.plan` through
+MCP or `rdev connection-entry plan` through the CLI. That materializes the invite
+into `rdev.connection-entry.materialization-plan.v1`, including:
+
+- the selected ownership/session-mode decision;
+- human-facing entry surfaces such as link, visible script, or signed package;
+- Agent-only metadata such as ticket, gateway, manifest root, transport, release,
+  and checksum inputs;
+- missing release inputs that must be provided before packaging is ready;
+- `entry_package_plan` when a platform package/launcher plan can be generated.
+
+When an agent provides an empty `out_dir`, the MCP and CLI materializers write a
+target-side `CONNECTION_ENTRY.md`, the machine-readable
+`connection-entry-plan.json`, and any generated launcher/package planning files.
+Those generated files are the target-side handoff; ticket, gateway, root,
+transport, release, and checksum values remain inside the plan for Agent/tool
+use.
+
+For Windows attended temporary support, the current package implementation wraps
+the existing Windows temporary acceptance plan as
+`rdev.connection-entry.package-plan.v1`. Future macOS, Linux, managed-service,
+LAN, hosted, relay, and mesh package planners should attach to the same generic
+Connection Entry Package Plan surface rather than creating new human-facing
+parameter lists.
+
 The same invite includes `connection_entry_plan`. Agents should use it as the
 universal connection decision contract rather than exposing ticket codes,
 gateway URLs, manifest roots, or transport flags to a human. For an

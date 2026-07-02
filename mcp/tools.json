@@ -81,6 +81,98 @@
       }
     },
     {
+      "name": "rdev.connection_entry.plan",
+      "description": "Materialize an invite into a universal target-side connection entry and package plan, including human-facing entry surfaces, Agent-only metadata, owned-vs-third-party mode selection, missing release inputs, and platform package planning.",
+      "safety": "Planning only; writes no remote state and does not execute on the target host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "host_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "invite_json": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "ownership": {
+            "enum": [
+              "owned",
+              "third-party"
+            ],
+            "type": "string"
+          },
+          "out_dir": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "release_bundle_required_artifacts": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "release_bundle_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "release_root_public_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_mode": {
+            "enum": [
+              "attended-temporary",
+              "managed",
+              "break-glass"
+            ],
+            "type": "string"
+          },
+          "target_os": {
+            "enum": [
+              "windows",
+              "darwin",
+              "linux"
+            ],
+            "type": "string"
+          },
+          "windows_bootstrap_script": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "windows_bootstrap_script_sha256": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "windows_bootstrap_script_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "windows_host_download_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "windows_host_sha256": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "windows_verifier_download_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "windows_verifier_sha256": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "invite_json"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.tickets.create",
       "description": "Create a short-lived support or remote development ticket for a target host.",
       "safety": "Creates access path; does not execute on host.",
