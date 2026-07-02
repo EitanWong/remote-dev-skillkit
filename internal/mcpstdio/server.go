@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
@@ -125,6 +126,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
+	case "rdev.support_session.create":
+		data, err = s.supportSessionCreate(params.Arguments)
 	case "rdev.support_session.plan":
 		data, err = s.supportSessionPlan(params.Arguments)
 	case "rdev.support_session.status":
@@ -242,6 +245,45 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 		return nil, err
 	}
 	return invite, nil
+}
+
+func (s Server) supportSessionCreate(args map[string]any) (any, error) {
+	ttl := intArg(args, "ttl_seconds", 7200)
+	if ttl < 60 || ttl > 86400 {
+		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
+	}
+	autoApprove := boolArg(args, "auto_approve", true)
+	metadata := map[string]string{
+		"connection_entry":  "standard-visible",
+		"approval_contract": "target-consent-scoped-ticket",
+	}
+	if autoApprove {
+		metadata["auto_approve"] = "attended-temporary"
+	}
+	ticket, err := s.Gateway.CreateTicketWithMetadata(
+		model.HostModeAttendedTemporary,
+		ttl,
+		policyCapabilitiesToStrings(policy.TemporaryDefaults()),
+		stringArg(args, "reason", "visible temporary remote support"),
+		metadata,
+	)
+	if err != nil {
+		return nil, err
+	}
+	gatewayURL := requiredString(args, "gateway_url")
+	joinURL := strings.TrimRight(gatewayURL, "/") + "/join/" + ticket.Code
+	manifestURL := strings.TrimRight(gatewayURL, "/") + "/v1/tickets/" + ticket.Code + "/manifest"
+	return supportsession.BuildCreated(supportsession.CreatedOptions{
+		GatewayURL:            gatewayURL,
+		JoinURL:               joinURL,
+		ManifestURL:           manifestURL,
+		ManifestRootPublicKey: manifestRootPublicKey(s.Gateway.ManifestRoot()),
+		Ticket:                ticket,
+		Target:                stringArg(args, "target", "auto"),
+		Locale:                stringArg(args, "locale", "auto"),
+		RdevCommand:           stringArg(args, "rdev_command", "rdev"),
+		AutoApprove:           autoApprove,
+	}), nil
 }
 
 func (s Server) supportSessionPlan(args map[string]any) (any, error) {
@@ -731,6 +773,14 @@ func boolArg(args map[string]any, key string, fallback bool) bool {
 		return fallback
 	}
 	return typed
+}
+
+func policyCapabilitiesToStrings(caps []policy.Capability) []string {
+	values := make([]string, 0, len(caps))
+	for _, cap := range caps {
+		values = append(values, string(cap))
+	}
+	return values
 }
 
 func stringSliceArg(args map[string]any, key string) []string {

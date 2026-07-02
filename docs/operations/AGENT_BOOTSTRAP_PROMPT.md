@@ -110,18 +110,23 @@ Steps:
     durable workstation, third-party temporary repair, LAN, hosted, relay, mesh,
     SSH, or VPN-assisted connectivity. Do not ask a human to assemble ticket
     codes, manifest roots, gateway URLs, transports, release roots, or checksum
-    flags. First call `rdev.support_session.plan` through MCP, or
-    `rdev support-session plan` through the CLI, to obtain the standard gateway
-    startup argv, verified helper assets, invite creation commands, localized
-    target-user command, and scoped attended-temporary auto-approval contract.
+    flags. If a reachable gateway is already running, first call
+    `rdev.support_session.create` through MCP, or
+    `rdev support-session create` through the CLI, to create the session and
+    obtain the ready target command, join URL, manifest root, real ticket code,
+    and status watcher in one payload. If no suitable gateway is running yet,
+    call `rdev.support_session.plan` or `rdev support-session plan` to obtain
+    the standard gateway startup argv, verified helper assets, invite creation
+    commands, localized target-user command, and scoped attended-temporary
+    auto-approval contract.
     After giving the target command to the human, call
     `rdev.support_session.status` through MCP or
     `rdev support-session status --wait` through CLI. When the status returns
     `connected=true`, proactively tell me that the connection has been
     established before creating any jobs.
     Do not write ad hoc PowerShell, shell relay, nohup, approval, or bootstrap
-    code when the plan can provide it. After the viable gateway/transport path
-    is known, use
+    code when the plan can provide it. For lower-level package materialization
+    or when `rdev.support_session.create` is not sufficient, use
     `rdev.invites.create` or `rdev invite create` so the Agent receives
     `connection_entry`, `connection_entry.package_catalog`,
     `connection_entry_plan`, manifest root, and transport fallback instructions

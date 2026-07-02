@@ -12,6 +12,13 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev support-session create` and MCP tool
+  `rdev.support_session.create` with schema
+  `rdev.support-session-created.v1`. When a gateway is already reachable,
+  Agents can now create the attended-temporary ticket and receive the ready
+  target command, join URL, real ticket code, manifest root, and status watcher
+  in one payload instead of manually creating an invite and substituting
+  placeholders.
 - Added `rdev support-session plan` and MCP tool
   `rdev.support_session.plan` with schema `rdev.support-session-plan.v1`.
   The plan returns reviewed argv for preparing a session workdir, building the
@@ -32,17 +39,16 @@ metadata, status watching, or approval polling by hand.
   Entry, with audit events for both registration and auto-approval.
 - Added `--auto-approve` to `rdev invite create` and `auto_approve` to
   `rdev.invites.create`.
-- Added regression coverage for support-session plans, localized target
-  commands, status feedback, verified helper assets, scoped auto-approval, and
-  ticket metadata snapshot copying.
+- Added regression coverage for support-session create payloads, support-session
+  plans, localized target commands, status feedback, verified helper assets,
+  scoped auto-approval, and ticket metadata snapshot copying.
 
 ### Changed
 
 - Updated README, MCP docs, Agent Bootstrap Prompt, i18n quick starts, and core
-  Skills so Agents must call the standard support-session planner before writing
-  ad hoc PowerShell, shell relay, nohup, bootstrap, gateway, ticket/root, or
-  approval steps, then call the standard status watcher before claiming the
-  remote host is connected.
+  Skills so Agents prefer the standard support-session creator when a gateway is
+  available, fall back to the planner only to prepare a gateway, and call the
+  standard status watcher before claiming the remote host is connected.
 - Windows join commands no longer use `ExecutionPolicy Bypass`.
 - Development gateway plans now carry all configured helper asset paths for
   Windows amd64, macOS arm64/amd64, and Linux amd64/arm64.

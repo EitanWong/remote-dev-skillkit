@@ -51,6 +51,37 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	}
 }
 
+func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "http://192.0.2.10:8787",
+		ManifestRootPublicKey: "manifest-root:abc",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "windows",
+		Locale:                "zh-CN",
+		RdevCommand:           "rdev",
+		AutoApprove:           true,
+	})
+
+	if created["schema_version"] != CreatedSchemaVersion ||
+		created["target_command"] == "" ||
+		!strings.Contains(created["target_command"].(string), "ABCD-1234") ||
+		strings.Contains(created["target_command"].(string), "<ticket-code>") ||
+		strings.Contains(created["target_command"].(string), "ExecutionPolicy Bypass") {
+		t.Fatalf("expected ready Windows command without unsafe placeholders: %#v", created)
+	}
+	watch := strings.Join(created["watch_connection_status"].([]string), "\x00")
+	if !strings.Contains(watch, "ABCD-1234") ||
+		strings.Contains(watch, "<ticket-code>") ||
+		!strings.Contains(watch, "--wait") {
+		t.Fatalf("expected ready status watcher, got %s", watch)
+	}
+	flow := strings.Join(created["agent_flow"].([]string), "\n")
+	if !strings.Contains(flow, "proactively report") ||
+		!strings.Contains(flow, "do not ask the human to assemble") {
+		t.Fatalf("expected Agent-native flow, got %s", flow)
+	}
+}
+
 func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 	status := BuildStatus(StatusOptions{
 		TicketCode: "ABCD-1234",

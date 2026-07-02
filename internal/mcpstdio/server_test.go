@@ -245,6 +245,44 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 	}
 }
 
+func TestServerToolCallSupportSessionCreate(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.create", map[string]any{
+		"gateway_url":  "http://192.0.2.44:8787",
+		"target":       "windows",
+		"reason":       "company computer support",
+		"auto_approve": true,
+		"locale":       "zh-CN",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-created.v1" ||
+		structured["recommended_surface"] != "windows" ||
+		structured["auto_approve"] != true {
+		t.Fatalf("expected created support session payload, got %#v", structured)
+	}
+	ticketCode, _ := structured["ticket_code"].(string)
+	targetCommand, _ := structured["target_command"].(string)
+	if ticketCode == "" ||
+		!strings.Contains(targetCommand, ticketCode) ||
+		strings.Contains(targetCommand, "<ticket-code>") ||
+		strings.Contains(targetCommand, "ExecutionPolicy Bypass") {
+		t.Fatalf("expected ready safe target command: ticket=%q command=%q", ticketCode, targetCommand)
+	}
+	watch := strings.Join(anyStrings(structured["watch_connection_status"].([]any)), "\x00")
+	if !strings.Contains(watch, ticketCode) ||
+		strings.Contains(watch, "<ticket-code>") ||
+		!strings.Contains(watch, "--wait") {
+		t.Fatalf("expected ready status watcher, got %s", watch)
+	}
+}
+
 func TestServerToolCallSupportSessionStatus(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "company computer support", map[string]string{

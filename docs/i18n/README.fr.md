@@ -36,15 +36,18 @@ When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
-gateway, transport, release, or checksum flags. First call
-`rdev.support_session.plan` through MCP or `rdev support-session plan` through
-CLI to get the standard gateway startup, verified helper assets, invite commands,
-localized target command, scoped auto-approval plan, and status watch command.
+gateway, transport, release, or checksum flags. If a reachable gateway is
+already running, first call `rdev.support_session.create` through MCP or
+`rdev support-session create` through CLI to get the ready target command, join
+URL, real ticket code, manifest root, scoped auto-approval state, and status
+watch command in one payload. If no gateway is running yet, call
+`rdev.support_session.plan` or `rdev support-session plan` to prepare one.
 After giving the target-machine command, watch `rdev.support_session.status` or
 `rdev support-session status --wait`; when `connected=true`, proactively tell me
 the connection has been established before creating jobs. Use
 `rdev.invites.create`, then materialize it with `rdev.connection_entry.plan` or
-`rdev connection-entry plan`.
+`rdev connection-entry plan` only when lower-level invite materialization is
+needed.
 Read `connection_entry.package_catalog` and the signed join manifest
 `package_catalog` to select the target OS/architecture package candidate.
 Give the target side only the selected link, visible runner/launcher,

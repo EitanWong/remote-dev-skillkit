@@ -218,6 +218,62 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	}
 }
 
+func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	handler := httpapi.NewServer(gw).Handler()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{
+		"support-session", "create",
+		"--gateway-url", server.URL,
+		"--target", "windows",
+		"--reason", "company computer support",
+		"--locale", "zh-CN",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion         string            `json:"schema_version"`
+		TicketCode            string            `json:"ticket_code"`
+		TargetCommand         string            `json:"target_command"`
+		TargetCommands        map[string]string `json:"target_commands"`
+		WatchConnectionStatus []string          `json:"watch_connection_status"`
+		RecommendedSurface    string            `json:"recommended_surface"`
+		AutoApprove           bool              `json:"auto_approve"`
+		ManifestRootPublicKey string            `json:"manifest_root_public_key"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid create JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-created.v1" ||
+		payload.TicketCode == "" ||
+		payload.RecommendedSurface != "windows" ||
+		!payload.AutoApprove ||
+		payload.ManifestRootPublicKey == "" {
+		t.Fatalf("unexpected support-session create payload: %#v", payload)
+	}
+	if !strings.Contains(payload.TargetCommand, payload.TicketCode) ||
+		!strings.Contains(payload.TargetCommand, "bootstrap.ps1") ||
+		strings.Contains(payload.TargetCommand, "<ticket-code>") ||
+		strings.Contains(payload.TargetCommand, "ExecutionPolicy Bypass") {
+		t.Fatalf("target command should be ready and safe: %s", payload.TargetCommand)
+	}
+	if !strings.Contains(payload.TargetCommands["macos_linux"], payload.TicketCode) {
+		t.Fatalf("expected cross-platform command candidates with real ticket: %#v", payload.TargetCommands)
+	}
+	watch := strings.Join(payload.WatchConnectionStatus, "\x00")
+	if !strings.Contains(watch, payload.TicketCode) ||
+		strings.Contains(watch, "<ticket-code>") ||
+		!strings.Contains(watch, "--wait") {
+		t.Fatalf("watch command should be ready: %#v", payload.WatchConnectionStatus)
+	}
+}
+
 func TestSupportSessionStatusReportsConnectionFeedback(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()

@@ -91,10 +91,13 @@ run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan.
 When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
-or VPN-assisted connectivity. First call `rdev.support_session.plan` through MCP
-or `rdev support-session plan` through the CLI to get the standard gateway,
-helper-asset, invite, localized target-command, and scoped auto-approval plan.
-After giving me the target-machine command, watch `rdev.support_session.status`
+or VPN-assisted connectivity. If a reachable gateway is already running, first
+call `rdev.support_session.create` through MCP or
+`rdev support-session create` through the CLI. That returns the ready
+target-machine command, ticket, join URL, and status watcher in one structured
+payload. If no gateway is running yet, call `rdev.support_session.plan` or
+`rdev support-session plan` to prepare one. After giving me the target-machine
+command, watch `rdev.support_session.status`
 or `rdev support-session status --wait`; when `connected=true`, tell me the
 connection has been established before creating jobs.
 Do not ask humans to assemble ticket, root, gateway, transport, release, or
@@ -187,22 +190,30 @@ create a Connection Entry, choose the right connection mode, and give the target
 side only the link, visible script, or signed package it should run.
 ```
 
-The Agent should start with `rdev.support_session.plan` or
-`rdev support-session plan`. That standard plan tells the Agent how to build or
-locate `rdev`, start a gateway with verified platform helper assets, create the
-attended-temporary invite, enable scoped auto-approval when appropriate, and
-return localized target-user instructions plus a standard status watch command.
-The Agent should not write its own PowerShell, relay, nohup, ticket, root,
-gateway, transport, status polling, or approval glue.
+The Agent should start with `rdev.support_session.create` or
+`rdev support-session create` when a reachable gateway is already running. That
+high-level entry creates the scoped attended-temporary ticket and returns
+`rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
+join URL, manifest root, real ticket code, and status watcher with no
+placeholders. The Agent should use `rdev.support_session.plan` or
+`rdev support-session plan` only when it still needs to prepare or start the
+gateway. The Agent should not write its own PowerShell, relay, nohup, ticket,
+root, gateway, transport, status polling, or approval glue.
 
-After that, the Agent creates an invite and materializes it before asking anyone
-on the target side to do anything. The public name for this universal handoff is
-**Connection Entry**. It covers your own long-running workstation, someone
-else's temporary repair machine, LAN, hosted, relay, mesh, SSH, and VPN-assisted
-paths. Humans should not hand-assemble ticket codes, root keys, gateway URLs,
-transports, release roots, or checksums.
+For lower-level package materialization, the Agent creates an invite and
+materializes it before asking anyone on the target side to do anything. The
+public name for this universal handoff is **Connection Entry**. It covers your
+own long-running workstation, someone else's temporary repair machine, LAN,
+hosted, relay, mesh, SSH, and VPN-assisted paths. Humans should not
+hand-assemble ticket codes, root keys, gateway URLs, transports, release roots,
+or checksums.
 
 ```bash
+rdev support-session create \
+  --gateway-url http://<reachable-gateway-host>:8787 \
+  --target auto \
+  --locale auto
+
 rdev support-session plan \
   --gateway-url http://<reachable-gateway-host>:8787 \
   --target auto \

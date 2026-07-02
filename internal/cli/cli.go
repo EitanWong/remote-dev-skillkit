@@ -1712,6 +1712,30 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		return fmt.Errorf("missing support-session subcommand")
 	}
 	switch args[0] {
+	case "create":
+		fs := flag.NewFlagSet("support-session create", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host")
+		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
+		reason := fs.String("reason", "visible temporary remote support", "support session reason")
+		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
+		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
+		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
+		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.supportSessionCreate(ctx, supportSessionCreateOptions{
+			GatewayURL:        *gatewayURL,
+			Target:            *target,
+			Reason:            *reason,
+			TTLSeconds:        *ttl,
+			AutoApprove:       *autoApprove,
+			Locale:            *locale,
+			OperatorTokenFile: *operatorTokenFile,
+			RdevCommand:       *rdevCommand,
+		})
 	case "plan":
 		fs := flag.NewFlagSet("support-session plan", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1765,6 +1789,63 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown support-session subcommand %q", args[0])
 	}
+}
+
+type supportSessionCreateOptions struct {
+	GatewayURL        string
+	Target            string
+	Reason            string
+	TTLSeconds        int
+	AutoApprove       bool
+	Locale            string
+	OperatorTokenFile string
+	RdevCommand       string
+}
+
+func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreateOptions) error {
+	if strings.TrimSpace(opts.GatewayURL) == "" {
+		return fmt.Errorf("support-session create requires --gateway-url; run rdev support-session plan if no reachable gateway is running yet")
+	}
+	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
+		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+	}
+	payload, err := createGatewayInviteTicket(ctx, http.DefaultClient, inviteCreateOptions{
+		GatewayURL:        opts.GatewayURL,
+		Mode:              model.HostModeAttendedTemporary,
+		TTLSeconds:        opts.TTLSeconds,
+		Reason:            opts.Reason,
+		Capabilities:      cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
+		Transport:         "auto",
+		NetworkScope:      "auto",
+		AuthorityProfile:  "standard",
+		OperatorTokenFile: opts.OperatorTokenFile,
+		RdevCommand:       opts.RdevCommand,
+		Once:              false,
+		AutoApprove:       opts.AutoApprove,
+	})
+	if err != nil {
+		return err
+	}
+	created := supportsession.BuildCreated(supportsession.CreatedOptions{
+		GatewayURL:            opts.GatewayURL,
+		JoinURL:               payload.JoinURL,
+		ManifestURL:           payload.ManifestURL,
+		ManifestRootPublicKey: payload.ManifestRootPublicKey,
+		Ticket:                payload.Ticket,
+		Target:                opts.Target,
+		Locale:                opts.Locale,
+		RdevCommand:           opts.RdevCommand,
+		AutoApprove:           opts.AutoApprove,
+	})
+	return writeJSON(a.Stdout, created)
+}
+
+func cliPolicyCapabilitiesToStrings(caps []policy.Capability) []string {
+	values := make([]string, 0, len(caps))
+	for _, cap := range caps {
+		values = append(values, string(cap))
+	}
+	return values
 }
 
 type supportSessionStatusOptions struct {
@@ -6572,6 +6653,7 @@ Usage:
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256> --execute
+  rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session plan --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto

@@ -29,6 +29,21 @@ func Tools() []Tool {
 			}, []string{"gateway_url", "reason"}),
 		},
 		{
+			Name:        "rdev.support_session.create",
+			Description: "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. Agents should prefer this high-level tool when the gateway is running, instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+			Safety:      "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
+			InputSchema: object(map[string]any{
+				"gateway_url":         stringField(),
+				"target":              enum("auto", "windows", "macos", "linux"),
+				"reason":              stringField(),
+				"ttl_seconds":         integer(60, 86400),
+				"auto_approve":        boolField(),
+				"locale":              stringField(),
+				"operator_token_file": stringField(),
+				"rdev_command":        stringField(),
+			}, []string{"gateway_url"}),
+		},
+		{
 			Name:        "rdev.support_session.plan",
 			Description: "Create a standardized Agent-native support session plan that builds or locates rdev, starts a gateway with verified helper assets, creates a scoped attended-temporary invite, and returns localized one-command target instructions. Agents should use this before writing any ad hoc bootstrap, relay, or approval steps.",
 			Safety:      "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",

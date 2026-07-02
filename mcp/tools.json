@@ -84,6 +84,57 @@
       }
     },
     {
+      "name": "rdev.support_session.create",
+      "description": "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. Agents should prefer this high-level tool when the gateway is running, instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+      "safety": "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_approve": {
+            "type": "boolean"
+          },
+          "gateway_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "operator_token_file": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rdev_command": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "enum": [
+              "auto",
+              "windows",
+              "macos",
+              "linux"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gateway_url"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.support_session.plan",
       "description": "Create a standardized Agent-native support session plan that builds or locates rdev, starts a gateway with verified helper assets, creates a scoped attended-temporary invite, and returns localized one-command target instructions. Agents should use this before writing any ad hoc bootstrap, relay, or approval steps.",
       "safety": "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",

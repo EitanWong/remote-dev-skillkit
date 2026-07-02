@@ -42,12 +42,13 @@ revocation.
 - Run `rdev bootstrap agent-plan --repo-root .` when available and follow its
   JSON plan for local MCP, `rdev` recovery, Connection Entry defaults, and
   ask/auto-probe boundaries.
-- For a new support session, use `rdev.support_session.plan` through MCP or
-  `rdev support-session plan` through CLI before creating custom gateway,
-  shell, PowerShell, relay, nohup, approval, or bootstrap steps. The plan is the
-  standard Agent-native package for verified helper assets, invite creation,
-  localized target commands, status watching, and scoped attended-temporary
-  auto-approval.
+- For a new support session with an already reachable gateway, use
+  `rdev.support_session.create` through MCP or `rdev support-session create`
+  through CLI. It returns the ready target command, join URL, real ticket code,
+  manifest root, and status watcher in one payload. If no gateway is running
+  yet, use `rdev.support_session.plan` or `rdev support-session plan` before
+  creating custom gateway, shell, PowerShell, relay, nohup, approval, or
+  bootstrap steps.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -82,12 +83,16 @@ revocation.
    machine-readable install/connect plan.
 3. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
-4. If no suitable host is active, create the standard session plan with
+4. If no suitable host is active and a reachable gateway already exists, create
+   the session with `rdev.support_session.create` or
+   `rdev support-session create`; give the target side only the returned
+   `target_command` or `join_url`, then watch the returned status command. If
+   no gateway is running yet, create the standard session plan with
    `rdev.support_session.plan` or `rdev support-session plan`; execute only
-   reviewed argv steps from that plan. Then create an invite with
-   `rdev.invites.create` or `rdev invite create`, and materialize it with
-   `rdev.connection_entry.plan` or `rdev connection-entry plan` before giving
-   target-side instructions.
+   reviewed argv steps from that plan. For lower-level package materialization
+   only, create an invite with `rdev.invites.create` or `rdev invite create`,
+   and materialize it with `rdev.connection_entry.plan` or
+   `rdev connection-entry plan` before giving target-side instructions.
    Read `connection_entry.package_catalog` and the signed join manifest's
    `package_catalog`, select the target OS/architecture candidate from probes,
    and prefer the materialized self-contained Connection Entry runner when
