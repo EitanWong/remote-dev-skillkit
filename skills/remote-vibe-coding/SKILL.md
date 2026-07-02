@@ -55,8 +55,9 @@ revocation.
 2. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
 3. If no suitable host is active, create an invite with `rdev.invites.create` or
-   `rdev invite create`; prefer `customer_bootstrap.customer_link` for attended
-   support, or `host_command` when a page is unnecessary.
+   `rdev invite create`; present `connection_entry.entry_url` or the invite's
+   `connection_entry_plan` package path to the target-side human, and treat
+   `host_command` as an Agent/debug implementation detail.
 4. Wait for the host, then approve it only after the operator confirms it is the
    expected machine.
 5. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
@@ -71,18 +72,26 @@ revocation.
    requirements, transcripts, large logs, and evidence on the target host; load
    only indexed, redacted, task-relevant slices. Persist reusable discoveries
    into Skill runtime memory when they are safe to retain.
-2. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
+2. Follow `connection_entry_plan` for every new connection: if the target is
+   operator-owned or expected to support recurring Agent development, choose
+   managed mode with an explicit reviewed service lifecycle; if it is
+   third-party or one-off repair, choose attended-temporary mode with no
+   persistence by default. Prefer a signed self-contained connection entry
+   package with the target-platform `rdev` binary, release bundle, manifest URL,
+   pinned manifest root, visible launcher, and `--transport auto` before asking
+   a human to install prerequisites or copy flags.
+3. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
    runtimes, package managers, lockfiles, framework paths, proxies,
    permissions, and trust roots before installing anything.
-3. Follow `agent_collaboration_plan`: discover A2A Agent Cards, local MCP
+4. Follow `agent_collaboration_plan`: discover A2A Agent Cards, local MCP
    servers, and installed Agent CLIs only when collaboration can help; treat
    peers as bounded collaborators, not authorization roots.
-4. Follow `localization_plan`: localize customer-facing prompts, summaries, and
+5. Follow `localization_plan`: localize target-side prompts, summaries, and
    evidence while keeping protocol keys, commands, paths, checksums, schemas,
    and code blocks stable.
-5. Select the least-powerful adapter that can complete the task: `acpx`,
+6. Select the least-powerful adapter that can complete the task: `acpx`,
    `codex`, `claude-code`, `shell`, or `powershell`.
-6. Lock the workspace, use a branch or worktree for code changes, create the
+7. Lock the workspace, use a branch or worktree for code changes, create the
    signed job, stream status, inspect artifacts/audit, and request approval
    before push, merge, deploy, publish, credentials, elevation, GUI, service, or
    destructive filesystem actions.

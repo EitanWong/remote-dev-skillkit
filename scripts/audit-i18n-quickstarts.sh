@@ -29,6 +29,7 @@ required_patterns=(
   "Repository: https://github.com/EitanWong/remote-dev-skillkit"
   "First clone or update the repository in a safe user/workspace location."
   "local MCP stdio"
+  "connection_entry.entry_url"
   "do not require a"
   "hosted gateway URL"
   "network reachability"

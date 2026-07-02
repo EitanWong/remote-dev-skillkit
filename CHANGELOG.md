@@ -1,8 +1,8 @@
 # Changelog
 
-All notable local development changes are recorded here. This repository has
-not been pushed to a public GitHub remote yet; release publication still
-requires explicit operator approval.
+All notable local development changes are recorded here. The public repository
+is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
+publication still requires explicit operator approval.
 
 ## 0.1.4-dev
 
@@ -43,9 +43,17 @@ manifest, transport, and approval steps.
 - Added capability vocabulary for `network.discovery.scoped`,
   `network.probe.lan`, `relay.use`, `mesh.use`, `ssh.tunnel`, and
   `downstream.control.scoped`.
-- Added `rdev.customer-bootstrap.v1` inside invite output so agents can send a
-  customer link, one-line platform commands, target-side steps, agent follow-up
-  actions, and revocation instructions without hand-assembling bootstrap text.
+- Added `rdev.connection-entry.v1` inside invite output so agents can send one
+  target-side entry URL, one-line platform commands, human steps, agent
+  follow-up actions, and revocation instructions without hand-assembling
+  bootstrap text.
+- Added `rdev.connection-entry-plan.v1` inside invite output so agents can use
+  the same universal entry for temporary third-party support and owned managed
+  workstations. The plan carries mode selection, signed self-contained package
+  guidance, platform `rdev` binary, signed release bundle, pinned
+  release/manifest roots, join manifest URL, visible launcher, transport
+  fallback, privilege strategy, and evidence requirements as machine-readable
+  instructions.
 - Added development gateway join resources at `/join/<ticket>`,
   `/join/<ticket>/bootstrap.sh`, and `/join/<ticket>/bootstrap.ps1` for visible
   attended target-host startup with `--transport auto`.
@@ -61,7 +69,7 @@ manifest, transport, and approval steps.
   using local or configured peer Agents, including A2A-style Agent Card peers,
   MCP stdio peers, and local Agent CLIs for bounded collaborative subtasks.
 - Added `rdev.localization-plan.v1` to invite output so agents can detect the
-  target host/customer language, localize user-facing surfaces, and preserve
+  target-side language, localize user-facing surfaces, and preserve
   stable protocol keys, commands, paths, schemas, and checksums.
 - Added language-aware join page matching through `?lang=` and
   `Accept-Language` for the repository's supported quick-start languages.
@@ -136,6 +144,20 @@ manifest, transport, and approval steps.
   status, and evidence.
 - Changed invite defaults from WSS-only to auto transport for maximum
   field-connectivity while preserving WSS as the first candidate.
+- Changed invite host commands, transport fallback commands, MCP invite output,
+  HTTP ticket responses, and join bootstrap scripts to include the pinned
+  manifest root public key automatically, removing a manual trust-root copy step
+  from Windows/LAN setup.
+- Changed host registration gating so direct `--gateway --ticket-code` remains
+  local-dev only, while signed `--manifest-url` plus
+  `--manifest-root-public-key` can register through HTTPS gateways or routable
+  private/LAN HTTP gateways.
+- Changed remote-session guidance to prefer `connection_entry.entry_url` or a
+  signed connection entry package before asking the target-side user to install
+  prerequisites or assemble command flags.
+- Changed the Agent Bootstrap Prompt and multilingual quick-start copy-paste
+  prompt to require connection entries for remote hosts instead of human
+  assembly of ticket, root, gateway, or transport values.
 - Documented that agents may scan scoped local/private networks and use
   configured relay, mesh, and SSH paths automatically, while those paths remain
   connectivity choices only and never replace rdev target consent, host
@@ -144,8 +166,8 @@ manifest, transport, and approval steps.
   point over reachable downstream devices while keeping evidence requirements
   and task-intent boundaries explicit.
 - Updated README, MCP stdio, bootstrap, and remote-vibe-coding docs to prefer
-  the one-link customer bootstrap flow for support sessions while preserving
-  visible consent, auditability, and revocation.
+  the universal one-link connection entry flow for all new target hosts while
+  preserving visible consent, auditability, and revocation.
 - Documented host-context-first progressive disclosure as the standard
   AI-native context model for remote sessions.
 - Documented adaptive host-local provisioning for skills, MCP tools,

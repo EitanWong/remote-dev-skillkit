@@ -1,6 +1,6 @@
 ---
 name: safe-remote-support
-description: Use when an agent needs to create, operate, review, or revoke a consent-based Remote Dev Skillkit support session for a temporary customer host or managed owned host, including invite creation, visible bootstrap, scoped jobs, runtime memory, approvals, evidence, and cleanup.
+description: Use when an agent needs to create, operate, review, or revoke a consent-based Remote Dev Skillkit support session for a temporary third-party host or managed owned host, including invite creation, visible bootstrap, scoped jobs, runtime memory, approvals, evidence, and cleanup.
 ---
 
 # Safe Remote Support
@@ -37,6 +37,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - For Windows temporary acceptance, generate the plan using a confirmed release
   bundle URL and output directory, then verify the emitted plan path before
   sending a one-command bootstrap to a target user.
+- For any new target host, prefer a signed self-contained connection entry
+  package or package-aware join link from the invite's `connection_entry_plan`
+  before asking a human to install prerequisites, copy ticket codes, copy
+  manifest roots, or hand-assemble network flags.
 - After a real Windows temporary run, package release evidence using the plan,
   output directory, transcript, release verification, audit, no-persistence
   evidence, and approval-probe paths produced or confirmed for that run.
@@ -50,7 +54,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Always summarize evidence after a job: commands, exit codes, files changed, approvals, artifacts, and residual risk.
 - Write runtime memory only for reusable support facts that are safe to retain,
   such as detected OS family, adapter availability, proxy requirement, verifier
-  availability, and approved workspace scope. Do not store customer secrets,
+  availability, and approved workspace scope. Do not store target-side secrets,
   private hostnames, unredacted transcripts, ticket codes, operator tokens, or
   broad filesystem inventories.
 
@@ -62,9 +66,13 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 2. Read scoped runtime memory and verify stale or high-impact facts.
 3. Ask for missing gateway, ticket, release, checksum, root key, or target-user
    details before generating commands.
-4. Create a ticket with `rdev.tickets.create`.
-5. For Windows temporary support, generate and verify the acceptance plan, then review the launcher, release-verification requirements, no-persistence checks, and approval probes.
-6. Explain the join URL and visible consent screen.
+4. Create an invite with `rdev.invites.create` when available so the Agent gets
+   `connection_entry`, `connection_entry_plan`, manifest root, and transport
+   fallback instructions together.
+5. For Windows temporary support, generate and verify the acceptance plan or
+   connection entry package, then review the launcher, release-verification
+   requirements, no-persistence checks, and approval probes.
+6. Explain the connection entry URL or package and visible consent screen.
 7. Wait for the host to appear pending.
 8. Ask the operator to approve the host with scoped capabilities.
 9. Inspect capabilities with `rdev.hosts.capabilities`.

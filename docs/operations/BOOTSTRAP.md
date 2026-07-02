@@ -5,9 +5,10 @@
 1. Operator creates a ticket.
 2. Remote user opens the join URL.
 3. Join page displays operator, server, mode, capabilities, and expiration.
-4. User runs PowerShell bootstrap.
-5. Bootstrap downloads the signed `rdev-host` binary.
-6. Bootstrap verifies checksum/signature.
+4. User runs the visible PowerShell bootstrap or a signed self-contained
+   connection entry package.
+5. Bootstrap downloads or unpacks the signed `rdev-host` binary.
+6. Bootstrap verifies checksum/signature and the signed release bundle.
 7. Host generates a keypair.
 8. Host registers using the one-time ticket.
 9. Gateway marks the host pending.
@@ -121,18 +122,27 @@ When it is present, `rdev-host` verifies the join manifest with that pinned root
 - Admin elevation only via normal OS prompts.
 - Clear stop and uninstall instructions.
 
-## Agent-Created Customer Link
+## Agent-Created Connection Entry
 
-Agents should create customer-facing bootstrap links with `rdev.invites.create`
+Agents should create target-side connection entries with `rdev.invites.create`
 or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
-`customer_bootstrap`:
+`connection_entry`:
 
-- `customer_link`: the page to send to the target-side user;
+- `entry_url`: the page to open on the target machine;
 - `one_line_commands`: inspectable macOS/Linux and Windows commands;
-- `customer_steps`: the minimal target-side actions;
+- `human_steps`: the minimal target-side actions;
 - `agent_after_connect`: the actions the agent should perform after the host
   appears;
 - `revocation_instructions`: how to stop the session and revoke access.
+
+The same invite includes `connection_entry_plan`. Agents should use it as the
+universal connection decision contract rather than exposing ticket codes,
+gateway URLs, manifest roots, or transport flags to a human. For an
+operator-owned personal or fleet machine, choose managed mode and create an
+explicit reviewed service lifecycle with release gates, enrollment renewal,
+revocation refresh, reconnect proof, and stop/uninstall instructions. For a
+third-party or one-off repair machine, choose attended-temporary mode and keep
+the session visible with no persistence by default.
 
 The same invite also includes `host_context_plan`, which tells agents to keep
 remote environment details, project file structure, requirement notes,
@@ -171,7 +181,7 @@ For machines controlled by the operator, prefer managed mode with explicit
 service plans, `--once=false`, `--transport auto`, release-bundle startup
 verification, enrollment renewal, revocation refresh, workspace locks, Git
 worktrees, host-local context caches, reconnect proof, audit slices, and
-evidence bundles. This is separate from attended temporary customer support.
+evidence bundles. This is separate from attended temporary third-party support.
 
 The development gateway serves:
 
@@ -188,13 +198,26 @@ available on the target machine, then run a visible attended host session:
 rdev host serve --manifest-url <manifest-url> --transport auto --once=false
 ```
 
-This is the one-link customer path for support and debugging. It is an attended
+This is the one-link connection entry path for support and debugging. It is an attended
 temporary session: no background service is installed, no persistent execution
 policy is changed, and no persistence is created by the temporary bootstrap.
 The Windows one-line command may use process-scoped
 `-ExecutionPolicy Bypass` so the bootstrap can run in locked-down default shell
 contexts, but it must not call `Set-ExecutionPolicy` or change machine/user
-policy.
+policy. The bootstrap script now carries the pinned
+`--manifest-root-public-key`, so target-side users do not need to copy trust
+roots, ticket codes, gateway URLs, or transport flags from chat.
+
+For new target-host connections, agents should prefer the invite's
+`connection_entry_plan` when release assets are available. The connection entry
+package is the no-prerequisite path: one platform-specific bundle with
+`rdev`/`rdev-host`, signed release-bundle evidence, the join manifest URL, the
+pinned manifest root, visible stop/revoke instructions, and `--transport auto`
+fallback. It should probe WSS, HTTPS long-poll, short-poll, LAN/private gateway
+reachability, and already configured proxy/relay/mesh/SSH paths before asking
+the human for more network details. Elevation is allowed only through normal
+UAC/sudo/system prompts for a signed job that needs it, and the approval must be
+recorded as evidence.
 
 ## Managed Device Flow
 

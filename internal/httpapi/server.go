@@ -369,10 +369,12 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	if !s.persistState(w) {
 		return
 	}
+	manifestRoot := manifestRootPublicKey(s.Gateway.ManifestRoot())
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"ticket":      ticket,
-		"joinUrl":     requestBaseURL(r) + "/join/" + ticket.Code,
-		"manifestUrl": requestBaseURL(r) + "/v1/tickets/" + ticket.Code + "/manifest",
+		"ticket":                ticket,
+		"joinUrl":               requestBaseURL(r) + "/join/" + ticket.Code,
+		"manifestUrl":           requestBaseURL(r) + "/v1/tickets/" + ticket.Code + "/manifest",
+		"manifestRootPublicKey": manifestRoot,
 	})
 }
 
@@ -387,7 +389,10 @@ func (s Server) ticketSubresource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"manifest": manifest})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"manifest":              manifest,
+		"manifestRootPublicKey": manifestRootPublicKey(s.Gateway.ManifestRoot()),
+	})
 }
 
 func (s Server) join(w http.ResponseWriter, r *http.Request) {
@@ -397,6 +402,7 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	manifestURL := requestBaseURL(r) + "/v1/tickets/" + code + "/manifest"
+	manifestRoot := manifestRootPublicKey(s.Gateway.ManifestRoot())
 	if _, err := s.Gateway.JoinManifest(code, requestBaseURL(r), requestBaseURL(r)+"/join/"+code); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -405,9 +411,9 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 	case "":
 		s.joinPage(w, r, code, manifestURL)
 	case "bootstrap.sh":
-		writeShellBootstrap(w, manifestURL)
+		writeShellBootstrap(w, manifestURL, manifestRoot)
 	case "bootstrap.ps1":
-		writePowerShellBootstrap(w, manifestURL)
+		writePowerShellBootstrap(w, manifestURL, manifestRoot)
 	default:
 		writeError(w, http.StatusNotFound, "unknown join resource")
 	}
@@ -639,9 +645,13 @@ func supportedJoinLocale(tag string) string {
 	}
 }
 
-func writeShellBootstrap(w http.ResponseWriter, manifestURL string) {
+func writeShellBootstrap(w http.ResponseWriter, manifestURL, manifestRootPublicKey string) {
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+	rootArg := ""
+	if strings.TrimSpace(manifestRootPublicKey) != "" {
+		rootArg = " --manifest-root-public-key " + shellQuote(manifestRootPublicKey)
+	}
 	_, _ = fmt.Fprintf(w, `#!/bin/sh
 set -eu
 if ! command -v rdev >/dev/null 2>&1; then
@@ -649,21 +659,32 @@ if ! command -v rdev >/dev/null 2>&1; then
   exit 127
 fi
 echo "Starting visible Remote Dev Skillkit host session..."
-exec rdev host serve --manifest-url %s --transport auto --once=false
-`, shellQuote(manifestURL))
+exec rdev host serve --manifest-url %s%s --transport auto --once=false
+`, shellQuote(manifestURL), rootArg)
 }
 
-func writePowerShellBootstrap(w http.ResponseWriter, manifestURL string) {
+func writePowerShellBootstrap(w http.ResponseWriter, manifestURL, manifestRootPublicKey string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+	rootArg := ""
+	if strings.TrimSpace(manifestRootPublicKey) != "" {
+		rootArg = " --manifest-root-public-key '" + powerShellSingleQuoteValue(manifestRootPublicKey) + "'"
+	}
 	_, _ = fmt.Fprintf(w, `$ErrorActionPreference = 'Stop'
 if (-not (Get-Command rdev -ErrorAction SilentlyContinue)) {
   Write-Error "rdev is required. Install the verified rdev release package, then run this bootstrap again."
   exit 127
 }
 Write-Host "Starting visible Remote Dev Skillkit host session..."
-& rdev host serve --manifest-url '%s' --transport auto --once=false
-`, powerShellSingleQuoteValue(manifestURL))
+& rdev host serve --manifest-url '%s'%s --transport auto --once=false
+`, powerShellSingleQuoteValue(manifestURL), rootArg)
+}
+
+func manifestRootPublicKey(root model.TrustBundle) string {
+	if root.SigningKeyID == "" || root.PublicKey == "" {
+		return ""
+	}
+	return root.SigningKeyID + ":" + root.PublicKey
 }
 
 func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {

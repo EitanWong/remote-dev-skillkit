@@ -486,6 +486,13 @@ func (g *MemoryGateway) TrustBundle() model.TrustBundle {
 	return model.NewTrustBundle(g.signingID, g.publicKey)
 }
 
+func (g *MemoryGateway) ManifestRoot() model.TrustBundle {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return model.NewTrustBundle(g.manifestSigningID, g.manifestPublicKey)
+}
+
 func (g *MemoryGateway) SignedTrustBundle() model.SignedTrustBundle {
 	g.mu.Lock()
 	defer g.mu.Unlock()

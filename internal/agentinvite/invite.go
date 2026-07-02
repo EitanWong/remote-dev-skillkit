@@ -13,43 +13,46 @@ import (
 const SchemaVersion = "rdev.agent-invite.v1"
 
 type Options struct {
-	GatewayURL          string
-	JoinURL             string
-	ManifestURL         string
-	Ticket              model.Ticket
-	Transport           string
-	NetworkScope        string
-	AuthorityProfile    string
-	Once                bool
-	RequireHostApproval bool
-	RdevCommand         string
-	CreatedAt           time.Time
+	GatewayURL            string
+	JoinURL               string
+	ManifestURL           string
+	ManifestRootPublicKey string
+	Ticket                model.Ticket
+	Transport             string
+	NetworkScope          string
+	AuthorityProfile      string
+	Once                  bool
+	RequireHostApproval   bool
+	RdevCommand           string
+	CreatedAt             time.Time
 }
 
 type Invite struct {
-	SchemaVersion       string            `json:"schema_version"`
-	GatewayURL          string            `json:"gateway_url"`
-	JoinURL             string            `json:"join_url"`
-	ManifestURL         string            `json:"manifest_url"`
-	Ticket              model.Ticket      `json:"ticket"`
-	Transport           string            `json:"transport"`
-	TransportPlan       TransportPlan     `json:"transport_plan"`
-	ConnectionPlan      ConnectionPlan    `json:"connection_plan"`
-	AuthorityProfile    AuthorityProfile  `json:"authority_profile"`
-	CustomerBootstrap   CustomerBootstrap `json:"customer_bootstrap"`
-	HostContextPlan     HostContextPlan   `json:"host_context_plan"`
-	ProvisioningPlan    ProvisioningPlan  `json:"agent_provisioning_plan"`
-	CollaborationPlan   CollaborationPlan `json:"agent_collaboration_plan"`
-	LocalizationPlan    LocalizationPlan  `json:"localization_plan"`
-	ManagedDevPlan      ManagedDevPlan    `json:"managed_development_plan"`
-	HostCommand         string            `json:"host_command"`
-	FallbackCommands    []string          `json:"fallback_commands"`
-	HumanNextActions    []string          `json:"human_next_actions"`
-	AgentNextActions    []string          `json:"agent_next_actions"`
-	ConnectivityChecks  []string          `json:"connectivity_checks"`
-	MCPTools            map[string]string `json:"mcp_tools"`
-	RequiresHumanAction []string          `json:"requires_human_action"`
-	CreatedAt           time.Time         `json:"created_at"`
+	SchemaVersion         string              `json:"schema_version"`
+	GatewayURL            string              `json:"gateway_url"`
+	JoinURL               string              `json:"join_url"`
+	ManifestURL           string              `json:"manifest_url"`
+	ManifestRootPublicKey string              `json:"manifest_root_public_key,omitempty"`
+	Ticket                model.Ticket        `json:"ticket"`
+	Transport             string              `json:"transport"`
+	TransportPlan         TransportPlan       `json:"transport_plan"`
+	ConnectionPlan        ConnectionPlan      `json:"connection_plan"`
+	AuthorityProfile      AuthorityProfile    `json:"authority_profile"`
+	ConnectionEntry       ConnectionEntry     `json:"connection_entry"`
+	ConnectionEntryPlan   ConnectionEntryPlan `json:"connection_entry_plan"`
+	HostContextPlan       HostContextPlan     `json:"host_context_plan"`
+	ProvisioningPlan      ProvisioningPlan    `json:"agent_provisioning_plan"`
+	CollaborationPlan     CollaborationPlan   `json:"agent_collaboration_plan"`
+	LocalizationPlan      LocalizationPlan    `json:"localization_plan"`
+	ManagedDevPlan        ManagedDevPlan      `json:"managed_development_plan"`
+	HostCommand           string              `json:"host_command"`
+	FallbackCommands      []string            `json:"fallback_commands"`
+	HumanNextActions      []string            `json:"human_next_actions"`
+	AgentNextActions      []string            `json:"agent_next_actions"`
+	ConnectivityChecks    []string            `json:"connectivity_checks"`
+	MCPTools              map[string]string   `json:"mcp_tools"`
+	RequiresHumanAction   []string            `json:"requires_human_action"`
+	CreatedAt             time.Time           `json:"created_at"`
 }
 
 type TransportPlan struct {
@@ -115,16 +118,32 @@ type AuthorityScope struct {
 	Requirements []string `json:"requirements"`
 }
 
-type CustomerBootstrap struct {
+type ConnectionEntry struct {
 	SchemaVersion          string            `json:"schema_version"`
-	CustomerLink           string            `json:"customer_link"`
+	EntryURL               string            `json:"entry_url"`
 	ConsentMode            string            `json:"consent_mode"`
 	AutomationLevel        string            `json:"automation_level"`
 	OneLineCommands        map[string]string `json:"one_line_commands"`
 	InstallPrerequisites   []string          `json:"install_prerequisites"`
-	CustomerSteps          []string          `json:"customer_steps"`
+	HumanSteps             []string          `json:"human_steps"`
 	AgentAfterConnect      []string          `json:"agent_after_connect"`
 	RevocationInstructions []string          `json:"revocation_instructions"`
+}
+
+type ConnectionEntryPlan struct {
+	SchemaVersion      string   `json:"schema_version"`
+	Mode               string   `json:"mode"`
+	BestFor            []string `json:"best_for"`
+	EntryModes         []string `json:"entry_modes"`
+	ModeSelection      []string `json:"mode_selection"`
+	PackageFormats     []string `json:"package_formats"`
+	RequiredContents   []string `json:"required_contents"`
+	RuntimeFlow        []string `json:"runtime_flow"`
+	NetworkStrategy    []string `json:"network_strategy"`
+	PrivilegeStrategy  []string `json:"privilege_strategy"`
+	AgentRules         []string `json:"agent_rules"`
+	EvidenceRequired   []string `json:"evidence_required"`
+	ImplementationGaps []string `json:"implementation_gaps"`
 }
 
 type HostContextPlan struct {
@@ -237,11 +256,13 @@ func New(opts Options) (Invite, error) {
 		createdAt = time.Now().UTC()
 	}
 
-	hostCommand := hostServeCommand(rdevCommand, manifestURL, transport, opts.Once)
-	transportPlan := newTransportPlan(rdevCommand, manifestURL, transport, opts.Once)
+	manifestRootPublicKey := strings.TrimSpace(opts.ManifestRootPublicKey)
+	hostCommand := hostServeCommand(rdevCommand, manifestURL, manifestRootPublicKey, transport, opts.Once)
+	transportPlan := newTransportPlan(rdevCommand, manifestURL, manifestRootPublicKey, transport, opts.Once)
 	connectionPlan := newConnectionPlan(gatewayURL, networkScope)
 	authority := newAuthorityProfile(authorityProfile)
-	customerBootstrap := newCustomerBootstrap(joinURL)
+	connectionEntry := newConnectionEntry(joinURL)
+	connectionEntryPlan := newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, transport)
 	hostContextPlan := newHostContextPlan()
 	provisioningPlan := newProvisioningPlan()
 	collaborationPlan := newCollaborationPlan()
@@ -250,7 +271,7 @@ func New(opts Options) (Invite, error) {
 	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
 
 	agentActions := []string{
-		"Probe the local runtime with rdev doctor and inspect configured gateway reachability before asking the human to run the host command.",
+		"Probe the local runtime with rdev doctor and inspect configured gateway reachability before giving the human a connection entry link, script, or package.",
 		"Poll rdev.hosts.list with status=pending or active until the target host appears.",
 		"Ask the human operator to approve the host if it is pending; then call rdev.hosts.approve with ticket-scoped capabilities.",
 		"Create a job with rdev.jobs.create only after the host is active and the requested policy is explained.",
@@ -261,31 +282,33 @@ func New(opts Options) (Invite, error) {
 	}
 
 	return Invite{
-		SchemaVersion:     SchemaVersion,
-		GatewayURL:        gatewayURL,
-		JoinURL:           joinURL,
-		ManifestURL:       manifestURL,
-		Ticket:            opts.Ticket,
-		Transport:         transport,
-		TransportPlan:     transportPlan,
-		ConnectionPlan:    connectionPlan,
-		AuthorityProfile:  authority,
-		CustomerBootstrap: customerBootstrap,
-		HostContextPlan:   hostContextPlan,
-		ProvisioningPlan:  provisioningPlan,
-		CollaborationPlan: collaborationPlan,
-		LocalizationPlan:  localizationPlan,
-		ManagedDevPlan:    managedDevPlan,
-		HostCommand:       hostCommand,
-		FallbackCommands:  fallbackCommands,
+		SchemaVersion:         SchemaVersion,
+		GatewayURL:            gatewayURL,
+		JoinURL:               joinURL,
+		ManifestURL:           manifestURL,
+		ManifestRootPublicKey: manifestRootPublicKey,
+		Ticket:                opts.Ticket,
+		Transport:             transport,
+		TransportPlan:         transportPlan,
+		ConnectionPlan:        connectionPlan,
+		AuthorityProfile:      authority,
+		ConnectionEntry:       connectionEntry,
+		ConnectionEntryPlan:   connectionEntryPlan,
+		HostContextPlan:       hostContextPlan,
+		ProvisioningPlan:      provisioningPlan,
+		CollaborationPlan:     collaborationPlan,
+		LocalizationPlan:      localizationPlan,
+		ManagedDevPlan:        managedDevPlan,
+		HostCommand:           hostCommand,
+		FallbackCommands:      fallbackCommands,
 		HumanNextActions: []string{
-			"Run host_command on the target machine that needs help.",
-			"If the target network blocks WebSocket traffic, use the first fallback command that the Agent recommends.",
+			"Open connection_entry.entry_url or run the generated connection entry package on the target machine that needs help.",
+			"Keep the visible connection session open until the Agent reports completion.",
 		},
 		AgentNextActions: agentActions,
 		ConnectivityChecks: []string{
 			"Confirm the gateway URL is reachable from the Agent environment before creating jobs.",
-			"Ask the target-side human to run host_command; the host connects outbound, so no inbound port should be opened on the target machine.",
+			"Ask the target-side human to open connection_entry.entry_url or run the generated connection entry package; the host connects outbound, so no inbound port should be opened on the target machine.",
 			"If the host does not appear, ask for target-side network symptoms: proxy requirement, TLS interception, blocked outbound 443, DNS failure, captive portal, or VPN requirement.",
 			"Prefer auto transport. It tries WSS first and falls back to HTTPS long-poll, then short polling for restrictive networks.",
 			"If the Agent and target are on the same LAN, probe scoped local/LAN reachability and prefer a LAN-reachable gateway URL before relay, mesh, or SSH.",
@@ -294,7 +317,7 @@ func New(opts Options) (Invite, error) {
 			"Keep remote environment, project structure, requirement notes, and large evidence on the host; load only indexed slices or artifact references into the Agent server context.",
 			"Let the host detect missing skills, MCP tools, adapters, language runtimes, package managers, and project dependencies; install user-scoped missing pieces automatically when policy allows, and ask before elevation or external mutation.",
 			"Discover local or configured Agent peers, including A2A-compatible agents, when collaboration can help; delegate only through signed jobs, scoped policy, approvals, redaction, and evidence.",
-			"Detect the target host language and localize customer bootstrap, skills, MCP responses, job summaries, approval prompts, and evidence summaries; fall back predictably when a locale is unavailable.",
+			"Detect the target host language and localize connection entries, skills, MCP responses, job summaries, approval prompts, and evidence summaries; fall back predictably when a locale is unavailable.",
 			"For owned long-running development machines, prefer managed mode with service-backed restart, release gates, enrollment renewal, revocation refresh, workspace locks, host-local context, and reconnect evidence.",
 		},
 		MCPTools: map[string]string{
@@ -321,7 +344,7 @@ func newManagedDevPlan() ManagedDevPlan {
 		},
 		HostModes: []string{
 			"managed",
-			"attended-temporary for one-off customer support",
+			"attended-temporary for one-off third-party support",
 		},
 		ServiceSurfaces: []string{
 			"macOS LaunchAgent plan with explicit launchctl start/inspect/stop",
@@ -354,12 +377,12 @@ func newManagedDevPlan() ManagedDevPlan {
 			"safe uninstall or service stop plan retained with the managed host",
 		},
 		AgentRules: []string{
-			"treat owned long-running developer machines as managed hosts, not customer temporary hosts",
+			"treat owned long-running developer machines as managed hosts, not third-party temporary hosts",
 			"keep the host visible and controllable through normal OS service controls",
 			"store project context and large evidence on the host; keep server context indexed and on demand",
 			"reuse verified host-local tools and caches before reinstalling dependencies",
 			"collect evidence for reconnects, service lifecycle, workspace locks, jobs, approvals, and upgrades",
-			"ask before enabling persistence on a third-party or customer machine",
+			"ask before enabling persistence on a third-party machine",
 		},
 		EvidenceRequired: []string{
 			"managed host registration and approval",
@@ -398,7 +421,7 @@ func newLocalizationPlan() LocalizationPlan {
 			"Windows UI culture and user culture",
 			"macOS AppleLanguages and locale",
 			"Linux locale and desktop language settings",
-			"operator or customer explicit language preference",
+			"operator or target-side explicit language preference",
 		},
 		LocalizedSurfaces: []string{
 			"join page and bootstrap instructions",
@@ -411,12 +434,12 @@ func newLocalizationPlan() LocalizationPlan {
 		},
 		AgentRules: []string{
 			"use BCP 47 language tags and normalize regional variants before matching",
-			"prefer the target host/customer language for target-side instructions",
+			"prefer the target-side language for target-side instructions",
 			"prefer the operator's configured language for operator-only reports when known",
 			"keep protocol keys, schema versions, capability ids, command names, paths, and code blocks unchanged",
 			"do not translate secrets, tokens, file paths, shell syntax, JSON field names, or evidence checksums",
-			"include the selected language in evidence when language affects customer instructions or approvals",
-			"ask only when detected languages conflict and the next action is customer-facing or high risk",
+			"include the selected language in evidence when language affects target-side instructions or approvals",
+			"ask only when detected languages conflict and the next action is target-facing or high risk",
 		},
 		FallbackOrder: []string{
 			"exact BCP 47 match",
@@ -427,7 +450,7 @@ func newLocalizationPlan() LocalizationPlan {
 			"detected locale sources",
 			"selected BCP 47 language",
 			"fallback reason when exact match is unavailable",
-			"localized customer-facing text version or artifact id",
+			"localized target-facing text version or artifact id",
 		},
 	}
 }
@@ -465,7 +488,7 @@ func newHostContextPlan() HostContextPlan {
 			"use signed jobs for context collection so host policy, redaction, audit, and approval gates apply",
 		},
 		RedactionRules: []string{
-			"redact secrets, tokens, private keys, customer identifiers, and private hostnames before upload",
+			"redact secrets, tokens, private keys, target-side identifiers, and private hostnames before upload",
 			"store sensitive raw context on the host when possible and upload only redacted summaries or references",
 			"include checksums and freshness metadata so later slices can be verified without reloading everything",
 		},
@@ -502,12 +525,12 @@ func newCollaborationPlan() CollaborationPlan {
 			"discover peer capabilities before delegation and choose the narrowest useful task",
 			"use host-local context slices and artifact references instead of dumping full repositories into peer prompts",
 			"wrap peer work in signed rdev jobs so host policy, workspace locks, redaction, audit, cancellation, and approval gates apply",
-			"do not expose rdev operator tokens, host private keys, release keys, customer secrets, or unrestricted shell access to peers",
+			"do not expose rdev operator tokens, host private keys, release keys, target-side secrets, or unrestricted shell access to peers",
 			"prefer A2A task, message, and artifact boundaries when a peer advertises an A2A Agent Card",
 		},
 		ApprovalRequiredFor: []string{
 			"delegating to an untrusted, unauthenticated, or internet-reachable peer",
-			"sharing sensitive customer data, secrets, credentials, private hostnames, or regulated data",
+			"sharing sensitive target-side data, secrets, credentials, private hostnames, or regulated data",
 			"letting a peer install packages, mutate services, push, deploy, publish, spend money, or change external resources",
 			"granting a peer downstream control over additional hosts or devices",
 		},
@@ -581,24 +604,25 @@ func newProvisioningPlan() ProvisioningPlan {
 	}
 }
 
-func newCustomerBootstrap(joinURL string) CustomerBootstrap {
+func newConnectionEntry(joinURL string) ConnectionEntry {
 	bootstrapBase := strings.TrimRight(joinURL, "/")
-	return CustomerBootstrap{
-		SchemaVersion:   "rdev.customer-bootstrap.v1",
-		CustomerLink:    joinURL,
+	return ConnectionEntry{
+		SchemaVersion:   "rdev.connection-entry.v1",
+		EntryURL:        joinURL,
 		ConsentMode:     "attended-visible-consent",
-		AutomationLevel: "one-link-minimal-steps-after-consent",
+		AutomationLevel: "one-entry-minimal-steps-after-consent",
 		OneLineCommands: map[string]string{
 			"macos_linux_sh":     "curl -fsSL " + shellQuote(bootstrapBase+"/bootstrap.sh") + " | sh",
 			"windows_powershell": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powershellSingleQuoteValue(bootstrapBase+"/bootstrap.ps1") + "' | iex\"",
 		},
 		InstallPrerequisites: []string{
-			"rdev binary is installed or made available by the published bootstrap package",
-			"target user runs the visible bootstrap command on the machine that needs help",
+			"preferred: a signed self-contained Remote Dev Skillkit connection entry package is available for the target OS",
+			"fallback: rdev binary is already installed or made available by the published connection entry package",
+			"target-side user runs one visible connection entry on the machine that needs help",
 			"outbound HTTPS or configured fallback connectivity to the gateway",
 		},
-		CustomerSteps: []string{
-			"Open customer_link on the target machine.",
+		HumanSteps: []string{
+			"Open entry_url on the target machine.",
 			"Run the platform command shown on that page.",
 			"Keep the visible host session running until the Agent reports completion.",
 		},
@@ -614,6 +638,98 @@ func newCustomerBootstrap(joinURL string) CustomerBootstrap {
 			"remove any temporary bootstrap files created by the published installer package",
 		},
 	}
+}
+
+func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, transport string) ConnectionEntryPlan {
+	return ConnectionEntryPlan{
+		SchemaVersion: "rdev.connection-entry-plan.v1",
+		Mode:          "universal-agent-selected-entry",
+		BestFor: []string{
+			"any new target host connection where humans should not assemble tickets, roots, gateway URLs, or transport flags",
+			"third-party temporary repair where the target host should not install Go, Git, Node, Python, or other prerequisites first",
+			"operator-owned workstations that should become stable long-running managed development hosts",
+			"cross-subnet LAN, VPN, NAT, firewall, proxy, and CGNAT environments where the entry must choose the best outbound path",
+			"owned workstations that need a quick attended bootstrap before an explicit managed-service plan is approved",
+		},
+		EntryModes: []string{
+			"attended-temporary for third-party, one-off, or time-boxed repair",
+			"managed for operator-owned personal or fleet machines that need durable development access",
+			"break-glass only when operator policy explicitly permits a short-lived emergency session",
+		},
+		ModeSelection: []string{
+			"if the machine is operator-owned or expected to support recurring Agent development work, select managed mode and plan an explicit visible service lifecycle",
+			"if the machine belongs to someone else or the session is one-off support, select attended-temporary mode with no persistence by default",
+			"if ownership, persistence approval, or service policy is unclear, ask one concise question before creating a managed entry",
+			"do not expose raw ticket codes, manifest roots, gateway URLs, or transport flags to the human when a connection_entry can carry them",
+		},
+		PackageFormats: []string{
+			"windows-amd64 signed zip or exe containing rdev.exe, release-bundle.json, checksums, and a visible connection launcher",
+			"darwin-arm64/darwin-amd64 tar.gz or pkg containing rdev, release-bundle.json, checksums, and a visible connection launcher",
+			"linux-amd64/linux-arm64 tar.gz or AppImage-style package containing rdev, release-bundle.json, checksums, and a visible connection launcher",
+		},
+		RequiredContents: []string{
+			"target-platform rdev/rdev-host binary",
+			"signed release-bundle.json and required artifact manifests",
+			"pinned release root public key",
+			"pinned manifest root public key: " + placeholderIfEmpty(manifestRootPublicKey, "<manifest-root-public-key>"),
+			"join manifest URL: " + placeholderIfEmpty(manifestURL, "<manifest-url>"),
+			"gateway URL: " + placeholderIfEmpty(gatewayURL, "<gateway-url>"),
+			"transport preference: " + placeholderIfEmpty(transport, "auto"),
+			"visible stop/revoke instructions and local cleanup notes",
+			"managed-mode service plan only when the operator explicitly approves persistent owned-host access",
+		},
+		RuntimeFlow: []string{
+			"show the target-side user the session purpose, gateway, ticket expiry, requested capabilities, and stop instructions before connecting",
+			"verify the package checksum and signed release bundle before executing the host binary",
+			"fetch and verify the join manifest with the pinned manifest root before trusting ticket, gateway, or job-signing metadata",
+			"select attended-temporary or managed mode from ownership, recurrence, and persistence policy before registering",
+			"register the host, wait for operator approval when required, then start job transport with --transport auto",
+			"for attended temporary mode, keep the session visible; closing the launcher stops the host process",
+			"for managed owned-host mode, use a reviewed service plan, release gate, renewal/revocation refresh, reconnect proof, and explicit stop/uninstall instructions",
+		},
+		NetworkStrategy: []string{
+			"try outbound WSS first for low-latency work",
+			"fall back to HTTPS long-poll when WebSocket upgrades are blocked",
+			"fall back to short polling when long-held requests are unstable",
+			"prefer LAN/private gateway URLs when the Agent and target can route to each other across subnets",
+			"use already configured proxy, relay, mesh, VPN, or SSH paths when direct outbound gateway access fails",
+			"ask before installing persistent, privileged, paid, firewall, DNS, cloud, or security-policy-changing connectivity components",
+		},
+		PrivilegeStrategy: []string{
+			"default to normal user permissions for attended temporary support",
+			"request administrator/root privileges only when a signed job explicitly requires them for the repair",
+			"use normal OS authorization surfaces such as UAC or sudo prompts; do not hide elevation or weaken execution policy permanently",
+			"record elevation requests, decisions, commands, exit codes, and post-change verification in evidence",
+		},
+		AgentRules: []string{
+			"prefer sending a connection entry link, script, or package over asking for raw shell access",
+			"do not ask the human to copy ticket codes, root keys, gateway URLs, or transport flags when the invite already contains them",
+			"if the connection entry cannot reach the gateway, collect probe evidence and switch to the next configured connection mode before asking the human",
+			"keep target-side human steps to open/run/approve/keep-window-open whenever possible",
+			"choose managed mode only for owned hosts or explicitly approved durable access; keep third-party hosts temporary by default",
+		},
+		EvidenceRequired: []string{
+			"package verification result",
+			"join manifest verification result",
+			"selected host mode and ownership/persistence decision basis",
+			"selected transport and fallback attempts",
+			"host registration and approval status",
+			"revocation or stop instructions delivered to the target-side user",
+		},
+		ImplementationGaps: []string{
+			"publish per-platform connection entry packages as release assets",
+			"serve package-aware connection entry pages that choose the target OS package automatically",
+			"add end-to-end Windows clean-machine acceptance evidence for one-run connection entry startup",
+			"add relay/mesh adapter execution paths for environments where direct outbound gateway access fails",
+		},
+	}
+}
+
+func placeholderIfEmpty(value, placeholder string) string {
+	if strings.TrimSpace(value) == "" {
+		return placeholder
+	}
+	return value
 }
 
 func defaultManifestURL(gatewayURL, ticketCode string) string {
@@ -650,7 +766,7 @@ func validAuthorityProfile(profile string) bool {
 	}
 }
 
-func newTransportPlan(rdevCommand, manifestURL, transport string, once bool) TransportPlan {
+func newTransportPlan(rdevCommand, manifestURL, manifestRootPublicKey, transport string, once bool) TransportPlan {
 	transports := []string{transport}
 	if transport == "auto" {
 		transports = []string{"wss", "long-poll", "poll"}
@@ -661,7 +777,7 @@ func newTransportPlan(rdevCommand, manifestURL, transport string, once bool) Tra
 			Transport:    candidate,
 			Priority:     i + 1,
 			Reason:       transportReason(candidate),
-			HostCommand:  hostServeCommand(rdevCommand, manifestURL, candidate, once),
+			HostCommand:  hostServeCommand(rdevCommand, manifestURL, manifestRootPublicKey, candidate, once),
 			FailureHints: transportFailureHints(candidate),
 		})
 	}
@@ -964,8 +1080,11 @@ func fallbackCommandsFromPlan(plan TransportPlan, selected string) []string {
 	return values
 }
 
-func hostServeCommand(rdevCommand, manifestURL, transport string, once bool) string {
+func hostServeCommand(rdevCommand, manifestURL, manifestRootPublicKey, transport string, once bool) string {
 	command := fmt.Sprintf("%s host serve --manifest-url %s --transport %s", rdevCommand, shellQuote(manifestURL), shellQuote(transport))
+	if strings.TrimSpace(manifestRootPublicKey) != "" {
+		command += " --manifest-root-public-key " + shellQuote(manifestRootPublicKey)
+	}
 	if once {
 		command += " --once"
 	}

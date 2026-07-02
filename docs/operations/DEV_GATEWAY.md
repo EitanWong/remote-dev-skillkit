@@ -116,7 +116,7 @@ rdev host serve \
   --once=false
 ```
 
-`--gateway-client-cert` and `--gateway-client-key` must be provided together. The host uses the same gateway HTTP client for join-manifest fetches, registration, host approval waits, trust-bundle fetches, trust-store refreshes, job polling, job cancellation checks, completion, failure, and artifact appends. `rdev host serve` still limits ticket-based registration to local dev gateways (`http://127.0.0.1:<port>`, `http://localhost:<port>`, `https://127.0.0.1:<port>`, or `https://localhost:<port>`); public production gateway registration remains a future transport/authentication surface.
+`--gateway-client-cert` and `--gateway-client-key` must be provided together. The host uses the same gateway HTTP client for join-manifest fetches, registration, host approval waits, trust-bundle fetches, trust-store refreshes, job polling, job cancellation checks, completion, failure, and artifact appends. Direct `--gateway --ticket-code` registration remains local-dev only. For LAN/private or public gateway registration, use a signed `--manifest-url` plus pinned `--manifest-root-public-key`; that lets private HTTP gateway URLs and HTTPS gateways work without hand-copying ticket or trust fields.
 
 Use WSS for the production host job channel:
 
@@ -168,7 +168,8 @@ rdev host serve \
 For the same host path over local mTLS, switch the gateway URL to `https://127.0.0.1:<port>` and add `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`.
 
 Agents should normally create an invite first. This asks the gateway for a
-ticket and returns a copyable target-host command plus the MCP next actions:
+ticket and returns a universal `connection_entry`, `connection_entry_plan`,
+machine-readable fallback commands, and the MCP next actions:
 
 ```bash
 rdev invite create \
@@ -204,6 +205,12 @@ rdev host serve \
   --manifest-root-public-key manifest-dev:<base64url_ed25519_public_key> \
   --transport auto
 ```
+
+Agents should treat that command as implementation detail. The human-facing
+path is `connection_entry.entry_url` or a signed connection entry package. The
+Agent decides whether the entry should become an attended temporary session for
+a third-party or one-off repair machine, or a managed session for an
+operator-owned workstation that needs durable development access.
 
 ## Endpoints
 

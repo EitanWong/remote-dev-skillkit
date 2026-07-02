@@ -84,7 +84,10 @@ acting. If a required value is unclear, ask me one short question instead of
 guessing. For a personal computer agent install, use local MCP stdio with
 `rdev mcp serve`; do not require a hosted gateway URL. When remote hosts are
 needed, auto-select the safest working mode: local dev gateway, LAN-reachable
-gateway, hosted gateway, SSH tunnel, or relay/mesh/VPN. If tunneling is needed,
+gateway, hosted gateway, SSH tunnel, or relay/mesh/VPN. For remote hosts, create
+an invite and present `connection_entry.entry_url` or a signed connection entry
+package instead of asking humans to assemble ticket, root, gateway, or transport
+flags. If tunneling is needed,
 prefer open-source/free options first, such as frp, Chisel, headscale, or
 WireGuard, after probing what is already installed. Dry-run before execute. Do
 not hardcode private paths, secrets, or server addresses; treat
@@ -172,17 +175,34 @@ If there is no hosted gateway yet, start locally with `rdev mcp serve` and
 plan before creating real remote-host invites.
 
 The JSON output includes `schema_version: rdev.agent-invite.v1`, a short-lived
-ticket, the manifest URL, a copyable `host_command`, a transport fallback plan,
-`customer_bootstrap`, and the next MCP tools the agent should call. The human
-action is intentionally small: open the generated customer link on the target
-computer, run the visible platform command, and approve the host when policy
-requires it. The agent does the waiting, probing, job creation, status tracking,
-evidence review, and revocation.
+ticket, the manifest URL, the pinned manifest root, a machine-readable
+`host_command`, a transport fallback plan, `connection_entry`,
+`connection_entry_plan`, and the next MCP tools the agent should call. Humans
+should not hand-assemble ticket codes, root keys, gateway URLs, or transport
+flags. They open the generated `connection_entry.entry_url` or run the signed
+connection entry package on the target computer, then approve the host when
+policy requires it. The agent does the waiting, probing, mode selection, job
+creation, status tracking, evidence review, and revocation.
 
-For customer support, send the invite's `customer_bootstrap.customer_link`.
-The join page serves inspectable `/bootstrap.sh` and `/bootstrap.ps1` helpers
-that start a visible attended host session with `--transport auto`. They do not
-create hidden persistence, weaken OS policy, or open inbound firewall ports.
+`connection_entry` is the universal target-side entry point. The join page
+serves inspectable `/bootstrap.sh` and `/bootstrap.ps1` helpers that start a
+visible host session with the pinned `--manifest-root-public-key` and
+`--transport auto`. They do not create hidden persistence, weaken OS policy, or
+open inbound firewall ports.
+
+`connection_entry_plan` tells the Agent how to choose the right shape. If the
+target is your own personal or fleet machine, the Agent should plan a durable
+managed connection with an explicit reviewed service lifecycle, release gates,
+renewal/revocation refresh, reconnect proof, and uninstall instructions. If the
+target belongs to someone else or is a one-off repair, the Agent should use a
+temporary attended connection with no persistence by default. In both cases the
+preferred package is self-contained: platform `rdev` binary, signed release
+bundle, manifest URL, manifest root, release root, visible launcher,
+stop/revoke text, and network fallback logic so the target machine does not
+need Go, Git, Node, Python, or manual flag assembly before it can connect. If a
+repair requires administrator/root privileges, the entry should request them
+through normal OS authorization prompts and record the approval evidence; it
+must not hide elevation or permanently weaken security policy.
 
 Invite output also includes `host_context_plan`. Remote Dev Skillkit is
 host-context-first: environment probes, project file trees, requirement notes,
@@ -209,9 +229,9 @@ evidence.
 
 Everything user-facing is language-aware. Invite output includes
 `localization_plan`, and join pages can match `?lang=` or the target browser's
-`Accept-Language`. Agents should detect the target host/customer language from
+`Accept-Language`. Agents should detect the target-side language from
 host locale, OS UI language, browser hints, and explicit preferences, then
-localize customer instructions, skills, MCP summaries, approval prompts, job
+localize target-side instructions, skills, MCP summaries, approval prompts, job
 status, and evidence summaries. Protocol keys, schema versions, commands,
 paths, JSON fields, checksums, and code blocks stay unchanged.
 
@@ -220,7 +240,7 @@ For your own computer or workstation fleet, invite output includes
 managed host mode, `--once=false`, service-backed restart plans,
 `--transport auto`, release-bundle startup gates, enrollment renewal,
 revocation refresh, workspace locks, Git worktrees, host-local context caches,
-evidence bundles, and reconnect proof. Temporary customer sessions stay light;
+evidence bundles, and reconnect proof. Temporary third-party sessions stay light;
 owned developer machines get the durable treatment.
 
 `--transport auto` is the field-friendly default: the host tries outbound WSS
@@ -241,7 +261,7 @@ Native rdev host connections are outbound-first:
 | WSS over TLS/mTLS | implemented | Low-latency public or LAN gateway |
 | HTTPS long-poll | implemented | Proxies and firewalls that allow HTTPS but block WebSocket upgrades |
 | HTTPS short-poll | implemented | Maximum compatibility when long-held requests are unstable |
-| LAN gateway URL | implemented when routable | Agent server and target host share a LAN/VPN segment |
+| LAN/private gateway URL | implemented when routable and signed-manifest verified | Agent server and target host share a LAN/VPN segment, including different private subnets |
 
 Invite output also includes agent-managed options for HTTPS relay, mesh/VPN,
 and SSH tunnel scenarios. Agents may inspect local network interfaces, route
@@ -332,7 +352,7 @@ storage provider packages, and final external GitHub publishing steps.
 - No private server address or personal path baked into the public project.
 - No unrestricted agent shell by default.
 - No dumping whole remote repositories, environment snapshots, logs, or
-  customer context into the Agent server by default; use host-side indexes and
+  target-side context into the Agent server by default; use host-side indexes and
   progressive disclosure.
 - No blind dependency or tool installation: probe first, install from verified
   sources, prefer host-local/user/workspace scope, and record evidence.

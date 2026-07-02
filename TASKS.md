@@ -110,8 +110,12 @@
 - [x] Add AI-native Agent invite workflow with `rdev.agent-invite.v1`, `rdev invite create`, and MCP tool `rdev.invites.create`.
 - [x] Add auto transport fallback planning and runtime fallback from WSS to HTTPS long-poll to short polling for restrictive networks.
 - [x] Add Agent connection protocol matrix with LAN scope, scoped discovery plan, and agent-managed relay/mesh/SSH connectivity candidates.
+- [x] Add invite-level universal connection entry plan for no-prerequisite target-host onboarding, including owned managed vs third-party temporary mode selection, self-contained platform packages, manifest root, release bundle, network fallback, visible elevation, and evidence requirements.
+- [x] Auto-include manifest root public keys in gateway ticket responses, Agent invite host commands, MCP invite output, and join bootstrap scripts so target users do not copy trust roots from chat.
+- [x] Allow signed-manifest-verified LAN/private and HTTPS gateway registration while keeping raw `--gateway --ticket-code` registration local-dev only.
 - [x] Add max-control Agent authority profile for remote-host-assisted discovery and downstream authorized device control.
-- [x] Add one-link attended customer bootstrap with join page, platform bootstrap scripts, invite `customer_bootstrap`, and Agent follow-up instructions.
+- [x] Add one-link attended connection entry with join page, platform bootstrap scripts, invite `connection_entry`, and Agent follow-up instructions.
+- [x] Sync Agent Bootstrap Prompt and multilingual quick starts so remote-host setup uses connection entries instead of human-assembled ticket/root/gateway/transport values.
 - [x] Add host-context-first progressive disclosure plan so remote host environment, project structure, requirements, logs, and evidence stay on the host while agents load indexed slices on demand.
 - [x] Add adaptive host-local provisioning plan so agents can probe and install verified skills, MCP tools, adapters, and dependencies on the target host when policy allows.
 - [x] Add A2A-aware peer-Agent collaboration plan so target-host AI tools can assist through bounded signed jobs, policy, approvals, and evidence.

@@ -68,6 +68,9 @@ func TestServerToolCallCreateTicket(t *testing.T) {
 	if _, ok := structured["joinUrl"].(string); !ok {
 		t.Fatalf("expected joinUrl in structured content: %#v", structured)
 	}
+	if root, ok := structured["manifestRootPublicKey"].(string); !ok || root == "" {
+		t.Fatalf("expected manifestRootPublicKey in structured content: %#v", structured)
+	}
 }
 
 func TestServerToolCallCreateInvite(t *testing.T) {
@@ -90,9 +93,20 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if structured["schema_version"] != "rdev.agent-invite.v1" {
 		t.Fatalf("expected agent invite schema, got %#v", structured)
 	}
+	legacyEntryField := "customer" + "_bootstrap"
+	legacyPlanField := "connector" + "_package_plan"
+	if _, ok := structured[legacyEntryField]; ok {
+		t.Fatalf("structured content should use connection_entry, got %#v", structured)
+	}
+	if _, ok := structured[legacyPlanField]; ok {
+		t.Fatalf("structured content should use connection_entry_plan, got %#v", structured)
+	}
 	hostCommand, ok := structured["host_command"].(string)
-	if !ok || !strings.Contains(hostCommand, "host serve --manifest-url https://api.example.com/v1/tickets/") || !strings.Contains(hostCommand, "--transport auto") {
+	if !ok || !strings.Contains(hostCommand, "host serve --manifest-url https://api.example.com/v1/tickets/") || !strings.Contains(hostCommand, "--transport auto") || !strings.Contains(hostCommand, "--manifest-root-public-key") {
 		t.Fatalf("expected target host auto command, got %#v", structured)
+	}
+	if root, ok := structured["manifest_root_public_key"].(string); !ok || root == "" {
+		t.Fatalf("expected manifest root in invite structured content, got %#v", structured)
 	}
 	if _, ok := structured["agent_next_actions"].([]any); !ok {
 		t.Fatalf("expected agent next actions, got %#v", structured)
@@ -104,6 +118,10 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	connectionPlan, ok := structured["connection_plan"].(map[string]any)
 	if !ok || connectionPlan["schema_version"] != "rdev.connection-plan.v1" {
 		t.Fatalf("expected connection plan, got %#v", structured)
+	}
+	connectionEntryPlan, ok := structured["connection_entry_plan"].(map[string]any)
+	if !ok || connectionEntryPlan["schema_version"] != "rdev.connection-entry-plan.v1" || connectionEntryPlan["mode"] != "universal-agent-selected-entry" {
+		t.Fatalf("expected connection entry plan, got %#v", structured)
 	}
 	implemented, ok := connectionPlan["implemented"].([]any)
 	if !ok || len(implemented) < 4 {
@@ -121,9 +139,9 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	if !ok || authority["schema_version"] != "rdev.agent-authority.v1" || authority["profile"] != "max-control" {
 		t.Fatalf("expected max-control authority profile, got %#v", structured)
 	}
-	customerBootstrap, ok := structured["customer_bootstrap"].(map[string]any)
-	if !ok || customerBootstrap["schema_version"] != "rdev.customer-bootstrap.v1" {
-		t.Fatalf("expected customer bootstrap, got %#v", structured)
+	connectionEntry, ok := structured["connection_entry"].(map[string]any)
+	if !ok || connectionEntry["schema_version"] != "rdev.connection-entry.v1" {
+		t.Fatalf("expected connection entry, got %#v", structured)
 	}
 	hostContextPlan, ok := structured["host_context_plan"].(map[string]any)
 	if !ok || hostContextPlan["schema_version"] != "rdev.host-context-plan.v1" || hostContextPlan["storage_location"] != "remote-host-first" {

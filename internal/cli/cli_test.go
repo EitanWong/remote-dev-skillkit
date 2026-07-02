@@ -95,11 +95,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 
 	var payload struct {
-		SchemaVersion string `json:"schema_version"`
-		GatewayURL    string `json:"gateway_url"`
-		ManifestURL   string `json:"manifest_url"`
-		Transport     string `json:"transport"`
-		TransportPlan struct {
+		SchemaVersion         string `json:"schema_version"`
+		GatewayURL            string `json:"gateway_url"`
+		ManifestURL           string `json:"manifest_url"`
+		ManifestRootPublicKey string `json:"manifest_root_public_key"`
+		Transport             string `json:"transport"`
+		TransportPlan         struct {
 			SchemaVersion string `json:"schema_version"`
 			Mode          string `json:"mode"`
 			Candidates    []struct {
@@ -143,13 +144,24 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 				ID string `json:"id"`
 			} `json:"control_paths"`
 		} `json:"authority_profile"`
-		CustomerBootstrap struct {
+		ConnectionEntry struct {
 			SchemaVersion   string            `json:"schema_version"`
-			CustomerLink    string            `json:"customer_link"`
+			EntryURL        string            `json:"entry_url"`
 			AutomationLevel string            `json:"automation_level"`
 			OneLineCommands map[string]string `json:"one_line_commands"`
-			CustomerSteps   []string          `json:"customer_steps"`
-		} `json:"customer_bootstrap"`
+			HumanSteps      []string          `json:"human_steps"`
+		} `json:"connection_entry"`
+		ConnectionEntryPlan struct {
+			SchemaVersion      string   `json:"schema_version"`
+			Mode               string   `json:"mode"`
+			EntryModes         []string `json:"entry_modes"`
+			ModeSelection      []string `json:"mode_selection"`
+			PackageFormats     []string `json:"package_formats"`
+			RequiredContents   []string `json:"required_contents"`
+			NetworkStrategy    []string `json:"network_strategy"`
+			PrivilegeStrategy  []string `json:"privilege_strategy"`
+			ImplementationGaps []string `json:"implementation_gaps"`
+		} `json:"connection_entry_plan"`
 		HostContextPlan struct {
 			SchemaVersion         string   `json:"schema_version"`
 			StorageLocation       string   `json:"storage_location"`
@@ -202,6 +214,11 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid invite JSON: %v\n%s", err, stdout.String())
 	}
+	legacyEntryField := "customer" + "_bootstrap"
+	legacyPlanField := "connector" + "_package_plan"
+	if strings.Contains(stdout.String(), legacyEntryField) || strings.Contains(stdout.String(), legacyPlanField) {
+		t.Fatalf("invite JSON should use generic connection entry fields, got %s", stdout.String())
+	}
 	if payload.SchemaVersion != "rdev.agent-invite.v1" {
 		t.Fatalf("unexpected schema: %#v", payload)
 	}
@@ -213,6 +230,12 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 	if !strings.Contains(payload.ManifestURL, "/v1/tickets/") || !strings.Contains(payload.HostCommand, "host serve --manifest-url") || !strings.Contains(payload.HostCommand, "--transport wss") {
 		t.Fatalf("invite should include manifest URL and WSS host command: %#v", payload)
+	}
+	if payload.ManifestRootPublicKey == "" || !strings.Contains(payload.HostCommand, "--manifest-root-public-key") {
+		t.Fatalf("invite should carry the manifest root in host_command: %#v", payload)
+	}
+	if len(payload.TransportPlan.Candidates) == 0 || !strings.Contains(payload.TransportPlan.Candidates[0].HostCommand, "--manifest-root-public-key") {
+		t.Fatalf("transport candidates should carry manifest root: %#v", payload.TransportPlan.Candidates)
 	}
 	if len(payload.HumanNextActions) == 0 || len(payload.AgentNextActions) == 0 || len(payload.ConnectivityChecks) == 0 {
 		t.Fatalf("invite should split human and agent actions: %#v", payload)
@@ -229,11 +252,17 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	if len(payload.AuthorityProfile.ControlPaths) < 3 || !slices.Contains(payload.AuthorityProfile.RequiredCapabilities, "downstream.control.scoped") {
 		t.Fatalf("max-control profile should include downstream control paths and capability: %#v", payload.AuthorityProfile)
 	}
-	if payload.CustomerBootstrap.SchemaVersion != "rdev.customer-bootstrap.v1" || payload.CustomerBootstrap.CustomerLink == "" || len(payload.CustomerBootstrap.OneLineCommands) < 2 {
-		t.Fatalf("invite should include customer bootstrap: %#v", payload.CustomerBootstrap)
+	if payload.ConnectionEntry.SchemaVersion != "rdev.connection-entry.v1" || payload.ConnectionEntry.EntryURL == "" || len(payload.ConnectionEntry.OneLineCommands) < 2 {
+		t.Fatalf("invite should include connection entry: %#v", payload.ConnectionEntry)
 	}
-	if !strings.Contains(payload.CustomerBootstrap.OneLineCommands["macos_linux_sh"], "/join/") || !strings.Contains(payload.CustomerBootstrap.OneLineCommands["windows_powershell"], "bootstrap.ps1") {
-		t.Fatalf("customer bootstrap should include one-link commands: %#v", payload.CustomerBootstrap.OneLineCommands)
+	if !strings.Contains(payload.ConnectionEntry.OneLineCommands["macos_linux_sh"], "/join/") || !strings.Contains(payload.ConnectionEntry.OneLineCommands["windows_powershell"], "bootstrap.ps1") {
+		t.Fatalf("connection entry should include one-link commands: %#v", payload.ConnectionEntry.OneLineCommands)
+	}
+	if payload.ConnectionEntryPlan.SchemaVersion != "rdev.connection-entry-plan.v1" || payload.ConnectionEntryPlan.Mode != "universal-agent-selected-entry" {
+		t.Fatalf("invite should include connection entry plan: %#v", payload.ConnectionEntryPlan)
+	}
+	if len(payload.ConnectionEntryPlan.EntryModes) < 2 || len(payload.ConnectionEntryPlan.ModeSelection) == 0 || len(payload.ConnectionEntryPlan.PackageFormats) < 3 || len(payload.ConnectionEntryPlan.RequiredContents) == 0 || len(payload.ConnectionEntryPlan.NetworkStrategy) == 0 || len(payload.ConnectionEntryPlan.PrivilegeStrategy) == 0 || len(payload.ConnectionEntryPlan.ImplementationGaps) == 0 {
+		t.Fatalf("connection entry plan should define mode, package, network, privilege, and gap details: %#v", payload.ConnectionEntryPlan)
 	}
 	if payload.HostContextPlan.SchemaVersion != "rdev.host-context-plan.v1" || payload.HostContextPlan.StorageLocation != "remote-host-first" || payload.HostContextPlan.ServerContextBudget != "index-and-on-demand-slices" {
 		t.Fatalf("invite should include host context plan: %#v", payload.HostContextPlan)
@@ -285,10 +314,11 @@ func TestInviteCreateDefaultsToAutoTransportPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload struct {
-		Transport        string   `json:"transport"`
-		HostCommand      string   `json:"host_command"`
-		FallbackCommands []string `json:"fallback_commands"`
-		TransportPlan    struct {
+		Transport             string   `json:"transport"`
+		ManifestRootPublicKey string   `json:"manifest_root_public_key"`
+		HostCommand           string   `json:"host_command"`
+		FallbackCommands      []string `json:"fallback_commands"`
+		TransportPlan         struct {
 			Mode       string `json:"mode"`
 			Candidates []struct {
 				Transport string `json:"transport"`
@@ -301,13 +331,16 @@ func TestInviteCreateDefaultsToAutoTransportPlan(t *testing.T) {
 	if payload.Transport != "auto" || !strings.Contains(payload.HostCommand, "--transport auto") {
 		t.Fatalf("expected auto host command, got %#v", payload)
 	}
+	if payload.ManifestRootPublicKey == "" || !strings.Contains(payload.HostCommand, "--manifest-root-public-key") {
+		t.Fatalf("expected auto host command to include manifest root, got %#v", payload)
+	}
 	if payload.TransportPlan.Mode != "auto" || len(payload.TransportPlan.Candidates) != 3 {
 		t.Fatalf("expected three transport candidates, got %#v", payload.TransportPlan)
 	}
 	if payload.TransportPlan.Candidates[0].Transport != "wss" || payload.TransportPlan.Candidates[1].Transport != "long-poll" || payload.TransportPlan.Candidates[2].Transport != "poll" {
 		t.Fatalf("unexpected transport fallback order: %#v", payload.TransportPlan.Candidates)
 	}
-	if len(payload.FallbackCommands) != 2 || !strings.Contains(payload.FallbackCommands[0], "--transport long-poll") || !strings.Contains(payload.FallbackCommands[1], "--transport poll") {
+	if len(payload.FallbackCommands) != 2 || !strings.Contains(payload.FallbackCommands[0], "--transport long-poll") || !strings.Contains(payload.FallbackCommands[1], "--transport poll") || !strings.Contains(payload.FallbackCommands[0], "--manifest-root-public-key") {
 		t.Fatalf("expected long-poll and poll fallback commands, got %#v", payload.FallbackCommands)
 	}
 }
@@ -1229,8 +1262,39 @@ func TestHostServeRejectsNonLocalHTTPSGateway(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected non-local gateway registration to fail")
 	}
-	if !strings.Contains(err.Error(), "local dev gateways only") {
+	if !strings.Contains(err.Error(), "requires --manifest-url with --manifest-root-public-key") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSignedManifestGatewayURLAllowsPrivateLANHTTPAndHTTPS(t *testing.T) {
+	allowed := []string{
+		"http://192.168.2.10:8787",
+		"http://10.0.0.8:8787",
+		"http://172.16.4.5:8787",
+		"http://rdev-gateway.local:8787",
+		"https://api.example.com/v1",
+	}
+	for _, value := range allowed {
+		if !isSignedManifestGatewayURL(value, true) {
+			t.Fatalf("expected signed manifest gateway URL to be allowed: %s", value)
+		}
+	}
+
+	rejected := []string{
+		"http://198.51.100.10:8787",
+		"http://192.168.2.10",
+		"ws://192.168.2.10:8787",
+		"https://api.example.com/v1",
+	}
+	for _, value := range rejected {
+		verified := true
+		if strings.HasPrefix(value, "https://") {
+			verified = false
+		}
+		if isSignedManifestGatewayURL(value, verified) {
+			t.Fatalf("expected gateway URL to be rejected: %s verified=%v", value, verified)
+		}
 	}
 }
 

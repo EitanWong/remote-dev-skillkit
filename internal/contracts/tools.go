@@ -11,8 +11,8 @@ func Tools() []Tool {
 	return []Tool{
 		{
 			Name:        "rdev.invites.create",
-			Description: "Create an Agent-first remote session invite with a ticket, manifest URL, target-host command, and next MCP actions.",
-			Safety:      "Creates an access path and target-host command; does not execute on the host.",
+			Description: "Create an Agent-first remote session invite with a universal connection entry, manifest URL, pinned manifest root, transport plan, and next MCP actions.",
+			Safety:      "Creates an access path and connection metadata; does not execute on the host.",
 			InputSchema: object(map[string]any{
 				"gateway_url":           stringField(),
 				"mode":                  enum("attended-temporary", "managed", "break-glass"),

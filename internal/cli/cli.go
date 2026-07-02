@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1804,8 +1805,9 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if strings.TrimSpace(opts.GatewayURL) == "" {
 		return fmt.Errorf("gateway is required when --ticket-code is provided")
 	}
-	if !isLocalDevGatewayURL(opts.GatewayURL) {
-		return fmt.Errorf("host registration currently supports local dev gateways only")
+	manifestRootVerified := opts.ManifestURL != "" && strings.TrimSpace(opts.ManifestRootPublicKey) != ""
+	if !isLocalDevGatewayURL(opts.GatewayURL) && !isSignedManifestGatewayURL(opts.GatewayURL, manifestRootVerified) {
+		return fmt.Errorf("non-local gateway registration requires --manifest-url with --manifest-root-public-key and an HTTPS or private/LAN gateway URL")
 	}
 	identity, identityCreated, err := hostidentity.LoadOrCreate(opts.IdentityStorePath, opts.IdentityKeyID)
 	if err != nil {
@@ -2031,6 +2033,40 @@ func isLocalDevGatewayURL(value string) bool {
 	default:
 		return false
 	}
+}
+
+func isSignedManifestGatewayURL(value string, manifestRootVerified bool) bool {
+	if !manifestRootVerified {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" {
+		return false
+	}
+	switch parsed.Scheme {
+	case "https":
+		return true
+	case "http":
+		return isPrivateOrLANHost(parsed.Hostname()) && parsed.Port() != ""
+	default:
+		return false
+	}
+}
+
+func isPrivateOrLANHost(host string) bool {
+	normalized := strings.Trim(strings.ToLower(host), "[]")
+	switch normalized {
+	case "localhost":
+		return true
+	}
+	if strings.HasSuffix(normalized, ".local") || strings.HasSuffix(normalized, ".lan") {
+		return true
+	}
+	ip := net.ParseIP(normalized)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 func (a App) hostInstallService(opts hostInstallServiceOptions) error {
@@ -2951,16 +2987,17 @@ func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
 		return err
 	}
 	invite, err := agentinvite.New(agentinvite.Options{
-		GatewayURL:          opts.GatewayURL,
-		JoinURL:             payload.JoinURL,
-		ManifestURL:         payload.ManifestURL,
-		Ticket:              payload.Ticket,
-		Transport:           opts.Transport,
-		NetworkScope:        opts.NetworkScope,
-		AuthorityProfile:    opts.AuthorityProfile,
-		Once:                opts.Once,
-		RequireHostApproval: true,
-		RdevCommand:         opts.RdevCommand,
+		GatewayURL:            opts.GatewayURL,
+		JoinURL:               payload.JoinURL,
+		ManifestURL:           payload.ManifestURL,
+		ManifestRootPublicKey: payload.ManifestRootPublicKey,
+		Ticket:                payload.Ticket,
+		Transport:             opts.Transport,
+		NetworkScope:          opts.NetworkScope,
+		AuthorityProfile:      opts.AuthorityProfile,
+		Once:                  opts.Once,
+		RequireHostApproval:   true,
+		RdevCommand:           opts.RdevCommand,
 	})
 	if err != nil {
 		return err
@@ -2971,10 +3008,11 @@ func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
 }
 
 type gatewayInviteTicketPayload struct {
-	Ticket      model.Ticket `json:"ticket"`
-	JoinURL     string       `json:"joinUrl"`
-	ManifestURL string       `json:"manifestUrl"`
-	Error       string       `json:"error"`
+	Ticket                model.Ticket `json:"ticket"`
+	JoinURL               string       `json:"joinUrl"`
+	ManifestURL           string       `json:"manifestUrl"`
+	ManifestRootPublicKey string       `json:"manifestRootPublicKey"`
+	Error                 string       `json:"error"`
 }
 
 func createGatewayInviteTicket(ctx context.Context, client *http.Client, opts inviteCreateOptions) (gatewayInviteTicketPayload, error) {

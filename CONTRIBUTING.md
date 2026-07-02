@@ -47,7 +47,7 @@ opening a pull request.
     or human confirmation makes the right path clear.
   - Scale analysis to task risk: streamline obvious one-line fixes, but expand
     reasoning for security, release, transport, enrollment, hosted auth/storage,
-    customer bootstrap, or remote-control changes.
+    connection entry, or remote-control changes.
   - Test assumptions against source, contracts, schemas, docs, and existing
     behavior; correct course when new evidence contradicts the initial plan.
   - Track progress explicitly during complex work: what is established, what is

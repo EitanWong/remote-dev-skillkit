@@ -17,7 +17,8 @@ Agent-first session tools include:
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
-`transport_plan`, `connection_plan`, `customer_bootstrap`,
+`transport_plan`, `connection_plan`, `connection_entry`,
+`connection_entry_plan`,
 `host_context_plan`, `agent_provisioning_plan`,
 `agent_collaboration_plan`, `localization_plan`,
 `managed_development_plan`, `fallback_commands`, `authority_profile`,
@@ -28,12 +29,15 @@ itself. The default transport is `auto`, which tries WSS first and falls back to
 HTTPS long-poll and then short polling when restrictive networks block
 WebSocket upgrades or long-held requests.
 
-For customer support flows, prefer `customer_bootstrap.customer_link` over
-manually copying host flags. The join page provides visible, inspectable
-platform bootstrap commands for the target machine. Agents should treat those
-commands as attended consented startup, then watch `rdev.hosts.list`, approve
-the expected host when policy requires approval, run scoped jobs, export
-evidence, and revoke the ticket when finished.
+For every new target host, prefer `connection_entry.entry_url` or a signed
+connection entry package over manually copying host flags. The join page
+provides visible, inspectable platform bootstrap commands for the target
+machine. Agents should treat those commands as consented startup, then choose
+the correct host mode: `managed` for operator-owned machines that need durable
+development access, or `attended-temporary` for third-party or one-off repair.
+After the host connects, the Agent watches `rdev.hosts.list`, approves the
+expected host when policy requires approval, runs scoped jobs, exports evidence,
+and revokes or stops the session when finished.
 
 The `host_context_plan` is the standard for AI-native context management. It
 sets `storage_location=remote-host-first` and
@@ -62,7 +66,7 @@ jobs so host policy, workspace locks, redaction, cancellation, approval gates,
 audit, and evidence still apply.
 
 The `localization_plan` is the standard for cross-language behavior. MCP
-clients should detect the target host/customer language from explicit `lang`
+clients should detect the target-side language from explicit `lang`
 inputs, `Accept-Language`, `LANG`/`LC_*`/`LANGUAGE`, Windows UI culture, macOS
 AppleLanguages, Linux locale settings, and operator preferences. User-facing
 instructions, approvals, summaries, and evidence should use the selected BCP 47

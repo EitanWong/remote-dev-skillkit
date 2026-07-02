@@ -208,15 +208,17 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 		return nil, err
 	}
 	gatewayURL := requiredString(args, "gateway_url")
+	manifestRoot := s.Gateway.ManifestRoot()
 	invite, err := agentinvite.New(agentinvite.Options{
-		GatewayURL:          gatewayURL,
-		Ticket:              ticket,
-		Transport:           stringArg(args, "transport", "auto"),
-		NetworkScope:        stringArg(args, "network_scope", "auto"),
-		AuthorityProfile:    stringArg(args, "authority_profile", "max-control"),
-		Once:                boolArg(args, "once", false),
-		RequireHostApproval: boolArg(args, "require_host_approval", true),
-		RdevCommand:         stringArg(args, "rdev_command", "rdev"),
+		GatewayURL:            gatewayURL,
+		ManifestRootPublicKey: manifestRootPublicKey(manifestRoot),
+		Ticket:                ticket,
+		Transport:             stringArg(args, "transport", "auto"),
+		NetworkScope:          stringArg(args, "network_scope", "auto"),
+		AuthorityProfile:      stringArg(args, "authority_profile", "max-control"),
+		Once:                  boolArg(args, "once", false),
+		RequireHostApproval:   boolArg(args, "require_host_approval", true),
+		RdevCommand:           stringArg(args, "rdev_command", "rdev"),
 	})
 	if err != nil {
 		return nil, err
@@ -234,13 +236,21 @@ func (s Server) createTicket(args map[string]any) (any, error) {
 		return nil, err
 	}
 	return map[string]any{
-		"ticket":  ticket,
-		"joinUrl": publicExampleJoinURL(ticket.Code),
+		"ticket":                ticket,
+		"joinUrl":               publicExampleJoinURL(ticket.Code),
+		"manifestRootPublicKey": manifestRootPublicKey(s.Gateway.ManifestRoot()),
 	}, nil
 }
 
 func publicExampleJoinURL(ticketCode string) string {
 	return "https://agent.example.com/join/" + ticketCode
+}
+
+func manifestRootPublicKey(root model.TrustBundle) string {
+	if root.SigningKeyID == "" || root.PublicKey == "" {
+		return ""
+	}
+	return root.SigningKeyID + ":" + root.PublicKey
 }
 
 func (s Server) revokeTicket(args map[string]any) (any, error) {

@@ -91,7 +91,16 @@ Steps:
     unless I explicitly ask you to upgrade. Before replacing any binary or
     restarting a managed service, verify the selected archive checksum and
     signed `release-bundle.json` with the configured release root.
-13. If the user wants to control a remote host, build a connection-mode plan:
+13. If the user wants to control a remote host, build a connection entry plan.
+    Do not ask a human to assemble ticket codes, manifest roots, gateway URLs,
+    or transport flags. After the viable gateway/transport path is known, use
+    `rdev.invites.create` or `rdev invite create` so the Agent receives
+    `connection_entry`, `connection_entry_plan`, manifest root, and transport
+    fallback instructions together. Present the target-side human with
+    `connection_entry.entry_url` or the signed connection entry package.
+    Select host mode from ownership and duration: use `managed` for my own
+    personal/fleet machines that need durable development access; use
+    `attended-temporary` for third-party or one-off repair machines.
     - If the Agent and host are on the same machine, use local MCP stdio and
       local/dev gateway flows.
     - If the Agent and host share a LAN or VPN, prefer a LAN-reachable gateway
@@ -118,6 +127,8 @@ Steps:
       update status unknown
     - selected connection mode for local use
     - selected remote connection mode, if remote-host work was requested
+    - selected connection entry mode: managed owned host or attended temporary
+      target host
     - whether any tunnel/mesh/relay is needed, which option was chosen, and why
     - whether a hosted gateway is absent, optional, configured, or still needed
       for the remote-host workflow I asked for
@@ -190,6 +201,12 @@ The agent should choose the simplest working path, in this order:
    paid hosted services.
 6. Hosted/public gateway: use when the operator already has one or explicitly
    approves creating one.
+
+Once a path is selected, the user-facing output should be a universal
+connection entry: a link, script, or signed package. Raw `host_command`,
+ticket, root, gateway, and transport values are machine-readable implementation
+details for the Agent and should not be handed to the target-side human as a
+manual assembly task.
 
 Open-source/free candidates to consider before paid relay services:
 

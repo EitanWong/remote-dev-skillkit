@@ -34,5 +34,5 @@ and open an issue or pull request to update the translation.
 
 Maintainers can run `scripts/audit-i18n-quickstarts.sh` to verify that all
 translations still include the common framework list, quick install commands,
-Agent Bootstrap Prompt link, local demo commands, safety posture, and Apache-2.0
-license reference.
+Agent Bootstrap Prompt link, connection entry wording, local demo commands,
+safety posture, and Apache-2.0 license reference.

@@ -32,7 +32,10 @@ acting. If a required value is unclear, ask me one short question instead of
 guessing. For a personal computer agent install, use local MCP stdio with
 `rdev mcp serve`; do not require a hosted gateway URL. When remote hosts are
 needed, auto-select the safest working mode: local dev gateway, LAN-reachable
-gateway, hosted gateway, SSH tunnel, or relay/mesh/VPN. If tunneling is needed,
+gateway, hosted gateway, SSH tunnel, or relay/mesh/VPN. For remote hosts, create
+an invite and present `connection_entry.entry_url` or a signed connection entry
+package instead of asking humans to assemble ticket, root, gateway, or transport
+flags. If tunneling is needed,
 prefer open-source/free options first, such as frp, Chisel, headscale, or
 WireGuard, after probing what is already installed. Dry-run before execute. Do
 not hardcode private paths, secrets, or server addresses; treat

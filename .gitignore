@@ -7,3 +7,4 @@ coverage.out
 *.tmp
 *.local
 .rdev/
+.codegraph/

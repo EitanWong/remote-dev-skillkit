@@ -2,8 +2,8 @@
   "tools": [
     {
       "name": "rdev.invites.create",
-      "description": "Create an Agent-first remote session invite with a ticket, manifest URL, target-host command, and next MCP actions.",
-      "safety": "Creates an access path and target-host command; does not execute on the host.",
+      "description": "Create an Agent-first remote session invite with a universal connection entry, manifest URL, pinned manifest root, transport plan, and next MCP actions.",
+      "safety": "Creates an access path and connection metadata; does not execute on the host.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

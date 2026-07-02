@@ -65,8 +65,8 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "bootstrap.sh", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"rdev host serve", "--manifest-url", "--transport auto", "--once=false"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"rdev host serve", "--manifest-url", "--transport auto", "--once=false"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"rdev host serve", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"rdev host serve", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.accept != "" {
@@ -747,7 +747,8 @@ func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Manifest model.JoinManifest `json:"manifest"`
+		Manifest              model.JoinManifest `json:"manifest"`
+		ManifestRootPublicKey string             `json:"manifestRootPublicKey"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
@@ -757,6 +758,9 @@ func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 	}
 	if payload.Manifest.TrustFingerprint == "" {
 		t.Fatal("manifest should include trust fingerprint")
+	}
+	if payload.ManifestRootPublicKey == "" {
+		t.Fatal("manifest endpoint should include the pinned manifest root public key")
 	}
 	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)
