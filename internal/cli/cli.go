@@ -48,6 +48,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/service"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
+	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
@@ -79,6 +80,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.doctor(ctx)
 	case "bootstrap":
 		return a.bootstrap(ctx, args[1:])
+	case "support-session":
+		return a.supportSession(ctx, args[1:])
 	case "mcp":
 		return a.mcp(args[1:])
 	case "host":
@@ -689,6 +692,11 @@ type gatewayServeOptions struct {
 	ClientCAPath            string
 	OperatorAuthPath        string
 	HostedOperatorAuthPath  string
+	RdevWindowsAMD64Path    string
+	RdevDarwinARM64Path     string
+	RdevDarwinAMD64Path     string
+	RdevLinuxAMD64Path      string
+	RdevLinuxARM64Path      string
 }
 
 func (a App) operatorAuth(args []string) error {
@@ -1697,6 +1705,42 @@ func pathExists(path string) bool {
 	}
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func (a App) supportSession(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing support-session subcommand")
+	}
+	switch args[0] {
+	case "plan":
+		fs := flag.NewFlagSet("support-session plan", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, logs, and generated helpers")
+		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host")
+		addr := fs.String("addr", "0.0.0.0:8787", "gateway listen address for the generated start command")
+		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
+		reason := fs.String("reason", "visible temporary remote support", "support session reason")
+		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
+		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
+		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return writeJSON(a.Stdout, supportsession.BuildPlan(ctx, supportsession.Options{
+			RepoRoot:    *repoRoot,
+			WorkDir:     *workDir,
+			GatewayURL:  *gatewayURL,
+			Addr:        *addr,
+			Target:      *target,
+			Reason:      *reason,
+			TTLSeconds:  *ttl,
+			AutoApprove: *autoApprove,
+			Locale:      *locale,
+		}))
+	default:
+		return fmt.Errorf("unknown support-session subcommand %q", args[0])
+	}
 }
 
 func (a App) mcp(args []string) error {
@@ -3306,6 +3350,7 @@ func (a App) invite(ctx context.Context, args []string) error {
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path to run on the target host")
 		once := fs.Bool("once", false, "ask the target host process to exit after one job")
+		autoApprove := fs.Bool("auto-approve", false, "auto-approve the first attended-temporary host created by this standard Connection Entry")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -3321,6 +3366,7 @@ func (a App) invite(ctx context.Context, args []string) error {
 			OperatorTokenFile: *operatorTokenFile,
 			RdevCommand:       *rdevCommand,
 			Once:              *once,
+			AutoApprove:       *autoApprove,
 		})
 	default:
 		return fmt.Errorf("unknown invite subcommand %q", args[0])
@@ -3339,6 +3385,7 @@ type inviteCreateOptions struct {
 	OperatorTokenFile string
 	RdevCommand       string
 	Once              bool
+	AutoApprove       bool
 }
 
 func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
@@ -3350,6 +3397,9 @@ func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
 	}
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
 		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+	}
+	if opts.AutoApprove && opts.Mode != model.HostModeAttendedTemporary {
+		return fmt.Errorf("--auto-approve is only supported for attended-temporary Connection Entries")
 	}
 	payload, err := createGatewayInviteTicket(ctx, http.DefaultClient, opts)
 	if err != nil {
@@ -3365,7 +3415,7 @@ func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
 		NetworkScope:          opts.NetworkScope,
 		AuthorityProfile:      opts.AuthorityProfile,
 		Once:                  opts.Once,
-		RequireHostApproval:   true,
+		RequireHostApproval:   !opts.AutoApprove,
 		RdevCommand:           opts.RdevCommand,
 	})
 	if err != nil {
@@ -3390,6 +3440,8 @@ func createGatewayInviteTicket(ctx context.Context, client *http.Client, opts in
 		"ttl_seconds":  opts.TTLSeconds,
 		"reason":       opts.Reason,
 		"capabilities": opts.Capabilities,
+		"auto_approve": opts.AutoApprove,
+		"metadata":     inviteTicketMetadata(opts),
 	})
 	if err != nil {
 		return gatewayInviteTicketPayload{}, err
@@ -3422,6 +3474,17 @@ func createGatewayInviteTicket(ctx context.Context, client *http.Client, opts in
 		return gatewayInviteTicketPayload{}, fmt.Errorf("create invite ticket failed: %s", payload.Error)
 	}
 	return payload, nil
+}
+
+func inviteTicketMetadata(opts inviteCreateOptions) map[string]string {
+	if !opts.AutoApprove || opts.Mode != model.HostModeAttendedTemporary {
+		return nil
+	}
+	return map[string]string{
+		"auto_approve":      "attended-temporary",
+		"connection_entry":  "standard-visible",
+		"approval_contract": "target-consent-scoped-ticket",
+	}
 }
 
 func gatewayTicketsURL(gatewayURL string) string {
@@ -3568,6 +3631,11 @@ func (a App) gateway(args []string) error {
 		clientCA := fs.String("client-ca", "", "optional client CA PEM path; when set, require and verify client certificates")
 		operatorAuth := fs.String("operator-auth", "", "optional operator auth JSON file requiring bearer tokens for control-plane APIs")
 		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
+		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
+		rdevDarwinARM64 := fs.String("rdev-darwin-arm64", "", "optional rdev helper served to macOS arm64 Connection Entry bootstraps")
+		rdevDarwinAMD64 := fs.String("rdev-darwin-amd64", "", "optional rdev helper served to macOS amd64 Connection Entry bootstraps")
+		rdevLinuxAMD64 := fs.String("rdev-linux-amd64", "", "optional rdev helper served to Linux amd64 Connection Entry bootstraps")
+		rdevLinuxARM64 := fs.String("rdev-linux-arm64", "", "optional rdev helper served to Linux arm64 Connection Entry bootstraps")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -3593,6 +3661,11 @@ func (a App) gateway(args []string) error {
 			ClientCAPath:            *clientCA,
 			OperatorAuthPath:        *operatorAuth,
 			HostedOperatorAuthPath:  *hostedOperatorAuth,
+			RdevWindowsAMD64Path:    *rdevWindowsAMD64,
+			RdevDarwinARM64Path:     *rdevDarwinARM64,
+			RdevDarwinAMD64Path:     *rdevDarwinAMD64,
+			RdevLinuxAMD64Path:      *rdevLinuxAMD64,
+			RdevLinuxARM64Path:      *rdevLinuxARM64,
 		})
 	case "storage":
 		if len(args) < 2 {
@@ -4240,6 +4313,13 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		auth = combined
 	}
 	server := httpapi.NewServerWithOperatorAuthAndStateStore(gw, store, auth)
+	server.Assets = httpapi.AssetConfig{
+		RdevWindowsAMD64Path: opts.RdevWindowsAMD64Path,
+		RdevDarwinARM64Path:  opts.RdevDarwinARM64Path,
+		RdevDarwinAMD64Path:  opts.RdevDarwinAMD64Path,
+		RdevLinuxAMD64Path:   opts.RdevLinuxAMD64Path,
+		RdevLinuxARM64Path:   opts.RdevLinuxARM64Path,
+	}
 	if opts.SigningKeyPath != "" {
 		action := "loaded"
 		if created {

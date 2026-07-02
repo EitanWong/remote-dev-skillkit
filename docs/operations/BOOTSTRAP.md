@@ -292,8 +292,10 @@ The development gateway serves:
 /join/<ticket>/bootstrap.ps1
 ```
 
-These helpers currently require a verified `rdev` release package to be
-available on the target machine, then run a visible attended host session:
+These helpers use an existing `rdev` when one is available. When `rdev` is
+missing and the gateway was started with configured helper assets, they download
+the platform helper from `/assets`, verify its SHA-256 through the matching
+`.sha256` endpoint, and then run a visible attended host session:
 
 ```bash
 rdev host serve --manifest-url <manifest-url> --transport auto --once=false
@@ -302,10 +304,9 @@ rdev host serve --manifest-url <manifest-url> --transport auto --once=false
 This is the one-link connection entry path for support and debugging. It is an attended
 temporary session: no background service is installed, no persistent execution
 policy is changed, and no persistence is created by the temporary bootstrap.
-The Windows one-line command may use process-scoped
-`-ExecutionPolicy Bypass` so the bootstrap can run in locked-down default shell
-contexts, but it must not call `Set-ExecutionPolicy` or change machine/user
-policy. The bootstrap script now carries the pinned
+The Windows one-line command does not use `-ExecutionPolicy Bypass`, does not
+call `Set-ExecutionPolicy`, and does not change machine/user policy. The
+bootstrap script now carries the pinned
 `--manifest-root-public-key`, so target-side users do not need to copy trust
 roots, ticket codes, gateway URLs, or transport flags from chat.
 

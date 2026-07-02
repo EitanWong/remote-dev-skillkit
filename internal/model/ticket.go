@@ -20,15 +20,16 @@ const (
 )
 
 type Ticket struct {
-	ID           string       `json:"id"`
-	Code         string       `json:"code"`
-	Mode         HostMode     `json:"mode"`
-	Status       TicketStatus `json:"status"`
-	TTLSeconds   int          `json:"ttl_seconds"`
-	Capabilities []string     `json:"capabilities"`
-	Reason       string       `json:"reason"`
-	CreatedAt    time.Time    `json:"created_at"`
-	ExpiresAt    time.Time    `json:"expires_at"`
+	ID           string            `json:"id"`
+	Code         string            `json:"code"`
+	Mode         HostMode          `json:"mode"`
+	Status       TicketStatus      `json:"status"`
+	TTLSeconds   int               `json:"ttl_seconds"`
+	Capabilities []string          `json:"capabilities"`
+	Reason       string            `json:"reason"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	ExpiresAt    time.Time         `json:"expires_at"`
 }
 
 func NewTicket(mode HostMode, ttlSeconds int, capabilities []string, reason string, now time.Time) (Ticket, error) {

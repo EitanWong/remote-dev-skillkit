@@ -207,6 +207,10 @@ func (g *MemoryGateway) WithAuditSink(sink AuditSink) *MemoryGateway {
 }
 
 func (g *MemoryGateway) CreateTicket(mode model.HostMode, ttlSeconds int, capabilities []string, reason string) (model.Ticket, error) {
+	return g.CreateTicketWithMetadata(mode, ttlSeconds, capabilities, reason, nil)
+}
+
+func (g *MemoryGateway) CreateTicketWithMetadata(mode model.HostMode, ttlSeconds int, capabilities []string, reason string, metadata map[string]string) (model.Ticket, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -223,6 +227,16 @@ func (g *MemoryGateway) CreateTicket(mode model.HostMode, ttlSeconds int, capabi
 	ticket, err := model.NewTicket(mode, ttlSeconds, capabilities, reason, g.now())
 	if err != nil {
 		return model.Ticket{}, err
+	}
+	if len(metadata) > 0 {
+		ticket.Metadata = map[string]string{}
+		for key, value := range metadata {
+			key = strings.TrimSpace(key)
+			value = strings.TrimSpace(value)
+			if key != "" && value != "" {
+				ticket.Metadata[key] = value
+			}
+		}
 	}
 	g.tickets[ticket.ID] = ticket
 	g.codeIndex[ticket.Code] = ticket.ID
@@ -338,9 +352,30 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 	if err != nil {
 		return model.Host{}, err
 	}
+	if ticket.Metadata["auto_approve"] == "attended-temporary" &&
+		ticket.Mode == model.HostModeAttendedTemporary &&
+		!g.ticketHasHostLocked(ticket.ID) {
+		now := g.now().UTC()
+		host.Status = model.HostStatusActive
+		host.ApprovedAt = &now
+		host.LastSeenAt = now
+		g.hosts[host.ID] = host
+		g.appendAuditLocked("host", "host.register", host.ID, "registered host with attended-temporary auto approval")
+		g.appendAuditLocked("operator", "host.auto_approve", host.ID, "auto-approved attended-temporary host from standard connection entry")
+		return host, nil
+	}
 	g.hosts[host.ID] = host
 	g.appendAuditLocked("host", "host.register", host.ID, "registered pending host")
 	return host, nil
+}
+
+func (g *MemoryGateway) ticketHasHostLocked(ticketID string) bool {
+	for _, host := range g.hosts {
+		if host.TicketID == ticketID {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *MemoryGateway) RevokeTicket(ticketID, reason string) (model.Ticket, error) {

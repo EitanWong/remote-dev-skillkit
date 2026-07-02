@@ -4,6 +4,51 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.12-dev
+
+Current phase: real fresh-agent support sessions are standardized so Agents no
+longer improvise gateway startup, Windows bootstrap, `rdev` recovery, ticket
+metadata, or approval polling by hand.
+
+### Added
+
+- Added `rdev support-session plan` and MCP tool
+  `rdev.support_session.plan` with schema `rdev.support-session-plan.v1`.
+  The plan returns reviewed argv for preparing a session workdir, building the
+  local `rdev`, cross-building Windows/macOS/Linux helper binaries, starting a
+  dev gateway with helper asset flags, creating the invite, and giving
+  localized target-side one-command instructions.
+- Added gateway `/assets/*` serving for configured platform `rdev` helpers plus
+  `.sha256` endpoints. `/join/<ticket>/bootstrap.sh` and
+  `/join/<ticket>/bootstrap.ps1` now download a verified helper when `rdev` is
+  missing on the target host instead of failing with "rdev is required".
+- Added scoped attended-temporary auto-approval metadata. `auto_approve` can
+  activate the first host only for an explicit attended-temporary Connection
+  Entry, with audit events for both registration and auto-approval.
+- Added `--auto-approve` to `rdev invite create` and `auto_approve` to
+  `rdev.invites.create`.
+- Added regression coverage for support-session plans, localized target
+  commands, verified helper assets, scoped auto-approval, and ticket metadata
+  snapshot copying.
+
+### Changed
+
+- Updated README, MCP docs, Agent Bootstrap Prompt, i18n quick starts, and core
+  Skills so Agents must call the standard support-session planner before writing
+  ad hoc PowerShell, shell relay, nohup, bootstrap, gateway, ticket/root, or
+  approval steps.
+- Windows join commands no longer use `ExecutionPolicy Bypass`.
+- Development gateway plans now carry all configured helper asset paths for
+  Windows amd64, macOS arm64/amd64, and Linux amd64/arm64.
+
+### Still Requires Real Acceptance
+
+- Clean Windows/macOS/Linux target-machine acceptance with real release assets.
+- Real restrictive-network relay/mesh/frp/Chisel/headscale/WireGuard evidence
+  beyond unit/smoke tests.
+- Production hosted auth/storage provider integration and production enrollment
+  authority drills/key custody/fleet renewal evidence.
+
 ## 0.1.11-dev
 
 Current phase: installed Agents now get a machine-readable bootstrap recovery

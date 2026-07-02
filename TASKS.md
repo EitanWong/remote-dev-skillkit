@@ -118,6 +118,11 @@
 - [x] Add signed package-aware Connection Entry catalog metadata with Windows/macOS/Linux candidates, visible script fallbacks, join page recommendation, invite output, signed join manifest coverage, and regression tests so Agents select target OS packages without human flag assembly.
 - [x] Add self-contained Connection Entry runner package surface with runner manifest, visible launcher, dry-run path selection, direct/LAN/proxy/native fallback probes, and configured SSH/frp/Chisel/headscale/Tailscale/WireGuard helper gateway overrides.
 - [x] Add real runner execution for approved helper startup and user/workspace-scoped dependency repair through structured `RDEV_*_START_ARGV_JSON`, `RDEV_*_INSTALL_ACTION_JSON`, and `rdev deps install` for SHA-256 verified Chisel/frpc helper installs.
+- [x] Add standardized support-session planning through `rdev support-session plan` and MCP tool `rdev.support_session.plan` so Agents get gateway startup, verified helper assets, invite creation, localized target commands, and scoped attended-temporary auto-approval without writing ad hoc bootstrap or approval code.
+- [x] Add target-side bootstrap self-repair for missing `rdev` through configured gateway `/assets` helper downloads with SHA-256 verification for Windows/macOS/Linux.
+- [x] Add first-host-only attended-temporary auto-approval metadata for standard visible Connection Entries, with audit events and regression coverage.
+- [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.
+- [ ] Run real fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode acceptance to confirm the Agent calls `rdev.support_session.plan` instead of inventing gateway/bootstrap code.
 - [x] Auto-include manifest root public keys in gateway ticket responses, Agent invite host commands, MCP invite output, and join bootstrap scripts so target users do not copy trust roots from chat.
 - [x] Allow signed-manifest-verified LAN/private and HTTPS gateway registration while keeping raw `--gateway --ticket-code` registration local-dev only.
 - [x] Add max-control Agent authority profile for remote-host-assisted discovery and downstream authorized device control.

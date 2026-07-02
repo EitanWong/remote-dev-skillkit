@@ -42,6 +42,11 @@ revocation.
 - Run `rdev bootstrap agent-plan --repo-root .` when available and follow its
   JSON plan for local MCP, `rdev` recovery, Connection Entry defaults, and
   ask/auto-probe boundaries.
+- For a new support session, use `rdev.support_session.plan` through MCP or
+  `rdev support-session plan` through CLI before creating custom gateway,
+  shell, PowerShell, relay, nohup, approval, or bootstrap steps. The plan is the
+  standard Agent-native package for verified helper assets, invite creation,
+  localized target commands, and scoped attended-temporary auto-approval.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -76,9 +81,12 @@ revocation.
    machine-readable install/connect plan.
 3. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
-4. If no suitable host is active, create an invite with `rdev.invites.create` or
-   `rdev invite create`; then materialize it with `rdev.connection_entry.plan`
-   or `rdev connection-entry plan` before giving target-side instructions.
+4. If no suitable host is active, create the standard session plan with
+   `rdev.support_session.plan` or `rdev support-session plan`; execute only
+   reviewed argv steps from that plan. Then create an invite with
+   `rdev.invites.create` or `rdev invite create`, and materialize it with
+   `rdev.connection_entry.plan` or `rdev connection-entry plan` before giving
+   target-side instructions.
    Read `connection_entry.package_catalog` and the signed join manifest's
    `package_catalog`, select the target OS/architecture candidate from probes,
    and prefer the materialized self-contained Connection Entry runner when
@@ -94,8 +102,9 @@ revocation.
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
-5. Wait for the host, then approve it only after the operator confirms it is the
-   expected machine.
+5. Wait for the host. If the standard attended-temporary auto-approval contract
+   activated it, verify it is the expected machine before creating jobs;
+   otherwise approve it only after the operator confirms it is expected.
 6. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
    policy, release trust inputs, and language/locale.
 7. Ask only for missing authorization, gateway, host, workspace, release,

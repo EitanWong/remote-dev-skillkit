@@ -2,10 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +28,16 @@ type Server struct {
 	StatePath    string
 	StateStore   gateway.StateStore
 	OperatorAuth *operatorauth.Authorizer
+	Assets       AssetConfig
 	stateMu      *sync.Mutex
+}
+
+type AssetConfig struct {
+	RdevWindowsAMD64Path string
+	RdevDarwinARM64Path  string
+	RdevDarwinAMD64Path  string
+	RdevLinuxAMD64Path   string
+	RdevLinuxARM64Path   string
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
@@ -70,6 +84,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
 	mux.HandleFunc("GET /join/", s.join)
+	mux.HandleFunc("GET /assets/", s.asset)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
 	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
 	mux.HandleFunc("GET /v1/hosts/", s.hostSubresource)
@@ -343,10 +358,12 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Mode         model.HostMode `json:"mode"`
-		TTLSeconds   int            `json:"ttl_seconds"`
-		Capabilities []string       `json:"capabilities"`
-		Reason       string         `json:"reason"`
+		Mode         model.HostMode    `json:"mode"`
+		TTLSeconds   int               `json:"ttl_seconds"`
+		Capabilities []string          `json:"capabilities"`
+		Reason       string            `json:"reason"`
+		AutoApprove  bool              `json:"auto_approve"`
+		Metadata     map[string]string `json:"metadata"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -361,7 +378,16 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	if req.Reason == "" {
 		req.Reason = "remote support"
 	}
-	ticket, err := s.Gateway.CreateTicket(req.Mode, req.TTLSeconds, req.Capabilities, req.Reason)
+	metadata := map[string]string{}
+	for key, value := range req.Metadata {
+		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+			metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	if req.AutoApprove {
+		metadata["auto_approve"] = "attended-temporary"
+	}
+	ticket, err := s.Gateway.CreateTicketWithMetadata(req.Mode, req.TTLSeconds, req.Capabilities, req.Reason, metadata)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -411,9 +437,9 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 	case "":
 		s.joinPage(w, r, code, manifestURL)
 	case "bootstrap.sh":
-		writeShellBootstrap(w, manifestURL, manifestRoot)
+		s.writeShellBootstrap(w, r, manifestURL, manifestRoot)
 	case "bootstrap.ps1":
-		writePowerShellBootstrap(w, manifestURL, manifestRoot)
+		s.writePowerShellBootstrap(w, r, manifestURL, manifestRoot)
 	default:
 		writeError(w, http.StatusNotFound, "unknown join resource")
 	}
@@ -422,7 +448,7 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestURL string) {
 	joinBase := strings.TrimRight(requestBaseURL(r), "/") + "/join/" + code
 	shellCommand := "curl -fsSL " + shellQuote(joinBase+"/bootstrap.sh") + " | sh"
-	powerShellCommand := "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' | iex\""
+	powerShellCommand := "powershell -NoProfile -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' | iex\""
 	packageCatalog := model.NewConnectionEntryPackageCatalog(joinBase)
 	packageCatalogJSON, _ := json.Marshal(packageCatalog)
 	packageCatalogScript := strings.ReplaceAll(string(packageCatalogJSON), "</", "<\\/")
@@ -714,39 +740,158 @@ func supportedJoinLocale(tag string) string {
 	}
 }
 
-func writeShellBootstrap(w http.ResponseWriter, manifestURL, manifestRootPublicKey string) {
+func (s Server) writeShellBootstrap(w http.ResponseWriter, r *http.Request, manifestURL, manifestRootPublicKey string) {
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
 	if strings.TrimSpace(manifestRootPublicKey) != "" {
 		rootArg = " --manifest-root-public-key " + shellQuote(manifestRootPublicKey)
 	}
+	assetBase := shellQuote(strings.TrimRight(requestBaseURL(r), "/") + "/assets")
 	_, _ = fmt.Fprintf(w, `#!/bin/sh
 set -eu
 if ! command -v rdev >/dev/null 2>&1; then
-  echo "rdev is required. Install the verified rdev release package, then run this bootstrap again." >&2
-  exit 127
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) echo "unsupported architecture: $arch" >&2; exit 127 ;;
+  esac
+  case "$os" in
+    darwin|linux) ;;
+    *) echo "unsupported operating system: $os" >&2; exit 127 ;;
+  esac
+  asset="rdev-${os}-${arch}"
+  mkdir -p "${TMPDIR:-/tmp}/rdev-connection-entry"
+  out="${TMPDIR:-/tmp}/rdev-connection-entry/rdev"
+  echo "Downloading verified rdev helper ${asset}..."
+  curl -fsSL %s"/${asset}" -o "$out"
+  expected="$(curl -fsSL %s"/${asset}.sha256")"
+  actual="$(shasum -a 256 "$out" | awk '{print $1}')"
+  if [ "$actual" != "$expected" ]; then
+    echo "rdev helper SHA-256 mismatch" >&2
+    rm -f "$out"
+    exit 127
+  fi
+  chmod 700 "$out"
+  rdev_cmd="$out"
+else
+  rdev_cmd="$(command -v rdev)"
 fi
 echo "Starting visible Remote Dev Skillkit host session..."
-exec rdev host serve --manifest-url %s%s --transport auto --once=false
-`, shellQuote(manifestURL), rootArg)
+exec "$rdev_cmd" host serve --manifest-url %s%s --transport auto --once=false
+`, assetBase, assetBase, shellQuote(manifestURL), rootArg)
 }
 
-func writePowerShellBootstrap(w http.ResponseWriter, manifestURL, manifestRootPublicKey string) {
+func (s Server) writePowerShellBootstrap(w http.ResponseWriter, r *http.Request, manifestURL, manifestRootPublicKey string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
 	if strings.TrimSpace(manifestRootPublicKey) != "" {
 		rootArg = " --manifest-root-public-key '" + powerShellSingleQuoteValue(manifestRootPublicKey) + "'"
 	}
+	assetBase := powerShellSingleQuoteValue(strings.TrimRight(requestBaseURL(r), "/") + "/assets")
 	_, _ = fmt.Fprintf(w, `$ErrorActionPreference = 'Stop'
-if (-not (Get-Command rdev -ErrorAction SilentlyContinue)) {
-  Write-Error "rdev is required. Install the verified rdev release package, then run this bootstrap again."
-  exit 127
+$rdevCmd = Get-Command rdev -ErrorAction SilentlyContinue
+if ($rdevCmd) {
+  $rdevPath = $rdevCmd.Source
+} else {
+  if (-not [Environment]::Is64BitOperatingSystem) {
+    throw "unsupported Windows architecture: 32-bit"
+  }
+  $asset = "rdev-windows-amd64.exe"
+  $dir = Join-Path $env:TEMP "rdev-connection-entry"
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  $rdevPath = Join-Path $dir "rdev.exe"
+  Write-Host "Downloading verified rdev helper $asset..."
+  Invoke-WebRequest -Uri ('%s/' + $asset) -OutFile $rdevPath
+  $expected = (Invoke-WebRequest -Uri ('%s/' + $asset + '.sha256')).Content.Trim()
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $rdevPath).Hash.ToLowerInvariant()
+  if ($actual -ne $expected.ToLowerInvariant()) {
+    Remove-Item -Force $rdevPath -ErrorAction SilentlyContinue
+    throw "rdev helper SHA-256 mismatch"
+  }
 }
 Write-Host "Starting visible Remote Dev Skillkit host session..."
-& rdev host serve --manifest-url '%s'%s --transport auto --once=false
-`, powerShellSingleQuoteValue(manifestURL), rootArg)
+& $rdevPath host serve --manifest-url '%s'%s --transport auto --once=false
+`, assetBase, assetBase, powerShellSingleQuoteValue(manifestURL), rootArg)
+}
+
+func (s Server) asset(w http.ResponseWriter, r *http.Request) {
+	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/assets/"), "/")
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, `\`) {
+		writeError(w, http.StatusNotFound, "unknown asset")
+		return
+	}
+	shaOnly := false
+	if strings.HasSuffix(name, ".sha256") {
+		shaOnly = true
+		name = strings.TrimSuffix(name, ".sha256")
+	}
+	path, ok := s.assetPath(name)
+	if !ok {
+		writeError(w, http.StatusNotFound, "asset is not configured")
+		return
+	}
+	sum, err := fileSHA256(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if shaOnly {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintln(w, sum)
+		return
+	}
+	http.ServeFile(w, r, path)
+}
+
+func (s Server) assetPath(name string) (string, bool) {
+	switch name {
+	case "rdev-windows-amd64.exe":
+		return configuredAssetPath(s.Assets.RdevWindowsAMD64Path)
+	case "rdev-darwin-arm64":
+		return configuredAssetPath(s.Assets.RdevDarwinARM64Path)
+	case "rdev-darwin-amd64":
+		return configuredAssetPath(s.Assets.RdevDarwinAMD64Path)
+	case "rdev-linux-amd64":
+		return configuredAssetPath(s.Assets.RdevLinuxAMD64Path)
+	case "rdev-linux-arm64":
+		return configuredAssetPath(s.Assets.RdevLinuxARM64Path)
+	default:
+		return "", false
+	}
+}
+
+func configuredAssetPath(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false
+	}
+	clean, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(clean)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	return clean, true
+}
+
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func manifestRootPublicKey(root model.TrustBundle) string {

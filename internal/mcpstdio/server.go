@@ -16,6 +16,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
@@ -124,6 +125,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
+	case "rdev.support_session.plan":
+		data, err = s.supportSessionPlan(params.Arguments)
 	case "rdev.connection_entry.plan":
 		data, err = s.connectionEntryPlan(params.Arguments)
 	case "rdev.tickets.create":
@@ -206,7 +209,17 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 	ttl := intArg(args, "ttl_seconds", 7200)
 	reason := stringArg(args, "reason", "remote support")
 	capabilities := stringSliceArg(args, "capabilities")
-	ticket, err := s.Gateway.CreateTicket(mode, ttl, capabilities, reason)
+	autoApprove := boolArg(args, "auto_approve", false)
+	if autoApprove && mode != model.HostModeAttendedTemporary {
+		return nil, fmt.Errorf("auto_approve is only supported for attended-temporary Connection Entries")
+	}
+	metadata := map[string]string{}
+	if autoApprove {
+		metadata["auto_approve"] = "attended-temporary"
+		metadata["connection_entry"] = "standard-visible"
+		metadata["approval_contract"] = "target-consent-scoped-ticket"
+	}
+	ticket, err := s.Gateway.CreateTicketWithMetadata(mode, ttl, capabilities, reason, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -220,13 +233,27 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 		NetworkScope:          stringArg(args, "network_scope", "auto"),
 		AuthorityProfile:      stringArg(args, "authority_profile", "max-control"),
 		Once:                  boolArg(args, "once", false),
-		RequireHostApproval:   boolArg(args, "require_host_approval", true),
+		RequireHostApproval:   boolArg(args, "require_host_approval", !autoApprove),
 		RdevCommand:           stringArg(args, "rdev_command", "rdev"),
 	})
 	if err != nil {
 		return nil, err
 	}
 	return invite, nil
+}
+
+func (s Server) supportSessionPlan(args map[string]any) (any, error) {
+	return supportsession.BuildPlan(context.Background(), supportsession.Options{
+		RepoRoot:    stringArg(args, "repo_root", "."),
+		WorkDir:     stringArg(args, "work_dir", ""),
+		GatewayURL:  stringArg(args, "gateway_url", ""),
+		Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
+		Target:      stringArg(args, "target", "auto"),
+		Reason:      stringArg(args, "reason", "visible temporary remote support"),
+		TTLSeconds:  intArg(args, "ttl_seconds", 7200),
+		AutoApprove: boolArg(args, "auto_approve", true),
+		Locale:      stringArg(args, "locale", "auto"),
+	}), nil
 }
 
 func (s Server) connectionEntryPlan(args map[string]any) (any, error) {

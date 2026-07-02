@@ -153,6 +153,71 @@ func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
 	}
 }
 
+func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := filepath.Dir(filepath.Dir(wd))
+	workDir := filepath.Join(t.TempDir(), "support")
+
+	if err := app.Run(context.Background(), []string{
+		"support-session", "plan",
+		"--repo-root", repoRoot,
+		"--work-dir", workDir,
+		"--gateway-url", "http://192.0.2.10:8787",
+		"--target", "windows",
+		"--reason", "company computer support",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		AutoApprove   struct {
+			Enabled      bool     `json:"enabled"`
+			Scope        string   `json:"scope"`
+			Capabilities []string `json:"capabilities"`
+		} `json:"auto_approve"`
+		Commands map[string][]string `json:"commands"`
+		Target   struct {
+			Windows      string   `json:"windows"`
+			HumanSurface []string `json:"human_receives_only"`
+		} `json:"target_user_instructions"`
+		Forbidden []string `json:"forbidden"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support session plan JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-plan.v1" || !payload.AutoApprove.Enabled {
+		t.Fatalf("expected standard support session plan with auto approval: %#v", payload)
+	}
+	if !strings.Contains(payload.AutoApprove.Scope, "attended-temporary") ||
+		!slices.Contains(payload.AutoApprove.Capabilities, "shell.user") {
+		t.Fatalf("auto approval should be scoped and minimal: %#v", payload.AutoApprove)
+	}
+	startGateway := strings.Join(payload.Commands["start_gateway"], "\x00")
+	if !strings.Contains(startGateway, "--rdev-windows-amd64") ||
+		!strings.Contains(startGateway, "--manifest-signing-key") ||
+		!strings.Contains(startGateway, "--state") {
+		t.Fatalf("gateway plan should carry assets and durable state: %#v", payload.Commands["start_gateway"])
+	}
+	createInviteHTTP := strings.Join(payload.Commands["create_invite_http"], "\n")
+	if !strings.Contains(createInviteHTTP, `"auto_approve":true`) ||
+		!strings.Contains(createInviteHTTP, `"mode":"attended-temporary"`) {
+		t.Fatalf("invite command should create auto-approved attended temporary ticket: %s", createInviteHTTP)
+	}
+	if strings.Contains(payload.Target.Windows, "ExecutionPolicy Bypass") ||
+		!strings.Contains(payload.Target.Windows, "bootstrap.ps1") ||
+		!slices.Contains(payload.Target.HumanSurface, "visible one-line script") ||
+		!slices.Contains(payload.Forbidden, "unverified binary download") {
+		t.Fatalf("target instructions should be one visible safe command: %#v", payload.Target)
+	}
+}
+
 func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()

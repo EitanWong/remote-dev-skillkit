@@ -14,6 +14,9 @@
             ],
             "type": "string"
           },
+          "auto_approve": {
+            "type": "boolean"
+          },
           "capabilities": {
             "items": {
               "minLength": 1,
@@ -81,12 +84,67 @@
       }
     },
     {
+      "name": "rdev.support_session.plan",
+      "description": "Create a standardized Agent-native support session plan that builds or locates rdev, starts a gateway with verified helper assets, creates a scoped attended-temporary invite, and returns localized one-command target instructions. Agents should use this before writing any ad hoc bootstrap, relay, or approval steps.",
+      "safety": "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "addr": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "auto_approve": {
+            "type": "boolean"
+          },
+          "gateway_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "repo_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "enum": [
+              "auto",
+              "windows",
+              "macos",
+              "linux"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "work_dir": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.connection_entry.plan",
       "description": "Materialize an invite into the universal Connection Entry handoff and self-contained Connection Entry runner package. Humans receive only a link, visible launcher, or signed package; ticket, gateway, manifest root, transport, release, relay, mesh, VPN, SSH, checksum, helper startup, and approved dependency install values stay in Agent/tool metadata.",
       "safety": "Planning only; writes no remote state and does not execute on the target host.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "force": {
+            "type": "boolean"
+          },
           "host_name": {
             "minLength": 1,
             "type": "string"
@@ -94,9 +152,6 @@
           "invite_json": {
             "minLength": 1,
             "type": "string"
-          },
-          "force": {
-            "type": "boolean"
           },
           "managed_binary_path": {
             "minLength": 1,
@@ -114,6 +169,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "out_dir": {
+            "minLength": 1,
+            "type": "string"
+          },
           "ownership": {
             "enum": [
               "owned",
@@ -121,15 +180,15 @@
             ],
             "type": "string"
           },
-          "out_dir": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "release_bundle_required_artifacts": {
+          "rdev_command": {
             "minLength": 1,
             "type": "string"
           },
           "release_bundle_path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "release_bundle_required_artifacts": {
             "minLength": 1,
             "type": "string"
           },
@@ -146,6 +205,13 @@
               "attended-temporary",
               "managed",
               "break-glass"
+            ],
+            "type": "string"
+          },
+          "target_arch": {
+            "enum": [
+              "amd64",
+              "arm64"
             ],
             "type": "string"
           },
@@ -182,17 +248,6 @@
             "type": "string"
           },
           "windows_verifier_sha256": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "target_arch": {
-            "enum": [
-              "amd64",
-              "arm64"
-            ],
-            "type": "string"
-          },
-          "rdev_command": {
             "minLength": 1,
             "type": "string"
           }
@@ -893,5 +948,6 @@
         "type": "object"
       }
     }
-  ]
+  ],
+  "version": "0.0.1"
 }

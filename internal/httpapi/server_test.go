@@ -65,8 +65,8 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "推荐入口", "Agent 包目录", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"rdev host serve", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"rdev host serve", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.accept != "" {
@@ -82,6 +82,39 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 				t.Fatalf("%s expected %q in body:\n%s", tc.path, want, rec.Body.String())
 			}
 		}
+		if strings.Contains(rec.Body.String(), "ExecutionPolicy Bypass") ||
+			strings.Contains(rec.Body.String(), "rdev is required") {
+			t.Fatalf("%s should not require preinstalled rdev or bypass execution policy:\n%s", tc.path, rec.Body.String())
+		}
+	}
+}
+
+func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
+	dir := t.TempDir()
+	binaryPath := filepath.Join(dir, "rdev.exe")
+	if err := os.WriteFile(binaryPath, []byte("fake rdev binary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(gateway.NewMemoryGateway())
+	server.Assets.RdevWindowsAMD64Path = binaryPath
+	handler := server.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-windows-amd64.exe.sha256", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	sum := sha256.Sum256([]byte("fake rdev binary\n"))
+	if strings.TrimSpace(rec.Body.String()) != hex.EncodeToString(sum[:]) {
+		t.Fatalf("unexpected sha body: %q", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/assets/rdev-windows-amd64.exe", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "fake rdev binary") {
+		t.Fatalf("expected configured binary, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -816,6 +849,62 @@ func TestRegisterAndApproveHost(t *testing.T) {
 	handler.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+}
+
+func TestAutoApproveAttendedTemporaryTicketActivatesHost(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+
+	body := bytes.NewBufferString(`{"mode":"attended-temporary","ttl_seconds":600,"reason":"standard support session","auto_approve":true}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/tickets", body)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var ticketPayload struct {
+		Ticket model.Ticket `json:"ticket"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &ticketPayload); err != nil {
+		t.Fatal(err)
+	}
+	if ticketPayload.Ticket.Metadata["auto_approve"] != "attended-temporary" {
+		t.Fatalf("expected auto approve metadata, got %#v", ticketPayload.Ticket.Metadata)
+	}
+
+	registerBody := bytes.NewBufferString(`{"ticket_code":"` + ticketPayload.Ticket.Code + `","name":"standard-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", registerBody)
+	registerRec := httptest.NewRecorder()
+	handler.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", registerRec.Code, registerRec.Body.String())
+	}
+	var registerPayload struct {
+		Host model.Host `json:"host"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
+		t.Fatal(err)
+	}
+	if registerPayload.Host.Status != model.HostStatusActive || registerPayload.Host.ApprovedAt == nil {
+		t.Fatalf("expected auto-approved active host, got %#v", registerPayload.Host)
+	}
+
+	secondBody := bytes.NewBufferString(`{"ticket_code":"` + ticketPayload.Ticket.Code + `","name":"second-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", secondBody)
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for second host registration, got %d: %s", secondRec.Code, secondRec.Body.String())
+	}
+	var secondPayload struct {
+		Host model.Host `json:"host"`
+	}
+	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondPayload); err != nil {
+		t.Fatal(err)
+	}
+	if secondPayload.Host.Status != model.HostStatusPending || secondPayload.Host.ApprovedAt != nil {
+		t.Fatalf("expected only first host to be auto-approved, got %#v", secondPayload.Host)
 	}
 }
 

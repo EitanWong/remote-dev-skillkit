@@ -633,7 +633,7 @@ func newConnectionEntry(joinURL string) ConnectionEntry {
 		PackageCatalog:  model.NewConnectionEntryPackageCatalog(joinURL),
 		OneLineCommands: map[string]string{
 			"macos_linux_sh":     "curl -fsSL " + shellQuote(bootstrapBase+"/bootstrap.sh") + " | sh",
-			"windows_powershell": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm '" + powershellSingleQuoteValue(bootstrapBase+"/bootstrap.ps1") + "' | iex\"",
+			"windows_powershell": "powershell -NoProfile -Command \"irm '" + powershellSingleQuoteValue(bootstrapBase+"/bootstrap.ps1") + "' | iex\"",
 		},
 		InstallPrerequisites: []string{
 			"preferred: a signed self-contained Remote Dev Skillkit connection entry package is available for the target OS",

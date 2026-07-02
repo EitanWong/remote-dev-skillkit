@@ -91,9 +91,12 @@ run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan.
 When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
-or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
-gateway, transport, release, or checksum flags. Use `rdev.invites.create`, then
-materialize it with `rdev.connection_entry.plan` or `rdev connection-entry plan`.
+or VPN-assisted connectivity. First call `rdev.support_session.plan` through MCP
+or `rdev support-session plan` through the CLI to get the standard gateway,
+helper-asset, invite, localized target-command, and scoped auto-approval plan.
+Do not ask humans to assemble ticket, root, gateway, transport, release, or
+checksum flags. Use `rdev.invites.create`, then materialize it with
+`rdev.connection_entry.plan` or `rdev connection-entry plan`.
 Give the target side only the selected link, visible script, or signed package;
 keep low-level parameters in Agent/tool metadata. Choose `managed` for my own
 long-running machines and `attended-temporary` for third-party or one-off
@@ -181,12 +184,26 @@ create a Connection Entry, choose the right connection mode, and give the target
 side only the link, visible script, or signed package it should run.
 ```
 
-The Agent should create an invite and materialize it before asking anyone on the
-target side to do anything. The public name for this universal handoff is
+The Agent should start with `rdev.support_session.plan` or
+`rdev support-session plan`. That standard plan tells the Agent how to build or
+locate `rdev`, start a gateway with verified platform helper assets, create the
+attended-temporary invite, enable scoped auto-approval when appropriate, and
+return localized target-user instructions. The Agent should not write its own
+PowerShell, relay, nohup, ticket, root, gateway, transport, or approval glue.
+
+After that, the Agent creates an invite and materializes it before asking anyone
+on the target side to do anything. The public name for this universal handoff is
 **Connection Entry**. It covers your own long-running workstation, someone
 else's temporary repair machine, LAN, hosted, relay, mesh, SSH, and VPN-assisted
 paths. Humans should not hand-assemble ticket codes, root keys, gateway URLs,
 transports, release roots, or checksums.
+
+```bash
+rdev support-session plan \
+  --gateway-url http://<reachable-gateway-host>:8787 \
+  --target auto \
+  --locale auto
+```
 
 If there is no hosted gateway yet, the Agent should start with local MCP stdio,
 `rdev demo local`, or a local-dev/LAN gateway plan. It should only escalate to

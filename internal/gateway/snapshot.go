@@ -89,6 +89,8 @@ func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
 	tickets := make(map[string]model.Ticket, len(snapshot.Tickets))
 	codeIndex := make(map[string]string, len(snapshot.Tickets))
 	for _, ticket := range snapshot.Tickets {
+		ticket.Capabilities = append([]string(nil), ticket.Capabilities...)
+		ticket.Metadata = cloneStringMap(ticket.Metadata)
 		tickets[ticket.ID] = ticket
 		codeIndex[ticket.Code] = ticket.ID
 	}
@@ -122,6 +124,7 @@ func (g *MemoryGateway) snapshotLocked(now time.Time) Snapshot {
 	tickets := make([]model.Ticket, 0, len(g.tickets))
 	for _, ticket := range g.tickets {
 		ticket.Capabilities = append([]string(nil), ticket.Capabilities...)
+		ticket.Metadata = cloneStringMap(ticket.Metadata)
 		tickets = append(tickets, ticket)
 	}
 	sort.Slice(tickets, func(i, j int) bool {
@@ -169,6 +172,17 @@ func (g *MemoryGateway) snapshotLocked(now time.Time) Snapshot {
 		Artifacts:     artifacts,
 		Audit:         auditEvents,
 	}
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(values))
+	for key, value := range values {
+		copied[key] = value
+	}
+	return copied
 }
 
 func (g *MemoryGateway) validateSnapshot(snapshot Snapshot) error {

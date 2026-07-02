@@ -196,6 +196,55 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 	}
 }
 
+func TestServerToolCallSupportSessionPlan(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.plan", map[string]any{
+		"repo_root":    ".",
+		"work_dir":     filepath.Join(t.TempDir(), "support"),
+		"gateway_url":  "http://192.0.2.44:8787",
+		"target":       "windows",
+		"reason":       "company computer support",
+		"auto_approve": true,
+		"locale":       "zh-CN",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-plan.v1" {
+		t.Fatalf("expected support-session plan schema, got %#v", structured)
+	}
+	autoApprove := structured["auto_approve"].(map[string]any)
+	if autoApprove["enabled"] != true || !strings.Contains(autoApprove["scope"].(string), "attended-temporary") {
+		t.Fatalf("expected scoped auto approve, got %#v", autoApprove)
+	}
+	commands := structured["commands"].(map[string]any)
+	startGateway := strings.Join(anyStrings(commands["start_gateway"].([]any)), "\x00")
+	if !strings.Contains(startGateway, "--rdev-windows-amd64") ||
+		!strings.Contains(startGateway, "--rdev-linux-arm64") ||
+		!strings.Contains(startGateway, "--manifest-signing-key") {
+		t.Fatalf("expected gateway assets in plan, got %s", startGateway)
+	}
+	createInvite := strings.Join(anyStrings(commands["create_invite_cli"].([]any)), "\x00")
+	if !strings.Contains(createInvite, "--auto-approve") {
+		t.Fatalf("expected CLI auto approve in plan, got %s", createInvite)
+	}
+	target := structured["target_user_instructions"].(map[string]any)
+	if !strings.Contains(target["message"].(string), "目标电脑") ||
+		!strings.Contains(target["windows"].(string), "bootstrap.ps1") ||
+		strings.Contains(target["windows"].(string), "ExecutionPolicy Bypass") {
+		t.Fatalf("expected localized visible Windows command, got %#v", target)
+	}
+	forbidden := structured["forbidden"].([]any)
+	if !containsAnyString(forbidden, "manual ticket/root/gateway/transport assembly for target user") {
+		t.Fatalf("expected manual assembly prohibition, got %#v", forbidden)
+	}
+}
+
 func TestServerToolCallConnectionEntryPlan(t *testing.T) {
 	inviteInput := mcpRequestLine(t, "rdev.invites.create", map[string]any{
 		"gateway_url": "https://api.example.com/v1",
@@ -861,6 +910,16 @@ func containsAnyString(values []any, want string) bool {
 		}
 	}
 	return false
+}
+
+func anyStrings(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text, ok := value.(string); ok {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 func fileExistsForMCPTest(path string) bool {

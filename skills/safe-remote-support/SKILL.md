@@ -22,6 +22,13 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Run `rdev bootstrap agent-plan --repo-root .` when available and use it as
   the machine-readable contract for local MCP, `rdev` recovery, remote defaults,
   and ask/auto-probe boundaries.
+- For every new visible support session, call `rdev.support_session.plan` over
+  MCP or `rdev support-session plan` over CLI before writing any gateway,
+  PowerShell, relay, nohup, approval, or bootstrap steps. Treat the returned
+  `rdev.support-session-plan.v1` as the standard session package: build or find
+  `rdev`, start the gateway with verified helper assets, create the invite,
+  localize the target command, and use scoped attended-temporary auto-approval
+  when enabled.
 - Load scoped runtime memory before creating a new support session, but verify
   stale host, gateway, workspace, release, adapter, and approval facts before
   using them.
@@ -111,14 +118,16 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 5. Ask for missing gateway, release, root, or approval details only when they
    cannot be supplied by the invite, signed manifest, Connection Entry plan, or
    local probes.
-6. Create an invite with `rdev.invites.create` when available so the Agent gets
+6. Create the standard support session plan with `rdev.support_session.plan` or
+   `rdev support-session plan`; execute only reviewed argv steps from that plan.
+7. Create an invite with `rdev.invites.create` when available so the Agent gets
    `connection_entry`, `connection_entry_plan`, manifest root, and transport
    fallback instructions together.
-7. Materialize the invite with `rdev.connection_entry.plan` or
+8. Materialize the invite with `rdev.connection_entry.plan` or
    `rdev connection-entry plan`; review `mode_decision`, `human_surface`,
    package-catalog candidate choice, `agent_metadata`, `missing_inputs`, and
    `runner_plan`/`entry_package_plan`.
-8. Prefer the materialized Connection Entry runner when available. Dry-run it
+9. Prefer the materialized Connection Entry runner when available. Dry-run it
    with `rdev connection-entry run --runner-manifest ... --dry-run` to select
    direct, proxy, LAN, relay, mesh, VPN, or SSH-assisted connectivity before the
    target user starts the visible session. If the runner reports a configured
@@ -127,10 +136,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    temporary support, generate and verify the acceptance plan or connection
    entry package, then review the launcher, release-verification requirements,
    no-persistence checks, and approval probes.
-9. Explain the selected connection entry URL, visible script, or signed package
+10. Explain the selected connection entry URL, visible script, or signed package
    and visible consent screen.
-10. Wait for the host to appear pending.
-11. Ask the operator to approve the host with scoped capabilities.
+11. Wait for the host to appear. If the standard attended-temporary
+    auto-approval contract was enabled, verify the host is active and expected;
+    otherwise approve it with scoped capabilities.
 12. Inspect capabilities with `rdev.hosts.capabilities`.
 13. Create small scoped jobs with `rdev.jobs.create`.
 14. Use `rdev.jobs.approve` for dangerous actions.
