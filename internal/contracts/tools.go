@@ -45,6 +45,15 @@ func Tools() []Tool {
 			}, nil),
 		},
 		{
+			Name:        "rdev.support_session.status",
+			Description: "Read standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, or is still waiting.",
+			Safety:      "Read-only status check; does not approve hosts or execute jobs.",
+			InputSchema: object(map[string]any{
+				"ticket_code": stringField(),
+				"locale":      stringField(),
+			}, []string{"ticket_code"}),
+		},
+		{
 			Name:        "rdev.connection_entry.plan",
 			Description: "Materialize an invite into the universal Connection Entry handoff and self-contained Connection Entry runner package. Humans receive only a link, visible launcher, or signed package; ticket, gateway, manifest root, transport, release, relay, mesh, VPN, SSH, checksum, helper startup, and approved dependency install values stay in Agent/tool metadata.",
 			Safety:      "Planning only; writes no remote state and does not execute on the target host.",

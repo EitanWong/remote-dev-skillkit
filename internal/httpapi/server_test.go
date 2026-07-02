@@ -906,6 +906,28 @@ func TestAutoApproveAttendedTemporaryTicketActivatesHost(t *testing.T) {
 	if secondPayload.Host.Status != model.HostStatusPending || secondPayload.Host.ApprovedAt != nil {
 		t.Fatalf("expected only first host to be auto-approved, got %#v", secondPayload.Host)
 	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(ticketPayload.Ticket.Code)+"&locale=zh-CN", nil)
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for support-session status, got %d: %s", statusRec.Code, statusRec.Body.String())
+	}
+	var statusPayload struct {
+		SchemaVersion string `json:"schema_version"`
+		Connected     bool   `json:"connected"`
+		Status        string `json:"status"`
+		Feedback      string `json:"feedback"`
+	}
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatal(err)
+	}
+	if statusPayload.SchemaVersion != "rdev.support-session-status.v1" ||
+		!statusPayload.Connected ||
+		statusPayload.Status != "connected" ||
+		!strings.Contains(statusPayload.Feedback, "连接已经建立") {
+		t.Fatalf("unexpected support-session status: %#v", statusPayload)
+	}
 }
 
 func TestRegisterHostPreservesIdentityFields(t *testing.T) {

@@ -14,6 +14,7 @@ The server currently uses an in-memory gateway. It is suitable for local integra
 Agent-first session tools include:
 
 - `rdev.support_session.plan`
+- `rdev.support_session.status`
 - `rdev.invites.create`
 - `rdev.connection_entry.plan`
 
@@ -40,6 +41,14 @@ steps. The plan returns:
 The plan is read-only. It does not start the gateway, create a ticket, approve a
 host, install software, or execute on the target host. Agents execute only the
 returned argv steps they have verified in the current environment.
+
+`rdev.support_session.status` returns `rdev.support-session-status.v1` in
+`structuredContent`. Agents should call it after giving the target user the
+Connection Entry command, and should continue watching until `connected=true` or
+`status=pending-approval`. When `connected=true`, the Agent must proactively
+tell the user that the connection has been established before creating jobs. The
+tool returns localized `feedback` and `next_action` strings so the Agent does
+not need to invent status wording.
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,

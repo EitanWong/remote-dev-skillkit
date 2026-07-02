@@ -8,7 +8,7 @@ publication still requires explicit operator approval.
 
 Current phase: real fresh-agent support sessions are standardized so Agents no
 longer improvise gateway startup, Windows bootstrap, `rdev` recovery, ticket
-metadata, or approval polling by hand.
+metadata, status watching, or approval polling by hand.
 
 ### Added
 
@@ -18,6 +18,11 @@ metadata, or approval polling by hand.
   local `rdev`, cross-building Windows/macOS/Linux helper binaries, starting a
   dev gateway with helper asset flags, creating the invite, and giving
   localized target-side one-command instructions.
+- Added `rdev support-session status`, `GET /v1/support-session/status`, and
+  MCP tool `rdev.support_session.status` with schema
+  `rdev.support-session-status.v1`. Agents can now watch a ticket after giving
+  the target-side command, receive localized `feedback`/`next_action`, and
+  proactively tell the user when `connected=true`.
 - Added gateway `/assets/*` serving for configured platform `rdev` helpers plus
   `.sha256` endpoints. `/join/<ticket>/bootstrap.sh` and
   `/join/<ticket>/bootstrap.ps1` now download a verified helper when `rdev` is
@@ -28,15 +33,16 @@ metadata, or approval polling by hand.
 - Added `--auto-approve` to `rdev invite create` and `auto_approve` to
   `rdev.invites.create`.
 - Added regression coverage for support-session plans, localized target
-  commands, verified helper assets, scoped auto-approval, and ticket metadata
-  snapshot copying.
+  commands, status feedback, verified helper assets, scoped auto-approval, and
+  ticket metadata snapshot copying.
 
 ### Changed
 
 - Updated README, MCP docs, Agent Bootstrap Prompt, i18n quick starts, and core
   Skills so Agents must call the standard support-session planner before writing
   ad hoc PowerShell, shell relay, nohup, bootstrap, gateway, ticket/root, or
-  approval steps.
+  approval steps, then call the standard status watcher before claiming the
+  remote host is connected.
 - Windows join commands no longer use `ExecutionPolicy Bypass`.
 - Development gateway plans now carry all configured helper asset paths for
   Windows amd64, macOS arm64/amd64, and Linux amd64/arm64.

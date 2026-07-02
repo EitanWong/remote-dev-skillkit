@@ -114,6 +114,11 @@ Steps:
     `rdev support-session plan` through the CLI, to obtain the standard gateway
     startup argv, verified helper assets, invite creation commands, localized
     target-user command, and scoped attended-temporary auto-approval contract.
+    After giving the target command to the human, call
+    `rdev.support_session.status` through MCP or
+    `rdev support-session status --wait` through CLI. When the status returns
+    `connected=true`, proactively tell me that the connection has been
+    established before creating any jobs.
     Do not write ad hoc PowerShell, shell relay, nohup, approval, or bootstrap
     code when the plan can provide it. After the viable gateway/transport path
     is known, use

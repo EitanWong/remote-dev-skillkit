@@ -454,6 +454,29 @@ func (g *MemoryGateway) Hosts(status string) []model.Host {
 	return hosts
 }
 
+func (g *MemoryGateway) HostsForTicketCode(ticketCode, status string) []model.Host {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ticketID := ""
+	if strings.TrimSpace(ticketCode) != "" {
+		ticketID = g.codeIndex[strings.TrimSpace(ticketCode)]
+	}
+	hosts := make([]model.Host, 0, len(g.hosts))
+	for _, host := range g.hosts {
+		if ticketID != "" && host.TicketID != ticketID {
+			continue
+		}
+		if status == "" || string(host.Status) == status {
+			hosts = append(hosts, host)
+		}
+	}
+	sort.Slice(hosts, func(i, j int) bool {
+		return hosts[i].CreatedAt.Before(hosts[j].CreatedAt)
+	})
+	return hosts
+}
+
 func (g *MemoryGateway) Host(hostID string) (model.Host, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

@@ -218,6 +218,59 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	}
 }
 
+func TestSupportSessionStatusReportsConnectionFeedback(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	handler := httpapi.NewServer(gw).Handler()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "company computer support", map[string]string{
+		"auto_approve": "attended-temporary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "win-dev",
+		OS:           "windows",
+		Arch:         "amd64",
+		Capabilities: []string{"shell.user"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{
+		"support-session", "status",
+		"--gateway-url", server.URL,
+		"--ticket-code", ticket.Code,
+		"--locale", "zh-CN",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		Connected     bool   `json:"connected"`
+		Status        string `json:"status"`
+		Feedback      string `json:"feedback"`
+		NextAction    string `json:"next_action"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid status JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-status.v1" ||
+		!payload.Connected ||
+		payload.Status != "connected" ||
+		!strings.Contains(payload.Feedback, "连接已经建立") ||
+		!strings.Contains(payload.NextAction, "汇报连接已建立") {
+		t.Fatalf("unexpected support-session status: %#v", payload)
+	}
+}
+
 func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()

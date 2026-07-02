@@ -94,6 +94,9 @@ computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. First call `rdev.support_session.plan` through MCP
 or `rdev support-session plan` through the CLI to get the standard gateway,
 helper-asset, invite, localized target-command, and scoped auto-approval plan.
+After giving me the target-machine command, watch `rdev.support_session.status`
+or `rdev support-session status --wait`; when `connected=true`, tell me the
+connection has been established before creating jobs.
 Do not ask humans to assemble ticket, root, gateway, transport, release, or
 checksum flags. Use `rdev.invites.create`, then materialize it with
 `rdev.connection_entry.plan` or `rdev connection-entry plan`.
@@ -188,8 +191,9 @@ The Agent should start with `rdev.support_session.plan` or
 `rdev support-session plan`. That standard plan tells the Agent how to build or
 locate `rdev`, start a gateway with verified platform helper assets, create the
 attended-temporary invite, enable scoped auto-approval when appropriate, and
-return localized target-user instructions. The Agent should not write its own
-PowerShell, relay, nohup, ticket, root, gateway, transport, or approval glue.
+return localized target-user instructions plus a standard status watch command.
+The Agent should not write its own PowerShell, relay, nohup, ticket, root,
+gateway, transport, status polling, or approval glue.
 
 After that, the Agent creates an invite and materializes it before asking anyone
 on the target side to do anything. The public name for this universal handoff is
@@ -202,6 +206,12 @@ transports, release roots, or checksums.
 rdev support-session plan \
   --gateway-url http://<reachable-gateway-host>:8787 \
   --target auto \
+  --locale auto
+
+rdev support-session status \
+  --gateway-url http://<reachable-gateway-host>:8787 \
+  --ticket-code <ticket-code> \
+  --wait \
   --locale auto
 ```
 
@@ -231,6 +241,10 @@ assets are not published yet. The target side opens the generated
 target computer, then approves the host when policy requires it.
 The agent does the waiting, probing, mode selection, package planning, job
 creation, status tracking, evidence review, and revocation.
+
+When status returns `connected=true`, the Agent should proactively tell the
+user: "Connection established. The target host is online and ready for scoped
+work." In Chinese sessions, the standardized feedback is: "连接已经建立，目标主机已在线并可用于受控任务。"
 
 `connection_entry` is the universal target-side entry point. The join page
 serves inspectable `/bootstrap.sh` and `/bootstrap.ps1` helpers that start a

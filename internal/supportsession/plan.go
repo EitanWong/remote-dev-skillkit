@@ -14,6 +14,7 @@ import (
 )
 
 const PlanSchemaVersion = "rdev.support-session-plan.v1"
+const StatusSchemaVersion = "rdev.support-session-status.v1"
 
 type Options struct {
 	RepoRoot    string
@@ -25,6 +26,12 @@ type Options struct {
 	TTLSeconds  int
 	AutoApprove bool
 	Locale      string
+}
+
+type StatusOptions struct {
+	TicketCode string
+	Hosts      []model.Host
+	Locale     string
 }
 
 func BuildPlan(ctx context.Context, opts Options) map[string]any {
@@ -127,6 +134,13 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 				"-d", string(inviteBody),
 			},
 			"create_invite_cli": createInviteCommand,
+			"watch_connection_status": []string{
+				rdevPath, "support-session", "status",
+				"--gateway-url", gatewayURL,
+				"--ticket-code", "<ticket-code>",
+				"--wait",
+				"--locale", locale,
+			},
 		},
 		"target_user_instructions": LocalizedTargetInstructions(gatewayURL, locale),
 		"agent_flow": []string{
@@ -134,6 +148,8 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 			"start gateway with the exact start_gateway argv in a managed terminal/session",
 			"create the invite through HTTP or CLI",
 			"give target user only the localized join URL or one-line visible script",
+			"watch connection status with rdev.support_session.status or rdev support-session status --wait",
+			"when connected=true, proactively tell the user the connection is established before creating jobs",
 			"do not write ad hoc relay/nohup/bootstrap code",
 			"after host connects, it is active when auto_approve is enabled; otherwise call rdev.hosts.approve",
 		},
@@ -144,6 +160,47 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 			"manual ticket/root/gateway/transport assembly for target user",
 		},
 		"detected_host_capabilities": hostcap.Detect(ctx),
+	}
+}
+
+func BuildStatus(opts StatusOptions) map[string]any {
+	ticketCode := strings.TrimSpace(opts.TicketCode)
+	locale := strings.TrimSpace(opts.Locale)
+	if locale == "" {
+		locale = "auto"
+	}
+	hosts := append([]model.Host(nil), opts.Hosts...)
+	active := hostsByStatus(hosts, model.HostStatusActive)
+	pending := hostsByStatus(hosts, model.HostStatusPending)
+	revoked := hostsByStatus(hosts, model.HostStatusRevoked)
+	connected := len(active) > 0
+	waiting := !connected && len(pending) == 0
+	status := "waiting"
+	if connected {
+		status = "connected"
+	} else if len(pending) > 0 {
+		status = "pending-approval"
+	} else if len(revoked) > 0 {
+		status = "revoked"
+	}
+	return map[string]any{
+		"schema_version": StatusSchemaVersion,
+		"ok":             connected || len(pending) > 0 || waiting,
+		"ticket_code":    ticketCode,
+		"status":         status,
+		"connected":      connected,
+		"waiting":        waiting,
+		"feedback":       localizedStatusFeedback(status, locale),
+		"next_action":    localizedStatusNextAction(status, locale),
+		"active_hosts":   active,
+		"pending_hosts":  pending,
+		"revoked_hosts":  revoked,
+		"host_count": map[string]int{
+			"active":  len(active),
+			"pending": len(pending),
+			"revoked": len(revoked),
+			"total":   len(hosts),
+		},
 	}
 }
 
@@ -171,6 +228,70 @@ func LocalizedTargetInstructions(gatewayURL, locale string) map[string]any {
 		"macos_linux":         macLinux,
 		"join_url_template":   gatewayURL + "/join/<ticket-code>",
 		"human_receives_only": []string{"localized join URL", "visible one-line script", "or signed package when published"},
+	}
+}
+
+func hostsByStatus(hosts []model.Host, status model.HostStatus) []model.Host {
+	values := make([]model.Host, 0, len(hosts))
+	for _, host := range hosts {
+		if host.Status == status {
+			values = append(values, host)
+		}
+	}
+	return values
+}
+
+func localizedStatusFeedback(status, locale string) string {
+	switch locale {
+	case "zh-CN", "zh":
+		switch status {
+		case "connected":
+			return "连接已经建立，目标主机已在线并可用于受控任务。"
+		case "pending-approval":
+			return "目标主机已经出现，正在等待审批或自动批准完成。"
+		case "revoked":
+			return "连接票据或主机已经撤销。"
+		default:
+			return "还没有检测到目标主机连接，请确认目标机器上的可见命令仍在运行。"
+		}
+	default:
+		switch status {
+		case "connected":
+			return "Connection established. The target host is online and ready for scoped work."
+		case "pending-approval":
+			return "The target host has appeared and is waiting for approval or auto-approval to complete."
+		case "revoked":
+			return "The connection ticket or host has been revoked."
+		default:
+			return "No target host is connected yet. Keep the visible command running on the target machine."
+		}
+	}
+}
+
+func localizedStatusNextAction(status, locale string) string {
+	switch locale {
+	case "zh-CN", "zh":
+		switch status {
+		case "connected":
+			return "向用户汇报连接已建立，然后检查主机能力并创建最小权限任务。"
+		case "pending-approval":
+			return "如果不是标准自动批准会话，请审批预期主机；否则继续等待短暂同步。"
+		case "revoked":
+			return "创建新的 Connection Entry。"
+		default:
+			return "继续等待，或检查 gateway 地址、网络可达性和目标命令输出。"
+		}
+	default:
+		switch status {
+		case "connected":
+			return "Tell the user the connection is established, then inspect capabilities and create the smallest scoped job."
+		case "pending-approval":
+			return "Approve the expected host if this is not a standard auto-approved session; otherwise wait briefly."
+		case "revoked":
+			return "Create a new Connection Entry."
+		default:
+			return "Keep waiting, or check gateway reachability, network path, and target command output."
+		}
 	}
 }
 

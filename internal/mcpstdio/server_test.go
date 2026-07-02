@@ -245,6 +245,44 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 	}
 }
 
+func TestServerToolCallSupportSessionStatus(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "company computer support", map[string]string{
+		"auto_approve": "attended-temporary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "win-dev",
+		OS:           "windows",
+		Arch:         "amd64",
+		Capabilities: []string{"shell.user"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.support_session.status", map[string]any{
+		"ticket_code": ticket.Code,
+		"locale":      "zh-CN",
+	})
+	var out bytes.Buffer
+	server := NewServer(gw)
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-status.v1" ||
+		structured["connected"] != true ||
+		structured["status"] != "connected" ||
+		!strings.Contains(structured["feedback"].(string), "连接已经建立") {
+		t.Fatalf("expected connected support session status, got %#v", structured)
+	}
+}
+
 func TestServerToolCallConnectionEntryPlan(t *testing.T) {
 	inviteInput := mcpRequestLine(t, "rdev.invites.create", map[string]any{
 		"gateway_url": "https://api.example.com/v1",

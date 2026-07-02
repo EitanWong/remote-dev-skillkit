@@ -46,7 +46,8 @@ revocation.
   `rdev support-session plan` through CLI before creating custom gateway,
   shell, PowerShell, relay, nohup, approval, or bootstrap steps. The plan is the
   standard Agent-native package for verified helper assets, invite creation,
-  localized target commands, and scoped attended-temporary auto-approval.
+  localized target commands, status watching, and scoped attended-temporary
+  auto-approval.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -102,9 +103,12 @@ revocation.
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
-5. Wait for the host. If the standard attended-temporary auto-approval contract
-   activated it, verify it is the expected machine before creating jobs;
-   otherwise approve it only after the operator confirms it is expected.
+5. Watch the host with `rdev.support_session.status` or
+   `rdev support-session status --wait`. When `connected=true`, proactively
+   report the localized feedback to the user before creating jobs. If the
+   standard attended-temporary auto-approval contract activated it, verify it is
+   the expected machine before creating jobs; otherwise approve it only after
+   the operator confirms it is expected.
 6. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
    policy, release trust inputs, and language/locale.
 7. Ask only for missing authorization, gateway, host, workspace, release,

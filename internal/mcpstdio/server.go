@@ -127,6 +127,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.createInvite(params.Arguments)
 	case "rdev.support_session.plan":
 		data, err = s.supportSessionPlan(params.Arguments)
+	case "rdev.support_session.status":
+		data, err = s.supportSessionStatus(params.Arguments)
 	case "rdev.connection_entry.plan":
 		data, err = s.connectionEntryPlan(params.Arguments)
 	case "rdev.tickets.create":
@@ -253,6 +255,15 @@ func (s Server) supportSessionPlan(args map[string]any) (any, error) {
 		TTLSeconds:  intArg(args, "ttl_seconds", 7200),
 		AutoApprove: boolArg(args, "auto_approve", true),
 		Locale:      stringArg(args, "locale", "auto"),
+	}), nil
+}
+
+func (s Server) supportSessionStatus(args map[string]any) (any, error) {
+	ticketCode := requiredString(args, "ticket_code")
+	return supportsession.BuildStatus(supportsession.StatusOptions{
+		TicketCode: ticketCode,
+		Hosts:      s.Gateway.HostsForTicketCode(ticketCode, ""),
+		Locale:     stringArg(args, "locale", "auto"),
 	}), nil
 }
 

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
 func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
@@ -37,11 +39,37 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	if !strings.Contains(createInvite, "--auto-approve") {
 		t.Fatalf("expected auto-approve invite command, got %s", createInvite)
 	}
+	watch := strings.Join(anyStrings(commands["watch_connection_status"].([]string)), "\x00")
+	if !strings.Contains(watch, "support-session") || !strings.Contains(watch, "status") || !strings.Contains(watch, "--wait") {
+		t.Fatalf("expected status watch command, got %s", watch)
+	}
 	target := plan["target_user_instructions"].(map[string]any)
 	if !strings.Contains(target["message"].(string), "目标电脑") ||
 		!strings.Contains(target["windows"].(string), "bootstrap.ps1") ||
 		strings.Contains(target["windows"].(string), "ExecutionPolicy Bypass") {
 		t.Fatalf("unexpected target instructions: %#v", target)
+	}
+}
+
+func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
+	status := BuildStatus(StatusOptions{
+		TicketCode: "ABCD-1234",
+		Locale:     "zh-CN",
+		Hosts: []model.Host{{
+			ID:       "host_1",
+			TicketID: "ticket_1",
+			Status:   model.HostStatusActive,
+			Name:     "win-dev",
+			OS:       "windows",
+			Arch:     "amd64",
+		}},
+	})
+
+	if status["schema_version"] != StatusSchemaVersion ||
+		status["connected"] != true ||
+		status["status"] != "connected" ||
+		!strings.Contains(status["feedback"].(string), "连接已经建立") {
+		t.Fatalf("expected connected localized status, got %#v", status)
 	}
 }
 

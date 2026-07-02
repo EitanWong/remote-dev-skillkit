@@ -39,7 +39,10 @@ or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
 gateway, transport, release, or checksum flags. First call
 `rdev.support_session.plan` through MCP or `rdev support-session plan` through
 CLI to get the standard gateway startup, verified helper assets, invite commands,
-localized target command, and scoped auto-approval plan. Use
+localized target command, scoped auto-approval plan, and status watch command.
+After giving the target-machine command, watch `rdev.support_session.status` or
+`rdev support-session status --wait`; when `connected=true`, proactively tell me
+the connection has been established before creating jobs. Use
 `rdev.invites.create`, then materialize it with `rdev.connection_entry.plan` or
 `rdev connection-entry plan`.
 Read `connection_entry.package_catalog` and the signed join manifest

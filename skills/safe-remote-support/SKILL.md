@@ -29,6 +29,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev`, start the gateway with verified helper assets, create the invite,
   localize the target command, and use scoped attended-temporary auto-approval
   when enabled.
+- After giving the target-side command, watch the session with
+  `rdev.support_session.status` or `rdev support-session status --wait`. When
+  `connected=true`, proactively tell the user the connection is established
+  before creating any jobs.
 - Load scoped runtime memory before creating a new support session, but verify
   stale host, gateway, workspace, release, adapter, and approval facts before
   using them.
@@ -138,7 +142,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    no-persistence checks, and approval probes.
 10. Explain the selected connection entry URL, visible script, or signed package
    and visible consent screen.
-11. Wait for the host to appear. If the standard attended-temporary
+11. Watch `rdev.support_session.status` or
+    `rdev support-session status --wait` until the host appears. If
+    `connected=true`, report the localized `feedback` to the user immediately.
+    If the standard attended-temporary
     auto-approval contract was enabled, verify the host is active and expected;
     otherwise approve it with scoped capabilities.
 12. Inspect capabilities with `rdev.hosts.capabilities`.

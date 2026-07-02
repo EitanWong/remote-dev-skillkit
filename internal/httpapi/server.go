@@ -20,6 +20,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
+	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 )
 
@@ -85,6 +86,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
 	mux.HandleFunc("GET /join/", s.join)
 	mux.HandleFunc("GET /assets/", s.asset)
+	mux.HandleFunc("GET /v1/support-session/status", s.supportSessionStatus)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
 	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
 	mux.HandleFunc("GET /v1/hosts/", s.hostSubresource)
@@ -909,6 +911,25 @@ func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"hosts": s.Gateway.Hosts(r.URL.Query().Get("status")),
 	})
+}
+
+func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "auditor role is required")
+		return
+	}
+	ticketCode := strings.TrimSpace(r.URL.Query().Get("ticket_code"))
+	if ticketCode == "" {
+		writeError(w, http.StatusBadRequest, "ticket_code is required")
+		return
+	}
+	hosts := s.Gateway.HostsForTicketCode(ticketCode, "")
+	status := supportsession.BuildStatus(supportsession.StatusOptions{
+		TicketCode: ticketCode,
+		Hosts:      hosts,
+		Locale:     r.URL.Query().Get("locale"),
+	})
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s Server) registerHost(w http.ResponseWriter, r *http.Request) {

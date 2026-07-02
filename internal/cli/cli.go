@@ -1738,9 +1738,106 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			AutoApprove: *autoApprove,
 			Locale:      *locale,
 		}))
+	case "status":
+		fs := flag.NewFlagSet("support-session status", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway URL that created the Connection Entry")
+		ticketCode := fs.String("ticket-code", "", "Connection Entry ticket code to watch")
+		locale := fs.String("locale", "auto", "feedback language, for example auto, en, or zh-CN")
+		wait := fs.Bool("wait", false, "wait until a host connects or approval is pending")
+		timeout := fs.Duration("timeout", 2*time.Minute, "maximum wait duration when --wait is set")
+		interval := fs.Duration("interval", time.Second, "poll interval when --wait is set")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		status, err := supportSessionStatus(ctx, http.DefaultClient, supportSessionStatusOptions{
+			GatewayURL: *gatewayURL,
+			TicketCode: *ticketCode,
+			Locale:     *locale,
+			Wait:       *wait,
+			Timeout:    *timeout,
+			Interval:   *interval,
+		})
+		if err != nil {
+			return err
+		}
+		return writeJSON(a.Stdout, status)
 	default:
 		return fmt.Errorf("unknown support-session subcommand %q", args[0])
 	}
+}
+
+type supportSessionStatusOptions struct {
+	GatewayURL string
+	TicketCode string
+	Locale     string
+	Wait       bool
+	Timeout    time.Duration
+	Interval   time.Duration
+}
+
+func supportSessionStatus(ctx context.Context, client *http.Client, opts supportSessionStatusOptions) (map[string]any, error) {
+	if strings.TrimSpace(opts.GatewayURL) == "" {
+		return nil, fmt.Errorf("support-session status requires --gateway-url")
+	}
+	if strings.TrimSpace(opts.TicketCode) == "" {
+		return nil, fmt.Errorf("support-session status requires --ticket-code")
+	}
+	if opts.Interval <= 0 {
+		opts.Interval = time.Second
+	}
+	deadline := time.Now().Add(opts.Timeout)
+	for {
+		status, err := fetchSupportSessionStatus(ctx, client, opts)
+		if err != nil {
+			return nil, err
+		}
+		if !opts.Wait || status["connected"] == true || status["status"] == "pending-approval" {
+			return status, nil
+		}
+		if opts.Timeout > 0 && time.Now().After(deadline) {
+			status["ok"] = false
+			status["timed_out"] = true
+			status["next_action"] = "Keep waiting, or check gateway reachability, network path, and target command output."
+			return status, nil
+		}
+		timer := time.NewTimer(opts.Interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func fetchSupportSessionStatus(ctx context.Context, client *http.Client, opts supportSessionStatusOptions) (map[string]any, error) {
+	endpoint := strings.TrimRight(opts.GatewayURL, "/") + "/v1/support-session/status"
+	values := url.Values{}
+	values.Set("ticket_code", opts.TicketCode)
+	if strings.TrimSpace(opts.Locale) != "" {
+		values.Set("locale", opts.Locale)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+values.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := doGatewayRequest(client, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if message, _ := payload["error"].(string); message != "" {
+			return nil, fmt.Errorf("support-session status failed: %s", message)
+		}
+		return nil, fmt.Errorf("support-session status failed: %s", resp.Status)
+	}
+	return payload, nil
 }
 
 func (a App) mcp(args []string) error {
@@ -6475,6 +6572,8 @@ Usage:
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256> --execute
+  rdev support-session plan --gateway-url http://127.0.0.1:8787 --target auto --locale auto
+  rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
   rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party
   rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --dry-run
