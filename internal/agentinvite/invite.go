@@ -120,6 +120,8 @@ type AuthorityScope struct {
 
 type ConnectionEntry struct {
 	SchemaVersion          string            `json:"schema_version"`
+	HandoffName            string            `json:"handoff_name"`
+	HandoffContract        []string          `json:"handoff_contract"`
 	EntryURL               string            `json:"entry_url"`
 	ConsentMode            string            `json:"consent_mode"`
 	AutomationLevel        string            `json:"automation_level"`
@@ -133,9 +135,11 @@ type ConnectionEntry struct {
 type ConnectionEntryPlan struct {
 	SchemaVersion      string   `json:"schema_version"`
 	Mode               string   `json:"mode"`
+	PackagePlanSchema  string   `json:"package_plan_schema"`
 	BestFor            []string `json:"best_for"`
 	EntryModes         []string `json:"entry_modes"`
 	ModeSelection      []string `json:"mode_selection"`
+	RequiredAgentFlow  []string `json:"required_agent_flow"`
 	PackageFormats     []string `json:"package_formats"`
 	RequiredContents   []string `json:"required_contents"`
 	RuntimeFlow        []string `json:"runtime_flow"`
@@ -608,6 +612,8 @@ func newConnectionEntry(joinURL string) ConnectionEntry {
 	bootstrapBase := strings.TrimRight(joinURL, "/")
 	return ConnectionEntry{
 		SchemaVersion:   "rdev.connection-entry.v1",
+		HandoffName:     "Connection Entry",
+		HandoffContract: connectionEntryHandoffContract(),
 		EntryURL:        joinURL,
 		ConsentMode:     "attended-visible-consent",
 		AutomationLevel: "one-entry-minimal-steps-after-consent",
@@ -642,8 +648,9 @@ func newConnectionEntry(joinURL string) ConnectionEntry {
 
 func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, transport string) ConnectionEntryPlan {
 	return ConnectionEntryPlan{
-		SchemaVersion: "rdev.connection-entry-plan.v1",
-		Mode:          "universal-agent-selected-entry",
+		SchemaVersion:     "rdev.connection-entry-plan.v1",
+		Mode:              "universal-agent-selected-entry",
+		PackagePlanSchema: "rdev.connection-entry.package-plan.v1",
 		BestFor: []string{
 			"any new target host connection where humans should not assemble tickets, roots, gateway URLs, or transport flags",
 			"third-party temporary repair where the target host should not install Go, Git, Node, Python, or other prerequisites first",
@@ -661,6 +668,13 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"if the machine belongs to someone else or the session is one-off support, select attended-temporary mode with no persistence by default",
 			"if ownership, persistence approval, or service policy is unclear, ask one concise question before creating a managed entry",
 			"do not expose raw ticket codes, manifest roots, gateway URLs, or transport flags to the human when a connection_entry can carry them",
+		},
+		RequiredAgentFlow: []string{
+			"create an invite first with rdev.invites.create or rdev invite create",
+			"materialize the invite with rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions",
+			"give the target side only the selected connection_entry.entry_url, visible launcher script, or signed package",
+			"keep ticket, gateway, manifest root, transport, release, and checksum values inside Agent/tool metadata",
+			"choose managed for owned recurring machines and attended-temporary for third-party or one-off machines",
 		},
 		PackageFormats: []string{
 			"windows-amd64 signed zip or exe containing rdev.exe, release-bundle.json, checksums, and a visible connection launcher",
@@ -722,6 +736,15 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"add end-to-end Windows clean-machine acceptance evidence for one-run connection entry startup",
 			"add relay/mesh adapter execution paths for environments where direct outbound gateway access fails",
 		},
+	}
+}
+
+func connectionEntryHandoffContract() []string {
+	return []string{
+		"Connection Entry is the universal target-side handoff for every new remote host, whether the result is a link, visible script, or signed package.",
+		"Target-side humans must not assemble ticket codes, gateway URLs, manifest roots, transports, release roots, or checksums by hand.",
+		"Agent/tool metadata owns low-level connection parameters and records missing_inputs when package materialization needs more release data.",
+		"Owned personal or fleet machines default to managed planning for durable Agent work; third-party or one-off machines default to attended-temporary planning.",
 	}
 }
 

@@ -1,6 +1,7 @@
 package connectionentry
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -29,7 +30,12 @@ type Options struct {
 	SessionMode                    string
 	ReleaseBundleURL               string
 	ReleaseBundleRequiredArtifacts string
+	ReleaseBundlePath              string
 	ReleaseRootPublicKey           string
+	ManagedBinaryPath              string
+	ManagedServiceName             string
+	ManagedServiceLabel            string
+	ManagedUnitName                string
 	WindowsHostDownloadURL         string
 	WindowsHostExpectedSHA256      string
 	WindowsVerifierDownloadURL     string
@@ -44,6 +50,8 @@ type Options struct {
 
 type Plan struct {
 	SchemaVersion          string            `json:"schema_version"`
+	ConnectionEntryName    string            `json:"connection_entry_name"`
+	EntryPackagePlanSchema string            `json:"entry_package_plan_schema"`
 	GeneratedAt            time.Time         `json:"generated_at"`
 	OutDir                 string            `json:"out_dir,omitempty"`
 	InviteSchemaVersion    string            `json:"invite_schema_version"`
@@ -57,6 +65,7 @@ type Plan struct {
 	EntryCommand           string            `json:"entry_command,omitempty"`
 	HumanSurface           []string          `json:"human_surface"`
 	AgentMetadata          []string          `json:"agent_metadata"`
+	HandoffContract        []string          `json:"handoff_contract"`
 	HumanMessagePath       string            `json:"human_message_path,omitempty"`
 	HumanSteps             []string          `json:"human_steps"`
 	AgentSteps             []string          `json:"agent_steps"`
@@ -128,6 +137,8 @@ func FromInvite(opts Options) (Plan, error) {
 	entryCommand := commandForOS(invite.ConnectionEntry.OneLineCommands, targetOS)
 	plan := Plan{
 		SchemaVersion:          MaterializationPlanSchemaVersion,
+		ConnectionEntryName:    "Connection Entry",
+		EntryPackagePlanSchema: EntryPackagePlanSchemaVersion,
 		GeneratedAt:            now.UTC(),
 		OutDir:                 outDir,
 		InviteSchemaVersion:    invite.SchemaVersion,
@@ -141,6 +152,7 @@ func FromInvite(opts Options) (Plan, error) {
 		EntryCommand:           entryCommand,
 		HumanSurface:           humanSurface(targetOS, sessionMode),
 		AgentMetadata:          agentMetadata(),
+		HandoffContract:        handoffContract(),
 		HumanSteps:             humanSteps(invite, sessionMode, targetOS),
 		AgentSteps:             agentSteps(invite, sessionMode),
 		NetworkStrategy:        invite.ConnectionEntryPlan.NetworkStrategy,
@@ -148,6 +160,9 @@ func FromInvite(opts Options) (Plan, error) {
 	plan.Checks = buildChecks(invite, plan, entryCommand)
 	if targetOS == "windows" && sessionMode == string(model.HostModeAttendedTemporary) {
 		addWindowsEntryPackagePlan(&plan, invite, opts, outDir)
+	}
+	if sessionMode == string(model.HostModeManaged) {
+		addManagedEntryPackagePlan(&plan, invite, opts, outDir)
 	}
 	if outDir != "" {
 		if err := writeMaterializedFiles(&plan); err != nil {
@@ -275,6 +290,16 @@ func agentMetadata() []string {
 	}
 }
 
+func handoffContract() []string {
+	return []string{
+		"Connection Entry is the universal target-side handoff for every new remote host.",
+		"The target side receives only a link, visible script, or signed package.",
+		"Ticket, gateway, manifest root, transport, release, and checksum values stay in Agent/package metadata.",
+		"Agents must use rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions.",
+		"Owned recurring machines use managed planning; third-party or one-off machines use attended-temporary planning by default.",
+	}
+}
+
 func humanSteps(invite agentinvite.Invite, sessionMode, targetOS string) []string {
 	steps := []string{
 		"Open " + invite.ConnectionEntry.EntryURL + " on the target machine.",
@@ -390,6 +415,150 @@ func addWindowsEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Opti
 	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
 }
 
+func addManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
+	missing := managedMissingInputs(plan.TargetOS, opts)
+	plan.MissingInputs = append(plan.MissingInputs, missing...)
+	if outDir == "" || len(missing) > 0 {
+		plan.Checks = append(plan.Checks, Check{
+			Name:   "managed_service_package_plan",
+			Passed: false,
+			Detail: "requires out_dir, managed binary path, release bundle path, and release root before generating the managed-service package plan",
+		})
+		return
+	}
+	switch plan.TargetOS {
+	case "darwin":
+		addManagedMacEntryPackagePlan(plan, invite, opts, outDir)
+	case "linux":
+		addLinuxManagedEntryPackagePlan(plan, invite, opts, outDir)
+	case "windows":
+		addWindowsManagedEntryPackagePlan(plan, invite, opts, outDir)
+	default:
+		plan.MissingInputs = append(plan.MissingInputs, "managed_service_unsupported_target_os: "+plan.TargetOS)
+		plan.Checks = append(plan.Checks, Check{Name: "managed_service_package_plan", Passed: false, Detail: "unsupported target OS for managed service package plan: " + plan.TargetOS})
+	}
+}
+
+func addManagedMacEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
+	macPlan, err := acceptance.RunManagedMacServicePlan(context.Background(), acceptance.ManagedMacServiceOptions{
+		OutDir:                   filepath.Join(outDir, "managed-macos"),
+		BinaryPath:               strings.TrimSpace(opts.ManagedBinaryPath),
+		GatewayURL:               invite.GatewayURL,
+		TicketCode:               invite.Ticket.Code,
+		Label:                    strings.TrimSpace(opts.ManagedServiceLabel),
+		ReleaseBundle:            strings.TrimSpace(opts.ReleaseBundlePath),
+		ReleaseRootPublicKey:     strings.TrimSpace(opts.ReleaseRootPublicKey),
+		ReleaseRequiredArtifacts: splitCSV(opts.ReleaseBundleRequiredArtifacts),
+		Transport:                managedTransport(invite.Transport),
+		Force:                    opts.Force,
+		Now:                      plan.GeneratedAt,
+	})
+	if err != nil {
+		addManagedEntryPackagePlanError(plan, err)
+		return
+	}
+	plan.EntryPackagePlan = &EntryPackagePlan{
+		SchemaVersion:       EntryPackagePlanSchemaVersion,
+		TargetOS:            plan.TargetOS,
+		SessionMode:         plan.SessionMode,
+		PackageMode:         "reviewed-managed-service-connection-entry",
+		OK:                  allAcceptanceChecksPassed(macPlan.Checks),
+		PlanPath:            filepath.Join(macPlan.OutDir, "service-plan.json"),
+		LauncherPath:        macPlan.PlistPath,
+		PlatformPlanSchema:  macPlan.SchemaVersion,
+		PlatformPlanKind:    "managed-mac-service-plan",
+		HumanEntryPoint:     "review the generated LaunchAgent plist and run the listed service-control commands only on the owned Mac",
+		AgentOnlyParameters: managedAgentOnlyParameters(),
+		Checks:              macPlan.Checks,
+	}
+	plan.GeneratedFiles = append(plan.GeneratedFiles,
+		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable macOS managed-service plan inside the generic connection entry package plan"},
+		GeneratedFile{Path: plan.EntryPackagePlan.LauncherPath, Purpose: "reviewable LaunchAgent plist for owned managed host enrollment"},
+	)
+	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
+}
+
+func addLinuxManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
+	linuxPlan, err := acceptance.RunLinuxManagedServicePlan(acceptance.LinuxManagedServiceOptions{
+		OutDir:                   filepath.Join(outDir, "managed-linux"),
+		BinaryPath:               strings.TrimSpace(opts.ManagedBinaryPath),
+		GatewayURL:               invite.GatewayURL,
+		TicketCode:               invite.Ticket.Code,
+		UnitName:                 strings.TrimSpace(opts.ManagedUnitName),
+		ReleaseBundle:            strings.TrimSpace(opts.ReleaseBundlePath),
+		ReleaseRootPublicKey:     strings.TrimSpace(opts.ReleaseRootPublicKey),
+		ReleaseRequiredArtifacts: splitCSV(opts.ReleaseBundleRequiredArtifacts),
+		Transport:                managedTransport(invite.Transport),
+		Force:                    opts.Force,
+		Now:                      plan.GeneratedAt,
+	})
+	if err != nil {
+		addManagedEntryPackagePlanError(plan, err)
+		return
+	}
+	plan.EntryPackagePlan = &EntryPackagePlan{
+		SchemaVersion:       EntryPackagePlanSchemaVersion,
+		TargetOS:            plan.TargetOS,
+		SessionMode:         plan.SessionMode,
+		PackageMode:         "reviewed-managed-service-connection-entry",
+		OK:                  allAcceptanceChecksPassed(linuxPlan.Checks),
+		PlanPath:            filepath.Join(linuxPlan.OutDir, "linux-managed-service-plan.json"),
+		LauncherPath:        linuxPlan.UnitPath,
+		PlatformPlanSchema:  linuxPlan.SchemaVersion,
+		PlatformPlanKind:    "linux-managed-service-plan",
+		HumanEntryPoint:     "review the generated systemd user unit and run the listed service-control commands only on the owned Linux host",
+		AgentOnlyParameters: managedAgentOnlyParameters(),
+		Checks:              linuxPlan.Checks,
+	}
+	plan.GeneratedFiles = append(plan.GeneratedFiles,
+		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable Linux managed-service plan inside the generic connection entry package plan"},
+		GeneratedFile{Path: plan.EntryPackagePlan.LauncherPath, Purpose: "reviewable systemd user unit for owned managed host enrollment"},
+	)
+	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
+}
+
+func addWindowsManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
+	winPlan, err := acceptance.RunWindowsManagedServicePlan(acceptance.WindowsManagedServiceOptions{
+		OutDir:                   filepath.Join(outDir, "managed-windows"),
+		BinaryPath:               strings.TrimSpace(opts.ManagedBinaryPath),
+		GatewayURL:               invite.GatewayURL,
+		TicketCode:               invite.Ticket.Code,
+		ServiceName:              strings.TrimSpace(opts.ManagedServiceName),
+		ReleaseBundle:            strings.TrimSpace(opts.ReleaseBundlePath),
+		ReleaseRootPublicKey:     strings.TrimSpace(opts.ReleaseRootPublicKey),
+		ReleaseRequiredArtifacts: splitCSV(opts.ReleaseBundleRequiredArtifacts),
+		Transport:                managedTransport(invite.Transport),
+		Force:                    opts.Force,
+		Now:                      plan.GeneratedAt,
+	})
+	if err != nil {
+		addManagedEntryPackagePlanError(plan, err)
+		return
+	}
+	plan.EntryPackagePlan = &EntryPackagePlan{
+		SchemaVersion:       EntryPackagePlanSchemaVersion,
+		TargetOS:            plan.TargetOS,
+		SessionMode:         plan.SessionMode,
+		PackageMode:         "reviewed-managed-service-connection-entry",
+		OK:                  allAcceptanceChecksPassed(winPlan.Checks),
+		PlanPath:            filepath.Join(winPlan.OutDir, "windows-managed-service-plan.json"),
+		PlatformPlanSchema:  winPlan.SchemaVersion,
+		PlatformPlanKind:    "windows-managed-service-plan",
+		HumanEntryPoint:     "review the generated Windows Service plan and run the listed service-control commands only on the owned Windows host",
+		AgentOnlyParameters: managedAgentOnlyParameters(),
+		Checks:              winPlan.Checks,
+	}
+	plan.GeneratedFiles = append(plan.GeneratedFiles,
+		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable Windows managed-service plan inside the generic connection entry package plan"},
+	)
+	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
+}
+
+func addManagedEntryPackagePlanError(plan *Plan, err error) {
+	plan.MissingInputs = append(plan.MissingInputs, "managed_service_package_plan_error: "+err.Error())
+	plan.Checks = append(plan.Checks, Check{Name: "managed_service_package_plan", Passed: false, Detail: err.Error()})
+}
+
 func windowsMissingInputs(opts Options) []string {
 	var missing []string
 	required := map[string]string{
@@ -406,6 +575,57 @@ func windowsMissingInputs(opts Options) []string {
 		}
 	}
 	return missing
+}
+
+func managedMissingInputs(targetOS string, opts Options) []string {
+	required := map[string]string{
+		"managed_binary_path":     opts.ManagedBinaryPath,
+		"release_bundle_path":     opts.ReleaseBundlePath,
+		"release_root_public_key": opts.ReleaseRootPublicKey,
+	}
+	var missing []string
+	for name, value := range required {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, name)
+		}
+	}
+	if targetOS == "windows" && strings.TrimSpace(opts.ManagedBinaryPath) != "" && !strings.Contains(opts.ManagedBinaryPath, `:\`) && !strings.HasPrefix(opts.ManagedBinaryPath, `\\`) {
+		missing = append(missing, "managed_binary_path_absolute_windows")
+	}
+	return missing
+}
+
+func managedAgentOnlyParameters() []string {
+	return []string{
+		"manifest_url",
+		"manifest_root_public_key",
+		"gateway_url",
+		"ticket_code",
+		"transport",
+		"managed_binary_path",
+		"release_bundle_path",
+		"release_root_public_key",
+	}
+}
+
+func managedTransport(value string) string {
+	switch strings.TrimSpace(value) {
+	case "poll":
+		return "poll"
+	default:
+		return "long-poll"
+	}
+}
+
+func splitCSV(value string) []string {
+	var values []string
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
 }
 
 func writeMaterializedFiles(plan *Plan) error {

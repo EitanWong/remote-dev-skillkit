@@ -42,11 +42,15 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   before asking a human to install prerequisites, copy ticket codes, copy
   manifest roots, or hand-assemble network flags.
 - For every new target host, create an invite first and then materialize it with
-  `rdev.connection_entry.plan` or `rdev connection-entry plan`. Treat
-  `entry_package_plan` as the generic package surface for Windows, macOS, Linux,
-  managed, LAN, hosted, relay, or mesh variants. If release/package inputs are
-  missing, report those missing inputs to the operator instead of asking the
-  target-side human to assemble raw connection parameters.
+  `rdev.connection_entry.plan` or `rdev connection-entry plan` before sending
+  target-side instructions. Treat Connection Entry as the universal handoff
+  name, and `entry_package_plan` as the generic package surface for Windows,
+  macOS, Linux, managed, LAN, hosted, relay, mesh, SSH, or VPN variants. If
+  release/package inputs are missing, report those missing inputs to the
+  operator instead of asking the target-side human to assemble raw connection
+  parameters. For operator-owned durable machines, use the materialized reviewed
+  managed-service plan; for third-party support, keep the session
+  attended-temporary with no persistence by default.
 - After a real Windows temporary run, package release evidence using the plan,
   output directory, transcript, release verification, audit, no-persistence
   evidence, and approval-probe paths produced or confirmed for that run.

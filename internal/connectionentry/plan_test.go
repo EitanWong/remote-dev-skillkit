@@ -29,6 +29,11 @@ func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	if plan.SchemaVersion != MaterializationPlanSchemaVersion {
 		t.Fatalf("unexpected schema: %#v", plan)
 	}
+	if plan.ConnectionEntryName != "Connection Entry" ||
+		plan.EntryPackagePlanSchema != EntryPackagePlanSchemaVersion ||
+		!slices.Contains(plan.HandoffContract, "Agents must use rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions.") {
+		t.Fatalf("expected universal connection entry contract, got %#v", plan)
+	}
 	if plan.SessionMode != string(model.HostModeAttendedTemporary) || plan.EntryURL == "" {
 		t.Fatalf("expected attended temporary entry plan: %#v", plan)
 	}
@@ -102,6 +107,122 @@ func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
 	}
 	if !fileExists(filepath.Join(out, "connection-entry-plan.json")) {
 		t.Fatalf("expected materialization plan JSON in out dir")
+	}
+}
+
+func TestFromInviteReportsMissingManagedInputs(t *testing.T) {
+	plan, err := FromInvite(Options{
+		InviteJSON:  mustJSON(t, testInvite(t, model.HostModeManaged)),
+		OutDir:      filepath.Join(t.TempDir(), "managed-entry"),
+		TargetOS:    "linux",
+		Ownership:   "owned",
+		SessionMode: string(model.HostModeManaged),
+		Now:         time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.EntryPackagePlan != nil {
+		t.Fatalf("missing managed inputs should not generate package plan: %#v", plan.EntryPackagePlan)
+	}
+	for _, expected := range []string{"managed_binary_path", "release_bundle_path", "release_root_public_key"} {
+		if !slices.Contains(plan.MissingInputs, expected) {
+			t.Fatalf("expected missing input %q, got %#v", expected, plan.MissingInputs)
+		}
+	}
+}
+
+func TestFromInviteGeneratesManagedServiceMaterialization(t *testing.T) {
+	cases := []struct {
+		name             string
+		targetOS         string
+		binary           string
+		releaseBundle    string
+		required         string
+		kind             string
+		generatedFile    string
+		serviceName      string
+		serviceLabel     string
+		unitName         string
+		expectedLauncher bool
+	}{
+		{
+			name:             "macos",
+			targetOS:         "darwin",
+			binary:           "/opt/rdev/rdev",
+			releaseBundle:    "/opt/rdev/release-bundle.json",
+			required:         "rdev,rdev-host,rdev-verify",
+			kind:             "managed-mac-service-plan",
+			generatedFile:    "managed-macos/service-plan.json",
+			serviceLabel:     "com.example.rdev.host",
+			expectedLauncher: true,
+		},
+		{
+			name:             "linux",
+			targetOS:         "linux",
+			binary:           "/opt/rdev/rdev",
+			releaseBundle:    "/opt/rdev/release-bundle.json",
+			required:         "rdev,rdev-host,rdev-verify",
+			kind:             "linux-managed-service-plan",
+			generatedFile:    "managed-linux/linux-managed-service-plan.json",
+			unitName:         "rdev-host.service",
+			expectedLauncher: true,
+		},
+		{
+			name:          "windows",
+			targetOS:      "windows",
+			binary:        `C:\Program Files\rdev\rdev.exe`,
+			releaseBundle: `C:\Program Files\rdev\release-bundle.json`,
+			required:      "rdev.exe,rdev-host.exe,rdev-verify.exe",
+			kind:          "windows-managed-service-plan",
+			generatedFile: "managed-windows/windows-managed-service-plan.json",
+			serviceName:   "RemoteDevSkillkitHost",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "entry")
+			plan, err := FromInvite(Options{
+				InviteJSON:                     mustJSON(t, testInvite(t, model.HostModeManaged)),
+				OutDir:                         out,
+				TargetOS:                       tc.targetOS,
+				Ownership:                      "owned",
+				SessionMode:                    string(model.HostModeManaged),
+				ManagedBinaryPath:              tc.binary,
+				ManagedServiceName:             tc.serviceName,
+				ManagedServiceLabel:            tc.serviceLabel,
+				ManagedUnitName:                tc.unitName,
+				ReleaseBundlePath:              tc.releaseBundle,
+				ReleaseRootPublicKey:           "release-root:" + strings.Repeat("b", 43),
+				ReleaseBundleRequiredArtifacts: tc.required,
+				Now:                            time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.MissingInputs) != 0 {
+				t.Fatalf("expected no missing inputs, got %#v", plan.MissingInputs)
+			}
+			if plan.EntryPackagePlan == nil || !plan.EntryPackagePlan.OK {
+				t.Fatalf("expected managed entry package plan: %#v", plan.EntryPackagePlan)
+			}
+			if plan.EntryPackagePlan.SchemaVersion != EntryPackagePlanSchemaVersion ||
+				plan.EntryPackagePlan.PackageMode != "reviewed-managed-service-connection-entry" ||
+				plan.EntryPackagePlan.PlatformPlanKind != tc.kind {
+				t.Fatalf("unexpected managed package wrapper: %#v", plan.EntryPackagePlan)
+			}
+			if !fileExists(filepath.Join(out, tc.generatedFile)) {
+				t.Fatalf("expected generated managed plan %s", filepath.Join(out, tc.generatedFile))
+			}
+			if tc.expectedLauncher && !fileExists(plan.EntryPackagePlan.LauncherPath) {
+				t.Fatalf("expected generated launcher/unit path: %#v", plan.EntryPackagePlan)
+			}
+			if !slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "managed_binary_path") ||
+				!slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "release_bundle_path") ||
+				!slices.Contains(plan.HumanSurface, "reviewed managed-service entry package after owned-host approval") {
+				t.Fatalf("expected managed metadata and surface split: %#v", plan)
+			}
+		})
 	}
 }
 

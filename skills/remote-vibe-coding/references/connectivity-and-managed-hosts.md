@@ -33,6 +33,9 @@ max-control discovery, or long-running owned workstations.
   The target-side human receives a link, visible script, or signed package from
   `connection_entry` / `entry_package_plan`; raw ticket, root, gateway,
   transport, release, and checksum values stay in Agent metadata.
+- Do not create separate customer-link or connector-package public surfaces.
+  LAN, hosted, relay, mesh, SSH, and VPN decisions are connectivity details
+  inside the same Connection Entry Package Plan.
 
 ## Max-Control Profile
 

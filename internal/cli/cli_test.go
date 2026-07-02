@@ -146,6 +146,8 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 		} `json:"authority_profile"`
 		ConnectionEntry struct {
 			SchemaVersion   string            `json:"schema_version"`
+			HandoffName     string            `json:"handoff_name"`
+			HandoffContract []string          `json:"handoff_contract"`
 			EntryURL        string            `json:"entry_url"`
 			AutomationLevel string            `json:"automation_level"`
 			OneLineCommands map[string]string `json:"one_line_commands"`
@@ -154,8 +156,10 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 		ConnectionEntryPlan struct {
 			SchemaVersion      string   `json:"schema_version"`
 			Mode               string   `json:"mode"`
+			PackagePlanSchema  string   `json:"package_plan_schema"`
 			EntryModes         []string `json:"entry_modes"`
 			ModeSelection      []string `json:"mode_selection"`
+			RequiredAgentFlow  []string `json:"required_agent_flow"`
 			PackageFormats     []string `json:"package_formats"`
 			RequiredContents   []string `json:"required_contents"`
 			NetworkStrategy    []string `json:"network_strategy"`
@@ -252,17 +256,36 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	if len(payload.AuthorityProfile.ControlPaths) < 3 || !slices.Contains(payload.AuthorityProfile.RequiredCapabilities, "downstream.control.scoped") {
 		t.Fatalf("max-control profile should include downstream control paths and capability: %#v", payload.AuthorityProfile)
 	}
-	if payload.ConnectionEntry.SchemaVersion != "rdev.connection-entry.v1" || payload.ConnectionEntry.EntryURL == "" || len(payload.ConnectionEntry.OneLineCommands) < 2 {
+	if payload.ConnectionEntry.SchemaVersion != "rdev.connection-entry.v1" ||
+		payload.ConnectionEntry.HandoffName != "Connection Entry" ||
+		payload.ConnectionEntry.EntryURL == "" ||
+		len(payload.ConnectionEntry.OneLineCommands) < 2 ||
+		len(payload.ConnectionEntry.HandoffContract) == 0 {
 		t.Fatalf("invite should include connection entry: %#v", payload.ConnectionEntry)
+	}
+	if !slices.Contains(payload.ConnectionEntry.HandoffContract, "Target-side humans must not assemble ticket codes, gateway URLs, manifest roots, transports, release roots, or checksums by hand.") {
+		t.Fatalf("connection entry should define the universal handoff contract: %#v", payload.ConnectionEntry.HandoffContract)
 	}
 	if !strings.Contains(payload.ConnectionEntry.OneLineCommands["macos_linux_sh"], "/join/") || !strings.Contains(payload.ConnectionEntry.OneLineCommands["windows_powershell"], "bootstrap.ps1") {
 		t.Fatalf("connection entry should include one-link commands: %#v", payload.ConnectionEntry.OneLineCommands)
 	}
-	if payload.ConnectionEntryPlan.SchemaVersion != "rdev.connection-entry-plan.v1" || payload.ConnectionEntryPlan.Mode != "universal-agent-selected-entry" {
+	if payload.ConnectionEntryPlan.SchemaVersion != "rdev.connection-entry-plan.v1" ||
+		payload.ConnectionEntryPlan.Mode != "universal-agent-selected-entry" ||
+		payload.ConnectionEntryPlan.PackagePlanSchema != "rdev.connection-entry.package-plan.v1" {
 		t.Fatalf("invite should include connection entry plan: %#v", payload.ConnectionEntryPlan)
 	}
-	if len(payload.ConnectionEntryPlan.EntryModes) < 2 || len(payload.ConnectionEntryPlan.ModeSelection) == 0 || len(payload.ConnectionEntryPlan.PackageFormats) < 3 || len(payload.ConnectionEntryPlan.RequiredContents) == 0 || len(payload.ConnectionEntryPlan.NetworkStrategy) == 0 || len(payload.ConnectionEntryPlan.PrivilegeStrategy) == 0 || len(payload.ConnectionEntryPlan.ImplementationGaps) == 0 {
+	if len(payload.ConnectionEntryPlan.EntryModes) < 2 ||
+		len(payload.ConnectionEntryPlan.ModeSelection) == 0 ||
+		len(payload.ConnectionEntryPlan.RequiredAgentFlow) == 0 ||
+		len(payload.ConnectionEntryPlan.PackageFormats) < 3 ||
+		len(payload.ConnectionEntryPlan.RequiredContents) == 0 ||
+		len(payload.ConnectionEntryPlan.NetworkStrategy) == 0 ||
+		len(payload.ConnectionEntryPlan.PrivilegeStrategy) == 0 ||
+		len(payload.ConnectionEntryPlan.ImplementationGaps) == 0 {
 		t.Fatalf("connection entry plan should define mode, package, network, privilege, and gap details: %#v", payload.ConnectionEntryPlan)
+	}
+	if !slices.Contains(payload.ConnectionEntryPlan.RequiredAgentFlow, "materialize the invite with rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions") {
+		t.Fatalf("connection entry plan should require invite materialization before target handoff: %#v", payload.ConnectionEntryPlan.RequiredAgentFlow)
 	}
 	if payload.HostContextPlan.SchemaVersion != "rdev.host-context-plan.v1" || payload.HostContextPlan.StorageLocation != "remote-host-first" || payload.HostContextPlan.ServerContextBudget != "index-and-on-demand-slices" {
 		t.Fatalf("invite should include host context plan: %#v", payload.HostContextPlan)
@@ -294,7 +317,9 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	if !slices.Contains(payload.ManagedDevPlan.HostModes, "managed") || len(payload.ManagedDevPlan.ServiceSurfaces) == 0 || len(payload.ManagedDevPlan.ReliabilityControls) == 0 || len(payload.ManagedDevPlan.WorkspaceControls) == 0 {
 		t.Fatalf("managed development plan should define modes, service surfaces, reliability, and workspace controls: %#v", payload.ManagedDevPlan)
 	}
-	if strings.Contains(stdout.String(), "/Users/eitan") || strings.Contains(stdout.String(), "Documents/Codex") {
+	privateHomePath := strings.Join([]string{"", "Users", "sample-user"}, "/")
+	privateWorkspaceMarker := strings.Join([]string{"Documents", "SampleWorkspace"}, "/")
+	if strings.Contains(stdout.String(), privateHomePath) || strings.Contains(stdout.String(), privateWorkspaceMarker) {
 		t.Fatalf("invite leaked local private path: %s", stdout.String())
 	}
 }
@@ -432,9 +457,12 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 			AgentOnlyParameters []string `json:"agent_only_parameters"`
 		} `json:"entry_package_plan"`
 		Plan struct {
-			ModeDecision  string   `json:"mode_decision"`
-			HumanSurface  []string `json:"human_surface"`
-			AgentMetadata []string `json:"agent_metadata"`
+			ConnectionEntryName    string   `json:"connection_entry_name"`
+			EntryPackagePlanSchema string   `json:"entry_package_plan_schema"`
+			ModeDecision           string   `json:"mode_decision"`
+			HumanSurface           []string `json:"human_surface"`
+			AgentMetadata          []string `json:"agent_metadata"`
+			HandoffContract        []string `json:"handoff_contract"`
 		} `json:"plan"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
@@ -454,14 +482,86 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 		!slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "manifest_root_public_key") {
 		t.Fatalf("expected raw connection parameters to be agent-only, got %#v", payload.EntryPackagePlan.AgentOnlyParameters)
 	}
-	if !strings.Contains(payload.Plan.ModeDecision, "attended-temporary") ||
+	if payload.Plan.ConnectionEntryName != "Connection Entry" ||
+		payload.Plan.EntryPackagePlanSchema != "rdev.connection-entry.package-plan.v1" ||
+		!strings.Contains(payload.Plan.ModeDecision, "attended-temporary") ||
 		!slices.Contains(payload.Plan.HumanSurface, "connection_entry.entry_url") ||
-		!slices.Contains(payload.Plan.AgentMetadata, "gateway URL") {
+		!slices.Contains(payload.Plan.AgentMetadata, "gateway URL") ||
+		!slices.Contains(payload.Plan.HandoffContract, "Agents must use rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions.") {
 		t.Fatalf("expected universal mode decision and split human/agent surfaces, got %#v", payload.Plan)
 	}
 	if strings.Contains(stdout.String(), "customer_bootstrap") ||
 		strings.Contains(stdout.String(), "connector_package_plan") {
 		t.Fatalf("connection entry output should not use legacy customer/connector names: %s", stdout.String())
+	}
+}
+
+func TestConnectionEntryPlanMaterializesManagedLinuxPackagePlan(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var inviteOut bytes.Buffer
+	inviteApp := NewApp(&inviteOut, &bytes.Buffer{})
+	if err := inviteApp.Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--mode", string(model.HostModeManaged),
+		"--reason", "owned workstation",
+		"--transport", "auto",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "managed-entry")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"connection-entry", "plan",
+		"--invite-json", inviteOut.String(),
+		"--out", outDir,
+		"--target-os", "linux",
+		"--ownership", "owned",
+		"--managed-binary", "/opt/rdev/rdev",
+		"--release-bundle", "/opt/rdev/release-bundle.json",
+		"--release-root-public-key", "release-root:" + strings.Repeat("b", 43),
+		"--release-bundle-required-artifacts", "rdev,rdev-host,rdev-verify",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		OK               bool `json:"ok"`
+		EntryPackagePlan struct {
+			SchemaVersion       string   `json:"schema_version"`
+			TargetOS            string   `json:"target_os"`
+			SessionMode         string   `json:"session_mode"`
+			PackageMode         string   `json:"package_mode"`
+			PlatformPlanKind    string   `json:"platform_plan_kind"`
+			LauncherPath        string   `json:"launcher_path"`
+			AgentOnlyParameters []string `json:"agent_only_parameters"`
+		} `json:"entry_package_plan"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid managed connection entry output: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK {
+		t.Fatalf("expected managed connection entry plan ok, got %s", stdout.String())
+	}
+	if payload.EntryPackagePlan.SchemaVersion != "rdev.connection-entry.package-plan.v1" ||
+		payload.EntryPackagePlan.TargetOS != "linux" ||
+		payload.EntryPackagePlan.SessionMode != string(model.HostModeManaged) ||
+		payload.EntryPackagePlan.PackageMode != "reviewed-managed-service-connection-entry" ||
+		payload.EntryPackagePlan.PlatformPlanKind != "linux-managed-service-plan" ||
+		!fileExistsForCLITest(payload.EntryPackagePlan.LauncherPath) {
+		t.Fatalf("expected generic entry package plan wrapping Linux managed service plan, got %#v", payload.EntryPackagePlan)
+	}
+	if !slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "managed_binary_path") ||
+		!slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "release_bundle_path") {
+		t.Fatalf("expected managed raw parameters to be agent-only, got %#v", payload.EntryPackagePlan.AgentOnlyParameters)
+	}
+	if !fileExistsForCLITest(filepath.Join(outDir, "managed-linux", "linux-managed-service-plan.json")) {
+		t.Fatalf("expected Linux managed service plan in entry package")
 	}
 }
 
@@ -1353,7 +1453,7 @@ func TestHostServeRejectsNonLocalHTTPSGateway(t *testing.T) {
 
 func TestSignedManifestGatewayURLAllowsPrivateLANHTTPAndHTTPS(t *testing.T) {
 	allowed := []string{
-		"http://192.168.2.10:8787",
+		"http://192.168.99.10:8787",
 		"http://10.0.0.8:8787",
 		"http://172.16.4.5:8787",
 		"http://rdev-gateway.local:8787",
@@ -1367,8 +1467,8 @@ func TestSignedManifestGatewayURLAllowsPrivateLANHTTPAndHTTPS(t *testing.T) {
 
 	rejected := []string{
 		"http://198.51.100.10:8787",
-		"http://192.168.2.10",
-		"ws://192.168.2.10:8787",
+		"http://192.168.99.10",
+		"ws://192.168.99.10:8787",
 		"https://api.example.com/v1",
 	}
 	for _, value := range rejected {

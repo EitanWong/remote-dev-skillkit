@@ -30,17 +30,20 @@ before acting. Ask one short question when a required value is unclear. For this
 personal computer, prefer local MCP stdio with `rdev mcp serve`; do not require a
 hosted gateway URL.
 
-When I ask you to work on another machine, create a Connection Entry. Do not ask
-humans to assemble ticket, root, gateway, or transport flags. Use
-`rdev.invites.create`, then `rdev.connection_entry.plan` or
-`rdev connection-entry plan`, and give the target side only a link, visible
-script, or signed package. Choose `managed` for my own long-running machines and
-`attended-temporary` for third-party or one-off repair machines. Auto-select
-LAN, hosted, SSH, relay, mesh, or VPN paths as needed; prefer existing,
-open-source/free options such as frp, Chisel, headscale, or WireGuard; ask before
-privileged, persistent, paid, firewall, DNS, cloud, or security-policy changes.
-Dry-run before execute. Do not hardcode private paths, secrets, or server
-addresses; example URLs are placeholders only.
+When I ask you to work on another machine, always create a Connection Entry.
+Treat it as the universal target-side handoff for every scenario: my own durable
+computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
+or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
+gateway, transport, release, or checksum flags. Use `rdev.invites.create`, then
+materialize it with `rdev.connection_entry.plan` or `rdev connection-entry plan`.
+Give the target side only the selected link, visible script, or signed package;
+keep low-level parameters in Agent/tool metadata. Choose `managed` for my own
+long-running machines and `attended-temporary` for third-party or one-off repair
+machines. Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed;
+prefer existing, open-source/free options such as frp, Chisel, headscale, or
+WireGuard; ask before privileged, persistent, paid, firewall, DNS, cloud, or
+security-policy changes. Dry-run before execute. Do not hardcode private paths,
+secrets, or server addresses; example URLs are placeholders only.
 ```
 
 النص الكامل للنسخ: [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md).

@@ -122,8 +122,15 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 		t.Fatalf("expected connection plan, got %#v", structured)
 	}
 	connectionEntryPlan, ok := structured["connection_entry_plan"].(map[string]any)
-	if !ok || connectionEntryPlan["schema_version"] != "rdev.connection-entry-plan.v1" || connectionEntryPlan["mode"] != "universal-agent-selected-entry" {
+	if !ok ||
+		connectionEntryPlan["schema_version"] != "rdev.connection-entry-plan.v1" ||
+		connectionEntryPlan["mode"] != "universal-agent-selected-entry" ||
+		connectionEntryPlan["package_plan_schema"] != "rdev.connection-entry.package-plan.v1" {
 		t.Fatalf("expected connection entry plan, got %#v", structured)
+	}
+	flow, ok := connectionEntryPlan["required_agent_flow"].([]any)
+	if !ok || !containsAnyString(flow, "materialize the invite with rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions") {
+		t.Fatalf("expected required materialization flow, got %#v", connectionEntryPlan)
 	}
 	implemented, ok := connectionPlan["implemented"].([]any)
 	if !ok || len(implemented) < 4 {
@@ -142,8 +149,12 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 		t.Fatalf("expected max-control authority profile, got %#v", structured)
 	}
 	connectionEntry, ok := structured["connection_entry"].(map[string]any)
-	if !ok || connectionEntry["schema_version"] != "rdev.connection-entry.v1" {
+	if !ok || connectionEntry["schema_version"] != "rdev.connection-entry.v1" || connectionEntry["handoff_name"] != "Connection Entry" {
 		t.Fatalf("expected connection entry, got %#v", structured)
+	}
+	handoffContract, ok := connectionEntry["handoff_contract"].([]any)
+	if !ok || !containsAnyString(handoffContract, "Target-side humans must not assemble ticket codes, gateway URLs, manifest roots, transports, release roots, or checksums by hand.") {
+		t.Fatalf("expected universal handoff contract, got %#v", connectionEntry)
 	}
 	hostContextPlan, ok := structured["host_context_plan"].(map[string]any)
 	if !ok || hostContextPlan["schema_version"] != "rdev.host-context-plan.v1" || hostContextPlan["storage_location"] != "remote-host-first" {
@@ -205,8 +216,15 @@ func TestServerToolCallConnectionEntryPlan(t *testing.T) {
 		structured["target_os"] != "windows" {
 		t.Fatalf("unexpected connection entry plan: %#v", structured)
 	}
+	if structured["connection_entry_name"] != "Connection Entry" ||
+		structured["entry_package_plan_schema"] != "rdev.connection-entry.package-plan.v1" {
+		t.Fatalf("expected universal connection entry contract fields, got %#v", structured)
+	}
 	if text, ok := structured["mode_decision"].(string); !ok || !strings.Contains(text, "attended-temporary") {
 		t.Fatalf("expected attended temporary mode decision, got %#v", structured)
+	}
+	if contract, ok := structured["handoff_contract"].([]any); !ok || !containsAnyString(contract, "Agents must use rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions.") {
+		t.Fatalf("expected handoff contract, got %#v", structured)
 	}
 	if surface, ok := structured["human_surface"].([]any); !ok || !containsAnyString(surface, "connection_entry.entry_url") {
 		t.Fatalf("expected human connection entry surface, got %#v", structured)
@@ -282,6 +300,60 @@ func TestServerToolCallConnectionEntryPlanWritesPackagePlan(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "connection-entry-plan.json")); err != nil {
 		t.Fatalf("expected materialized plan JSON: %v", err)
+	}
+}
+
+func TestServerToolCallConnectionEntryPlanWritesManagedPackagePlan(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	inviteIn := mcpRequestLine(t, "rdev.invites.create", map[string]any{
+		"gateway_url": "https://api.example.com/v1",
+		"mode":        "managed",
+		"reason":      "owned workstation",
+		"transport":   "auto",
+	})
+	var inviteOut bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(inviteIn), &inviteOut); err != nil {
+		t.Fatal(err)
+	}
+	inviteLines := responseLines(t, inviteOut.String())
+	inviteResult := inviteLines[0]["result"].(map[string]any)
+	inviteStructured := inviteResult["structuredContent"].(map[string]any)
+	inviteJSON, err := json.Marshal(inviteStructured)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "managed-entry")
+	input := mcpRequestLine(t, "rdev.connection_entry.plan", map[string]any{
+		"invite_json":                       string(inviteJSON),
+		"out_dir":                           outDir,
+		"target_os":                         "linux",
+		"ownership":                         "owned",
+		"managed_binary_path":               "/opt/rdev/rdev",
+		"release_bundle_path":               "/opt/rdev/release-bundle.json",
+		"release_root_public_key":           "release-root:" + strings.Repeat("b", 43),
+		"release_bundle_required_artifacts": "rdev,rdev-host,rdev-verify",
+	})
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	packagePlan, ok := structured["entry_package_plan"].(map[string]any)
+	if !ok ||
+		packagePlan["schema_version"] != "rdev.connection-entry.package-plan.v1" ||
+		packagePlan["package_mode"] != "reviewed-managed-service-connection-entry" ||
+		packagePlan["platform_plan_kind"] != "linux-managed-service-plan" {
+		t.Fatalf("expected generic managed entry package plan, got %#v", structured)
+	}
+	launcher, ok := packagePlan["launcher_path"].(string)
+	if !ok || !fileExistsForMCPTest(launcher) {
+		t.Fatalf("expected generated Linux service unit, got %#v", packagePlan)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "managed-linux", "linux-managed-service-plan.json")); err != nil {
+		t.Fatalf("expected generated Linux managed service plan: %v", err)
 	}
 }
 

@@ -82,7 +82,7 @@
     },
     {
       "name": "rdev.connection_entry.plan",
-      "description": "Materialize an invite into a universal target-side connection entry and package plan, including human-facing entry surfaces, Agent-only metadata, owned-vs-third-party mode selection, missing release inputs, and platform package planning.",
+      "description": "Materialize an invite into the universal Connection Entry handoff and Connection Entry Package Plan. Humans receive only a link, visible script, or signed package; ticket, gateway, manifest root, transport, release, and checksum values stay in Agent/tool metadata.",
       "safety": "Planning only; writes no remote state and does not execute on the target host.",
       "inputSchema": {
         "additionalProperties": false,
@@ -98,6 +98,22 @@
           "force": {
             "type": "boolean"
           },
+          "managed_binary_path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "managed_service_label": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "managed_service_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "managed_unit_name": {
+            "minLength": 1,
+            "type": "string"
+          },
           "ownership": {
             "enum": [
               "owned",
@@ -110,6 +126,10 @@
             "type": "string"
           },
           "release_bundle_required_artifacts": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "release_bundle_path": {
             "minLength": 1,
             "type": "string"
           },

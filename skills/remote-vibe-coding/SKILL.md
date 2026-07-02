@@ -31,6 +31,10 @@ revocation.
 - Do not invent real configuration from examples, placeholders, memory, or
   guesses when gateway, workspace, framework, release, adapter, host, repo, or
   approval details are unclear.
+- Treat Connection Entry as the only target-side handoff for every new remote
+  host. Do not invent narrower surfaces such as customer links or connector
+  package plans, and do not give humans raw ticket/root/gateway/transport
+  assembly tasks.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -56,7 +60,8 @@ revocation.
    before using them for commands, paths, approvals, or release decisions.
 3. If no suitable host is active, create an invite with `rdev.invites.create` or
    `rdev invite create`; then materialize it with `rdev.connection_entry.plan`
-   or `rdev connection-entry plan`. Present only the selected
+   or `rdev connection-entry plan` before giving target-side instructions.
+   Present only the selected
    `connection_entry.entry_url`, visible script, or signed package to the
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, and transport values as Agent/package metadata.
@@ -85,7 +90,11 @@ revocation.
    `entry_package_plan` as the generic package surface for Windows, macOS,
    Linux, managed-service, LAN, hosted, relay, or mesh variants; if packaging is
    not ready, report `missing_inputs` to the operator and keep target-side
-   instructions limited to a Connection Entry.
+   instructions limited to a Connection Entry. For owned managed machines,
+   prefer the generated reviewed LaunchAgent, systemd user-service, or Windows
+   Service package plan over hand-written service-manager commands; do not start
+   or install the service until the operator explicitly approves the reviewed
+   service-control steps.
 3. Follow `agent_provisioning_plan`: probe skills, MCP tools, adapters,
    runtimes, package managers, lockfiles, framework paths, proxies,
    permissions, and trust roots before installing anything.

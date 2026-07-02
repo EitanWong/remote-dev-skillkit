@@ -4,6 +4,65 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.7-dev
+
+Current phase: Connection Entry is now the universal remote-host handoff
+contract. Agents must create an invite, materialize it into a Connection Entry
+Package Plan, and give the target side only a link, visible script, or signed
+package instead of exposing ticket/root/gateway/transport/release/checksum
+assembly.
+
+### Added
+
+- Added machine-readable Connection Entry handoff fields to invite output:
+  `connection_entry.handoff_name`, `connection_entry.handoff_contract`,
+  `connection_entry_plan.package_plan_schema`, and
+  `connection_entry_plan.required_agent_flow`.
+- Added materialization-plan contract fields:
+  `connection_entry_name`, `entry_package_plan_schema`, and
+  `handoff_contract`.
+- Added tests that require MCP and CLI invite/materialization output to preserve
+  the universal Connection Entry handoff contract.
+
+### Changed
+
+- Updated README, Agent Bootstrap Prompt, operations docs, i18n quick starts,
+  and core Skills to treat Connection Entry as the only target-side handoff name
+  for owned managed hosts, third-party temporary support, LAN, hosted, relay,
+  mesh, SSH, and VPN-assisted paths.
+- Updated MCP tool descriptions and i18n audits so public tooling keeps
+  low-level connection parameters in Agent/tool metadata and requires invite
+  materialization before target-side instructions.
+
+## 0.1.6-dev
+
+Current phase: owned managed Connection Entry package plans are implemented so
+agents can materialize long-running personal or fleet machines into reviewed
+macOS LaunchAgent, Linux systemd user-service, or Windows Service plans through
+the same universal Connection Entry Package Plan surface.
+
+### Added
+
+- Added owned managed-service materialization to `rdev.connection_entry.plan`
+  and `rdev connection-entry plan` for `target_os=darwin`, `linux`, and
+  `windows`.
+- Added managed-service inputs for Agent tooling:
+  `managed_binary_path`, `release_bundle_path`, `managed_service_name`,
+  `managed_service_label`, and `managed_unit_name`.
+- Added generic `entry_package_plan` wrappers for
+  `managed-mac-service-plan`, `linux-managed-service-plan`, and
+  `windows-managed-service-plan` so owned durable hosts use the same package
+  surface as temporary support hosts.
+
+### Changed
+
+- Managed Connection Entries now report missing local binary, release bundle,
+  or release root inputs through `missing_inputs` instead of asking humans to
+  assemble service-manager commands or raw connection flags.
+- Managed service materialization generates reviewed plans and service files
+  only; it does not start, install, persist, or uninstall services without the
+  explicit service-control steps already present in the acceptance plans.
+
 ## 0.1.5-dev
 
 Current phase: universal Connection Entry materialization is implemented so

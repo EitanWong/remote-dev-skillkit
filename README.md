@@ -82,17 +82,20 @@ before acting. Ask one short question when a required value is unclear. For this
 personal computer, prefer local MCP stdio with `rdev mcp serve`; do not require a
 hosted gateway URL.
 
-When I ask you to work on another machine, create a Connection Entry. Do not ask
-humans to assemble ticket, root, gateway, or transport flags. Use
-`rdev.invites.create`, then `rdev.connection_entry.plan` or
-`rdev connection-entry plan`, and give the target side only a link, visible
-script, or signed package. Choose `managed` for my own long-running machines and
-`attended-temporary` for third-party or one-off repair machines. Auto-select
-LAN, hosted, SSH, relay, mesh, or VPN paths as needed; prefer existing,
-open-source/free options such as frp, Chisel, headscale, or WireGuard; ask before
-privileged, persistent, paid, firewall, DNS, cloud, or security-policy changes.
-Dry-run before execute. Do not hardcode private paths, secrets, or server
-addresses; example URLs are placeholders only.
+When I ask you to work on another machine, always create a Connection Entry.
+Treat it as the universal target-side handoff for every scenario: my own durable
+computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
+or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
+gateway, transport, release, or checksum flags. Use `rdev.invites.create`, then
+materialize it with `rdev.connection_entry.plan` or `rdev connection-entry plan`.
+Give the target side only the selected link, visible script, or signed package;
+keep low-level parameters in Agent/tool metadata. Choose `managed` for my own
+long-running machines and `attended-temporary` for third-party or one-off repair
+machines. Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed;
+prefer existing, open-source/free options such as frp, Chisel, headscale, or
+WireGuard; ask before privileged, persistent, paid, firewall, DNS, cloud, or
+security-policy changes. Dry-run before execute. Do not hardcode private paths,
+secrets, or server addresses; example URLs are placeholders only.
 ```
 
 For the full copy-paste prompt, see
@@ -160,7 +163,11 @@ binary or restarting a managed service.
 ## Agent-First Remote Session
 
 When a machine needs help, the agent should create an invite instead of asking
-the human to assemble flags by hand:
+the human to assemble flags by hand. The public name for this handoff is
+**Connection Entry**. It intentionally replaces narrower names such as customer
+link or connector package plan, because the same contract covers your own
+long-running workstation, someone else's temporary repair machine, LAN,
+hosted, relay, mesh, SSH, and VPN-assisted paths.
 
 ```bash
 rdev invite create \
@@ -179,11 +186,12 @@ ticket, the manifest URL, the pinned manifest root, a machine-readable
 `host_command`, a transport fallback plan, `connection_entry`,
 `connection_entry_plan`, and the next MCP tools the agent should call. The Agent
 then materializes the invite with `rdev.connection_entry.plan` or
-`rdev connection-entry plan`. That produces a Connection Entry Package Plan:
-human-facing entry surfaces, Agent-only connection metadata, owned-vs-third-party
-mode selection, missing release inputs, and platform package planning. Humans
-should not hand-assemble ticket codes, root keys, gateway URLs, or transport
-flags. They open the generated `connection_entry.entry_url` or run the signed
+`rdev connection-entry plan`. That produces a **Connection Entry Package Plan**
+(`rdev.connection-entry.package-plan.v1`): human-facing entry surfaces,
+Agent-only connection metadata, owned-vs-third-party mode selection, missing
+release inputs, and platform package planning. Humans should not hand-assemble
+ticket codes, root keys, gateway URLs, transports, release roots, or checksums.
+They open the generated `connection_entry.entry_url` or run the signed
 connection entry package on the target computer, then approve the host when
 policy requires it. The agent does the waiting, probing, mode selection, package
 planning, job creation, status tracking, evidence review, and revocation.
@@ -201,9 +209,12 @@ renewal/revocation refresh, reconnect proof, and uninstall instructions. If the
 target belongs to someone else or is a one-off repair, the Agent should use a
 temporary attended connection with no persistence by default. In both cases the
 preferred package is self-contained: platform `rdev` binary, signed release
-bundle, manifest URL, manifest root, release root, visible launcher,
-stop/revoke text, and network fallback logic so the target machine does not
-need Go, Git, Node, Python, or manual flag assembly before it can connect. If a
+bundle, manifest URL, manifest root, release root, visible launcher, stop/revoke
+text, and network fallback logic so the target machine does not need Go, Git,
+Node, Python, or manual flag assembly before it can connect. For owned managed
+machines, the package can also include a reviewed macOS LaunchAgent, Linux
+systemd user-service, or Windows Service plan; the materializer writes those
+plans for review and does not silently install or start a service. If a
 repair requires administrator/root privileges, the entry should request them
 through normal OS authorization prompts and record the approval evidence; it
 must not hide elevation or permanently weaken security policy.

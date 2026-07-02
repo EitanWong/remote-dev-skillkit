@@ -124,6 +124,11 @@ When it is present, `rdev-host` verifies the join manifest with that pinned root
 
 ## Agent-Created Connection Entry
 
+Connection Entry is the universal name for the target-side handoff. Avoid
+narrower names such as customer link or connector package plan in public
+contracts: the same handoff covers owned managed workstations, third-party
+temporary repair, LAN, hosted, relay, mesh, SSH, and VPN-assisted paths.
+
 Agents should create target-side connection entries with `rdev.invites.create`
 or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
 `connection_entry`:
@@ -135,9 +140,10 @@ or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
   appears;
 - `revocation_instructions`: how to stop the session and revoke access.
 
-After invite creation, agents should call `rdev.connection_entry.plan` through
-MCP or `rdev connection-entry plan` through the CLI. That materializes the invite
-into `rdev.connection-entry.materialization-plan.v1`, including:
+After invite creation, agents must call `rdev.connection_entry.plan` through
+MCP or `rdev connection-entry plan` through the CLI before giving target-side
+instructions. That materializes the invite into
+`rdev.connection-entry.materialization-plan.v1`, including:
 
 - the selected ownership/session-mode decision;
 - human-facing entry surfaces such as link, visible script, or signed package;
@@ -155,10 +161,14 @@ use.
 
 For Windows attended temporary support, the current package implementation wraps
 the existing Windows temporary acceptance plan as
-`rdev.connection-entry.package-plan.v1`. Future macOS, Linux, managed-service,
-LAN, hosted, relay, and mesh package planners should attach to the same generic
-Connection Entry Package Plan surface rather than creating new human-facing
-parameter lists.
+`rdev.connection-entry.package-plan.v1`. For operator-owned managed machines,
+the same package surface now wraps reviewed macOS LaunchAgent, Linux systemd
+user-service, and Windows Service plans. The materializer writes those plans and
+service files for review; it does not start, install, persist, or uninstall a
+service unless the operator later runs the explicit service-control commands.
+Future LAN, hosted, relay, mesh, SSH, and VPN package planners must attach to
+the same generic Connection Entry Package Plan surface rather than creating new
+human-facing parameter lists.
 
 The same invite includes `connection_entry_plan`. Agents should use it as the
 universal connection decision contract rather than exposing ticket codes,

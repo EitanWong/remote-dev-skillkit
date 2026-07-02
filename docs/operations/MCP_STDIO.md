@@ -16,6 +16,11 @@ Agent-first session tools include:
 - `rdev.invites.create`
 - `rdev.connection_entry.plan`
 
+Connection Entry is the universal target-side handoff. MCP clients should not
+invent narrower public names such as customer link or connector package plan:
+the same contract covers owned managed hosts, third-party temporary support,
+LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
+
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 It creates a ticket and returns a manifest URL, `host_command`,
 `transport_plan`, `connection_plan`, `connection_entry`,
@@ -30,7 +35,7 @@ itself. The default transport is `auto`, which tries WSS first and falls back to
 HTTPS long-poll and then short polling when restrictive networks block
 WebSocket upgrades or long-held requests.
 
-For every new target host, prefer `connection_entry.entry_url` or a signed
+For every new target host, use `connection_entry.entry_url` or a signed
 connection entry package over manually copying host flags. The join page
 provides visible, inspectable platform bootstrap commands for the target
 machine. Agents should treat those commands as consented startup, then choose
@@ -41,7 +46,8 @@ expected host when policy requires approval, runs scoped jobs, exports evidence,
 and revokes or stops the session when finished.
 
 `rdev.connection_entry.plan` turns an invite into
-`rdev.connection-entry.materialization-plan.v1`. It returns the selected
+`rdev.connection-entry.materialization-plan.v1`. MCP clients should call it
+before showing target-side instructions. It returns the selected
 ownership/session-mode decision, human-facing surfaces, Agent-only metadata,
 network strategy, missing release inputs, and, when enough release material is
 available, an `rdev.connection-entry.package-plan.v1` wrapper around the
@@ -51,6 +57,13 @@ launcher/package planning files into that empty directory. Target-side humans
 receive only the selected Connection Entry surface. Ticket codes, manifest
 roots, gateway URLs, transport preferences, release roots, and checksums stay in
 Agent/tool metadata.
+
+For owned managed machines, `rdev.connection_entry.plan` can also generate
+reviewed macOS LaunchAgent, Linux systemd user-service, or Windows Service
+package plans when the agent supplies the target-local `managed_binary_path`,
+`release_bundle_path`, release root, and optional service label/name/unit. This
+is still planning only: service start/install/uninstall remains an explicit
+operator-reviewed follow-up step.
 
 The `host_context_plan` is the standard for AI-native context management. It
 sets `storage_location=remote-host-first` and

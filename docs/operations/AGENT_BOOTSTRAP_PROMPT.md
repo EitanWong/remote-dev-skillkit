@@ -91,16 +91,21 @@ Steps:
     unless I explicitly ask you to upgrade. Before replacing any binary or
     restarting a managed service, verify the selected archive checksum and
     signed `release-bundle.json` with the configured release root.
-13. If the user wants to control a remote host, build a Connection Entry.
-    Do not ask a human to assemble ticket codes, manifest roots, gateway URLs,
-    or transport flags. After the viable gateway/transport path is known, use
+13. If the user wants to control a remote host, always build a Connection
+    Entry. This is the universal target-side handoff for every scenario: owned
+    durable workstation, third-party temporary repair, LAN, hosted, relay, mesh,
+    SSH, or VPN-assisted connectivity. Do not ask a human to assemble ticket
+    codes, manifest roots, gateway URLs, transports, release roots, or checksum
+    flags. After the viable gateway/transport path is known, use
     `rdev.invites.create` or `rdev invite create` so the Agent receives
     `connection_entry`, `connection_entry_plan`, manifest root, and transport
     fallback instructions together. Then call `rdev.connection_entry.plan`
     through MCP or `rdev connection-entry plan` through the CLI to materialize
     the generic Connection Entry Package Plan. Present the target-side human
     with only the selected human surface: `connection_entry.entry_url`, a visible
-    script, or a signed package.
+    script, or a signed package. Keep low-level connection parameters in
+    Agent/tool metadata and report `missing_inputs` when package materialization
+    needs more release data.
     Select host mode from ownership and duration: use `managed` for my own
     personal/fleet machines that need durable development access; use
     `attended-temporary` for third-party or one-off repair machines.
@@ -207,11 +212,11 @@ The agent should choose the simplest working path, in this order:
 6. Hosted/public gateway: use when the operator already has one or explicitly
    approves creating one.
 
-Once a path is selected, the user-facing output should be a universal
-Connection Entry: a link, script, or signed package. Raw `host_command`, ticket,
+Once a path is selected, the user-facing output must be a universal Connection
+Entry: a link, visible script, or signed package. Raw `host_command`, ticket,
 root, gateway, transport, release, and checksum values are machine-readable
 implementation details for the Agent and the Connection Entry Package Plan; they
-should not be handed to the target-side human as a manual assembly task.
+must not be handed to the target-side human as a manual assembly task.
 
 Open-source/free candidates to consider before paid relay services:
 

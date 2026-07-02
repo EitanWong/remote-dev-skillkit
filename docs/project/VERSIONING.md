@@ -20,6 +20,13 @@ Before v1.0.0:
   connection-entry guidance.
 - `0.1.5-dev` marks universal Connection Entry materialization through MCP/CLI
   and generic package-plan output.
+- `0.1.6-dev` marks owned managed Connection Entry package materialization for
+  reviewed macOS LaunchAgent, Linux systemd user-service, and Windows Service
+  plans.
+- `0.1.7-dev` marks Connection Entry as the universal target-side handoff
+  contract with required invite materialization and generic package-plan
+  metadata for owned, third-party, LAN, hosted, relay, mesh, SSH, and
+  VPN-assisted scenarios.
 
 Compatibility promises:
 

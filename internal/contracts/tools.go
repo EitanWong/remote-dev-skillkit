@@ -29,7 +29,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.connection_entry.plan",
-			Description: "Materialize an invite into a universal target-side connection entry and package plan, including human-facing entry surfaces, Agent-only metadata, owned-vs-third-party mode selection, missing release inputs, and platform package planning.",
+			Description: "Materialize an invite into the universal Connection Entry handoff and Connection Entry Package Plan. Humans receive only a link, visible script, or signed package; ticket, gateway, manifest root, transport, release, and checksum values stay in Agent/tool metadata.",
 			Safety:      "Planning only; writes no remote state and does not execute on the target host.",
 			InputSchema: object(map[string]any{
 				"invite_json":                       stringField(),
@@ -37,9 +37,14 @@ func Tools() []Tool {
 				"ownership":                         enum("owned", "third-party"),
 				"session_mode":                      enum("attended-temporary", "managed", "break-glass"),
 				"release_bundle_url":                stringField(),
+				"release_bundle_path":               stringField(),
 				"release_bundle_required_artifacts": stringField(),
 				"release_root_public_key":           stringField(),
 				"out_dir":                           stringField(),
+				"managed_binary_path":               stringField(),
+				"managed_service_name":              stringField(),
+				"managed_service_label":             stringField(),
+				"managed_unit_name":                 stringField(),
 				"windows_host_download_url":         stringField(),
 				"windows_host_sha256":               stringField(),
 				"windows_verifier_download_url":     stringField(),
