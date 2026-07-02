@@ -42,6 +42,13 @@ revocation.
 - Run `rdev bootstrap agent-plan --repo-root .` when available and follow its
   JSON plan for local MCP, `rdev` recovery, Connection Entry defaults, and
   ask/auto-probe boundaries.
+- When a fresh Agent session is asked to connect a machine and local `rdev`,
+  gateway state, or target helper assets are unclear, call
+  `rdev.support_session.prepare` or run
+  `rdev support-session prepare --build-assets` from a checkout. Follow its
+  `standard_recovery`, `asset_report`, and `connection_readiness` fields
+  instead of writing custom PowerShell, approval polling, ticket substitution,
+  relay, or bootstrap glue.
 - For a new support session with an already reachable gateway, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
@@ -83,9 +90,14 @@ revocation.
    `rdev bootstrap agent-plan --repo-root .` or
    `go run ./cmd/rdev bootstrap agent-plan --repo-root .` to get a
    machine-readable install/connect plan.
-3. Load relevant Skill runtime memory, then verify or refresh any stale facts
+3. If the user wants to connect a target machine, call
+   `rdev.support_session.prepare` or run `rdev support-session prepare` to
+   verify one-command support-session readiness. If helper assets are missing
+   and a checkout plus Go are available, use `--build-assets`; do not write
+   custom PowerShell, ticket substitution, approval polling, or relay glue.
+4. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
-4. If no suitable host is active and a reachable gateway already exists, create
+5. If no suitable host is active and a reachable gateway already exists, create
    the session with `rdev.support_session.create` or
    `rdev support-session create`; give the target side only the returned
    `target_command` or `join_url`, then watch the returned status command. If
@@ -111,15 +123,15 @@ revocation.
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
-5. Watch the host with `rdev.support_session.status` or
+6. Watch the host with `rdev.support_session.status` or
    `rdev support-session status --wait`. When `connected=true`, proactively
    report the localized feedback to the user before creating jobs. If the
    standard attended-temporary auto-approval contract activated it, verify it is
    the expected machine before creating jobs; otherwise approve it only after
    the operator confirms it is expected.
-6. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
+7. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
    policy, release trust inputs, and language/locale.
-7. Ask only for missing authorization, gateway, host, workspace, release,
+8. Ask only for missing authorization, gateway, host, workspace, release,
    adapter, framework, repo, tunnel/mesh approval, or approval configuration
    that cannot be safely discovered. Do not ask for target OS, ticket, manifest
    root, gateway, transport, release root, checksum, or helper argv assembly

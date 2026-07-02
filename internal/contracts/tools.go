@@ -29,6 +29,19 @@ func Tools() []Tool {
 			}, []string{"gateway_url", "reason"}),
 		},
 		{
+			Name:        "rdev.support_session.prepare",
+			Description: "Inspect a fresh Agent runtime for one-command support-session readiness: local rdev recovery, Go/Git checkout state, gateway URL defaults, platform helper asset availability, target bootstrap self-repair, and standard recovery actions. Agents should call this before improvising setup when rdev or gateway state is unclear.",
+			Safety:      "Read-only by default; with build_assets=true it builds local helper binaries from the checked-out source but does not create tickets, start a gateway, approve hosts, or execute on a target machine.",
+			InputSchema: object(map[string]any{
+				"repo_root":    stringField(),
+				"work_dir":     stringField(),
+				"gateway_url":  stringField(),
+				"addr":         stringField(),
+				"target":       enum("auto", "windows", "macos", "linux"),
+				"build_assets": boolField(),
+			}, nil),
+		},
+		{
 			Name:        "rdev.support_session.create",
 			Description: "Create an attended temporary support session through an already reachable gateway and return a ready target command plus status watcher. Agents should prefer this high-level tool when the gateway is running; if no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
 			Safety:      "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",

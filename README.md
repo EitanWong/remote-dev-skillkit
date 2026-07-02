@@ -91,15 +91,21 @@ run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan.
 When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
-or VPN-assisted connectivity. If a reachable gateway is already running, first
-call `rdev.support_session.create` through MCP or
+or VPN-assisted connectivity. If `rdev`, the gateway, or helper assets are
+unclear, first call `rdev.support_session.prepare` or run
+`rdev support-session prepare --build-assets`; follow its standard recovery
+actions instead of writing custom bootstrap, approval, or relay glue. If a
+reachable gateway is
+already running, call `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
 payload. If no gateway is running yet, run `rdev support-session start` in a
-visible foreground terminal; it starts the local gateway and prints the same
-ready session payload before listening. Use `rdev.support_session.plan` or
-`rdev support-session plan` only for review/debug planning. After giving me the
-target-machine command, watch `rdev.support_session.status`
+visible foreground terminal; it auto-prepares verified Windows/macOS/Linux
+helper assets when a source checkout and Go are available, starts the local
+gateway, and prints the same ready session payload before listening. Use
+`rdev.support_session.plan` or `rdev support-session plan` only for review/debug
+planning. After giving me the target-machine command, watch
+`rdev.support_session.status`
 or `rdev support-session status --wait`; when `connected=true`, tell me the
 connection has been established before creating jobs.
 Do not ask humans to assemble ticket, root, gateway, transport, release, or
@@ -197,13 +203,18 @@ The Agent should start with `rdev.support_session.create` or
 high-level entry creates the scoped attended-temporary ticket and returns
 `rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
-placeholders. If no gateway is running yet, the Agent should run
-`rdev support-session start` in a visible foreground terminal; that command
-starts the local gateway and prints `rdev.support-session-started.v1` with the
-embedded ready session. The Agent should use `rdev.support_session.plan` or
-`rdev support-session plan` only for review/debug planning. The Agent should
-not write its own PowerShell, relay, nohup, ticket, root, gateway, transport,
-status polling, or approval glue.
+placeholders. When `rdev`, gateway state, or target helper assets are unclear,
+the Agent should call `rdev.support_session.prepare` or run
+`rdev support-session prepare --build-assets` from a checkout. That returns
+`rdev.support-session-prepare.v1` with local recovery, helper asset hashes,
+one-command target readiness, and standard recovery actions. If no gateway is
+running yet, the Agent should run `rdev support-session start` in a visible
+foreground terminal; that command auto-prepares verified helper assets when
+possible, starts the local gateway, and prints
+`rdev.support-session-started.v1` with the embedded ready session. The Agent
+should use `rdev.support_session.plan` or `rdev support-session plan` only for
+review/debug planning. The Agent should not write its own PowerShell, relay,
+nohup, ticket, root, gateway, transport, status polling, or approval glue.
 
 For lower-level package materialization, the Agent creates an invite and
 materializes it before asking anyone on the target side to do anything. The
@@ -214,6 +225,11 @@ hand-assemble ticket codes, root keys, gateway URLs, transports, release roots,
 or checksums.
 
 ```bash
+rdev support-session prepare \
+  --gateway-url http://<reachable-gateway-host>:8787 \
+  --target auto \
+  --build-assets
+
 rdev support-session start \
   --addr 0.0.0.0:8787 \
   --gateway-url http://<reachable-gateway-host>:8787 \

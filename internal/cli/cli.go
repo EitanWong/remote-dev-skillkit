@@ -1713,6 +1713,26 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		return fmt.Errorf("missing support-session subcommand")
 	}
 	switch args[0] {
+	case "prepare":
+		fs := flag.NewFlagSet("support-session prepare", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		addr := fs.String("addr", "127.0.0.1:8787", "foreground gateway listen address")
+		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to http://<addr>")
+		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
+		buildAssets := fs.Bool("build-assets", false, "build missing platform rdev helper assets from the checkout")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.supportSessionPrepare(ctx, supportSessionPrepareOptions{
+			RepoRoot:    *repoRoot,
+			WorkDir:     *workDir,
+			Addr:        *addr,
+			GatewayURL:  *gatewayURL,
+			Target:      *target,
+			BuildAssets: *buildAssets,
+		})
 	case "start":
 		fs := flag.NewFlagSet("support-session start", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1830,6 +1850,15 @@ type supportSessionStartOptions struct {
 	RdevCommand string
 }
 
+type supportSessionPrepareOptions struct {
+	RepoRoot    string
+	WorkDir     string
+	Addr        string
+	GatewayURL  string
+	Target      string
+	BuildAssets bool
+}
+
 type supportSessionCreateOptions struct {
 	GatewayURL        string
 	Target            string
@@ -1839,6 +1868,14 @@ type supportSessionCreateOptions struct {
 	Locale            string
 	OperatorTokenFile string
 	RdevCommand       string
+}
+
+func (a App) supportSessionPrepare(ctx context.Context, opts supportSessionPrepareOptions) error {
+	prepared, err := prepareSupportSessionEnvironment(ctx, opts)
+	if err != nil {
+		return err
+	}
+	return writeJSON(a.Stdout, prepared)
 }
 
 func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOptions) error {
@@ -1855,7 +1892,28 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	workDir := strings.TrimSpace(opts.WorkDir)
 	if workDir == "" {
-		workDir = filepath.Join(".", "work", "rdev-support-session")
+		if wd, err := os.Getwd(); err == nil {
+			if repoRoot := findSupportSessionRepoRoot(wd); repoRoot != "" {
+				workDir = filepath.Join(repoRoot, "work", "rdev-support-session")
+			}
+		}
+		if workDir == "" {
+			workDir = filepath.Join(".", "work", "rdev-support-session")
+		}
+	}
+	if absWorkDir, err := filepath.Abs(workDir); err == nil {
+		workDir = absWorkDir
+	}
+	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
+		RepoRoot:    findSupportSessionRepoRoot("."),
+		WorkDir:     workDir,
+		Addr:        addr,
+		GatewayURL:  gatewayURL,
+		Target:      opts.Target,
+		BuildAssets: true,
+	})
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
 		return err
@@ -1930,10 +1988,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		AutoApprove:           opts.AutoApprove,
 	})
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
-		Addr:       addr,
-		GatewayURL: gatewayURL,
-		WorkDir:    workDir,
-		Created:    created,
+		Addr:                 addr,
+		GatewayURL:           gatewayURL,
+		WorkDir:              workDir,
+		Created:              created,
+		AssetReport:          prepared["asset_report"],
+		ConnectionReadiness:  prepared["connection_readiness"],
+		ConnectivityStrategy: prepared["connectivity_strategy"],
 	})
 	if err := writeJSON(a.Stdout, started); err != nil {
 		return err
@@ -1978,6 +2039,30 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 		AutoApprove:           opts.AutoApprove,
 	})
 	return writeJSON(a.Stdout, created)
+}
+
+func prepareSupportSessionEnvironment(ctx context.Context, opts supportSessionPrepareOptions) (map[string]any, error) {
+	return supportsession.Prepare(ctx, supportsession.PrepareOptions{
+		RepoRoot:    opts.RepoRoot,
+		WorkDir:     opts.WorkDir,
+		Addr:        opts.Addr,
+		GatewayURL:  opts.GatewayURL,
+		Target:      opts.Target,
+		BuildAssets: opts.BuildAssets,
+	})
+}
+
+func findSupportSessionRepoRoot(start string) string {
+	prepared, err := supportsession.Prepare(context.Background(), supportsession.PrepareOptions{
+		RepoRoot: start,
+	})
+	if err != nil {
+		return start
+	}
+	if repoRoot, _ := prepared["repo_root"].(string); repoRoot != "" {
+		return repoRoot
+	}
+	return start
 }
 
 func cliPolicyCapabilitiesToStrings(caps []policy.Capability) []string {

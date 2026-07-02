@@ -218,6 +218,82 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	}
 }
 
+func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := filepath.Dir(filepath.Dir(wd))
+	workDir := filepath.Join(t.TempDir(), "support")
+
+	if err := app.Run(context.Background(), []string{
+		"support-session", "prepare",
+		"--repo-root", repoRoot,
+		"--work-dir", workDir,
+		"--gateway-url", "http://127.0.0.1:8787",
+		"--target", "windows",
+		"--build-assets",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion       string `json:"schema_version"`
+		RepoRootValid       bool   `json:"repo_root_valid"`
+		ConnectionReadiness struct {
+			Ready                     bool `json:"ready"`
+			TargetBootstrapSelfRepair bool `json:"target_bootstrap_self_repair"`
+			HumanGetsOneCommand       bool `json:"human_gets_one_command"`
+		} `json:"connection_readiness"`
+		ConnectivityStrategy struct {
+			SchemaVersion      string   `json:"schema_version"`
+			SelectionOrder     []string `json:"selection_order"`
+			AutomaticDowngrade []string `json:"automatic_downgrade"`
+		} `json:"connectivity_strategy"`
+		AssetReport struct {
+			SchemaVersion string `json:"schema_version"`
+			AllReady      bool   `json:"all_ready"`
+			BuildAssets   bool   `json:"build_assets"`
+			Assets        []struct {
+				ID          string `json:"id"`
+				Present     bool   `json:"present"`
+				BuildStatus string `json:"build_status"`
+				SHA256      string `json:"sha256"`
+			} `json:"assets"`
+		} `json:"asset_report"`
+		StandardRecovery []string `json:"standard_recovery"`
+		Forbidden        []string `json:"forbidden"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid prepare JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-prepare.v1" ||
+		!payload.RepoRootValid ||
+		!payload.ConnectionReadiness.Ready ||
+		!payload.ConnectionReadiness.TargetBootstrapSelfRepair ||
+		!payload.ConnectionReadiness.HumanGetsOneCommand ||
+		payload.ConnectivityStrategy.SchemaVersion != "rdev.support-session-connectivity-strategy.v1" ||
+		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "native-lan-gateway") ||
+		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "existing-frp-or-chisel-relay") ||
+		!payload.AssetReport.AllReady ||
+		!payload.AssetReport.BuildAssets ||
+		len(payload.AssetReport.Assets) != 5 {
+		t.Fatalf("unexpected prepare payload: %#v", payload)
+	}
+	for _, asset := range payload.AssetReport.Assets {
+		if !asset.Present || asset.SHA256 == "" || (asset.BuildStatus != "built" && asset.BuildStatus != "not-requested") {
+			t.Fatalf("expected present hashed asset, got %#v", asset)
+		}
+	}
+	if !slices.Contains(payload.Forbidden, "ad hoc bootstrap code") ||
+		!slices.Contains(payload.StandardRecovery, "do not write custom PowerShell, relay, approval polling, ticket substitution, or bootstrap glue") {
+		t.Fatalf("expected standard guardrails, got recovery=%#v forbidden=%#v", payload.StandardRecovery, payload.Forbidden)
+	}
+}
+
 func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()
@@ -314,6 +390,18 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			GatewayURL string `json:"gateway_url"`
 			Lifecycle  string `json:"lifecycle"`
 		} `json:"gateway"`
+		AssetReport struct {
+			SchemaVersion string `json:"schema_version"`
+			AllReady      bool   `json:"all_ready"`
+		} `json:"asset_report"`
+		ConnectionReadiness struct {
+			Ready                     bool `json:"ready"`
+			TargetBootstrapSelfRepair bool `json:"target_bootstrap_self_repair"`
+		} `json:"connection_readiness"`
+		ConnectivityStrategy struct {
+			SchemaVersion  string   `json:"schema_version"`
+			SelectionOrder []string `json:"selection_order"`
+		} `json:"connectivity_strategy"`
 		Session struct {
 			SchemaVersion         string   `json:"schema_version"`
 			TicketCode            string   `json:"ticket_code"`
@@ -330,6 +418,14 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		payload.Gateway.GatewayURL != gatewayURL ||
 		payload.Gateway.Lifecycle != "foreground-visible-process" {
 		t.Fatalf("unexpected started payload: %#v", payload)
+	}
+	if payload.AssetReport.SchemaVersion != "rdev.support-session-assets.v1" ||
+		!payload.AssetReport.AllReady ||
+		!payload.ConnectionReadiness.Ready ||
+		!payload.ConnectionReadiness.TargetBootstrapSelfRepair ||
+		payload.ConnectivityStrategy.SchemaVersion != "rdev.support-session-connectivity-strategy.v1" ||
+		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "existing-wireguard-vpn") {
+		t.Fatalf("expected support-session start to prepare helper assets, got %#v", payload)
 	}
 	if payload.Session.SchemaVersion != "rdev.support-session-created.v1" ||
 		payload.Session.TicketCode == "" ||

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -242,6 +243,42 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 	forbidden := structured["forbidden"].([]any)
 	if !containsAnyString(forbidden, "manual ticket/root/gateway/transport assembly for target user") {
 		t.Fatalf("expected manual assembly prohibition, got %#v", forbidden)
+	}
+}
+
+func TestServerToolCallSupportSessionPrepare(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.prepare", map[string]any{
+		"repo_root":   ".",
+		"work_dir":    filepath.Join(t.TempDir(), "support"),
+		"gateway_url": "http://192.0.2.44:8787",
+		"target":      "windows",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-prepare.v1" {
+		t.Fatalf("expected support-session prepare schema, got %#v", structured)
+	}
+	readiness := structured["connection_readiness"].(map[string]any)
+	if readiness["human_gets_one_command"] != true {
+		t.Fatalf("expected one-command readiness contract, got %#v", readiness)
+	}
+	connectivity := structured["connectivity_strategy"].(map[string]any)
+	order := anyStrings(connectivity["selection_order"].([]any))
+	if connectivity["schema_version"] != "rdev.support-session-connectivity-strategy.v1" ||
+		!slices.Contains(order, "native-lan-gateway") ||
+		!slices.Contains(order, "existing-frp-or-chisel-relay") {
+		t.Fatalf("expected adaptive connectivity strategy, got %#v", connectivity)
+	}
+	recovery := anyStrings(structured["standard_recovery"].([]any))
+	if !slices.Contains(recovery, "do not write custom PowerShell, relay, approval polling, ticket substitution, or bootstrap glue") {
+		t.Fatalf("expected no-improvisation recovery contract, got %#v", recovery)
 	}
 }
 

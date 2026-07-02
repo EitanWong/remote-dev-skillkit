@@ -36,18 +36,23 @@ When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
-gateway, transport, release, or checksum flags. If a reachable gateway is
-already running, first call `rdev.support_session.create` through MCP or
-`rdev support-session create` through CLI to get the ready target command, join
-URL, real ticket code, manifest root, scoped auto-approval state, and status
-watch command in one payload. If no gateway is running yet, run
-`rdev support-session start` in a visible foreground terminal; it starts the
-local gateway and prints the same ready session payload before listening. Use
-`rdev.support_session.plan` or `rdev support-session plan` only for review/debug
-planning. After giving the target-machine command, watch
-`rdev.support_session.status` or
-`rdev support-session status --wait`; when `connected=true`, proactively tell me
-the connection has been established before creating jobs. Use
+gateway, transport, release, or checksum flags. If local `rdev`, gateway state,
+or target helper assets are unclear, first call `rdev.support_session.prepare`
+through MCP or run `rdev support-session prepare --build-assets` from the
+checkout. Follow its `connection_readiness`, `asset_report`, `missing_inputs`,
+and `standard_recovery` fields instead of writing custom bootstrap, approval, or
+relay glue. If a reachable gateway is already running, call
+`rdev.support_session.create` through MCP or `rdev support-session create`
+through CLI to get the ready target command, join URL, real ticket code,
+manifest root, scoped auto-approval state, and status watch command in one
+payload. If no gateway is running yet, run `rdev support-session start` in a
+visible foreground terminal; it prepares verified helper assets when possible,
+starts the local gateway, and prints the same ready session payload before
+listening. Use `rdev.support_session.plan` or `rdev support-session plan` only
+for review/debug planning. After giving the target-machine command, watch
+`rdev.support_session.status` or `rdev support-session status --wait`; when
+`connected=true`, proactively tell me the connection has been established before
+creating jobs. Use
 `rdev.invites.create`, then materialize it with `rdev.connection_entry.plan` or
 `rdev connection-entry plan` only when lower-level invite materialization is
 needed.

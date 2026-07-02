@@ -2,6 +2,7 @@ package supportsession
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,6 +95,14 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		GatewayURL: "http://127.0.0.1:8787",
 		WorkDir:    "work/rdev-support-session",
 		Created:    created,
+		AssetReport: map[string]any{
+			"schema_version": "rdev.support-session-assets.v1",
+			"all_ready":      true,
+		},
+		ConnectionReadiness: map[string]any{
+			"ready":                        true,
+			"target_bootstrap_self_repair": true,
+		},
 	})
 
 	if started["schema_version"] != StartedSchemaVersion || started["ok"] != true {
@@ -109,10 +118,70 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		!strings.Contains(gateway["stop"].(string), "interrupt") {
 		t.Fatalf("expected visible foreground gateway lifecycle, got %#v", gateway)
 	}
+	if started["asset_report"].(map[string]any)["all_ready"] != true ||
+		started["connection_readiness"].(map[string]any)["ready"] != true {
+		t.Fatalf("expected asset/readiness reports in started payload, got %#v", started)
+	}
 	forbidden := strings.Join(started["forbidden"].([]string), "\n")
 	if !strings.Contains(forbidden, "background hidden gateway") ||
 		!strings.Contains(forbidden, "ExecutionPolicy Bypass") {
 		t.Fatalf("expected start guardrails, got %s", forbidden)
+	}
+}
+
+func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repoRoot, "cmd", "rdev"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module example.com/rdevtest\n\ngo 1.22\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "cmd", "rdev", "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(t.TempDir(), "support")
+	prepare, err := Prepare(context.Background(), PrepareOptions{
+		RepoRoot:    repoRoot,
+		WorkDir:     workDir,
+		GatewayURL:  "http://127.0.0.1:8787",
+		Target:      "windows",
+		BuildAssets: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepare["schema_version"] != PrepareSchemaVersion || prepare["repo_root_valid"] != true {
+		t.Fatalf("unexpected prepare identity: %#v", prepare)
+	}
+	readiness := prepare["connection_readiness"].(map[string]any)
+	if readiness["target_bootstrap_self_repair"] != true || readiness["human_gets_one_command"] != true {
+		t.Fatalf("expected one-command target bootstrap readiness, got %#v", readiness)
+	}
+	connectivity := prepare["connectivity_strategy"].(map[string]any)
+	order := connectivity["selection_order"].([]string)
+	if connectivity["schema_version"] != "rdev.support-session-connectivity-strategy.v1" ||
+		!strings.Contains(strings.Join(order, "\n"), "native-lan-gateway") ||
+		!strings.Contains(strings.Join(order, "\n"), "existing-frp-or-chisel-relay") {
+		t.Fatalf("expected adaptive connectivity strategy, got %#v", connectivity)
+	}
+	downgrade := strings.Join(connectivity["automatic_downgrade"].([]string), "\n")
+	if !strings.Contains(downgrade, "falls back to HTTPS long-poll") ||
+		!strings.Contains(downgrade, "short polling") {
+		t.Fatalf("expected native transport downgrade rules, got %s", downgrade)
+	}
+	assets := prepare["asset_report"].(map[string]any)
+	if assets["all_ready"] != true || assets["build_assets"] != true {
+		t.Fatalf("expected built helper assets, got %#v", assets)
+	}
+	for _, asset := range assets["assets"].([]map[string]any) {
+		if asset["present"] != true || asset["sha256"] == "" {
+			t.Fatalf("expected present hashed helper asset, got %#v", asset)
+		}
+	}
+	recovery := strings.Join(prepare["standard_recovery"].([]string), "\n")
+	if !strings.Contains(recovery, "do not write custom PowerShell") {
+		t.Fatalf("expected standard recovery guardrail, got %s", recovery)
 	}
 }
 

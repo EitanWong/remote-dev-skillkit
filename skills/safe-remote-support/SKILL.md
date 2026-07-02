@@ -22,17 +22,23 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Run `rdev bootstrap agent-plan --repo-root .` when available and use it as
   the machine-readable contract for local MCP, `rdev` recovery, remote defaults,
   and ask/auto-probe boundaries.
+- If local `rdev`, gateway state, or target helper assets are unclear, call
+  `rdev.support_session.prepare` or run
+  `rdev support-session prepare --build-assets` from a checkout. Treat
+  `rdev.support-session-prepare.v1` as the standard recovery contract for fresh
+  Agents: it reports local recovery, verified helper assets, one-command target
+  readiness, missing inputs, and forbidden improvisations.
 - For every new visible support session with an already reachable gateway, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
   CLI. Treat the returned `rdev.support-session-created.v1` as the standard
   one-command session package: it already includes the target command, join URL,
   real ticket code, manifest root, status watcher, and scoped
   attended-temporary auto-approval state. If no gateway is running yet, call
-  `rdev support-session start` in a visible foreground terminal; it starts the
-  gateway and prints the same ready session payload before listening. Use
-  `rdev.support_session.plan` or `rdev support-session plan` only for
-  review/debug planning before writing any gateway, PowerShell, relay, nohup,
-  approval, or bootstrap steps.
+  `rdev support-session start` in a visible foreground terminal; it prepares
+  verified helper assets when possible, starts the gateway, and prints the same
+  ready session payload before listening. Use `rdev.support_session.plan` or
+  `rdev support-session plan` only for review/debug planning before writing any
+  gateway, PowerShell, relay, nohup, approval, or bootstrap steps.
 - After giving the target-side command, watch the session with
   `rdev.support_session.status` or `rdev support-session status --wait`. When
   `connected=true`, proactively tell the user the connection is established

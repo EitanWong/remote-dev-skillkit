@@ -126,6 +126,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
+	case "rdev.support_session.prepare":
+		data, err = s.supportSessionPrepare(params.Arguments)
 	case "rdev.support_session.create":
 		data, err = s.supportSessionCreate(params.Arguments)
 	case "rdev.support_session.plan":
@@ -185,6 +187,17 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		return nil, err
 	}
 	return toolResult(data)
+}
+
+func (s Server) supportSessionPrepare(args map[string]any) (any, error) {
+	return supportsession.Prepare(context.Background(), supportsession.PrepareOptions{
+		RepoRoot:    stringArg(args, "repo_root", "."),
+		WorkDir:     stringArg(args, "work_dir", ""),
+		GatewayURL:  stringArg(args, "gateway_url", ""),
+		Addr:        stringArg(args, "addr", "127.0.0.1:8787"),
+		Target:      stringArg(args, "target", "auto"),
+		BuildAssets: boolArg(args, "build_assets", false),
+	})
 }
 
 func (s Server) updateCheck(args map[string]any) (any, error) {

@@ -12,11 +12,27 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev support-session prepare` and MCP tool
+  `rdev.support_session.prepare` with schema
+  `rdev.support-session-prepare.v1`. Fresh Agents can now inspect local `rdev`
+  recovery, repo/workdir resolution, Go/Git availability, helper asset
+  readiness, gateway defaults, missing inputs, and standard recovery actions
+  before writing any setup glue.
+- Added `rdev.support-session-connectivity-strategy.v1` to support-session
+  prepare/start payloads. The strategy gives Agents a stable adaptive
+  connection order: local MCP, direct gateway, LAN/private gateway,
+  proxy-aware HTTPS, WSS-to-long-poll-to-poll native fallback, existing SSH
+  tunnel, existing frp/Chisel relay, existing headscale/Tailscale mesh,
+  existing WireGuard VPN, and operator-provided hosted gateway. It also records
+  automatic downgrade/upgrade rules and approval boundaries for privileged,
+  persistent, paid, firewall, DNS, route, or cloud changes.
 - Added `rdev support-session start` with schema
   `rdev.support-session-started.v1`. When no gateway is running yet, Agents can
   start a visible foreground local gateway, create the attended-temporary ticket,
-  print the ready target command/join URL/status watcher, and keep the gateway
-  serving without writing ad hoc background process or invite glue.
+  auto-build verified Windows/macOS/Linux helper assets when a source checkout
+  and Go are available, print the ready target command/join URL/status watcher
+  plus asset/readiness reports, and keep the gateway serving without writing ad
+  hoc background process or invite glue.
 - Added `rdev support-session create` and MCP tool
   `rdev.support_session.create` with schema
   `rdev.support-session-created.v1`. When a gateway is already reachable,
@@ -52,10 +68,12 @@ metadata, status watching, or approval polling by hand.
 ### Changed
 
 - Updated README, MCP docs, Agent Bootstrap Prompt, i18n quick starts, and core
-  Skills so Agents prefer the standard support-session creator when a gateway is
-  available, use foreground `rdev support-session start` when no gateway is
-  running, reserve the planner for review/debug, and call the standard status
-  watcher before claiming the remote host is connected.
+  Skills so fresh Agents call support-session prepare when `rdev`, gateway
+  state, helper assets, or connectivity are unclear; prefer the standard
+  support-session creator when a gateway is available; use foreground
+  `rdev support-session start` when no gateway is running; reserve the planner
+  for review/debug; and call the standard status watcher before claiming the
+  remote host is connected.
 - Windows join commands no longer use `ExecutionPolicy Bypass`.
 - Development gateway plans now carry all configured helper asset paths for
   Windows amd64, macOS arm64/amd64, and Linux amd64/arm64.

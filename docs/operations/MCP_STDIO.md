@@ -13,6 +13,7 @@ The server currently uses an in-memory gateway. It is suitable for local integra
 
 Agent-first session tools include:
 
+- `rdev.support_session.prepare`
 - `rdev.support_session.plan`
 - `rdev.support_session.create`
 - `rdev.support_session.status`
@@ -32,13 +33,24 @@ ticket code, and status watcher command. The returned command strings have the
 real ticket code already filled in; Agents must not ask humans to assemble
 ticket/root/gateway/transport values or write replacement bootstrap code.
 
+`rdev.support_session.prepare` returns `rdev.support-session-prepare.v1` in
+`structuredContent`. Fresh Agent sessions should call it when local `rdev`,
+gateway state, helper assets, or one-command target readiness is unclear. It
+reports the detected OS/arch, Go/Git/`rdev` paths, resolved repo/work dirs,
+gateway URL defaults, Windows/macOS/Linux helper asset URLs and SHA-256 hashes,
+`connection_readiness`, `missing_inputs`, and standard recovery actions. By
+default it is read-only. With `build_assets=true`, it builds local helper
+binaries from the checked-out source so target bootstraps can download verified
+helpers when the target machine does not already have `rdev`.
+
 When no suitable gateway is running yet, Agents should run
 `rdev support-session start` as a visible foreground CLI process. It starts the
 local gateway, creates the attended-temporary ticket, prints
 `rdev.support-session-started.v1` with an embedded
-`rdev.support-session-created.v1`, then keeps serving until interrupted. This is
-a CLI foreground process rather than an MCP tool because MCP calls should not
-hide or orphan a long-running gateway.
+`rdev.support-session-created.v1`, includes `asset_report` and
+`connection_readiness`, then keeps serving until interrupted. This is a CLI
+foreground process rather than an MCP tool because MCP calls should not hide or
+orphan a long-running gateway.
 
 `rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
 `structuredContent`. Agents should call it before inventing any gateway,
