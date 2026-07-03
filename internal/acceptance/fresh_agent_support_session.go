@@ -214,11 +214,13 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	mcpFollowUp := mapSliceFromAny(input.CreatedSession["mcp_follow_up"])
 	configuredWatcher := mapFromAny(input.CreatedSession["watch_connection_status_configured_gateway"])
 	supervision := mapFromAny(input.CreatedSession["connection_supervision"])
+	preflight := mapFromAny(input.CreatedSession["gateway_candidate_preflight"])
 	readyFile := mapFromAny(input.StartedSession["ready_file"])
 	foregroundFeedback := mapFromAny(input.StartedSession["foreground_feedback"])
 	session := mapFromAny(input.StartedSession["session"])
 	startedHandoff := mapFromAny(input.StartedSession["user_handoff"])
 	startedSupervision := mapFromAny(input.StartedSession["connection_supervision"])
+	startedPreflight := mapFromAny(input.StartedSession["gateway_candidate_preflight"])
 	connectedNext := mapFromAny(input.ConnectedStatus["connected_next_steps"])
 	recoveryForbidden := strings.Join(stringSliceFromAny(input.WaitingRecovery["forbidden"]), "\n")
 	copyPaste := stringFromAny(handoff["copy_paste"])
@@ -237,8 +239,10 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "created_session_has_waiting_mcp_followup", Passed: len(mcpFollowUp) > 0 && stringFromAny(mcpFollowUp[0]["tool"]) == "rdev.support_session.status" && boolFromAny(mapFromAny(mcpFollowUp[0]["arguments"])["wait"]), Detail: fmt.Sprintf("%v", mcpFollowUp)},
 		{Name: "configured_gateway_watcher_omits_gateway_url", Passed: !strings.Contains(strings.Join(stringSliceFromAny(configuredWatcher["command"]), " "), "--gateway-url"), Detail: strings.Join(stringSliceFromAny(configuredWatcher["command"]), " ")},
 		{Name: "created_session_has_connection_supervision", Passed: stringFromAny(supervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(mapFromAny(supervision["mcp_watch_call"])["tool"]) == "rdev.support_session.status" && boolFromAny(mapFromAny(mapFromAny(supervision["mcp_watch_call"])["arguments"])["wait"]) && strings.Contains(stringFromAny(supervision["connected_report_rule"]), "connected_next_steps.user_report"), Detail: stringFromAny(supervision["upgrade_reason"])},
+		{Name: "created_session_has_gateway_candidate_preflight", Passed: stringFromAny(preflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(preflight["candidate_count"]) > 0 && strings.Contains(stringFromAny(preflight["agent_rule"]), "target command owns ordered URL fallback"), Detail: stringFromAny(preflight["preflight_mode"])},
 		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == true && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
 		{Name: "started_payload_has_top_level_supervision", Passed: stringFromAny(startedSupervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(startedSupervision["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(startedSupervision["continuity_assessment"])},
+		{Name: "started_payload_has_top_level_gateway_preflight", Passed: stringFromAny(startedPreflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(startedPreflight["candidate_count"]) > 0, Detail: stringFromAny(startedPreflight["preflight_mode"])},
 		{Name: "started_payload_has_foreground_feedback", Passed: stringFromAny(foregroundFeedback["schema_version"]) == "rdev.support-session-foreground-feedback.v1" && stringFromAny(foregroundFeedback["event_prefix"]) == "rdev support session event: " && strings.Contains(stringFromAny(foregroundFeedback["connected_rule"]), "connection has been established"), Detail: stringFromAny(foregroundFeedback["event_prefix"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
@@ -323,6 +327,19 @@ func stringFromAny(value any) string {
 func boolFromAny(value any) bool {
 	b, _ := value.(bool)
 	return b
+}
+
+func intFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
 }
 
 func mapFromAny(value any) map[string]any {

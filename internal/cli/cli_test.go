@@ -514,6 +514,12 @@ func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.
 			SelectionOrder     []string `json:"selection_order"`
 			AutomaticDowngrade []string `json:"automatic_downgrade"`
 		} `json:"connectivity_strategy"`
+		GatewayCandidatePreflight struct {
+			SchemaVersion  string `json:"schema_version"`
+			PreflightMode  string `json:"preflight_mode"`
+			CandidateCount int    `json:"candidate_count"`
+			AgentRule      string `json:"agent_rule"`
+		} `json:"gateway_candidate_preflight"`
 		AssetReport struct {
 			SchemaVersion string `json:"schema_version"`
 			AllReady      bool   `json:"all_ready"`
@@ -539,6 +545,10 @@ func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.
 		payload.ConnectivityStrategy.SchemaVersion != "rdev.support-session-connectivity-strategy.v1" ||
 		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "native-lan-gateway") ||
 		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "existing-frp-or-chisel-relay") ||
+		payload.GatewayCandidatePreflight.SchemaVersion != "rdev.support-session-gateway-candidate-preflight.v1" ||
+		payload.GatewayCandidatePreflight.PreflightMode != "local-classification-no-network-scan" ||
+		payload.GatewayCandidatePreflight.CandidateCount == 0 ||
+		!strings.Contains(payload.GatewayCandidatePreflight.AgentRule, "target command owns ordered URL fallback") ||
 		!payload.AssetReport.AllReady ||
 		!payload.AssetReport.BuildAssets ||
 		len(payload.AssetReport.Assets) != 5 {
@@ -818,6 +828,11 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			SchemaVersion  string   `json:"schema_version"`
 			SelectionOrder []string `json:"selection_order"`
 		} `json:"connectivity_strategy"`
+		GatewayCandidatePreflight struct {
+			SchemaVersion  string `json:"schema_version"`
+			CandidateCount int    `json:"candidate_count"`
+			AgentRule      string `json:"agent_rule"`
+		} `json:"gateway_candidate_preflight"`
 		ReadyFile struct {
 			SchemaVersion string `json:"schema_version"`
 			Path          string `json:"path"`
@@ -856,6 +871,11 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		payload.ConnectivityStrategy.SchemaVersion != "rdev.support-session-connectivity-strategy.v1" ||
 		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "existing-wireguard-vpn") {
 		t.Fatalf("expected support-session start to prepare helper assets, got %#v", payload)
+	}
+	if payload.GatewayCandidatePreflight.SchemaVersion != "rdev.support-session-gateway-candidate-preflight.v1" ||
+		payload.GatewayCandidatePreflight.CandidateCount == 0 ||
+		!strings.Contains(payload.GatewayCandidatePreflight.AgentRule, "candidate table") {
+		t.Fatalf("expected started payload gateway preflight, got %#v", payload.GatewayCandidatePreflight)
 	}
 	if payload.ReadyFile.SchemaVersion != "rdev.support-session-ready-file.v1" ||
 		payload.ReadyFile.Path != readyFile ||

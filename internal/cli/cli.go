@@ -2168,14 +2168,15 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		AutoApprove:           opts.AutoApprove,
 	})
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
-		Addr:                 addr,
-		GatewayURL:           gatewayURL,
-		WorkDir:              workDir,
-		ReadyFile:            readyFile,
-		Created:              created,
-		AssetReport:          prepared["asset_report"],
-		ConnectionReadiness:  prepared["connection_readiness"],
-		ConnectivityStrategy: prepared["connectivity_strategy"],
+		Addr:                      addr,
+		GatewayURL:                gatewayURL,
+		WorkDir:                   workDir,
+		ReadyFile:                 readyFile,
+		Created:                   created,
+		AssetReport:               prepared["asset_report"],
+		ConnectionReadiness:       prepared["connection_readiness"],
+		ConnectivityStrategy:      prepared["connectivity_strategy"],
+		GatewayCandidatePreflight: prepared["gateway_candidate_preflight"],
 	})
 	if err := writeJSONFile0600(readyFile, started); err != nil {
 		return err

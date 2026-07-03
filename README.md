@@ -112,7 +112,10 @@ testing. If this runtime has configured gateway fallbacks such as
 target command can fail over without Agent-written glue. `connect`, `handoff`,
 and `create` use the first configured `RDEV_*_GATEWAY_URL` when no explicit
 `gateway_url` is supplied, so fresh Agents do not need to ask me which gateway
-URL to use. If a reachable gateway is already running, `connect` returns
+URL to use. Read `gateway_candidate_preflight` before asking me network
+questions or writing probes: it classifies each candidate as LAN, same-machine,
+operator-provided, or configured hosted/relay/mesh/VPN/SSH fallback and gives
+the standard next action. If a reachable gateway is already running, `connect` returns
 `rdev.support-session-connect.v1` with `ready_to_send_to_human=true`; if no
 gateway is running, it returns `ready_to_send_to_human=false` plus the
 `cli_start_now_command`. If a lower-level path is explicitly needed, call
@@ -279,15 +282,16 @@ assets are unclear, the Agent
 should call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets` from a checkout. That returns
 `rdev.support-session-prepare.v1` with local recovery, helper asset hashes,
-one-command target readiness, `gateway_url_candidates`, and standard recovery
-actions. The Agent should use the recommended gateway candidate for target-side
-commands and keep raw address selection out of human chat. If no gateway is
+one-command target readiness, `gateway_url_candidates`,
+`gateway_candidate_preflight`, and standard recovery actions. The Agent should
+use that preflight table and the recommended gateway candidate for target-side
+commands, then keep raw address selection out of human chat. If no gateway is
 running yet, the Agent should run `rdev support-session connect --start` in a
 visible foreground terminal; that command auto-prepares verified helper assets when
 possible, starts the local gateway, and prints
 `rdev.support-session-started.v1` with top-level `user_handoff`,
 `target_command`, `join_url`, `connection_supervision`, and status watcher
-fields. It also includes `foreground_feedback`, a stderr event contract for the
+fields plus the same `gateway_candidate_preflight` decision table. It also includes `foreground_feedback`, a stderr event contract for the
 same foreground command; when the Agent sees `event=connected`, it should
 immediately report that the connection has been established. It keeps the full
 created session under `session` for compatibility, but fresh Agents should send

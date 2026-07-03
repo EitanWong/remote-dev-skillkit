@@ -59,8 +59,12 @@ revocation.
   `standard_recovery`, `asset_report`, and `connection_readiness` fields
   instead of writing custom PowerShell, approval polling, ticket substitution,
   relay, or bootstrap glue. Use the recommended `gateway_url_candidates` item
-  for target-side commands. Never send a remote target a wildcard listen
-  address such as `0.0.0.0`, and treat loopback as same-machine only.
+  and the returned `gateway_candidate_preflight` decision table for target-side
+  commands. Read `gateway_candidate_preflight` before asking humans network
+  questions or writing probes; it classifies LAN/direct, same-machine,
+  operator-provided, and configured hosted/relay/mesh/VPN/SSH candidates with
+  standard next actions. Never send a remote target a wildcard listen address
+  such as `0.0.0.0`, and treat loopback as same-machine only.
   Configured `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
   `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, and
   `RDEV_SSH_GATEWAY_URL` values are tool metadata: `rdev` appends them to
@@ -98,6 +102,10 @@ revocation.
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Read returned `gateway_candidate_preflight` before asking the human for
+  network details. If it shows only LAN or same-machine candidates, use the
+  standard recovery/upgrade paths to configure a hosted/relay/mesh/VPN/SSH
+  fallback before promising durable long-running work.
 - Read returned `connection_continuity_policy`. If
   `stable_after_lan_change=false`, treat LAN as an opportunistic first path and
   prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming durable

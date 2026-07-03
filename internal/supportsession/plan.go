@@ -33,6 +33,7 @@ const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recover
 const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-steps.v1"
 const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1"
 const ConnectionSupervisionSchemaVersion = "rdev.support-session-connection-supervision.v1"
+const GatewayCandidatePreflightSchemaVersion = "rdev.support-session-gateway-candidate-preflight.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -272,6 +273,7 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"watch_connection_status": created["watch_connection_status"],
 		"watch_connection_status_configured_gateway": created["watch_connection_status_configured_gateway"],
 		"connection_supervision":                     created["connection_supervision"],
+		"gateway_candidate_preflight":                created["gateway_candidate_preflight"],
 		"mcp_follow_up":                              created["mcp_follow_up"],
 		"agent_next_step":                            "send user_handoff.message plus user_handoff.copy_paste to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
 		"human_surface_rule":                         "humans receive only user_handoff.message plus user_handoff.copy_paste",
@@ -306,15 +308,16 @@ type CreatedOptions struct {
 }
 
 type StartedOptions struct {
-	Addr                    string
-	GatewayURL              string
-	WorkDir                 string
-	ReadyFile               string
-	Created                 map[string]any
-	AssetReport             any
-	ConnectionReadiness     any
-	ConnectivityStrategy    any
-	StandardRecoveryActions []string
+	Addr                      string
+	GatewayURL                string
+	WorkDir                   string
+	ReadyFile                 string
+	Created                   map[string]any
+	AssetReport               any
+	ConnectionReadiness       any
+	ConnectivityStrategy      any
+	GatewayCandidatePreflight any
+	StandardRecoveryActions   []string
 }
 
 func BuildStarted(opts StartedOptions) map[string]any {
@@ -354,6 +357,10 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"asset_report":          opts.AssetReport,
 		"connection_readiness":  opts.ConnectionReadiness,
 		"connectivity_strategy": opts.ConnectivityStrategy,
+		"gateway_candidate_preflight": firstNonNil(
+			opts.GatewayCandidatePreflight,
+			session["gateway_candidate_preflight"],
+		),
 		"agent_flow": []string{
 			"keep this process running while the target host connects",
 			"give the target-side human only user_handoff.message plus user_handoff.copy_paste",
@@ -503,6 +510,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"target_bootstrap_self_repair":  allAssetsReady,
 		"gateway_url":                   gatewayURL,
 		"gateway_url_candidates":        gatewayCandidates,
+		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
 		"target":                        target,
 		"human_gets_one_command":        true,
 		"auto_approval_contract":        "attended-temporary first host only when created by support-session start/create",
@@ -539,16 +547,17 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			"all_ready":      allAssetsReady,
 			"assets":         assetReports,
 		},
-		"connectivity_strategy":    connectivityStrategy(gatewayURL, target, gatewayCandidates),
-		"connection_readiness":     connectionReadiness,
-		"missing_inputs":           missingInputs,
-		"standard_recovery":        recoveryActions,
-		"target_handoff_policy":    "give the target-side human only the generated target_command or join_url",
-		"forbidden":                []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
-		"recommended_next_step":    recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
-		"command_to_connect_start": []string{"rdev", "support-session", "connect", "--start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
-		"command_to_start":         []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
-		"command_to_prepare_all":   []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"connectivity_strategy":       connectivityStrategy(gatewayURL, target, gatewayCandidates),
+		"gateway_candidate_preflight": gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"connection_readiness":        connectionReadiness,
+		"missing_inputs":              missingInputs,
+		"standard_recovery":           recoveryActions,
+		"target_handoff_policy":       "give the target-side human only the generated target_command or join_url",
+		"forbidden":                   []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
+		"recommended_next_step":       recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
+		"command_to_connect_start":    []string{"rdev", "support-session", "connect", "--start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_start":            []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_prepare_all":      []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
 	}, nil
 }
 
@@ -607,6 +616,110 @@ func connectivityStrategy(gatewayURL, target string, gatewayCandidates []Gateway
 		},
 		"agent_rule": "use Connection Entry runner metadata for relay/mesh/VPN/SSH execution; never ask the target-side human to assemble low-level flags",
 	}
+}
+
+func gatewayCandidatePreflight(gatewayURL, target string, gatewayCandidates []GatewayURLCandidate) map[string]any {
+	candidates := make([]map[string]any, 0, len(gatewayCandidates))
+	for i, candidate := range gatewayCandidates {
+		candidates = append(candidates, gatewayCandidatePreflightReport(i+1, candidate))
+	}
+	return map[string]any{
+		"schema_version":  GatewayCandidatePreflightSchemaVersion,
+		"intent":          "agent-readable-gateway-candidate-decision-table",
+		"gateway_url":     strings.TrimRight(strings.TrimSpace(gatewayURL), "/"),
+		"target":          normalizeTarget(target),
+		"preflight_mode":  "local-classification-no-network-scan",
+		"candidate_count": len(candidates),
+		"candidates":      candidates,
+		"standard_sequence": []string{
+			"call rdev.support_session.connect or run rdev support-session connect first",
+			"send only returned user_handoff.message plus user_handoff.copy_paste",
+			"wait with returned connection_supervision or foreground_feedback",
+			"if all candidates fail, rerun rdev.support_session.prepare or rdev support-session prepare --build-assets before asking the human",
+		},
+		"ask_human_only_for": []string{
+			"authorization or company policy",
+			"persistent managed-host approval",
+			"privileged firewall, DNS, route, service, driver, or credential changes",
+			"real hosted/relay/mesh/VPN/SSH endpoint credentials when none are configured",
+		},
+		"agent_rule":         "use this candidate table before asking humans or writing probes; the target command owns ordered URL fallback and status/recovery owns waiting",
+		"human_surface_rule": "do not expose this table to target users; humans receive only user_handoff.message plus user_handoff.copy_paste",
+		"forbidden": []string{
+			"Agent-authored PowerShell or shell network probes",
+			"custom relay, mesh, VPN, SSH, or polling scripts",
+			"manual ticket/root/gateway/transport/checksum assembly",
+			"ExecutionPolicy Bypass",
+			"hidden install or persistence",
+		},
+	}
+}
+
+func gatewayCandidatePreflightReport(order int, candidate GatewayURLCandidate) map[string]any {
+	kind := strings.TrimSpace(candidate.Kind)
+	scope := strings.TrimSpace(candidate.Scope)
+	sameMachineOnly := kind == "loopback" || scope == "same-machine-only" || isLoopbackHost(candidate.Host)
+	stableFallback := isStableGatewayCandidateKind(kind)
+	status := "candidate-unverified"
+	nextAction := "use the returned target command and status watcher; if it times out, follow connection_recovery"
+	switch {
+	case sameMachineOnly:
+		status = "same-machine-only"
+		nextAction = "use only for same-machine demos; for a remote target, prefer a LAN/private or configured hosted/relay/mesh/VPN/SSH candidate"
+	case kind == "lan-private":
+		status = "lan-candidate-unverified"
+		nextAction = "try this as the first opportunistic LAN path; if status wait times out, configure a stable RDEV_*_GATEWAY_URL and create a fresh Connection Entry"
+	case stableFallback:
+		status = "configured-stable-fallback-unverified"
+		nextAction = "use this configured fallback in the generated target command, then wait with connection_supervision"
+	case kind == "explicit":
+		status = "operator-provided-unverified"
+		nextAction = "use when the operator or Agent runtime supplied this gateway; verify by standard status feedback, not custom scripts"
+	}
+	report := map[string]any{
+		"order":                           order,
+		"url":                             strings.TrimRight(strings.TrimSpace(candidate.URL), "/"),
+		"kind":                            kind,
+		"scope":                           scope,
+		"source":                          candidate.Source,
+		"recommended":                     candidate.Recommended,
+		"reason":                          candidate.Reason,
+		"host":                            candidate.Host,
+		"port":                            candidate.Port,
+		"health_url":                      strings.TrimRight(strings.TrimSpace(candidate.URL), "/") + "/healthz",
+		"status":                          status,
+		"probeable_from_agent":            !sameMachineOnly,
+		"same_machine_only":               sameMachineOnly,
+		"stable_fallback":                 stableFallback,
+		"requires_operator_configuration": false,
+		"standard_next_action":            nextAction,
+	}
+	if stableFallback {
+		report["durability"] = "configured-fallback-for-lan-changes"
+	} else if sameMachineOnly {
+		report["durability"] = "same-machine-only"
+	} else {
+		report["durability"] = "opportunistic"
+	}
+	return report
+}
+
+func isStableGatewayCandidateKind(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "hosted", "relay", "mesh", "vpn", "ssh":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func standardRecoveryActions(actions []string) []string {
@@ -996,6 +1109,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"connection_attempt_policy":     attemptPolicy,
 		"connection_continuity_policy":  continuityPolicy,
 		"connection_supervision":        connectionSupervision(opts.Ticket.Code, locale, rdevCommand, attemptPolicy, continuityPolicy),
+		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
 		"target_bootstrap_requirements": bootstrapRequirements,
 		"target_bootstrap_readiness":    opts.TargetBootstrapReadiness,
 		"watch_connection_status":       statusCommand,

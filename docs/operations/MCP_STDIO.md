@@ -79,10 +79,12 @@ prepare when local `rdev`, gateway state, helper assets, or one-command target
 readiness is unclear. It
 reports the detected OS/arch, Go/Git/`rdev` paths, resolved repo/work dirs,
 gateway URL candidates, Windows/macOS/Linux helper asset URLs and SHA-256
-hashes, `connection_readiness`, `missing_inputs`, and standard recovery
-actions. Agents should use the `recommended=true` item from
-`gateway_url_candidates` for target-side commands and should not ask humans to
-assemble gateway URLs. Wildcard listen addresses such as `0.0.0.0` are never a
+hashes, `gateway_candidate_preflight`, `connection_readiness`,
+`missing_inputs`, and standard recovery actions. Agents should read
+`gateway_candidate_preflight` before asking humans or writing probes, then use
+the `recommended=true` item from `gateway_url_candidates` for target-side
+commands and should not ask humans to assemble gateway URLs. Wildcard listen
+addresses such as `0.0.0.0` are never a
 target URL; loopback candidates are same-machine only. If
 `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
 `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
@@ -100,7 +102,7 @@ local gateway, creates the attended-temporary ticket, prints
 `user_handoff`, `target_command`, `join_url`, `connection_supervision`, and
 watcher at the top level, keeps the full `rdev.support-session-created.v1`
 under `session` for compatibility, includes `asset_report` and
-`connection_readiness`, includes the
+`connection_readiness`, includes `gateway_candidate_preflight`, includes the
 same recommended gateway URL candidates, and emits target commands that try
 those ordered candidates before failing. The embedded
 `connection_attempt_policy` is the only place Agents should read target-side

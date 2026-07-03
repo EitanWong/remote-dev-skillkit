@@ -12,6 +12,14 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev.support-session-gateway-candidate-preflight.v1` to
+  support-session prepare, create, start, and high-level connect payloads.
+  Fresh Agents now get a machine-readable candidate decision table that
+  classifies direct/LAN, same-machine, operator-provided, and configured
+  hosted/relay/mesh/VPN/SSH gateway paths, plus the standard next action for
+  each candidate. This gives Codex, Claude Code, Hermes, OpenClaw/OpenCode, and
+  other MCP-capable Agents the same network-path guidance without writing
+  custom PowerShell, shell, relay, tunnel, probe, or polling scripts.
 - Added `rdev support-session connect --start` as the preferred one-command
   CLI path for fresh Agents when no hosted/relay gateway is configured. It
   delegates to the visible foreground support-session runner, builds verified

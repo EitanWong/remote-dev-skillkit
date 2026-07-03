@@ -143,6 +143,10 @@ Steps:
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
     PowerShell, shell, relay, or approval-polling fallback. Read
+    `gateway_candidate_preflight` before asking me network questions or writing
+    probes; it classifies LAN/direct, same-machine, operator-provided, and
+    configured hosted/relay/mesh/VPN/SSH candidates and gives the standard next
+    action for each candidate. Read
     `connection_continuity_policy`: if `stable_after_lan_change=false`, treat
     LAN as an opportunistic first path and prefer a configured hosted, relay,
     mesh, VPN, or SSH gateway before promising durable connectivity. Read
@@ -168,7 +172,7 @@ Steps:
     `rdev.support-session-started.v1` with top-level `user_handoff`,
     `target_command`, `join_url`, `connection_supervision`, status watcher,
     asset report, recommended gateway URL candidates, and connection readiness
-    before listening. It keeps the full created session under `session` for
+    plus `gateway_candidate_preflight` before listening. It keeps the full created session under `session` for
     compatibility, but fresh Agents should send only the top-level
     `user_handoff.message` plus `user_handoff.copy_paste`, then use top-level
     `connection_supervision` to wait, report, and recover. Also read

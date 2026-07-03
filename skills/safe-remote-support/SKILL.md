@@ -38,9 +38,13 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev.support-session-prepare.v1` as the standard recovery contract for fresh
   Agents: it reports local recovery, verified helper assets, one-command target
   readiness, recommended `gateway_url_candidates`, missing inputs, and
-  forbidden improvisations. Use the recommended candidate for target-side
-  commands; never send a remote target `0.0.0.0`, and use loopback only for
-  same-machine tests. Configured `RDEV_HOSTED_GATEWAY_URL`,
+  `gateway_candidate_preflight`, and forbidden improvisations. Use the returned
+  preflight table and recommended candidate for target-side commands; never
+  send a remote target `0.0.0.0`, and use loopback only for same-machine tests.
+  Read `gateway_candidate_preflight` before asking humans network questions or
+  writing probes; it classifies LAN/direct, same-machine, operator-provided,
+  and configured hosted/relay/mesh/VPN/SSH candidates with standard next
+  actions. Configured `RDEV_HOSTED_GATEWAY_URL`,
   `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
   `RDEV_VPN_GATEWAY_URL`, and `RDEV_SSH_GATEWAY_URL` values are automatically
   appended to ordered gateway candidates after direct/LAN paths and before
@@ -75,6 +79,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Read returned `gateway_candidate_preflight` before asking the human for
+  network details. If it shows only LAN or same-machine candidates, use the
+  standard recovery/upgrade paths to configure a hosted/relay/mesh/VPN/SSH
+  fallback before promising durable long-running work.
 - Read returned `connection_supervision` after sending the handoff. Use its
   `mcp_watch_call` or `cli_watch_command` to wait, report
   `connected_next_steps.user_report` as soon as the host connects, and choose

@@ -268,6 +268,7 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["ready_to_send_to_human"] != true ||
 		connect["user_handoff"] == nil ||
 		connect["connection_supervision"] == nil ||
+		connect["gateway_candidate_preflight"] == nil ||
 		connect["target_command"] != created["target_command"] ||
 		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected ready connect payload, got %#v", connect)
@@ -352,6 +353,17 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	candidates := created["gateway_url_candidates"].([]GatewayURLCandidate)
 	if len(candidates) != 2 || !candidates[0].Recommended {
 		t.Fatalf("expected gateway candidates in created payload, got %#v", candidates)
+	}
+	preflight := created["gateway_candidate_preflight"].(map[string]any)
+	if preflight["schema_version"] != GatewayCandidatePreflightSchemaVersion ||
+		preflight["candidate_count"] != 2 ||
+		!strings.Contains(preflight["agent_rule"].(string), "target command owns ordered URL fallback") {
+		t.Fatalf("expected gateway candidate preflight contract, got %#v", preflight)
+	}
+	preflightCandidates := preflight["candidates"].([]map[string]any)
+	if preflightCandidates[0]["status"] != "operator-provided-unverified" ||
+		preflightCandidates[0]["same_machine_only"] != false {
+		t.Fatalf("expected operator-provided preflight candidate, got %#v", preflightCandidates)
 	}
 	followUp := created["mcp_follow_up"].([]map[string]any)
 	if len(followUp) == 0 || followUp[0]["arguments"].(map[string]any)["wait"] != true {
@@ -481,6 +493,11 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		started["connection_readiness"].(map[string]any)["ready"] != true {
 		t.Fatalf("expected asset/readiness reports in started payload, got %#v", started)
 	}
+	preflight := started["gateway_candidate_preflight"].(map[string]any)
+	if preflight["schema_version"] != GatewayCandidatePreflightSchemaVersion ||
+		!strings.Contains(preflight["agent_rule"].(string), "candidate table") {
+		t.Fatalf("expected top-level gateway candidate preflight, got %#v", preflight)
+	}
 	feedback := started["foreground_feedback"].(map[string]any)
 	if feedback["schema_version"] != "rdev.support-session-foreground-feedback.v1" ||
 		feedback["stream"] != "stderr" ||
@@ -544,6 +561,17 @@ func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
 	if !strings.Contains(downgrade, "falls back to HTTPS long-poll") ||
 		!strings.Contains(downgrade, "short polling") {
 		t.Fatalf("expected native transport downgrade rules, got %s", downgrade)
+	}
+	preflight := prepare["gateway_candidate_preflight"].(map[string]any)
+	if preflight["schema_version"] != GatewayCandidatePreflightSchemaVersion ||
+		preflight["preflight_mode"] != "local-classification-no-network-scan" ||
+		preflight["candidate_count"] == 0 ||
+		!strings.Contains(preflight["agent_rule"].(string), "target command owns ordered URL fallback") {
+		t.Fatalf("expected gateway candidate preflight contract, got %#v", preflight)
+	}
+	readinessPreflight := readiness["gateway_candidate_preflight"].(map[string]any)
+	if readinessPreflight["schema_version"] != GatewayCandidatePreflightSchemaVersion {
+		t.Fatalf("expected readiness to mirror gateway candidate preflight, got %#v", readinessPreflight)
 	}
 	assets := prepare["asset_report"].(map[string]any)
 	if assets["all_ready"] != true || assets["build_assets"] != true {
