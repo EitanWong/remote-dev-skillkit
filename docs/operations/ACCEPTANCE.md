@@ -31,7 +31,8 @@ one-message flow:
 4. send only `user_handoff.message` plus `user_handoff.copy_paste` to the human;
 5. read `ready_file.path` when foreground stdout is hard to parse;
 6. expose `status_file.path` for the latest machine-readable foreground event
-   when terminal output is unavailable;
+   when terminal output is unavailable, with regression coverage that drives the
+   foreground watcher from `waiting` to `connected` after host registration;
 7. expose foreground stderr feedback events so an Agent can report
    `event=connected` from the kept-open command;
 8. wait for status with `rdev.support_session.status` as the fallback source of

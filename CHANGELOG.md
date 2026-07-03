@@ -61,6 +61,8 @@ metadata, status watching, or approval polling by hand.
   have a stable local file containing the latest machine-readable foreground
   event, so they can report `event=connected` / `status.connected=true` even
   when a harness cannot stream or parse the long-running terminal output.
+  Regression coverage now exercises the watcher from `waiting` through a real
+  host registration to a connected status-file event.
 - Added `rdev.support-session-gateway-candidate-preflight.v1` to
   support-session prepare, create, start, and high-level connect payloads.
   Fresh Agents now get a machine-readable candidate decision table that
