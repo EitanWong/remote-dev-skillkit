@@ -1,8 +1,68 @@
 {
   "tools": [
     {
+      "name": "rdev.support_session.connect",
+      "description": "Single high-level Agent entry for 'connect a computer'. Fresh Agents should call this before rdev.invites.create, rdev.connection_entry.plan, hand-written gateway setup, or package materialization. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, agent_connection_runbook, gateway_candidate_preflight, connection_supervision, and status watcher in one payload. If no gateway is running, returns cli_start_now_command plus agent_connection_runbook for the standard visible foreground rdev support-session connect --start flow, instead of making the Agent choose lower-level handoff/create/start/status steps.",
+      "safety": "Creates a scoped attended-temporary ticket only when a reachable/configured gateway is supplied; otherwise planning only. Does not execute on the target host, install hidden persistence, bypass policy, or mutate firewall/DNS/routes.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "addr": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "auto_approve": {
+            "type": "boolean"
+          },
+          "gateway_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "operator_token_file": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rdev_command": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "repo_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "enum": [
+              "auto",
+              "windows",
+              "macos",
+              "linux"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "work_dir": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.invites.create",
-      "description": "Create an Agent-first remote session invite with a universal connection entry, manifest URL, pinned manifest root, transport plan, and next MCP actions.",
+      "description": "Create an Agent-first remote session invite with a universal connection entry, manifest URL, pinned manifest root, transport plan, and next MCP actions. For ordinary 'connect this computer' requests, call rdev.support_session.connect first; use invites.create for reviewed package materialization, managed owned-host planning, or explicit lower-level workflows.",
       "safety": "Creates an access path and connection metadata; does not execute on the host.",
       "inputSchema": {
         "additionalProperties": false,
@@ -80,66 +140,6 @@
           "gateway_url",
           "reason"
         ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.support_session.connect",
-      "description": "Single high-level Agent entry for 'connect a computer'. Fresh Agents should call this before rdev.invites.create, rdev.connection_entry.plan, hand-written gateway setup, or package materialization. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, agent_connection_runbook, gateway_candidate_preflight, connection_supervision, and status watcher in one payload. If no gateway is running, returns cli_start_now_command plus agent_connection_runbook for the standard visible foreground rdev support-session connect --start flow, instead of making the Agent choose lower-level handoff/create/start/status steps.",
-      "safety": "Creates a scoped attended-temporary ticket only when a reachable/configured gateway is supplied; otherwise planning only. Does not execute on the target host, install hidden persistence, bypass policy, or mutate firewall/DNS/routes.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "addr": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "auto_approve": {
-            "type": "boolean"
-          },
-          "gateway_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "operator_token_file": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "rdev_command": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "repo_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "target": {
-            "enum": [
-              "auto",
-              "windows",
-              "macos",
-              "linux"
-            ],
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "maximum": 86400,
-            "minimum": 60,
-            "type": "integer"
-          },
-          "work_dir": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
         "type": "object"
       }
     },

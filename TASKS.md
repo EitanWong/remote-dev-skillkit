@@ -143,6 +143,7 @@
 - [x] Add `rdev.support-session-gateway-candidate-preflight.v1` to prepare/create/start/connect payloads so Agents read a standard gateway candidate decision table before asking humans network questions or writing probes.
 - [x] Add `rdev.support-session-agent-runbook.v1` to handoff/prepare/create/start/connect/status/recovery payloads so fresh Agents get one standard connect/wait/report/recover sequence before choosing lower-level tools.
 - [x] Tighten fresh-Agent runbook routing so ordinary "connect this computer" requests start with `rdev.support_session.connect` / `rdev support-session connect`, and low-level invite/package planning is reserved for explicit package materialization, approved managed owned-host planning, or high-level recovery instructions.
+- [x] Put `rdev.support_session.connect` first in the public MCP tool contract so fresh Agents discover the high-level connection entry before low-level invite/package tools.
 - [x] Add `rdev.connection-attempt-policy.v1` and bounded target-side timeout/retry behavior so Windows/macOS/Linux one-liners fail over quickly instead of hanging on a dead gateway candidate.
 - [x] Add MCP wait support to `rdev.support_session.status` so Agents can wait for connection feedback through the standard tool instead of writing custom polling loops.
 - [x] Add `rdev.support-session-user-handoff.v1` so Agents can send a localized message plus exact copy-paste command/link to humans without rewriting the target command.
@@ -152,6 +153,7 @@
 - [x] Add `rdev.support-session-target-bootstrap-requirements.v1` and CLI `rdev.support-session-target-bootstrap-readiness.v1` probing so Agents detect missing gateway helper assets before sending clean-machine Windows/macOS/Linux commands.
 - [x] Add `rdev gateway serve --rdev-assets-dir` for explicit low-level dev gateways, while keeping ordinary support sessions on `rdev support-session start/create/status`.
 - [x] Add fresh-Agent bootstrap self-repair acceptance coverage so the local gate fetches join page, Windows/macOS/Linux bootstrap scripts, and helper asset hashes, proving clean targets are not told to install `rdev` manually.
+- [x] Add configured stable fallback acceptance coverage so the local fresh-Agent gate proves `RDEV_RELAY_GATEWAY_URL` is auto-selected, target commands use relay join URLs, and Agent supervision treats the session as durable after LAN changes.
 - [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.
 - [ ] Run real fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode acceptance to confirm the Agent calls `rdev.support_session.create` when a gateway is reachable, uses `rdev support-session connect --start` when no gateway exists, reserves `rdev.support_session.plan` for review/debug, and never invents gateway/bootstrap code.
 - [ ] Run clean Windows target acceptance using the `connect --start` generated PowerShell handoff to prove `/assets/rdev-windows-amd64.exe` self-repair, SHA-256 verification, auto-approved first host registration, status wait, revocation, and no-persistence cleanup.

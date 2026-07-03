@@ -10,25 +10,6 @@ type Tool struct {
 func Tools() []Tool {
 	return []Tool{
 		{
-			Name:        "rdev.invites.create",
-			Description: "Create an Agent-first remote session invite with a universal connection entry, manifest URL, pinned manifest root, transport plan, and next MCP actions.",
-			Safety:      "Creates an access path and connection metadata; does not execute on the host.",
-			InputSchema: object(map[string]any{
-				"gateway_url":           stringField(),
-				"mode":                  enum("attended-temporary", "managed", "break-glass"),
-				"ttl_seconds":           integer(60, 86400),
-				"capabilities":          stringArray(),
-				"reason":                stringField(),
-				"transport":             enum("auto", "wss", "long-poll", "poll"),
-				"network_scope":         enum("auto", "internet", "lan", "relay", "mesh", "ssh"),
-				"authority_profile":     enum("standard", "max-control"),
-				"rdev_command":          stringField(),
-				"once":                  boolField(),
-				"require_host_approval": boolField(),
-				"auto_approve":          boolField(),
-			}, []string{"gateway_url", "reason"}),
-		},
-		{
 			Name:        "rdev.support_session.connect",
 			Description: "Single high-level Agent entry for 'connect a computer'. Fresh Agents should call this before rdev.invites.create, rdev.connection_entry.plan, hand-written gateway setup, or package materialization. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, agent_connection_runbook, gateway_candidate_preflight, connection_supervision, and status watcher in one payload. If no gateway is running, returns cli_start_now_command plus agent_connection_runbook for the standard visible foreground rdev support-session connect --start flow, instead of making the Agent choose lower-level handoff/create/start/status steps.",
 			Safety:      "Creates a scoped attended-temporary ticket only when a reachable/configured gateway is supplied; otherwise planning only. Does not execute on the target host, install hidden persistence, bypass policy, or mutate firewall/DNS/routes.",
@@ -45,6 +26,25 @@ func Tools() []Tool {
 				"operator_token_file": stringField(),
 				"rdev_command":        stringField(),
 			}, nil),
+		},
+		{
+			Name:        "rdev.invites.create",
+			Description: "Create an Agent-first remote session invite with a universal connection entry, manifest URL, pinned manifest root, transport plan, and next MCP actions. For ordinary 'connect this computer' requests, call rdev.support_session.connect first; use invites.create for reviewed package materialization, managed owned-host planning, or explicit lower-level workflows.",
+			Safety:      "Creates an access path and connection metadata; does not execute on the host.",
+			InputSchema: object(map[string]any{
+				"gateway_url":           stringField(),
+				"mode":                  enum("attended-temporary", "managed", "break-glass"),
+				"ttl_seconds":           integer(60, 86400),
+				"capabilities":          stringArray(),
+				"reason":                stringField(),
+				"transport":             enum("auto", "wss", "long-poll", "poll"),
+				"network_scope":         enum("auto", "internet", "lan", "relay", "mesh", "ssh"),
+				"authority_profile":     enum("standard", "max-control"),
+				"rdev_command":          stringField(),
+				"once":                  boolField(),
+				"require_host_approval": boolField(),
+				"auto_approve":          boolField(),
+			}, []string{"gateway_url", "reason"}),
 		},
 		{
 			Name:        "rdev.support_session.handoff",

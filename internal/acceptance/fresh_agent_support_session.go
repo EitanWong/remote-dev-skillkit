@@ -41,6 +41,7 @@ type FreshAgentSupportSessionReport struct {
 	HandoffReachableGateway map[string]any `json:"handoff_reachable_gateway"`
 	CreatedSession          map[string]any `json:"created_session"`
 	StartedSession          map[string]any `json:"started_session"`
+	StableFallbackSession   map[string]any `json:"stable_fallback_session"`
 	ConnectedStatus         map[string]any `json:"connected_status"`
 	WaitingRecovery         map[string]any `json:"waiting_recovery"`
 	BootstrapSelfRepair     map[string]any `json:"bootstrap_self_repair"`
@@ -133,6 +134,49 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		ReadyFile:  filepath.Join(outDir, "support-session", "support-session-ready.json"),
 		Created:    created,
 	})
+	stableFallback := withFreshAgentGatewayEnv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev", func() map[string]any {
+		stableURL, stableCandidates := supportsession.ConfiguredGatewayURLCandidate()
+		stableTicket, err := gw.CreateTicketWithMetadata(
+			model.HostModeAttendedTemporary,
+			7200,
+			policyCapabilitiesToStringsForFreshAgent(policy.TemporaryDefaults()),
+			"fresh Agent stable fallback acceptance",
+			map[string]string{
+				"connection_entry":  "standard-visible",
+				"approval_contract": "target-consent-scoped-ticket",
+				"auto_approve":      "attended-temporary",
+			},
+		)
+		if err != nil {
+			return map[string]any{"error": err.Error()}
+		}
+		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
+			Addr:        "0.0.0.0:8787",
+			Target:      "auto",
+			Reason:      "fresh Agent stable fallback acceptance",
+			TTLSeconds:  7200,
+			AutoApprove: true,
+			Locale:      locale,
+			RdevCommand: rdevCommand,
+		})
+		created := supportsession.BuildCreated(supportsession.CreatedOptions{
+			GatewayURL:            stableURL,
+			GatewayURLCandidates:  stableCandidates,
+			ManifestRootPublicKey: manifestRootPublicKeyForFreshAgent(gw.ManifestRoot()),
+			Ticket:                stableTicket,
+			Target:                "windows",
+			Locale:                locale,
+			RdevCommand:           rdevCommand,
+			AutoApprove:           true,
+		})
+		return map[string]any{
+			"schema_version": "rdev.acceptance.stable-fallback-session.v1",
+			"env_var":        "RDEV_RELAY_GATEWAY_URL",
+			"gateway_url":    stableURL,
+			"handoff":        handoff,
+			"created":        created,
+		}
+	})
 	host, err := gw.RegisterHost(model.HostRegistration{
 		TicketCode:   ticket.Code,
 		Name:         "fresh-agent-acceptance-host",
@@ -170,6 +214,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		HandoffReachableGateway: handoffReachableGateway,
 		CreatedSession:          created,
 		StartedSession:          started,
+		StableFallbackSession:   stableFallback,
 		ConnectedStatus:         connectedStatus,
 		WaitingRecovery:         waitingRecovery,
 		BootstrapSelfRepair:     bootstrapSelfRepair,
@@ -180,6 +225,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 			ConnectReachableGateway: connectReachableGateway,
 			CreatedSession:          created,
 			StartedSession:          started,
+			StableFallbackSession:   stableFallback,
 			ConnectedStatus:         connectedStatus,
 			WaitingRecovery:         waitingRecovery,
 			Host:                    host,
@@ -210,6 +256,7 @@ type freshAgentSupportSessionCheckInput struct {
 	ConnectReachableGateway map[string]any
 	CreatedSession          map[string]any
 	StartedSession          map[string]any
+	StableFallbackSession   map[string]any
 	ConnectedStatus         map[string]any
 	WaitingRecovery         map[string]any
 	Host                    model.Host
@@ -238,6 +285,13 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	startedSupervision := mapFromAny(input.StartedSession["connection_supervision"])
 	startedPreflight := mapFromAny(input.StartedSession["gateway_candidate_preflight"])
 	startedRunbook := mapFromAny(input.StartedSession["agent_connection_runbook"])
+	stableFallbackCreated := mapFromAny(input.StableFallbackSession["created"])
+	stableFallbackHandoff := mapFromAny(input.StableFallbackSession["handoff"])
+	stableFallbackHandoffArgs := mapFromAny(stableFallbackHandoff["mcp_next_arguments"])
+	stableFallbackContinuity := mapFromAny(stableFallbackCreated["connection_continuity_policy"])
+	stableFallbackSupervision := mapFromAny(stableFallbackCreated["connection_supervision"])
+	stableFallbackRunbook := mapFromAny(stableFallbackCreated["agent_connection_runbook"])
+	stableFallbackRunbookSummary := mapFromAny(stableFallbackRunbook["gateway_candidate_summary"])
 	connectedNext := mapFromAny(input.ConnectedStatus["connected_next_steps"])
 	statusRunbook := mapFromAny(input.ConnectedStatus["agent_connection_runbook"])
 	recoveryRunbook := mapFromAny(input.WaitingRecovery["agent_connection_runbook"])
@@ -269,6 +323,11 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "started_payload_has_foreground_feedback", Passed: stringFromAny(foregroundFeedback["schema_version"]) == "rdev.support-session-foreground-feedback.v1" && stringFromAny(foregroundFeedback["event_prefix"]) == "rdev support session event: " && strings.Contains(stringFromAny(foregroundFeedback["connected_rule"]), "connection has been established"), Detail: stringFromAny(foregroundFeedback["event_prefix"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
+		{Name: "stable_fallback_handoff_uses_configured_gateway", Passed: stringFromAny(stableFallbackHandoff["selected_path"]) == "create-with-reachable-gateway" && stringFromAny(stableFallbackHandoffArgs["gateway_url"]) == "https://relay.example.test/rdev", Detail: fmt.Sprintf("%v", stableFallbackHandoffArgs)},
+		{Name: "stable_fallback_created_uses_relay_candidate", Passed: strings.Contains(stringFromAny(stableFallbackCreated["target_command"]), "https://relay.example.test/rdev/join/") && strings.Contains(stringFromAny(mapFromAny(stableFallbackCreated["user_handoff"])["copy_paste"]), "https://relay.example.test/rdev/join/"), Detail: stringFromAny(stableFallbackCreated["target_command"])},
+		{Name: "stable_fallback_continuity_is_durable", Passed: boolFromAny(stableFallbackContinuity["stable_after_lan_change"]) && strings.Contains(strings.Join(stringSliceFromAny(stableFallbackContinuity["stable_fallback_kinds"]), "\n"), "relay"), Detail: fmt.Sprintf("%v", stableFallbackContinuity)},
+		{Name: "stable_fallback_supervision_does_not_request_upgrade", Passed: stableFallbackSupervision["upgrade_recommended"] == false && strings.Contains(stringFromAny(stableFallbackSupervision["upgrade_reason"]), "stable hosted/relay/mesh/VPN/SSH fallback already configured"), Detail: stringFromAny(stableFallbackSupervision["upgrade_reason"])},
+		{Name: "stable_fallback_runbook_reports_stable_candidate", Passed: boolFromAny(stableFallbackRunbookSummary["has_stable_configured_fallback"]) && strings.Contains(strings.Join(stringSliceFromAny(stableFallbackRunbookSummary["candidate_kinds"]), "\n"), "relay"), Detail: fmt.Sprintf("%v", stableFallbackRunbookSummary)},
 		{Name: "auto_approval_connects_first_attended_host", Passed: input.Host.Status == model.HostStatusActive && input.ConnectedStatus["connected"] == true, Detail: string(input.Host.Status)},
 		{Name: "connected_status_has_user_report", Passed: stringFromAny(connectedNext["schema_version"]) == supportsession.ConnectedNextStepsSchemaVersion && strings.TrimSpace(stringFromAny(connectedNext["user_report"])) != "", Detail: stringFromAny(connectedNext["user_report"])},
 		{Name: "connected_status_points_to_capability_probe", Passed: strings.Contains(fmt.Sprintf("%v", connectedNext["mcp_next_calls"]), "rdev.hosts.capabilities"), Detail: fmt.Sprintf("%v", connectedNext["mcp_next_calls"])},
@@ -437,6 +496,39 @@ func withFreshAgentGatewayEnvCleared(fn func() map[string]any) map[string]any {
 				_ = os.Setenv(name, previous[name].value)
 			} else {
 				_ = os.Unsetenv(name)
+			}
+		}
+	}()
+	return fn()
+}
+
+func withFreshAgentGatewayEnv(name, value string, fn func() map[string]any) map[string]any {
+	envNames := []string{
+		"RDEV_HOSTED_GATEWAY_URL",
+		"RDEV_RELAY_GATEWAY_URL",
+		"RDEV_MESH_GATEWAY_URL",
+		"RDEV_VPN_GATEWAY_URL",
+		"RDEV_SSH_GATEWAY_URL",
+	}
+	type previousEnv struct {
+		value string
+		ok    bool
+	}
+	previous := map[string]previousEnv{}
+	for _, envName := range envNames {
+		envValue, ok := os.LookupEnv(envName)
+		previous[envName] = previousEnv{value: envValue, ok: ok}
+		_ = os.Unsetenv(envName)
+	}
+	if strings.TrimSpace(name) != "" {
+		_ = os.Setenv(name, value)
+	}
+	defer func() {
+		for _, envName := range envNames {
+			if previous[envName].ok {
+				_ = os.Setenv(envName, previous[envName].value)
+			} else {
+				_ = os.Unsetenv(envName)
 			}
 		}
 	}()

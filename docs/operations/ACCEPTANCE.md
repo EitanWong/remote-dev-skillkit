@@ -39,7 +39,12 @@ one-message flow:
    `bootstrap.sh`, and `/assets/*.sha256` endpoints from a `httptest` gateway
    to prove clean targets can download and SHA-256 verify helper binaries
    instead of being told to install `rdev` manually;
-10. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+10. configure `RDEV_RELAY_GATEWAY_URL` during the local gate and prove the
+    high-level handoff auto-selects that stable gateway, the target command uses
+    the relay join URL, `connection_continuity_policy.stable_after_lan_change`
+    is true, and the Agent runbook reports the stable fallback instead of
+    asking the Agent to write relay/mesh/VPN/SSH glue;
+11. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
    gateway, transport, or bootstrap glue.
 
 The command writes `report.json` with schema

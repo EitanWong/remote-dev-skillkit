@@ -236,6 +236,7 @@ skillkit_install_dry_run = json.loads((root / "skillkit-install-dry-run.json").r
 skillkit_install_execute = json.loads((root / "skillkit-install-execute.json").read_text())
 update_plan = json.loads((root / "update-plan.json").read_text())
 skillkit_manifest = json.loads((pathlib.Path(skillkit_install_plan_output["bundle"]) / "manifest.json").read_text())
+skillkit_mcp_tools = json.loads((pathlib.Path(skillkit_install_plan_output["bundle"]) / "mcp" / "tools.json").read_text())
 commands = pathlib.Path(plan_output["commands"]).read_text()
 
 assert build["ok"] is True, build
@@ -339,6 +340,7 @@ assert "rdev mcp tools" in skillkit_manifest["adaptive_configuration"]["probe_be
 assert "available connection modes" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
 assert "framework install path" in skillkit_manifest["adaptive_configuration"]["ask_if_unclear"], skillkit_manifest
 assert "https://api.example.com/v1" in skillkit_manifest["adaptive_configuration"]["placeholders"], skillkit_manifest
+assert skillkit_mcp_tools["tools"][0]["name"] == "rdev.support_session.connect", skillkit_mcp_tools["tools"][:3]
 assert skillkit_install_plan_output["adaptive_configuration_schema"] == "rdev.adaptive-configuration-contract.v1", skillkit_install_plan_output
 assert skillkit_install_plan_verification["schema"] == "rdev.skillkit-install-plan-verification.v1", skillkit_install_plan_verification
 assert skillkit_install_plan_verification["ok"] is True, skillkit_install_plan_verification
@@ -382,11 +384,23 @@ assert all(
     name in fresh_agent_checks and fresh_agent_checks[name]["passed"] is True
     for name in bootstrap_self_repair_checks
 ), fresh_agent_checks
+stable_fallback_checks = [
+    "stable_fallback_handoff_uses_configured_gateway",
+    "stable_fallback_created_uses_relay_candidate",
+    "stable_fallback_continuity_is_durable",
+    "stable_fallback_supervision_does_not_request_upgrade",
+    "stable_fallback_runbook_reports_stable_candidate",
+]
+assert all(
+    name in fresh_agent_checks and fresh_agent_checks[name]["passed"] is True
+    for name in stable_fallback_checks
+), fresh_agent_checks
 
 print(json.dumps({
     "ok": True,
     "fresh_agent_support_session_contract": True,
     "fresh_agent_bootstrap_self_repair_contract": True,
+    "fresh_agent_stable_fallback_contract": True,
     "fresh_agent_support_session_schema": fresh_agent_output["schema"],
     "build_schema": build_manifest["schema_version"],
     "built_artifacts": len(build_manifest["artifacts"]),
@@ -404,6 +418,7 @@ print(json.dumps({
     "skillkit_install_plan_verification_schema": skillkit_install_plan_verification["schema"],
     "skillkit_install_report_schema": skillkit_install_execute["schema"],
     "skillkit_adaptive_configuration": True,
+    "skillkit_mcp_connect_first": True,
     "planned_platforms": plan_output["platform_count"],
     "github_project_seed_issues": github_project_readiness["bootstrap_dry_run"]["seed_issues"],
     "post_release_platforms": post_release_output["platform_count"],

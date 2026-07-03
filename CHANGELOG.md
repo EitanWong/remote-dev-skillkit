@@ -28,12 +28,25 @@ metadata, status watching, or approval polling by hand.
   `rdev.connection_entry.plan`, package materialization, or hand-written gateway
   setup unless the operator or a high-level recovery payload explicitly asks
   for that lower-level path.
+- Reordered the public MCP tool contract so `rdev.support_session.connect` is
+  the first listed tool. This makes the high-level connection entry the most
+  discoverable choice for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and
+  other MCP-capable Agents, while moving low-level `rdev.invites.create` behind
+  the safer fresh-Agent entry.
 - Added `rdev.acceptance.bootstrap-self-repair.v1` coverage inside
   `rdev acceptance fresh-agent-support-session`. The local contract gate now
   starts a `httptest` join server with verified helper assets, fetches the join
   page, Windows `bootstrap.ps1`, macOS/Linux `bootstrap.sh`, and asset
   `.sha256` endpoints, and fails if the target-side surface asks humans to
   install `rdev` manually or use `ExecutionPolicy Bypass`.
+- Added stable fallback coverage to `rdev acceptance fresh-agent-support-session`.
+  The local gate now configures `RDEV_RELAY_GATEWAY_URL` and fails unless the
+  high-level handoff auto-selects that gateway, the target command uses the
+  relay join URL, `connection_continuity_policy.stable_after_lan_change=true`,
+  supervision avoids unnecessary upgrades, and the Agent runbook reports the
+  configured stable fallback. This is a contract gate for configured
+  hosted/relay/mesh/VPN/SSH paths, not proof of real restrictive-network
+  execution.
 - Added `rdev.support-session-gateway-candidate-preflight.v1` to
   support-session prepare, create, start, and high-level connect payloads.
   Fresh Agents now get a machine-readable candidate decision table that

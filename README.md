@@ -8,10 +8,13 @@ host-local policy, evidence bundles, and release verification so they can fix
 real development environments without being handed the keys to the whole
 building.
 
-The product is AI-native: the human talks to an agent, and the agent uses
-`rdev.invites.create`, `rdev.hosts.*`, and `rdev.jobs.*` to prepare the remote
-session, wait for the host, request approval when needed, run scoped work, and
-bring back evidence.
+The product is AI-native: the human talks to an agent, and the agent starts
+ordinary "connect this computer" work with `rdev.support_session.connect`.
+That high-level entry returns the one target-side handoff to send, the standard
+status watcher, connection supervision, and recovery guidance. Lower-level
+`rdev.invites.create`, `rdev.connection_entry.plan`, `rdev.hosts.*`, and
+`rdev.jobs.*` tools remain available for reviewed packaging, managed hosts,
+scoped work, approvals, and evidence after the connection path is established.
 
 Multilingual quick starts: [English](README.md), [简体中文](docs/i18n/README.zh-CN.md), [Español](docs/i18n/README.es.md), [Français](docs/i18n/README.fr.md), [Deutsch](docs/i18n/README.de.md), [日本語](docs/i18n/README.ja.md), [한국어](docs/i18n/README.ko.md), [Português](docs/i18n/README.pt-BR.md), [हिन्दी](docs/i18n/README.hi.md), [العربية](docs/i18n/README.ar.md), [Русский](docs/i18n/README.ru.md).
 

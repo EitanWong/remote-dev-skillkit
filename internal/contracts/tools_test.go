@@ -4,7 +4,8 @@ import "testing"
 
 func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 	seen := map[string]bool{}
-	for _, tool := range Tools() {
+	tools := Tools()
+	for _, tool := range tools {
 		if tool.Name == "" {
 			t.Fatal("tool name must not be empty")
 		}
@@ -42,6 +43,21 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 	}
 	if !seen["rdev.update.check"] || !seen["rdev.update.plan"] {
 		t.Fatal("expected update check and plan tools")
+	}
+}
+
+func TestSupportSessionConnectIsFirstTool(t *testing.T) {
+	tools := Tools()
+	if len(tools) == 0 {
+		t.Fatal("expected tools")
+	}
+	if tools[0].Name != "rdev.support_session.connect" {
+		t.Fatalf("fresh-agent tool list must lead with high-level connect, got %q", tools[0].Name)
+	}
+	for index, tool := range tools {
+		if tool.Name == "rdev.invites.create" && index == 0 {
+			t.Fatal("low-level invite tool must not be the first tool for fresh Agents")
+		}
 	}
 }
 
