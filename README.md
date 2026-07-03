@@ -94,9 +94,10 @@ computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. First call `rdev.support_session.connect` or run
 `rdev support-session connect`; it is the high-level "connect a computer"
 entry. If a configured or reachable gateway exists, it creates the session and
-returns the ready `user_handoff`. If no gateway is running, it returns the
-standard visible foreground `rdev support-session start` command instead of
-failing or making the Agent choose lower-level steps. Use
+returns the ready `user_handoff`. If no gateway is running, it returns
+`cli_start_now_command`, the standard visible foreground
+`rdev support-session connect --start` command, instead of failing or making
+the Agent choose lower-level steps. Use
 `rdev.support_session.handoff` only for review/debug routing details. If `rdev`, the gateway, or helper assets are
 unclear, call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets`; follow its standard recovery
@@ -114,7 +115,7 @@ and `create` use the first configured `RDEV_*_GATEWAY_URL` when no explicit
 URL to use. If a reachable gateway is already running, `connect` returns
 `rdev.support-session-connect.v1` with `ready_to_send_to_human=true`; if no
 gateway is running, it returns `ready_to_send_to_human=false` plus the
-foreground start command. If a lower-level path is explicitly needed, call
+`cli_start_now_command`. If a lower-level path is explicitly needed, call
 `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
@@ -122,7 +123,7 @@ payload. It also returns `target_bootstrap_requirements` and, for CLI calls,
 `target_bootstrap_readiness`, so the Agent can detect whether an existing
 gateway can serve verified helper assets for clean targets that do not already
 have `rdev`. If readiness is false for a platform command, run
-`rdev support-session start` or `rdev support-session prepare --build-assets`
+`rdev support-session connect --start` or `rdev support-session prepare --build-assets`
 instead of asking the target-side human to install `rdev` manually. The target
 command already tries ordered gateway URL candidates with bounded timeout/retry
 behavior; do not write a custom PowerShell, shell, relay, or polling fallback.
@@ -132,7 +133,8 @@ and prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming the
 connection is robust for long-running work.
 Prefer `user_handoff.message` plus
 `user_handoff.copy_paste` when telling me what to run. If no gateway is running
-yet, run `rdev support-session start` in a visible foreground terminal; it
+yet, run `rdev support-session connect --start` in a visible foreground
+terminal; it
 auto-prepares verified Windows/macOS/Linux
 helper assets when a source checkout and Go are available, starts the local
 gateway, and prints the same ready session payload before listening. Send only
@@ -247,7 +249,9 @@ The Agent should start with `rdev.support_session.connect` or
 `rdev.support-session-connect.v1` and collapses the ordinary decision tree: when
 a reachable gateway or configured `RDEV_*_GATEWAY_URL` exists, it creates the
 session and returns a ready `user_handoff`; when no gateway is running, it
-returns the standard visible foreground `rdev support-session start` command.
+returns `cli_start_now_command`, the standard visible foreground
+`rdev support-session connect --start` command, plus a `support-session start`
+compatibility fallback.
 `rdev.support_session.handoff` remains available for review/debug routing
 details, but fresh Agents should not use it as the normal first step. The
 created/started session then returns
@@ -257,7 +261,7 @@ placeholders. It also includes `target_bootstrap_requirements` and, for CLI
 create calls against an existing gateway, `target_bootstrap_readiness`. Those
 fields prevent the common failure where a manually started gateway has no
 downloadable `rdev` helper for a clean Windows target. If readiness is false,
-use the standard `support-session start` or `prepare --build-assets` path
+use the standard `support-session connect --start` or `prepare --build-assets` path
 instead of inventing an install script or telling the target user to assemble
 prerequisites. The command itself loops through ordered Connection Entry URLs on
 the target machine with bounded timeouts/retries, so fallback stays in `rdev`
@@ -275,8 +279,8 @@ should call `rdev.support_session.prepare` or run
 one-command target readiness, `gateway_url_candidates`, and standard recovery
 actions. The Agent should use the recommended gateway candidate for target-side
 commands and keep raw address selection out of human chat. If no gateway is
-running yet, the Agent should run `rdev support-session start` in a visible
-foreground terminal; that command auto-prepares verified helper assets when
+running yet, the Agent should run `rdev support-session connect --start` in a
+visible foreground terminal; that command auto-prepares verified helper assets when
 possible, starts the local gateway, and prints
 `rdev.support-session-started.v1` with top-level `user_handoff`,
 `target_command`, `join_url`, `connection_supervision`, and status watcher
@@ -296,8 +300,8 @@ Operators may preconfigure hosted/relay/mesh/VPN/SSH gateway URLs with
 URLs in the ordered candidate list, while keeping ticket/root/transport details
 inside the structured payload. `rdev support-session create` can now omit
 `--gateway-url` when one of those configured URLs exists; if neither an
-explicit nor configured reachable gateway exists, use `rdev support-session
-start`.
+explicit nor configured reachable gateway exists, use
+`rdev support-session connect --start`.
 If an operator intentionally starts a low-level dev gateway, prefer
 `--rdev-assets-dir <dir>` over five individual helper flags so `/assets`
 contains the verified Windows/macOS/Linux bootstrap helpers.
@@ -312,6 +316,11 @@ or checksums.
 
 ```bash
 rdev support-session connect \
+  --target auto \
+  --locale auto
+
+rdev support-session connect \
+  --start \
   --target auto \
   --locale auto
 

@@ -205,8 +205,10 @@ type freshAgentSupportSessionCheckInput struct {
 
 func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []Check {
 	noGatewayCommand := stringSliceFromAny(input.HandoffNoGateway["foreground_start_command"])
+	noGatewayStartNowCommand := stringSliceFromAny(input.HandoffNoGateway["cli_start_now_command"])
 	reachableArgs := mapFromAny(input.HandoffReachableGateway["mcp_next_arguments"])
 	connectStartCommand := stringSliceFromAny(input.ConnectNoGateway["foreground_start_command"])
+	connectStartNowCommand := stringSliceFromAny(input.ConnectNoGateway["cli_start_now_command"])
 	connectUserHandoff := mapFromAny(input.ConnectReachableGateway["user_handoff"])
 	handoff := mapFromAny(input.CreatedSession["user_handoff"])
 	mcpFollowUp := mapSliceFromAny(input.CreatedSession["mcp_follow_up"])
@@ -222,9 +224,10 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	targetCommand := stringFromAny(input.CreatedSession["target_command"])
 	forbiddenText := strings.Join(stringSliceFromAny(input.CreatedSession["forbidden"]), "\n") + "\n" + targetCommand + "\n" + copyPaste
 	checks := []Check{
-		{Name: "connect_without_gateway_returns_foreground_start", Passed: input.ConnectNoGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectNoGateway["selected_path"] == "start-foreground-gateway" && input.ConnectNoGateway["ready_to_send_to_human"] == false && containsAllStrings(connectStartCommand, "support-session", "start"), Detail: strings.Join(connectStartCommand, " ")},
+		{Name: "connect_without_gateway_returns_start_now_command", Passed: input.ConnectNoGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectNoGateway["selected_path"] == "start-foreground-gateway" && input.ConnectNoGateway["ready_to_send_to_human"] == false && containsAllStrings(connectStartNowCommand, "support-session", "connect", "--start") && containsAllStrings(connectStartCommand, "support-session", "start"), Detail: strings.Join(connectStartNowCommand, " ")},
 		{Name: "connect_with_gateway_returns_ready_handoff", Passed: input.ConnectReachableGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectReachableGateway["selected_path"] == "created-with-reachable-gateway" && input.ConnectReachableGateway["ready_to_send_to_human"] == true && stringFromAny(connectUserHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion, Detail: stringFromAny(connectUserHandoff["copy_paste_kind"])},
 		{Name: "handoff_without_gateway_selects_foreground_start", Passed: input.HandoffNoGateway["selected_path"] == "start-foreground-gateway", Detail: stringFromAny(input.HandoffNoGateway["selected_path"])},
+		{Name: "handoff_without_gateway_prefers_connect_start", Passed: containsAllStrings(noGatewayStartNowCommand, "support-session", "connect", "--start"), Detail: strings.Join(noGatewayStartNowCommand, " ")},
 		{Name: "foreground_start_command_is_standard_tool", Passed: containsAllStrings(noGatewayCommand, "support-session", "start"), Detail: strings.Join(noGatewayCommand, " ")},
 		{Name: "handoff_with_gateway_selects_create_tool", Passed: input.HandoffReachableGateway["selected_path"] == "create-with-reachable-gateway" && input.HandoffReachableGateway["mcp_next_tool"] == "rdev.support_session.create", Detail: stringFromAny(input.HandoffReachableGateway["selected_path"])},
 		{Name: "create_arguments_include_gateway_and_waitable_target", Passed: stringFromAny(reachableArgs["gateway_url"]) != "" && stringFromAny(reachableArgs["target"]) == "auto", Detail: fmt.Sprintf("%v", reachableArgs)},

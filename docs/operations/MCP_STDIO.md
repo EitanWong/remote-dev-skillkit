@@ -35,8 +35,8 @@ LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
 configured, it creates the attended-temporary support session and returns
 `ready_to_send_to_human=true` with the exact `user_handoff.message` and
 `user_handoff.copy_paste`. If no gateway is present, it returns
-`ready_to_send_to_human=false` with the standard foreground
-`rdev support-session start` command to run in a visible terminal. Agents should
+`ready_to_send_to_human=false` with `cli_start_now_command`, the standard foreground
+`rdev support-session connect --start` command to run in a visible terminal. Agents should
 follow the connect payload instead of choosing between handoff/create/start/plan
 themselves or writing bootstrap, relay, approval-polling, or recovery scripts.
 
@@ -49,7 +49,7 @@ as the normal first step.
 `structuredContent`. Agents should prefer it when a reachable gateway is
 already running. If `gateway_url` is omitted, the tool uses the first configured
 `RDEV_*_GATEWAY_URL`; if no explicit or configured gateway exists, use
-`rdev support-session start`. It creates the scoped attended-temporary ticket
+`rdev support-session connect --start`. It creates the scoped attended-temporary ticket
 and returns a ready target-machine command, join URL, manifest URL, pinned
 manifest root, ticket code, and status watcher command. The returned command
 strings have the real ticket code already filled in. The target command is the standard fallback
@@ -69,7 +69,7 @@ platform command only when a terminal command is needed. The payload also
 includes `target_bootstrap_requirements`; CLI-created sessions can include
 `target_bootstrap_readiness` after probing gateway `/assets` endpoints. If an
 existing gateway cannot serve the verified helper assets for the selected
-platform, Agents should recover with `rdev support-session start` or
+platform, Agents should recover with `rdev support-session connect --start` or
 `rdev support-session prepare --build-assets` instead of asking the target-side
 human to install `rdev` manually.
 
@@ -94,7 +94,7 @@ checked-out source so target bootstraps can download verified helpers when the
 target machine does not already have `rdev`.
 
 When no suitable gateway is running yet, Agents should run
-`rdev support-session start` as a visible foreground CLI process. It starts the
+`rdev support-session connect --start` as a visible foreground CLI process. It starts the
 local gateway, creates the attended-temporary ticket, prints
 `rdev.support-session-started.v1`, mirrors the created session's
 `user_handoff`, `target_command`, `join_url`, `connection_supervision`, and

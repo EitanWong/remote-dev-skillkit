@@ -194,7 +194,8 @@ func TestAcceptanceFreshAgentSupportSession(t *testing.T) {
 		names = append(names, check.Name)
 	}
 	for _, expected := range []string{
-		"handoff_without_gateway_selects_foreground_start",
+		"connect_without_gateway_returns_start_now_command",
+		"handoff_without_gateway_prefers_connect_start",
 		"handoff_with_gateway_selects_create_tool",
 		"auto_approval_connects_first_attended_host",
 		"connected_status_has_user_report",
@@ -226,6 +227,7 @@ func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T)
 		SchemaVersion    string   `json:"schema_version"`
 		SelectedPath     string   `json:"selected_path"`
 		ReadyToSendHuman bool     `json:"ready_to_send_to_human"`
+		StartNowCommand  []string `json:"cli_start_now_command"`
 		StartCommand     []string `json:"foreground_start_command"`
 		AgentNextStep    string   `json:"agent_next_step"`
 	}
@@ -235,7 +237,9 @@ func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T)
 	if payload.SchemaVersion != "rdev.support-session-connect.v1" ||
 		payload.SelectedPath != "start-foreground-gateway" ||
 		payload.ReadyToSendHuman ||
+		!slices.Contains(payload.StartNowCommand, "--start") ||
 		!slices.Contains(payload.StartCommand, "start") ||
+		!strings.Contains(payload.AgentNextStep, "cli_start_now_command") ||
 		!strings.Contains(payload.AgentNextStep, "ready_file.path") {
 		t.Fatalf("unexpected foreground connect payload: %#v", payload)
 	}
@@ -647,13 +651,13 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	}
 	if payload.TargetBootstrapRequirements.SchemaVersion != "rdev.support-session-target-bootstrap-requirements.v1" ||
 		!slices.Contains(payload.TargetBootstrapRequirements.RequiredAssets, "rdev-windows-amd64.exe") ||
-		!slices.Contains(payload.TargetBootstrapRequirements.StandardFix, "rdev support-session start") ||
+		!slices.Contains(payload.TargetBootstrapRequirements.StandardFix, "rdev support-session connect --start") ||
 		!slices.Contains(payload.TargetBootstrapRequirements.Forbidden, "using ExecutionPolicy Bypass") {
 		t.Fatalf("expected Windows bootstrap requirements and standard recovery, got %#v", payload.TargetBootstrapRequirements)
 	}
 	if payload.TargetBootstrapReadiness.SchemaVersion != "rdev.support-session-target-bootstrap-readiness.v1" ||
 		payload.TargetBootstrapReadiness.AllReady ||
-		!strings.Contains(payload.TargetBootstrapReadiness.AgentRule, "support-session start") {
+		!strings.Contains(payload.TargetBootstrapReadiness.AgentRule, "support-session connect --start") {
 		t.Fatalf("expected create to report missing gateway helper assets, got %#v", payload.TargetBootstrapReadiness)
 	}
 	if payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||

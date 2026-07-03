@@ -85,7 +85,7 @@
     },
     {
       "name": "rdev.support_session.connect",
-      "description": "Single high-level Agent entry for 'connect a computer'. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, connection_supervision, and status watcher in one payload. If no gateway is running, returns the standard visible foreground rdev support-session start command instead of failing or making the Agent choose lower-level handoff/create/start/status steps.",
+      "description": "Single high-level Agent entry for 'connect a computer'. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, connection_supervision, and status watcher in one payload. If no gateway is running, returns cli_start_now_command for the standard visible foreground rdev support-session connect --start flow, plus the older support-session start fallback, instead of making the Agent choose lower-level handoff/create/start/status steps.",
       "safety": "Creates a scoped attended-temporary ticket only when a reachable/configured gateway is supplied; otherwise planning only. Does not execute on the target host, install hidden persistence, bypass policy, or mutate firewall/DNS/routes.",
       "inputSchema": {
         "additionalProperties": false,
@@ -145,7 +145,7 @@
     },
     {
       "name": "rdev.support_session.handoff",
-      "description": "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided or a configured RDEV_*_GATEWAY_URL fallback exists, call rdev.support_session.create next; if not, run the returned foreground rdev support-session start command, then read its ready_file.path when terminal stdout is hard to parse. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
+      "description": "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided or a configured RDEV_*_GATEWAY_URL fallback exists, call rdev.support_session.create next; if not, run cli_start_now_command, the visible foreground rdev support-session connect --start command, then read its ready_file.path when terminal stdout is hard to parse. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
       "safety": "Planning only; does not create tickets, start a gateway, approve hosts, execute on the target host, or install persistence.",
       "inputSchema": {
         "additionalProperties": false,
@@ -240,7 +240,7 @@
     },
     {
       "name": "rdev.support_session.create",
-      "description": "Create an attended temporary support session through an already reachable gateway and return a ready user_handoff, target command, status watcher, connection_supervision, and connection_continuity_policy. If gateway_url is omitted, the tool uses the first configured RDEV_*_GATEWAY_URL fallback. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured RDEV_*_GATEWAY_URL hosted/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. Agents should read connection_supervision to wait, report connected=true, and choose standard upgrade/recovery tools; read stable_after_lan_change before promising durable connectivity, prefer user_handoff.message plus user_handoff.copy_paste for the human-facing response, and use the foreground CLI command rdev support-session start when no gateway is running instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+      "description": "Create an attended temporary support session through an already reachable gateway and return a ready user_handoff, target command, status watcher, connection_supervision, and connection_continuity_policy. If gateway_url is omitted, the tool uses the first configured RDEV_*_GATEWAY_URL fallback. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured RDEV_*_GATEWAY_URL hosted/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. Agents should read connection_supervision to wait, report connected=true, and choose standard upgrade/recovery tools; read stable_after_lan_change before promising durable connectivity, prefer user_handoff.message plus user_handoff.copy_paste for the human-facing response, and use rdev support-session connect --start when no gateway is running instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
       "safety": "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
       "inputSchema": {
         "additionalProperties": false,
@@ -288,7 +288,7 @@
     },
     {
       "name": "rdev.support_session.plan",
-      "description": "Create a standardized Agent-native support session plan for review/debug access to gateway startup, recommended gateway URL candidates, configured RDEV_*_GATEWAY_URL fallbacks, verified helper assets, invite creation, localized target commands with built-in candidate fallback/timeout policy, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.create when a gateway is running and the foreground CLI command rdev support-session start when no gateway is running.",
+      "description": "Create a standardized Agent-native support session plan for review/debug access to gateway startup, recommended gateway URL candidates, configured RDEV_*_GATEWAY_URL fallbacks, verified helper assets, invite creation, localized target commands with built-in candidate fallback/timeout policy, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.connect, or rdev support-session connect --start when a local foreground gateway is needed.",
       "safety": "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",
       "inputSchema": {
         "additionalProperties": false,

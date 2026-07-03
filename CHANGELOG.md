@@ -12,12 +12,25 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev support-session connect --start` as the preferred one-command
+  CLI path for fresh Agents when no hosted/relay gateway is configured. It
+  delegates to the visible foreground support-session runner, builds verified
+  Windows/macOS/Linux helper assets when a checkout and Go are available,
+  writes `ready_file.path`, prints the top-level human handoff, and keeps the
+  gateway serving without requiring Agents to hand-run gateway/invite/package
+  steps.
+- Added `cli_start_now_command` to `rdev.support-session-handoff.v1` and
+  `rdev.support-session-connect.v1`. Fresh Agents now receive an explicit
+  standard command to run locally before talking to the target human, while
+  `foreground_start_command` remains as a compatibility fallback for older
+  harnesses.
 - Added `rdev.support-session-handoff.v1` through CLI
   `rdev support-session handoff` and MCP tool `rdev.support_session.handoff`.
   Fresh Agents now get one standard first-contact decision: call
   `rdev.support_session.create` when a gateway URL is already reachable, or run
-  the returned foreground `rdev support-session start` command when no gateway
-  is running. This reduces model-dependent guessing between prepare, create,
+  the returned `cli_start_now_command` foreground
+  `rdev support-session connect --start` command when no gateway is running.
+  This reduces model-dependent guessing between prepare, create,
   start, plan, and ad hoc bootstrap scripts.
 - Added `rdev.connection-attempt-policy.v1` to
   `rdev.support-session-created.v1`. Agents now receive the ordered target
@@ -66,7 +79,7 @@ metadata, status watching, or approval polling by hand.
   `rdev.support-session-target-bootstrap-readiness.v1` probing. Fresh Agents can
   detect that an existing gateway lacks verified helper assets before sending a
   Windows/macOS/Linux terminal command, then recover through
-  `rdev support-session start` or `rdev support-session prepare --build-assets`
+  `rdev support-session connect --start` or `rdev support-session prepare --build-assets`
   instead of asking the target user to install `rdev` manually.
 - Added `rdev gateway serve --rdev-assets-dir` as a lower-level convenience for
   explicitly managed dev gateways that need to serve all platform helper assets.
@@ -146,7 +159,7 @@ metadata, status watching, or approval polling by hand.
   Fresh Agents can now call one "connect a computer" entry first: when a
   reachable or configured gateway exists it creates the session and returns the
   ready `user_handoff`; when no gateway is running it returns the standard
-  visible foreground `rdev support-session start` command instead of failing or
+  `cli_start_now_command` foreground `rdev support-session connect --start` command instead of failing or
   forcing model-dependent handoff/create/start decisions.
 - Added `rdev support-session create` and MCP tool
   `rdev.support_session.create` with schema

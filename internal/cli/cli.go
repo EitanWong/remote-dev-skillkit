@@ -1757,7 +1757,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
 		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
 		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
-		gatewayURL := fs.String("gateway-url", "", "already reachable gateway URL; omit to use configured RDEV_*_GATEWAY_URL or return a foreground start command")
+		gatewayURL := fs.String("gateway-url", "", "already reachable gateway URL; omit to use configured RDEV_*_GATEWAY_URL or return cli_start_now_command")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
 		reason := fs.String("reason", "visible temporary remote support", "support session reason")
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
@@ -1765,6 +1765,8 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for generated local commands")
+		start := fs.Bool("start", false, "when no reachable gateway is configured, start the standard visible foreground gateway in this process")
+		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file when --start is used")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1780,6 +1782,8 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			Locale:            *locale,
 			OperatorTokenFile: *operatorTokenFile,
 			RdevCommand:       *rdevCommand,
+			Start:             *start,
+			ReadyFile:         *readyFile,
 		})
 	case "handoff":
 		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
@@ -1964,6 +1968,8 @@ type supportSessionConnectOptions struct {
 	Locale            string
 	OperatorTokenFile string
 	RdevCommand       string
+	Start             bool
+	ReadyFile         string
 }
 
 type supportSessionPrepareOptions struct {
@@ -1997,6 +2003,20 @@ func (a App) supportSessionPrepare(ctx context.Context, opts supportSessionPrepa
 func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConnectOptions) error {
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
 		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+	}
+	if opts.Start {
+		return a.supportSessionStart(ctx, supportSessionStartOptions{
+			Addr:        opts.Addr,
+			GatewayURL:  opts.GatewayURL,
+			WorkDir:     opts.WorkDir,
+			Target:      opts.Target,
+			Reason:      opts.Reason,
+			TTLSeconds:  opts.TTLSeconds,
+			AutoApprove: opts.AutoApprove,
+			Locale:      opts.Locale,
+			RdevCommand: opts.RdevCommand,
+			ReadyFile:   opts.ReadyFile,
+		})
 	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
@@ -2182,7 +2202,7 @@ func createSupportSessionPayload(ctx context.Context, opts supportSessionCreateO
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
 	}
 	if gatewayURL == "" {
-		return nil, fmt.Errorf("support-session create requires --gateway-url or a configured RDEV_*_GATEWAY_URL; run rdev support-session start if no reachable gateway is running yet")
+		return nil, fmt.Errorf("support-session create requires --gateway-url or a configured RDEV_*_GATEWAY_URL; run rdev support-session connect --start if no reachable gateway is running yet")
 	}
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
 		return nil, fmt.Errorf("ttl-seconds must be between 60 and 86400")
@@ -2238,7 +2258,7 @@ func probeTargetBootstrapReadiness(ctx context.Context, client *http.Client, gat
 		"all_ready":      allReady,
 		"probed":         len(assets) > 0,
 		"assets":         results,
-		"agent_rule":     "if all_ready is false for a platform terminal command, run rdev support-session start or prepare --build-assets instead of asking the target user to install rdev manually",
+		"agent_rule":     "if all_ready is false for a platform terminal command, run rdev support-session connect --start or prepare --build-assets instead of asking the target user to install rdev manually",
 	}
 }
 

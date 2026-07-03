@@ -47,8 +47,8 @@ revocation.
   the high-level "connect a computer" entry. If a reachable or configured
   gateway exists, it returns `ready_to_send_to_human=true` with the exact
   `user_handoff.message` and `user_handoff.copy_paste`. If no gateway is
-  running, it returns `ready_to_send_to_human=false` with the standard visible
-  foreground `rdev support-session start` command. Use
+  running, it returns `ready_to_send_to_human=false` with `cli_start_now_command`, the standard visible foreground
+  `rdev support-session connect --start` command. Use
   `rdev.support_session.handoff` only for review/debug routing details, and use
   `rdev.support_session.plan` only when the connect/handoff output, operator,
   or debug workflow explicitly asks for review-level planning.
@@ -75,13 +75,13 @@ revocation.
 - For a new support session, prefer the high-level connect output. If
   `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only the returned `user_handoff`. If it returns
-  `ready_to_send_to_human=false`, run the returned foreground start command in
+  `ready_to_send_to_human=false`, run the returned `cli_start_now_command` in
   a visible terminal, read `ready_file.path` when needed, then send the started
   payload's top-level `user_handoff`. For lower-level explicit gateway workflows, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
-  yet, run `rdev support-session start` in a visible foreground terminal. It
+  yet, run `rdev support-session connect --start` in a visible foreground terminal. It
   starts the gateway, chooses a target-usable gateway URL candidate, and prints
   the same ready session payload before listening. Use
   `rdev.support_session.plan` or `rdev support-session plan` only for
@@ -109,7 +109,7 @@ revocation.
 - Read `target_bootstrap_requirements` and, for CLI-created sessions,
   `target_bootstrap_readiness` before sending a platform terminal command from
   an existing gateway. If readiness is false, recover with
-  `rdev support-session start` or `rdev support-session prepare --build-assets`
+  `rdev support-session connect --start` or `rdev support-session prepare --build-assets`
   instead of asking the target-side human to install `rdev` manually or writing
   a custom downloader.
 - Do not manually combine `rdev gateway serve` plus `rdev invite create` for
@@ -169,16 +169,16 @@ revocation.
    glue. If configured `RDEV_*_GATEWAY_URL` fallback values are present, keep
    them inside the returned candidate list and target command instead of
    explaining raw tunnel parameters to the human. If no explicit `gateway_url`
-   was supplied, let handoff/create use the configured gateway candidate before
-   falling back to foreground `rdev support-session start`.
+  was supplied, let handoff/create use the configured gateway candidate before
+  falling back to foreground `rdev support-session connect --start`.
 4. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
 5. If no suitable host is active and a reachable gateway already exists, create
    the session with `rdev.support_session.create` or
    `rdev support-session create`; give the target side only the returned
    `target_command` or `join_url`, then watch the returned status command. If
-   no gateway is running yet, run `rdev support-session start` in a visible
-   foreground terminal and send the top-level `user_handoff.message` plus
+   no gateway is running yet, run `rdev support-session connect --start` in a
+   visible foreground terminal and send the top-level `user_handoff.message` plus
    `user_handoff.copy_paste` verbatim; follow `auto_target_rule` when the
    target is unknown. If foreground stdout is hard to parse, read the same
    started payload from returned `ready_file.path`. Use

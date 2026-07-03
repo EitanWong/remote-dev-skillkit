@@ -238,11 +238,14 @@ func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 	})
 	connect := BuildConnectFromHandoff(handoff)
 	startCommand := strings.Join(anyStrings(connect["foreground_start_command"].([]string)), "\x00")
+	startNowCommand := strings.Join(anyStrings(connect["cli_start_now_command"].([]string)), "\x00")
 
 	if connect["schema_version"] != ConnectSchemaVersion ||
 		connect["selected_path"] != "start-foreground-gateway" ||
 		connect["ready_to_send_to_human"] != false ||
+		!strings.Contains(startNowCommand, "support-session\x00connect\x00--start") ||
 		!strings.Contains(startCommand, "support-session\x00start") ||
+		!strings.Contains(connect["agent_next_step"].(string), "cli_start_now_command") ||
 		!strings.Contains(connect["agent_next_step"].(string), "ready_file.path") {
 		t.Fatalf("expected connect payload to route to foreground start, got %#v", connect)
 	}

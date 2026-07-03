@@ -40,8 +40,8 @@ gateway, transport, release, or checksum flags. First call
 `rdev.support_session.connect` through MCP or run `rdev support-session connect`.
 If it returns `ready_to_send_to_human=true`, send only the returned
 `user_handoff.message` plus `user_handoff.copy_paste`. If it returns
-`ready_to_send_to_human=false`, run the returned visible foreground
-`rdev support-session start` command, read `ready_file.path` when stdout is hard to parse, then send only the started payload's top-level `user_handoff.message` plus `user_handoff.copy_paste`. If local `rdev`, gateway state, or target helper assets are unclear,
+`ready_to_send_to_human=false`, run the returned `cli_start_now_command` visible foreground
+`rdev support-session connect --start` command, read `ready_file.path` when stdout is hard to parse, then send only the started payload's top-level `user_handoff.message` plus `user_handoff.copy_paste`. If local `rdev`, gateway state, or target helper assets are unclear,
 call `rdev.support_session.prepare` through MCP or run
 `rdev support-session prepare --build-assets` from the checkout. Follow its `connection_readiness`, `asset_report`, `missing_inputs`,
 and `standard_recovery` fields instead of writing custom bootstrap, approval, or
@@ -51,16 +51,16 @@ same-machine only. If `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`, `RDEV
 `rdev.support_session.create` through MCP or `rdev support-session create`
 through CLI to get the ready target command, join URL, real ticket code,
 manifest root, scoped auto-approval state, and status watch command in one
-payload. Read `target_bootstrap_requirements` and, for CLI-created sessions, `target_bootstrap_readiness`; if readiness is false for a platform command, recover with `rdev support-session start` or `rdev support-session prepare --build-assets` instead of asking the target-side human to install `rdev` manually. Prefer `user_handoff.message` plus `user_handoff.copy_paste` for
+payload. Read `target_bootstrap_requirements` and, for CLI-created sessions, `target_bootstrap_readiness`; if readiness is false for a platform command, recover with `rdev support-session connect --start` or `rdev support-session prepare --build-assets` instead of asking the target-side human to install `rdev` manually. Prefer `user_handoff.message` plus `user_handoff.copy_paste` for
 the human-facing response. When `user_handoff.target` is `auto`, follow
 `user_handoff.auto_target_rule`: send the join URL first and use returned
 platform commands only when a terminal command is needed. The target command already tries ordered Connection
 Entry URLs on the target machine with bounded timeout/retry behavior, so do not
 write custom fallback scripts. Read `connection_continuity_policy`; when `stable_after_lan_change=false`, treat LAN as an opportunistic first path and prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work. If no gateway is
-running yet, run `rdev support-session start` in a visible foreground terminal;
+running yet, run `rdev support-session connect --start` in a visible foreground terminal;
 it prepares verified helper assets when possible, starts the local gateway,
 selects a target-usable gateway URL candidate, prints the same ready session
-payload before listening, and writes that payload to `ready_file.path` as `support-session-ready.json` by default. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session start` so verified helper assets are served automatically. Use
+payload before listening, and writes that payload to `ready_file.path` as `support-session-ready.json` by default. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session connect --start` so verified helper assets are served automatically. Use
 `rdev.support_session.plan` or `rdev support-session plan` only
 for review/debug planning. After giving the target-machine command, watch
 `rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; CLI status can omit `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. Created session payloads include `watch_connection_status_configured_gateway`; use that returned command when configured gateway metadata is present. When

@@ -27,8 +27,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   the high-level "connect a computer" entry. If a reachable or configured
   gateway exists, it returns `ready_to_send_to_human=true` with the exact
   `user_handoff.message` and `user_handoff.copy_paste`. If no gateway is
-  running, it returns `ready_to_send_to_human=false` with the standard visible
-  foreground `rdev support-session start` command. Use
+  running, it returns `ready_to_send_to_human=false` with `cli_start_now_command`, the standard visible foreground
+  `rdev support-session connect --start` command. Use
   `rdev.support_session.handoff` only for review/debug routing details, and use
   `rdev.support_session.plan` only when the connect/handoff output, operator,
   or debug workflow explicitly asks for review-level planning.
@@ -54,7 +54,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - For every new visible support session, prefer the high-level connect output.
   If `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only the returned `user_handoff`. If it returns
-  `ready_to_send_to_human=false`, run the returned foreground start command in
+  `ready_to_send_to_human=false`, run the returned `cli_start_now_command` in
   a visible terminal, read `ready_file.path` when needed, then send the started
   payload's top-level `user_handoff`. For lower-level explicit gateway workflows, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
@@ -62,7 +62,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   one-command session package: it already includes the target command, join URL,
   real ticket code, manifest root, status watcher, and scoped
   attended-temporary auto-approval state. If no gateway is running yet, call
-  `rdev support-session start` in a visible foreground terminal; it prepares
+  `rdev support-session connect --start` in a visible foreground terminal; it prepares
   verified helper assets when possible, starts the gateway, selects a
   target-usable gateway URL candidate, and prints the same ready session payload
   before listening. It also writes the same JSON to `ready_file.path`; use that
@@ -89,7 +89,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - Read `target_bootstrap_requirements` and, for CLI-created sessions,
   `target_bootstrap_readiness` before sending a platform terminal command from
   an existing gateway. If readiness is false, recover with
-  `rdev support-session start` or `rdev support-session prepare --build-assets`
+  `rdev support-session connect --start` or `rdev support-session prepare --build-assets`
   instead of asking the target-side human to install `rdev` manually or writing
   a custom downloader.
 - Do not manually combine `rdev gateway serve` plus `rdev invite create` for
@@ -205,8 +205,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    returned `user_handoff.copy_paste`, `target_command`, or `join_url` to the
    target-side human. If no explicit gateway URL was supplied, let create use a
    configured `RDEV_*_GATEWAY_URL` before asking for configuration. If no
-   gateway exists, run `rdev support-session start` in a visible foreground
-   terminal and send only top-level `user_handoff.message` plus
+   gateway exists, run `rdev support-session connect --start` in a visible
+   foreground terminal and send only top-level `user_handoff.message` plus
    `user_handoff.copy_paste`. Then use returned `connection_supervision` to
    wait, report connection establishment, and recover through standard tools.
    Use `rdev.support_session.plan` or

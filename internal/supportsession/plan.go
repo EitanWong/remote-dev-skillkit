@@ -123,7 +123,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	}
 	workDir := strings.TrimSpace(opts.WorkDir)
 	selectedPath := "start-foreground-gateway"
-	agentNextStep := "run foreground_start_command in a visible terminal, then send the returned user_handoff.message plus user_handoff.copy_paste"
+	agentNextStep := "run cli_start_now_command in a visible terminal, then send the returned user_handoff.message plus user_handoff.copy_paste"
 	mcpNextTool := ""
 	resolvedCreateGatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if resolvedCreateGatewayURL == "" {
@@ -164,6 +164,27 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	} else {
 		startCommand = append(startCommand, "--auto-approve=false")
 	}
+	connectStartCommand := []string{
+		rdevCommand, "support-session", "connect",
+		"--start",
+		"--addr", addr,
+		"--target", target,
+		"--reason", reason,
+		"--ttl-seconds", strconv.Itoa(ttl),
+		"--locale", locale,
+		"--rdev-command", rdevCommand,
+	}
+	if workDir != "" {
+		connectStartCommand = append(connectStartCommand, "--work-dir", workDir)
+	}
+	if gatewayURL != "" {
+		connectStartCommand = append(connectStartCommand, "--gateway-url", gatewayURL)
+	}
+	if opts.AutoApprove {
+		connectStartCommand = append(connectStartCommand, "--auto-approve")
+	} else {
+		connectStartCommand = append(connectStartCommand, "--auto-approve=false")
+	}
 	return map[string]any{
 		"schema_version":           HandoffSchemaVersion,
 		"ok":                       true,
@@ -172,6 +193,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		"agent_next_step":          agentNextStep,
 		"mcp_next_tool":            mcpNextTool,
 		"mcp_next_arguments":       createArgs,
+		"cli_start_now_command":    connectStartCommand,
 		"foreground_start_command": startCommand,
 		"prepare_command": []string{
 			rdevCommand, "support-session", "prepare",
@@ -228,10 +250,11 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 		return payload
 	}
 	payload["ready_to_send_to_human"] = false
+	payload["cli_start_now_command"] = handoff["cli_start_now_command"]
 	payload["foreground_start_command"] = handoff["foreground_start_command"]
 	payload["prepare_command"] = handoff["prepare_command"]
-	payload["agent_next_step"] = "run foreground_start_command in a visible terminal; read ready_file.path if stdout is hard to parse; then send only the started payload's user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
-	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned foreground_start_command first and then send the started payload's top-level user_handoff"
+	payload["agent_next_step"] = "run cli_start_now_command in a visible terminal; it starts the gateway, builds verified helper assets, prints the target command, writes ready_file.path, and waits for the target; then send only the started payload's user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
+	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned cli_start_now_command first and then send the started payload's top-level user_handoff"
 	return payload
 }
 
@@ -478,7 +501,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"requires_human_decision_first": []string{"company or owner authorization when the target is not clearly operator-owned"},
 	}
 	recoveryActions := []string{
-		"prefer rdev support-session start when no gateway is running; it creates the ticket, prints one target command, and watches through support-session status",
+		"prefer rdev support-session connect --start when no gateway is running; it creates the ticket, prints one target command, prepares helper assets, and watches through support-session status",
 		"if local_rdev_usable is false, run go install ./cmd/rdev from a valid checkout or use go run ./cmd/rdev bootstrap agent-plan --repo-root . as a temporary planner",
 		"if target_bootstrap_self_repair is false, rerun rdev support-session prepare --build-assets from a valid checkout before giving commands to targets that may not have rdev installed",
 		"do not write custom PowerShell, relay, approval polling, ticket substitution, or bootstrap glue",
@@ -508,15 +531,16 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			"all_ready":      allAssetsReady,
 			"assets":         assetReports,
 		},
-		"connectivity_strategy":  connectivityStrategy(gatewayURL, target, gatewayCandidates),
-		"connection_readiness":   connectionReadiness,
-		"missing_inputs":         missingInputs,
-		"standard_recovery":      recoveryActions,
-		"target_handoff_policy":  "give the target-side human only the generated target_command or join_url",
-		"forbidden":              []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
-		"recommended_next_step":  recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
-		"command_to_start":       []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
-		"command_to_prepare_all": []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"connectivity_strategy":    connectivityStrategy(gatewayURL, target, gatewayCandidates),
+		"connection_readiness":     connectionReadiness,
+		"missing_inputs":           missingInputs,
+		"standard_recovery":        recoveryActions,
+		"target_handoff_policy":    "give the target-side human only the generated target_command or join_url",
+		"forbidden":                []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
+		"recommended_next_step":    recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
+		"command_to_connect_start": []string{"rdev", "support-session", "connect", "--start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_start":         []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_prepare_all":   []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
 	}, nil
 }
 
@@ -584,7 +608,7 @@ func standardRecoveryActions(actions []string) []string {
 	return []string{
 		"run rdev support-session prepare to inspect local rdev, Go, Git, repository, helper assets, gateway URL, and target command readiness",
 		"if rdev is missing, build it from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
-		"if helper assets are missing, rerun rdev support-session start from a valid checkout so target bootstraps can download verified helpers",
+		"if helper assets are missing, rerun rdev support-session connect --start from a valid checkout so target bootstraps can download verified helpers",
 		"ask one concise question only when authorization, persistence approval, privileged network changes, or a real gateway/relay credential is required",
 	}
 }
@@ -1209,8 +1233,8 @@ func bootstrapRequirements(target string) map[string]any {
 	requirements := map[string]any{
 		"schema_version": "rdev.support-session-target-bootstrap-requirements.v1",
 		"target":         target,
-		"agent_rule":     "support-session start prepares these helper assets automatically; if using an existing gateway, verify the relevant /assets endpoints before sending a platform command",
-		"standard_fix":   []string{"rdev support-session prepare --build-assets", "rdev support-session start"},
+		"agent_rule":     "support-session connect --start prepares these helper assets automatically; if using an existing gateway, verify the relevant /assets endpoints before sending a platform command",
+		"standard_fix":   []string{"rdev support-session prepare --build-assets", "rdev support-session connect --start"},
 		"forbidden":      []string{"telling the target user to install rdev manually as the first recovery step", "writing an ad hoc bootstrap downloader", "using ExecutionPolicy Bypass"},
 	}
 	switch target {
@@ -1632,7 +1656,7 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 		}
 	case "revoked":
 		agentActions = []string{
-			"create a new Connection Entry with rdev.support_session.create or rdev support-session start",
+			"create a new Connection Entry with rdev.support_session.create or rdev support-session connect --start",
 			"send only the new user_handoff message plus copy_paste value to the human",
 			"do not reuse old ticket, manifest root, gateway, or transport metadata",
 		}
@@ -1678,6 +1702,7 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 			"rdev.support_session.prepare",
 			"rdev support-session prepare --build-assets",
 			"rdev.support_session.create",
+			"rdev support-session connect --start",
 			"rdev support-session start",
 			"rdev.connection_entry.plan",
 			"rdev connection-entry run --dry-run",
@@ -1829,9 +1854,9 @@ func supportSessionAssetSpecs(binDir string) []supportSessionAssetSpec {
 func recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady bool) string {
 	switch {
 	case localRdevUsable && allAssetsReady:
-		return "run rdev support-session start and give the generated target_command to the target-side human"
+		return "run rdev support-session connect --start and give the generated target_command to the target-side human"
 	case allAssetsReady:
-		return "use the current rdev executable or checkout command to run support-session start; target-side self-repair assets are ready"
+		return "use the current rdev executable or checkout command to run support-session connect --start; target-side self-repair assets are ready"
 	default:
 		return "prepare helper assets from a valid checkout before relying on one-command targets without preinstalled rdev"
 	}

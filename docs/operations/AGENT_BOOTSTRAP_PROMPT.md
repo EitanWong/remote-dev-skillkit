@@ -114,7 +114,7 @@ Steps:
     `rdev support-session connect`. If it returns `ready_to_send_to_human=true`,
     send only the returned `user_handoff.message` plus
     `user_handoff.copy_paste`. If it returns `ready_to_send_to_human=false`,
-    run the returned visible foreground `rdev support-session start` command,
+    run the returned `cli_start_now_command` visible foreground `rdev support-session connect --start` command,
     read `ready_file.path` when terminal stdout is hard to parse, then send only
     the started payload's top-level `user_handoff.message` plus
     `user_handoff.copy_paste`. If local
@@ -157,11 +157,11 @@ Steps:
     open the page. Also read `target_bootstrap_requirements` and, for CLI
     create calls, `target_bootstrap_readiness`. If an existing gateway cannot
     serve the verified helper assets for the selected platform, use the
-    standard `rdev support-session start` or
+    standard `rdev support-session connect --start` or
     `rdev support-session prepare --build-assets` recovery path instead of
     asking the target-side human to install `rdev` manually or writing a custom
     downloader. If no suitable
-    gateway is running yet, run `rdev support-session start` in a visible
+    gateway is running yet, run `rdev support-session connect --start` in a visible
     foreground terminal. It
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
     are available, starts the local gateway, and prints
