@@ -57,7 +57,10 @@ surface: it can try ordered Connection Entry URLs on the target machine with
 bounded per-candidate timeout/retry behavior before failing. The payload also
 includes `connection_attempt_policy`, so Agents can explain the behavior without
 writing replacement PowerShell, shell, relay, approval polling, or bootstrap
-code. It also includes `connection_supervision`, the Agent-side contract for
+code. After registration, `rdev host serve --transport auto` keeps the signed
+join-manifest gateway candidates and can switch to another reachable candidate
+if the current gateway fails before jobs are processed. It also includes
+`connection_supervision`, the Agent-side contract for
 waiting, proactively reporting `connected=true`, and choosing standard
 prepare/runner/Connection Entry upgrade or recovery tools when the first path is
 LAN-only or times out. It also includes `user_handoff` with a localized
@@ -114,6 +117,10 @@ same recommended gateway URL candidates, and emits target commands that try
 those ordered candidates before failing. The embedded
 `connection_attempt_policy` is the only place Agents should read target-side
 timeout/retry behavior from.
+The embedded `connection_supervision.automatic_downgrade_boundaries` also
+describes post-registration runtime failover across signed join-manifest gateway
+candidates, so Agents should wait/report/recover through standard status tools
+instead of generating relay or polling code.
 The payload also includes `foreground_feedback`: while the foreground command
 is kept open, it emits machine-readable stderr lines prefixed with
 `rdev support session event: `. Agents should report connection success as soon

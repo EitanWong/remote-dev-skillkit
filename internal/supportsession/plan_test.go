@@ -352,6 +352,9 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(supervision["connected_report_rule"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected Agent-side connection supervision contract, got %#v", supervision)
 	}
+	if !strings.Contains(strings.Join(supervision["automatic_downgrade_boundaries"].([]string), "\n"), "signed join-manifest gateway candidates") {
+		t.Fatalf("expected supervision to describe signed gateway candidate runtime failover, got %#v", supervision["automatic_downgrade_boundaries"])
+	}
 	candidateOrder := attemptPolicy["candidate_order"].([]map[string]any)
 	if len(candidateOrder) != 2 ||
 		candidateOrder[0]["join_url"] == "" ||

@@ -120,7 +120,10 @@ revocation.
   tries ordered gateway URL candidates on the target machine with the returned
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
-  polling, or bootstrap scripts.
+  polling, or bootstrap scripts. After registration, `rdev host serve
+  --transport auto` also reuses signed join-manifest gateway candidates and can
+  switch to another reachable candidate if the current gateway fails before
+  jobs are processed.
 - Read returned `agent_connection_runbook` before choosing lower-level
   support-session tools. It tells the Agent when to run `cli_start_now_command`,
   when to send the handoff, how to wait, when to report connected, and how to
@@ -248,7 +251,9 @@ revocation.
    `rdev.hosts.capabilities`, and only then create the smallest scoped job. Do
    not write custom polling loops. If the wait times out or the target does not appear,
    follow `connection_supervision` and `connection_recovery` instead of writing
-   PowerShell, shell, relay, approval, or bootstrap glue. If the
+   PowerShell, shell, relay, approval, or bootstrap glue. Treat
+   `connection_supervision.automatic_downgrade_boundaries` as the standard
+   source for post-registration signed gateway candidate failover. If the
    standard attended-temporary auto-approval contract activated it, verify it is
    the expected machine before creating jobs; otherwise approve it only after
    the operator confirms it is expected.

@@ -148,6 +148,9 @@ have `rdev`. If readiness is false for a platform command, run
 instead of asking the target-side human to install `rdev` manually. The target
 command already tries ordered gateway URL candidates with bounded timeout/retry
 behavior; do not write a custom PowerShell, shell, relay, or polling fallback.
+After the target has registered, `rdev host serve --transport auto` also reuses
+the signed join-manifest gateway candidates and can switch to another reachable
+candidate if the current gateway fails before jobs are processed.
 Read `connection_continuity_policy` as well: if
 `stable_after_lan_change=false`, treat LAN as only the first opportunistic path
 and prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming the
@@ -291,7 +294,10 @@ use the standard `support-session connect --start` or `prepare --build-assets` p
 instead of inventing an install script or telling the target user to assemble
 prerequisites. The command itself loops through ordered Connection Entry URLs on
 the target machine with bounded timeouts/retries, so fallback stays in `rdev`
-instead of Agent-written glue. The same payload includes
+instead of Agent-written glue. After registration, `rdev host serve --transport
+auto` keeps the signed join-manifest gateway candidates and can switch the job
+runtime to another reachable candidate if the current gateway fails before any
+work is processed. The same payload includes
 `user_handoff.message` and `user_handoff.copy_paste`, which is the exact
 human-facing text and command/link the Agent should send. When the target OS is
 unknown, `user_handoff.auto_target_rule` tells the Agent to send the join URL

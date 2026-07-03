@@ -152,7 +152,10 @@ Steps:
     and status watcher in one payload. The target command already tries ordered
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
-    PowerShell, shell, relay, or approval-polling fallback. Read
+    PowerShell, shell, relay, or approval-polling fallback. After registration,
+    `rdev host serve --transport auto` reuses signed join-manifest gateway
+    candidates and can switch to another reachable candidate if the current
+    gateway fails before jobs are processed. Read
     `agent_connection_runbook` first; it is the machine-readable order of
     operations for connecting, waiting, reporting, and recovering without
     custom scripts. Read
@@ -175,7 +178,9 @@ Steps:
     `connection_supervision` after sending the handoff: use its watch call or
     command, report `connected_next_steps.user_report` immediately when
     connected, and use its standard upgrade/recovery paths instead of writing
-    network scripts when a LAN-only path times out. Prefer
+    network scripts when a LAN-only path times out. Treat
+    `connection_supervision.automatic_downgrade_boundaries` as the source of
+    truth for post-registration signed gateway candidate failover. Prefer
     `user_handoff.message` plus `user_handoff.copy_paste` when telling me what
     to run on the target machine. When `user_handoff.target` is `auto`, follow
     `user_handoff.auto_target_rule`: send the join URL first, and use the

@@ -2748,6 +2748,7 @@ type hostServeOptions struct {
 	ReleaseBundlePath           string
 	ReleaseRootPublicKey        string
 	ReleaseRequiredArtifacts    []string
+	ManifestGatewayCandidates   []model.JoinManifestGatewayCandidate
 }
 
 type hostInstallServiceOptions struct {
@@ -2852,6 +2853,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		if err != nil {
 			return err
 		}
+		opts.ManifestGatewayCandidates = manifest.GatewayCandidates
 		if strings.TrimSpace(opts.GatewayURL) == "" {
 			opts.GatewayURL = selectJoinManifestGatewayURL(ctx, gatewayClient, manifest)
 		}
@@ -7453,6 +7455,27 @@ func (a App) runHostJobs(ctx context.Context, opts hostServeOptions, client *htt
 }
 
 func (a App) runAutoHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+	processed, err := a.runAutoHostJobsOnce(ctx, opts, client, hostID, identityFingerprint)
+	if err == nil || processed > 0 || ctx.Err() != nil || len(opts.ManifestGatewayCandidates) == 0 {
+		return processed, err
+	}
+	fallbacks := manifestGatewayFallbackURLs(opts.ManifestGatewayCandidates, opts.GatewayURL)
+	for _, gatewayURL := range fallbacks {
+		if !joinManifestGatewayReachable(ctx, client, gatewayURL, opts.TrustPin) {
+			continue
+		}
+		next := opts
+		next.GatewayURL = gatewayURL
+		fallbackProcessed, fallbackErr := a.runAutoHostJobsOnce(ctx, next, client, hostID, identityFingerprint)
+		if fallbackErr == nil || fallbackProcessed > 0 || ctx.Err() != nil {
+			return fallbackProcessed, fallbackErr
+		}
+		err = fmt.Errorf("%v; fallback gateway %s: %w", err, gatewayURL, fallbackErr)
+	}
+	return processed, err
+}
+
+func (a App) runAutoHostJobsOnce(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
 	wssOpts := opts
 	wssOpts.Transport = "wss"
 	processed, err := a.runWSSHostJobs(ctx, wssOpts, client, hostID, identityFingerprint)
@@ -7472,6 +7495,21 @@ func (a App) runAutoHostJobs(ctx context.Context, opts hostServeOptions, client 
 		return pollProcessed, fmt.Errorf("auto transport failed: wss: %v; long-poll: %v; poll: %w", err, longPollErr, pollErr)
 	}
 	return pollProcessed, nil
+}
+
+func manifestGatewayFallbackURLs(candidates []model.JoinManifestGatewayCandidate, currentGatewayURL string) []string {
+	current := strings.TrimRight(strings.TrimSpace(currentGatewayURL), "/")
+	out := []string{}
+	seen := map[string]bool{current: true, "": true}
+	for _, candidate := range candidates {
+		gatewayURL := strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		if seen[gatewayURL] {
+			continue
+		}
+		seen[gatewayURL] = true
+		out = append(out, gatewayURL)
+	}
+	return out
 }
 
 func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {

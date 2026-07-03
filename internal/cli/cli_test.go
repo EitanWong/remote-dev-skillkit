@@ -4906,6 +4906,71 @@ func TestHostServeAutoFallsBackToLongPoll(t *testing.T) {
 	}
 }
 
+func TestHostServeAutoSwitchesSignedManifestGatewayCandidateAfterFailure(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustPin, err := gw.TrustBundle().Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	processed, err := app.pollAndRunDevJobs(ctx, hostServeOptions{
+		GatewayURL:      "http://127.0.0.1:1",
+		TrustPin:        trustPin,
+		Transport:       "auto",
+		LongPollTimeout: 100 * time.Millisecond,
+		MaxJobs:         1,
+		ManifestGatewayCandidates: []model.JoinManifestGatewayCandidate{
+			{URL: "http://127.0.0.1:1", Kind: "lan-private", Scope: "stale-lan", Recommended: true},
+			{URL: server.URL, Kind: "relay", Scope: "configured-relay"},
+		},
+	}, nil, host.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job after gateway candidate switch, got %d", processed)
+	}
+	completed, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected job succeeded after signed candidate switch, got %s", completed.Status)
+	}
+}
+
 func TestHostServeCancelsRunningCodexJobWhenGatewayJobCanceled(t *testing.T) {
 	requireGitForCLITest(t)
 	gw := gateway.NewMemoryGateway()

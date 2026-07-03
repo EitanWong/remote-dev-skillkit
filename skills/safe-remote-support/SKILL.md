@@ -98,7 +98,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   tries ordered gateway URL candidates on the target machine with the returned
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
-  polling, or bootstrap scripts.
+  polling, or bootstrap scripts. After registration, `rdev host serve
+  --transport auto` also reuses signed join-manifest gateway candidates and can
+  switch to another reachable candidate if the current gateway fails before
+  jobs are processed.
 - Read returned `agent_connection_runbook` before choosing lower-level
   support-session tools. It tells the Agent when to run `cli_start_now_command`,
   when to send the handoff, how to wait, when to report connected, and how to
@@ -111,7 +114,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `mcp_watch_call` or `cli_watch_command` to wait, report
   `connected_next_steps.user_report` as soon as the host connects, and choose
   standard prepare/runner/Connection Entry upgrade or recovery tools when a
-  LAN-only path times out.
+  LAN-only path times out. Treat
+  `connection_supervision.automatic_downgrade_boundaries` as the standard
+  source for post-registration signed gateway candidate failover.
 - Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
   telling the human what to run on the target machine. Do not rewrite the
   command or ask the human to assemble values.

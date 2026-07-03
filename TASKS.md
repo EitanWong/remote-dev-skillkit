@@ -156,6 +156,7 @@
 - [x] Add fresh-Agent bootstrap self-repair acceptance coverage so the local gate fetches join page, Windows/macOS/Linux bootstrap scripts, and helper asset hashes, proving clean targets are not told to install `rdev` manually.
 - [x] Add configured stable fallback acceptance coverage so the local fresh-Agent gate proves `RDEV_RELAY_GATEWAY_URL` is auto-selected, target commands use relay join URLs, and Agent supervision treats the session as durable after LAN changes.
 - [x] Add signed join-manifest gateway candidates so generated support-session bootstraps pass ordered gateway candidates into `rdev host serve`, and the target host selects a reachable signed candidate before registration.
+- [x] Add post-registration runtime fallback across signed join-manifest gateway candidates so `rdev host serve --transport auto` can switch to another reachable candidate when the current gateway fails before jobs are processed.
 - [x] Add foreground `support-session-status.json` output and `rdev.support-session-status-file.v1` metadata so Agents can read the latest machine-readable connection event from `status_file.path` instead of parsing long-running terminal output or writing polling loops.
 - [x] Add regression coverage that drives the foreground status-file watcher from `waiting` to `connected` after a real in-memory host registration, proving Agents can read connected feedback from `status_file.path`.
 - [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.

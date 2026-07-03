@@ -64,6 +64,13 @@ metadata, status watching, or approval polling by hand.
   configured relay/hosted/mesh/VPN/SSH fallback from handoff metadata toward
   target runtime behavior while preserving the existing primary `gateway_url`
   fallback.
+- Added post-registration runtime fallback across signed join-manifest gateway
+  candidates. When `rdev host serve --transport auto` registers through one
+  candidate but that gateway fails before any jobs are processed, the host now
+  probes the remaining signed candidates and reruns the normal WSS -> long-poll
+  -> poll fallback against the next reachable gateway. Support-session
+  continuity and supervision contracts now describe this standard path so
+  Agents wait/recover through `rdev` instead of writing relay or polling code.
 - Added `rdev.support-session-status-file.v1` metadata and default
   `support-session-status.json` output for foreground
   `rdev support-session connect --start` / `start` sessions. Fresh Agents now
