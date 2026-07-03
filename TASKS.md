@@ -137,6 +137,7 @@
 - [x] Let CLI `rdev support-session status --ticket-code ... --wait` auto-select the first configured `RDEV_*_GATEWAY_URL` when `--gateway-url` is omitted, so Agents can report connection feedback without preserving low-level gateway parameters.
 - [x] Add `watch_connection_status_configured_gateway` to created support-session payloads so Agents with configured gateway metadata get a ready status watcher command that omits `--gateway-url`.
 - [x] Add `rdev.support-session-continuity-policy.v1` to created support-session payloads so Agents know whether the current Connection Entry is LAN-dependent or has configured hosted/relay/mesh/VPN/SSH continuity before promising durable work.
+- [x] Add `rdev.support-session-connection-supervision.v1` to created/started/connect payloads so Agents use a standard watch/report/upgrade contract after sending the handoff, instead of writing polling, relay, bootstrap, or network scripts.
 - [x] Add `rdev.connection-attempt-policy.v1` and bounded target-side timeout/retry behavior so Windows/macOS/Linux one-liners fail over quickly instead of hanging on a dead gateway candidate.
 - [x] Add MCP wait support to `rdev.support_session.status` so Agents can wait for connection feedback through the standard tool instead of writing custom polling loops.
 - [x] Add `rdev.support-session-user-handoff.v1` so Agents can send a localized message plus exact copy-paste command/link to humans without rewriting the target command.

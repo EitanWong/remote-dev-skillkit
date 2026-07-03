@@ -264,6 +264,7 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["selected_path"] != "created-with-reachable-gateway" ||
 		connect["ready_to_send_to_human"] != true ||
 		connect["user_handoff"] == nil ||
+		connect["connection_supervision"] == nil ||
 		connect["target_command"] != created["target_command"] ||
 		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected ready connect payload, got %#v", connect)
@@ -327,6 +328,18 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(continuityPolicy["agent_rule"].(string), "LAN as an opportunistic first path") {
 		t.Fatalf("expected structured continuity policy, got %#v", continuityPolicy)
 	}
+	supervision := created["connection_supervision"].(map[string]any)
+	watchCall := supervision["mcp_watch_call"].(map[string]any)
+	watchArgs := watchCall["arguments"].(map[string]any)
+	if supervision["schema_version"] != ConnectionSupervisionSchemaVersion ||
+		supervision["stable_after_lan_change"] != false ||
+		supervision["upgrade_recommended"] != true ||
+		watchCall["tool"] != "rdev.support_session.status" ||
+		watchArgs["ticket_code"] != "ABCD-1234" ||
+		watchArgs["wait"] != true ||
+		!strings.Contains(supervision["connected_report_rule"].(string), "connected_next_steps.user_report") {
+		t.Fatalf("expected Agent-side connection supervision contract, got %#v", supervision)
+	}
 	candidateOrder := attemptPolicy["candidate_order"].([]map[string]any)
 	if len(candidateOrder) != 2 ||
 		candidateOrder[0]["join_url"] == "" ||
@@ -376,6 +389,15 @@ func TestConnectionContinuityPolicyReportsConfiguredStableFallback(t *testing.T)
 		policy["assessment"] != "stable-fallback-configured" ||
 		!strings.Contains(stableKinds, "relay") {
 		t.Fatalf("expected stable relay continuity policy, got %#v", policy)
+	}
+	supervision := connectionSupervision("ABCD-1234", "en", "rdev", map[string]any{
+		"candidate_order": []map[string]any{{"join_url": "https://relay.example.test/join/ABCD-1234", "kind": "relay"}},
+	}, policy)
+	if supervision["schema_version"] != ConnectionSupervisionSchemaVersion ||
+		supervision["stable_after_lan_change"] != true ||
+		supervision["upgrade_recommended"] != false ||
+		!strings.Contains(supervision["upgrade_reason"].(string), "already configured") {
+		t.Fatalf("expected supervision to recognize stable fallback, got %#v", supervision)
 	}
 }
 
@@ -439,7 +461,8 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		handoff["schema_version"] != UserHandoffSchemaVersion ||
 		handoff["copy_paste"] != started["target_command"] ||
 		started["target_command"] != session["target_command"] ||
-		started["join_url"] != session["join_url"] {
+		started["join_url"] != session["join_url"] ||
+		started["connection_supervision"] == nil {
 		t.Fatalf("expected top-level human handoff mirror, got %#v", started)
 	}
 	watch := strings.Join(anyStrings(started["watch_connection_status"].([]string)), "\x00")

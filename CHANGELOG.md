@@ -29,6 +29,13 @@ metadata, status watching, or approval polling by hand.
   LAN/direct paths from sessions that already include configured hosted, relay,
   mesh, VPN, or SSH fallback URLs, then choose standard upgrade/recovery tools
   instead of claiming durable connectivity from a LAN-only first contact.
+- Added `rdev.support-session-connection-supervision.v1` to created, started,
+  and high-level connect payloads. Fresh Agents now get one machine-readable
+  watch/report/upgrade contract after sending the human handoff: wait with the
+  returned MCP or CLI status command, report
+  `connected_next_steps.user_report` when `connected=true`, and use standard
+  prepare/runner/Connection Entry upgrade or recovery tools when a LAN-only path
+  times out instead of writing polling, relay, bootstrap, or network scripts.
 - Added bounded target-side bootstrap attempts: Windows commands use
   `Invoke-RestMethod -TimeoutSec`, and macOS/Linux commands use `curl`
   connect/max-time/retry limits before trying the next Connection Entry URL.
@@ -170,8 +177,8 @@ metadata, status watching, or approval polling by hand.
   `rdev.invites.create`.
 - Added regression coverage for foreground support-session start payloads,
   support-session create payloads, support-session plans, localized target
-  commands, status feedback, verified helper assets, scoped auto-approval, and
-  ticket metadata snapshot copying.
+  commands, connection supervision, status feedback, verified helper assets,
+  scoped auto-approval, and ticket metadata snapshot copying.
 
 ### Changed
 

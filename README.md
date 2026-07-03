@@ -140,9 +140,9 @@ the started payload's top-level `user_handoff.message` plus
 `user_handoff.copy_paste`; do not read nested session fields or rewrite the
 command. Use
 `rdev.support_session.plan` or `rdev support-session plan` only for review/debug
-planning. After giving me the target-machine command, watch
-`rdev.support_session.status`
-or `rdev support-session status --wait`; the CLI status command can omit
+planning. After giving me the target-machine command, read
+`connection_supervision` and watch `rdev.support_session.status` or
+`rdev support-session status --wait`; the CLI status command can omit
 `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. Created session
 payloads include `watch_connection_status_configured_gateway` with this shorter
 watcher command, and Agents should use it when a configured gateway is present.
@@ -279,10 +279,12 @@ running yet, the Agent should run `rdev support-session start` in a visible
 foreground terminal; that command auto-prepares verified helper assets when
 possible, starts the local gateway, and prints
 `rdev.support-session-started.v1` with top-level `user_handoff`,
-`target_command`, `join_url`, and status watcher fields. It keeps the full
-created session under `session` for compatibility, but fresh Agents should send
-only the top-level `user_handoff.message` plus `user_handoff.copy_paste`. It
-also writes the same payload to `ready_file.path` as
+`target_command`, `join_url`, `connection_supervision`, and status watcher
+fields. It keeps the full created session under `session` for compatibility,
+but fresh Agents should send only the top-level `user_handoff.message` plus
+`user_handoff.copy_paste`, then use top-level `connection_supervision` to wait,
+report `connected=true`, and choose standard upgrade/recovery tools. It also
+writes the same payload to `ready_file.path` as
 `support-session-ready.json` under the session work directory by default, so
 Agents can read the file when a long-running foreground terminal makes stdout
 hard to parse. The Agent

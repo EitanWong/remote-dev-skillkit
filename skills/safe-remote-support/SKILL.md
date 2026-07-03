@@ -75,6 +75,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Read returned `connection_supervision` after sending the handoff. Use its
+  `mcp_watch_call` or `cli_watch_command` to wait, report
+  `connected_next_steps.user_report` as soon as the host connects, and choose
+  standard prepare/runner/Connection Entry upgrade or recovery tools when a
+  LAN-only path times out.
 - Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
   telling the human what to run on the target machine. Do not rewrite the
   command or ask the human to assemble values.
@@ -202,7 +207,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    configured `RDEV_*_GATEWAY_URL` before asking for configuration. If no
    gateway exists, run `rdev support-session start` in a visible foreground
    terminal and send only top-level `user_handoff.message` plus
-   `user_handoff.copy_paste`. Use `rdev.support_session.plan` or
+   `user_handoff.copy_paste`. Then use returned `connection_supervision` to
+   wait, report connection establishment, and recover through standard tools.
+   Use `rdev.support_session.plan` or
    `rdev support-session plan` only for review/debug planning.
 7. For lower-level package materialization only, create an invite with
    `rdev.invites.create` when available so the Agent gets `connection_entry`,

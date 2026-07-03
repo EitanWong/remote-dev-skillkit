@@ -145,7 +145,11 @@ Steps:
     PowerShell, shell, relay, or approval-polling fallback. Read
     `connection_continuity_policy`: if `stable_after_lan_change=false`, treat
     LAN as an opportunistic first path and prefer a configured hosted, relay,
-    mesh, VPN, or SSH gateway before promising durable connectivity. Prefer
+    mesh, VPN, or SSH gateway before promising durable connectivity. Read
+    `connection_supervision` after sending the handoff: use its watch call or
+    command, report `connected_next_steps.user_report` immediately when
+    connected, and use its standard upgrade/recovery paths instead of writing
+    network scripts when a LAN-only path times out. Prefer
     `user_handoff.message` plus `user_handoff.copy_paste` when telling me what
     to run on the target machine. When `user_handoff.target` is `auto`, follow
     `user_handoff.auto_target_rule`: send the join URL first, and use the
@@ -162,11 +166,13 @@ Steps:
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
     are available, starts the local gateway, and prints
     `rdev.support-session-started.v1` with top-level `user_handoff`,
-    `target_command`, `join_url`, status watcher, asset report, recommended
-    gateway URL candidates, and connection readiness before listening. It keeps
-    the full created session under `session` for compatibility, but fresh
-    Agents should send only the top-level `user_handoff.message` plus
-    `user_handoff.copy_paste`. It also writes the same JSON payload to
+    `target_command`, `join_url`, `connection_supervision`, status watcher,
+    asset report, recommended gateway URL candidates, and connection readiness
+    before listening. It keeps the full created session under `session` for
+    compatibility, but fresh Agents should send only the top-level
+    `user_handoff.message` plus `user_handoff.copy_paste`, then use top-level
+    `connection_supervision` to wait, report, and recover. It also writes the
+    same JSON payload to
     `ready_file.path`
     (`support-session-ready.json` in the session work directory by default);
     read that file when the long-running foreground terminal makes stdout hard

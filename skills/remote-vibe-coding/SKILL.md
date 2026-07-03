@@ -96,6 +96,10 @@ revocation.
   `stable_after_lan_change=false`, treat LAN as an opportunistic first path and
   prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming durable
   connectivity for long-running work.
+- Read returned `connection_supervision` after sending the handoff. Use its
+  `mcp_watch_call` or `cli_watch_command` to wait, immediately report
+  `connected_next_steps.user_report` when connected, and follow its standard
+  upgrade/recovery paths when the current entry is LAN-only or times out.
 - Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
   telling the human what to run on the target machine. Do not rewrite the
   command or ask the human to assemble values.
@@ -198,13 +202,14 @@ revocation.
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
-6. Watch the host with `rdev.support_session.status` using `wait=true` or
+6. Watch the host using returned `connection_supervision.mcp_watch_call`, or
+   `rdev.support_session.status` with `wait=true`, or
    `rdev support-session status --wait`. When `connected=true`, proactively
    report `connected_next_steps.user_report` to the user, inspect
    `rdev.hosts.capabilities`, and only then create the smallest scoped job. Do
    not write custom polling loops. If the wait times out or the target does not appear,
-   follow `connection_recovery` instead of writing PowerShell, shell, relay,
-   approval, or bootstrap glue. If the
+   follow `connection_supervision` and `connection_recovery` instead of writing
+   PowerShell, shell, relay, approval, or bootstrap glue. If the
    standard attended-temporary auto-approval contract activated it, verify it is
    the expected machine before creating jobs; otherwise approve it only after
    the operator confirms it is expected.

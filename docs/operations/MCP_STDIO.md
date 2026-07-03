@@ -57,8 +57,12 @@ surface: it can try ordered Connection Entry URLs on the target machine with
 bounded per-candidate timeout/retry behavior before failing. The payload also
 includes `connection_attempt_policy`, so Agents can explain the behavior without
 writing replacement PowerShell, shell, relay, approval polling, or bootstrap
-code. It also includes `user_handoff` with a localized `message` and exact
-`copy_paste` value; Agents should send that to the human verbatim. When
+code. It also includes `connection_supervision`, the Agent-side contract for
+waiting, proactively reporting `connected=true`, and choosing standard
+prepare/runner/Connection Entry upgrade or recovery tools when the first path is
+LAN-only or times out. It also includes `user_handoff` with a localized
+`message` and exact `copy_paste` value; Agents should send that to the human
+verbatim. When
 `user_handoff.target` is `auto`, Agents should follow
 `user_handoff.auto_target_rule`: send the join URL first, then use the returned
 platform command only when a terminal command is needed. The payload also
@@ -93,9 +97,10 @@ When no suitable gateway is running yet, Agents should run
 `rdev support-session start` as a visible foreground CLI process. It starts the
 local gateway, creates the attended-temporary ticket, prints
 `rdev.support-session-started.v1`, mirrors the created session's
-`user_handoff`, `target_command`, `join_url`, and watcher at the top level,
-keeps the full `rdev.support-session-created.v1` under `session` for
-compatibility, includes `asset_report` and `connection_readiness`, includes the
+`user_handoff`, `target_command`, `join_url`, `connection_supervision`, and
+watcher at the top level, keeps the full `rdev.support-session-created.v1`
+under `session` for compatibility, includes `asset_report` and
+`connection_readiness`, includes the
 same recommended gateway URL candidates, and emits target commands that try
 those ordered candidates before failing. The embedded
 `connection_attempt_policy` is the only place Agents should read target-side

@@ -32,6 +32,7 @@ const UserHandoffSchemaVersion = "rdev.support-session-user-handoff.v1"
 const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recovery.v1"
 const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-steps.v1"
 const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1"
+const ConnectionSupervisionSchemaVersion = "rdev.support-session-connection-supervision.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -247,10 +248,11 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"join_url":                created["join_url"],
 		"watch_connection_status": created["watch_connection_status"],
 		"watch_connection_status_configured_gateway": created["watch_connection_status_configured_gateway"],
-		"mcp_follow_up":      created["mcp_follow_up"],
-		"agent_next_step":    "send user_handoff.message plus user_handoff.copy_paste to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
-		"human_surface_rule": "humans receive only user_handoff.message plus user_handoff.copy_paste",
-		"agent_rule":         "Agents should call rdev.support_session.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
+		"connection_supervision":                     created["connection_supervision"],
+		"mcp_follow_up":                              created["mcp_follow_up"],
+		"agent_next_step":                            "send user_handoff.message plus user_handoff.copy_paste to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
+		"human_surface_rule":                         "humans receive only user_handoff.message plus user_handoff.copy_paste",
+		"agent_rule":                                 "Agents should call rdev.support_session.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
 			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
@@ -315,11 +317,12 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"join_url":                session["join_url"],
 		"watch_connection_status": session["watch_connection_status"],
 		"watch_connection_status_configured_gateway": session["watch_connection_status_configured_gateway"],
-		"mcp_follow_up":         session["mcp_follow_up"],
-		"session":               session,
-		"asset_report":          opts.AssetReport,
-		"connection_readiness":  opts.ConnectionReadiness,
-		"connectivity_strategy": opts.ConnectivityStrategy,
+		"connection_supervision":                     session["connection_supervision"],
+		"mcp_follow_up":                              session["mcp_follow_up"],
+		"session":                                    session,
+		"asset_report":                               opts.AssetReport,
+		"connection_readiness":                       opts.ConnectionReadiness,
+		"connectivity_strategy":                      opts.ConnectivityStrategy,
 		"agent_flow": []string{
 			"keep this process running while the target host connects",
 			"give the target-side human only user_handoff.message plus user_handoff.copy_paste",
@@ -960,6 +963,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"user_handoff":                  userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
 		"connection_attempt_policy":     attemptPolicy,
 		"connection_continuity_policy":  continuityPolicy,
+		"connection_supervision":        connectionSupervision(opts.Ticket.Code, locale, rdevCommand, attemptPolicy, continuityPolicy),
 		"target_bootstrap_requirements": bootstrapRequirements,
 		"target_bootstrap_readiness":    opts.TargetBootstrapReadiness,
 		"watch_connection_status":       statusCommand,
@@ -1142,6 +1146,62 @@ func connectionContinuityPolicy(candidates []GatewayURLCandidate) map[string]any
 		"requires_operator_approval_for": []string{"opening ports, router/NAT/firewall/DNS/route changes", "installing tunnel, mesh, VPN, service, driver, or persistent helper components", "creating or editing SSH credentials/config", "using paid hosted relay or cloud resources", "turning a temporary third-party session into managed persistence"},
 		"forbidden":                      []string{"Agent-authored polling loops", "custom PowerShell or shell relay/bootstrap scripts", "asking humans to assemble ticket/root/gateway/transport/checksum values", "ExecutionPolicy Bypass", "hidden install or persistence"},
 		"agent_rule":                     "treat LAN as an opportunistic first path, not the reliability plan; when stable_after_lan_change is false, prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work before claiming robust connectivity",
+	}
+}
+
+func connectionSupervision(ticketCode, locale, rdevCommand string, attemptPolicy, continuityPolicy map[string]any) map[string]any {
+	ticketCode = strings.TrimSpace(ticketCode)
+	locale = strings.TrimSpace(locale)
+	if locale == "" {
+		locale = "auto"
+	}
+	rdevCommand = strings.TrimSpace(rdevCommand)
+	if rdevCommand == "" {
+		rdevCommand = "rdev"
+	}
+	stableAfterLANChange, _ := continuityPolicy["stable_after_lan_change"].(bool)
+	assessment, _ := continuityPolicy["assessment"].(string)
+	candidateOrder, _ := attemptPolicy["candidate_order"]
+	upgradeRecommended := !stableAfterLANChange
+	upgradeReason := "stable hosted/relay/mesh/VPN/SSH fallback already configured"
+	if upgradeRecommended {
+		upgradeReason = "current Connection Entry has no configured stable fallback beyond direct/LAN/explicit candidates"
+	}
+	return map[string]any{
+		"schema_version": ConnectionSupervisionSchemaVersion,
+		"intent":         "agent-side-watch-report-and-standard-upgrade-contract",
+		"ticket_code":    ticketCode,
+		"locale":         locale,
+		"mcp_watch_call": map[string]any{
+			"tool": "rdev.support_session.status",
+			"arguments": map[string]any{
+				"ticket_code": ticketCode,
+				"locale":      locale,
+				"wait":        true,
+			},
+		},
+		"cli_watch_command":     []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale},
+		"connected_report_rule": "when status.connected=true, immediately send connected_next_steps.user_report to the user before creating jobs",
+		"pending_approval_rule": "if status=pending-approval, approve only the expected host or wait for scoped attended-temporary auto-approval; do not ask the target human for ticket/root/gateway/transport",
+		"timeout_recovery_tools": []map[string]any{
+			{"tool": "rdev.support_session.status", "arguments": map[string]any{"ticket_code": ticketCode, "locale": locale, "wait": true}},
+			{"tool": "rdev.support_session.prepare", "arguments": map[string]any{"target": "auto", "build_assets": true}},
+		},
+		"timeout_recovery_commands": [][]string{
+			{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale},
+			{rdevCommand, "support-session", "prepare", "--target", "auto", "--build-assets"},
+		},
+		"candidate_order":                candidateOrder,
+		"continuity_assessment":          assessment,
+		"stable_after_lan_change":        stableAfterLANChange,
+		"upgrade_recommended":            upgradeRecommended,
+		"upgrade_reason":                 upgradeReason,
+		"standard_upgrade_paths":         []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence approval", "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
+		"automatic_downgrade_boundaries": []string{"target command owns ordered URL fallback and bounded timeouts", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "status timeout returns connection_recovery for standard recovery"},
+		"requires_operator_approval_for": continuityPolicy["requires_operator_approval_for"],
+		"agent_rule":                     "after sending user_handoff, use this supervision contract to wait, report connected=true, and choose standard upgrade/recovery tools; do not write polling, relay, bootstrap, or network mutation scripts",
+		"human_surface_rule":             "humans receive only user_handoff.message plus user_handoff.copy_paste; supervision fields are for the Agent runtime",
+		"forbidden":                      []string{"custom polling loops", "Agent-authored PowerShell or shell relay/bootstrap scripts", "manual ticket/root/gateway/transport assembly", "ExecutionPolicy Bypass", "hidden install or persistence"},
 	}
 }
 

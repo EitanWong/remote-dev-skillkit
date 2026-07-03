@@ -211,9 +211,11 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	handoff := mapFromAny(input.CreatedSession["user_handoff"])
 	mcpFollowUp := mapSliceFromAny(input.CreatedSession["mcp_follow_up"])
 	configuredWatcher := mapFromAny(input.CreatedSession["watch_connection_status_configured_gateway"])
+	supervision := mapFromAny(input.CreatedSession["connection_supervision"])
 	readyFile := mapFromAny(input.StartedSession["ready_file"])
 	session := mapFromAny(input.StartedSession["session"])
 	startedHandoff := mapFromAny(input.StartedSession["user_handoff"])
+	startedSupervision := mapFromAny(input.StartedSession["connection_supervision"])
 	connectedNext := mapFromAny(input.ConnectedStatus["connected_next_steps"])
 	recoveryForbidden := strings.Join(stringSliceFromAny(input.WaitingRecovery["forbidden"]), "\n")
 	copyPaste := stringFromAny(handoff["copy_paste"])
@@ -230,7 +232,9 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "created_session_copy_paste_is_not_rewritten_placeholder", Passed: copyPaste == targetCommand && !strings.Contains(copyPaste, "<ticket-code>") && !strings.Contains(copyPaste, "ExecutionPolicy Bypass"), Detail: copyPaste},
 		{Name: "created_session_has_waiting_mcp_followup", Passed: len(mcpFollowUp) > 0 && stringFromAny(mcpFollowUp[0]["tool"]) == "rdev.support_session.status" && boolFromAny(mapFromAny(mcpFollowUp[0]["arguments"])["wait"]), Detail: fmt.Sprintf("%v", mcpFollowUp)},
 		{Name: "configured_gateway_watcher_omits_gateway_url", Passed: !strings.Contains(strings.Join(stringSliceFromAny(configuredWatcher["command"]), " "), "--gateway-url"), Detail: strings.Join(stringSliceFromAny(configuredWatcher["command"]), " ")},
+		{Name: "created_session_has_connection_supervision", Passed: stringFromAny(supervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(mapFromAny(supervision["mcp_watch_call"])["tool"]) == "rdev.support_session.status" && boolFromAny(mapFromAny(mapFromAny(supervision["mcp_watch_call"])["arguments"])["wait"]) && strings.Contains(stringFromAny(supervision["connected_report_rule"]), "connected_next_steps.user_report"), Detail: stringFromAny(supervision["upgrade_reason"])},
 		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == true && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
+		{Name: "started_payload_has_top_level_supervision", Passed: stringFromAny(startedSupervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(startedSupervision["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(startedSupervision["continuity_assessment"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
 		{Name: "auto_approval_connects_first_attended_host", Passed: input.Host.Status == model.HostStatusActive && input.ConnectedStatus["connected"] == true, Detail: string(input.Host.Status)},
