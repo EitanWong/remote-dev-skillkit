@@ -377,6 +377,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	watchRunbook := runbook["watch"].(map[string]any)
 	standardEntry := runbook["standard_entry_tool"].(map[string]any)
 	lowLevelEntry := runbook["low_level_entry_rule"].(map[string]any)
+	failurePrevention := runbook["fresh_agent_failure_prevention"].(map[string]any)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		runbook["phase"] != "created" ||
 		watchRunbook["mcp_tool"] != "rdev.support_session.status" ||
@@ -385,6 +386,12 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(strings.Join(runbook["forbidden"].([]string), "\n"), "Agent-authored PowerShell") ||
 		!strings.Contains(strings.Join(lowLevelEntry["do_not_start_with"].([]string), "\n"), "rdev.connection_entry.plan") {
 		t.Fatalf("expected Agent connection runbook, got %#v", runbook)
+	}
+	if failurePrevention["schema_version"] != FreshAgentFailurePreventionSchemaVersion ||
+		!strings.Contains(strings.Join(failurePrevention["known_failure_pattern"].([]string), "\n"), "rdev is required") ||
+		!strings.Contains(strings.Join(failurePrevention["required_standard_path"].([]string), "\n"), "cli_start_now_command") ||
+		!strings.Contains(strings.Join(failurePrevention["forbidden_agent_generated_workarounds"].([]string), "\n"), "ExecutionPolicy Bypass") {
+		t.Fatalf("expected fresh-Agent failure-prevention contract, got %#v", failurePrevention)
 	}
 	followUp := created["mcp_follow_up"].([]map[string]any)
 	if len(followUp) == 0 || followUp[0]["arguments"].(map[string]any)["wait"] != true {

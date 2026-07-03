@@ -52,7 +52,12 @@ one-message flow:
     `rdev host serve` and the target host can select a reachable signed
     candidate before registration;
 13. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
-   gateway, transport, or bootstrap glue.
+   gateway, transport, or bootstrap glue;
+14. include `agent_connection_runbook.fresh_agent_failure_prevention`, a
+   machine-readable regression guard for real fresh-Agent failures such as
+   manual gateway/invite/bootstrap assembly, missing helper assets that produce
+   `rdev is required`, background gateway workarounds, custom approval polling,
+   and Agent-written PowerShell/shell setup.
 
 The command writes `report.json` with schema
 `rdev.acceptance.fresh-agent-support-session.v1`. A passing report proves the

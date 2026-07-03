@@ -86,6 +86,12 @@ asking humans or writing probes, then use the `recommended=true` item from `gate
 commands and should not ask humans to assemble gateway URLs. Wildcard listen
 addresses such as `0.0.0.0` are never a
 target URL; loopback candidates are same-machine only. If
+`agent_connection_runbook.fresh_agent_failure_prevention` is present, read it
+before writing setup code: it captures real fresh-Agent failure patterns such
+as manual gateway/invite/bootstrap glue, missing helper assets that produce
+`rdev is required`, background gateway workarounds, custom approval polling,
+and Agent-written PowerShell/shell setup.
+If
 `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
 `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
 configured, support-session tools append those hosted/relay/mesh/VPN/SSH

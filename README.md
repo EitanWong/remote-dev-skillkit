@@ -125,7 +125,15 @@ operator-provided, or configured hosted/relay/mesh/VPN/SSH fallback and gives
 the standard next action. Also read `agent_connection_runbook`; it is the
 machine-readable order of operations for fresh Agents: run the standard start
 command when needed, send only the handoff, wait, report `connected=true`, and
-recover without custom scripts. If a reachable gateway is already running, `connect` returns
+recover without custom scripts. Read
+`agent_connection_runbook.fresh_agent_failure_prevention` before writing any
+setup code: it captures known bad fresh-Agent failure patterns such as manual
+`gateway serve` plus `invite create`, missing helper assets that make Windows
+say `rdev is required`, background gateway glue, custom approval polling, and
+Agent-written PowerShell/shell bootstraps. If you are about to write one of
+those workarounds, stop and use the returned `cli_start_now_command`,
+`ready_file.path`, `status_file.path`, `connection_supervision`, or
+`rdev.support_session.prepare` recovery path instead. If a reachable gateway is already running, `connect` returns
 `rdev.support-session-connect.v1` with `ready_to_send_to_human=true`; if no
 gateway is running, it returns `ready_to_send_to_human=false` plus the
 `cli_start_now_command`. If a lower-level path is explicitly needed, call
