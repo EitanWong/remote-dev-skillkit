@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	neturl "net/url"
 	"os"
@@ -35,6 +36,7 @@ const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-ste
 const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1"
 const ConnectionSupervisionSchemaVersion = "rdev.support-session-connection-supervision.v1"
 const GatewayCandidatePreflightSchemaVersion = "rdev.support-session-gateway-candidate-preflight.v1"
+const ConnectivityHelperPreflightSchemaVersion = "rdev.support-session-connectivity-helper-preflight.v1"
 const AgentConnectionRunbookSchemaVersion = "rdev.support-session-agent-runbook.v1"
 const FreshAgentFailurePreventionSchemaVersion = "rdev.support-session-fresh-agent-failure-prevention.v1"
 
@@ -96,6 +98,16 @@ type GatewayEnvCandidate struct {
 	Kind   string
 	Scope  string
 	Reason string
+}
+
+type connectivityHelperDefinition struct {
+	ID               string
+	Kind             string
+	GatewayEnv       string
+	StartArgvEnv     string
+	InstallActionEnv string
+	AllowedTools     []string
+	ApprovalRequired []string
 }
 
 func BuildHandoff(opts HandoffOptions) map[string]any {
@@ -290,6 +302,7 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"watch_connection_status_configured_gateway": created["watch_connection_status_configured_gateway"],
 		"connection_supervision":                     created["connection_supervision"],
 		"gateway_candidate_preflight":                created["gateway_candidate_preflight"],
+		"connectivity_helper_preflight":              created["connectivity_helper_preflight"],
 		"agent_connection_runbook":                   created["agent_connection_runbook"],
 		"mcp_follow_up":                              created["mcp_follow_up"],
 		"agent_next_step":                            "send user_handoff.message plus user_handoff.copy_paste to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
@@ -380,6 +393,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			opts.GatewayCandidatePreflight,
 			session["gateway_candidate_preflight"],
 		),
+		"connectivity_helper_preflight": session["connectivity_helper_preflight"],
 		"agent_connection_runbook": firstNonNil(
 			session["agent_connection_runbook"],
 			agentConnectionRunbook(agentConnectionRunbookOptions{
@@ -541,13 +555,15 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		rdevPath = currentExecutable
 	}
 	target := normalizeTarget(opts.Target)
+	helperPreflight := connectivityHelperPreflight()
 	connectionReadiness := map[string]any{
-		"ready":                        localRdevUsable || allAssetsReady,
-		"local_rdev_usable":            localRdevUsable,
-		"target_bootstrap_self_repair": allAssetsReady,
-		"gateway_url":                  gatewayURL,
-		"gateway_url_candidates":       gatewayCandidates,
-		"gateway_candidate_preflight":  gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"ready":                         localRdevUsable || allAssetsReady,
+		"local_rdev_usable":             localRdevUsable,
+		"target_bootstrap_self_repair":  allAssetsReady,
+		"gateway_url":                   gatewayURL,
+		"gateway_url_candidates":        gatewayCandidates,
+		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"connectivity_helper_preflight": helperPreflight,
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
 			Phase:       "prepare",
 			Status:      "not-created",
@@ -592,8 +608,9 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			"all_ready":      allAssetsReady,
 			"assets":         assetReports,
 		},
-		"connectivity_strategy":       connectivityStrategy(gatewayURL, target, gatewayCandidates),
-		"gateway_candidate_preflight": gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"connectivity_strategy":         connectivityStrategy(gatewayURL, target, gatewayCandidates),
+		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"connectivity_helper_preflight": helperPreflight,
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
 			Phase:       "prepare",
 			Status:      "not-created",
@@ -1136,6 +1153,287 @@ func gatewayEnvCandidatesFromEnv() []GatewayEnvCandidate {
 	return out
 }
 
+func connectivityHelperPreflight() map[string]any {
+	definitions := connectivityHelperDefinitions()
+	helpers := make([]map[string]any, 0, len(definitions))
+	configured := []string{}
+	readyCount := 0
+	for _, definition := range definitions {
+		gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv(definition.GatewayEnv)), "/")
+		startArgvRaw := strings.TrimSpace(os.Getenv(definition.StartArgvEnv))
+		installActionRaw := strings.TrimSpace(os.Getenv(definition.InstallActionEnv))
+		report := map[string]any{
+			"id":                 definition.ID,
+			"kind":               definition.Kind,
+			"gateway_env":        definition.GatewayEnv,
+			"start_argv_env":     definition.StartArgvEnv,
+			"install_action_env": definition.InstallActionEnv,
+			"gateway_configured": gatewayURL != "",
+			"start_configured":   startArgvRaw != "",
+			"install_configured": installActionRaw != "",
+			"allowed_tools":      definition.AllowedTools,
+			"approval_required":  definition.ApprovalRequired,
+			"status":             "not-configured",
+		}
+		if gatewayURL != "" {
+			report["gateway_url"] = gatewayURL
+			configured = append(configured, definition.ID)
+		}
+		if startArgvRaw != "" {
+			argv, tool, err := parseHelperStartArgv(startArgvRaw, definition.StartArgvEnv, definition.AllowedTools)
+			if err != nil {
+				report["status"] = "invalid-start-argv"
+				report["error"] = err.Error()
+			} else {
+				report["start_tool"] = tool
+				report["start_argc"] = len(argv)
+				report["start_argv_preview"] = safeArgvPreview(argv)
+				if gatewayURL != "" {
+					report["status"] = "ready-to-use-after-approval-check"
+					readyCount++
+				} else {
+					report["status"] = "start-argv-without-gateway"
+				}
+			}
+		}
+		if installActionRaw != "" {
+			actionReport := parseHelperInstallActionReport(installActionRaw, definition.InstallActionEnv, definition.AllowedTools)
+			report["install_action"] = actionReport
+			if actionReport["valid"] == false && report["status"] == "not-configured" {
+				report["status"] = "invalid-install-action"
+			}
+		}
+		helpers = append(helpers, report)
+	}
+	return map[string]any{
+		"schema_version":        ConnectivityHelperPreflightSchemaVersion,
+		"intent":                "standard-read-only-helper-configuration-preflight-for-adaptive-connectivity",
+		"helpers":               helpers,
+		"configured_helper_ids": configured,
+		"ready_helper_count":    readyCount,
+		"auto_execute":          false,
+		"standard_next_step":    "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run when helper execution is needed; do not write custom SSH, relay, mesh, VPN, shell, or PowerShell startup code",
+		"agent_rule":            "read this before asking network questions or writing tunnel commands; if a helper is configured, use standard Connection Entry runner metadata and approval boundaries",
+		"forbidden": []string{
+			"ExecutionPolicy Bypass",
+			"encoded shell commands",
+			"shell command-string wrappers",
+			"printing credentials or private keys",
+			"installing services, drivers, firewall, DNS, route, cloud, or paid resources without explicit approval",
+		},
+	}
+}
+
+func connectivityHelperDefinitions() []connectivityHelperDefinition {
+	return []connectivityHelperDefinition{
+		{
+			ID:               "existing-ssh-tunnel",
+			Kind:             "ssh",
+			GatewayEnv:       "RDEV_SSH_GATEWAY_URL",
+			StartArgvEnv:     "RDEV_SSH_TUNNEL_START_ARGV_JSON",
+			InstallActionEnv: "RDEV_SSH_INSTALL_ACTION_JSON",
+			AllowedTools:     []string{"ssh"},
+			ApprovalRequired: []string{"new keys", "config edits", "ambiguous identities", "privileged ports"},
+		},
+		{
+			ID:               "existing-frp-or-chisel-relay",
+			Kind:             "relay",
+			GatewayEnv:       "RDEV_RELAY_GATEWAY_URL",
+			StartArgvEnv:     "RDEV_RELAY_START_ARGV_JSON",
+			InstallActionEnv: "RDEV_RELAY_INSTALL_ACTION_JSON",
+			AllowedTools:     []string{"frpc", "chisel"},
+			ApprovalRequired: []string{"download/install", "relay credential creation", "public port changes", "paid relay", "persistent service"},
+		},
+		{
+			ID:               "existing-headscale-tailscale-mesh",
+			Kind:             "mesh",
+			GatewayEnv:       "RDEV_MESH_GATEWAY_URL",
+			StartArgvEnv:     "RDEV_MESH_START_ARGV_JSON",
+			InstallActionEnv: "RDEV_MESH_INSTALL_ACTION_JSON",
+			AllowedTools:     []string{"tailscale"},
+			ApprovalRequired: []string{"new enrollment", "auth key use", "ACL changes", "DNS changes", "service changes"},
+		},
+		{
+			ID:               "existing-wireguard-vpn",
+			Kind:             "vpn",
+			GatewayEnv:       "RDEV_VPN_GATEWAY_URL",
+			StartArgvEnv:     "RDEV_VPN_START_ARGV_JSON",
+			InstallActionEnv: "RDEV_VPN_INSTALL_ACTION_JSON",
+			AllowedTools:     []string{"wg", "wg-quick"},
+			ApprovalRequired: []string{"key creation", "profile import", "route/DNS/firewall mutation", "persistent tunnel start"},
+		},
+	}
+}
+
+func parseHelperStartArgv(raw, envName string, allowedTools []string) ([]string, string, error) {
+	var argv []string
+	if err := json.Unmarshal([]byte(raw), &argv); err != nil {
+		return nil, "", fmt.Errorf("%s must be a JSON argv array: %w", envName, err)
+	}
+	if len(argv) == 0 {
+		return nil, "", fmt.Errorf("%s must contain at least one argv item", envName)
+	}
+	for i, arg := range argv {
+		if strings.TrimSpace(arg) == "" {
+			return nil, "", fmt.Errorf("%s item %d must not be empty", envName, i)
+		}
+	}
+	if err := rejectUnsafeArgv(argv, envName); err != nil {
+		return nil, "", err
+	}
+	tool := executableBaseName(argv[0])
+	if !helperToolAllowed(tool, allowedTools) {
+		return nil, "", fmt.Errorf("%s starts %q, but only allows: %s", envName, tool, strings.Join(allowedTools, ", "))
+	}
+	return argv, tool, nil
+}
+
+func parseHelperInstallActionReport(raw, envName string, allowedTools []string) map[string]any {
+	var action struct {
+		SchemaVersion     string   `json:"schema_version"`
+		Tool              string   `json:"tool"`
+		Argv              []string `json:"argv"`
+		Scope             string   `json:"scope"`
+		Reason            string   `json:"reason"`
+		ExpectedSHA256    string   `json:"expected_sha256"`
+		RequiresElevation bool     `json:"requires_elevation"`
+	}
+	report := map[string]any{"valid": false, "env": envName}
+	if err := json.Unmarshal([]byte(raw), &action); err != nil {
+		report["error"] = fmt.Sprintf("%s must be a JSON dependency install action: %v", envName, err)
+		return report
+	}
+	tool := executableBaseName(action.Tool)
+	report["tool"] = tool
+	report["scope"] = action.Scope
+	report["reason"] = action.Reason
+	report["has_expected_sha256"] = strings.TrimSpace(action.ExpectedSHA256) != ""
+	report["requires_elevation"] = action.RequiresElevation
+	if tool == "" {
+		report["error"] = envName + " must include a non-empty tool"
+		return report
+	}
+	if !helperToolAllowed(tool, allowedTools) {
+		report["error"] = fmt.Sprintf("%s installs %q, but only allows: %s", envName, tool, strings.Join(allowedTools, ", "))
+		return report
+	}
+	if len(action.Argv) == 0 {
+		report["error"] = envName + " must include a non-empty argv array"
+		return report
+	}
+	if err := rejectUnsafeArgv(action.Argv, envName); err != nil {
+		report["error"] = err.Error()
+		return report
+	}
+	if action.RequiresElevation {
+		report["error"] = envName + " requires elevation; use a reviewed managed package/service plan instead"
+		return report
+	}
+	scope := strings.TrimSpace(action.Scope)
+	if scope == "" {
+		scope = "user"
+	}
+	switch scope {
+	case "user", "workspace", "attended-visible", "managed-approved":
+	default:
+		report["error"] = fmt.Sprintf("%s has unsupported install scope %q", envName, scope)
+		return report
+	}
+	if strings.TrimSpace(action.ExpectedSHA256) != "" && !isHexSHA256(action.ExpectedSHA256) {
+		report["error"] = envName + " expected_sha256 must be a hex SHA-256 value"
+		return report
+	}
+	report["valid"] = true
+	report["argc"] = len(action.Argv)
+	report["argv_preview"] = safeArgvPreview(action.Argv)
+	return report
+}
+
+func safeArgvPreview(argv []string) []string {
+	if len(argv) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(argv))
+	for i, arg := range argv {
+		if i == 0 {
+			out = append(out, executableBaseName(arg))
+			continue
+		}
+		lower := strings.ToLower(arg)
+		if strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "key") || strings.Contains(lower, "password") {
+			out = append(out, "<redacted>")
+			continue
+		}
+		out = append(out, arg)
+	}
+	if len(out) > 8 {
+		return append(out[:8], "...")
+	}
+	return out
+}
+
+func executableBaseName(value string) string {
+	normalized := strings.ReplaceAll(value, "\\", "/")
+	parts := strings.Split(normalized, "/")
+	base := strings.TrimSpace(parts[len(parts)-1])
+	return strings.TrimSuffix(strings.ToLower(base), ".exe")
+}
+
+func helperToolAllowed(tool string, allowed []string) bool {
+	tool = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(tool)), ".exe")
+	for _, value := range allowed {
+		if tool == strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".exe") {
+			return true
+		}
+	}
+	return false
+}
+
+func rejectUnsafeArgv(argv []string, label string) error {
+	if len(argv) == 0 {
+		return nil
+	}
+	tool := executableBaseName(argv[0])
+	for _, arg := range argv[1:] {
+		lower := strings.ToLower(strings.TrimSpace(arg))
+		if strings.EqualFold(arg, "bypass") {
+			return fmt.Errorf("%s must not use ExecutionPolicy Bypass", label)
+		}
+		if lower == "-encodedcommand" || lower == "-enc" {
+			return fmt.Errorf("%s must not use encoded shell commands", label)
+		}
+		if !isShellTool(tool) {
+			continue
+		}
+		if lower == "-c" || lower == "/c" || lower == "-command" {
+			return fmt.Errorf("%s must use argv execution, not shell command-string execution", label)
+		}
+	}
+	return nil
+}
+
+func isShellTool(tool string) bool {
+	switch tool {
+	case "sh", "bash", "zsh", "cmd", "powershell", "pwsh":
+		return true
+	default:
+		return false
+	}
+}
+
+func isHexSHA256(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 64 {
+		return false
+	}
+	for _, ch := range value {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 func appendConfiguredGatewayCandidates(candidates []GatewayURLCandidate, envCandidates []GatewayEnvCandidate) []GatewayURLCandidate {
 	for _, envCandidate := range envCandidates {
 		url := strings.TrimRight(strings.TrimSpace(envCandidate.URL), "/")
@@ -1301,6 +1599,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 	}
 	attemptPolicy := connectionAttemptPolicy(gatewayCandidates, joinURLs)
 	continuityPolicy := connectionContinuityPolicy(gatewayCandidates)
+	helperPreflight := connectivityHelperPreflight()
 	runtimeGatewayCandidates := runtimeGatewayCandidates(gatewayCandidates)
 	windowsCommand := windowsBootstrapCommand(joinURLs, runtimeGatewayCandidates)
 	macLinuxCommand := macLinuxBootstrapCommand(joinURLs, runtimeGatewayCandidates)
@@ -1334,28 +1633,29 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"--locale", locale,
 	}
 	return map[string]any{
-		"schema_version":               CreatedSchemaVersion,
-		"ok":                           true,
-		"session_mode":                 string(model.HostModeAttendedTemporary),
-		"intent":                       "agent-created-one-command-visible-support-session",
-		"gateway_url":                  gatewayURL,
-		"gateway_url_candidates":       gatewayCandidates,
-		"ticket_code":                  opts.Ticket.Code,
-		"ticket":                       opts.Ticket,
-		"join_url":                     joinURL,
-		"manifest_url":                 manifestURL,
-		"manifest_root_public_key":     opts.ManifestRootPublicKey,
-		"target":                       target,
-		"locale":                       locale,
-		"auto_approve":                 opts.AutoApprove,
-		"recommended_surface":          recommendedSurface,
-		"target_command":               recommended,
-		"target_commands":              targetCommands,
-		"user_handoff":                 userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
-		"connection_attempt_policy":    attemptPolicy,
-		"connection_continuity_policy": continuityPolicy,
-		"connection_supervision":       connectionSupervision(opts.Ticket.Code, locale, rdevCommand, attemptPolicy, continuityPolicy),
-		"gateway_candidate_preflight":  gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"schema_version":                CreatedSchemaVersion,
+		"ok":                            true,
+		"session_mode":                  string(model.HostModeAttendedTemporary),
+		"intent":                        "agent-created-one-command-visible-support-session",
+		"gateway_url":                   gatewayURL,
+		"gateway_url_candidates":        gatewayCandidates,
+		"ticket_code":                   opts.Ticket.Code,
+		"ticket":                        opts.Ticket,
+		"join_url":                      joinURL,
+		"manifest_url":                  manifestURL,
+		"manifest_root_public_key":      opts.ManifestRootPublicKey,
+		"target":                        target,
+		"locale":                        locale,
+		"auto_approve":                  opts.AutoApprove,
+		"recommended_surface":           recommendedSurface,
+		"target_command":                recommended,
+		"target_commands":               targetCommands,
+		"user_handoff":                  userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
+		"connection_attempt_policy":     attemptPolicy,
+		"connection_continuity_policy":  continuityPolicy,
+		"connection_supervision":        connectionSupervision(opts.Ticket.Code, locale, rdevCommand, attemptPolicy, continuityPolicy),
+		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"connectivity_helper_preflight": helperPreflight,
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
 			Phase:       "created",
 			Status:      "waiting",
@@ -1755,6 +2055,7 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 	if opts.AutoApprove {
 		createInviteCommand = append(createInviteCommand, "--auto-approve")
 	}
+	helperPreflight := connectivityHelperPreflight()
 	inviteBody, _ := json.Marshal(map[string]any{
 		"mode":         string(model.HostModeAttendedTemporary),
 		"ttl_seconds":  ttl,
@@ -1766,15 +2067,16 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 		},
 	})
 	return map[string]any{
-		"schema_version":         PlanSchemaVersion,
-		"ok":                     true,
-		"intent":                 "one-command-visible-attended-temporary-connection-entry",
-		"repo_root":              repoRoot,
-		"work_dir":               workDir,
-		"target":                 target,
-		"locale":                 locale,
-		"gateway_url":            gatewayURL,
-		"gateway_url_candidates": gatewayCandidates,
+		"schema_version":                PlanSchemaVersion,
+		"ok":                            true,
+		"intent":                        "one-command-visible-attended-temporary-connection-entry",
+		"repo_root":                     repoRoot,
+		"work_dir":                      workDir,
+		"target":                        target,
+		"locale":                        locale,
+		"gateway_url":                   gatewayURL,
+		"gateway_url_candidates":        gatewayCandidates,
+		"connectivity_helper_preflight": helperPreflight,
 		"auto_approve": map[string]any{
 			"enabled":        opts.AutoApprove,
 			"scope":          "attended-temporary tickets created by this standard plan only",

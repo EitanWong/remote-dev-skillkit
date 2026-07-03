@@ -270,10 +270,17 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["user_handoff"] == nil ||
 		connect["connection_supervision"] == nil ||
 		connect["gateway_candidate_preflight"] == nil ||
+		connect["connectivity_helper_preflight"] == nil ||
 		connect["agent_connection_runbook"] == nil ||
 		connect["target_command"] != created["target_command"] ||
 		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected ready connect payload, got %#v", connect)
+	}
+	connectHelperPreflight := connect["connectivity_helper_preflight"].(map[string]any)
+	createdHelperPreflight := created["connectivity_helper_preflight"].(map[string]any)
+	if connectHelperPreflight["schema_version"] != createdHelperPreflight["schema_version"] ||
+		connectHelperPreflight["agent_rule"] != createdHelperPreflight["agent_rule"] {
+		t.Fatalf("expected connect payload to mirror helper preflight, got %#v", connectHelperPreflight)
 	}
 	runbook := connect["agent_connection_runbook"].(map[string]any)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
@@ -509,8 +516,15 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		handoff["copy_paste"] != started["target_command"] ||
 		started["target_command"] != session["target_command"] ||
 		started["join_url"] != session["join_url"] ||
-		started["connection_supervision"] == nil {
+		started["connection_supervision"] == nil ||
+		started["connectivity_helper_preflight"] == nil {
 		t.Fatalf("expected top-level human handoff mirror, got %#v", started)
+	}
+	startedHelperPreflight := started["connectivity_helper_preflight"].(map[string]any)
+	sessionHelperPreflight := session["connectivity_helper_preflight"].(map[string]any)
+	if startedHelperPreflight["schema_version"] != sessionHelperPreflight["schema_version"] ||
+		startedHelperPreflight["agent_rule"] != sessionHelperPreflight["agent_rule"] {
+		t.Fatalf("expected started payload to mirror helper preflight, got %#v", startedHelperPreflight)
 	}
 	watch := strings.Join(anyStrings(started["watch_connection_status"].([]string)), "\x00")
 	if !strings.Contains(watch, "ABCD-1234") || !strings.Contains(watch, "--wait") {
@@ -640,6 +654,73 @@ func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
 	recovery := strings.Join(prepare["standard_recovery"].([]string), "\n")
 	if !strings.Contains(recovery, "do not write custom PowerShell") {
 		t.Fatalf("expected standard recovery guardrail, got %s", recovery)
+	}
+}
+
+func TestPrepareReportsConnectivityHelperPreflight(t *testing.T) {
+	t.Setenv("RDEV_RELAY_GATEWAY_URL", "http://127.0.0.1:8787")
+	t.Setenv("RDEV_RELAY_START_ARGV_JSON", `["chisel","client","relay.example.invalid","R:8787:127.0.0.1:8787"]`)
+	t.Setenv("RDEV_RELAY_INSTALL_ACTION_JSON", `{"schema_version":"rdev.connection-entry.dependency-install-action.v1","tool":"chisel","scope":"user","argv":["rdev","deps","install","chisel","--scope","user"],"expected_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`)
+	prepare, err := Prepare(context.Background(), PrepareOptions{
+		RepoRoot: ".",
+		Target:   "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight := prepare["connectivity_helper_preflight"].(map[string]any)
+	if preflight["schema_version"] != ConnectivityHelperPreflightSchemaVersion ||
+		preflight["ready_helper_count"] != 1 ||
+		preflight["auto_execute"] != false ||
+		!strings.Contains(preflight["agent_rule"].(string), "standard Connection Entry runner") {
+		t.Fatalf("expected helper preflight contract, got %#v", preflight)
+	}
+	readiness := prepare["connection_readiness"].(map[string]any)
+	if readiness["connectivity_helper_preflight"] == nil {
+		t.Fatalf("expected readiness to mirror helper preflight, got %#v", readiness)
+	}
+	helpers := preflight["helpers"].([]map[string]any)
+	var relay map[string]any
+	for _, helper := range helpers {
+		if helper["id"] == "existing-frp-or-chisel-relay" {
+			relay = helper
+			break
+		}
+	}
+	if relay == nil ||
+		relay["status"] != "ready-to-use-after-approval-check" ||
+		relay["gateway_configured"] != true ||
+		relay["start_tool"] != "chisel" {
+		t.Fatalf("expected configured relay helper report, got %#v", relay)
+	}
+	install := relay["install_action"].(map[string]any)
+	if install["valid"] != true ||
+		install["tool"] != "chisel" ||
+		install["has_expected_sha256"] != true {
+		t.Fatalf("expected valid relay install action report, got %#v", install)
+	}
+}
+
+func TestPrepareRejectsUnsafeConnectivityHelperPreflight(t *testing.T) {
+	t.Setenv("RDEV_RELAY_GATEWAY_URL", "http://127.0.0.1:8787")
+	t.Setenv("RDEV_RELAY_START_ARGV_JSON", `["powershell","-ExecutionPolicy","Bypass","-Command","Install-Chisel"]`)
+	prepare, err := Prepare(context.Background(), PrepareOptions{RepoRoot: "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight := prepare["connectivity_helper_preflight"].(map[string]any)
+	helpers := preflight["helpers"].([]map[string]any)
+	var relay map[string]any
+	for _, helper := range helpers {
+		if helper["id"] == "existing-frp-or-chisel-relay" {
+			relay = helper
+			break
+		}
+	}
+	if relay == nil ||
+		relay["status"] != "invalid-start-argv" ||
+		!strings.Contains(relay["error"].(string), "ExecutionPolicy Bypass") {
+		t.Fatalf("expected unsafe helper argv to be rejected, got %#v", relay)
 	}
 }
 

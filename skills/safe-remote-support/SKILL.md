@@ -38,7 +38,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev.support-session-prepare.v1` as the standard recovery contract for fresh
   Agents: it reports local recovery, verified helper assets, one-command target
   readiness, recommended `gateway_url_candidates`, missing inputs, and
-  `agent_connection_runbook`, `gateway_candidate_preflight`, and forbidden
+  `agent_connection_runbook`, `gateway_candidate_preflight`,
+  `connectivity_helper_preflight`, and forbidden
   improvisations. Read `agent_connection_runbook` first; it is the standard
   order of operations for connect, wait, report, operate, and recover. Use its
   `standard_entry_tool` for ordinary "connect this computer" requests and obey
@@ -52,7 +53,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   Read `gateway_candidate_preflight` before asking humans network questions or
   writing probes; it classifies LAN/direct, same-machine, operator-provided,
   and configured hosted/relay/mesh/VPN/SSH candidates with standard next
-  actions. Configured `RDEV_HOSTED_GATEWAY_URL`,
+  actions. Read `connectivity_helper_preflight` before asking about SSH, relay,
+  mesh, or VPN helper setup; it reports configured helper gateway URLs, start
+  argv JSON, install action JSON, allow-listed tools, and validation failures
+  without executing helpers. Configured `RDEV_HOSTED_GATEWAY_URL`,
   `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
   `RDEV_VPN_GATEWAY_URL`, and `RDEV_SSH_GATEWAY_URL` values are automatically
   appended to ordered gateway candidates after direct/LAN paths and before
@@ -110,6 +114,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   network details. If it shows only LAN or same-machine candidates, use the
   standard recovery/upgrade paths to configure a hosted/relay/mesh/VPN/SSH
   fallback before promising durable long-running work.
+- Read returned `connectivity_helper_preflight` before starting SSH, relay,
+  mesh, or VPN helpers. If helper metadata is configured and valid, use
+  `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run` and
+  its runner metadata; do not write custom helper startup scripts.
 - Read returned `connection_supervision` after sending the handoff. Use its
   `mcp_watch_call` or `cli_watch_command` to wait, report
   `connected_next_steps.user_report` as soon as the host connects, and choose

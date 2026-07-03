@@ -87,6 +87,15 @@ metadata, status watching, or approval polling by hand.
   each candidate. This gives Codex, Claude Code, Hermes, OpenClaw/OpenCode, and
   other MCP-capable Agents the same network-path guidance without writing
   custom PowerShell, shell, relay, tunnel, probe, or polling scripts.
+- Added `rdev.support-session-connectivity-helper-preflight.v1` to
+  support-session prepare, created, and plan payloads. Fresh Agents can now see
+  whether standard SSH, relay, mesh, or VPN helper metadata is configured via
+  `RDEV_*_GATEWAY_URL`, `RDEV_*_START_ARGV_JSON`, and
+  `RDEV_*_INSTALL_ACTION_JSON`; invalid helper argv such as shell command
+  strings, encoded commands, wrong tools, elevation, or `ExecutionPolicy
+  Bypass` is reported as structured preflight failure. This keeps restricted
+  network decisions in standard `rdev` contracts instead of model-written
+  tunnel scripts.
 - Added `rdev support-session connect --start` as the preferred one-command
   CLI path for fresh Agents when no hosted/relay gateway is configured. It
   delegates to the visible foreground support-session runner, builds verified

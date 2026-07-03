@@ -271,11 +271,13 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	connectStartCommand := stringSliceFromAny(input.ConnectNoGateway["foreground_start_command"])
 	connectStartNowCommand := stringSliceFromAny(input.ConnectNoGateway["cli_start_now_command"])
 	connectUserHandoff := mapFromAny(input.ConnectReachableGateway["user_handoff"])
+	connectHelperPreflight := mapFromAny(input.ConnectReachableGateway["connectivity_helper_preflight"])
 	handoff := mapFromAny(input.CreatedSession["user_handoff"])
 	mcpFollowUp := mapSliceFromAny(input.CreatedSession["mcp_follow_up"])
 	configuredWatcher := mapFromAny(input.CreatedSession["watch_connection_status_configured_gateway"])
 	supervision := mapFromAny(input.CreatedSession["connection_supervision"])
 	preflight := mapFromAny(input.CreatedSession["gateway_candidate_preflight"])
+	helperPreflight := mapFromAny(input.CreatedSession["connectivity_helper_preflight"])
 	runbook := mapFromAny(input.CreatedSession["agent_connection_runbook"])
 	runbookStandardEntry := mapFromAny(runbook["standard_entry_tool"])
 	runbookLowLevelRule := mapFromAny(runbook["low_level_entry_rule"])
@@ -287,6 +289,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	startedHandoff := mapFromAny(input.StartedSession["user_handoff"])
 	startedSupervision := mapFromAny(input.StartedSession["connection_supervision"])
 	startedPreflight := mapFromAny(input.StartedSession["gateway_candidate_preflight"])
+	startedHelperPreflight := mapFromAny(input.StartedSession["connectivity_helper_preflight"])
 	startedRunbook := mapFromAny(input.StartedSession["agent_connection_runbook"])
 	stableFallbackCreated := mapFromAny(input.StableFallbackSession["created"])
 	stableFallbackHandoff := mapFromAny(input.StableFallbackSession["handoff"])
@@ -305,6 +308,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	checks := []Check{
 		{Name: "connect_without_gateway_returns_start_now_command", Passed: input.ConnectNoGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectNoGateway["selected_path"] == "start-foreground-gateway" && input.ConnectNoGateway["ready_to_send_to_human"] == false && containsAllStrings(connectStartNowCommand, "support-session", "connect", "--start") && containsAllStrings(connectStartCommand, "support-session", "start"), Detail: strings.Join(connectStartNowCommand, " ")},
 		{Name: "connect_with_gateway_returns_ready_handoff", Passed: input.ConnectReachableGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectReachableGateway["selected_path"] == "created-with-reachable-gateway" && input.ConnectReachableGateway["ready_to_send_to_human"] == true && stringFromAny(connectUserHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion, Detail: stringFromAny(connectUserHandoff["copy_paste_kind"])},
+		{Name: "connect_with_gateway_has_top_level_helper_preflight", Passed: stringFromAny(connectHelperPreflight["schema_version"]) == supportsession.ConnectivityHelperPreflightSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(connectHelperPreflight["forbidden"]), "\n"), "ExecutionPolicy Bypass"), Detail: fmt.Sprintf("%v", connectHelperPreflight["configured_helper_ids"])},
 		{Name: "handoff_without_gateway_selects_foreground_start", Passed: input.HandoffNoGateway["selected_path"] == "start-foreground-gateway", Detail: stringFromAny(input.HandoffNoGateway["selected_path"])},
 		{Name: "handoff_without_gateway_prefers_connect_start", Passed: containsAllStrings(noGatewayStartNowCommand, "support-session", "connect", "--start"), Detail: strings.Join(noGatewayStartNowCommand, " ")},
 		{Name: "foreground_start_command_is_standard_tool", Passed: containsAllStrings(noGatewayCommand, "support-session", "start"), Detail: strings.Join(noGatewayCommand, " ")},
@@ -317,6 +321,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "created_session_has_connection_supervision", Passed: stringFromAny(supervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(mapFromAny(supervision["mcp_watch_call"])["tool"]) == "rdev.support_session.status" && boolFromAny(mapFromAny(mapFromAny(supervision["mcp_watch_call"])["arguments"])["wait"]) && strings.Contains(stringFromAny(supervision["connected_report_rule"]), "connected_next_steps.user_report"), Detail: stringFromAny(supervision["upgrade_reason"])},
 		{Name: "connection_supervision_covers_signed_candidate_runtime_failover", Passed: strings.Contains(strings.Join(stringSliceFromAny(supervision["automatic_downgrade_boundaries"]), "\n"), "signed join-manifest gateway candidates"), Detail: strings.Join(stringSliceFromAny(supervision["automatic_downgrade_boundaries"]), " | ")},
 		{Name: "created_session_has_gateway_candidate_preflight", Passed: stringFromAny(preflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(preflight["candidate_count"]) > 0 && strings.Contains(stringFromAny(preflight["agent_rule"]), "target command owns ordered URL fallback"), Detail: stringFromAny(preflight["preflight_mode"])},
+		{Name: "created_session_has_connectivity_helper_preflight", Passed: stringFromAny(helperPreflight["schema_version"]) == supportsession.ConnectivityHelperPreflightSchemaVersion && stringFromAny(helperPreflight["agent_rule"]) != "" && strings.Contains(strings.Join(stringSliceFromAny(helperPreflight["forbidden"]), "\n"), "ExecutionPolicy Bypass"), Detail: fmt.Sprintf("%v", helperPreflight["configured_helper_ids"])},
 		{Name: "created_session_has_agent_connection_runbook", Passed: stringFromAny(runbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(runbook["sequence"]), "\n"), "user_handoff.message") && strings.Contains(strings.Join(stringSliceFromAny(runbook["forbidden"]), "\n"), "Agent-authored PowerShell"), Detail: stringFromAny(runbook["phase"])},
 		{Name: "agent_runbook_starts_with_support_session_connect", Passed: stringFromAny(runbookStandardEntry["mcp_tool"]) == "rdev.support_session.connect" && strings.Contains(strings.Join(stringSliceFromAny(runbookStandardEntry["cli_command"]), " "), "support-session connect"), Detail: fmt.Sprintf("%v", runbookStandardEntry)},
 		{Name: "agent_runbook_forbids_low_level_invite_first", Passed: strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.invites.create") && strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.connection_entry.plan"), Detail: fmt.Sprintf("%v", runbookLowLevelRule)},
@@ -324,6 +329,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == true && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
 		{Name: "started_payload_has_top_level_supervision", Passed: stringFromAny(startedSupervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(startedSupervision["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(startedSupervision["continuity_assessment"])},
 		{Name: "started_payload_has_top_level_gateway_preflight", Passed: stringFromAny(startedPreflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(startedPreflight["candidate_count"]) > 0, Detail: stringFromAny(startedPreflight["preflight_mode"])},
+		{Name: "started_payload_has_top_level_helper_preflight", Passed: stringFromAny(startedHelperPreflight["schema_version"]) == supportsession.ConnectivityHelperPreflightSchemaVersion && strings.Contains(stringFromAny(startedHelperPreflight["agent_rule"]), "Connection Entry runner"), Detail: fmt.Sprintf("%v", startedHelperPreflight["configured_helper_ids"])},
 		{Name: "started_payload_has_top_level_agent_runbook", Passed: stringFromAny(startedRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(fmt.Sprintf("%v", startedRunbook["watch"]), "rdev.support_session.status"), Detail: stringFromAny(startedRunbook["phase"])},
 		{Name: "started_payload_has_foreground_feedback", Passed: stringFromAny(foregroundFeedback["schema_version"]) == "rdev.support-session-foreground-feedback.v1" && stringFromAny(foregroundFeedback["event_prefix"]) == "rdev support session event: " && strings.Contains(stringFromAny(foregroundFeedback["connected_rule"]), "connection has been established"), Detail: stringFromAny(foregroundFeedback["event_prefix"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},

@@ -122,7 +122,11 @@ and `create` use the first configured `RDEV_*_GATEWAY_URL` when no explicit
 URL to use. Read `gateway_candidate_preflight` before asking me network
 questions or writing probes: it classifies each candidate as LAN, same-machine,
 operator-provided, or configured hosted/relay/mesh/VPN/SSH fallback and gives
-the standard next action. Also read `agent_connection_runbook`; it is the
+the standard next action. Also read `connectivity_helper_preflight`: it reports
+configured `RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` helper
+metadata for SSH, relay, mesh, and VPN paths, validates tool allow-lists, and
+flags unsafe argv such as shell command strings or `ExecutionPolicy Bypass`
+without executing anything. Also read `agent_connection_runbook`; it is the
 machine-readable order of operations for fresh Agents: run the standard start
 command when needed, send only the handoff, wait, report `connected=true`, and
 recover without custom scripts. Read
@@ -309,7 +313,8 @@ should call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets` from a checkout. That returns
 `rdev.support-session-prepare.v1` with local recovery, helper asset hashes,
 one-command target readiness, `gateway_url_candidates`,
-`gateway_candidate_preflight`, `agent_connection_runbook`, and standard recovery actions. The Agent should
+`gateway_candidate_preflight`, `connectivity_helper_preflight`,
+`agent_connection_runbook`, and standard recovery actions. The Agent should
 use that preflight table and the recommended gateway candidate for target-side
 commands, then keep raw address selection out of human chat. If no gateway is
 running yet, the Agent should run `rdev support-session connect --start` in a
@@ -337,7 +342,12 @@ nohup, ticket, root, gateway, transport, status polling, or approval glue.
 Operators may preconfigure hosted/relay/mesh/VPN/SSH gateway URLs with
 `RDEV_*_GATEWAY_URL`; support-session prepare/start/create will include those
 URLs in the ordered candidate list, while keeping ticket/root/transport details
-inside the structured payload. `rdev support-session create` can now omit
+inside the structured payload. They may also preconfigure reviewed helper
+metadata with `RDEV_SSH_TUNNEL_START_ARGV_JSON`, `RDEV_RELAY_START_ARGV_JSON`,
+`RDEV_MESH_START_ARGV_JSON`, `RDEV_VPN_START_ARGV_JSON`, or matching
+`RDEV_*_INSTALL_ACTION_JSON`; support-session payloads report that state in
+`connectivity_helper_preflight` so Agents use the Connection Entry runner path
+instead of writing tunnel commands. `rdev support-session create` can now omit
 `--gateway-url` when one of those configured URLs exists; if neither an
 explicit nor configured reachable gateway exists, use
 `rdev support-session connect --start`.

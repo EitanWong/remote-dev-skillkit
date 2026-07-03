@@ -60,6 +60,13 @@ writing replacement PowerShell, shell, relay, approval polling, or bootstrap
 code. After registration, `rdev host serve --transport auto` keeps the signed
 join-manifest gateway candidates and can switch to another reachable candidate
 if the current gateway fails before jobs are processed. It also includes
+`connectivity_helper_preflight`, a read-only contract that reports configured
+SSH, relay, mesh, and VPN helper gateway URLs, start argv JSON, install action
+JSON, allow-listed tools, approval boundaries, and validation errors such as
+wrong tools, shell command strings, encoded commands, elevation, or
+`ExecutionPolicy Bypass`. Agents should read this field before writing network
+questions or tunnel commands; helper execution belongs to the Connection Entry
+runner and its dry-run/report path. It also includes
 `connection_supervision`, the Agent-side contract for
 waiting, proactively reporting `connected=true`, and choosing standard
 prepare/runner/Connection Entry upgrade or recovery tools when the first path is
@@ -82,7 +89,8 @@ prepare when local `rdev`, gateway state, helper assets, or one-command target
 readiness is unclear. It
 reports the detected OS/arch, Go/Git/`rdev` paths, resolved repo/work dirs,
 gateway URL candidates, Windows/macOS/Linux helper asset URLs and SHA-256
-hashes, `agent_connection_runbook`, `gateway_candidate_preflight`, `connection_readiness`,
+hashes, `agent_connection_runbook`, `gateway_candidate_preflight`,
+`connectivity_helper_preflight`, `connection_readiness`,
 `missing_inputs`, and standard recovery actions. Agents should read
 `agent_connection_runbook` first, read `gateway_candidate_preflight` before
 asking humans or writing probes, then use the `recommended=true` item from `gateway_url_candidates` for target-side
@@ -100,7 +108,9 @@ If
 configured, support-session tools append those hosted/relay/mesh/VPN/SSH
 candidates after direct/LAN candidates and before loopback, so Agents can hand
 over one target command instead of writing custom tunnel fallback scripts. By
-default it is read-only. With `build_assets=true`, it builds local helper binaries from the
+default it is read-only. `connectivity_helper_preflight` also reports matching
+`RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` metadata without
+executing it. With `build_assets=true`, it builds local helper binaries from the
 checked-out source so target bootstraps can download verified helpers when the
 target machine does not already have `rdev`.
 

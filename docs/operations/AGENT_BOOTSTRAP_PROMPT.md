@@ -145,6 +145,15 @@ Steps:
     `rdev.support_session.handoff`, and `rdev.support_session.create` can use the first configured
     `RDEV_*_GATEWAY_URL` when no explicit `gateway_url` was supplied, so do not
     ask me to choose a gateway URL when the runtime already has one configured.
+    Read `connectivity_helper_preflight` as well: it reports configured
+    `RDEV_SSH_TUNNEL_START_ARGV_JSON`, `RDEV_RELAY_START_ARGV_JSON`,
+    `RDEV_MESH_START_ARGV_JSON`, `RDEV_VPN_START_ARGV_JSON`, and matching
+    `RDEV_*_INSTALL_ACTION_JSON` helper metadata for SSH, relay, mesh, and VPN
+    paths, validates tool allow-lists, and flags unsafe argv such as shell
+    command strings, encoded commands, elevation, or `ExecutionPolicy Bypass`
+    without executing anything. If helper execution is needed, use
+    `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run`
+    and the returned runner metadata instead of writing tunnel scripts.
     If a lower-level explicit gateway workflow is needed, call
     `rdev.support_session.create` through MCP, or
     `rdev support-session create` through the CLI, to create the session and

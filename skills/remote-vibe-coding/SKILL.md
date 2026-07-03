@@ -61,6 +61,10 @@ revocation.
   relay, or bootstrap glue. Use the recommended `gateway_url_candidates` item
   plus the returned `agent_connection_runbook` and
   `gateway_candidate_preflight` decision table for target-side commands. Read
+  `connectivity_helper_preflight` before asking network questions or writing
+  tunnel commands; it reports configured SSH/relay/mesh/VPN helper gateway
+  URLs, start argv JSON, install action JSON, allow-listed tools, and
+  validation failures without executing helpers. Read
   `agent_connection_runbook` first; it is the standard order of operations for
   connect, wait, report, operate, and recover. Use its `standard_entry_tool`
   for ordinary "connect this computer" requests and obey
@@ -132,6 +136,10 @@ revocation.
   network details. If it shows only LAN or same-machine candidates, use the
   standard recovery/upgrade paths to configure a hosted/relay/mesh/VPN/SSH
   fallback before promising durable long-running work.
+- Read returned `connectivity_helper_preflight` before starting SSH, relay,
+  mesh, or VPN helpers. If helper metadata is configured and valid, use
+  `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run` and
+  its runner metadata; do not write custom helper startup scripts.
 - Read returned `connection_continuity_policy`. If
   `stable_after_lan_change=false`, treat LAN as an opportunistic first path and
   prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming durable
@@ -206,7 +214,9 @@ revocation.
    and a checkout plus Go are available, use `--build-assets`; use the returned
    `gateway_url_candidates` recommendation for target-side commands; do not
    write custom PowerShell, ticket substitution, approval polling, or relay
-   glue. If configured `RDEV_*_GATEWAY_URL` fallback values are present, keep
+   glue. Read `connectivity_helper_preflight` for configured
+   `RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` metadata before
+   asking about tunnels or helpers. If configured `RDEV_*_GATEWAY_URL` fallback values are present, keep
    them inside the returned candidate list and target command instead of
    explaining raw tunnel parameters to the human. If no explicit `gateway_url`
   was supplied, let handoff/create use the configured gateway candidate before
