@@ -481,6 +481,14 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 			CurlMaxTimeSec            int    `json:"curl_max_time_sec"`
 			RetriesPerCandidate       int    `json:"retries_per_candidate"`
 		} `json:"connection_attempt_policy"`
+		ConnectionContinuityPolicy struct {
+			SchemaVersion               string   `json:"schema_version"`
+			StableAfterLANChange        bool     `json:"stable_after_lan_change"`
+			HasStableConfiguredFallback bool     `json:"has_stable_configured_fallback"`
+			StableFallbackKinds         []string `json:"stable_fallback_kinds"`
+			Assessment                  string   `json:"assessment"`
+			AgentRule                   string   `json:"agent_rule"`
+		} `json:"connection_continuity_policy"`
 		TargetBootstrapRequirements struct {
 			SchemaVersion  string   `json:"schema_version"`
 			RequiredAssets []string `json:"required_assets"`
@@ -540,6 +548,14 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.ConnectionAttemptPolicy.CurlMaxTimeSec != 10 ||
 		payload.ConnectionAttemptPolicy.RetriesPerCandidate != 1 {
 		t.Fatalf("expected bounded connection attempt policy, got %#v", payload.ConnectionAttemptPolicy)
+	}
+	if payload.ConnectionContinuityPolicy.SchemaVersion != "rdev.support-session-continuity-policy.v1" ||
+		!payload.ConnectionContinuityPolicy.StableAfterLANChange ||
+		!payload.ConnectionContinuityPolicy.HasStableConfiguredFallback ||
+		!slices.Contains(payload.ConnectionContinuityPolicy.StableFallbackKinds, "relay") ||
+		payload.ConnectionContinuityPolicy.Assessment != "stable-fallback-configured" ||
+		!strings.Contains(payload.ConnectionContinuityPolicy.AgentRule, "opportunistic first path") {
+		t.Fatalf("expected configured relay continuity policy, got %#v", payload.ConnectionContinuityPolicy)
 	}
 	if payload.TargetBootstrapRequirements.SchemaVersion != "rdev.support-session-target-bootstrap-requirements.v1" ||
 		!slices.Contains(payload.TargetBootstrapRequirements.RequiredAssets, "rdev-windows-amd64.exe") ||

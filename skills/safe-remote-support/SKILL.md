@@ -84,6 +84,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev support-session status --wait`; CLI status can omit `--gateway-url`
   when a configured `RDEV_*_GATEWAY_URL` exists. Prefer returned
   `watch_connection_status_configured_gateway.command` when it is applicable.
+  Read `connection_continuity_policy`; if `stable_after_lan_change=false`, do
+  not claim durable connectivity beyond the current reachable LAN/direct path.
+  Prefer a configured hosted/relay/mesh/VPN/SSH gateway for long-running work.
   When `connected=true`, proactively tell
   the user the connection is established using `connected_next_steps.user_report`,
   inspect `rdev.hosts.capabilities`, and create only the smallest scoped job for

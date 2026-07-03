@@ -279,6 +279,13 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		attemptPolicy["retries_per_candidate"] != 1 {
 		t.Fatalf("expected structured target attempt policy, got %#v", attemptPolicy)
 	}
+	continuityPolicy := created["connection_continuity_policy"].(map[string]any)
+	if continuityPolicy["schema_version"] != ContinuityPolicySchemaVersion ||
+		continuityPolicy["stable_after_lan_change"] != false ||
+		continuityPolicy["assessment"] != "lan-or-explicit-path" ||
+		!strings.Contains(continuityPolicy["agent_rule"].(string), "LAN as an opportunistic first path") {
+		t.Fatalf("expected structured continuity policy, got %#v", continuityPolicy)
+	}
 	candidateOrder := attemptPolicy["candidate_order"].([]map[string]any)
 	if len(candidateOrder) != 2 ||
 		candidateOrder[0]["join_url"] == "" ||
@@ -311,6 +318,23 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	if !strings.Contains(flow, "proactively report") ||
 		!strings.Contains(flow, "do not ask the human to assemble") {
 		t.Fatalf("expected Agent-native flow, got %s", flow)
+	}
+}
+
+func TestConnectionContinuityPolicyReportsConfiguredStableFallback(t *testing.T) {
+	policy := connectionContinuityPolicy([]GatewayURLCandidate{
+		{URL: "http://192.168.50.10:8787", Kind: "lan-private"},
+		{URL: "https://relay.example.test/rdev", Kind: "relay", Source: "env:RDEV_RELAY_GATEWAY_URL"},
+	})
+
+	stableKinds := strings.Join(policy["stable_fallback_kinds"].([]string), ",")
+	if policy["schema_version"] != ContinuityPolicySchemaVersion ||
+		policy["has_lan_candidate"] != true ||
+		policy["has_stable_configured_fallback"] != true ||
+		policy["stable_after_lan_change"] != true ||
+		policy["assessment"] != "stable-fallback-configured" ||
+		!strings.Contains(stableKinds, "relay") {
+		t.Fatalf("expected stable relay continuity policy, got %#v", policy)
 	}
 }
 

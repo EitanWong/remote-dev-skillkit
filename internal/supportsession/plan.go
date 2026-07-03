@@ -30,6 +30,7 @@ const ConnectionAttemptPolicySchemaVersion = "rdev.connection-attempt-policy.v1"
 const UserHandoffSchemaVersion = "rdev.support-session-user-handoff.v1"
 const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recovery.v1"
 const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-steps.v1"
+const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -828,6 +829,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		joinURLs = []string{joinURL}
 	}
 	attemptPolicy := connectionAttemptPolicy(gatewayCandidates, joinURLs)
+	continuityPolicy := connectionContinuityPolicy(gatewayCandidates)
 	windowsCommand := windowsBootstrapCommand(joinURLs)
 	macLinuxCommand := macLinuxBootstrapCommand(joinURLs)
 	bootstrapRequirements := bootstrapRequirements(target)
@@ -879,6 +881,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"target_commands":               targetCommands,
 		"user_handoff":                  userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
 		"connection_attempt_policy":     attemptPolicy,
+		"connection_continuity_policy":  continuityPolicy,
 		"target_bootstrap_requirements": bootstrapRequirements,
 		"target_bootstrap_readiness":    opts.TargetBootstrapReadiness,
 		"watch_connection_status":       statusCommand,
@@ -907,6 +910,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"agent_flow": []string{
 			"give the target-side human only target_command or join_url",
 			"target_command already tries ordered gateway URL candidates with bounded per-candidate timeouts and retry policy; do not write your own fallback script",
+			"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
 			"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
 			"watch connection status with watch_connection_status or rdev.support_session.status",
 			"when connected=true, proactively report that the connection is established",
@@ -1003,6 +1007,63 @@ func connectionAttemptPolicy(candidates []GatewayURLCandidate, joinURLs []string
 		"retry_delay_sec":              targetHTTPRetryDelaySeconds,
 		"target_handoff":               "single visible command; target-side command owns URL fallback, timeout, retry, download, verification, and host startup",
 		"agent_rule":                   "do not rewrite, wrap, or expand target_command; watch the returned status tool/command instead",
+	}
+}
+
+func connectionContinuityPolicy(candidates []GatewayURLCandidate) map[string]any {
+	kinds := make([]string, 0, len(candidates))
+	stableKinds := []string{}
+	hasLAN := false
+	hasLoopbackOnly := len(candidates) == 0
+	for _, candidate := range candidates {
+		kind := strings.TrimSpace(candidate.Kind)
+		if kind == "" {
+			kind = "unknown"
+		}
+		kinds = append(kinds, kind)
+		switch kind {
+		case "lan-private":
+			hasLAN = true
+			hasLoopbackOnly = false
+		case "hosted", "relay", "mesh", "vpn", "ssh":
+			stableKinds = append(stableKinds, kind)
+			hasLoopbackOnly = false
+		case "explicit", "host":
+			if candidate.Scope != "same-machine-only" {
+				hasLoopbackOnly = false
+			}
+		case "loopback":
+		default:
+			hasLoopbackOnly = false
+		}
+	}
+	stableAfterLANChange := len(stableKinds) > 0
+	assessment := "lan-or-explicit-path"
+	if stableAfterLANChange {
+		assessment = "stable-fallback-configured"
+	} else if hasLAN {
+		assessment = "lan-dependent"
+	} else if hasLoopbackOnly {
+		assessment = "same-machine-only"
+	}
+	return map[string]any{
+		"schema_version":                 ContinuityPolicySchemaVersion,
+		"intent":                         "agent-readable-continuity-and-reconnect-guidance",
+		"connection_model":               "target-initiated-outbound-connection-entry-with-ordered-candidate-fallback",
+		"candidate_kinds":                dedupeStrings(kinds),
+		"stable_fallback_kinds":          dedupeStrings(stableKinds),
+		"has_lan_candidate":              hasLAN,
+		"has_stable_configured_fallback": stableAfterLANChange,
+		"stable_after_lan_change":        stableAfterLANChange,
+		"assessment":                     assessment,
+		"target_command_behavior":        "the returned target command tries candidate URLs in order with bounded timeouts before failing",
+		"agent_watch_behavior":           "after handing over user_handoff.copy_paste, use rdev.support_session.status wait=true or the returned watcher command and proactively report connected=true",
+		"automatic_downgrade":            []string{"target command tries the next Connection Entry URL when direct or LAN bootstrap fails", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "status wait timeout returns connection_recovery instead of requiring custom polling"},
+		"automatic_upgrade":              []string{"when an RDEV_HOSTED_GATEWAY_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL becomes configured, create a fresh Connection Entry so future target commands include that stable path", "for operator-owned recurring machines, move from attended-temporary to a reviewed managed Connection Entry only after explicit persistence approval", "persist the best verified stable path in scoped runtime memory after evidence is reviewed"},
+		"if_lan_or_loopback_fails":       []string{"run rdev.support_session.prepare or rdev support-session prepare --build-assets to refresh gateway_url_candidates", "prefer configured hosted/relay/mesh/VPN/SSH gateway URLs before asking the human for network details", "ask only when privileged network changes, credentials, paid/cloud resources, or managed persistence are required"},
+		"requires_operator_approval_for": []string{"opening ports, router/NAT/firewall/DNS/route changes", "installing tunnel, mesh, VPN, service, driver, or persistent helper components", "creating or editing SSH credentials/config", "using paid hosted relay or cloud resources", "turning a temporary third-party session into managed persistence"},
+		"forbidden":                      []string{"Agent-authored polling loops", "custom PowerShell or shell relay/bootstrap scripts", "asking humans to assemble ticket/root/gateway/transport/checksum values", "ExecutionPolicy Bypass", "hidden install or persistence"},
+		"agent_rule":                     "treat LAN as an opportunistic first path, not the reliability plan; when stable_after_lan_change is false, prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work before claiming robust connectivity",
 	}
 }
 

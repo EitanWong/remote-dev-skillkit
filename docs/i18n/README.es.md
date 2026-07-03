@@ -55,7 +55,7 @@ the human-facing response. When `user_handoff.target` is `auto`, follow
 `user_handoff.auto_target_rule`: send the join URL first and use returned
 platform commands only when a terminal command is needed. The target command already tries ordered Connection
 Entry URLs on the target machine with bounded timeout/retry behavior, so do not
-write custom fallback scripts. If no gateway is
+write custom fallback scripts. Read `connection_continuity_policy`; when `stable_after_lan_change=false`, treat LAN as an opportunistic first path and prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work. If no gateway is
 running yet, run `rdev support-session start` in a visible foreground terminal;
 it prepares verified helper assets when possible, starts the local gateway,
 selects a target-usable gateway URL candidate, and prints the same ready session

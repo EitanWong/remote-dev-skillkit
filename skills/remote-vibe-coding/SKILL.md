@@ -82,6 +82,10 @@ revocation.
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Read returned `connection_continuity_policy`. If
+  `stable_after_lan_change=false`, treat LAN as an opportunistic first path and
+  prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming durable
+  connectivity for long-running work.
 - Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
   telling the human what to run on the target machine. Do not rewrite the
   command or ask the human to assemble values.

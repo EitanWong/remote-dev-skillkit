@@ -138,7 +138,10 @@ Steps:
     and status watcher in one payload. The target command already tries ordered
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
-    PowerShell, shell, relay, or approval-polling fallback. Prefer
+    PowerShell, shell, relay, or approval-polling fallback. Read
+    `connection_continuity_policy`: if `stable_after_lan_change=false`, treat
+    LAN as an opportunistic first path and prefer a configured hosted, relay,
+    mesh, VPN, or SSH gateway before promising durable connectivity. Prefer
     `user_handoff.message` plus `user_handoff.copy_paste` when telling me what
     to run on the target machine. When `user_handoff.target` is `auto`, follow
     `user_handoff.auto_target_rule`: send the join URL first, and use the

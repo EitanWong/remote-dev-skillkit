@@ -120,6 +120,10 @@ have `rdev`. If readiness is false for a platform command, run
 instead of asking the target-side human to install `rdev` manually. The target
 command already tries ordered gateway URL candidates with bounded timeout/retry
 behavior; do not write a custom PowerShell, shell, relay, or polling fallback.
+Read `connection_continuity_policy` as well: if
+`stable_after_lan_change=false`, treat LAN as only the first opportunistic path
+and prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming the
+connection is robust for long-running work.
 Prefer `user_handoff.message` plus
 `user_handoff.copy_paste` when telling me what to run. If no gateway is running
 yet, run `rdev support-session start` in a visible foreground terminal; it

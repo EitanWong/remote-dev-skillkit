@@ -42,6 +42,8 @@ required_patterns=(
   "rdev support-session plan"
   "rdev support-session status --wait"
   "watch_connection_status_configured_gateway"
+  "connection_continuity_policy"
+  "stable_after_lan_change=false"
   "scoped auto-approval state"
   "connected=true"
   "materialize it with"

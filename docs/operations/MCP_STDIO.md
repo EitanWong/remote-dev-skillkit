@@ -160,6 +160,11 @@ CLI status can omit `--gateway-url` when `RDEV_HOSTED_GATEWAY_URL`,
 for the gateway URL just to watch a known ticket. Created-session payloads
 include `watch_connection_status_configured_gateway.command`; use it when a
 configured gateway exists, otherwise use `watch_connection_status`.
+Created-session payloads also include `connection_continuity_policy` with
+schema `rdev.support-session-continuity-policy.v1`. Agents should read
+`stable_after_lan_change`: when it is `false`, LAN is only an opportunistic
+first path and durable work should prefer a configured hosted, relay, mesh, VPN,
+or SSH gateway before claiming robust connectivity.
 When the returned status has `connected=true`, immediately tell the user the
 connection is established before creating jobs. Status payloads include
 `connected_next_steps` with schema

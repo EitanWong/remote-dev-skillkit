@@ -24,6 +24,11 @@ metadata, status watching, or approval polling by hand.
   Connection Entry URL list plus bounded timeout/retry settings, so they can
   explain connection behavior without writing custom PowerShell, shell, relay,
   or polling glue.
+- Added `rdev.support-session-continuity-policy.v1` to
+  `rdev.support-session-created.v1`. Agents can now distinguish opportunistic
+  LAN/direct paths from sessions that already include configured hosted, relay,
+  mesh, VPN, or SSH fallback URLs, then choose standard upgrade/recovery tools
+  instead of claiming durable connectivity from a LAN-only first contact.
 - Added bounded target-side bootstrap attempts: Windows commands use
   `Invoke-RestMethod -TimeoutSec`, and macOS/Linux commands use `curl`
   connect/max-time/retry limits before trying the next Connection Entry URL.

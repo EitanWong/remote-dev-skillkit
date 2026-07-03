@@ -399,6 +399,15 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 		attemptPolicy["curl_connect_timeout_sec"] != float64(2) {
 		t.Fatalf("expected bounded connection attempt policy, got %#v", attemptPolicy)
 	}
+	continuityPolicy := structured["connection_continuity_policy"].(map[string]any)
+	stableKinds := anyStrings(continuityPolicy["stable_fallback_kinds"].([]any))
+	if continuityPolicy["schema_version"] != "rdev.support-session-continuity-policy.v1" ||
+		continuityPolicy["stable_after_lan_change"] != true ||
+		continuityPolicy["has_stable_configured_fallback"] != true ||
+		!slices.Contains(stableKinds, "relay") ||
+		continuityPolicy["assessment"] != "stable-fallback-configured" {
+		t.Fatalf("expected configured relay continuity policy, got %#v", continuityPolicy)
+	}
 	handoff := structured["user_handoff"].(map[string]any)
 	if handoff["schema_version"] != "rdev.support-session-user-handoff.v1" ||
 		handoff["copy_paste_kind"] != "windows" ||
