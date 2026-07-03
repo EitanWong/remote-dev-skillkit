@@ -10,6 +10,36 @@ The target behavior is defined in the canonical final architecture lock,
 envelopes, host-side validation, workspace locks, approval gates, evidence,
 audit, and revocation.
 
+## Fresh-Agent Support-Session Contract Gate
+
+Run:
+
+```bash
+rdev acceptance fresh-agent-support-session \
+  --out .rdev/acceptance/fresh-agent-support-session
+```
+
+This is a local contract gate for the AI-native support-session surface. It does
+not start a gateway listener, contact a remote host, install a service, open a
+tunnel, or prove real Codex/Claude Code/Hermes/OpenClaw behavior. Instead, it
+checks that the standard tool payloads still let a fresh Agent do the intended
+one-message flow:
+
+1. call `rdev.support_session.handoff` first;
+2. choose `rdev.support_session.create` when a gateway is reachable;
+3. choose visible foreground `rdev support-session start` when no gateway is running;
+4. send only `user_handoff.message` plus `user_handoff.copy_paste` to the human;
+5. read `ready_file.path` when foreground stdout is hard to parse;
+6. wait for status with `rdev.support_session.status`;
+7. report `connected=true` through `connected_next_steps.user_report`;
+8. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+   gateway, transport, or bootstrap glue.
+
+The command writes `report.json` with schema
+`rdev.acceptance.fresh-agent-support-session.v1`. A passing report proves the
+local contract is intact; the real multi-harness and clean-machine acceptance
+runs remain required before claiming production-grade connectivity.
+
 ## Managed Mac Coding Harness
 
 Run:

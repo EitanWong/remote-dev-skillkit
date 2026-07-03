@@ -828,6 +828,22 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		return fmt.Errorf("missing acceptance subcommand")
 	}
 	switch args[0] {
+	case "fresh-agent-support-session":
+		fs := flag.NewFlagSet("acceptance fresh-agent-support-session", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "empty output directory for the fresh-Agent support-session contract report")
+		gatewayURL := fs.String("gateway-url", "", "gateway URL to use in the simulated reachable-gateway path; defaults to http://127.0.0.1:8787")
+		rdevCommand := fs.String("rdev-command", "rdev", "rdev command name or absolute path to place in generated Agent commands")
+		locale := fs.String("locale", "en", "localized user-facing language for handoff/status fields")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceFreshAgentSupportSession(acceptance.FreshAgentSupportSessionOptions{
+			OutDir:      *out,
+			GatewayURL:  *gatewayURL,
+			RdevCommand: *rdevCommand,
+			Locale:      *locale,
+		})
 	case "managed-mac":
 		fs := flag.NewFlagSet("acceptance managed-mac", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1194,6 +1210,27 @@ func (a App) acceptanceManagedMac(ctx context.Context, opts acceptance.ManagedMa
 		"approval_probe_job_id":  report.ApprovalJob.ID,
 		"checks":                 report.Checks,
 		"recommended_next_steps": report.RecommendedNextSteps,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) acceptanceFreshAgentSupportSession(opts acceptance.FreshAgentSupportSessionOptions) error {
+	report, err := acceptance.RunFreshAgentSupportSession(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                        allAcceptanceChecksPassed(report.Checks),
+		"schema":                    report.SchemaVersion,
+		"out":                       report.OutDir,
+		"report":                    filepath.Join(report.OutDir, "report.json"),
+		"gateway_url":               report.GatewayURL,
+		"checks":                    report.Checks,
+		"recommended_next_steps":    report.RecommendedNextSteps,
+		"real_environment_required": report.RealEnvironmentRequired,
+		"note":                      "local contract gate only; no remote host, gateway listener, tunnel, service, or external network was started",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -7108,6 +7145,7 @@ Usage:
   rdev trust verify --bundle .rdev/trust/trust-bundle-revoked.json --root-public-key trust-root:...
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
+  rdev acceptance fresh-agent-support-session --out fresh-agent-support-session
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo . --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
   rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example/rdev-verify.exe --verifier-sha256 <sha256>

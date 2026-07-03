@@ -499,12 +499,17 @@ without becoming mysterious.
 
 ```bash
 go test ./...
+rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session
 rdev demo local
 rdev mcp tools
 ```
 
 The local demo walks through ticket creation, host registration, approval, job
 execution, artifacts, and audit without needing a public gateway.
+The fresh-Agent support-session acceptance command is a local contract gate: it
+checks that handoff/create/start/status payloads still support the one-command
+Agent flow before you run real Codex/Claude Code/Hermes/OpenClaw and clean
+Windows/macOS/Linux acceptance.
 
 ## Current Status
 

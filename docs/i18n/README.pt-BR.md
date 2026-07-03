@@ -132,6 +132,7 @@ A segunda linha de install é o caminho de instalação em um comando quando o b
 
 ```bash
 go test ./...
+rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session
 rdev demo local
 rdev mcp tools
 ```

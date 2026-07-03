@@ -126,6 +126,13 @@ metadata, status watching, or approval polling by hand.
   long-running foreground terminal makes stdout hard to parse, then send
   `session.user_handoff.message` plus `session.user_handoff.copy_paste` without
   inventing extra scripts or asking the human to assemble ticket/gateway values.
+- Added `rdev acceptance fresh-agent-support-session` with schema
+  `rdev.acceptance.fresh-agent-support-session.v1`. This local contract gate
+  verifies the fresh-Agent handoff/create/start/status flow: one standard
+  selected path, one human `user_handoff`, ready-file fallback, waitable status,
+  `connected_next_steps.user_report`, and forbidden ad hoc bootstrap, polling,
+  relay, ticket/root/gateway/transport assembly, hidden install, or
+  `ExecutionPolicy Bypass` shortcuts.
 - Added `rdev support-session create` and MCP tool
   `rdev.support_session.create` with schema
   `rdev.support-session-created.v1`. When a gateway is already reachable,
@@ -177,9 +184,15 @@ metadata, status watching, or approval polling by hand.
 - Windows join commands no longer use `ExecutionPolicy Bypass`.
 - Development gateway plans now carry all configured helper asset paths for
   Windows amd64, macOS arm64/amd64, and Linux amd64/arm64.
+- Release smoke now runs the fresh-Agent support-session contract gate before
+  release packaging so local regressions in the AI-native connection flow fail
+  early.
 
 ### Still Requires Real Acceptance
 
+- Real fresh-Agent Codex/Claude Code/Hermes/OpenClaw/OpenCode behavior still
+  requires explicit multi-harness acceptance; the local contract gate does not
+  prove model behavior in those runtimes.
 - Clean Windows/macOS/Linux target-machine acceptance with real release assets.
 - Real restrictive-network relay/mesh/frp/Chisel/headscale/WireGuard evidence
   beyond unit/smoke tests.

@@ -153,6 +153,62 @@ func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
 	}
 }
 
+func TestAcceptanceFreshAgentSupportSession(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	out := filepath.Join(t.TempDir(), "fresh-agent")
+
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "fresh-agent-support-session",
+		"--out", out,
+		"--gateway-url", "http://127.0.0.1:8787",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		OK     bool   `json:"ok"`
+		Schema string `json:"schema"`
+		Report string `json:"report"`
+		Checks []struct {
+			Name   string `json:"name"`
+			Passed bool   `json:"passed"`
+		} `json:"checks"`
+		Note string `json:"note"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid acceptance JSON: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != "rdev.acceptance.fresh-agent-support-session.v1" {
+		t.Fatalf("unexpected fresh-agent acceptance summary: %#v", payload)
+	}
+	if _, err := os.Stat(payload.Report); err != nil {
+		t.Fatalf("expected report file: %v", err)
+	}
+	var names []string
+	for _, check := range payload.Checks {
+		if !check.Passed {
+			t.Fatalf("expected passing check: %#v", check)
+		}
+		names = append(names, check.Name)
+	}
+	for _, expected := range []string{
+		"handoff_without_gateway_selects_foreground_start",
+		"handoff_with_gateway_selects_create_tool",
+		"auto_approval_connects_first_attended_host",
+		"connected_status_has_user_report",
+		"waiting_recovery_forbids_custom_scripts",
+	} {
+		if !slices.Contains(names, expected) {
+			t.Fatalf("missing check %q in %#v", expected, names)
+		}
+	}
+	if !strings.Contains(payload.Note, "local contract gate only") {
+		t.Fatalf("expected local-gate note, got %q", payload.Note)
+	}
+}
+
 func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

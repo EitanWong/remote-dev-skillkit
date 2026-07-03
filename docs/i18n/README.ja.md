@@ -132,6 +132,7 @@ rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --targ
 
 ```bash
 go test ./...
+rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session
 rdev demo local
 rdev mcp tools
 ```

@@ -12,6 +12,10 @@ trap cleanup EXIT
 
 scripts/audit-public-surface.sh > "$work_dir/public-surface-audit.txt"
 
+go run ./cmd/rdev acceptance fresh-agent-support-session \
+  --out "$work_dir/fresh-agent-support-session" \
+  > "$work_dir/fresh-agent-support-session-output.json"
+
 go test ./internal/cli \
   -run 'TestGatewayDevMTLSHealthzRequiresClientCertificate|TestHostServeRegistersWithLocalMTLSGateway|TestHostServeMTLSGatewayRejectsMissingClientCertificate|TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway' \
   -count=1 \
@@ -214,6 +218,7 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
+fresh_agent_output = json.loads((root / "fresh-agent-support-session-output.json").read_text())
 build = json.loads((root / "build.json").read_text())
 platform_output = json.loads((root / "platform-candidates-output.json").read_text())
 platform_manifest = json.loads(pathlib.Path(platform_output["manifest"]).read_text())
@@ -361,9 +366,13 @@ assert update_plan["platform"] == "linux/amd64", update_plan
 assert update_plan["selected_archive"]["name"].endswith("linux-amd64.tar.gz"), update_plan
 assert any("rdev release verify-bundle" in step for step in update_plan["verification_steps"]), update_plan
 assert any(check["name"] == "plan_is_dry_run" and check["passed"] is True for check in update_plan["checks"]), update_plan
+assert fresh_agent_output["ok"] is True, fresh_agent_output
+assert fresh_agent_output["schema"] == "rdev.acceptance.fresh-agent-support-session.v1", fresh_agent_output
 
 print(json.dumps({
     "ok": True,
+    "fresh_agent_support_session_contract": True,
+    "fresh_agent_support_session_schema": fresh_agent_output["schema"],
     "build_schema": build_manifest["schema_version"],
     "built_artifacts": len(build_manifest["artifacts"]),
     "build_sbom": True,
