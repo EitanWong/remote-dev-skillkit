@@ -100,7 +100,13 @@ unclear, call `rdev.support_session.prepare` or run
 actions and use its recommended `gateway_url_candidates` entry instead of
 asking me to choose or assemble a gateway URL. Never give a remote target
 `0.0.0.0` or same-machine loopback unless this is explicitly same-machine
-testing. If a reachable gateway is already running, call
+testing. If this runtime has configured gateway fallbacks such as
+`RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
+`RDEV_SSH_GATEWAY_URL`, `rdev` automatically appends them to
+`gateway_url_candidates` after direct/LAN candidates and before loopback so the
+target command can fail over without Agent-written glue. If a reachable gateway
+is already running, call
 `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
@@ -255,6 +261,10 @@ possible, starts the local gateway, and prints
 should use `rdev.support_session.plan` or `rdev support-session plan` only for
 review/debug planning. The Agent should not write its own PowerShell, relay,
 nohup, ticket, root, gateway, transport, status polling, or approval glue.
+Operators may preconfigure hosted/relay/mesh/VPN/SSH gateway URLs with
+`RDEV_*_GATEWAY_URL`; support-session prepare/start/create will include those
+URLs in the ordered candidate list, while keeping ticket/root/transport details
+inside the structured payload.
 If an operator intentionally starts a low-level dev gateway, prefer
 `--rdev-assets-dir <dir>` over five individual helper flags so `/assets`
 contains the verified Windows/macOS/Linux bootstrap helpers.

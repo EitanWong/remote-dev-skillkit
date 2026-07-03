@@ -46,6 +46,68 @@ func TestGatewayURLCandidatesRespectExplicitGateway(t *testing.T) {
 	}
 }
 
+func TestGatewayURLCandidatesAppendConfiguredFallbacksBeforeLoopback(t *testing.T) {
+	candidates := gatewayURLCandidatesFromIPsAndEnv("0.0.0.0:8787", "", []net.IP{
+		net.ParseIP("192.168.50.10"),
+	}, []GatewayEnvCandidate{
+		{
+			EnvVar: "RDEV_RELAY_GATEWAY_URL",
+			URL:    "https://relay.example.test/rdev",
+			Kind:   "relay",
+			Scope:  "configured-relay",
+			Reason: "configured relay gateway URL",
+		},
+		{
+			EnvVar: "RDEV_MESH_GATEWAY_URL",
+			URL:    "https://mesh.example.test/rdev",
+			Kind:   "mesh",
+			Scope:  "configured-mesh",
+			Reason: "configured mesh gateway URL",
+		},
+	})
+
+	if len(candidates) != 4 {
+		t.Fatalf("expected LAN, relay, mesh, and loopback candidates, got %#v", candidates)
+	}
+	if candidates[0].Kind != "lan-private" || !candidates[0].Recommended {
+		t.Fatalf("expected LAN candidate to stay recommended, got %#v", candidates)
+	}
+	if candidates[1].URL != "https://relay.example.test/rdev" ||
+		candidates[1].Kind != "relay" ||
+		candidates[1].Source != "env:RDEV_RELAY_GATEWAY_URL" ||
+		candidates[1].Recommended {
+		t.Fatalf("expected configured relay fallback after LAN, got %#v", candidates)
+	}
+	if candidates[2].Kind != "mesh" || candidates[3].Kind != "loopback" {
+		t.Fatalf("expected configured fallbacks before loopback, got %#v", candidates)
+	}
+}
+
+func TestGatewayURLCandidatesPreferConfiguredFallbackOverLoopbackWhenNoPrivateIP(t *testing.T) {
+	candidates := gatewayURLCandidatesFromIPsAndEnv("0.0.0.0:8787", "", nil, []GatewayEnvCandidate{
+		{
+			EnvVar: "RDEV_HOSTED_GATEWAY_URL",
+			URL:    "https://hosted.example.test/rdev",
+			Kind:   "hosted",
+			Scope:  "operator-provided-hosted-gateway",
+			Reason: "configured hosted gateway URL",
+		},
+	})
+
+	if len(candidates) != 2 {
+		t.Fatalf("expected hosted and loopback candidates, got %#v", candidates)
+	}
+	if candidates[0].Kind != "hosted" || !candidates[0].Recommended {
+		t.Fatalf("expected configured hosted gateway to be recommended before loopback, got %#v", candidates)
+	}
+	if candidates[0].Host != "hosted.example.test" || candidates[0].Source != "env:RDEV_HOSTED_GATEWAY_URL" {
+		t.Fatalf("expected parsed configured host/source metadata, got %#v", candidates[0])
+	}
+	if candidates[1].Kind != "loopback" || candidates[1].Recommended {
+		t.Fatalf("expected loopback to be same-machine fallback only, got %#v", candidates[1])
+	}
+}
+
 func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "support")
 	plan := BuildPlan(context.Background(), Options{

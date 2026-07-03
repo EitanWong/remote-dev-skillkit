@@ -2060,7 +2060,7 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 	}
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:               opts.GatewayURL,
-		GatewayURLCandidates:     []supportsession.GatewayURLCandidate{{URL: strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"), Kind: "explicit", Scope: "operator-provided", Recommended: true, Reason: "support-session create gateway URL"}},
+		GatewayURLCandidates:     supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", opts.GatewayURL, nil),
 		JoinURL:                  payload.JoinURL,
 		ManifestURL:              payload.ManifestURL,
 		ManifestRootPublicKey:    payload.ManifestRootPublicKey,

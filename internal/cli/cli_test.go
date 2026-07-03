@@ -407,6 +407,7 @@ func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.
 }
 
 func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
+	t.Setenv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev")
 	gw := gateway.NewMemoryGateway()
 	handler := httpapi.NewServer(gw).Handler()
 	server := httptest.NewServer(handler)
@@ -430,6 +431,8 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		TicketCode           string `json:"ticket_code"`
 		GatewayURLCandidates []struct {
 			URL         string `json:"url"`
+			Kind        string `json:"kind"`
+			Source      string `json:"source"`
 			Recommended bool   `json:"recommended"`
 		} `json:"gateway_url_candidates"`
 		TargetCommand         string            `json:"target_command"`
@@ -477,9 +480,16 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	if len(payload.GatewayURLCandidates) == 0 || !payload.GatewayURLCandidates[0].Recommended {
 		t.Fatalf("expected created payload to carry gateway candidates, got %#v", payload.GatewayURLCandidates)
 	}
+	if len(payload.GatewayURLCandidates) < 2 ||
+		payload.GatewayURLCandidates[1].URL != "https://relay.example.test/rdev" ||
+		payload.GatewayURLCandidates[1].Kind != "relay" ||
+		payload.GatewayURLCandidates[1].Source != "env:RDEV_RELAY_GATEWAY_URL" {
+		t.Fatalf("expected configured relay fallback candidate, got %#v", payload.GatewayURLCandidates)
+	}
 	if !strings.Contains(payload.TargetCommand, payload.TicketCode) ||
 		!strings.Contains(payload.TargetCommand, "bootstrap.ps1") ||
 		!strings.Contains(payload.TargetCommand, "foreach ($u in $urls)") ||
+		!strings.Contains(payload.TargetCommand, "https://relay.example.test/rdev/join/") ||
 		!strings.Contains(payload.TargetCommand, "-TimeoutSec 10") ||
 		strings.Contains(payload.TargetCommand, "<ticket-code>") ||
 		strings.Contains(payload.TargetCommand, "ExecutionPolicy Bypass") {

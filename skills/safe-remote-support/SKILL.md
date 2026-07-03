@@ -36,7 +36,12 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   readiness, recommended `gateway_url_candidates`, missing inputs, and
   forbidden improvisations. Use the recommended candidate for target-side
   commands; never send a remote target `0.0.0.0`, and use loopback only for
-  same-machine tests.
+  same-machine tests. Configured `RDEV_HOSTED_GATEWAY_URL`,
+  `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
+  `RDEV_VPN_GATEWAY_URL`, and `RDEV_SSH_GATEWAY_URL` values are automatically
+  appended to ordered gateway candidates after direct/LAN paths and before
+  loopback, so Agents should not hand-write relay, mesh, VPN, SSH, or tunnel
+  fallback scripts.
 - For every new visible support session with an already reachable gateway, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
   CLI. Treat the returned `rdev.support-session-created.v1` as the standard

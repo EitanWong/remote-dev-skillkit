@@ -309,7 +309,7 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 	manifestURL := strings.TrimRight(gatewayURL, "/") + "/v1/tickets/" + ticket.Code + "/manifest"
 	return supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
-		GatewayURLCandidates:  []supportsession.GatewayURLCandidate{{URL: strings.TrimRight(gatewayURL, "/"), Kind: "explicit", Scope: "operator-provided", Recommended: true, Reason: "support-session create gateway URL"}},
+		GatewayURLCandidates:  supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", gatewayURL, nil),
 		JoinURL:               joinURL,
 		ManifestURL:           manifestURL,
 		ManifestRootPublicKey: manifestRootPublicKey(s.Gateway.ManifestRoot()),

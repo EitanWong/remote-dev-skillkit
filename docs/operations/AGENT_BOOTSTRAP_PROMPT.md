@@ -121,8 +121,13 @@ Steps:
     `standard_recovery` fields instead of writing custom setup code. Use its
     recommended `gateway_url_candidates` entry for target-side commands instead
     of asking me to choose a gateway URL; never hand a remote target `0.0.0.0`
-    or loopback unless the target is the same machine. If a reachable gateway is
-    already running, first call
+    or loopback unless the target is the same machine. If this runtime has
+    `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+    `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
+    `RDEV_SSH_GATEWAY_URL` configured, treat them as Agent/tool metadata:
+    `rdev` appends them to `gateway_url_candidates` after direct/LAN candidates
+    and before loopback so the target command can fail over without custom
+    relay or tunnel code. If a reachable gateway is already running, first call
     `rdev.support_session.create` through MCP, or
     `rdev support-session create` through the CLI, to create the session and
     obtain the ready target command, join URL, manifest root, real ticket code,

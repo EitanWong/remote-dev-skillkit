@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,8 +78,17 @@ type GatewayURLCandidate struct {
 	Scope       string `json:"scope"`
 	Host        string `json:"host"`
 	Port        string `json:"port"`
+	Source      string `json:"source"`
 	Recommended bool   `json:"recommended"`
 	Reason      string `json:"reason"`
+}
+
+type GatewayEnvCandidate struct {
+	EnvVar string
+	URL    string
+	Kind   string
+	Scope  string
+	Reason string
 }
 
 func BuildHandoff(opts HandoffOptions) map[string]any {
@@ -506,6 +516,10 @@ func ResolveGatewayURL(addr, explicitGatewayURL string) (string, []GatewayURLCan
 }
 
 func GatewayURLCandidatesFromIPs(addr, explicitGatewayURL string, ips []net.IP) []GatewayURLCandidate {
+	return gatewayURLCandidatesFromIPsAndEnv(addr, explicitGatewayURL, ips, gatewayEnvCandidatesFromEnv())
+}
+
+func gatewayURLCandidatesFromIPsAndEnv(addr, explicitGatewayURL string, ips []net.IP, envCandidates []GatewayEnvCandidate) []GatewayURLCandidate {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		addr = "0.0.0.0:8787"
@@ -517,7 +531,7 @@ func GatewayURLCandidatesFromIPs(addr, explicitGatewayURL string, ips []net.IP) 
 	explicit := strings.TrimRight(strings.TrimSpace(explicitGatewayURL), "/")
 	candidates := make([]GatewayURLCandidate, 0, 2+len(ips))
 	if explicit != "" {
-		candidates = append(candidates, candidateFromURL(explicit, "explicit", "operator-provided", true, "explicit gateway_url supplied by the Agent/operator"))
+		candidates = append(candidates, candidateFromURL(explicit, "explicit", "operator-provided", "argument:gateway_url", true, "explicit gateway_url supplied by the Agent/operator"))
 	}
 	if isWildcardHost(host) {
 		for _, ip := range sortedPrivateIPs(ips) {
@@ -528,10 +542,12 @@ func GatewayURLCandidatesFromIPs(addr, explicitGatewayURL string, ips []net.IP) 
 				Scope:       "LAN/VPN/routed-private-network",
 				Host:        ip.String(),
 				Port:        port,
+				Source:      "local-interface",
 				Recommended: explicit == "" && !hasRecommendedGatewayCandidate(candidates),
 				Reason:      "listen address is wildcard; this private interface address is more useful for target machines than 0.0.0.0",
 			})
 		}
+		candidates = appendConfiguredGatewayCandidates(candidates, envCandidates)
 		loopbackURL := "http://" + net.JoinHostPort("127.0.0.1", port)
 		candidates = append(candidates, GatewayURLCandidate{
 			URL:         loopbackURL,
@@ -539,6 +555,7 @@ func GatewayURLCandidatesFromIPs(addr, explicitGatewayURL string, ips []net.IP) 
 			Scope:       "same-machine-only",
 			Host:        "127.0.0.1",
 			Port:        port,
+			Source:      "listen-address",
 			Recommended: explicit == "" && !hasRecommendedGatewayCandidate(candidates),
 			Reason:      "fallback for same-machine testing only; remote target machines cannot use this URL",
 		})
@@ -556,16 +573,20 @@ func GatewayURLCandidatesFromIPs(addr, explicitGatewayURL string, ips []net.IP) 
 		kind = "loopback"
 		reason = "loopback is only suitable when the target is this same machine"
 	}
+	if kind == "loopback" {
+		candidates = appendConfiguredGatewayCandidates(candidates, envCandidates)
+	}
 	candidates = append(candidates, GatewayURLCandidate{
 		URL:         "http://" + net.JoinHostPort(urlHost, port),
 		Kind:        kind,
 		Scope:       scope,
 		Host:        urlHost,
 		Port:        port,
+		Source:      "listen-address",
 		Recommended: explicit == "",
 		Reason:      reason,
 	})
-	return dedupeGatewayCandidates(candidates)
+	return appendConfiguredGatewayCandidates(candidates, envCandidates)
 }
 
 func splitListenAddress(addr string) (string, string) {
@@ -582,11 +603,14 @@ func splitListenAddress(addr string) (string, string) {
 	return strings.Trim(addr, "[]"), ""
 }
 
-func candidateFromURL(rawURL, kind, scope string, recommended bool, reason string) GatewayURLCandidate {
+func candidateFromURL(rawURL, kind, scope, source string, recommended bool, reason string) GatewayURLCandidate {
 	host := ""
 	port := ""
 	withoutScheme := strings.TrimPrefix(strings.TrimPrefix(rawURL, "http://"), "https://")
-	if parsedHost, parsedPort, err := net.SplitHostPort(withoutScheme); err == nil {
+	if parsedURL, err := neturl.Parse(rawURL); err == nil && parsedURL.Host != "" {
+		host = strings.Trim(parsedURL.Hostname(), "[]")
+		port = parsedURL.Port()
+	} else if parsedHost, parsedPort, err := net.SplitHostPort(withoutScheme); err == nil {
 		host = strings.Trim(parsedHost, "[]")
 		port = parsedPort
 	}
@@ -596,9 +620,49 @@ func candidateFromURL(rawURL, kind, scope string, recommended bool, reason strin
 		Scope:       scope,
 		Host:        host,
 		Port:        port,
+		Source:      source,
 		Recommended: recommended,
 		Reason:      reason,
 	}
+}
+
+func gatewayEnvCandidatesFromEnv() []GatewayEnvCandidate {
+	definitions := []GatewayEnvCandidate{
+		{EnvVar: "RDEV_HOSTED_GATEWAY_URL", Kind: "hosted", Scope: "operator-provided-hosted-gateway", Reason: "configured hosted gateway URL"},
+		{EnvVar: "RDEV_RELAY_GATEWAY_URL", Kind: "relay", Scope: "configured-relay", Reason: "configured relay gateway URL"},
+		{EnvVar: "RDEV_MESH_GATEWAY_URL", Kind: "mesh", Scope: "configured-mesh", Reason: "configured mesh gateway URL"},
+		{EnvVar: "RDEV_VPN_GATEWAY_URL", Kind: "vpn", Scope: "configured-vpn", Reason: "configured VPN gateway URL"},
+		{EnvVar: "RDEV_SSH_GATEWAY_URL", Kind: "ssh", Scope: "configured-ssh-tunnel", Reason: "configured SSH tunnel gateway URL"},
+	}
+	out := make([]GatewayEnvCandidate, 0, len(definitions))
+	for _, definition := range definitions {
+		raw := strings.TrimRight(strings.TrimSpace(os.Getenv(definition.EnvVar)), "/")
+		if raw == "" {
+			continue
+		}
+		definition.URL = raw
+		out = append(out, definition)
+	}
+	return out
+}
+
+func appendConfiguredGatewayCandidates(candidates []GatewayURLCandidate, envCandidates []GatewayEnvCandidate) []GatewayURLCandidate {
+	for _, envCandidate := range envCandidates {
+		url := strings.TrimRight(strings.TrimSpace(envCandidate.URL), "/")
+		if url == "" {
+			continue
+		}
+		recommended := !hasRecommendedGatewayCandidate(candidates)
+		candidates = append(candidates, candidateFromURL(
+			url,
+			envCandidate.Kind,
+			envCandidate.Scope,
+			"env:"+envCandidate.EnvVar,
+			recommended,
+			envCandidate.Reason+" from "+envCandidate.EnvVar,
+		))
+	}
+	return dedupeGatewayCandidates(candidates)
 }
 
 func localInterfaceIPs() []net.IP {
@@ -856,7 +920,7 @@ func normalizeCreatedGatewayCandidates(gatewayURL string, candidates []GatewayUR
 		values = append(values, candidate)
 	}
 	if gatewayURL != "" && len(values) == 0 {
-		values = append(values, candidateFromURL(gatewayURL, "explicit", "operator-provided", true, "created support session gateway URL"))
+		values = append(values, candidateFromURL(gatewayURL, "explicit", "operator-provided", "created:generation", true, "created support session gateway URL"))
 	}
 	if !hasRecommendedGatewayCandidate(values) && len(values) > 0 {
 		values[0].Recommended = true

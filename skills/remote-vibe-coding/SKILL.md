@@ -57,6 +57,11 @@ revocation.
   relay, or bootstrap glue. Use the recommended `gateway_url_candidates` item
   for target-side commands. Never send a remote target a wildcard listen
   address such as `0.0.0.0`, and treat loopback as same-machine only.
+  Configured `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+  `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, and
+  `RDEV_SSH_GATEWAY_URL` values are tool metadata: `rdev` appends them to
+  ordered gateway candidates after direct/LAN paths and before loopback so the
+  target one-liner can fail over without Agent-authored tunnel scripts.
 - For a new support session with an already reachable gateway, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
@@ -135,7 +140,9 @@ revocation.
    and a checkout plus Go are available, use `--build-assets`; use the returned
    `gateway_url_candidates` recommendation for target-side commands; do not
    write custom PowerShell, ticket substitution, approval polling, or relay
-   glue.
+   glue. If configured `RDEV_*_GATEWAY_URL` fallback values are present, keep
+   them inside the returned candidate list and target command instead of
+   explaining raw tunnel parameters to the human.
 4. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
 5. If no suitable host is active and a reachable gateway already exists, create

@@ -70,6 +70,14 @@ metadata, status watching, or approval polling by hand.
   ordered Connection Entry URLs on the target machine before failing, so Agents
   should not write custom PowerShell, shell, relay, ticket substitution,
   bootstrap, or approval-polling glue.
+- Added configured gateway fallback discovery for support sessions.
+  `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+  `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, and
+  `RDEV_SSH_GATEWAY_URL` are now appended to `gateway_url_candidates` after
+  direct/LAN candidates and before loopback. `rdev support-session create` and
+  MCP `rdev.support_session.create` include those candidates in the returned
+  target command, so Agents can hand over one command while the target tries
+  LAN, hosted, relay, mesh, VPN, or SSH-assisted entry URLs without custom glue.
 - Added `rdev support-session prepare` and MCP tool
   `rdev.support_session.prepare` with schema
   `rdev.support-session-prepare.v1`. Fresh Agents can now inspect local `rdev`

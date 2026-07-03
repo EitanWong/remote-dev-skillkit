@@ -68,8 +68,13 @@ hashes, `connection_readiness`, `missing_inputs`, and standard recovery
 actions. Agents should use the `recommended=true` item from
 `gateway_url_candidates` for target-side commands and should not ask humans to
 assemble gateway URLs. Wildcard listen addresses such as `0.0.0.0` are never a
-target URL; loopback candidates are same-machine only. By default it is
-read-only. With `build_assets=true`, it builds local helper binaries from the
+target URL; loopback candidates are same-machine only. If
+`RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
+configured, support-session tools append those hosted/relay/mesh/VPN/SSH
+candidates after direct/LAN candidates and before loopback, so Agents can hand
+over one target command instead of writing custom tunnel fallback scripts. By
+default it is read-only. With `build_assets=true`, it builds local helper binaries from the
 checked-out source so target bootstraps can download verified helpers when the
 target machine does not already have `rdev`.
 

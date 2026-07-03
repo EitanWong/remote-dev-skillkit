@@ -47,7 +47,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.prepare",
-			Description: "Inspect a fresh Agent runtime for one-command support-session readiness: local rdev recovery, Go/Git checkout state, gateway URL candidates, platform helper asset availability, target bootstrap self-repair, and standard recovery actions. Agents should call this before improvising setup when rdev or gateway state is unclear, then use the recommended gateway_url_candidates entry instead of asking humans to assemble gateway values.",
+			Description: "Inspect a fresh Agent runtime for one-command support-session readiness: local rdev recovery, Go/Git checkout state, gateway URL candidates, configured RDEV_*_GATEWAY_URL fallbacks, platform helper asset availability, target bootstrap self-repair, and standard recovery actions. Agents should call this before improvising setup when rdev or gateway state is unclear, then use the recommended gateway_url_candidates entry instead of asking humans to assemble gateway values.",
 			Safety:      "Read-only by default; with build_assets=true it builds local helper binaries from the checked-out source but does not create tickets, start a gateway, approve hosts, or execute on a target machine.",
 			InputSchema: object(map[string]any{
 				"repo_root":    stringField(),
@@ -60,7 +60,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.create",
-			Description: "Create an attended temporary support session through an already reachable gateway and return a ready user_handoff, target command, and status watcher. The target command is the standardized fallback surface and can try ordered gateway URL candidates with bounded timeout/retry behavior without Agent-authored scripts. Agents should prefer user_handoff.message plus user_handoff.copy_paste for the human-facing response. If no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+			Description: "Create an attended temporary support session through an already reachable gateway and return a ready user_handoff, target command, and status watcher. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured RDEV_*_GATEWAY_URL hosted/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. Agents should prefer user_handoff.message plus user_handoff.copy_paste for the human-facing response. If no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
 			Safety:      "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
 			InputSchema: object(map[string]any{
 				"gateway_url":         stringField(),
@@ -75,7 +75,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.plan",
-			Description: "Create a standardized Agent-native support session plan for review/debug access to gateway startup, recommended gateway URL candidates, verified helper assets, invite creation, localized target commands with built-in candidate fallback/timeout policy, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.create when a gateway is running and the foreground CLI command rdev support-session start when no gateway is running.",
+			Description: "Create a standardized Agent-native support session plan for review/debug access to gateway startup, recommended gateway URL candidates, configured RDEV_*_GATEWAY_URL fallbacks, verified helper assets, invite creation, localized target commands with built-in candidate fallback/timeout policy, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.create when a gateway is running and the foreground CLI command rdev support-session start when no gateway is running.",
 			Safety:      "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",
 			InputSchema: object(map[string]any{
 				"repo_root":    stringField(),

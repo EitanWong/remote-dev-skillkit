@@ -336,6 +336,7 @@ func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 }
 
 func TestServerToolCallSupportSessionCreate(t *testing.T) {
+	t.Setenv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev")
 	input := mcpRequestLine(t, "rdev.support_session.create", map[string]any{
 		"gateway_url":  "http://192.0.2.44:8787",
 		"target":       "windows",
@@ -384,6 +385,15 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 	}
 	if len(gatewayCandidates) == 0 {
 		t.Fatalf("expected created payload to carry gateway candidates: %#v", structured)
+	}
+	if len(gatewayCandidates) < 2 ||
+		gatewayCandidates[1].(map[string]any)["url"] != "https://relay.example.test/rdev" ||
+		gatewayCandidates[1].(map[string]any)["kind"] != "relay" ||
+		gatewayCandidates[1].(map[string]any)["source"] != "env:RDEV_RELAY_GATEWAY_URL" {
+		t.Fatalf("expected configured relay fallback candidate, got %#v", gatewayCandidates)
+	}
+	if !strings.Contains(targetCommand, "https://relay.example.test/rdev/join/") {
+		t.Fatalf("expected target command to include configured relay join fallback, got %q", targetCommand)
 	}
 	watch := strings.Join(anyStrings(structured["watch_connection_status"].([]any)), "\x00")
 	if !strings.Contains(watch, ticketCode) ||
