@@ -30,7 +30,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.handoff",
-			Description: "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided or a configured RDEV_*_GATEWAY_URL fallback exists, call rdev.support_session.create next; if not, run the returned foreground rdev support-session start command. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
+			Description: "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided or a configured RDEV_*_GATEWAY_URL fallback exists, call rdev.support_session.create next; if not, run the returned foreground rdev support-session start command, then read its ready_file.path when terminal stdout is hard to parse. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
 			Safety:      "Planning only; does not create tickets, start a gateway, approve hosts, execute on the target host, or install persistence.",
 			InputSchema: object(map[string]any{
 				"repo_root":    stringField(),

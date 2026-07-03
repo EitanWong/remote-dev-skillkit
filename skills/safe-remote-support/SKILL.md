@@ -55,7 +55,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev support-session start` in a visible foreground terminal; it prepares
   verified helper assets when possible, starts the gateway, selects a
   target-usable gateway URL candidate, and prints the same ready session payload
-  before listening. Use `rdev.support_session.plan` or
+  before listening. It also writes the same JSON to `ready_file.path`; use that
+  ready file when foreground stdout is hard to parse. Use
+  `rdev.support_session.plan` or
   `rdev support-session plan` only for review/debug planning before writing any
   gateway, PowerShell, relay, nohup, approval, or bootstrap steps.
 - Treat returned `target_command` as the standard fallback surface. It already

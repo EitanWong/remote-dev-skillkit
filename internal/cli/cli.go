@@ -1777,6 +1777,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
+		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file before serving; defaults to the session work dir")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1790,6 +1791,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			AutoApprove: *autoApprove,
 			Locale:      *locale,
 			RdevCommand: *rdevCommand,
+			ReadyFile:   *readyFile,
 		})
 	case "create":
 		fs := flag.NewFlagSet("support-session create", flag.ContinueOnError)
@@ -1880,6 +1882,7 @@ type supportSessionStartOptions struct {
 	AutoApprove bool
 	Locale      string
 	RdevCommand string
+	ReadyFile   string
 }
 
 type supportSessionPrepareOptions struct {
@@ -1932,6 +1935,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	if absWorkDir, err := filepath.Abs(workDir); err == nil {
 		workDir = absWorkDir
+	}
+	readyFile := strings.TrimSpace(opts.ReadyFile)
+	if readyFile == "" {
+		readyFile = filepath.Join(workDir, "support-session-ready.json")
+	}
+	if absReadyFile, err := filepath.Abs(readyFile); err == nil {
+		readyFile = absReadyFile
 	}
 	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
 		RepoRoot:    findSupportSessionRepoRoot("."),
@@ -2022,14 +2032,19 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		Addr:                 addr,
 		GatewayURL:           gatewayURL,
 		WorkDir:              workDir,
+		ReadyFile:            readyFile,
 		Created:              created,
 		AssetReport:          prepared["asset_report"],
 		ConnectionReadiness:  prepared["connection_readiness"],
 		ConnectivityStrategy: prepared["connectivity_strategy"],
 	})
+	if err := writeJSONFile0600(readyFile, started); err != nil {
+		return err
+	}
 	if err := writeJSON(a.Stdout, started); err != nil {
 		return err
 	}
+	_, _ = fmt.Fprintf(a.Stderr, "rdev support session ready payload written to %s\n", readyFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
 	return listenAndServeGatewayContext(ctx, addr, server.Handler(), nil)
 }
@@ -8261,6 +8276,24 @@ func writeJSON(out io.Writer, value any) error {
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(value)
+}
+
+func writeJSONFile0600(path string, value any) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("ready file path is required")
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 func allAcceptanceChecksPassed(checks []acceptance.Check) bool {

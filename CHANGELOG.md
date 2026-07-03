@@ -119,6 +119,13 @@ metadata, status watching, or approval polling by hand.
   and Go are available, print the ready target command/join URL/status watcher
   plus asset/readiness reports, and keep the gateway serving without writing ad
   hoc background process or invite glue.
+- Added `rdev.support-session-ready-file.v1` metadata to
+  `rdev.support-session-started.v1`. `rdev support-session start` now writes the
+  same started payload to `support-session-ready.json` by default, or to
+  `--ready-file`, before serving. Fresh Agents can read `ready_file.path` when a
+  long-running foreground terminal makes stdout hard to parse, then send
+  `session.user_handoff.message` plus `session.user_handoff.copy_paste` without
+  inventing extra scripts or asking the human to assemble ticket/gateway values.
 - Added `rdev support-session create` and MCP tool
   `rdev.support_session.create` with schema
   `rdev.support-session-created.v1`. When a gateway is already reachable,

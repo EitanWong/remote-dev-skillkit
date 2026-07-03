@@ -160,7 +160,10 @@ Steps:
     `rdev.support-session-started.v1` with the embedded ready target command,
     join URL, real ticket code, manifest root, status watcher, asset report,
     recommended gateway URL candidates, and connection readiness before
-    listening. Use `rdev.support_session.plan` or `rdev support-session plan`
+    listening. It also writes the same JSON payload to `ready_file.path`
+    (`support-session-ready.json` in the session work directory by default);
+    read that file when the long-running foreground terminal makes stdout hard
+    to parse. Use `rdev.support_session.plan` or `rdev support-session plan`
     only for review/debug planning or when the operator asks for the underlying
     gateway argv.
     After giving the target command to the human, call

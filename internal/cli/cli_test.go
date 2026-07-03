@@ -650,13 +650,16 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := NewApp(&stdout, &stderr)
+	workDir := filepath.Join(t.TempDir(), "support")
+	readyFile := filepath.Join(workDir, "ready", "support-session-ready.json")
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- app.Run(ctx, []string{
 			"support-session", "start",
 			"--addr", addr,
 			"--gateway-url", gatewayURL,
-			"--work-dir", filepath.Join(t.TempDir(), "support"),
+			"--work-dir", workDir,
+			"--ready-file", readyFile,
 			"--target", "windows",
 			"--locale", "zh-CN",
 		})
@@ -695,6 +698,12 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			SchemaVersion  string   `json:"schema_version"`
 			SelectionOrder []string `json:"selection_order"`
 		} `json:"connectivity_strategy"`
+		ReadyFile struct {
+			SchemaVersion string `json:"schema_version"`
+			Path          string `json:"path"`
+			Contains      string `json:"contains"`
+			AgentRule     string `json:"agent_rule"`
+		} `json:"ready_file"`
 		Session struct {
 			SchemaVersion         string   `json:"schema_version"`
 			TicketCode            string   `json:"ticket_code"`
@@ -720,6 +729,12 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "existing-wireguard-vpn") {
 		t.Fatalf("expected support-session start to prepare helper assets, got %#v", payload)
 	}
+	if payload.ReadyFile.SchemaVersion != "rdev.support-session-ready-file.v1" ||
+		payload.ReadyFile.Path != readyFile ||
+		payload.ReadyFile.Contains != "rdev.support-session-started.v1" ||
+		!strings.Contains(payload.ReadyFile.AgentRule, "session.user_handoff.copy_paste") {
+		t.Fatalf("expected ready-file metadata, got %#v", payload.ReadyFile)
+	}
 	if payload.Session.SchemaVersion != "rdev.support-session-created.v1" ||
 		payload.Session.TicketCode == "" ||
 		!payload.Session.AutoApprove ||
@@ -731,6 +746,57 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	watch := strings.Join(payload.Session.WatchConnectionStatus, "\x00")
 	if !strings.Contains(watch, payload.Session.TicketCode) || !strings.Contains(watch, "--wait") {
 		t.Fatalf("expected ready watcher, got %#v", payload.Session.WatchConnectionStatus)
+	}
+	readyInfo, err := os.Stat(readyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readyInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("expected ready file permissions 0600, got %v", readyInfo.Mode().Perm())
+	}
+	var readyPayload struct {
+		SchemaVersion string `json:"schema_version"`
+		ReadyFile     struct {
+			Path string `json:"path"`
+		} `json:"ready_file"`
+		Session struct {
+			TicketCode  string `json:"ticket_code"`
+			UserHandoff struct {
+				CopyPaste string `json:"copy_paste"`
+			} `json:"user_handoff"`
+		} `json:"session"`
+	}
+	readyBytes, err := os.ReadFile(readyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(readyBytes, &readyPayload); err != nil {
+		t.Fatalf("invalid ready file JSON: %v\n%s", err, string(readyBytes))
+	}
+	if readyPayload.SchemaVersion != "rdev.support-session-started.v1" ||
+		readyPayload.ReadyFile.Path != readyFile ||
+		readyPayload.Session.TicketCode != payload.Session.TicketCode ||
+		!strings.Contains(readyPayload.Session.UserHandoff.CopyPaste, payload.Session.TicketCode) {
+		t.Fatalf("expected ready file to mirror started payload, got %#v", readyPayload)
+	}
+}
+
+func TestWriteJSONFile0600TightensExistingFilePermissions(t *testing.T) {
+	readyFile := filepath.Join(t.TempDir(), "ready.json")
+	if err := os.WriteFile(readyFile, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeJSONFile0600(readyFile, map[string]any{"ok": true}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(readyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected existing ready file permissions to tighten to 0600, got %v", info.Mode().Perm())
 	}
 }
 

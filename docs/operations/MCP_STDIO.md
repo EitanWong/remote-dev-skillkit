@@ -93,6 +93,11 @@ local gateway, creates the attended-temporary ticket, prints
 and emits target commands that try those ordered candidates before failing.
 The embedded `connection_attempt_policy` is the only place Agents should read
 target-side timeout/retry behavior from.
+The CLI also writes the same started payload to `ready_file.path`
+(`support-session-ready.json` in the session work directory by default), so
+Agents can read `session.user_handoff.message` and
+`session.user_handoff.copy_paste` from a stable file when a long-running
+foreground terminal makes stdout hard to parse.
 This is a CLI foreground process rather than an MCP tool because MCP calls
 should not hide or orphan a long-running gateway.
 Agents should not manually combine `rdev gateway serve` and `rdev invite create`

@@ -373,6 +373,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		Addr:       "127.0.0.1:8787",
 		GatewayURL: "http://127.0.0.1:8787",
 		WorkDir:    "work/rdev-support-session",
+		ReadyFile:  "work/rdev-support-session/support-session-ready.json",
 		Created:    created,
 		AssetReport: map[string]any{
 			"schema_version": "rdev.support-session-assets.v1",
@@ -400,6 +401,13 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	if started["asset_report"].(map[string]any)["all_ready"] != true ||
 		started["connection_readiness"].(map[string]any)["ready"] != true {
 		t.Fatalf("expected asset/readiness reports in started payload, got %#v", started)
+	}
+	readyFile := started["ready_file"].(map[string]any)
+	if readyFile["schema_version"] != "rdev.support-session-ready-file.v1" ||
+		readyFile["path"] != "work/rdev-support-session/support-session-ready.json" ||
+		readyFile["contains"] != StartedSchemaVersion ||
+		!strings.Contains(readyFile["agent_rule"].(string), "session.user_handoff.copy_paste") {
+		t.Fatalf("expected ready file metadata, got %#v", readyFile)
 	}
 	forbidden := strings.Join(started["forbidden"].([]string), "\n")
 	if !strings.Contains(forbidden, "background hidden gateway") ||

@@ -167,7 +167,9 @@ revocation.
    foreground terminal and use the embedded `session.target_command` or
    `session.join_url`; when `user_handoff` is present, send its localized
    `message` plus `copy_paste` verbatim and follow `auto_target_rule` when the
-   target is unknown. Use `rdev.support_session.plan` or
+   target is unknown. If foreground stdout is hard to parse, read the same
+   started payload from returned `ready_file.path`. Use
+   `rdev.support_session.plan` or
    `rdev support-session plan` only for review/debug planning. For lower-level
    package materialization only, create an invite with `rdev.invites.create` or
    `rdev invite create`, and materialize it with `rdev.connection_entry.plan`

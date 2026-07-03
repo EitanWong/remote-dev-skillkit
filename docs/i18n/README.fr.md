@@ -58,8 +58,8 @@ Entry URLs on the target machine with bounded timeout/retry behavior, so do not
 write custom fallback scripts. Read `connection_continuity_policy`; when `stable_after_lan_change=false`, treat LAN as an opportunistic first path and prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work. If no gateway is
 running yet, run `rdev support-session start` in a visible foreground terminal;
 it prepares verified helper assets when possible, starts the local gateway,
-selects a target-usable gateway URL candidate, and prints the same ready session
-payload before listening. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session start` so verified helper assets are served automatically. Use
+selects a target-usable gateway URL candidate, prints the same ready session
+payload before listening, and writes that payload to `ready_file.path` as `support-session-ready.json` by default. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session start` so verified helper assets are served automatically. Use
 `rdev.support_session.plan` or `rdev support-session plan` only
 for review/debug planning. After giving the target-machine command, watch
 `rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; CLI status can omit `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. Created session payloads include `watch_connection_status_configured_gateway`; use that returned command when configured gateway metadata is present. When
