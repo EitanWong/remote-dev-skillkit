@@ -62,7 +62,7 @@ selects a target-usable gateway URL candidate, and prints the same ready session
 payload before listening. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session start` so verified helper assets are served automatically. Use
 `rdev.support_session.plan` or `rdev support-session plan` only
 for review/debug planning. After giving the target-machine command, watch
-`rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; CLI status can omit `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. When
+`rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; CLI status can omit `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. Created session payloads include `watch_connection_status_configured_gateway`; use that returned command when configured gateway metadata is present. When
 `connected=true`, proactively tell me the connection has been established, follow
 `connected_next_steps.user_report`, inspect `rdev.hosts.capabilities`, and only
 then create the smallest scoped job for my task. If waiting times out or the target does not appear, read

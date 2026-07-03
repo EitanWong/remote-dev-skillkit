@@ -132,6 +132,7 @@
 - [x] Add configured hosted/relay/mesh/VPN/SSH gateway fallback discovery through `RDEV_*_GATEWAY_URL` so support-session prepare/start/create append operator-configured reachable paths after direct/LAN candidates and before loopback, keeping fallback selection inside the standard target command instead of Agent-authored scripts.
 - [x] Let support-session handoff/create auto-select the first configured `RDEV_*_GATEWAY_URL` when `gateway_url` is omitted, so fresh Agents do not ask humans to choose a gateway URL that the runtime already knows.
 - [x] Let CLI `rdev support-session status --ticket-code ... --wait` auto-select the first configured `RDEV_*_GATEWAY_URL` when `--gateway-url` is omitted, so Agents can report connection feedback without preserving low-level gateway parameters.
+- [x] Add `watch_connection_status_configured_gateway` to created support-session payloads so Agents with configured gateway metadata get a ready status watcher command that omits `--gateway-url`.
 - [x] Add `rdev.connection-attempt-policy.v1` and bounded target-side timeout/retry behavior so Windows/macOS/Linux one-liners fail over quickly instead of hanging on a dead gateway candidate.
 - [x] Add MCP wait support to `rdev.support_session.status` so Agents can wait for connection feedback through the standard tool instead of writing custom polling loops.
 - [x] Add `rdev.support-session-user-handoff.v1` so Agents can send a localized message plus exact copy-paste command/link to humans without rewriting the target command.

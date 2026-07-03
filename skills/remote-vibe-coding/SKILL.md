@@ -103,7 +103,9 @@ revocation.
   `connection_recovery` and follow its `agent_next_actions`,
   `standard_tools`, and `forbidden` fields. Do not invent target-side recovery
   scripts or ask the human for raw ticket/root/gateway/transport values. CLI
-  status can omit `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists.
+  status can omit `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists;
+  prefer returned `watch_connection_status_configured_gateway.command` when it
+  is applicable.
 - When status returns `connected=true`, immediately send
   `connected_next_steps.user_report` to the user, call the listed
   `rdev.hosts.capabilities` follow-up, then create only the smallest scoped job

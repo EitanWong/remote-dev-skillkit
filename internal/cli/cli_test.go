@@ -492,6 +492,10 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 			AllReady      bool   `json:"all_ready"`
 			AgentRule     string `json:"agent_rule"`
 		} `json:"target_bootstrap_readiness"`
+		WatchConnectionStatusConfiguredGateway struct {
+			Command   []string `json:"command"`
+			AgentRule string   `json:"agent_rule"`
+		} `json:"watch_connection_status_configured_gateway"`
 		RecommendedSurface    string `json:"recommended_surface"`
 		AutoApprove           bool   `json:"auto_approve"`
 		ManifestRootPublicKey string `json:"manifest_root_public_key"`
@@ -560,6 +564,13 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		strings.Contains(watch, "<ticket-code>") ||
 		!strings.Contains(watch, "--wait") {
 		t.Fatalf("watch command should be ready: %#v", payload.WatchConnectionStatus)
+	}
+	configuredWatch := strings.Join(payload.WatchConnectionStatusConfiguredGateway.Command, "\x00")
+	if !strings.Contains(configuredWatch, payload.TicketCode) ||
+		!strings.Contains(configuredWatch, "--wait") ||
+		strings.Contains(configuredWatch, "--gateway-url") ||
+		!strings.Contains(payload.WatchConnectionStatusConfiguredGateway.AgentRule, "RDEV_*_GATEWAY_URL") {
+		t.Fatalf("configured gateway watcher should be ready and omit gateway URL: %#v", payload.WatchConnectionStatusConfiguredGateway)
 	}
 }
 

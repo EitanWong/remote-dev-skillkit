@@ -157,7 +157,9 @@ approval bypass and is rejected for managed or break-glass tickets.
 CLI status can omit `--gateway-url` when `RDEV_HOSTED_GATEWAY_URL`,
 `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
 `RDEV_SSH_GATEWAY_URL` is configured, so Agents do not need to remember or ask
-for the gateway URL just to watch a known ticket.
+for the gateway URL just to watch a known ticket. Created-session payloads
+include `watch_connection_status_configured_gateway.command`; use it when a
+configured gateway exists, otherwise use `watch_connection_status`.
 When the returned status has `connected=true`, immediately tell the user the
 connection is established before creating jobs. Status payloads include
 `connected_next_steps` with schema

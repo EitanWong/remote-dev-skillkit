@@ -853,6 +853,12 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"--wait",
 		"--locale", locale,
 	}
+	configuredGatewayStatusCommand := []string{
+		rdevCommand, "support-session", "status",
+		"--ticket-code", opts.Ticket.Code,
+		"--wait",
+		"--locale", locale,
+	}
 	return map[string]any{
 		"schema_version":                CreatedSchemaVersion,
 		"ok":                            true,
@@ -876,6 +882,17 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"target_bootstrap_requirements": bootstrapRequirements,
 		"target_bootstrap_readiness":    opts.TargetBootstrapReadiness,
 		"watch_connection_status":       statusCommand,
+		"watch_connection_status_configured_gateway": map[string]any{
+			"command": configuredGatewayStatusCommand,
+			"requires_configured_gateway_env": []string{
+				"RDEV_HOSTED_GATEWAY_URL",
+				"RDEV_RELAY_GATEWAY_URL",
+				"RDEV_MESH_GATEWAY_URL",
+				"RDEV_VPN_GATEWAY_URL",
+				"RDEV_SSH_GATEWAY_URL",
+			},
+			"agent_rule": "use this shorter watcher when one RDEV_*_GATEWAY_URL is configured; otherwise use watch_connection_status",
+		},
 		"mcp_follow_up": []map[string]any{
 			{
 				"tool": "rdev.support_session.status",

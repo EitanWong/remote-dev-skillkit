@@ -162,7 +162,10 @@ Steps:
     gateway argv.
     After giving the target command to the human, call
     `rdev.support_session.status` with `wait=true` through MCP or
-    `rdev support-session status --wait` through CLI. When the status returns
+    `rdev support-session status --wait` through CLI. Created session payloads
+    include `watch_connection_status_configured_gateway`; use that returned
+    command when configured gateway metadata is present, otherwise use
+    `watch_connection_status`. When the status returns
     `connected=true`, proactively tell me that the connection has been
     established before creating any jobs. Then follow `connected_next_steps`:
     send `user_report`, inspect `rdev.hosts.capabilities`, and create only the

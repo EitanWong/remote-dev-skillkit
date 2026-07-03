@@ -89,6 +89,10 @@ metadata, status watching, or approval polling by hand.
   `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists, so Agents do
   not need to remember or ask for the gateway URL just to report
   `connected=true`.
+- Added `watch_connection_status_configured_gateway` to created support-session
+  payloads. Agents with a configured `RDEV_*_GATEWAY_URL` now get a ready
+  status watcher command that omits `--gateway-url`, while the existing
+  `watch_connection_status` remains available for explicit gateway calls.
 - Added `rdev support-session prepare` and MCP tool
   `rdev.support_session.prepare` with schema
   `rdev.support-session-prepare.v1`. Fresh Agents can now inspect local `rdev`

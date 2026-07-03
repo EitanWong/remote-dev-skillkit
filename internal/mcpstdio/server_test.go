@@ -425,6 +425,14 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 		!strings.Contains(watch, "--wait") {
 		t.Fatalf("expected ready status watcher, got %s", watch)
 	}
+	configuredWatcher := structured["watch_connection_status_configured_gateway"].(map[string]any)
+	configuredWatch := strings.Join(anyStrings(configuredWatcher["command"].([]any)), "\x00")
+	if !strings.Contains(configuredWatch, ticketCode) ||
+		!strings.Contains(configuredWatch, "--wait") ||
+		strings.Contains(configuredWatch, "--gateway-url") ||
+		!strings.Contains(configuredWatcher["agent_rule"].(string), "RDEV_*_GATEWAY_URL") {
+		t.Fatalf("expected configured gateway status watcher, got %#v", configuredWatcher)
+	}
 }
 
 func TestServerToolCallSupportSessionCreateUsesConfiguredGateway(t *testing.T) {

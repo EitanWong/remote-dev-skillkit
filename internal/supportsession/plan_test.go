@@ -299,6 +299,14 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(watch, "--wait") {
 		t.Fatalf("expected ready status watcher, got %s", watch)
 	}
+	configuredWatcher := created["watch_connection_status_configured_gateway"].(map[string]any)
+	configuredCommand := strings.Join(configuredWatcher["command"].([]string), "\x00")
+	if !strings.Contains(configuredCommand, "ABCD-1234") ||
+		!strings.Contains(configuredCommand, "--wait") ||
+		strings.Contains(configuredCommand, "--gateway-url") ||
+		!strings.Contains(configuredWatcher["agent_rule"].(string), "RDEV_*_GATEWAY_URL") {
+		t.Fatalf("expected configured-gateway status watcher, got %#v", configuredWatcher)
+	}
 	flow := strings.Join(created["agent_flow"].([]string), "\n")
 	if !strings.Contains(flow, "proactively report") ||
 		!strings.Contains(flow, "do not ask the human to assemble") {

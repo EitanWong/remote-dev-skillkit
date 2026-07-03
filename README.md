@@ -130,8 +130,10 @@ gateway, and prints the same ready session payload before listening. Use
 planning. After giving me the target-machine command, watch
 `rdev.support_session.status`
 or `rdev support-session status --wait`; the CLI status command can omit
-`--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. When
-`connected=true`, tell me the connection has been established before creating jobs. Then follow
+`--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. Created session
+payloads include `watch_connection_status_configured_gateway` with this shorter
+watcher command, and Agents should use it when a configured gateway is present.
+When `connected=true`, tell me the connection has been established before creating jobs. Then follow
 `connected_next_steps`: report `user_report`, inspect
 `rdev.hosts.capabilities`, and create only the smallest scoped job for my task.
 If waiting times out or
