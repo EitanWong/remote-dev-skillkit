@@ -115,7 +115,9 @@ Steps:
     send only the returned `user_handoff.message` plus
     `user_handoff.copy_paste`. If it returns `ready_to_send_to_human=false`,
     run the returned visible foreground `rdev support-session start` command,
-    then send the started session handoff. If local
+    read `ready_file.path` when terminal stdout is hard to parse, then send only
+    the started payload's top-level `user_handoff.message` plus
+    `user_handoff.copy_paste`. If local
     `rdev`, gateway state, or target helper assets are unclear, call
     `rdev.support_session.prepare` through MCP or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
@@ -159,10 +161,13 @@ Steps:
     foreground terminal. It
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
     are available, starts the local gateway, and prints
-    `rdev.support-session-started.v1` with the embedded ready target command,
-    join URL, real ticket code, manifest root, status watcher, asset report,
-    recommended gateway URL candidates, and connection readiness before
-    listening. It also writes the same JSON payload to `ready_file.path`
+    `rdev.support-session-started.v1` with top-level `user_handoff`,
+    `target_command`, `join_url`, status watcher, asset report, recommended
+    gateway URL candidates, and connection readiness before listening. It keeps
+    the full created session under `session` for compatibility, but fresh
+    Agents should send only the top-level `user_handoff.message` plus
+    `user_handoff.copy_paste`. It also writes the same JSON payload to
+    `ready_file.path`
     (`support-session-ready.json` in the session work directory by default);
     read that file when the long-running foreground terminal makes stdout hard
     to parse. Use `rdev.support_session.plan` or `rdev support-session plan`

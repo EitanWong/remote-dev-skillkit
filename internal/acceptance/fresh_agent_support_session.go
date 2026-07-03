@@ -213,6 +213,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	configuredWatcher := mapFromAny(input.CreatedSession["watch_connection_status_configured_gateway"])
 	readyFile := mapFromAny(input.StartedSession["ready_file"])
 	session := mapFromAny(input.StartedSession["session"])
+	startedHandoff := mapFromAny(input.StartedSession["user_handoff"])
 	connectedNext := mapFromAny(input.ConnectedStatus["connected_next_steps"])
 	recoveryForbidden := strings.Join(stringSliceFromAny(input.WaitingRecovery["forbidden"]), "\n")
 	copyPaste := stringFromAny(handoff["copy_paste"])
@@ -229,6 +230,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "created_session_copy_paste_is_not_rewritten_placeholder", Passed: copyPaste == targetCommand && !strings.Contains(copyPaste, "<ticket-code>") && !strings.Contains(copyPaste, "ExecutionPolicy Bypass"), Detail: copyPaste},
 		{Name: "created_session_has_waiting_mcp_followup", Passed: len(mcpFollowUp) > 0 && stringFromAny(mcpFollowUp[0]["tool"]) == "rdev.support_session.status" && boolFromAny(mapFromAny(mcpFollowUp[0]["arguments"])["wait"]), Detail: fmt.Sprintf("%v", mcpFollowUp)},
 		{Name: "configured_gateway_watcher_omits_gateway_url", Passed: !strings.Contains(strings.Join(stringSliceFromAny(configuredWatcher["command"]), " "), "--gateway-url"), Detail: strings.Join(stringSliceFromAny(configuredWatcher["command"]), " ")},
+		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == true && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
 		{Name: "auto_approval_connects_first_attended_host", Passed: input.Host.Status == model.HostStatusActive && input.ConnectedStatus["connected"] == true, Detail: string(input.Host.Status)},

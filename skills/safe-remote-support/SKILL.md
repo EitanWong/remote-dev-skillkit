@@ -56,7 +56,7 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   only the returned `user_handoff`. If it returns
   `ready_to_send_to_human=false`, run the returned foreground start command in
   a visible terminal, read `ready_file.path` when needed, then send the started
-  session `user_handoff`. For lower-level explicit gateway workflows, call
+  payload's top-level `user_handoff`. For lower-level explicit gateway workflows, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
   CLI. Treat the returned `rdev.support-session-created.v1` as the standard
   one-command session package: it already includes the target command, join URL,
@@ -201,8 +201,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    target-side human. If no explicit gateway URL was supplied, let create use a
    configured `RDEV_*_GATEWAY_URL` before asking for configuration. If no
    gateway exists, run `rdev support-session start` in a visible foreground
-   terminal and send only the embedded `session.target_command` or
-   `session.join_url`. Use `rdev.support_session.plan` or
+   terminal and send only top-level `user_handoff.message` plus
+   `user_handoff.copy_paste`. Use `rdev.support_session.plan` or
    `rdev support-session plan` only for review/debug planning.
 7. For lower-level package materialization only, create an invite with
    `rdev.invites.create` when available so the Agent gets `connection_entry`,

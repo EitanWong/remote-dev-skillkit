@@ -124,7 +124,7 @@ metadata, status watching, or approval polling by hand.
   same started payload to `support-session-ready.json` by default, or to
   `--ready-file`, before serving. Fresh Agents can read `ready_file.path` when a
   long-running foreground terminal makes stdout hard to parse, then send
-  `session.user_handoff.message` plus `session.user_handoff.copy_paste` without
+  top-level `user_handoff.message` plus `user_handoff.copy_paste` without
   inventing extra scripts or asking the human to assemble ticket/gateway values.
 - Added `rdev acceptance fresh-agent-support-session` with schema
   `rdev.acceptance.fresh-agent-support-session.v1`. This local contract gate

@@ -92,16 +92,18 @@ target machine does not already have `rdev`.
 When no suitable gateway is running yet, Agents should run
 `rdev support-session start` as a visible foreground CLI process. It starts the
 local gateway, creates the attended-temporary ticket, prints
-`rdev.support-session-started.v1` with an embedded
-`rdev.support-session-created.v1`, includes `asset_report` and
-`connection_readiness`, includes the same recommended gateway URL candidates,
-and emits target commands that try those ordered candidates before failing.
-The embedded `connection_attempt_policy` is the only place Agents should read
-target-side timeout/retry behavior from.
+`rdev.support-session-started.v1`, mirrors the created session's
+`user_handoff`, `target_command`, `join_url`, and watcher at the top level,
+keeps the full `rdev.support-session-created.v1` under `session` for
+compatibility, includes `asset_report` and `connection_readiness`, includes the
+same recommended gateway URL candidates, and emits target commands that try
+those ordered candidates before failing. The embedded
+`connection_attempt_policy` is the only place Agents should read target-side
+timeout/retry behavior from.
 The CLI also writes the same started payload to `ready_file.path`
 (`support-session-ready.json` in the session work directory by default), so
-Agents can read `session.user_handoff.message` and
-`session.user_handoff.copy_paste` from a stable file when a long-running
+Agents can read top-level `user_handoff.message` and
+`user_handoff.copy_paste` from a stable file when a long-running
 foreground terminal makes stdout hard to parse.
 This is a CLI foreground process rather than an MCP tool because MCP calls
 should not hide or orphan a long-running gateway.

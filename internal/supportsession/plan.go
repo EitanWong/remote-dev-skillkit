@@ -229,8 +229,8 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	payload["ready_to_send_to_human"] = false
 	payload["foreground_start_command"] = handoff["foreground_start_command"]
 	payload["prepare_command"] = handoff["prepare_command"]
-	payload["agent_next_step"] = "run foreground_start_command in a visible terminal; read ready_file.path if stdout is hard to parse; then send only session.user_handoff.message plus session.user_handoff.copy_paste and wait for connected=true"
-	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned foreground_start_command first and then send the started session user_handoff"
+	payload["agent_next_step"] = "run foreground_start_command in a visible terminal; read ready_file.path if stdout is hard to parse; then send only the started payload's user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
+	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned foreground_start_command first and then send the started payload's top-level user_handoff"
 	return payload
 }
 
@@ -297,6 +297,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	workDir := strings.TrimSpace(opts.WorkDir)
 	readyFile := strings.TrimSpace(opts.ReadyFile)
+	session := opts.Created
 	payload := map[string]any{
 		"schema_version": StartedSchemaVersion,
 		"ok":             true,
@@ -308,18 +309,26 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"lifecycle":   "foreground-visible-process",
 			"stop":        "interrupt this rdev support-session start process",
 		},
-		"session":               opts.Created,
+		"ready_to_send_to_human":  true,
+		"user_handoff":            session["user_handoff"],
+		"target_command":          session["target_command"],
+		"join_url":                session["join_url"],
+		"watch_connection_status": session["watch_connection_status"],
+		"watch_connection_status_configured_gateway": session["watch_connection_status_configured_gateway"],
+		"mcp_follow_up":         session["mcp_follow_up"],
+		"session":               session,
 		"asset_report":          opts.AssetReport,
 		"connection_readiness":  opts.ConnectionReadiness,
 		"connectivity_strategy": opts.ConnectivityStrategy,
 		"agent_flow": []string{
 			"keep this process running while the target host connects",
-			"give the target-side human only session.target_command or session.join_url",
-			"watch connection status with session.watch_connection_status or rdev.support_session.status",
+			"give the target-side human only user_handoff.message plus user_handoff.copy_paste",
+			"watch connection status with watch_connection_status or rdev.support_session.status",
 			"when connected=true, proactively report that the connection is established",
 			"if connection_readiness.ready is false, follow standard_recovery_actions instead of writing ad hoc bootstrap or relay code",
 		},
 		"standard_recovery_actions": standardRecoveryActions(opts.StandardRecoveryActions),
+		"human_surface_rule":        "humans receive only user_handoff.message plus user_handoff.copy_paste",
 		"forbidden": []string{
 			"background hidden gateway",
 			"ExecutionPolicy Bypass",
@@ -332,7 +341,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"schema_version": "rdev.support-session-ready-file.v1",
 			"path":           readyFile,
 			"contains":       StartedSchemaVersion,
-			"agent_rule":     "read this file after starting the foreground gateway when terminal stdout is hard to parse; send session.user_handoff.message plus session.user_handoff.copy_paste to the human",
+			"agent_rule":     "read this file after starting the foreground gateway when terminal stdout is hard to parse; send user_handoff.message plus user_handoff.copy_paste to the human",
 		}
 	}
 	return payload

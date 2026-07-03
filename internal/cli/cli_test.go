@@ -792,7 +792,15 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			Contains      string `json:"contains"`
 			AgentRule     string `json:"agent_rule"`
 		} `json:"ready_file"`
-		Session struct {
+		ReadyToSendHuman bool   `json:"ready_to_send_to_human"`
+		TargetCommand    string `json:"target_command"`
+		JoinURL          string `json:"join_url"`
+		UserHandoff      struct {
+			SchemaVersion string `json:"schema_version"`
+			CopyPaste     string `json:"copy_paste"`
+		} `json:"user_handoff"`
+		WatchConnectionStatus []string `json:"watch_connection_status"`
+		Session               struct {
 			SchemaVersion         string   `json:"schema_version"`
 			TicketCode            string   `json:"ticket_code"`
 			TargetCommand         string   `json:"target_command"`
@@ -820,8 +828,15 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	if payload.ReadyFile.SchemaVersion != "rdev.support-session-ready-file.v1" ||
 		payload.ReadyFile.Path != readyFile ||
 		payload.ReadyFile.Contains != "rdev.support-session-started.v1" ||
-		!strings.Contains(payload.ReadyFile.AgentRule, "session.user_handoff.copy_paste") {
+		!strings.Contains(payload.ReadyFile.AgentRule, "user_handoff.copy_paste") {
 		t.Fatalf("expected ready-file metadata, got %#v", payload.ReadyFile)
+	}
+	if !payload.ReadyToSendHuman ||
+		payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
+		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
+		payload.TargetCommand != payload.Session.TargetCommand ||
+		payload.JoinURL == "" {
+		t.Fatalf("expected top-level started handoff fields, got %#v", payload)
 	}
 	if payload.Session.SchemaVersion != "rdev.support-session-created.v1" ||
 		payload.Session.TicketCode == "" ||
@@ -834,6 +849,10 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	watch := strings.Join(payload.Session.WatchConnectionStatus, "\x00")
 	if !strings.Contains(watch, payload.Session.TicketCode) || !strings.Contains(watch, "--wait") {
 		t.Fatalf("expected ready watcher, got %#v", payload.Session.WatchConnectionStatus)
+	}
+	topLevelWatch := strings.Join(payload.WatchConnectionStatus, "\x00")
+	if !strings.Contains(topLevelWatch, payload.Session.TicketCode) || !strings.Contains(topLevelWatch, "--wait") {
+		t.Fatalf("expected top-level ready watcher, got %#v", payload.WatchConnectionStatus)
 	}
 	readyInfo, err := os.Stat(readyFile)
 	if err != nil {

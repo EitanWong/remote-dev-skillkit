@@ -434,6 +434,18 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		!strings.Contains(session["target_command"].(string), "ABCD-1234") {
 		t.Fatalf("expected embedded created session, got %#v", session)
 	}
+	handoff := started["user_handoff"].(map[string]any)
+	if started["ready_to_send_to_human"] != true ||
+		handoff["schema_version"] != UserHandoffSchemaVersion ||
+		handoff["copy_paste"] != started["target_command"] ||
+		started["target_command"] != session["target_command"] ||
+		started["join_url"] != session["join_url"] {
+		t.Fatalf("expected top-level human handoff mirror, got %#v", started)
+	}
+	watch := strings.Join(anyStrings(started["watch_connection_status"].([]string)), "\x00")
+	if !strings.Contains(watch, "ABCD-1234") || !strings.Contains(watch, "--wait") {
+		t.Fatalf("expected top-level watcher, got %#v", started["watch_connection_status"])
+	}
 	gateway := started["gateway"].(map[string]any)
 	if gateway["lifecycle"] != "foreground-visible-process" ||
 		!strings.Contains(gateway["stop"].(string), "interrupt") {
@@ -447,7 +459,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	if readyFile["schema_version"] != "rdev.support-session-ready-file.v1" ||
 		readyFile["path"] != "work/rdev-support-session/support-session-ready.json" ||
 		readyFile["contains"] != StartedSchemaVersion ||
-		!strings.Contains(readyFile["agent_rule"].(string), "session.user_handoff.copy_paste") {
+		!strings.Contains(readyFile["agent_rule"].(string), "user_handoff.copy_paste") {
 		t.Fatalf("expected ready file metadata, got %#v", readyFile)
 	}
 	forbidden := strings.Join(started["forbidden"].([]string), "\n")

@@ -41,7 +41,7 @@ gateway, transport, release, or checksum flags. First call
 If it returns `ready_to_send_to_human=true`, send only the returned
 `user_handoff.message` plus `user_handoff.copy_paste`. If it returns
 `ready_to_send_to_human=false`, run the returned visible foreground
-`rdev support-session start` command, then send the started session handoff. If local `rdev`, gateway state, or target helper assets are unclear,
+`rdev support-session start` command, read `ready_file.path` when stdout is hard to parse, then send only the started payload's top-level `user_handoff.message` plus `user_handoff.copy_paste`. If local `rdev`, gateway state, or target helper assets are unclear,
 call `rdev.support_session.prepare` through MCP or run
 `rdev support-session prepare --build-assets` from the checkout. Follow its `connection_readiness`, `asset_report`, `missing_inputs`,
 and `standard_recovery` fields instead of writing custom bootstrap, approval, or

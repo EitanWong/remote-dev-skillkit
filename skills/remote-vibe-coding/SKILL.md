@@ -77,7 +77,7 @@ revocation.
   only the returned `user_handoff`. If it returns
   `ready_to_send_to_human=false`, run the returned foreground start command in
   a visible terminal, read `ready_file.path` when needed, then send the started
-  session `user_handoff`. For lower-level explicit gateway workflows, use
+  payload's top-level `user_handoff`. For lower-level explicit gateway workflows, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
@@ -174,9 +174,8 @@ revocation.
    `rdev support-session create`; give the target side only the returned
    `target_command` or `join_url`, then watch the returned status command. If
    no gateway is running yet, run `rdev support-session start` in a visible
-   foreground terminal and use the embedded `session.target_command` or
-   `session.join_url`; when `user_handoff` is present, send its localized
-   `message` plus `copy_paste` verbatim and follow `auto_target_rule` when the
+   foreground terminal and send the top-level `user_handoff.message` plus
+   `user_handoff.copy_paste` verbatim; follow `auto_target_rule` when the
    target is unknown. If foreground stdout is hard to parse, read the same
    started payload from returned `ready_file.path`. Use
    `rdev.support_session.plan` or
