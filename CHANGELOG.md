@@ -28,6 +28,12 @@ metadata, status watching, or approval polling by hand.
   `rdev.connection_entry.plan`, package materialization, or hand-written gateway
   setup unless the operator or a high-level recovery payload explicitly asks
   for that lower-level path.
+- Added `rdev.acceptance.bootstrap-self-repair.v1` coverage inside
+  `rdev acceptance fresh-agent-support-session`. The local contract gate now
+  starts a `httptest` join server with verified helper assets, fetches the join
+  page, Windows `bootstrap.ps1`, macOS/Linux `bootstrap.sh`, and asset
+  `.sha256` endpoints, and fails if the target-side surface asks humans to
+  install `rdev` manually or use `ExecutionPolicy Bypass`.
 - Added `rdev.support-session-gateway-candidate-preflight.v1` to
   support-session prepare, create, start, and high-level connect payloads.
   Fresh Agents now get a machine-readable candidate decision table that

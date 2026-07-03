@@ -368,10 +368,25 @@ assert any("rdev release verify-bundle" in step for step in update_plan["verific
 assert any(check["name"] == "plan_is_dry_run" and check["passed"] is True for check in update_plan["checks"]), update_plan
 assert fresh_agent_output["ok"] is True, fresh_agent_output
 assert fresh_agent_output["schema"] == "rdev.acceptance.fresh-agent-support-session.v1", fresh_agent_output
+fresh_agent_checks = {check["name"]: check for check in fresh_agent_output["checks"]}
+bootstrap_self_repair_checks = [
+    "bootstrap_self_repair_join_page_available",
+    "bootstrap_self_repair_windows_downloads_verified_helper",
+    "bootstrap_self_repair_shell_downloads_verified_helper",
+    "bootstrap_self_repair_pins_manifest_root",
+    "bootstrap_self_repair_starts_visible_host",
+    "bootstrap_self_repair_assets_have_hashes",
+    "bootstrap_self_repair_no_manual_rdev_requirement",
+]
+assert all(
+    name in fresh_agent_checks and fresh_agent_checks[name]["passed"] is True
+    for name in bootstrap_self_repair_checks
+), fresh_agent_checks
 
 print(json.dumps({
     "ok": True,
     "fresh_agent_support_session_contract": True,
+    "fresh_agent_bootstrap_self_repair_contract": True,
     "fresh_agent_support_session_schema": fresh_agent_output["schema"],
     "build_schema": build_manifest["schema_version"],
     "built_artifacts": len(build_manifest["artifacts"]),

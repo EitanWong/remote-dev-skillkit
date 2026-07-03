@@ -1,14 +1,20 @@
 package acceptance
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
@@ -37,6 +43,7 @@ type FreshAgentSupportSessionReport struct {
 	StartedSession          map[string]any `json:"started_session"`
 	ConnectedStatus         map[string]any `json:"connected_status"`
 	WaitingRecovery         map[string]any `json:"waiting_recovery"`
+	BootstrapSelfRepair     map[string]any `json:"bootstrap_self_repair"`
 	Checks                  []Check        `json:"checks"`
 	RecommendedNextSteps    []string       `json:"recommended_next_steps"`
 	RealEnvironmentRequired []string       `json:"real_environment_required"`
@@ -147,6 +154,10 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		Locale:     locale,
 		TimedOut:   true,
 	})
+	bootstrapSelfRepair, bootstrapChecks, err := buildBootstrapSelfRepairContract(outDir, now)
+	if err != nil {
+		return FreshAgentSupportSessionReport{}, err
+	}
 
 	report := FreshAgentSupportSessionReport{
 		SchemaVersion:           FreshAgentSupportSessionReportSchemaVersion,
@@ -161,6 +172,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		StartedSession:          started,
 		ConnectedStatus:         connectedStatus,
 		WaitingRecovery:         waitingRecovery,
+		BootstrapSelfRepair:     bootstrapSelfRepair,
 		Checks: freshAgentSupportSessionChecks(freshAgentSupportSessionCheckInput{
 			HandoffNoGateway:        handoffNoGateway,
 			HandoffReachableGateway: handoffReachableGateway,
@@ -184,6 +196,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 			"real LAN departure or restrictive-network relay/mesh/VPN/SSH paths",
 		},
 	}
+	report.Checks = append(report.Checks, bootstrapChecks...)
 	if err := writeFreshAgentSupportSessionReport(filepath.Join(outDir, "report.json"), report); err != nil {
 		return FreshAgentSupportSessionReport{}, err
 	}
@@ -265,6 +278,130 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "fresh_agent_surface_forbids_unsafe_shortcuts", Passed: strings.Contains(forbiddenText, "hidden install") && strings.Contains(forbiddenText, "ExecutionPolicy Bypass"), Detail: forbiddenText},
 	}
 	return checks
+}
+
+func buildBootstrapSelfRepairContract(outDir string, now time.Time) (map[string]any, []Check, error) {
+	assetDir := filepath.Join(outDir, "bootstrap-self-repair-assets")
+	if err := os.MkdirAll(assetDir, 0o700); err != nil {
+		return nil, nil, err
+	}
+	assets := map[string]string{
+		"rdev-windows-amd64.exe": "fake windows rdev helper\n",
+		"rdev-darwin-arm64":      "fake darwin arm64 rdev helper\n",
+		"rdev-darwin-amd64":      "fake darwin amd64 rdev helper\n",
+		"rdev-linux-amd64":       "fake linux amd64 rdev helper\n",
+		"rdev-linux-arm64":       "fake linux arm64 rdev helper\n",
+	}
+	assetPaths := map[string]string{}
+	assetSHA256 := map[string]string{}
+	for name, content := range assets {
+		path := filepath.Join(assetDir, name)
+		if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+			return nil, nil, err
+		}
+		assetPaths[name] = path
+		sum := sha256.Sum256([]byte(content))
+		assetSHA256[name] = fmt.Sprintf("%x", sum[:])
+	}
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicketWithMetadata(
+		model.HostModeAttendedTemporary,
+		7200,
+		policyCapabilitiesToStringsForFreshAgent(policy.TemporaryDefaults()),
+		"fresh Agent bootstrap self-repair acceptance",
+		map[string]string{
+			"connection_entry":  "standard-visible",
+			"approval_contract": "target-consent-scoped-ticket",
+			"auto_approve":      "attended-temporary",
+		},
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	server := httpapi.NewServer(gw)
+	server.Assets = httpapi.AssetConfig{
+		RdevWindowsAMD64Path: assetPaths["rdev-windows-amd64.exe"],
+		RdevDarwinARM64Path:  assetPaths["rdev-darwin-arm64"],
+		RdevDarwinAMD64Path:  assetPaths["rdev-darwin-amd64"],
+		RdevLinuxAMD64Path:   assetPaths["rdev-linux-amd64"],
+		RdevLinuxARM64Path:   assetPaths["rdev-linux-arm64"],
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	joinBase := httpServer.URL + "/join/" + ticket.Code
+	joinPage, err := fetchAcceptanceText(httpServer.URL + "/join/" + ticket.Code)
+	if err != nil {
+		return nil, nil, err
+	}
+	windowsBootstrap, err := fetchAcceptanceText(joinBase + "/bootstrap.ps1")
+	if err != nil {
+		return nil, nil, err
+	}
+	shellBootstrap, err := fetchAcceptanceText(joinBase + "/bootstrap.sh")
+	if err != nil {
+		return nil, nil, err
+	}
+	assetResults := make([]map[string]any, 0, len(assetSHA256))
+	allAssetsOK := true
+	assetNames := make([]string, 0, len(assetSHA256))
+	for name := range assetSHA256 {
+		assetNames = append(assetNames, name)
+	}
+	sort.Strings(assetNames)
+	for _, name := range assetNames {
+		expected := assetSHA256[name]
+		actual, err := fetchAcceptanceText(httpServer.URL + "/assets/" + name + ".sha256")
+		ok := err == nil && strings.TrimSpace(actual) == expected
+		if !ok {
+			allAssetsOK = false
+		}
+		result := map[string]any{
+			"asset":           name,
+			"sha256_endpoint": httpServer.URL + "/assets/" + name + ".sha256",
+			"expected_sha256": expected,
+			"ok":              ok,
+		}
+		if err != nil {
+			result["error"] = err.Error()
+		}
+		assetResults = append(assetResults, result)
+	}
+	report := map[string]any{
+		"schema_version":       "rdev.acceptance.bootstrap-self-repair.v1",
+		"join_url":             joinBase,
+		"ticket_code":          ticket.Code,
+		"windows_script_bytes": len(windowsBootstrap),
+		"shell_script_bytes":   len(shellBootstrap),
+		"asset_sha256":         assetResults,
+		"agent_rule":           "fresh Agents should rely on support-session join bootstrap self-repair instead of asking target users to install rdev manually",
+	}
+	forbidden := joinPage + "\n" + windowsBootstrap + "\n" + shellBootstrap
+	checks := []Check{
+		{Name: "bootstrap_self_repair_join_page_available", Passed: strings.Contains(joinPage, "bootstrap.ps1") && strings.Contains(joinPage, "bootstrap.sh") && strings.Contains(joinPage, "rdev.connection-entry.package-catalog.v1"), Detail: joinBase},
+		{Name: "bootstrap_self_repair_windows_downloads_verified_helper", Passed: strings.Contains(windowsBootstrap, "Downloading verified rdev helper") && strings.Contains(windowsBootstrap, "Invoke-WebRequest") && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(windowsBootstrap, ".sha256"), Detail: "PowerShell downloads and verifies rdev-windows-amd64.exe when rdev is absent"},
+		{Name: "bootstrap_self_repair_shell_downloads_verified_helper", Passed: strings.Contains(shellBootstrap, "Downloading verified rdev helper") && strings.Contains(shellBootstrap, "curl -fsSL") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(shellBootstrap, ".sha256"), Detail: "shell downloads and verifies target OS/arch helper when rdev is absent"},
+		{Name: "bootstrap_self_repair_pins_manifest_root", Passed: strings.Contains(windowsBootstrap, "--manifest-root-public-key") && strings.Contains(shellBootstrap, "--manifest-root-public-key"), Detail: "bootstrap scripts pin the join manifest trust root"},
+		{Name: "bootstrap_self_repair_starts_visible_host", Passed: strings.Contains(windowsBootstrap, "host serve") && strings.Contains(shellBootstrap, "host serve") && strings.Contains(windowsBootstrap, "--transport auto") && strings.Contains(shellBootstrap, "--transport auto") && strings.Contains(windowsBootstrap, "--once=false") && strings.Contains(shellBootstrap, "--once=false"), Detail: "bootstrap scripts start attended host serve with transport auto"},
+		{Name: "bootstrap_self_repair_assets_have_hashes", Passed: allAssetsOK, Detail: fmt.Sprintf("%v", assetResults)},
+		{Name: "bootstrap_self_repair_no_manual_rdev_requirement", Passed: !strings.Contains(forbidden, "rdev is required") && !strings.Contains(forbidden, "Install the verified rdev release package") && !strings.Contains(forbidden, "ExecutionPolicy Bypass"), Detail: "join/bootstrap surface must not ask the target user to manually install rdev or bypass execution policy"},
+	}
+	return report, checks, nil
+}
+
+func fetchAcceptanceText(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("GET %s returned %s: %s", url, resp.Status, string(content))
+	}
+	return string(content), nil
 }
 
 func writeFreshAgentSupportSessionReport(path string, report FreshAgentSupportSessionReport) error {

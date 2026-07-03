@@ -35,7 +35,11 @@ one-message flow:
 7. wait for status with `rdev.support_session.status` as the fallback source of
    truth;
 8. report `connected=true` through `connected_next_steps.user_report`;
-9. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+9. fetch a local join page, Windows `bootstrap.ps1`, macOS/Linux
+   `bootstrap.sh`, and `/assets/*.sha256` endpoints from a `httptest` gateway
+   to prove clean targets can download and SHA-256 verify helper binaries
+   instead of being told to install `rdev` manually;
+10. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
    gateway, transport, or bootstrap glue.
 
 The command writes `report.json` with schema
