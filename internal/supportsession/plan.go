@@ -27,6 +27,7 @@ const ConnectSchemaVersion = "rdev.support-session-connect.v1"
 const CreatedSchemaVersion = "rdev.support-session-created.v1"
 const StartedSchemaVersion = "rdev.support-session-started.v1"
 const StatusSchemaVersion = "rdev.support-session-status.v1"
+const StatusFileSchemaVersion = "rdev.support-session-status-file.v1"
 const ConnectionAttemptPolicySchemaVersion = "rdev.connection-attempt-policy.v1"
 const UserHandoffSchemaVersion = "rdev.support-session-user-handoff.v1"
 const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recovery.v1"
@@ -268,7 +269,7 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	payload["foreground_start_command"] = handoff["foreground_start_command"]
 	payload["prepare_command"] = handoff["prepare_command"]
 	payload["agent_connection_runbook"] = handoff["agent_connection_runbook"]
-	payload["agent_next_step"] = "run cli_start_now_command in a visible terminal; it starts the gateway, builds verified helper assets, prints the target command, writes ready_file.path, and waits for the target; then send only the started payload's user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
+	payload["agent_next_step"] = "run cli_start_now_command in a visible terminal; it starts the gateway, builds verified helper assets, prints the target command, writes ready_file.path and status_file.path, and waits for the target; then send only the started payload's user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
 	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned cli_start_now_command first and then send the started payload's top-level user_handoff"
 	return payload
 }
@@ -327,6 +328,7 @@ type StartedOptions struct {
 	GatewayURL                string
 	WorkDir                   string
 	ReadyFile                 string
+	StatusFile                string
 	Created                   map[string]any
 	AssetReport               any
 	ConnectionReadiness       any
@@ -340,6 +342,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	workDir := strings.TrimSpace(opts.WorkDir)
 	readyFile := strings.TrimSpace(opts.ReadyFile)
+	statusFile := strings.TrimSpace(opts.StatusFile)
 	session := opts.Created
 	payload := map[string]any{
 		"schema_version": StartedSchemaVersion,
@@ -365,7 +368,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"event_prefix":   "rdev support session event: ",
 			"events":         []string{"waiting", "pending-approval", "connected"},
 			"connected_rule": "when event=connected, immediately tell the user the connection has been established before creating jobs",
-			"agent_rule":     "parse foreground feedback events from stderr when this command is kept open; use status watcher as the fallback source of truth",
+			"agent_rule":     "parse foreground feedback events from stderr when this command is kept open; read status_file.path or use the status watcher as fallback sources of truth",
 		},
 		"mcp_follow_up":         session["mcp_follow_up"],
 		"session":               session,
@@ -388,7 +391,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"agent_flow": []string{
 			"keep this process running while the target host connects",
 			"give the target-side human only user_handoff.message plus user_handoff.copy_paste",
-			"watch connection status with watch_connection_status or rdev.support_session.status",
+			"watch connection status with status_file.path, foreground_feedback, watch_connection_status, or rdev.support_session.status",
 			"when connected=true, proactively report that the connection is established",
 			"if connection_readiness.ready is false, follow standard_recovery_actions instead of writing ad hoc bootstrap or relay code",
 		},
@@ -407,6 +410,15 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"path":           readyFile,
 			"contains":       StartedSchemaVersion,
 			"agent_rule":     "read this file after starting the foreground gateway when terminal stdout is hard to parse; send user_handoff.message plus user_handoff.copy_paste to the human",
+		}
+	}
+	if statusFile != "" {
+		payload["status_file"] = map[string]any{
+			"schema_version":        StatusFileSchemaVersion,
+			"path":                  statusFile,
+			"contains":              "rdev.support-session-foreground-event.v1",
+			"status_schema_version": StatusSchemaVersion,
+			"agent_rule":            "read this file after starting the foreground gateway when terminal output is unavailable; when event=connected or status.connected=true, immediately report connected_next_steps.user_report",
 		}
 	}
 	return payload

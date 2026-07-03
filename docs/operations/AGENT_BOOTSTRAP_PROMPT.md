@@ -115,9 +115,10 @@ Steps:
     send only the returned `user_handoff.message` plus
     `user_handoff.copy_paste`. If it returns `ready_to_send_to_human=false`,
     run the returned `cli_start_now_command` visible foreground `rdev support-session connect --start` command,
-    read `ready_file.path` when terminal stdout is hard to parse, then send only
-    the started payload's top-level `user_handoff.message` plus
-    `user_handoff.copy_paste`. If local
+    read `ready_file.path` when terminal stdout is hard to parse, read
+    `status_file.path` for the latest machine-readable connection event when
+    terminal output is unavailable, then send only the started payload's
+    top-level `user_handoff.message` plus `user_handoff.copy_paste`. If local
     `rdev`, gateway state, or target helper assets are unclear, call
     `rdev.support_session.prepare` through MCP or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
@@ -196,7 +197,11 @@ Steps:
     `ready_file.path`
     (`support-session-ready.json` in the session work directory by default);
     read that file when the long-running foreground terminal makes stdout hard
-    to parse. Use `rdev.support_session.plan` or `rdev support-session plan`
+    to parse. It also writes `status_file.path`
+    (`support-session-status.json` by default) with the latest foreground event;
+    read it and report immediately when it shows `event=connected` or
+    `status.connected=true`. Use `rdev.support_session.plan` or
+    `rdev support-session plan`
     only for review/debug planning or when the operator asks for the underlying
     gateway argv.
     After giving the target command to the human, call

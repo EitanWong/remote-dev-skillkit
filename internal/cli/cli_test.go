@@ -241,14 +241,16 @@ func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T)
 		!slices.Contains(payload.StartNowCommand, "--start") ||
 		!slices.Contains(payload.StartCommand, "start") ||
 		!strings.Contains(payload.AgentNextStep, "cli_start_now_command") ||
-		!strings.Contains(payload.AgentNextStep, "ready_file.path") {
+		!strings.Contains(payload.AgentNextStep, "ready_file.path") ||
+		!strings.Contains(payload.AgentNextStep, "status_file.path") {
 		t.Fatalf("unexpected foreground connect payload: %#v", payload)
 	}
 }
 
 func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 	var out bytes.Buffer
-	writeSupportSessionEvent(&out, "connected", map[string]any{
+	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
+	writeSupportSessionEvent(&out, statusFile, "connected", map[string]any{
 		"schema_version": "rdev.support-session-status.v1",
 		"connected":      true,
 		"status":         "connected",
@@ -263,14 +265,42 @@ func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 		SchemaVersion string         `json:"schema_version"`
 		Event         string         `json:"event"`
 		Status        map[string]any `json:"status"`
+		AgentRule     string         `json:"agent_rule"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, prefix)), &payload); err != nil {
 		t.Fatalf("invalid event JSON: %v\n%s", err, line)
 	}
 	if payload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
 		payload.Event != "connected" ||
-		payload.Status["connected"] != true {
+		payload.Status["connected"] != true ||
+		!strings.Contains(payload.AgentRule, "connected_next_steps.user_report") {
 		t.Fatalf("unexpected event payload: %#v", payload)
+	}
+	statusBytes, err := os.ReadFile(statusFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statusPayload struct {
+		SchemaVersion string         `json:"schema_version"`
+		Event         string         `json:"event"`
+		Status        map[string]any `json:"status"`
+		AgentRule     string         `json:"agent_rule"`
+	}
+	if err := json.Unmarshal(statusBytes, &statusPayload); err != nil {
+		t.Fatalf("invalid status file JSON: %v\n%s", err, string(statusBytes))
+	}
+	if statusPayload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
+		statusPayload.Event != "connected" ||
+		statusPayload.Status["connected"] != true ||
+		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
+		t.Fatalf("unexpected status file payload: %#v", statusPayload)
+	}
+	info, err := os.Stat(statusFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected status file permissions 0600, got %v", info.Mode().Perm())
 	}
 }
 
@@ -791,6 +821,7 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	app := NewApp(&stdout, &stderr)
 	workDir := filepath.Join(t.TempDir(), "support")
 	readyFile := filepath.Join(workDir, "ready", "support-session-ready.json")
+	statusFile := filepath.Join(workDir, "status", "support-session-status.json")
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- app.Run(ctx, []string{
@@ -799,6 +830,7 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			"--gateway-url", gatewayURL,
 			"--work-dir", workDir,
 			"--ready-file", readyFile,
+			"--status-file", statusFile,
 			"--target", "windows",
 			"--locale", "zh-CN",
 		})
@@ -855,6 +887,13 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			Contains      string `json:"contains"`
 			AgentRule     string `json:"agent_rule"`
 		} `json:"ready_file"`
+		StatusFile struct {
+			SchemaVersion       string `json:"schema_version"`
+			Path                string `json:"path"`
+			Contains            string `json:"contains"`
+			StatusSchemaVersion string `json:"status_schema_version"`
+			AgentRule           string `json:"agent_rule"`
+		} `json:"status_file"`
 		ReadyToSendHuman bool   `json:"ready_to_send_to_human"`
 		TargetCommand    string `json:"target_command"`
 		JoinURL          string `json:"join_url"`
@@ -903,6 +942,13 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		!strings.Contains(payload.ReadyFile.AgentRule, "user_handoff.copy_paste") {
 		t.Fatalf("expected ready-file metadata, got %#v", payload.ReadyFile)
 	}
+	if payload.StatusFile.SchemaVersion != "rdev.support-session-status-file.v1" ||
+		payload.StatusFile.Path != statusFile ||
+		payload.StatusFile.Contains != "rdev.support-session-foreground-event.v1" ||
+		payload.StatusFile.StatusSchemaVersion != "rdev.support-session-status.v1" ||
+		!strings.Contains(payload.StatusFile.AgentRule, "connected_next_steps.user_report") {
+		t.Fatalf("expected status-file metadata, got %#v", payload.StatusFile)
+	}
 	if !payload.ReadyToSendHuman ||
 		payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
 		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
@@ -933,6 +979,13 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	if readyInfo.Mode().Perm() != 0o600 {
 		t.Fatalf("expected ready file permissions 0600, got %v", readyInfo.Mode().Perm())
 	}
+	statusInfo, err := os.Stat(statusFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statusInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("expected status file permissions 0600, got %v", statusInfo.Mode().Perm())
+	}
 	var readyPayload struct {
 		SchemaVersion string `json:"schema_version"`
 		ReadyFile     struct {
@@ -957,6 +1010,30 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		readyPayload.Session.TicketCode != payload.Session.TicketCode ||
 		!strings.Contains(readyPayload.Session.UserHandoff.CopyPaste, payload.Session.TicketCode) {
 		t.Fatalf("expected ready file to mirror started payload, got %#v", readyPayload)
+	}
+	var statusPayload struct {
+		SchemaVersion string `json:"schema_version"`
+		Event         string `json:"event"`
+		Status        struct {
+			SchemaVersion string `json:"schema_version"`
+			TicketCode    string `json:"ticket_code"`
+			Status        string `json:"status"`
+		} `json:"status"`
+		AgentRule string `json:"agent_rule"`
+	}
+	statusBytes, err := os.ReadFile(statusFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(statusBytes, &statusPayload); err != nil {
+		t.Fatalf("invalid status file JSON: %v\n%s", err, string(statusBytes))
+	}
+	if statusPayload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
+		statusPayload.Event != "waiting" ||
+		statusPayload.Status.SchemaVersion != "rdev.support-session-status.v1" ||
+		statusPayload.Status.TicketCode != payload.Session.TicketCode ||
+		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
+		t.Fatalf("expected status file to mirror foreground event, got %#v", statusPayload)
 	}
 }
 

@@ -132,6 +132,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		GatewayURL: gatewayURL,
 		WorkDir:    filepath.Join(outDir, "support-session"),
 		ReadyFile:  filepath.Join(outDir, "support-session", "support-session-ready.json"),
+		StatusFile: filepath.Join(outDir, "support-session", "support-session-status.json"),
 		Created:    created,
 	})
 	stableFallback := withFreshAgentGatewayEnv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev", func() map[string]any {
@@ -279,6 +280,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	runbookStandardEntry := mapFromAny(runbook["standard_entry_tool"])
 	runbookLowLevelRule := mapFromAny(runbook["low_level_entry_rule"])
 	readyFile := mapFromAny(input.StartedSession["ready_file"])
+	statusFile := mapFromAny(input.StartedSession["status_file"])
 	foregroundFeedback := mapFromAny(input.StartedSession["foreground_feedback"])
 	session := mapFromAny(input.StartedSession["session"])
 	startedHandoff := mapFromAny(input.StartedSession["user_handoff"])
@@ -322,6 +324,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "started_payload_has_top_level_agent_runbook", Passed: stringFromAny(startedRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(fmt.Sprintf("%v", startedRunbook["watch"]), "rdev.support_session.status"), Detail: stringFromAny(startedRunbook["phase"])},
 		{Name: "started_payload_has_foreground_feedback", Passed: stringFromAny(foregroundFeedback["schema_version"]) == "rdev.support-session-foreground-feedback.v1" && stringFromAny(foregroundFeedback["event_prefix"]) == "rdev support session event: " && strings.Contains(stringFromAny(foregroundFeedback["connected_rule"]), "connection has been established"), Detail: stringFromAny(foregroundFeedback["event_prefix"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
+		{Name: "started_payload_exposes_status_file", Passed: stringFromAny(statusFile["schema_version"]) == supportsession.StatusFileSchemaVersion && strings.Contains(stringFromAny(statusFile["path"]), "support-session-status.json") && strings.Contains(stringFromAny(statusFile["agent_rule"]), "connected_next_steps.user_report"), Detail: stringFromAny(statusFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
 		{Name: "stable_fallback_handoff_uses_configured_gateway", Passed: stringFromAny(stableFallbackHandoff["selected_path"]) == "create-with-reachable-gateway" && stringFromAny(stableFallbackHandoffArgs["gateway_url"]) == "https://relay.example.test/rdev", Detail: fmt.Sprintf("%v", stableFallbackHandoffArgs)},
 		{Name: "stable_fallback_created_uses_relay_candidate", Passed: strings.Contains(stringFromAny(stableFallbackCreated["target_command"]), "https://relay.example.test/rdev/join/") && strings.Contains(stringFromAny(stableFallbackCreated["target_command"]), "gateway_url_candidates=") && strings.Contains(stringFromAny(mapFromAny(stableFallbackCreated["user_handoff"])["copy_paste"]), "https://relay.example.test/rdev/join/"), Detail: stringFromAny(stableFallbackCreated["target_command"])},

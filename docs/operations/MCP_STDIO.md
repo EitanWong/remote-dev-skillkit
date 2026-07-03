@@ -117,7 +117,10 @@ The CLI also writes the same started payload to `ready_file.path`
 (`support-session-ready.json` in the session work directory by default), so
 Agents can read top-level `user_handoff.message` and
 `user_handoff.copy_paste` from a stable file when a long-running
-foreground terminal makes stdout hard to parse.
+foreground terminal makes stdout hard to parse. It also writes the latest
+foreground status event to `status_file.path` (`support-session-status.json` by
+default), so Agents can report `event=connected` without inventing a polling
+loop.
 This is a CLI foreground process rather than an MCP tool because MCP calls
 should not hide or orphan a long-running gateway.
 Agents should not manually combine `rdev gateway serve` and `rdev invite create`

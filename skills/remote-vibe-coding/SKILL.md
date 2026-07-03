@@ -89,8 +89,9 @@ revocation.
   `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only the returned `user_handoff`. If it returns
   `ready_to_send_to_human=false`, run the returned `cli_start_now_command` in
-  a visible terminal, read `ready_file.path` when needed, then send the started
-  payload's top-level `user_handoff`. For lower-level explicit gateway workflows, use
+  a visible terminal, read `ready_file.path` for the handoff when needed, read
+  `status_file.path` for the latest connection event when terminal output is
+  unavailable, then send the started payload's top-level `user_handoff`. For lower-level explicit gateway workflows, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
@@ -104,8 +105,8 @@ revocation.
   process open and read `foreground_feedback`. The command emits
   machine-readable stderr lines prefixed with
   `rdev support session event: `; when `event=connected`, immediately tell the
-  user the connection has been established. Use `connection_supervision` or the
-  status watcher as the fallback source of truth.
+  user the connection has been established. Use `status_file.path`,
+  `connection_supervision`, or the status watcher as fallback sources of truth.
 - Treat returned `target_command` as the standard fallback surface. It already
   tries ordered gateway URL candidates on the target machine with the returned
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
@@ -208,7 +209,9 @@ revocation.
    visible foreground terminal and send the top-level `user_handoff.message` plus
    `user_handoff.copy_paste` verbatim; follow `auto_target_rule` when the
    target is unknown. If foreground stdout is hard to parse, read the same
-   started payload from returned `ready_file.path`. Use
+   started payload from returned `ready_file.path`; if terminal output is
+   unavailable while waiting, read returned `status_file.path` and report
+   immediately when it shows `event=connected` or `status.connected=true`. Use
    `rdev.support_session.plan` or
    `rdev support-session plan` only for review/debug planning. For lower-level
    package materialization only, create an invite with `rdev.invites.create` or

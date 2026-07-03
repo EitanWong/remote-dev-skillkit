@@ -30,25 +30,27 @@ one-message flow:
 3. return `cli_start_now_command` for visible foreground `rdev support-session connect --start` when no gateway is running;
 4. send only `user_handoff.message` plus `user_handoff.copy_paste` to the human;
 5. read `ready_file.path` when foreground stdout is hard to parse;
-6. expose foreground stderr feedback events so an Agent can report
+6. expose `status_file.path` for the latest machine-readable foreground event
+   when terminal output is unavailable;
+7. expose foreground stderr feedback events so an Agent can report
    `event=connected` from the kept-open command;
-7. wait for status with `rdev.support_session.status` as the fallback source of
+8. wait for status with `rdev.support_session.status` as the fallback source of
    truth;
-8. report `connected=true` through `connected_next_steps.user_report`;
-9. fetch a local join page, Windows `bootstrap.ps1`, macOS/Linux
+9. report `connected=true` through `connected_next_steps.user_report`;
+10. fetch a local join page, Windows `bootstrap.ps1`, macOS/Linux
    `bootstrap.sh`, and `/assets/*.sha256` endpoints from a `httptest` gateway
    to prove clean targets can download and SHA-256 verify helper binaries
    instead of being told to install `rdev` manually;
-10. configure `RDEV_RELAY_GATEWAY_URL` during the local gate and prove the
+11. configure `RDEV_RELAY_GATEWAY_URL` during the local gate and prove the
     high-level handoff auto-selects that stable gateway, the target command uses
     the relay join URL, `connection_continuity_policy.stable_after_lan_change`
     is true, and the Agent runbook reports the stable fallback instead of
     asking the Agent to write relay/mesh/VPN/SSH glue;
-11. include signed runtime gateway candidates in the generated target bootstrap
+12. include signed runtime gateway candidates in the generated target bootstrap
     URL, so the fetched join manifest can carry ordered gateway candidates to
     `rdev host serve` and the target host can select a reachable signed
     candidate before registration;
-12. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+13. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
    gateway, transport, or bootstrap glue.
 
 The command writes `report.json` with schema

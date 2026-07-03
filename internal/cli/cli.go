@@ -1767,6 +1767,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for generated local commands")
 		start := fs.Bool("start", false, "when no reachable gateway is configured, start the standard visible foreground gateway in this process")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file when --start is used")
+		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file when --start is used")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1784,6 +1785,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			RdevCommand:       *rdevCommand,
 			Start:             *start,
 			ReadyFile:         *readyFile,
+			StatusFile:        *statusFile,
 		})
 	case "handoff":
 		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
@@ -1849,6 +1851,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file before serving; defaults to the session work dir")
+		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file before serving; defaults to the session work dir")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1863,6 +1866,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			Locale:      *locale,
 			RdevCommand: *rdevCommand,
 			ReadyFile:   *readyFile,
+			StatusFile:  *statusFile,
 		})
 	case "create":
 		fs := flag.NewFlagSet("support-session create", flag.ContinueOnError)
@@ -1954,6 +1958,7 @@ type supportSessionStartOptions struct {
 	Locale      string
 	RdevCommand string
 	ReadyFile   string
+	StatusFile  string
 }
 
 type supportSessionConnectOptions struct {
@@ -1970,6 +1975,7 @@ type supportSessionConnectOptions struct {
 	RdevCommand       string
 	Start             bool
 	ReadyFile         string
+	StatusFile        string
 }
 
 type supportSessionPrepareOptions struct {
@@ -2016,6 +2022,7 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 			Locale:      opts.Locale,
 			RdevCommand: opts.RdevCommand,
 			ReadyFile:   opts.ReadyFile,
+			StatusFile:  opts.StatusFile,
 		})
 	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
@@ -2081,6 +2088,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	if absReadyFile, err := filepath.Abs(readyFile); err == nil {
 		readyFile = absReadyFile
+	}
+	statusFile := strings.TrimSpace(opts.StatusFile)
+	if statusFile == "" {
+		statusFile = filepath.Join(workDir, "support-session-status.json")
+	}
+	if absStatusFile, err := filepath.Abs(statusFile); err == nil {
+		statusFile = absStatusFile
 	}
 	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
 		RepoRoot:    findSupportSessionRepoRoot("."),
@@ -2172,6 +2186,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		GatewayURL:                gatewayURL,
 		WorkDir:                   workDir,
 		ReadyFile:                 readyFile,
+		StatusFile:                statusFile,
 		Created:                   created,
 		AssetReport:               prepared["asset_report"],
 		ConnectionReadiness:       prepared["connection_readiness"],
@@ -2185,16 +2200,17 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		return err
 	}
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session ready payload written to %s\n", readyFile)
+	_, _ = fmt.Fprintf(a.Stderr, "rdev support session status file writing to %s\n", statusFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
-	go watchForegroundSupportSession(ctx, a.Stderr, gw, ticket.Code, opts.Locale)
+	go watchForegroundSupportSession(ctx, a.Stderr, statusFile, gw, ticket.Code, opts.Locale)
 	return listenAndServeGatewayContext(ctx, addr, server.Handler(), nil)
 }
 
-func watchForegroundSupportSession(ctx context.Context, out io.Writer, gw *gateway.MemoryGateway, ticketCode, locale string) {
+func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFile string, gw *gateway.MemoryGateway, ticketCode, locale string) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	seenPending := false
-	writeSupportSessionEvent(out, "waiting", supportsession.BuildStatus(supportsession.StatusOptions{
+	writeSupportSessionEvent(out, statusFile, "waiting", supportsession.BuildStatus(supportsession.StatusOptions{
 		TicketCode: ticketCode,
 		Hosts:      gw.HostsForTicketCode(ticketCode, ""),
 		Locale:     locale,
@@ -2210,26 +2226,30 @@ func watchForegroundSupportSession(ctx context.Context, out io.Writer, gw *gatew
 				Locale:     locale,
 			})
 			if status["connected"] == true {
-				writeSupportSessionEvent(out, "connected", status)
+				writeSupportSessionEvent(out, statusFile, "connected", status)
 				return
 			}
 			if status["status"] == "pending-approval" && !seenPending {
 				seenPending = true
-				writeSupportSessionEvent(out, "pending-approval", status)
+				writeSupportSessionEvent(out, statusFile, "pending-approval", status)
 			}
 		}
 	}
 }
 
-func writeSupportSessionEvent(out io.Writer, event string, status map[string]any) {
+func writeSupportSessionEvent(out io.Writer, statusFile, event string, status map[string]any) {
 	payload := map[string]any{
 		"schema_version": "rdev.support-session-foreground-event.v1",
 		"event":          event,
 		"status":         status,
+		"agent_rule":     "when event=connected or status.connected=true, immediately report status.connected_next_steps.user_report before creating jobs",
 	}
 	content, err := json.Marshal(payload)
 	if err != nil {
 		return
+	}
+	if strings.TrimSpace(statusFile) != "" {
+		_ = writeJSONFile0600(statusFile, payload)
 	}
 	_, _ = fmt.Fprintf(out, "rdev support session event: %s\n", string(content))
 }

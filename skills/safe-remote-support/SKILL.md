@@ -67,8 +67,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   If `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only the returned `user_handoff`. If it returns
   `ready_to_send_to_human=false`, run the returned `cli_start_now_command` in
-  a visible terminal, read `ready_file.path` when needed, then send the started
-  payload's top-level `user_handoff`. For lower-level explicit gateway workflows, call
+  a visible terminal, read `ready_file.path` for the handoff when needed, read
+  `status_file.path` for the latest connection event when terminal output is
+  unavailable, then send the started payload's top-level `user_handoff`. For lower-level explicit gateway workflows, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
   CLI. Treat the returned `rdev.support-session-created.v1` as the standard
   one-command session package: it already includes the target command, join URL,
@@ -78,7 +79,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   verified helper assets when possible, starts the gateway, selects a
   target-usable gateway URL candidate, and prints the same ready session payload
   before listening. It also writes the same JSON to `ready_file.path`; use that
-  ready file when foreground stdout is hard to parse. Use
+  ready file when foreground stdout is hard to parse. It writes the latest
+  foreground event to `status_file.path`; read it and report immediately when
+  it shows `event=connected` or `status.connected=true`. Use
   `rdev.support_session.plan` or
   `rdev support-session plan` only for review/debug planning before writing any
   gateway, PowerShell, relay, nohup, approval, or bootstrap steps.
@@ -232,7 +235,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   Also read `foreground_feedback` from the started payload: the foreground
   process emits machine-readable stderr events prefixed with
   `rdev support session event: `, and `event=connected` means report connection
-  establishment immediately.
+  establishment immediately. If stderr is unavailable, read `status_file.path`
+  for the same event before writing any custom polling loop.
   Use `rdev.support_session.plan` or
   `rdev support-session plan` only for review/debug planning.
 7. For lower-level package materialization only, create an invite with

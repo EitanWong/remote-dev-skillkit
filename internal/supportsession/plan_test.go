@@ -246,7 +246,8 @@ func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 		!strings.Contains(startNowCommand, "support-session\x00connect\x00--start") ||
 		!strings.Contains(startCommand, "support-session\x00start") ||
 		!strings.Contains(connect["agent_next_step"].(string), "cli_start_now_command") ||
-		!strings.Contains(connect["agent_next_step"].(string), "ready_file.path") {
+		!strings.Contains(connect["agent_next_step"].(string), "ready_file.path") ||
+		!strings.Contains(connect["agent_next_step"].(string), "status_file.path") {
 		t.Fatalf("expected connect payload to route to foreground start, got %#v", connect)
 	}
 }
@@ -472,6 +473,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		GatewayURL: "http://127.0.0.1:8787",
 		WorkDir:    "work/rdev-support-session",
 		ReadyFile:  "work/rdev-support-session/support-session-ready.json",
+		StatusFile: "work/rdev-support-session/support-session-status.json",
 		Created:    created,
 		AssetReport: map[string]any{
 			"schema_version": "rdev.support-session-assets.v1",
@@ -535,6 +537,14 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		readyFile["contains"] != StartedSchemaVersion ||
 		!strings.Contains(readyFile["agent_rule"].(string), "user_handoff.copy_paste") {
 		t.Fatalf("expected ready file metadata, got %#v", readyFile)
+	}
+	statusFile := started["status_file"].(map[string]any)
+	if statusFile["schema_version"] != StatusFileSchemaVersion ||
+		statusFile["path"] != "work/rdev-support-session/support-session-status.json" ||
+		statusFile["contains"] != "rdev.support-session-foreground-event.v1" ||
+		statusFile["status_schema_version"] != StatusSchemaVersion ||
+		!strings.Contains(statusFile["agent_rule"].(string), "connected_next_steps.user_report") {
+		t.Fatalf("expected status file metadata, got %#v", statusFile)
 	}
 	forbidden := strings.Join(started["forbidden"].([]string), "\n")
 	if !strings.Contains(forbidden, "background hidden gateway") ||

@@ -55,6 +55,12 @@ metadata, status watching, or approval polling by hand.
   configured relay/hosted/mesh/VPN/SSH fallback from handoff metadata toward
   target runtime behavior while preserving the existing primary `gateway_url`
   fallback.
+- Added `rdev.support-session-status-file.v1` metadata and default
+  `support-session-status.json` output for foreground
+  `rdev support-session connect --start` / `start` sessions. Fresh Agents now
+  have a stable local file containing the latest machine-readable foreground
+  event, so they can report `event=connected` / `status.connected=true` even
+  when a harness cannot stream or parse the long-running terminal output.
 - Added `rdev.support-session-gateway-candidate-preflight.v1` to
   support-session prepare, create, start, and high-level connect payloads.
   Fresh Agents now get a machine-readable candidate decision table that

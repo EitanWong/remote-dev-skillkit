@@ -341,7 +341,8 @@ func TestServerToolCallSupportSessionConnectWithoutGatewayReturnsStart(t *testin
 		structured["selected_path"] != "start-foreground-gateway" ||
 		structured["ready_to_send_to_human"] != false ||
 		!strings.Contains(startCommand, "support-session\x00start") ||
-		!strings.Contains(structured["agent_next_step"].(string), "ready_file.path") {
+		!strings.Contains(structured["agent_next_step"].(string), "ready_file.path") ||
+		!strings.Contains(structured["agent_next_step"].(string), "status_file.path") {
 		t.Fatalf("expected connect tool to return foreground start path, got %#v", structured)
 	}
 }

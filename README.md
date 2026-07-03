@@ -156,7 +156,9 @@ the started payload's top-level `user_handoff.message` plus
 command. Keep the foreground command open and read
 `foreground_feedback`: it emits machine-readable stderr events prefixed with
 `rdev support session event: `, including `event=connected`, so the Agent can
-tell me the connection is established even before opening a separate watcher. Use
+tell me the connection is established even before opening a separate watcher.
+When terminal output is unavailable, read `status_file.path`; it stores the
+latest machine-readable foreground event as `support-session-status.json`. Use
 `rdev.support_session.plan` or `rdev support-session plan` only for review/debug
 planning. After giving me the target-machine command, read
 `connection_supervision` and watch `rdev.support_session.status` or
@@ -312,7 +314,9 @@ use top-level `connection_supervision` or foreground feedback to wait, report
 writes the same payload to `ready_file.path` as
 `support-session-ready.json` under the session work directory by default, so
 Agents can read the file when a long-running foreground terminal makes stdout
-hard to parse. The Agent
+hard to parse. It also writes the latest foreground status event to
+`status_file.path` as `support-session-status.json`, so Agents can detect
+`event=connected` without writing their own polling loop. The Agent
 should use `rdev.support_session.plan` or `rdev support-session plan` only for
 review/debug planning. The Agent should not write its own PowerShell, relay,
 nohup, ticket, root, gateway, transport, status polling, or approval glue.
