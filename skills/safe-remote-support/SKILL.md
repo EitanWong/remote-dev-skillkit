@@ -81,7 +81,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `--rdev-assets-dir` or platform-specific helper asset flags first.
 - After giving the target-side command, watch the session with
   `rdev.support_session.status` using `wait=true` or
-  `rdev support-session status --wait`. When `connected=true`, proactively tell
+  `rdev support-session status --wait`; CLI status can omit `--gateway-url`
+  when a configured `RDEV_*_GATEWAY_URL` exists. When `connected=true`, proactively tell
   the user the connection is established using `connected_next_steps.user_report`,
   inspect `rdev.hosts.capabilities`, and create only the smallest scoped job for
   the user's task. Do not write custom polling loops. If the target does not appear or the wait call returns

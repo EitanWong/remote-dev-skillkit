@@ -84,6 +84,11 @@ metadata, status watching, or approval polling by hand.
   use the first configured `RDEV_*_GATEWAY_URL` when no explicit `gateway_url`
   is supplied. Fresh Agents therefore do not need to ask which gateway URL to
   use when the runtime already has a hosted/relay/mesh/VPN/SSH entry configured.
+- Added configured gateway auto-selection for CLI status watching. `rdev
+  support-session status --ticket-code ... --wait` can now omit
+  `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists, so Agents do
+  not need to remember or ask for the gateway URL just to report
+  `connected=true`.
 - Added `rdev support-session prepare` and MCP tool
   `rdev.support_session.prepare` with schema
   `rdev.support-session-prepare.v1`. Fresh Agents can now inspect local `rdev`

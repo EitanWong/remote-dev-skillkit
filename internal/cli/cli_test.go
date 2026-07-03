@@ -816,6 +816,54 @@ func TestSupportSessionStatusReportsConnectionFeedback(t *testing.T) {
 	}
 }
 
+func TestSupportSessionStatusUsesConfiguredGatewayURL(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	handler := httpapi.NewServer(gw).Handler()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", server.URL)
+
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "company computer support", map[string]string{
+		"auto_approve": "attended-temporary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "win-dev",
+		OS:           "windows",
+		Arch:         "amd64",
+		Capabilities: []string{"shell.user"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"support-session", "status",
+		"--ticket-code", ticket.Code,
+		"--locale", "en",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		Connected     bool   `json:"connected"`
+		Status        string `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid status JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-status.v1" ||
+		!payload.Connected ||
+		payload.Status != "connected" {
+		t.Fatalf("expected configured gateway status feedback, got %#v", payload)
+	}
+}
+
 func TestSupportSessionStatusWaitTimeoutIncludesRecovery(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "visible support")

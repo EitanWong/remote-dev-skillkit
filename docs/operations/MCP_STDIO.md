@@ -154,6 +154,10 @@ approval bypass and is rejected for managed or break-glass tickets.
 `rdev.support_session.status` accepts `wait`, `timeout_seconds`, and
 `interval_millis`. Agents should use the MCP wait mode or the CLI
 `rdev support-session status --wait` instead of writing their own polling loop.
+CLI status can omit `--gateway-url` when `RDEV_HOSTED_GATEWAY_URL`,
+`RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
+`RDEV_SSH_GATEWAY_URL` is configured, so Agents do not need to remember or ask
+for the gateway URL just to watch a known ticket.
 When the returned status has `connected=true`, immediately tell the user the
 connection is established before creating jobs. Status payloads include
 `connected_next_steps` with schema

@@ -2204,12 +2204,17 @@ type supportSessionStatusOptions struct {
 }
 
 func supportSessionStatus(ctx context.Context, client *http.Client, opts supportSessionStatusOptions) (map[string]any, error) {
-	if strings.TrimSpace(opts.GatewayURL) == "" {
-		return nil, fmt.Errorf("support-session status requires --gateway-url")
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		return nil, fmt.Errorf("support-session status requires --gateway-url or a configured RDEV_*_GATEWAY_URL")
 	}
 	if strings.TrimSpace(opts.TicketCode) == "" {
 		return nil, fmt.Errorf("support-session status requires --ticket-code")
 	}
+	opts.GatewayURL = gatewayURL
 	if opts.Interval <= 0 {
 		opts.Interval = time.Second
 	}

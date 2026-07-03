@@ -129,8 +129,9 @@ gateway, and prints the same ready session payload before listening. Use
 `rdev.support_session.plan` or `rdev support-session plan` only for review/debug
 planning. After giving me the target-machine command, watch
 `rdev.support_session.status`
-or `rdev support-session status --wait`; when `connected=true`, tell me the
-connection has been established before creating jobs. Then follow
+or `rdev support-session status --wait`; the CLI status command can omit
+`--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. When
+`connected=true`, tell me the connection has been established before creating jobs. Then follow
 `connected_next_steps`: report `user_report`, inspect
 `rdev.hosts.capabilities`, and create only the smallest scoped job for my task.
 If waiting times out or
@@ -305,6 +306,12 @@ rdev support-session plan \
 
 rdev support-session status \
   --gateway-url http://<reachable-gateway-host>:8787 \
+  --ticket-code <ticket-code> \
+  --wait \
+  --locale auto
+
+# If RDEV_HOSTED_GATEWAY_URL / RDEV_RELAY_GATEWAY_URL / similar is configured:
+rdev support-session status \
   --ticket-code <ticket-code> \
   --wait \
   --locale auto
