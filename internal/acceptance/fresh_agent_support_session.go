@@ -29,6 +29,8 @@ type FreshAgentSupportSessionReport struct {
 	GeneratedAt             time.Time      `json:"generated_at"`
 	OutDir                  string         `json:"out_dir"`
 	GatewayURL              string         `json:"gateway_url"`
+	ConnectNoGateway        map[string]any `json:"connect_no_gateway"`
+	ConnectReachableGateway map[string]any `json:"connect_reachable_gateway"`
 	HandoffNoGateway        map[string]any `json:"handoff_no_gateway"`
 	HandoffReachableGateway map[string]any `json:"handoff_reachable_gateway"`
 	CreatedSession          map[string]any `json:"created_session"`
@@ -89,6 +91,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		Locale:      locale,
 		RdevCommand: rdevCommand,
 	})
+	connectNoGateway := supportsession.BuildConnectFromHandoff(handoffNoGateway)
 
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
 	ticket, err := gw.CreateTicketWithMetadata(
@@ -115,6 +118,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		RdevCommand:           rdevCommand,
 		AutoApprove:           true,
 	})
+	connectReachableGateway := supportsession.BuildConnectFromCreated(created)
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
 		Addr:       "0.0.0.0:8787",
 		GatewayURL: gatewayURL,
@@ -149,6 +153,8 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		GeneratedAt:             now.UTC(),
 		OutDir:                  outDir,
 		GatewayURL:              gatewayURL,
+		ConnectNoGateway:        connectNoGateway,
+		ConnectReachableGateway: connectReachableGateway,
 		HandoffNoGateway:        handoffNoGateway,
 		HandoffReachableGateway: handoffReachableGateway,
 		CreatedSession:          created,
@@ -158,6 +164,8 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		Checks: freshAgentSupportSessionChecks(freshAgentSupportSessionCheckInput{
 			HandoffNoGateway:        handoffNoGateway,
 			HandoffReachableGateway: handoffReachableGateway,
+			ConnectNoGateway:        connectNoGateway,
+			ConnectReachableGateway: connectReachableGateway,
 			CreatedSession:          created,
 			StartedSession:          started,
 			ConnectedStatus:         connectedStatus,
@@ -166,7 +174,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 			Ticket:                  ticket,
 		}),
 		RecommendedNextSteps: []string{
-			"Use this contract gate before fresh-Agent multi-harness acceptance to catch regressions in the standard handoff/create/start/status flow.",
+			"Use this contract gate before fresh-Agent multi-harness acceptance to catch regressions in the standard connect/handoff/create/start/status flow.",
 			"Run real Codex, Claude Code, Hermes, and OpenClaw/OpenCode acceptance next; this local report does not prove model behavior in those runtimes.",
 			"Run clean Windows/macOS/Linux target acceptance and restrictive-network relay/mesh/VPN/SSH evidence before claiming production-grade connectivity.",
 		},
@@ -185,6 +193,8 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 type freshAgentSupportSessionCheckInput struct {
 	HandoffNoGateway        map[string]any
 	HandoffReachableGateway map[string]any
+	ConnectNoGateway        map[string]any
+	ConnectReachableGateway map[string]any
 	CreatedSession          map[string]any
 	StartedSession          map[string]any
 	ConnectedStatus         map[string]any
@@ -196,6 +206,8 @@ type freshAgentSupportSessionCheckInput struct {
 func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []Check {
 	noGatewayCommand := stringSliceFromAny(input.HandoffNoGateway["foreground_start_command"])
 	reachableArgs := mapFromAny(input.HandoffReachableGateway["mcp_next_arguments"])
+	connectStartCommand := stringSliceFromAny(input.ConnectNoGateway["foreground_start_command"])
+	connectUserHandoff := mapFromAny(input.ConnectReachableGateway["user_handoff"])
 	handoff := mapFromAny(input.CreatedSession["user_handoff"])
 	mcpFollowUp := mapSliceFromAny(input.CreatedSession["mcp_follow_up"])
 	configuredWatcher := mapFromAny(input.CreatedSession["watch_connection_status_configured_gateway"])
@@ -207,6 +219,8 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	targetCommand := stringFromAny(input.CreatedSession["target_command"])
 	forbiddenText := strings.Join(stringSliceFromAny(input.CreatedSession["forbidden"]), "\n") + "\n" + targetCommand + "\n" + copyPaste
 	checks := []Check{
+		{Name: "connect_without_gateway_returns_foreground_start", Passed: input.ConnectNoGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectNoGateway["selected_path"] == "start-foreground-gateway" && input.ConnectNoGateway["ready_to_send_to_human"] == false && containsAllStrings(connectStartCommand, "support-session", "start"), Detail: strings.Join(connectStartCommand, " ")},
+		{Name: "connect_with_gateway_returns_ready_handoff", Passed: input.ConnectReachableGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectReachableGateway["selected_path"] == "created-with-reachable-gateway" && input.ConnectReachableGateway["ready_to_send_to_human"] == true && stringFromAny(connectUserHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion, Detail: stringFromAny(connectUserHandoff["copy_paste_kind"])},
 		{Name: "handoff_without_gateway_selects_foreground_start", Passed: input.HandoffNoGateway["selected_path"] == "start-foreground-gateway", Detail: stringFromAny(input.HandoffNoGateway["selected_path"])},
 		{Name: "foreground_start_command_is_standard_tool", Passed: containsAllStrings(noGatewayCommand, "support-session", "start"), Detail: strings.Join(noGatewayCommand, " ")},
 		{Name: "handoff_with_gateway_selects_create_tool", Passed: input.HandoffReachableGateway["selected_path"] == "create-with-reachable-gateway" && input.HandoffReachableGateway["mcp_next_tool"] == "rdev.support_session.create", Detail: stringFromAny(input.HandoffReachableGateway["selected_path"])},

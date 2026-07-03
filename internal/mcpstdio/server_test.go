@@ -323,6 +323,58 @@ func TestServerToolCallSupportSessionHandoffUsesConfiguredGateway(t *testing.T) 
 	}
 }
 
+func TestServerToolCallSupportSessionConnectWithoutGatewayReturnsStart(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+		"target": "auto",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	startCommand := strings.Join(anyStrings(structured["foreground_start_command"].([]any)), "\x00")
+	if structured["schema_version"] != "rdev.support-session-connect.v1" ||
+		structured["selected_path"] != "start-foreground-gateway" ||
+		structured["ready_to_send_to_human"] != false ||
+		!strings.Contains(startCommand, "support-session\x00start") ||
+		!strings.Contains(structured["agent_next_step"].(string), "ready_file.path") {
+		t.Fatalf("expected connect tool to return foreground start path, got %#v", structured)
+	}
+}
+
+func TestServerToolCallSupportSessionConnectWithGatewayCreatesReadyHandoff(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+		"gateway_url":  "http://192.0.2.44:8787",
+		"target":       "windows",
+		"reason":       "company computer support",
+		"auto_approve": true,
+		"locale":       "zh-CN",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	handoff := structured["user_handoff"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-connect.v1" ||
+		structured["selected_path"] != "created-with-reachable-gateway" ||
+		structured["ready_to_send_to_human"] != true ||
+		handoff["schema_version"] != "rdev.support-session-user-handoff.v1" ||
+		handoff["copy_paste_kind"] != "windows" ||
+		!strings.Contains(handoff["copy_paste"].(string), "bootstrap.ps1") ||
+		strings.Contains(handoff["copy_paste"].(string), "ExecutionPolicy Bypass") {
+		t.Fatalf("expected connect tool to create ready handoff, got %#v", structured)
+	}
+}
+
 func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.prepare", map[string]any{
 		"repo_root":   ".",

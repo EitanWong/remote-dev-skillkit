@@ -14,6 +14,7 @@ The server currently uses an in-memory gateway. It is suitable for local integra
 Agent-first session tools include:
 
 - `rdev.support_session.handoff`
+- `rdev.support_session.connect`
 - `rdev.support_session.prepare`
 - `rdev.support_session.plan`
 - `rdev.support_session.create`
@@ -26,19 +27,23 @@ invent narrower public names such as customer link or connector package plan:
 the same contract covers owned managed hosts, third-party temporary support,
 LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
 
-`rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
+`rdev.support_session.connect` returns `rdev.support-session-connect.v1` in
 `structuredContent`. Fresh Agents should call it first when a human says
-"connect a computer" or similar. If `gateway_url` is present, the handoff tells
-the Agent to call `rdev.support_session.create` next. If `gateway_url` is
-omitted but `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+"connect a computer" or similar. If `gateway_url` is present, or if
+`RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
 `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
-configured, the handoff uses that configured gateway and still routes to
-`rdev.support_session.create`. If no gateway is present, the handoff returns a
-foreground `rdev support-session start` command to run in a visible terminal.
-Agents should follow `selected_path`,
-`mcp_next_tool`/`mcp_next_arguments`, and `foreground_start_command` instead of
-choosing between prepare/create/start/plan themselves or writing bootstrap,
-relay, approval-polling, or recovery scripts.
+configured, it creates the attended-temporary support session and returns
+`ready_to_send_to_human=true` with the exact `user_handoff.message` and
+`user_handoff.copy_paste`. If no gateway is present, it returns
+`ready_to_send_to_human=false` with the standard foreground
+`rdev support-session start` command to run in a visible terminal. Agents should
+follow the connect payload instead of choosing between handoff/create/start/plan
+themselves or writing bootstrap, relay, approval-polling, or recovery scripts.
+
+`rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
+`structuredContent`. It remains available for review/debug routing details and
+older harnesses, but fresh Agents should prefer `rdev.support_session.connect`
+as the normal first step.
 
 `rdev.support_session.create` returns `rdev.support-session-created.v1` in
 `structuredContent`. Agents should prefer it when a reachable gateway is
@@ -65,7 +70,7 @@ platform, Agents should recover with `rdev support-session start` or
 human to install `rdev` manually.
 
 `rdev.support_session.prepare` returns `rdev.support-session-prepare.v1` in
-`structuredContent`. Fresh Agent sessions should call handoff first, then call
+`structuredContent`. Fresh Agent sessions should call connect first, then call
 prepare when local `rdev`, gateway state, helper assets, or one-command target
 readiness is unclear. It
 reports the detected OS/arch, Go/Git/`rdev` paths, resolved repo/work dirs,

@@ -37,16 +37,17 @@ Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. Do not ask humans to assemble ticket, root,
 gateway, transport, release, or checksum flags. First call
-`rdev.support_session.handoff` through MCP or run `rdev support-session handoff`;
-follow `selected_path`, `mcp_next_tool`, `mcp_next_arguments`, or
-`foreground_start_command` instead of guessing whether to prepare, create, start,
-or plan. If local `rdev`, gateway state, or target helper assets are unclear,
+`rdev.support_session.connect` through MCP or run `rdev support-session connect`.
+If it returns `ready_to_send_to_human=true`, send only the returned
+`user_handoff.message` plus `user_handoff.copy_paste`. If it returns
+`ready_to_send_to_human=false`, run the returned visible foreground
+`rdev support-session start` command, then send the started session handoff. If local `rdev`, gateway state, or target helper assets are unclear,
 call `rdev.support_session.prepare` through MCP or run
 `rdev support-session prepare --build-assets` from the checkout. Follow its `connection_readiness`, `asset_report`, `missing_inputs`,
 and `standard_recovery` fields instead of writing custom bootstrap, approval, or
 relay glue. Use the recommended `gateway_url_candidates` entry for target-side
 commands; never send a remote target `0.0.0.0`, and treat loopback as
-same-machine only. If `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is configured, `rdev` appends it to `gateway_url_candidates` after direct/LAN candidates and before loopback so the target command can fail over without custom tunnel scripts. `handoff` and `create` can use the first configured `RDEV_*_GATEWAY_URL` when no explicit `gateway_url` was supplied. If a reachable gateway is already running, call
+same-machine only. If `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is configured, `rdev` appends it to `gateway_url_candidates` after direct/LAN candidates and before loopback so the target command can fail over without custom tunnel scripts. `connect`, `handoff`, and `create` can use the first configured `RDEV_*_GATEWAY_URL` when no explicit `gateway_url` was supplied. If a lower-level explicit gateway workflow is needed, call
 `rdev.support_session.create` through MCP or `rdev support-session create`
 through CLI to get the ready target command, join URL, real ticket code,
 manifest root, scoped auto-approval state, and status watch command in one

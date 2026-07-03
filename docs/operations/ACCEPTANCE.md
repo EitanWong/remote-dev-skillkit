@@ -25,9 +25,9 @@ tunnel, or prove real Codex/Claude Code/Hermes/OpenClaw behavior. Instead, it
 checks that the standard tool payloads still let a fresh Agent do the intended
 one-message flow:
 
-1. call `rdev.support_session.handoff` first;
-2. choose `rdev.support_session.create` when a gateway is reachable;
-3. choose visible foreground `rdev support-session start` when no gateway is running;
+1. call `rdev.support_session.connect` first;
+2. return ready `user_handoff` when a gateway is reachable;
+3. return visible foreground `rdev support-session start` when no gateway is running;
 4. send only `user_handoff.message` plus `user_handoff.copy_paste` to the human;
 5. read `ready_file.path` when foreground stdout is hard to parse;
 6. wait for status with `rdev.support_session.status`;

@@ -80,6 +80,8 @@ required_patterns=(
   "../operations/AGENT_BOOTSTRAP_PROMPT.md"
   "go install ./cmd/rdev"
   "rdev doctor"
+  "rdev.support_session.connect"
+  "rdev support-session connect"
   "rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session"
   "rdev skillkit export --source-root . --out dist/remote-dev-skillkit"
   "rdev skillkit verify --bundle dist/remote-dev-skillkit"

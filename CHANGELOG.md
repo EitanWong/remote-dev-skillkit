@@ -128,11 +128,19 @@ metadata, status watching, or approval polling by hand.
   inventing extra scripts or asking the human to assemble ticket/gateway values.
 - Added `rdev acceptance fresh-agent-support-session` with schema
   `rdev.acceptance.fresh-agent-support-session.v1`. This local contract gate
-  verifies the fresh-Agent handoff/create/start/status flow: one standard
-  selected path, one human `user_handoff`, ready-file fallback, waitable status,
+  verifies the fresh-Agent connect/handoff/create/start/status flow: one
+  high-level connect entry, one standard selected path, one human
+  `user_handoff`, ready-file fallback, waitable status,
   `connected_next_steps.user_report`, and forbidden ad hoc bootstrap, polling,
   relay, ticket/root/gateway/transport assembly, hidden install, or
   `ExecutionPolicy Bypass` shortcuts.
+- Added high-level `rdev support-session connect` and MCP tool
+  `rdev.support_session.connect` with schema `rdev.support-session-connect.v1`.
+  Fresh Agents can now call one "connect a computer" entry first: when a
+  reachable or configured gateway exists it creates the session and returns the
+  ready `user_handoff`; when no gateway is running it returns the standard
+  visible foreground `rdev support-session start` command instead of failing or
+  forcing model-dependent handoff/create/start decisions.
 - Added `rdev support-session create` and MCP tool
   `rdev.support_session.create` with schema
   `rdev.support-session-created.v1`. When a gateway is already reachable,
@@ -172,8 +180,8 @@ metadata, status watching, or approval polling by hand.
   or explicit gateway URL for target commands. Loopback remains available but is
   marked same-machine only.
 - Updated README, MCP docs, Agent Bootstrap Prompt, i18n quick starts, and core
-  Skills so fresh Agents call support-session handoff first, then follow the
-  returned create/start route. Prepare is used when readiness is unclear,
+  Skills so fresh Agents call support-session connect first, then follow the
+  returned ready handoff or foreground start route. Prepare is used when readiness is unclear,
   planner access is reserved for review/debug, and the standard status watcher
   remains required before claiming the remote host is connected. Connected
   status now also drives the capability-inspection step before job creation.

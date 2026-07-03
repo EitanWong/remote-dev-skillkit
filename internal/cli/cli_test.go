@@ -209,6 +209,38 @@ func TestAcceptanceFreshAgentSupportSession(t *testing.T) {
 	}
 }
 
+func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{
+		"support-session", "connect",
+		"--target", "auto",
+		"--reason", "company computer support",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion    string   `json:"schema_version"`
+		SelectedPath     string   `json:"selected_path"`
+		ReadyToSendHuman bool     `json:"ready_to_send_to_human"`
+		StartCommand     []string `json:"foreground_start_command"`
+		AgentNextStep    string   `json:"agent_next_step"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid connect JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-connect.v1" ||
+		payload.SelectedPath != "start-foreground-gateway" ||
+		payload.ReadyToSendHuman ||
+		!slices.Contains(payload.StartCommand, "start") ||
+		!strings.Contains(payload.AgentNextStep, "ready_file.path") {
+		t.Fatalf("unexpected foreground connect payload: %#v", payload)
+	}
+}
+
 func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

@@ -91,10 +91,13 @@ run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan.
 When I ask you to work on another machine, always create a Connection Entry.
 Treat it as the universal target-side handoff for every scenario: my own durable
 computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
-or VPN-assisted connectivity. First call `rdev.support_session.handoff` or run
-`rdev support-session handoff`; follow its `selected_path`,
-`mcp_next_tool`, `mcp_next_arguments`, or `foreground_start_command` instead of
-guessing whether to prepare, create, start, or plan. If `rdev`, the gateway, or helper assets are
+or VPN-assisted connectivity. First call `rdev.support_session.connect` or run
+`rdev support-session connect`; it is the high-level "connect a computer"
+entry. If a configured or reachable gateway exists, it creates the session and
+returns the ready `user_handoff`. If no gateway is running, it returns the
+standard visible foreground `rdev support-session start` command instead of
+failing or making the Agent choose lower-level steps. Use
+`rdev.support_session.handoff` only for review/debug routing details. If `rdev`, the gateway, or helper assets are
 unclear, call `rdev.support_session.prepare` or run
 `rdev support-session prepare --build-assets`; follow its standard recovery
 actions and use its recommended `gateway_url_candidates` entry instead of
@@ -105,10 +108,13 @@ testing. If this runtime has configured gateway fallbacks such as
 `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
 `RDEV_SSH_GATEWAY_URL`, `rdev` automatically appends them to
 `gateway_url_candidates` after direct/LAN candidates and before loopback so the
-target command can fail over without Agent-written glue. `handoff` and
-`create` also use the first configured `RDEV_*_GATEWAY_URL` when no explicit
+target command can fail over without Agent-written glue. `connect`, `handoff`,
+and `create` use the first configured `RDEV_*_GATEWAY_URL` when no explicit
 `gateway_url` is supplied, so fresh Agents do not need to ask me which gateway
-URL to use. If a reachable gateway is already running, call
+URL to use. If a reachable gateway is already running, `connect` returns
+`rdev.support-session-connect.v1` with `ready_to_send_to_human=true`; if no
+gateway is running, it returns `ready_to_send_to_human=false` plus the
+foreground start command. If a lower-level path is explicitly needed, call
 `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
@@ -233,12 +239,14 @@ create a Connection Entry, choose the right connection mode, and give the target
 side only the link, visible script, or signed package it should run.
 ```
 
-The Agent should start with `rdev.support_session.handoff` or
-`rdev support-session handoff`. That first-contact contract returns
-`rdev.support-session-handoff.v1` and chooses the next standard path: call
-`rdev.support_session.create` when a reachable gateway is already running or a
-configured `RDEV_*_GATEWAY_URL` exists, or run the returned foreground
-`rdev support-session start` command when no gateway is running. The
+The Agent should start with `rdev.support_session.connect` or
+`rdev support-session connect`. That first-contact contract returns
+`rdev.support-session-connect.v1` and collapses the ordinary decision tree: when
+a reachable gateway or configured `RDEV_*_GATEWAY_URL` exists, it creates the
+session and returns a ready `user_handoff`; when no gateway is running, it
+returns the standard visible foreground `rdev support-session start` command.
+`rdev.support_session.handoff` remains available for review/debug routing
+details, but fresh Agents should not use it as the normal first step. The
 created/started session then returns
 `rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
@@ -294,6 +302,10 @@ hand-assemble ticket codes, root keys, gateway URLs, transports, release roots,
 or checksums.
 
 ```bash
+rdev support-session connect \
+  --target auto \
+  --locale auto
+
 rdev support-session prepare \
   --target auto \
   --build-assets
@@ -507,9 +519,9 @@ rdev mcp tools
 The local demo walks through ticket creation, host registration, approval, job
 execution, artifacts, and audit without needing a public gateway.
 The fresh-Agent support-session acceptance command is a local contract gate: it
-checks that handoff/create/start/status payloads still support the one-command
-Agent flow before you run real Codex/Claude Code/Hermes/OpenClaw and clean
-Windows/macOS/Linux acceptance.
+checks that connect/handoff/create/start/status payloads still support the
+one-command Agent flow before you run real Codex/Claude Code/Hermes/OpenClaw
+and clean Windows/macOS/Linux acceptance.
 
 ## Current Status
 

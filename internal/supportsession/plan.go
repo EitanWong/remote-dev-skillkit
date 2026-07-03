@@ -23,6 +23,7 @@ import (
 const PlanSchemaVersion = "rdev.support-session-plan.v1"
 const PrepareSchemaVersion = "rdev.support-session-prepare.v1"
 const HandoffSchemaVersion = "rdev.support-session-handoff.v1"
+const ConnectSchemaVersion = "rdev.support-session-connect.v1"
 const CreatedSchemaVersion = "rdev.support-session-created.v1"
 const StartedSchemaVersion = "rdev.support-session-started.v1"
 const StatusSchemaVersion = "rdev.support-session-status.v1"
@@ -198,6 +199,63 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 			"hidden install",
 			"UAC or sudo bypass",
 			"service, firewall, DNS, route, credential, paid relay, or cloud changes without explicit approval",
+		},
+	}
+}
+
+func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
+	selectedPath, _ := handoff["selected_path"].(string)
+	payload := map[string]any{
+		"schema_version": ConnectSchemaVersion,
+		"ok":             true,
+		"intent":         "single-call-agent-entry-for-one-command-visible-support-session",
+		"selected_path":  selectedPath,
+		"handoff":        handoff,
+		"agent_rule":     "Agents should call rdev.support_session.connect first when a human asks to connect a computer; follow this payload instead of choosing handoff/create/start/status manually.",
+		"forbidden": []string{
+			"manual ticket/root/gateway/transport assembly for target humans",
+			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
+			"ExecutionPolicy Bypass",
+			"hidden install",
+		},
+	}
+	if selectedPath == "create-with-reachable-gateway" {
+		payload["ready_to_send_to_human"] = false
+		payload["mcp_next_tool"] = handoff["mcp_next_tool"]
+		payload["mcp_next_arguments"] = handoff["mcp_next_arguments"]
+		payload["agent_next_step"] = "call mcp_next_tool with mcp_next_arguments; then send only the returned user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
+		return payload
+	}
+	payload["ready_to_send_to_human"] = false
+	payload["foreground_start_command"] = handoff["foreground_start_command"]
+	payload["prepare_command"] = handoff["prepare_command"]
+	payload["agent_next_step"] = "run foreground_start_command in a visible terminal; read ready_file.path if stdout is hard to parse; then send only session.user_handoff.message plus session.user_handoff.copy_paste and wait for connected=true"
+	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned foreground_start_command first and then send the started session user_handoff"
+	return payload
+}
+
+func BuildConnectFromCreated(created map[string]any) map[string]any {
+	return map[string]any{
+		"schema_version":          ConnectSchemaVersion,
+		"ok":                      true,
+		"intent":                  "single-call-agent-entry-for-one-command-visible-support-session",
+		"selected_path":           "created-with-reachable-gateway",
+		"ready_to_send_to_human":  true,
+		"created_session":         created,
+		"user_handoff":            created["user_handoff"],
+		"target_command":          created["target_command"],
+		"join_url":                created["join_url"],
+		"watch_connection_status": created["watch_connection_status"],
+		"watch_connection_status_configured_gateway": created["watch_connection_status_configured_gateway"],
+		"mcp_follow_up":      created["mcp_follow_up"],
+		"agent_next_step":    "send user_handoff.message plus user_handoff.copy_paste to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
+		"human_surface_rule": "humans receive only user_handoff.message plus user_handoff.copy_paste",
+		"agent_rule":         "Agents should call rdev.support_session.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
+		"forbidden": []string{
+			"manual ticket/root/gateway/transport assembly for target humans",
+			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
+			"ExecutionPolicy Bypass",
+			"hidden install",
 		},
 	}
 }

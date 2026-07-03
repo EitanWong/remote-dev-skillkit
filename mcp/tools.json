@@ -84,6 +84,66 @@
       }
     },
     {
+      "name": "rdev.support_session.connect",
+      "description": "Single high-level Agent entry for 'connect a computer'. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff plus status watcher in one payload. If no gateway is running, returns the standard visible foreground rdev support-session start command instead of failing or making the Agent choose lower-level handoff/create/start/status steps.",
+      "safety": "Creates a scoped attended-temporary ticket only when a reachable/configured gateway is supplied; otherwise planning only. Does not execute on the target host, install hidden persistence, bypass policy, or mutate firewall/DNS/routes.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "addr": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "auto_approve": {
+            "type": "boolean"
+          },
+          "gateway_url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "operator_token_file": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rdev_command": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "repo_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "enum": [
+              "auto",
+              "windows",
+              "macos",
+              "linux"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "work_dir": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.support_session.handoff",
       "description": "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided or a configured RDEV_*_GATEWAY_URL fallback exists, call rdev.support_session.create next; if not, run the returned foreground rdev support-session start command, then read its ready_file.path when terminal stdout is hard to parse. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
       "safety": "Planning only; does not create tickets, start a gateway, approve hosts, execute on the target host, or install persistence.",

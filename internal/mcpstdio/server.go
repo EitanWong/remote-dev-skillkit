@@ -126,6 +126,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
+	case "rdev.support_session.connect":
+		data, err = s.supportSessionConnect(params.Arguments)
 	case "rdev.support_session.handoff":
 		data, err = s.supportSessionHandoff(params.Arguments)
 	case "rdev.support_session.prepare":
@@ -221,6 +223,36 @@ func (s Server) supportSessionPrepare(args map[string]any) (any, error) {
 	})
 }
 
+func (s Server) supportSessionConnect(args map[string]any) (any, error) {
+	ttl := intArg(args, "ttl_seconds", 7200)
+	if ttl < 60 || ttl > 86400 {
+		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
+	}
+	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
+			RepoRoot:    stringArg(args, "repo_root", "."),
+			WorkDir:     stringArg(args, "work_dir", ""),
+			Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
+			Target:      stringArg(args, "target", "auto"),
+			Reason:      stringArg(args, "reason", "visible temporary remote support"),
+			TTLSeconds:  ttl,
+			AutoApprove: boolArg(args, "auto_approve", true),
+			Locale:      stringArg(args, "locale", "auto"),
+			RdevCommand: stringArg(args, "rdev_command", "rdev"),
+		})
+		return supportsession.BuildConnectFromHandoff(handoff), nil
+	}
+	created, err := s.createSupportSessionPayload(args, gatewayURL, ttl)
+	if err != nil {
+		return nil, err
+	}
+	return supportsession.BuildConnectFromCreated(created), nil
+}
+
 func (s Server) updateCheck(args map[string]any) (any, error) {
 	return update.CheckLatest(context.Background(), http.DefaultClient, update.Options{
 		Repo:           stringArg(args, "repo", update.DefaultRepo),
@@ -286,6 +318,17 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 	if ttl < 60 || ttl > 86400 {
 		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
 	}
+	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		return nil, fmt.Errorf("support_session.create requires gateway_url or a configured RDEV_*_GATEWAY_URL")
+	}
+	return s.createSupportSessionPayload(args, gatewayURL, ttl)
+}
+
+func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL string, ttl int) (map[string]any, error) {
 	autoApprove := boolArg(args, "auto_approve", true)
 	metadata := map[string]string{
 		"connection_entry":  "standard-visible",
@@ -303,13 +346,6 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 	)
 	if err != nil {
 		return nil, err
-	}
-	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
-	if gatewayURL == "" {
-		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
-	}
-	if gatewayURL == "" {
-		return nil, fmt.Errorf("support_session.create requires gateway_url or a configured RDEV_*_GATEWAY_URL")
 	}
 	joinURL := strings.TrimRight(gatewayURL, "/") + "/join/" + ticket.Code
 	manifestURL := strings.TrimRight(gatewayURL, "/") + "/v1/tickets/" + ticket.Code + "/manifest"

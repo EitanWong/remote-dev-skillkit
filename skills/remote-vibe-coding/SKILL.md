@@ -43,11 +43,15 @@ revocation.
   JSON plan for local MCP, `rdev` recovery, Connection Entry defaults, and
   ask/auto-probe boundaries.
 - When a fresh Agent session is asked to connect a machine, first call
-  `rdev.support_session.handoff` or run `rdev support-session handoff`. Follow
-  `selected_path`, `mcp_next_tool`, `mcp_next_arguments`, or
-  `foreground_start_command` instead of guessing between prepare, create,
-  start, and plan. Use `rdev.support_session.plan` only when the handoff,
-  operator, or debug workflow explicitly asks for review-level planning.
+  `rdev.support_session.connect` or run `rdev support-session connect`. This is
+  the high-level "connect a computer" entry. If a reachable or configured
+  gateway exists, it returns `ready_to_send_to_human=true` with the exact
+  `user_handoff.message` and `user_handoff.copy_paste`. If no gateway is
+  running, it returns `ready_to_send_to_human=false` with the standard visible
+  foreground `rdev support-session start` command. Use
+  `rdev.support_session.handoff` only for review/debug routing details, and use
+  `rdev.support_session.plan` only when the connect/handoff output, operator,
+  or debug workflow explicitly asks for review-level planning.
 - When a fresh Agent session is asked to connect a machine and local `rdev`,
   gateway state, or target helper assets are unclear, call
   `rdev.support_session.prepare` or run
@@ -62,12 +66,18 @@ revocation.
   `RDEV_SSH_GATEWAY_URL` values are tool metadata: `rdev` appends them to
   ordered gateway candidates after direct/LAN paths and before loopback so the
   target one-liner can fail over without Agent-authored tunnel scripts.
+  `rdev.support_session.connect`, `rdev support-session connect`,
   `rdev.support_session.handoff`, `rdev support-session handoff`,
   `rdev.support_session.create`, and `rdev support-session create` may use the
   first configured `RDEV_*_GATEWAY_URL` when no explicit gateway URL was
   supplied; do not ask the human to choose a gateway URL when the runtime has
   one configured.
-- For a new support session with an already reachable gateway, use
+- For a new support session, prefer the high-level connect output. If
+  `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
+  only the returned `user_handoff`. If it returns
+  `ready_to_send_to_human=false`, run the returned foreground start command in
+  a visible terminal, read `ready_file.path` when needed, then send the started
+  session `user_handoff`. For lower-level explicit gateway workflows, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running

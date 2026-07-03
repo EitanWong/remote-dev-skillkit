@@ -110,10 +110,12 @@ Steps:
     durable workstation, third-party temporary repair, LAN, hosted, relay, mesh,
     SSH, or VPN-assisted connectivity. Do not ask a human to assemble ticket
     codes, manifest roots, gateway URLs, transports, release roots, or checksum
-    flags. First call `rdev.support_session.handoff` through MCP or run
-    `rdev support-session handoff`; follow its `selected_path`,
-    `mcp_next_tool`, `mcp_next_arguments`, or `foreground_start_command`
-    instead of guessing whether to prepare, create, start, or plan. If local
+    flags. First call `rdev.support_session.connect` through MCP or run
+    `rdev support-session connect`. If it returns `ready_to_send_to_human=true`,
+    send only the returned `user_handoff.message` plus
+    `user_handoff.copy_paste`. If it returns `ready_to_send_to_human=false`,
+    run the returned visible foreground `rdev support-session start` command,
+    then send the started session handoff. If local
     `rdev`, gateway state, or target helper assets are unclear, call
     `rdev.support_session.prepare` through MCP or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
@@ -127,11 +129,11 @@ Steps:
     `RDEV_SSH_GATEWAY_URL` configured, treat them as Agent/tool metadata:
     `rdev` appends them to `gateway_url_candidates` after direct/LAN candidates
     and before loopback so the target command can fail over without custom
-    relay or tunnel code. `rdev.support_session.handoff` and
-    `rdev.support_session.create` can use the first configured
+    relay or tunnel code. `rdev.support_session.connect`,
+    `rdev.support_session.handoff`, and `rdev.support_session.create` can use the first configured
     `RDEV_*_GATEWAY_URL` when no explicit `gateway_url` was supplied, so do not
     ask me to choose a gateway URL when the runtime already has one configured.
-    If a reachable gateway is already running, first call
+    If a lower-level explicit gateway workflow is needed, call
     `rdev.support_session.create` through MCP, or
     `rdev support-session create` through the CLI, to create the session and
     obtain the ready target command, join URL, manifest root, real ticket code,

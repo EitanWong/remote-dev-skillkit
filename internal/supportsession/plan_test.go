@@ -229,6 +229,47 @@ func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 	}
 }
 
+func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
+	handoff := BuildHandoff(HandoffOptions{
+		Addr:        "0.0.0.0:8787",
+		Target:      "auto",
+		AutoApprove: true,
+		RdevCommand: "rdev",
+	})
+	connect := BuildConnectFromHandoff(handoff)
+	startCommand := strings.Join(anyStrings(connect["foreground_start_command"].([]string)), "\x00")
+
+	if connect["schema_version"] != ConnectSchemaVersion ||
+		connect["selected_path"] != "start-foreground-gateway" ||
+		connect["ready_to_send_to_human"] != false ||
+		!strings.Contains(startCommand, "support-session\x00start") ||
+		!strings.Contains(connect["agent_next_step"].(string), "ready_file.path") {
+		t.Fatalf("expected connect payload to route to foreground start, got %#v", connect)
+	}
+}
+
+func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "http://192.0.2.10:8787",
+		ManifestRootPublicKey: "manifest-root:abc",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "auto",
+		Locale:                "en",
+		RdevCommand:           "rdev",
+		AutoApprove:           true,
+	})
+	connect := BuildConnectFromCreated(created)
+
+	if connect["schema_version"] != ConnectSchemaVersion ||
+		connect["selected_path"] != "created-with-reachable-gateway" ||
+		connect["ready_to_send_to_human"] != true ||
+		connect["user_handoff"] == nil ||
+		connect["target_command"] != created["target_command"] ||
+		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
+		t.Fatalf("expected ready connect payload, got %#v", connect)
+	}
+}
+
 func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	created := BuildCreated(CreatedOptions{
 		GatewayURL: "http://192.0.2.10:8787",

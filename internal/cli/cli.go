@@ -1751,6 +1751,36 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		return fmt.Errorf("missing support-session subcommand")
 	}
 	switch args[0] {
+	case "connect":
+		fs := flag.NewFlagSet("support-session connect", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
+		gatewayURL := fs.String("gateway-url", "", "already reachable gateway URL; omit to use configured RDEV_*_GATEWAY_URL or return a foreground start command")
+		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
+		reason := fs.String("reason", "visible temporary remote support", "support session reason")
+		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
+		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
+		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
+		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for generated local commands")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.supportSessionConnect(ctx, supportSessionConnectOptions{
+			RepoRoot:          *repoRoot,
+			WorkDir:           *workDir,
+			Addr:              *addr,
+			GatewayURL:        *gatewayURL,
+			Target:            *target,
+			Reason:            *reason,
+			TTLSeconds:        *ttl,
+			AutoApprove:       *autoApprove,
+			Locale:            *locale,
+			OperatorTokenFile: *operatorTokenFile,
+			RdevCommand:       *rdevCommand,
+		})
 	case "handoff":
 		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1922,6 +1952,20 @@ type supportSessionStartOptions struct {
 	ReadyFile   string
 }
 
+type supportSessionConnectOptions struct {
+	RepoRoot          string
+	WorkDir           string
+	Addr              string
+	GatewayURL        string
+	Target            string
+	Reason            string
+	TTLSeconds        int
+	AutoApprove       bool
+	Locale            string
+	OperatorTokenFile string
+	RdevCommand       string
+}
+
 type supportSessionPrepareOptions struct {
 	RepoRoot    string
 	WorkDir     string
@@ -1948,6 +1992,44 @@ func (a App) supportSessionPrepare(ctx context.Context, opts supportSessionPrepa
 		return err
 	}
 	return writeJSON(a.Stdout, prepared)
+}
+
+func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConnectOptions) error {
+	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
+		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+	}
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
+			RepoRoot:    opts.RepoRoot,
+			WorkDir:     opts.WorkDir,
+			Addr:        opts.Addr,
+			Target:      opts.Target,
+			Reason:      opts.Reason,
+			TTLSeconds:  opts.TTLSeconds,
+			AutoApprove: opts.AutoApprove,
+			Locale:      opts.Locale,
+			RdevCommand: opts.RdevCommand,
+		})
+		return writeJSON(a.Stdout, supportsession.BuildConnectFromHandoff(handoff))
+	}
+	created, err := createSupportSessionPayload(ctx, supportSessionCreateOptions{
+		GatewayURL:        gatewayURL,
+		Target:            opts.Target,
+		Reason:            opts.Reason,
+		TTLSeconds:        opts.TTLSeconds,
+		AutoApprove:       opts.AutoApprove,
+		Locale:            opts.Locale,
+		OperatorTokenFile: opts.OperatorTokenFile,
+		RdevCommand:       opts.RdevCommand,
+	})
+	if err != nil {
+		return err
+	}
+	return writeJSON(a.Stdout, supportsession.BuildConnectFromCreated(created))
 }
 
 func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOptions) error {
@@ -2087,15 +2169,23 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 }
 
 func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreateOptions) error {
+	created, err := createSupportSessionPayload(ctx, opts)
+	if err != nil {
+		return err
+	}
+	return writeJSON(a.Stdout, created)
+}
+
+func createSupportSessionPayload(ctx context.Context, opts supportSessionCreateOptions) (map[string]any, error) {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
 	}
 	if gatewayURL == "" {
-		return fmt.Errorf("support-session create requires --gateway-url or a configured RDEV_*_GATEWAY_URL; run rdev support-session start if no reachable gateway is running yet")
+		return nil, fmt.Errorf("support-session create requires --gateway-url or a configured RDEV_*_GATEWAY_URL; run rdev support-session start if no reachable gateway is running yet")
 	}
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
-		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
+		return nil, fmt.Errorf("ttl-seconds must be between 60 and 86400")
 	}
 	payload, err := createGatewayInviteTicket(ctx, http.DefaultClient, inviteCreateOptions{
 		GatewayURL:        gatewayURL,
@@ -2112,7 +2202,7 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 		AutoApprove:       opts.AutoApprove,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:               gatewayURL,
@@ -2127,7 +2217,7 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 		AutoApprove:              opts.AutoApprove,
 		TargetBootstrapReadiness: probeTargetBootstrapReadiness(ctx, http.DefaultClient, gatewayURL, opts.Target),
 	})
-	return writeJSON(a.Stdout, created)
+	return created, nil
 }
 
 func probeTargetBootstrapReadiness(ctx context.Context, client *http.Client, gatewayURL, target string) map[string]any {
@@ -7145,6 +7235,7 @@ Usage:
   rdev trust verify --bundle .rdev/trust/trust-bundle-revoked.json --root-public-key trust-root:...
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
+  rdev support-session connect --target auto --reason "visible temporary remote support"
   rdev acceptance fresh-agent-support-session --out fresh-agent-support-session
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo . --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
