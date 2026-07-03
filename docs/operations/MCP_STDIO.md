@@ -39,6 +39,11 @@ configured, it creates the attended-temporary support session and returns
 `rdev support-session connect --start` command to run in a visible terminal. Agents should
 follow the connect payload instead of choosing between handoff/create/start/plan
 themselves or writing bootstrap, relay, approval-polling, or recovery scripts.
+The payload includes `fresh_agent_connect_contract`, which is the shortest
+machine-readable standard path for a newly installed Agent: recover missing
+`rdev`, send only the returned handoff, wait through the standard status
+surfaces, and do not ask humans for ticket/root/gateway values or generate
+custom PowerShell, shell, tunnel, approval, or polling scripts.
 
 `rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
 `structuredContent`. It remains available for review/debug routing details and
@@ -57,7 +62,8 @@ surface: it can try ordered Connection Entry URLs on the target machine with
 bounded per-candidate timeout/retry behavior before failing. The payload also
 includes `connection_attempt_policy`, so Agents can explain the behavior without
 writing replacement PowerShell, shell, relay, approval polling, or bootstrap
-code. After registration, `rdev host serve --transport auto` keeps the signed
+code. It also includes `fresh_agent_connect_contract`; read it before writing
+any setup or recovery code. After registration, `rdev host serve --transport auto` keeps the signed
 join-manifest gateway candidates and can switch to another reachable candidate
 if the current gateway fails before jobs are processed. It also includes
 `connectivity_helper_preflight`, a read-only contract that reports configured
@@ -67,6 +73,12 @@ wrong tools, shell command strings, encoded commands, elevation, or
 `ExecutionPolicy Bypass`. Agents should read this field before writing network
 questions or tunnel commands; helper execution belongs to the Connection Entry
 runner and its dry-run/report path. It also includes
+`connection_entry_runner_recommendation`, the standard upgrade path from a
+simple support-session handoff to a self-contained adaptive Connection Entry
+runner. That field carries inline invite JSON plus the
+`rdev.connection_entry.plan` call and `rdev connection-entry run --dry-run`
+template, so Agents do not reconstruct ticket, root, gateway, transport, relay,
+mesh, VPN, or SSH metadata by hand. It also includes
 `connection_supervision`, the Agent-side contract for
 waiting, proactively reporting `connected=true`, and choosing standard
 prepare/runner/Connection Entry upgrade or recovery tools when the first path is

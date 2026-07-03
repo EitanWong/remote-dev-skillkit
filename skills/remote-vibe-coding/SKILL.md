@@ -65,6 +65,11 @@ revocation.
   tunnel commands; it reports configured SSH/relay/mesh/VPN helper gateway
   URLs, start argv JSON, install action JSON, allow-listed tools, and
   validation failures without executing helpers. Read
+  `connection_entry_runner_recommendation` when durable, long-running, or
+  restrictive-network connectivity is needed; it carries inline invite JSON and
+  the standard `rdev.connection_entry.plan` plus
+  `rdev connection-entry run --dry-run` route. Do not reconstruct ticket,
+  gateway, manifest root, relay, mesh, VPN, SSH, or checksum metadata by hand.
   `agent_connection_runbook` first; it is the standard order of operations for
   connect, wait, report, operate, and recover. Use its `standard_entry_tool`
   for ordinary "connect this computer" requests and obey
@@ -98,6 +103,12 @@ revocation.
   `cli_start_now_command`, `ready_file.path`, `status_file.path`,
   `connection_supervision`, or `rdev.support_session.prepare` recovery path
   instead.
+- Read `fresh_agent_connect_contract` whenever it is returned by
+  `rdev.support_session.connect`, `rdev.support_session.create`, or a started
+  foreground session. Treat it as the shortest model-independent contract:
+  recover missing `rdev`, send only the returned human handoff, wait through
+  standard status surfaces, and do not ask humans for ticket/root/gateway values
+  or generate custom PowerShell, shell, tunnel, approval, or polling scripts.
 - For a new support session, prefer the high-level connect output. If
   `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only the returned `user_handoff`. If it returns
@@ -140,6 +151,10 @@ revocation.
   mesh, or VPN helpers. If helper metadata is configured and valid, use
   `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run` and
   its runner metadata; do not write custom helper startup scripts.
+- Read returned `connection_entry_runner_recommendation` before promising
+  durable connectivity or changing from a simple support-session link to a
+  runner/package surface. Use its inline invite JSON and standard plan/dry-run
+  commands instead of creating a new invite or assembling raw flags.
 - Read returned `connection_continuity_policy`. If
   `stable_after_lan_change=false`, treat LAN as an opportunistic first path and
   prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming durable

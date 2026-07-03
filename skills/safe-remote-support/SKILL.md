@@ -56,7 +56,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   actions. Read `connectivity_helper_preflight` before asking about SSH, relay,
   mesh, or VPN helper setup; it reports configured helper gateway URLs, start
   argv JSON, install action JSON, allow-listed tools, and validation failures
-  without executing helpers. Configured `RDEV_HOSTED_GATEWAY_URL`,
+  without executing helpers. Read `connection_entry_runner_recommendation` when
+  durable, long-running, or restrictive-network support is needed; it carries
+  inline invite JSON and the standard `rdev.connection_entry.plan` plus
+  `rdev connection-entry run --dry-run` route, so do not reconstruct raw
+  ticket, gateway, root, relay, mesh, VPN, SSH, or checksum values. Configured `RDEV_HOSTED_GATEWAY_URL`,
   `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
   `RDEV_VPN_GATEWAY_URL`, and `RDEV_SSH_GATEWAY_URL` values are automatically
   appended to ordered gateway candidates after direct/LAN paths and before
@@ -76,6 +80,12 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `cli_start_now_command`, `ready_file.path`, `status_file.path`,
   `connection_supervision`, or `rdev.support_session.prepare` recovery path
   instead.
+- Read `fresh_agent_connect_contract` whenever it appears in
+  support-session output. It is the shortest model-independent contract for a
+  newly installed Agent: recover missing `rdev`, send only the returned human
+  handoff, wait through the standard watcher/status surfaces, and do not ask
+  humans for ticket/root/gateway values or generate custom PowerShell, shell,
+  tunnel, approval, or polling scripts.
 - For every new visible support session, prefer the high-level connect output.
   If `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only the returned `user_handoff`. If it returns
@@ -118,6 +128,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   mesh, or VPN helpers. If helper metadata is configured and valid, use
   `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run` and
   its runner metadata; do not write custom helper startup scripts.
+- Read returned `connection_entry_runner_recommendation` before moving from the
+  simple handoff to a runner/package surface. Use its inline invite JSON and
+  standard plan/dry-run commands instead of creating a new invite or assembling
+  raw connection flags.
 - Read returned `connection_supervision` after sending the handoff. Use its
   `mcp_watch_call` or `cli_watch_command` to wait, report
   `connected_next_steps.user_report` as soon as the host connects, and choose

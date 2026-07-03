@@ -118,7 +118,12 @@ Steps:
     read `ready_file.path` when terminal stdout is hard to parse, read
     `status_file.path` for the latest machine-readable connection event when
     terminal output is unavailable, then send only the started payload's
-    top-level `user_handoff.message` plus `user_handoff.copy_paste`. If local
+    top-level `user_handoff.message` plus `user_handoff.copy_paste`. Always
+    read `fresh_agent_connect_contract` when present; it is the
+    machine-readable standard path for fresh Agents. It tells you how to recover
+    missing `rdev`, what not to ask humans for, and which custom PowerShell,
+    shell, tunnel, approval, or polling scripts are forbidden. If you are about
+    to improvise setup code, stop and follow that contract instead. If local
     `rdev`, gateway state, or target helper assets are unclear, call
     `rdev.support_session.prepare` through MCP or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
@@ -154,6 +159,13 @@ Steps:
     without executing anything. If helper execution is needed, use
     `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run`
     and the returned runner metadata instead of writing tunnel scripts.
+    When a created or connected support-session payload includes
+    `connection_entry_runner_recommendation`, use that field for durable,
+    long-running, or restrictive-network support: it carries the inline invite
+    JSON, the standard `rdev.connection_entry.plan` call, and the
+    `rdev connection-entry run --dry-run` template. Do not reconstruct invite,
+    ticket, manifest root, gateway, relay, mesh, VPN, SSH, or checksum metadata
+    by hand.
     If a lower-level explicit gateway workflow is needed, call
     `rdev.support_session.create` through MCP, or
     `rdev support-session create` through the CLI, to create the session and

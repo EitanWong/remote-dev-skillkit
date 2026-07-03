@@ -2,6 +2,7 @@ package supportsession
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -250,6 +251,14 @@ func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 		!strings.Contains(connect["agent_next_step"].(string), "status_file.path") {
 		t.Fatalf("expected connect payload to route to foreground start, got %#v", connect)
 	}
+	contract := connect["fresh_agent_connect_contract"].(map[string]any)
+	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
+		contract["ready_to_send_human"] != false ||
+		contract["first_tool"] != "rdev.support_session.connect" ||
+		!strings.Contains(strings.Join(contract["recovery_if_rdev_missing"].([]string), "\n"), "go install ./cmd/rdev") ||
+		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "PowerShell bootstrap code") {
+		t.Fatalf("expected fresh-Agent connect contract, got %#v", contract)
+	}
 }
 
 func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
@@ -271,16 +280,34 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["connection_supervision"] == nil ||
 		connect["gateway_candidate_preflight"] == nil ||
 		connect["connectivity_helper_preflight"] == nil ||
+		connect["connection_entry_runner_recommendation"] == nil ||
 		connect["agent_connection_runbook"] == nil ||
+		connect["fresh_agent_connect_contract"] == nil ||
 		connect["target_command"] != created["target_command"] ||
 		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected ready connect payload, got %#v", connect)
+	}
+	contract := connect["fresh_agent_connect_contract"].(map[string]any)
+	autoApprove := contract["auto_approve"].(map[string]any)
+	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
+		contract["ready_to_send_human"] != true ||
+		contract["ticket_code"] != "ABCD-1234" ||
+		autoApprove["enabled"] != true ||
+		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "manifest root public key") ||
+		!strings.Contains(contract["status_rule"].(string), "connected_next_steps.user_report") {
+		t.Fatalf("expected ready fresh-Agent connect contract, got %#v", contract)
 	}
 	connectHelperPreflight := connect["connectivity_helper_preflight"].(map[string]any)
 	createdHelperPreflight := created["connectivity_helper_preflight"].(map[string]any)
 	if connectHelperPreflight["schema_version"] != createdHelperPreflight["schema_version"] ||
 		connectHelperPreflight["agent_rule"] != createdHelperPreflight["agent_rule"] {
 		t.Fatalf("expected connect payload to mirror helper preflight, got %#v", connectHelperPreflight)
+	}
+	connectRunner := connect["connection_entry_runner_recommendation"].(map[string]any)
+	createdRunner := created["connection_entry_runner_recommendation"].(map[string]any)
+	if connectRunner["schema_version"] != createdRunner["schema_version"] ||
+		connectRunner["invite_json"] != createdRunner["invite_json"] {
+		t.Fatalf("expected connect payload to mirror runner recommendation, got %#v", connectRunner)
 	}
 	runbook := connect["agent_connection_runbook"].(map[string]any)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
@@ -362,6 +389,14 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	if !strings.Contains(strings.Join(supervision["automatic_downgrade_boundaries"].([]string), "\n"), "signed join-manifest gateway candidates") {
 		t.Fatalf("expected supervision to describe signed gateway candidate runtime failover, got %#v", supervision["automatic_downgrade_boundaries"])
 	}
+	contract := created["fresh_agent_connect_contract"].(map[string]any)
+	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
+		contract["ready_to_send_human"] != true ||
+		contract["first_tool"] != "rdev.support_session.connect" ||
+		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "gateway URL") ||
+		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "relay, mesh, VPN, SSH, or polling scripts") {
+		t.Fatalf("expected created fresh-Agent connect contract, got %#v", contract)
+	}
 	candidateOrder := attemptPolicy["candidate_order"].([]map[string]any)
 	if len(candidateOrder) != 2 ||
 		candidateOrder[0]["join_url"] == "" ||
@@ -377,6 +412,37 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		preflight["candidate_count"] != 2 ||
 		!strings.Contains(preflight["agent_rule"].(string), "target command owns ordered URL fallback") {
 		t.Fatalf("expected gateway candidate preflight contract, got %#v", preflight)
+	}
+	runner := created["connection_entry_runner_recommendation"].(map[string]any)
+	if runner["schema_version"] != ConnectionEntryRunnerRecommendationSchemaVersion ||
+		runner["ok"] != true ||
+		runner["standard_tool"] != "rdev.connection_entry.plan" ||
+		runner["target_os"] != "windows" ||
+		runner["recommended_now"] != true ||
+		!strings.Contains(strings.Join(runner["agent_sequence"].([]string), "\n"), "dry-run the generated runner") ||
+		!strings.Contains(strings.Join(runner["forbidden"].([]string), "\n"), "Agent-authored SSH") {
+		t.Fatalf("expected runner recommendation contract, got %#v", runner)
+	}
+	var invite map[string]any
+	if err := json.Unmarshal([]byte(runner["invite_json"].(string)), &invite); err != nil {
+		t.Fatalf("expected valid inline invite JSON: %v", err)
+	}
+	if invite["schema_version"] != "rdev.agent-invite.v1" ||
+		invite["gateway_url"] != "http://192.0.2.10:8787" ||
+		invite["manifest_root_public_key"] != "manifest-root:abc" {
+		t.Fatalf("expected runner recommendation to carry complete invite metadata, got %#v", invite)
+	}
+	mcpPlanCall := runner["mcp_plan_call"].(map[string]any)
+	mcpPlanArgs := mcpPlanCall["arguments"].(map[string]any)
+	if mcpPlanCall["tool"] != "rdev.connection_entry.plan" ||
+		mcpPlanArgs["invite_json"] == "" ||
+		mcpPlanArgs["target_os"] != "windows" ||
+		mcpPlanArgs["session_mode"] != string(model.HostModeAttendedTemporary) {
+		t.Fatalf("expected ready MCP runner materialization call, got %#v", mcpPlanCall)
+	}
+	dryRun := strings.Join(runner["cli_dry_run_argv_template"].([]string), "\x00")
+	if !strings.Contains(dryRun, "connection-entry\x00run") || !strings.Contains(dryRun, "--dry-run") {
+		t.Fatalf("expected dry-run runner command template, got %#v", runner["cli_dry_run_argv_template"])
 	}
 	preflightCandidates := preflight["candidates"].([]map[string]any)
 	if preflightCandidates[0]["status"] != "operator-provided-unverified" ||
@@ -517,7 +583,8 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		started["target_command"] != session["target_command"] ||
 		started["join_url"] != session["join_url"] ||
 		started["connection_supervision"] == nil ||
-		started["connectivity_helper_preflight"] == nil {
+		started["connectivity_helper_preflight"] == nil ||
+		started["connection_entry_runner_recommendation"] == nil {
 		t.Fatalf("expected top-level human handoff mirror, got %#v", started)
 	}
 	startedHelperPreflight := started["connectivity_helper_preflight"].(map[string]any)
@@ -525,6 +592,12 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	if startedHelperPreflight["schema_version"] != sessionHelperPreflight["schema_version"] ||
 		startedHelperPreflight["agent_rule"] != sessionHelperPreflight["agent_rule"] {
 		t.Fatalf("expected started payload to mirror helper preflight, got %#v", startedHelperPreflight)
+	}
+	startedRunner := started["connection_entry_runner_recommendation"].(map[string]any)
+	sessionRunner := session["connection_entry_runner_recommendation"].(map[string]any)
+	if startedRunner["schema_version"] != sessionRunner["schema_version"] ||
+		startedRunner["invite_json"] != sessionRunner["invite_json"] {
+		t.Fatalf("expected started payload to mirror runner recommendation, got %#v", startedRunner)
 	}
 	watch := strings.Join(anyStrings(started["watch_connection_status"].([]string)), "\x00")
 	if !strings.Contains(watch, "ABCD-1234") || !strings.Contains(watch, "--wait") {
@@ -569,6 +642,14 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		statusFile["status_schema_version"] != StatusSchemaVersion ||
 		!strings.Contains(statusFile["agent_rule"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected status file metadata, got %#v", statusFile)
+	}
+	contract := started["fresh_agent_connect_contract"].(map[string]any)
+	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
+		contract["ready_to_send_human"] != true ||
+		contract["ready_file_path"] != "work/rdev-support-session/support-session-ready.json" ||
+		contract["status_file_path"] != "work/rdev-support-session/support-session-status.json" ||
+		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "polling scripts") {
+		t.Fatalf("expected started fresh-Agent connect contract, got %#v", contract)
 	}
 	forbidden := strings.Join(started["forbidden"].([]string), "\n")
 	if !strings.Contains(forbidden, "background hidden gateway") ||

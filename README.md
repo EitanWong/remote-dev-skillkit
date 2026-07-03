@@ -126,7 +126,17 @@ the standard next action. Also read `connectivity_helper_preflight`: it reports
 configured `RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` helper
 metadata for SSH, relay, mesh, and VPN paths, validates tool allow-lists, and
 flags unsafe argv such as shell command strings or `ExecutionPolicy Bypass`
-without executing anything. Also read `agent_connection_runbook`; it is the
+without executing anything. For durable or restrictive-network connectivity,
+read `connection_entry_runner_recommendation`; it carries the inline invite JSON
+and standard `rdev.connection_entry.plan` / `rdev connection-entry run
+--dry-run` path for the self-contained runner, so the Agent does not recreate
+ticket, manifest root, gateway, relay, mesh, VPN, or SSH glue. Also read
+`fresh_agent_connect_contract`; it is the shortest machine-readable contract
+for a newly installed Agent: recover `rdev` instead of stopping, send only
+`user_handoff.message` plus `user_handoff.copy_paste`, wait through the
+returned watcher/status file, and never ask humans for ticket/root/gateway
+values or generate custom PowerShell/shell/tunnel/polling scripts. Also read
+`agent_connection_runbook`; it is the
 machine-readable order of operations for fresh Agents: run the standard start
 command when needed, send only the handoff, wait, report `connected=true`, and
 recover without custom scripts. Read

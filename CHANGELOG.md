@@ -12,6 +12,14 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev.support-session-fresh-agent-connect-contract.v1` to high-level
+  support-session connect, created, and started payloads. Fresh Agents now get a
+  compact model-independent contract that says how to recover missing `rdev`,
+  when to send the one human handoff, how to wait and report connected status,
+  which values not to ask humans for, and which custom PowerShell, shell,
+  tunnel, approval, or polling scripts are forbidden. The fresh-agent acceptance
+  gate now fails if this contract disappears from the standard one-command
+  connection path.
 - Added `rdev.support-session-agent-runbook.v1` to support-session handoff,
   prepare, create, start, high-level connect, status, and recovery payloads.
   Fresh Agents now get one machine-readable order of operations for the whole
@@ -96,6 +104,14 @@ metadata, status watching, or approval polling by hand.
   Bypass` is reported as structured preflight failure. This keeps restricted
   network decisions in standard `rdev` contracts instead of model-written
   tunnel scripts.
+- Added `rdev.support-session-connection-entry-runner-recommendation.v1` to
+  support-session created, high-level connect, and started payloads. When a
+  simple join link is not enough for durable, long-running, or restrictive
+  network work, Agents now receive inline invite JSON plus the standard
+  `rdev.connection_entry.plan` / `rdev connection-entry run --dry-run` route
+  for the self-contained adaptive runner. This prevents fresh Agents from
+  recreating invite, ticket, root, gateway, relay, mesh, VPN, SSH, or checksum
+  metadata by hand.
 - Added `rdev support-session connect --start` as the preferred one-command
   CLI path for fresh Agents when no hosted/relay gateway is configured. It
   delegates to the visible foreground support-session runner, builds verified
