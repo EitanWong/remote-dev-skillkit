@@ -47,6 +47,14 @@ metadata, status watching, or approval polling by hand.
   configured stable fallback. This is a contract gate for configured
   hosted/relay/mesh/VPN/SSH paths, not proof of real restrictive-network
   execution.
+- Added signed join-manifest gateway candidates for support-session bootstraps.
+  Generated Windows/macOS/Linux target commands now pass ordered
+  `gateway_url_candidates` into `/join/<ticket>/bootstrap.*`; the gateway signs
+  those candidates into `rdev.join-manifest.v1`, and `rdev host serve` selects
+  the first reachable signed candidate before registration. This moves
+  configured relay/hosted/mesh/VPN/SSH fallback from handoff metadata toward
+  target runtime behavior while preserving the existing primary `gateway_url`
+  fallback.
 - Added `rdev.support-session-gateway-candidate-preflight.v1` to
   support-session prepare, create, start, and high-level connect payloads.
   Fresh Agents now get a machine-readable candidate decision table that

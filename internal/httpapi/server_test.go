@@ -806,6 +806,32 @@ func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 	}
 }
 
+func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+	candidates := `[{"url":"https://relay.example.test/rdev","kind":"relay","scope":"configured-relay","recommended":true},{"url":"http://192.0.2.10:8787","kind":"lan-private"}]`
+	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+ticket.Code+"/manifest?gateway_url_candidates="+url.QueryEscape(candidates), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Manifest.GatewayCandidates) < 2 || payload.Manifest.GatewayCandidates[0].Kind != "relay" {
+		t.Fatalf("expected signed relay candidate first, got %#v", payload.Manifest.GatewayCandidates)
+	}
+	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
+		t.Fatalf("expected manifest to verify: %v", err)
+	}
+}
+
 func TestRegisterAndApproveHost(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()

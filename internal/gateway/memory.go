@@ -605,6 +605,10 @@ func (g *MemoryGateway) TrustBundleUpdateForHost(hostID string, currentSequence 
 }
 
 func (g *MemoryGateway) JoinManifest(ticketCode, gatewayURL, joinURL string) (model.JoinManifest, error) {
+	return g.JoinManifestWithGatewayCandidates(ticketCode, gatewayURL, joinURL, nil)
+}
+
+func (g *MemoryGateway) JoinManifestWithGatewayCandidates(ticketCode, gatewayURL, joinURL string, candidates []model.JoinManifestGatewayCandidate) (model.JoinManifest, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -620,10 +624,11 @@ func (g *MemoryGateway) JoinManifest(ticketCode, gatewayURL, joinURL string) (mo
 		return model.JoinManifest{}, ErrTicketExpired
 	}
 	manifest, err := model.NewJoinManifest(ticket, model.JoinManifestSpec{
-		GatewayURL:   gatewayURL,
-		JoinURL:      joinURL,
-		Trust:        model.NewTrustBundle(g.signingID, g.publicKey),
-		SigningKeyID: g.manifestSigningID,
+		GatewayURL:        gatewayURL,
+		GatewayCandidates: candidates,
+		JoinURL:           joinURL,
+		Trust:             model.NewTrustBundle(g.signingID, g.publicKey),
+		SigningKeyID:      g.manifestSigningID,
 	}, g.now())
 	if err != nil {
 		return model.JoinManifest{}, err

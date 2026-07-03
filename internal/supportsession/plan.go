@@ -1250,8 +1250,9 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 	}
 	attemptPolicy := connectionAttemptPolicy(gatewayCandidates, joinURLs)
 	continuityPolicy := connectionContinuityPolicy(gatewayCandidates)
-	windowsCommand := windowsBootstrapCommand(joinURLs)
-	macLinuxCommand := macLinuxBootstrapCommand(joinURLs)
+	runtimeGatewayCandidates := runtimeGatewayCandidates(gatewayCandidates)
+	windowsCommand := windowsBootstrapCommand(joinURLs, runtimeGatewayCandidates)
+	macLinuxCommand := macLinuxBootstrapCommand(joinURLs, runtimeGatewayCandidates)
 	bootstrapRequirements := bootstrapRequirements(target)
 	targetCommands := map[string]string{
 		"windows":     windowsCommand,
@@ -1578,38 +1579,84 @@ func bootstrapRequirements(target string) map[string]any {
 	return requirements
 }
 
-func windowsBootstrapCommand(joinURLs []string) string {
-	urls := quotedPowerShellArrayValues(joinURLs, "/bootstrap.ps1")
+func windowsBootstrapCommand(joinURLs []string, runtimeCandidates []GatewayURLCandidate) string {
+	urls := quotedPowerShellArrayValues(joinURLs, "/bootstrap.ps1", runtimeCandidates)
 	return "powershell -NoProfile -Command \"$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $urls=@(" + strings.Join(urls, ",") + "); foreach ($u in $urls) { try { irm $u -UseBasicParsing -TimeoutSec " + strconv.Itoa(targetHTTPMaxTimeSeconds) + " | iex; exit 0 } catch { Write-Host ('rdev Connection Entry failed: ' + $u) } }; throw 'No reachable rdev Connection Entry URL'\""
 }
 
-func macLinuxBootstrapCommand(joinURLs []string) string {
-	urls := quotedShellArrayValues(joinURLs, "/bootstrap.sh")
+func macLinuxBootstrapCommand(joinURLs []string, runtimeCandidates []GatewayURLCandidate) string {
+	urls := quotedShellArrayValues(joinURLs, "/bootstrap.sh", runtimeCandidates)
 	return "sh -c 'set -eu; t=\"${TMPDIR:-/tmp}/rdev-bootstrap-$$.sh\"; for u in " + strings.Join(urls, " ") + "; do if curl --connect-timeout " + strconv.Itoa(targetHTTPConnectTimeoutSeconds) + " --max-time " + strconv.Itoa(targetHTTPMaxTimeSeconds) + " --retry " + strconv.Itoa(targetHTTPRetries) + " --retry-delay " + strconv.Itoa(targetHTTPRetryDelaySeconds) + " -fsSL \"$u\" -o \"$t\" && sh \"$t\"; then rm -f \"$t\"; exit 0; fi; rm -f \"$t\"; done; echo \"No reachable rdev Connection Entry URL\" >&2; exit 1'"
 }
 
-func quotedPowerShellArrayValues(values []string, suffix string) []string {
+func quotedPowerShellArrayValues(values []string, suffix string, runtimeCandidates []GatewayURLCandidate) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimRight(strings.TrimSpace(value), "/")
 		if value == "" {
 			continue
 		}
-		out = append(out, "'"+strings.ReplaceAll(value+suffix, "'", "''")+"'")
+		bootstrapURL := bootstrapURLWithRuntimeCandidates(value+suffix, runtimeCandidates)
+		out = append(out, "'"+strings.ReplaceAll(bootstrapURL, "'", "''")+"'")
 	}
 	return out
 }
 
-func quotedShellArrayValues(values []string, suffix string) []string {
+func quotedShellArrayValues(values []string, suffix string, runtimeCandidates []GatewayURLCandidate) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimRight(strings.TrimSpace(value), "/")
 		if value == "" {
 			continue
 		}
-		out = append(out, shellQuote(value+suffix))
+		out = append(out, shellQuote(bootstrapURLWithRuntimeCandidates(value+suffix, runtimeCandidates)))
 	}
 	return out
+}
+
+func runtimeGatewayCandidates(candidates []GatewayURLCandidate) []GatewayURLCandidate {
+	stable := make([]GatewayURLCandidate, 0, len(candidates))
+	rest := make([]GatewayURLCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		switch candidate.Kind {
+		case "hosted", "relay", "mesh", "vpn", "ssh":
+			stable = append(stable, candidate)
+		default:
+			rest = append(rest, candidate)
+		}
+	}
+	return append(stable, rest...)
+}
+
+func bootstrapURLWithRuntimeCandidates(rawURL string, candidates []GatewayURLCandidate) string {
+	if len(candidates) == 0 {
+		return rawURL
+	}
+	values := make([]map[string]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.URL) == "" {
+			continue
+		}
+		values = append(values, map[string]any{
+			"url":         strings.TrimRight(strings.TrimSpace(candidate.URL), "/"),
+			"kind":        candidate.Kind,
+			"scope":       candidate.Scope,
+			"recommended": candidate.Recommended,
+			"reason":      candidate.Reason,
+		})
+	}
+	if len(values) == 0 {
+		return rawURL
+	}
+	content, err := json.Marshal(values)
+	if err != nil {
+		return rawURL
+	}
+	separator := "?"
+	if strings.Contains(rawURL, "?") {
+		separator = "&"
+	}
+	return rawURL + separator + "gateway_url_candidates=" + neturl.QueryEscape(string(content))
 }
 
 func BuildPlan(ctx context.Context, opts Options) map[string]any {

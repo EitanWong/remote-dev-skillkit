@@ -305,6 +305,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 	if !strings.Contains(created["target_command"].(string), "foreach ($u in $urls)") ||
 		!strings.Contains(created["target_command"].(string), "198.51.100.10") ||
+		!strings.Contains(created["target_command"].(string), "gateway_url_candidates=") ||
 		!strings.Contains(created["target_command"].(string), "-TimeoutSec 10") ||
 		!strings.Contains(created["target_commands"].(map[string]string)["macos_linux"], "for u in") {
 		t.Fatalf("expected target command to try ordered gateway candidates: %#v", created["target_commands"])

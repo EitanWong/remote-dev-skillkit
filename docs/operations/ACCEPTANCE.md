@@ -44,7 +44,11 @@ one-message flow:
     the relay join URL, `connection_continuity_policy.stable_after_lan_change`
     is true, and the Agent runbook reports the stable fallback instead of
     asking the Agent to write relay/mesh/VPN/SSH glue;
-11. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+11. include signed runtime gateway candidates in the generated target bootstrap
+    URL, so the fetched join manifest can carry ordered gateway candidates to
+    `rdev host serve` and the target host can select a reachable signed
+    candidate before registration;
+12. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
    gateway, transport, or bootstrap glue.
 
 The command writes `report.json` with schema

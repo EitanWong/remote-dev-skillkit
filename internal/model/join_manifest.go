@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -22,33 +23,43 @@ type JoinManifestBootstrap struct {
 	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 }
 
+type JoinManifestGatewayCandidate struct {
+	URL         string `json:"url"`
+	Kind        string `json:"kind,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
 type JoinManifest struct {
-	SchemaVersion    string                        `json:"schema_version"`
-	TicketID         string                        `json:"ticket_id"`
-	TicketCode       string                        `json:"ticket_code"`
-	Mode             HostMode                      `json:"mode"`
-	Reason           string                        `json:"reason"`
-	Capabilities     []string                      `json:"capabilities"`
-	IssuedAt         time.Time                     `json:"issued_at"`
-	ExpiresAt        time.Time                     `json:"expires_at"`
-	GatewayURL       string                        `json:"gateway_url"`
-	JoinURL          string                        `json:"join_url"`
-	Trust            TrustBundle                   `json:"trust"`
-	TrustFingerprint string                        `json:"trust_fingerprint"`
-	Bootstrap        JoinManifestBootstrap         `json:"bootstrap,omitempty"`
-	PackageCatalog   ConnectionEntryPackageCatalog `json:"package_catalog,omitempty"`
-	SigningAlg       string                        `json:"signing_alg"`
-	SigningKeyID     string                        `json:"signing_key_id"`
-	Signature        string                        `json:"signature,omitempty"`
+	SchemaVersion     string                         `json:"schema_version"`
+	TicketID          string                         `json:"ticket_id"`
+	TicketCode        string                         `json:"ticket_code"`
+	Mode              HostMode                       `json:"mode"`
+	Reason            string                         `json:"reason"`
+	Capabilities      []string                       `json:"capabilities"`
+	IssuedAt          time.Time                      `json:"issued_at"`
+	ExpiresAt         time.Time                      `json:"expires_at"`
+	GatewayURL        string                         `json:"gateway_url"`
+	GatewayCandidates []JoinManifestGatewayCandidate `json:"gateway_candidates,omitempty"`
+	JoinURL           string                         `json:"join_url"`
+	Trust             TrustBundle                    `json:"trust"`
+	TrustFingerprint  string                         `json:"trust_fingerprint"`
+	Bootstrap         JoinManifestBootstrap          `json:"bootstrap,omitempty"`
+	PackageCatalog    ConnectionEntryPackageCatalog  `json:"package_catalog,omitempty"`
+	SigningAlg        string                         `json:"signing_alg"`
+	SigningKeyID      string                         `json:"signing_key_id"`
+	Signature         string                         `json:"signature,omitempty"`
 }
 
 type JoinManifestSpec struct {
-	GatewayURL     string
-	JoinURL        string
-	Trust          TrustBundle
-	Bootstrap      JoinManifestBootstrap
-	PackageCatalog ConnectionEntryPackageCatalog
-	SigningKeyID   string
+	GatewayURL        string
+	GatewayCandidates []JoinManifestGatewayCandidate
+	JoinURL           string
+	Trust             TrustBundle
+	Bootstrap         JoinManifestBootstrap
+	PackageCatalog    ConnectionEntryPackageCatalog
+	SigningKeyID      string
 }
 
 func NewJoinManifest(ticket Ticket, spec JoinManifestSpec, now time.Time) (JoinManifest, error) {
@@ -61,6 +72,7 @@ func NewJoinManifest(ticket Ticket, spec JoinManifestSpec, now time.Time) (JoinM
 	if spec.JoinURL == "" {
 		spec.JoinURL = spec.GatewayURL + "/join/" + ticket.Code
 	}
+	gatewayCandidates := normalizeJoinManifestGatewayCandidates(spec.GatewayURL, spec.GatewayCandidates)
 	if spec.SigningKeyID == "" {
 		spec.SigningKeyID = spec.Trust.SigningKeyID
 	}
@@ -72,22 +84,23 @@ func NewJoinManifest(ticket Ticket, spec JoinManifestSpec, now time.Time) (JoinM
 		spec.PackageCatalog = NewConnectionEntryPackageCatalog(spec.JoinURL)
 	}
 	return JoinManifest{
-		SchemaVersion:    JoinManifestSchemaVersion,
-		TicketID:         ticket.ID,
-		TicketCode:       ticket.Code,
-		Mode:             ticket.Mode,
-		Reason:           ticket.Reason,
-		Capabilities:     append([]string(nil), ticket.Capabilities...),
-		IssuedAt:         now.UTC(),
-		ExpiresAt:        ticket.ExpiresAt.UTC(),
-		GatewayURL:       spec.GatewayURL,
-		JoinURL:          spec.JoinURL,
-		Trust:            spec.Trust,
-		TrustFingerprint: fingerprint,
-		Bootstrap:        spec.Bootstrap,
-		PackageCatalog:   spec.PackageCatalog,
-		SigningAlg:       JobEnvelopeSigningAlg,
-		SigningKeyID:     spec.SigningKeyID,
+		SchemaVersion:     JoinManifestSchemaVersion,
+		TicketID:          ticket.ID,
+		TicketCode:        ticket.Code,
+		Mode:              ticket.Mode,
+		Reason:            ticket.Reason,
+		Capabilities:      append([]string(nil), ticket.Capabilities...),
+		IssuedAt:          now.UTC(),
+		ExpiresAt:         ticket.ExpiresAt.UTC(),
+		GatewayURL:        spec.GatewayURL,
+		GatewayCandidates: gatewayCandidates,
+		JoinURL:           spec.JoinURL,
+		Trust:             spec.Trust,
+		TrustFingerprint:  fingerprint,
+		Bootstrap:         spec.Bootstrap,
+		PackageCatalog:    spec.PackageCatalog,
+		SigningAlg:        JobEnvelopeSigningAlg,
+		SigningKeyID:      spec.SigningKeyID,
 	}, nil
 }
 
@@ -157,6 +170,11 @@ func (m JoinManifest) validateForSigning() error {
 	if m.PackageCatalog.SchemaVersion != "" && m.PackageCatalog.SchemaVersion != ConnectionEntryPackageCatalogSchemaVersion {
 		return fmt.Errorf("%w: unsupported package catalog schema", ErrJoinManifestInvalid)
 	}
+	for _, candidate := range m.GatewayCandidates {
+		if candidate.URL == "" {
+			return fmt.Errorf("%w: empty gateway candidate url", ErrJoinManifestInvalid)
+		}
+	}
 	fingerprint, err := m.Trust.Fingerprint()
 	if err != nil {
 		return err
@@ -168,6 +186,42 @@ func (m JoinManifest) validateForSigning() error {
 		return fmt.Errorf("%w: invalid validity window", ErrJoinManifestInvalid)
 	}
 	return nil
+}
+
+func normalizeJoinManifestGatewayCandidates(gatewayURL string, candidates []JoinManifestGatewayCandidate) []JoinManifestGatewayCandidate {
+	out := make([]JoinManifestGatewayCandidate, 0, len(candidates)+1)
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate.URL = strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		if candidate.URL == "" || seen[candidate.URL] {
+			continue
+		}
+		seen[candidate.URL] = true
+		out = append(out, candidate)
+	}
+	gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/")
+	if gatewayURL != "" && !seen[gatewayURL] {
+		out = append(out, JoinManifestGatewayCandidate{
+			URL:         gatewayURL,
+			Kind:        "manifest-gateway",
+			Scope:       "signed-manifest",
+			Recommended: len(out) == 0,
+			Reason:      "primary signed join manifest gateway",
+		})
+	}
+	if len(out) > 0 {
+		hasRecommended := false
+		for _, candidate := range out {
+			if candidate.Recommended {
+				hasRecommended = true
+				break
+			}
+		}
+		if !hasRecommended {
+			out[0].Recommended = true
+		}
+	}
+	return out
 }
 
 func (m JoinManifest) signingBytes() ([]byte, error) {

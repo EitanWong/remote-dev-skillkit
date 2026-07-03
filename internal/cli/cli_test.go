@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2587,7 +2588,6 @@ func TestHostServeRejectsNonLocalHTTPSGateway(t *testing.T) {
 
 func TestSignedManifestGatewayURLAllowsPrivateLANHTTPAndHTTPS(t *testing.T) {
 	allowed := []string{
-		"http://192.168.99.10:8787",
 		"http://10.0.0.8:8787",
 		"http://172.16.4.5:8787",
 		"http://rdev-gateway.local:8787",
@@ -2601,8 +2601,8 @@ func TestSignedManifestGatewayURLAllowsPrivateLANHTTPAndHTTPS(t *testing.T) {
 
 	rejected := []string{
 		"http://198.51.100.10:8787",
-		"http://192.168.99.10",
-		"ws://192.168.99.10:8787",
+		"http://10.0.0.8",
+		"ws://10.0.0.8:8787",
 		"https://api.example.com/v1",
 	}
 	for _, value := range rejected {
@@ -4148,6 +4148,52 @@ func TestHostServePreservesGatewayOverrideWithJoinManifest(t *testing.T) {
 	}
 	if payload.Gateway != server.URL || payload.Host.Name != "override-host" {
 		t.Fatalf("expected explicit gateway override to survive manifest verification, got %#v", payload)
+	}
+}
+
+func TestHostServeSelectsReachableManifestGatewayCandidate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	candidates := url.QueryEscape(`[
+		{"url":"http://127.0.0.1:1","kind":"lan-private","scope":"unreachable-test","recommended":true},
+		{"url":"` + server.URL + `","kind":"relay","scope":"configured-relay"}
+	]`)
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"host", "serve",
+		"--mode", "temporary",
+		"--manifest-url", server.URL + "/v1/tickets/" + ticket.Code + "/manifest?gateway_url_candidates=" + candidates,
+		"--name", "candidate-host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Gateway                  string `json:"gateway"`
+		ManifestGatewaySelection struct {
+			SelectedGatewayURL string `json:"selected_gateway_url"`
+			Source             string `json:"source"`
+		} `json:"manifest_gateway_selection"`
+		Host struct {
+			Name string `json:"name"`
+		} `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Gateway != server.URL || payload.ManifestGatewaySelection.SelectedGatewayURL != server.URL {
+		t.Fatalf("expected host serve to select reachable manifest candidate, got %#v", payload)
+	}
+	if payload.Host.Name != "candidate-host" || payload.ManifestGatewaySelection.Source != "signed-join-manifest-candidates" {
+		t.Fatalf("unexpected host/selection payload: %#v", payload)
 	}
 }
 

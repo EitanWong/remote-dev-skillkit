@@ -48,6 +48,44 @@ func TestJoinManifestSignsAndVerifies(t *testing.T) {
 	}
 }
 
+func TestJoinManifestSignsGatewayCandidates(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	ticket, err := NewTicket(HostModeAttendedTemporary, 600, []string{"shell.user"}, "repair", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := NewJoinManifest(ticket, JoinManifestSpec{
+		GatewayURL: "http://192.0.2.10:8787",
+		GatewayCandidates: []JoinManifestGatewayCandidate{
+			{URL: "https://relay.example.test/rdev", Kind: "relay", Scope: "configured-relay", Recommended: true},
+			{URL: "http://192.0.2.10:8787", Kind: "lan-private", Scope: "same-lan"},
+		},
+		Trust:        NewTrustBundle("test-key", publicKey),
+		SigningKeyID: "test-key",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err = manifest.Sign(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Verify(now); err != nil {
+		t.Fatalf("expected manifest to verify: %v", err)
+	}
+	if len(manifest.GatewayCandidates) != 2 || manifest.GatewayCandidates[0].Kind != "relay" {
+		t.Fatalf("expected signed relay candidate first, got %#v", manifest.GatewayCandidates)
+	}
+	manifest.GatewayCandidates[0].URL = "https://evil.example.test"
+	if err := manifest.Verify(now); !errors.Is(err, ErrJoinManifestSignature) {
+		t.Fatalf("expected candidate tampering to fail signature, got %v", err)
+	}
+}
+
 func TestJoinManifestVerifiesWithSeparateTrustRoot(t *testing.T) {
 	gatewayPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

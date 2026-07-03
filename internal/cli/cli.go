@@ -2833,7 +2833,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 			return err
 		}
 		if strings.TrimSpace(opts.GatewayURL) == "" {
-			opts.GatewayURL = manifest.GatewayURL
+			opts.GatewayURL = selectJoinManifestGatewayURL(ctx, gatewayClient, manifest)
 		}
 		opts.TicketCode = manifest.TicketCode
 		opts.TrustPin = manifest.TrustFingerprint
@@ -2954,6 +2954,13 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		"status":    "registered-pending-approval",
 		"transport": opts.Transport,
 		"note":      "registered with gateway; job transport starts after host approval when --once=false",
+	}
+	if opts.ManifestURL != "" {
+		payload["manifest_url"] = opts.ManifestURL
+		payload["manifest_gateway_selection"] = map[string]any{
+			"selected_gateway_url": opts.GatewayURL,
+			"source":               "signed-join-manifest-candidates",
+		}
 	}
 	if registration.EnrollmentCertificate != nil {
 		enrollmentSummary := map[string]any{
@@ -7732,6 +7739,31 @@ func fetchJoinManifest(ctx context.Context, client *http.Client, manifestURL, tr
 		return model.JoinManifest{}, err
 	}
 	return payload.Manifest, nil
+}
+
+func selectJoinManifestGatewayURL(ctx context.Context, client *http.Client, manifest model.JoinManifest) string {
+	candidates := manifest.GatewayCandidates
+	if len(candidates) == 0 {
+		return strings.TrimRight(strings.TrimSpace(manifest.GatewayURL), "/")
+	}
+	fallback := strings.TrimRight(strings.TrimSpace(manifest.GatewayURL), "/")
+	for _, candidate := range candidates {
+		gatewayURL := strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		if gatewayURL == "" {
+			continue
+		}
+		if joinManifestGatewayReachable(ctx, client, gatewayURL, manifest.TrustFingerprint) {
+			return gatewayURL
+		}
+	}
+	return fallback
+}
+
+func joinManifestGatewayReachable(ctx context.Context, client *http.Client, gatewayURL, trustPin string) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, err := fetchTrustBundle(probeCtx, client, gatewayURL, trustPin)
+	return err == nil
 }
 
 type hostTrust struct {

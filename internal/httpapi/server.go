@@ -9,6 +9,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -412,7 +413,8 @@ func (s Server) ticketSubresource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown ticket endpoint")
 		return
 	}
-	manifest, err := s.Gateway.JoinManifest(code, requestBaseURL(r), requestBaseURL(r)+"/join/"+code)
+	baseURL := requestBaseURL(r)
+	manifest, err := s.Gateway.JoinManifestWithGatewayCandidates(code, baseURL, baseURL+"/join/"+code, joinManifestGatewayCandidatesFromRequest(r, baseURL))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -429,7 +431,7 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown join endpoint")
 		return
 	}
-	manifestURL := requestBaseURL(r) + "/v1/tickets/" + code + "/manifest"
+	manifestURL := manifestURLForJoinRequest(r, code)
 	manifestRoot := manifestRootPublicKey(s.Gateway.ManifestRoot())
 	if _, err := s.Gateway.JoinManifest(code, requestBaseURL(r), requestBaseURL(r)+"/join/"+code); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -445,6 +447,34 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusNotFound, "unknown join resource")
 	}
+}
+
+func manifestURLForJoinRequest(r *http.Request, code string) string {
+	manifestURL := requestBaseURL(r) + "/v1/tickets/" + code + "/manifest"
+	if raw := strings.TrimSpace(r.URL.Query().Get("gateway_url_candidates")); raw != "" {
+		values := url.Values{}
+		values.Set("gateway_url_candidates", raw)
+		manifestURL += "?" + values.Encode()
+	}
+	return manifestURL
+}
+
+func joinManifestGatewayCandidatesFromRequest(r *http.Request, fallbackGatewayURL string) []model.JoinManifestGatewayCandidate {
+	raw := strings.TrimSpace(r.URL.Query().Get("gateway_url_candidates"))
+	if raw == "" {
+		return nil
+	}
+	var candidates []model.JoinManifestGatewayCandidate
+	if err := json.Unmarshal([]byte(raw), &candidates); err != nil {
+		return nil
+	}
+	for i := range candidates {
+		candidates[i].URL = strings.TrimRight(strings.TrimSpace(candidates[i].URL), "/")
+	}
+	if len(candidates) == 0 && strings.TrimSpace(fallbackGatewayURL) != "" {
+		return []model.JoinManifestGatewayCandidate{{URL: strings.TrimRight(fallbackGatewayURL, "/"), Kind: "manifest-gateway", Scope: "signed-manifest", Recommended: true}}
+	}
+	return candidates
 }
 
 func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestURL string) {
