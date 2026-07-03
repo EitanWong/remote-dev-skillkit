@@ -105,8 +105,10 @@ testing. If this runtime has configured gateway fallbacks such as
 `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
 `RDEV_SSH_GATEWAY_URL`, `rdev` automatically appends them to
 `gateway_url_candidates` after direct/LAN candidates and before loopback so the
-target command can fail over without Agent-written glue. If a reachable gateway
-is already running, call
+target command can fail over without Agent-written glue. `handoff` and
+`create` also use the first configured `RDEV_*_GATEWAY_URL` when no explicit
+`gateway_url` is supplied, so fresh Agents do not need to ask me which gateway
+URL to use. If a reachable gateway is already running, call
 `rdev.support_session.create` through MCP or
 `rdev support-session create` through the CLI. That returns the ready
 target-machine command, ticket, join URL, and status watcher in one structured
@@ -227,9 +229,10 @@ side only the link, visible script, or signed package it should run.
 The Agent should start with `rdev.support_session.handoff` or
 `rdev support-session handoff`. That first-contact contract returns
 `rdev.support-session-handoff.v1` and chooses the next standard path: call
-`rdev.support_session.create` when a reachable gateway is already running, or
-run the returned foreground `rdev support-session start` command when no
-gateway is running. The created/started session then returns
+`rdev.support_session.create` when a reachable gateway is already running or a
+configured `RDEV_*_GATEWAY_URL` exists, or run the returned foreground
+`rdev support-session start` command when no gateway is running. The
+created/started session then returns
 `rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
 placeholders. It also includes `target_bootstrap_requirements` and, for CLI
@@ -264,7 +267,10 @@ nohup, ticket, root, gateway, transport, status polling, or approval glue.
 Operators may preconfigure hosted/relay/mesh/VPN/SSH gateway URLs with
 `RDEV_*_GATEWAY_URL`; support-session prepare/start/create will include those
 URLs in the ordered candidate list, while keeping ticket/root/transport details
-inside the structured payload.
+inside the structured payload. `rdev support-session create` can now omit
+`--gateway-url` when one of those configured URLs exists; if neither an
+explicit nor configured reachable gateway exists, use `rdev support-session
+start`.
 If an operator intentionally starts a low-level dev gateway, prefer
 `--rdev-assets-dir <dir>` over five individual helper flags so `/assets`
 contains the verified Windows/macOS/Linux bootstrap helpers.

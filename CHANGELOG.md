@@ -78,6 +78,12 @@ metadata, status watching, or approval polling by hand.
   MCP `rdev.support_session.create` include those candidates in the returned
   target command, so Agents can hand over one command while the target tries
   LAN, hosted, relay, mesh, VPN, or SSH-assisted entry URLs without custom glue.
+- Added configured gateway auto-selection for first-contact handoff and create.
+  `rdev support-session handoff`, MCP `rdev.support_session.handoff`,
+  `rdev support-session create`, and MCP `rdev.support_session.create` can now
+  use the first configured `RDEV_*_GATEWAY_URL` when no explicit `gateway_url`
+  is supplied. Fresh Agents therefore do not need to ask which gateway URL to
+  use when the runtime already has a hosted/relay/mesh/VPN/SSH entry configured.
 - Added `rdev support-session prepare` and MCP tool
   `rdev.support_session.prepare` with schema
   `rdev.support-session-prepare.v1`. Fresh Agents can now inspect local `rdev`

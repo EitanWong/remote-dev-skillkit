@@ -41,7 +41,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `RDEV_VPN_GATEWAY_URL`, and `RDEV_SSH_GATEWAY_URL` values are automatically
   appended to ordered gateway candidates after direct/LAN paths and before
   loopback, so Agents should not hand-write relay, mesh, VPN, SSH, or tunnel
-  fallback scripts.
+  fallback scripts. `rdev.support_session.handoff`,
+  `rdev support-session handoff`, `rdev.support_session.create`, and
+  `rdev support-session create` may use the first configured
+  `RDEV_*_GATEWAY_URL` when no explicit gateway URL was supplied; do not ask
+  the human to choose a gateway URL when the runtime has one configured.
 - For every new visible support session with an already reachable gateway, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
   CLI. Treat the returned `rdev.support-session-created.v1` as the standard
@@ -176,7 +180,8 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 6. If a reachable gateway exists, create the standard support session with
    `rdev.support_session.create` or `rdev support-session create`; send only the
    returned `user_handoff.copy_paste`, `target_command`, or `join_url` to the
-   target-side human. If no
+   target-side human. If no explicit gateway URL was supplied, let create use a
+   configured `RDEV_*_GATEWAY_URL` before asking for configuration. If no
    gateway exists, run `rdev support-session start` in a visible foreground
    terminal and send only the embedded `session.target_command` or
    `session.join_url`. Use `rdev.support_session.plan` or

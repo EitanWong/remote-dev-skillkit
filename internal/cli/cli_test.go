@@ -295,6 +295,35 @@ func TestSupportSessionHandoffSelectsForegroundStartWithoutGateway(t *testing.T)
 	}
 }
 
+func TestSupportSessionHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{"support-session", "handoff", "--target", "auto"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion    string         `json:"schema_version"`
+		SelectedPath     string         `json:"selected_path"`
+		MCPNextTool      string         `json:"mcp_next_tool"`
+		GatewayURL       string         `json:"gateway_url"`
+		MCPNextArguments map[string]any `json:"mcp_next_arguments"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support session handoff JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-handoff.v1" ||
+		payload.SelectedPath != "create-with-reachable-gateway" ||
+		payload.MCPNextTool != "rdev.support_session.create" ||
+		payload.GatewayURL != "https://hosted.example.test/rdev" ||
+		payload.MCPNextArguments["gateway_url"] != "https://hosted.example.test/rdev" {
+		t.Fatalf("expected configured gateway handoff route, got %#v", payload)
+	}
+}
+
 func TestSupportSessionPlanDefaultGatewayDoesNotUseWildcardURL(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -531,6 +560,51 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		strings.Contains(watch, "<ticket-code>") ||
 		!strings.Contains(watch, "--wait") {
 		t.Fatalf("watch command should be ready: %#v", payload.WatchConnectionStatus)
+	}
+}
+
+func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	handler := httpapi.NewServer(gw).Handler()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", server.URL)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{
+		"support-session", "create",
+		"--target", "auto",
+		"--reason", "company computer support",
+		"--locale", "en",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion        string `json:"schema_version"`
+		GatewayURL           string `json:"gateway_url"`
+		TicketCode           string `json:"ticket_code"`
+		GatewayURLCandidates []struct {
+			URL         string `json:"url"`
+			Recommended bool   `json:"recommended"`
+		} `json:"gateway_url_candidates"`
+		TargetCommand string `json:"target_command"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid create JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-created.v1" ||
+		payload.GatewayURL != server.URL ||
+		payload.TicketCode == "" ||
+		payload.TargetCommand != server.URL+"/join/"+payload.TicketCode {
+		t.Fatalf("expected configured gateway create payload, got %#v", payload)
+	}
+	if len(payload.GatewayURLCandidates) == 0 ||
+		payload.GatewayURLCandidates[0].URL != server.URL ||
+		!payload.GatewayURLCandidates[0].Recommended {
+		t.Fatalf("expected configured gateway candidate, got %#v", payload.GatewayURLCandidates)
 	}
 }
 

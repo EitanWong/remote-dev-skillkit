@@ -29,19 +29,25 @@ LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
 `rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
 `structuredContent`. Fresh Agents should call it first when a human says
 "connect a computer" or similar. If `gateway_url` is present, the handoff tells
-the Agent to call `rdev.support_session.create` next. If no gateway is present,
-the handoff returns a foreground `rdev support-session start` command to run in
-a visible terminal. Agents should follow `selected_path`,
+the Agent to call `rdev.support_session.create` next. If `gateway_url` is
+omitted but `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
+configured, the handoff uses that configured gateway and still routes to
+`rdev.support_session.create`. If no gateway is present, the handoff returns a
+foreground `rdev support-session start` command to run in a visible terminal.
+Agents should follow `selected_path`,
 `mcp_next_tool`/`mcp_next_arguments`, and `foreground_start_command` instead of
 choosing between prepare/create/start/plan themselves or writing bootstrap,
 relay, approval-polling, or recovery scripts.
 
 `rdev.support_session.create` returns `rdev.support-session-created.v1` in
 `structuredContent`. Agents should prefer it when a reachable gateway is
-already running. It creates the scoped attended-temporary ticket and returns a
-ready target-machine command, join URL, manifest URL, pinned manifest root,
-ticket code, and status watcher command. The returned command strings have the
-real ticket code already filled in. The target command is the standard fallback
+already running. If `gateway_url` is omitted, the tool uses the first configured
+`RDEV_*_GATEWAY_URL`; if no explicit or configured gateway exists, use
+`rdev support-session start`. It creates the scoped attended-temporary ticket
+and returns a ready target-machine command, join URL, manifest URL, pinned
+manifest root, ticket code, and status watcher command. The returned command
+strings have the real ticket code already filled in. The target command is the standard fallback
 surface: it can try ordered Connection Entry URLs on the target machine with
 bounded per-candidate timeout/retry behavior before failing. The payload also
 includes `connection_attempt_policy`, so Agents can explain the behavior without

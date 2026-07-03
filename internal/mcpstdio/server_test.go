@@ -299,6 +299,30 @@ func TestServerToolCallSupportSessionHandoffWithoutGatewayUsesStart(t *testing.T
 	}
 }
 
+func TestServerToolCallSupportSessionHandoffUsesConfiguredGateway(t *testing.T) {
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
+	input := mcpRequestLine(t, "rdev.support_session.handoff", map[string]any{
+		"target": "auto",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	args := structured["mcp_next_arguments"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-handoff.v1" ||
+		structured["selected_path"] != "create-with-reachable-gateway" ||
+		structured["mcp_next_tool"] != "rdev.support_session.create" ||
+		structured["gateway_url"] != "https://hosted.example.test/rdev" ||
+		args["gateway_url"] != "https://hosted.example.test/rdev" {
+		t.Fatalf("expected configured gateway handoff, got %#v", structured)
+	}
+}
+
 func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.prepare", map[string]any{
 		"repo_root":   ".",
@@ -400,6 +424,38 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 		strings.Contains(watch, "<ticket-code>") ||
 		!strings.Contains(watch, "--wait") {
 		t.Fatalf("expected ready status watcher, got %s", watch)
+	}
+}
+
+func TestServerToolCallSupportSessionCreateUsesConfiguredGateway(t *testing.T) {
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
+	input := mcpRequestLine(t, "rdev.support_session.create", map[string]any{
+		"target":       "auto",
+		"reason":       "company computer support",
+		"auto_approve": true,
+		"locale":       "en",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	ticketCode, _ := structured["ticket_code"].(string)
+	if structured["schema_version"] != "rdev.support-session-created.v1" ||
+		structured["gateway_url"] != "https://hosted.example.test/rdev" ||
+		ticketCode == "" ||
+		structured["target_command"] != "https://hosted.example.test/rdev/join/"+ticketCode {
+		t.Fatalf("expected configured gateway create payload, got %#v", structured)
+	}
+	gatewayCandidates := structured["gateway_url_candidates"].([]any)
+	if len(gatewayCandidates) == 0 ||
+		gatewayCandidates[0].(map[string]any)["url"] != "https://hosted.example.test/rdev" ||
+		gatewayCandidates[0].(map[string]any)["recommended"] != true {
+		t.Fatalf("expected configured gateway candidate, got %#v", gatewayCandidates)
 	}
 }
 

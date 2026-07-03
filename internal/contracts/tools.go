@@ -30,7 +30,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.handoff",
-			Description: "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided, call rdev.support_session.create next; if not, run the returned foreground rdev support-session start command. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
+			Description: "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine. If gateway_url is provided or a configured RDEV_*_GATEWAY_URL fallback exists, call rdev.support_session.create next; if not, run the returned foreground rdev support-session start command. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
 			Safety:      "Planning only; does not create tickets, start a gateway, approve hosts, execute on the target host, or install persistence.",
 			InputSchema: object(map[string]any{
 				"repo_root":    stringField(),
@@ -60,7 +60,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.create",
-			Description: "Create an attended temporary support session through an already reachable gateway and return a ready user_handoff, target command, and status watcher. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured RDEV_*_GATEWAY_URL hosted/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. Agents should prefer user_handoff.message plus user_handoff.copy_paste for the human-facing response. If no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+			Description: "Create an attended temporary support session through an already reachable gateway and return a ready user_handoff, target command, and status watcher. If gateway_url is omitted, the tool uses the first configured RDEV_*_GATEWAY_URL fallback. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured RDEV_*_GATEWAY_URL hosted/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. Agents should prefer user_handoff.message plus user_handoff.copy_paste for the human-facing response. If no gateway is running, use the foreground CLI command rdev support-session start instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
 			Safety:      "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
 			InputSchema: object(map[string]any{
 				"gateway_url":         stringField(),
@@ -71,7 +71,7 @@ func Tools() []Tool {
 				"locale":              stringField(),
 				"operator_token_file": stringField(),
 				"rdev_command":        stringField(),
-			}, []string{"gateway_url"}),
+			}, nil),
 		},
 		{
 			Name:        "rdev.support_session.plan",

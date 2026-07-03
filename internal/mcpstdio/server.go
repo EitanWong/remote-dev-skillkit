@@ -304,7 +304,13 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	gatewayURL := requiredString(args, "gateway_url")
+	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		return nil, fmt.Errorf("support_session.create requires gateway_url or a configured RDEV_*_GATEWAY_URL")
+	}
 	joinURL := strings.TrimRight(gatewayURL, "/") + "/join/" + ticket.Code
 	manifestURL := strings.TrimRight(gatewayURL, "/") + "/v1/tickets/" + ticket.Code + "/manifest"
 	return supportsession.BuildCreated(supportsession.CreatedOptions{

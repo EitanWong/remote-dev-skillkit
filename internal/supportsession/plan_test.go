@@ -108,6 +108,21 @@ func TestGatewayURLCandidatesPreferConfiguredFallbackOverLoopbackWhenNoPrivateIP
 	}
 }
 
+func TestConfiguredGatewayURLCandidateReadsRuntimeFallback(t *testing.T) {
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
+	gatewayURL, candidates := ConfiguredGatewayURLCandidate()
+
+	if gatewayURL != "https://hosted.example.test/rdev" {
+		t.Fatalf("expected configured hosted gateway, got %q with candidates %#v", gatewayURL, candidates)
+	}
+	if len(candidates) != 1 ||
+		candidates[0].Kind != "hosted" ||
+		candidates[0].Source != "env:RDEV_HOSTED_GATEWAY_URL" ||
+		!candidates[0].Recommended {
+		t.Fatalf("expected configured hosted candidate metadata, got %#v", candidates)
+	}
+}
+
 func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "support")
 	plan := BuildPlan(context.Background(), Options{
@@ -193,6 +208,24 @@ func TestBuildHandoffRoutesMissingGatewayToForegroundStart(t *testing.T) {
 		!strings.Contains(startCommand, "support-session\x00start") ||
 		!strings.Contains(handoff["agent_rule"].(string), "do not choose support-session plan") {
 		t.Fatalf("expected foreground start handoff route, got %#v", handoff)
+	}
+}
+
+func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
+	handoff := BuildHandoff(HandoffOptions{
+		Target:      "auto",
+		AutoApprove: true,
+		RdevCommand: "rdev",
+	})
+
+	args := handoff["mcp_next_arguments"].(map[string]any)
+	if handoff["schema_version"] != HandoffSchemaVersion ||
+		handoff["selected_path"] != "create-with-reachable-gateway" ||
+		handoff["mcp_next_tool"] != "rdev.support_session.create" ||
+		handoff["gateway_url"] != "https://hosted.example.test/rdev" ||
+		args["gateway_url"] != "https://hosted.example.test/rdev" {
+		t.Fatalf("expected configured gateway create route, got %#v", handoff)
 	}
 }
 

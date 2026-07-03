@@ -62,6 +62,11 @@ revocation.
   `RDEV_SSH_GATEWAY_URL` values are tool metadata: `rdev` appends them to
   ordered gateway candidates after direct/LAN paths and before loopback so the
   target one-liner can fail over without Agent-authored tunnel scripts.
+  `rdev.support_session.handoff`, `rdev support-session handoff`,
+  `rdev.support_session.create`, and `rdev support-session create` may use the
+  first configured `RDEV_*_GATEWAY_URL` when no explicit gateway URL was
+  supplied; do not ask the human to choose a gateway URL when the runtime has
+  one configured.
 - For a new support session with an already reachable gateway, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
@@ -142,7 +147,9 @@ revocation.
    write custom PowerShell, ticket substitution, approval polling, or relay
    glue. If configured `RDEV_*_GATEWAY_URL` fallback values are present, keep
    them inside the returned candidate list and target command instead of
-   explaining raw tunnel parameters to the human.
+   explaining raw tunnel parameters to the human. If no explicit `gateway_url`
+   was supplied, let handoff/create use the configured gateway candidate before
+   falling back to foreground `rdev support-session start`.
 4. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, approvals, or release decisions.
 5. If no suitable host is active and a reachable gateway already exists, create

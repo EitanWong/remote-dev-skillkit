@@ -122,13 +122,18 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	selectedPath := "start-foreground-gateway"
 	agentNextStep := "run foreground_start_command in a visible terminal, then send the returned user_handoff.message plus user_handoff.copy_paste"
 	mcpNextTool := ""
-	if strings.TrimSpace(opts.GatewayURL) != "" {
+	resolvedCreateGatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if resolvedCreateGatewayURL == "" {
+		resolvedCreateGatewayURL, _ = ConfiguredGatewayURLCandidate()
+	}
+	if resolvedCreateGatewayURL != "" {
+		gatewayURL = resolvedCreateGatewayURL
 		selectedPath = "create-with-reachable-gateway"
 		agentNextStep = "call rdev.support_session.create with mcp_next_arguments, then send the returned user_handoff.message plus user_handoff.copy_paste"
 		mcpNextTool = "rdev.support_session.create"
 	}
 	createArgs := map[string]any{
-		"gateway_url":  strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"),
+		"gateway_url":  resolvedCreateGatewayURL,
 		"target":       target,
 		"reason":       reason,
 		"ttl_seconds":  ttl,
@@ -517,6 +522,19 @@ func ResolveGatewayURL(addr, explicitGatewayURL string) (string, []GatewayURLCan
 
 func GatewayURLCandidatesFromIPs(addr, explicitGatewayURL string, ips []net.IP) []GatewayURLCandidate {
 	return gatewayURLCandidatesFromIPsAndEnv(addr, explicitGatewayURL, ips, gatewayEnvCandidatesFromEnv())
+}
+
+func ConfiguredGatewayURLCandidate() (string, []GatewayURLCandidate) {
+	candidates := appendConfiguredGatewayCandidates(nil, gatewayEnvCandidatesFromEnv())
+	for _, candidate := range candidates {
+		if candidate.Recommended {
+			return candidate.URL, candidates
+		}
+	}
+	for _, candidate := range candidates {
+		return candidate.URL, candidates
+	}
+	return "", candidates
 }
 
 func gatewayURLCandidatesFromIPsAndEnv(addr, explicitGatewayURL string, ips []net.IP, envCandidates []GatewayEnvCandidate) []GatewayURLCandidate {

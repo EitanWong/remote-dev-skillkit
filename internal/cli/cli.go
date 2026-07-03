@@ -2035,14 +2035,18 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 }
 
 func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreateOptions) error {
-	if strings.TrimSpace(opts.GatewayURL) == "" {
-		return fmt.Errorf("support-session create requires --gateway-url; run rdev support-session plan if no reachable gateway is running yet")
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		return fmt.Errorf("support-session create requires --gateway-url or a configured RDEV_*_GATEWAY_URL; run rdev support-session start if no reachable gateway is running yet")
 	}
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
 		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
 	}
 	payload, err := createGatewayInviteTicket(ctx, http.DefaultClient, inviteCreateOptions{
-		GatewayURL:        opts.GatewayURL,
+		GatewayURL:        gatewayURL,
 		Mode:              model.HostModeAttendedTemporary,
 		TTLSeconds:        opts.TTLSeconds,
 		Reason:            opts.Reason,
@@ -2059,8 +2063,8 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 		return err
 	}
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
-		GatewayURL:               opts.GatewayURL,
-		GatewayURLCandidates:     supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", opts.GatewayURL, nil),
+		GatewayURL:               gatewayURL,
+		GatewayURLCandidates:     supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", gatewayURL, nil),
 		JoinURL:                  payload.JoinURL,
 		ManifestURL:              payload.ManifestURL,
 		ManifestRootPublicKey:    payload.ManifestRootPublicKey,
@@ -2069,7 +2073,7 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 		Locale:                   opts.Locale,
 		RdevCommand:              opts.RdevCommand,
 		AutoApprove:              opts.AutoApprove,
-		TargetBootstrapReadiness: probeTargetBootstrapReadiness(ctx, http.DefaultClient, opts.GatewayURL, opts.Target),
+		TargetBootstrapReadiness: probeTargetBootstrapReadiness(ctx, http.DefaultClient, gatewayURL, opts.Target),
 	})
 	return writeJSON(a.Stdout, created)
 }
