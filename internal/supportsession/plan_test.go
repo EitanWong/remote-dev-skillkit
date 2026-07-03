@@ -481,6 +481,12 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		started["connection_readiness"].(map[string]any)["ready"] != true {
 		t.Fatalf("expected asset/readiness reports in started payload, got %#v", started)
 	}
+	feedback := started["foreground_feedback"].(map[string]any)
+	if feedback["schema_version"] != "rdev.support-session-foreground-feedback.v1" ||
+		feedback["stream"] != "stderr" ||
+		!strings.Contains(feedback["connected_rule"].(string), "connection has been established") {
+		t.Fatalf("expected foreground feedback contract, got %#v", feedback)
+	}
 	readyFile := started["ready_file"].(map[string]any)
 	if readyFile["schema_version"] != "rdev.support-session-ready-file.v1" ||
 		readyFile["path"] != "work/rdev-support-session/support-session-ready.json" ||

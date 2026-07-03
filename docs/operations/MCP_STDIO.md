@@ -105,6 +105,11 @@ same recommended gateway URL candidates, and emits target commands that try
 those ordered candidates before failing. The embedded
 `connection_attempt_policy` is the only place Agents should read target-side
 timeout/retry behavior from.
+The payload also includes `foreground_feedback`: while the foreground command
+is kept open, it emits machine-readable stderr lines prefixed with
+`rdev support session event: `. Agents should report connection success as soon
+as they see `event=connected`; the MCP/CLI status watcher remains the fallback
+source of truth.
 The CLI also writes the same started payload to `ready_file.path`
 (`support-session-ready.json` in the session work directory by default), so
 Agents can read top-level `user_handoff.message` and

@@ -171,7 +171,11 @@ Steps:
     before listening. It keeps the full created session under `session` for
     compatibility, but fresh Agents should send only the top-level
     `user_handoff.message` plus `user_handoff.copy_paste`, then use top-level
-    `connection_supervision` to wait, report, and recover. It also writes the
+    `connection_supervision` to wait, report, and recover. Also read
+    `foreground_feedback`: the foreground command emits machine-readable stderr
+    lines prefixed with `rdev support session event: `, and `event=connected`
+    means you should immediately tell me the connection has been established.
+    It also writes the
     same JSON payload to
     `ready_file.path`
     (`support-session-ready.json` in the session work directory by default);

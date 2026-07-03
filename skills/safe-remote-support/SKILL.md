@@ -205,12 +205,16 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    returned `user_handoff.copy_paste`, `target_command`, or `join_url` to the
    target-side human. If no explicit gateway URL was supplied, let create use a
    configured `RDEV_*_GATEWAY_URL` before asking for configuration. If no
-   gateway exists, run `rdev support-session connect --start` in a visible
-   foreground terminal and send only top-level `user_handoff.message` plus
-   `user_handoff.copy_paste`. Then use returned `connection_supervision` to
-   wait, report connection establishment, and recover through standard tools.
-   Use `rdev.support_session.plan` or
-   `rdev support-session plan` only for review/debug planning.
+  gateway exists, run `rdev support-session connect --start` in a visible
+  foreground terminal and send only top-level `user_handoff.message` plus
+  `user_handoff.copy_paste`. Then use returned `connection_supervision` to
+  wait, report connection establishment, and recover through standard tools.
+  Also read `foreground_feedback` from the started payload: the foreground
+  process emits machine-readable stderr events prefixed with
+  `rdev support session event: `, and `event=connected` means report connection
+  establishment immediately.
+  Use `rdev.support_session.plan` or
+  `rdev support-session plan` only for review/debug planning.
 7. For lower-level package materialization only, create an invite with
    `rdev.invites.create` when available so the Agent gets `connection_entry`,
    `connection_entry_plan`, manifest root, and transport fallback instructions

@@ -87,6 +87,12 @@ revocation.
   `rdev.support_session.plan` or `rdev support-session plan` only for
   review/debug planning before creating custom gateway, shell, PowerShell,
   relay, nohup, approval, or bootstrap steps.
+- When running `rdev support-session connect --start`, keep the foreground
+  process open and read `foreground_feedback`. The command emits
+  machine-readable stderr lines prefixed with
+  `rdev support session event: `; when `event=connected`, immediately tell the
+  user the connection has been established. Use `connection_supervision` or the
+  status watcher as the fallback source of truth.
 - Treat returned `target_command` as the standard fallback surface. It already
   tries ordered gateway URL candidates on the target machine with the returned
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in

@@ -60,7 +60,7 @@ write custom fallback scripts. Read `connection_continuity_policy`; when `stable
 running yet, run `rdev support-session connect --start` in a visible foreground terminal;
 it prepares verified helper assets when possible, starts the local gateway,
 selects a target-usable gateway URL candidate, prints the same ready session
-payload before listening, and writes that payload to `ready_file.path` as `support-session-ready.json` by default. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session connect --start` so verified helper assets are served automatically. Use
+payload before listening, and writes that payload to `ready_file.path` as `support-session-ready.json` by default. It also exposes `foreground_feedback`; while the foreground command stays open, stderr lines prefixed with `rdev support session event: ` report `event=connected` so the Agent can immediately tell the user the connection is established. Do not manually combine `rdev gateway serve` plus `rdev invite create` for ordinary support sessions; use `rdev support-session connect --start` so verified helper assets are served automatically. Use
 `rdev.support_session.plan` or `rdev support-session plan` only
 for review/debug planning. After giving the target-machine command, watch
 `rdev.support_session.status` with `wait=true` or `rdev support-session status --wait`; CLI status can omit `--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. Created session payloads include `watch_connection_status_configured_gateway`; use that returned command when configured gateway metadata is present. When

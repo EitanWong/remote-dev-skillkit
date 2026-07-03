@@ -2185,7 +2185,52 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session ready payload written to %s\n", readyFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
+	go watchForegroundSupportSession(ctx, a.Stderr, gw, ticket.Code, opts.Locale)
 	return listenAndServeGatewayContext(ctx, addr, server.Handler(), nil)
+}
+
+func watchForegroundSupportSession(ctx context.Context, out io.Writer, gw *gateway.MemoryGateway, ticketCode, locale string) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	seenPending := false
+	writeSupportSessionEvent(out, "waiting", supportsession.BuildStatus(supportsession.StatusOptions{
+		TicketCode: ticketCode,
+		Hosts:      gw.HostsForTicketCode(ticketCode, ""),
+		Locale:     locale,
+	}))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			status := supportsession.BuildStatus(supportsession.StatusOptions{
+				TicketCode: ticketCode,
+				Hosts:      gw.HostsForTicketCode(ticketCode, ""),
+				Locale:     locale,
+			})
+			if status["connected"] == true {
+				writeSupportSessionEvent(out, "connected", status)
+				return
+			}
+			if status["status"] == "pending-approval" && !seenPending {
+				seenPending = true
+				writeSupportSessionEvent(out, "pending-approval", status)
+			}
+		}
+	}
+}
+
+func writeSupportSessionEvent(out io.Writer, event string, status map[string]any) {
+	payload := map[string]any{
+		"schema_version": "rdev.support-session-foreground-event.v1",
+		"event":          event,
+		"status":         status,
+	}
+	content, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "rdev support session event: %s\n", string(content))
 }
 
 func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreateOptions) error {

@@ -30,9 +30,12 @@ one-message flow:
 3. return `cli_start_now_command` for visible foreground `rdev support-session connect --start` when no gateway is running;
 4. send only `user_handoff.message` plus `user_handoff.copy_paste` to the human;
 5. read `ready_file.path` when foreground stdout is hard to parse;
-6. wait for status with `rdev.support_session.status`;
-7. report `connected=true` through `connected_next_steps.user_report`;
-8. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+6. expose foreground stderr feedback events so an Agent can report
+   `event=connected` from the kept-open command;
+7. wait for status with `rdev.support_session.status` as the fallback source of
+   truth;
+8. report `connected=true` through `connected_next_steps.user_report`;
+9. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
    gateway, transport, or bootstrap glue.
 
 The command writes `report.json` with schema

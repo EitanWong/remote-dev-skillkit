@@ -140,7 +140,10 @@ helper assets when a source checkout and Go are available, starts the local
 gateway, and prints the same ready session payload before listening. Send only
 the started payload's top-level `user_handoff.message` plus
 `user_handoff.copy_paste`; do not read nested session fields or rewrite the
-command. Use
+command. Keep the foreground command open and read
+`foreground_feedback`: it emits machine-readable stderr events prefixed with
+`rdev support session event: `, including `event=connected`, so the Agent can
+tell me the connection is established even before opening a separate watcher. Use
 `rdev.support_session.plan` or `rdev support-session plan` only for review/debug
 planning. After giving me the target-machine command, read
 `connection_supervision` and watch `rdev.support_session.status` or
@@ -284,10 +287,13 @@ visible foreground terminal; that command auto-prepares verified helper assets w
 possible, starts the local gateway, and prints
 `rdev.support-session-started.v1` with top-level `user_handoff`,
 `target_command`, `join_url`, `connection_supervision`, and status watcher
-fields. It keeps the full created session under `session` for compatibility,
-but fresh Agents should send only the top-level `user_handoff.message` plus
-`user_handoff.copy_paste`, then use top-level `connection_supervision` to wait,
-report `connected=true`, and choose standard upgrade/recovery tools. It also
+fields. It also includes `foreground_feedback`, a stderr event contract for the
+same foreground command; when the Agent sees `event=connected`, it should
+immediately report that the connection has been established. It keeps the full
+created session under `session` for compatibility, but fresh Agents should send
+only the top-level `user_handoff.message` plus `user_handoff.copy_paste`, then
+use top-level `connection_supervision` or foreground feedback to wait, report
+`connected=true`, and choose standard upgrade/recovery tools. It also
 writes the same payload to `ready_file.path` as
 `support-session-ready.json` under the session work directory by default, so
 Agents can read the file when a long-running foreground terminal makes stdout

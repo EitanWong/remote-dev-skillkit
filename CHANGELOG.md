@@ -24,6 +24,13 @@ metadata, status watching, or approval polling by hand.
   standard command to run locally before talking to the target human, while
   `foreground_start_command` remains as a compatibility fallback for older
   harnesses.
+- Added `rdev.support-session-foreground-feedback.v1` to started support
+  sessions and foreground stderr events with schema
+  `rdev.support-session-foreground-event.v1`. Agents that keep
+  `rdev support-session connect --start` open can now parse
+  `rdev support session event: {...}` lines and report `event=connected`
+  immediately, with `rdev.support_session.status` remaining the fallback source
+  of truth.
 - Added `rdev.support-session-handoff.v1` through CLI
   `rdev support-session handoff` and MCP tool `rdev.support_session.handoff`.
   Fresh Agents now get one standard first-contact decision: call

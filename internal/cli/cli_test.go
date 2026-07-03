@@ -245,6 +245,34 @@ func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T)
 	}
 }
 
+func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
+	var out bytes.Buffer
+	writeSupportSessionEvent(&out, "connected", map[string]any{
+		"schema_version": "rdev.support-session-status.v1",
+		"connected":      true,
+		"status":         "connected",
+	})
+
+	const prefix = "rdev support session event: "
+	line := strings.TrimSpace(out.String())
+	if !strings.HasPrefix(line, prefix) {
+		t.Fatalf("expected event prefix, got %q", line)
+	}
+	var payload struct {
+		SchemaVersion string         `json:"schema_version"`
+		Event         string         `json:"event"`
+		Status        map[string]any `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, prefix)), &payload); err != nil {
+		t.Fatalf("invalid event JSON: %v\n%s", err, line)
+	}
+	if payload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
+		payload.Event != "connected" ||
+		payload.Status["connected"] != true {
+		t.Fatalf("unexpected event payload: %#v", payload)
+	}
+}
+
 func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
