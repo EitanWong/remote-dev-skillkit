@@ -123,6 +123,15 @@ Steps:
     `rdev support-session prepare --build-assets` from the checkout. Follow its
     `connection_readiness`, `asset_report`, `missing_inputs`, and
     `standard_recovery` fields instead of writing custom setup code. Use its
+    `agent_connection_runbook.standard_entry_tool` as the source of truth for
+    ordinary "connect this computer" requests, and obey
+    `agent_connection_runbook.low_level_entry_rule`: do not start with
+    `rdev.invites.create`, `rdev invite create`,
+    `rdev.connection_entry.plan`, or `rdev connection-entry plan` unless the
+    operator explicitly asks for reviewed package materialization, approved
+    managed owned-host planning, or a high-level support-session recovery
+    payload names that path.
+    Use its
     recommended `gateway_url_candidates` entry for target-side commands instead
     of asking me to choose a gateway URL; never hand a remote target `0.0.0.0`
     or loopback unless the target is the same machine. If this runtime has
@@ -143,6 +152,9 @@ Steps:
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
     PowerShell, shell, relay, or approval-polling fallback. Read
+    `agent_connection_runbook` first; it is the machine-readable order of
+    operations for connecting, waiting, reporting, and recovering without
+    custom scripts. Read
     `gateway_candidate_preflight` before asking me network questions or writing
     probes; it classifies LAN/direct, same-machine, operator-provided, and
     configured hosted/relay/mesh/VPN/SSH candidates and gives the standard next
@@ -172,7 +184,7 @@ Steps:
     `rdev.support-session-started.v1` with top-level `user_handoff`,
     `target_command`, `join_url`, `connection_supervision`, status watcher,
     asset report, recommended gateway URL candidates, and connection readiness
-    plus `gateway_candidate_preflight` before listening. It keeps the full created session under `session` for
+    plus `agent_connection_runbook` and `gateway_candidate_preflight` before listening. It keeps the full created session under `session` for
     compatibility, but fresh Agents should send only the top-level
     `user_handoff.message` plus `user_handoff.copy_paste`, then use top-level
     `connection_supervision` to wait, report, and recover. Also read

@@ -12,6 +12,22 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev.support-session-agent-runbook.v1` to support-session handoff,
+  prepare, create, start, high-level connect, status, and recovery payloads.
+  Fresh Agents now get one machine-readable order of operations for the whole
+  visible connection loop: when to run `cli_start_now_command`, what to send to
+  the target-side human, how to wait, when to report `connected=true`, how to
+  inspect capabilities, and how to recover without choosing lower-level tools or
+  writing custom PowerShell, shell, relay, approval, bootstrap, or polling
+  scripts.
+- Tightened `rdev.support-session-agent-runbook.v1` with
+  `standard_entry_tool`, `fallback_entry_tool`, and `low_level_entry_rule`.
+  Fresh Agents are now explicitly told to start ordinary "connect this
+  computer" requests with `rdev.support_session.connect` /
+  `rdev support-session connect`, and not with `rdev.invites.create`,
+  `rdev.connection_entry.plan`, package materialization, or hand-written gateway
+  setup unless the operator or a high-level recovery payload explicitly asks
+  for that lower-level path.
 - Added `rdev.support-session-gateway-candidate-preflight.v1` to
   support-session prepare, create, start, and high-level connect payloads.
   Fresh Agents now get a machine-readable candidate decision table that

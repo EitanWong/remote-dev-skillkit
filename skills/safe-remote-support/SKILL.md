@@ -38,8 +38,16 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev.support-session-prepare.v1` as the standard recovery contract for fresh
   Agents: it reports local recovery, verified helper assets, one-command target
   readiness, recommended `gateway_url_candidates`, missing inputs, and
-  `gateway_candidate_preflight`, and forbidden improvisations. Use the returned
-  preflight table and recommended candidate for target-side commands; never
+  `agent_connection_runbook`, `gateway_candidate_preflight`, and forbidden
+  improvisations. Read `agent_connection_runbook` first; it is the standard
+  order of operations for connect, wait, report, operate, and recover. Use its
+  `standard_entry_tool` for ordinary "connect this computer" requests and obey
+  `low_level_entry_rule`: do not start with `rdev.invites.create`,
+  `rdev invite create`, `rdev.connection_entry.plan`, or
+  `rdev connection-entry plan` unless the operator explicitly requests reviewed
+  package materialization, approved managed owned-host planning, or a returned
+  high-level recovery payload names that path. Use the
+  returned preflight table and recommended candidate for target-side commands; never
   send a remote target `0.0.0.0`, and use loopback only for same-machine tests.
   Read `gateway_candidate_preflight` before asking humans network questions or
   writing probes; it classifies LAN/direct, same-machine, operator-provided,
@@ -79,6 +87,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Read returned `agent_connection_runbook` before choosing lower-level
+  support-session tools. It tells the Agent when to run `cli_start_now_command`,
+  when to send the handoff, how to wait, when to report connected, and how to
+  recover without custom scripts.
 - Read returned `gateway_candidate_preflight` before asking the human for
   network details. If it shows only LAN or same-machine candidates, use the
   standard recovery/upgrade paths to configure a hosted/relay/mesh/VPN/SSH

@@ -59,8 +59,17 @@ revocation.
   `standard_recovery`, `asset_report`, and `connection_readiness` fields
   instead of writing custom PowerShell, approval polling, ticket substitution,
   relay, or bootstrap glue. Use the recommended `gateway_url_candidates` item
-  and the returned `gateway_candidate_preflight` decision table for target-side
-  commands. Read `gateway_candidate_preflight` before asking humans network
+  plus the returned `agent_connection_runbook` and
+  `gateway_candidate_preflight` decision table for target-side commands. Read
+  `agent_connection_runbook` first; it is the standard order of operations for
+  connect, wait, report, operate, and recover. Use its `standard_entry_tool`
+  for ordinary "connect this computer" requests and obey
+  `low_level_entry_rule`: do not start with `rdev.invites.create`,
+  `rdev invite create`, `rdev.connection_entry.plan`, or
+  `rdev connection-entry plan` unless the operator explicitly requests reviewed
+  package materialization, approved managed owned-host planning, or a returned
+  high-level recovery payload names that path. Read
+  `gateway_candidate_preflight` before asking humans network
   questions or writing probes; it classifies LAN/direct, same-machine,
   operator-provided, and configured hosted/relay/mesh/VPN/SSH candidates with
   standard next actions. Never send a remote target a wildcard listen address
@@ -102,6 +111,10 @@ revocation.
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
   polling, or bootstrap scripts.
+- Read returned `agent_connection_runbook` before choosing lower-level
+  support-session tools. It tells the Agent when to run `cli_start_now_command`,
+  when to send the handoff, how to wait, when to report connected, and how to
+  recover without custom scripts.
 - Read returned `gateway_candidate_preflight` before asking the human for
   network details. If it shows only LAN or same-machine candidates, use the
   standard recovery/upgrade paths to configure a hosted/relay/mesh/VPN/SSH

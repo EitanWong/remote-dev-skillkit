@@ -520,6 +520,11 @@ func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.
 			CandidateCount int    `json:"candidate_count"`
 			AgentRule      string `json:"agent_rule"`
 		} `json:"gateway_candidate_preflight"`
+		AgentConnectionRunbook struct {
+			SchemaVersion string   `json:"schema_version"`
+			Phase         string   `json:"phase"`
+			Sequence      []string `json:"sequence"`
+		} `json:"agent_connection_runbook"`
 		AssetReport struct {
 			SchemaVersion string `json:"schema_version"`
 			AllReady      bool   `json:"all_ready"`
@@ -549,6 +554,9 @@ func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.
 		payload.GatewayCandidatePreflight.PreflightMode != "local-classification-no-network-scan" ||
 		payload.GatewayCandidatePreflight.CandidateCount == 0 ||
 		!strings.Contains(payload.GatewayCandidatePreflight.AgentRule, "target command owns ordered URL fallback") ||
+		payload.AgentConnectionRunbook.SchemaVersion != "rdev.support-session-agent-runbook.v1" ||
+		payload.AgentConnectionRunbook.Phase != "prepare" ||
+		!slices.Contains(payload.AgentConnectionRunbook.Sequence, "send only user_handoff.message plus user_handoff.copy_paste to the target-side human") ||
 		!payload.AssetReport.AllReady ||
 		!payload.AssetReport.BuildAssets ||
 		len(payload.AssetReport.Assets) != 5 {
@@ -833,6 +841,13 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			CandidateCount int    `json:"candidate_count"`
 			AgentRule      string `json:"agent_rule"`
 		} `json:"gateway_candidate_preflight"`
+		AgentConnectionRunbook struct {
+			SchemaVersion string `json:"schema_version"`
+			Phase         string `json:"phase"`
+			Watch         struct {
+				MCPTool string `json:"mcp_tool"`
+			} `json:"watch"`
+		} `json:"agent_connection_runbook"`
 		ReadyFile struct {
 			SchemaVersion string `json:"schema_version"`
 			Path          string `json:"path"`
@@ -876,6 +891,10 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		payload.GatewayCandidatePreflight.CandidateCount == 0 ||
 		!strings.Contains(payload.GatewayCandidatePreflight.AgentRule, "candidate table") {
 		t.Fatalf("expected started payload gateway preflight, got %#v", payload.GatewayCandidatePreflight)
+	}
+	if payload.AgentConnectionRunbook.SchemaVersion != "rdev.support-session-agent-runbook.v1" ||
+		payload.AgentConnectionRunbook.Watch.MCPTool != "rdev.support_session.status" {
+		t.Fatalf("expected started payload Agent runbook, got %#v", payload.AgentConnectionRunbook)
 	}
 	if payload.ReadyFile.SchemaVersion != "rdev.support-session-ready-file.v1" ||
 		payload.ReadyFile.Path != readyFile ||

@@ -269,9 +269,15 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["user_handoff"] == nil ||
 		connect["connection_supervision"] == nil ||
 		connect["gateway_candidate_preflight"] == nil ||
+		connect["agent_connection_runbook"] == nil ||
 		connect["target_command"] != created["target_command"] ||
 		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected ready connect payload, got %#v", connect)
+	}
+	runbook := connect["agent_connection_runbook"].(map[string]any)
+	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
+		!strings.Contains(runbook["agent_rule"].(string), "runbook before choosing lower-level") {
+		t.Fatalf("expected connect runbook, got %#v", runbook)
 	}
 }
 
@@ -364,6 +370,19 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	if preflightCandidates[0]["status"] != "operator-provided-unverified" ||
 		preflightCandidates[0]["same_machine_only"] != false {
 		t.Fatalf("expected operator-provided preflight candidate, got %#v", preflightCandidates)
+	}
+	runbook := created["agent_connection_runbook"].(map[string]any)
+	watchRunbook := runbook["watch"].(map[string]any)
+	standardEntry := runbook["standard_entry_tool"].(map[string]any)
+	lowLevelEntry := runbook["low_level_entry_rule"].(map[string]any)
+	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
+		runbook["phase"] != "created" ||
+		watchRunbook["mcp_tool"] != "rdev.support_session.status" ||
+		standardEntry["mcp_tool"] != "rdev.support_session.connect" ||
+		!strings.Contains(strings.Join(runbook["sequence"].([]string), "\n"), "connected_next_steps.user_report") ||
+		!strings.Contains(strings.Join(runbook["forbidden"].([]string), "\n"), "Agent-authored PowerShell") ||
+		!strings.Contains(strings.Join(lowLevelEntry["do_not_start_with"].([]string), "\n"), "rdev.connection_entry.plan") {
+		t.Fatalf("expected Agent connection runbook, got %#v", runbook)
 	}
 	followUp := created["mcp_follow_up"].([]map[string]any)
 	if len(followUp) == 0 || followUp[0]["arguments"].(map[string]any)["wait"] != true {
@@ -498,6 +517,11 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		!strings.Contains(preflight["agent_rule"].(string), "candidate table") {
 		t.Fatalf("expected top-level gateway candidate preflight, got %#v", preflight)
 	}
+	runbook := started["agent_connection_runbook"].(map[string]any)
+	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
+		!strings.Contains(strings.Join(runbook["sequence"].([]string), "\n"), "user_handoff.message") {
+		t.Fatalf("expected top-level Agent runbook, got %#v", runbook)
+	}
 	feedback := started["foreground_feedback"].(map[string]any)
 	if feedback["schema_version"] != "rdev.support-session-foreground-feedback.v1" ||
 		feedback["stream"] != "stderr" ||
@@ -573,6 +597,16 @@ func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
 	if readinessPreflight["schema_version"] != GatewayCandidatePreflightSchemaVersion {
 		t.Fatalf("expected readiness to mirror gateway candidate preflight, got %#v", readinessPreflight)
 	}
+	runbook := prepare["agent_connection_runbook"].(map[string]any)
+	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
+		runbook["phase"] != "prepare" ||
+		!strings.Contains(strings.Join(runbook["on_timeout_or_failure"].([]string), "\n"), "prepare --build-assets") {
+		t.Fatalf("expected prepare Agent runbook, got %#v", runbook)
+	}
+	readinessRunbook := readiness["agent_connection_runbook"].(map[string]any)
+	if readinessRunbook["schema_version"] != AgentConnectionRunbookSchemaVersion {
+		t.Fatalf("expected readiness to mirror Agent runbook, got %#v", readinessRunbook)
+	}
 	assets := prepare["asset_report"].(map[string]any)
 	if assets["all_ready"] != true || assets["build_assets"] != true {
 		t.Fatalf("expected built helper assets, got %#v", assets)
@@ -619,6 +653,12 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 		calls[0]["arguments"].(map[string]any)["host_id"] != "host_1" {
 		t.Fatalf("expected connected next-step contract, got %#v", next)
 	}
+	runbook := status["agent_connection_runbook"].(map[string]any)
+	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
+		runbook["status"] != "connected" ||
+		!strings.Contains(strings.Join(runbook["on_connected"].([]string), "\n"), "capabilities") {
+		t.Fatalf("expected connected status runbook, got %#v", runbook)
+	}
 }
 
 func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
@@ -636,6 +676,12 @@ func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
 		!strings.Contains(actions, "instead of writing ad hoc network scripts") ||
 		!strings.Contains(forbidden, "Agent-authored PowerShell or shell relay scripts") {
 		t.Fatalf("expected standard connection recovery contract, got %#v", recovery)
+	}
+	runbook := recovery["agent_connection_runbook"].(map[string]any)
+	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
+		runbook["phase"] != "recovery" ||
+		!strings.Contains(strings.Join(runbook["on_timeout_or_failure"].([]string), "\n"), "gateway_candidate_preflight") {
+		t.Fatalf("expected recovery runbook, got %#v", runbook)
 	}
 	next := status["connected_next_steps"].(map[string]any)
 	if next["schema_version"] != ConnectedNextStepsSchemaVersion ||

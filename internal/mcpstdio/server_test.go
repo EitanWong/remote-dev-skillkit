@@ -409,6 +409,12 @@ func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 	if !slices.Contains(recovery, "do not write custom PowerShell, relay, approval polling, ticket substitution, or bootstrap glue") {
 		t.Fatalf("expected no-improvisation recovery contract, got %#v", recovery)
 	}
+	runbook := structured["agent_connection_runbook"].(map[string]any)
+	if runbook["schema_version"] != "rdev.support-session-agent-runbook.v1" ||
+		runbook["phase"] != "prepare" ||
+		!strings.Contains(fmt.Sprintf("%v", runbook["sequence"]), "user_handoff.message") {
+		t.Fatalf("expected MCP prepare Agent runbook, got %#v", runbook)
+	}
 }
 
 func TestServerToolCallSupportSessionCreate(t *testing.T) {
@@ -479,6 +485,14 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 	}
 	if !strings.Contains(targetCommand, "https://relay.example.test/rdev/join/") {
 		t.Fatalf("expected target command to include configured relay join fallback, got %q", targetCommand)
+	}
+	runbook := structured["agent_connection_runbook"].(map[string]any)
+	watchRunbook := runbook["watch"].(map[string]any)
+	if runbook["schema_version"] != "rdev.support-session-agent-runbook.v1" ||
+		runbook["phase"] != "created" ||
+		watchRunbook["mcp_tool"] != "rdev.support_session.status" ||
+		!strings.Contains(fmt.Sprintf("%v", runbook["forbidden"]), "Agent-authored PowerShell") {
+		t.Fatalf("expected MCP create Agent runbook, got %#v", runbook)
 	}
 	watch := strings.Join(anyStrings(structured["watch_connection_status"].([]any)), "\x00")
 	if !strings.Contains(watch, ticketCode) ||

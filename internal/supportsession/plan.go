@@ -34,6 +34,7 @@ const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-ste
 const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1"
 const ConnectionSupervisionSchemaVersion = "rdev.support-session-connection-supervision.v1"
 const GatewayCandidatePreflightSchemaVersion = "rdev.support-session-gateway-candidate-preflight.v1"
+const AgentConnectionRunbookSchemaVersion = "rdev.support-session-agent-runbook.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -204,8 +205,19 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 			"--gateway-url", gatewayURL,
 			"--target", target,
 		},
-		"status_watch_rule":      "after sending the returned user_handoff to the human, call rdev.support_session.status with wait=true; when connected=true, proactively report the connection is established",
-		"recovery_rule":          "if create/start/status fails or times out, read connection_recovery or rerun rdev.support_session.prepare; do not write custom recovery scripts",
+		"status_watch_rule": "after sending the returned user_handoff to the human, call rdev.support_session.status with wait=true; when connected=true, proactively report the connection is established",
+		"recovery_rule":     "if create/start/status fails or times out, read connection_recovery or rerun rdev.support_session.prepare; do not write custom recovery scripts",
+		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
+			Phase:        selectedPath,
+			Status:       "not-created",
+			Target:       target,
+			Locale:       locale,
+			GatewayURL:   gatewayURL,
+			Candidates:   gatewayCandidates,
+			AutoApprove:  opts.AutoApprove,
+			RdevCommand:  rdevCommand,
+			NeedStartNow: selectedPath != "create-with-reachable-gateway",
+		}),
 		"gateway_url":            gatewayURL,
 		"gateway_url_candidates": gatewayCandidates,
 		"target":                 target,
@@ -247,6 +259,7 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 		payload["ready_to_send_to_human"] = false
 		payload["mcp_next_tool"] = handoff["mcp_next_tool"]
 		payload["mcp_next_arguments"] = handoff["mcp_next_arguments"]
+		payload["agent_connection_runbook"] = handoff["agent_connection_runbook"]
 		payload["agent_next_step"] = "call mcp_next_tool with mcp_next_arguments; then send only the returned user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
 		return payload
 	}
@@ -254,6 +267,7 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	payload["cli_start_now_command"] = handoff["cli_start_now_command"]
 	payload["foreground_start_command"] = handoff["foreground_start_command"]
 	payload["prepare_command"] = handoff["prepare_command"]
+	payload["agent_connection_runbook"] = handoff["agent_connection_runbook"]
 	payload["agent_next_step"] = "run cli_start_now_command in a visible terminal; it starts the gateway, builds verified helper assets, prints the target command, writes ready_file.path, and waits for the target; then send only the started payload's user_handoff.message plus user_handoff.copy_paste and wait for connected=true"
 	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned cli_start_now_command first and then send the started payload's top-level user_handoff"
 	return payload
@@ -274,6 +288,7 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"watch_connection_status_configured_gateway": created["watch_connection_status_configured_gateway"],
 		"connection_supervision":                     created["connection_supervision"],
 		"gateway_candidate_preflight":                created["gateway_candidate_preflight"],
+		"agent_connection_runbook":                   created["agent_connection_runbook"],
 		"mcp_follow_up":                              created["mcp_follow_up"],
 		"agent_next_step":                            "send user_handoff.message plus user_handoff.copy_paste to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
 		"human_surface_rule":                         "humans receive only user_handoff.message plus user_handoff.copy_paste",
@@ -360,6 +375,15 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"gateway_candidate_preflight": firstNonNil(
 			opts.GatewayCandidatePreflight,
 			session["gateway_candidate_preflight"],
+		),
+		"agent_connection_runbook": firstNonNil(
+			session["agent_connection_runbook"],
+			agentConnectionRunbook(agentConnectionRunbookOptions{
+				Phase:       "foreground-started",
+				Status:      "waiting",
+				GatewayURL:  gatewayURL,
+				RdevCommand: "rdev",
+			}),
 		),
 		"agent_flow": []string{
 			"keep this process running while the target host connects",
@@ -505,12 +529,20 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 	}
 	target := normalizeTarget(opts.Target)
 	connectionReadiness := map[string]any{
-		"ready":                         localRdevUsable || allAssetsReady,
-		"local_rdev_usable":             localRdevUsable,
-		"target_bootstrap_self_repair":  allAssetsReady,
-		"gateway_url":                   gatewayURL,
-		"gateway_url_candidates":        gatewayCandidates,
-		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"ready":                        localRdevUsable || allAssetsReady,
+		"local_rdev_usable":            localRdevUsable,
+		"target_bootstrap_self_repair": allAssetsReady,
+		"gateway_url":                  gatewayURL,
+		"gateway_url_candidates":       gatewayCandidates,
+		"gateway_candidate_preflight":  gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
+			Phase:       "prepare",
+			Status:      "not-created",
+			Target:      target,
+			GatewayURL:  gatewayURL,
+			Candidates:  gatewayCandidates,
+			RdevCommand: "rdev",
+		}),
 		"target":                        target,
 		"human_gets_one_command":        true,
 		"auto_approval_contract":        "attended-temporary first host only when created by support-session start/create",
@@ -549,15 +581,23 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		},
 		"connectivity_strategy":       connectivityStrategy(gatewayURL, target, gatewayCandidates),
 		"gateway_candidate_preflight": gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
-		"connection_readiness":        connectionReadiness,
-		"missing_inputs":              missingInputs,
-		"standard_recovery":           recoveryActions,
-		"target_handoff_policy":       "give the target-side human only the generated target_command or join_url",
-		"forbidden":                   []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
-		"recommended_next_step":       recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
-		"command_to_connect_start":    []string{"rdev", "support-session", "connect", "--start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
-		"command_to_start":            []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
-		"command_to_prepare_all":      []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
+			Phase:       "prepare",
+			Status:      "not-created",
+			Target:      target,
+			GatewayURL:  gatewayURL,
+			Candidates:  gatewayCandidates,
+			RdevCommand: "rdev",
+		}),
+		"connection_readiness":     connectionReadiness,
+		"missing_inputs":           missingInputs,
+		"standard_recovery":        recoveryActions,
+		"target_handoff_policy":    "give the target-side human only the generated target_command or join_url",
+		"forbidden":                []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
+		"recommended_next_step":    recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
+		"command_to_connect_start": []string{"rdev", "support-session", "connect", "--start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_start":         []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_prepare_all":   []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
 	}, nil
 }
 
@@ -720,6 +760,160 @@ func firstNonNil(values ...any) any {
 		}
 	}
 	return nil
+}
+
+type agentConnectionRunbookOptions struct {
+	Phase        string
+	Status       string
+	TicketCode   string
+	Target       string
+	Locale       string
+	GatewayURL   string
+	Candidates   []GatewayURLCandidate
+	AutoApprove  bool
+	RdevCommand  string
+	NeedStartNow bool
+	TimedOut     bool
+}
+
+func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
+	phase := strings.TrimSpace(opts.Phase)
+	if phase == "" {
+		phase = "support-session"
+	}
+	status := strings.TrimSpace(opts.Status)
+	if status == "" {
+		status = "waiting"
+	}
+	rdevCommand := strings.TrimSpace(opts.RdevCommand)
+	if rdevCommand == "" {
+		rdevCommand = "rdev"
+	}
+	ticketCode := strings.TrimSpace(opts.TicketCode)
+	sequence := []string{
+		"start with rdev.support_session.connect or rdev support-session connect",
+		"if ready_to_send_to_human=false, run cli_start_now_command exactly in a visible foreground terminal",
+		"send only user_handoff.message plus user_handoff.copy_paste to the target-side human",
+		"keep the target-side command/page and the local foreground gateway open while waiting",
+		"watch with foreground_feedback, connection_supervision.mcp_watch_call, or rdev.support_session.status wait=true",
+		"when connected=true, immediately report connected_next_steps.user_report before creating jobs",
+		"inspect capabilities, create the smallest scoped job, then review evidence before declaring work complete",
+	}
+	if opts.NeedStartNow {
+		sequence = append([]string{"run cli_start_now_command before sending anything to the target-side human"}, sequence...)
+	}
+	watch := map[string]any{
+		"foreground_feedback_event": "connected",
+		"mcp_tool":                  "rdev.support_session.status",
+		"mcp_arguments": map[string]any{
+			"ticket_code": ticketCode,
+			"locale":      opts.Locale,
+			"wait":        true,
+		},
+		"cli_command": []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", opts.Locale},
+		"rule":        "use returned watcher fields when present; do not write a polling loop",
+	}
+	if ticketCode == "" {
+		watch["mcp_arguments"] = map[string]any{"wait": true}
+		watch["cli_command"] = []string{rdevCommand, "support-session", "status", "--ticket-code", "<ticket-code>", "--wait"}
+	}
+	return map[string]any{
+		"schema_version": AgentConnectionRunbookSchemaVersion,
+		"intent":         "fresh-agent-one-command-connect-operate-recover-runbook",
+		"phase":          phase,
+		"status":         status,
+		"timed_out":      opts.TimedOut,
+		"ticket_code":    ticketCode,
+		"target":         normalizeTarget(opts.Target),
+		"locale":         opts.Locale,
+		"gateway_url":    strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"),
+		"standard_entry_tool": map[string]any{
+			"mcp_tool":    "rdev.support_session.connect",
+			"cli_command": []string{rdevCommand, "support-session", "connect"},
+			"rule":        "for a human request like connect this computer, call this first; it chooses create-via-reachable-gateway or foreground start and returns the only human handoff to send",
+		},
+		"fallback_entry_tool": map[string]any{
+			"mcp_tool":    "rdev.support_session.prepare",
+			"cli_command": []string{rdevCommand, "support-session", "prepare", "--build-assets"},
+			"rule":        "use only to repair missing local helper assets or inspect gateway candidates before creating a fresh support-session entry",
+		},
+		"auto_approve": map[string]any{
+			"enabled": opts.AutoApprove,
+			"scope":   "standard attended-temporary first host only",
+		},
+		"gateway_candidate_summary": gatewayCandidateRunbookSummary(opts.Candidates),
+		"sequence":                  sequence,
+		"watch":                     watch,
+		"on_connected": []string{
+			"tell the user the connection has been established",
+			"call rdev.hosts.capabilities for the connected host",
+			"ask for task intent only if it is still unclear",
+			"create the smallest scoped job allowed by capabilities and policy",
+		},
+		"on_timeout_or_failure": []string{
+			"read connection_recovery and gateway_candidate_preflight from the returned payload",
+			"rerun rdev.support_session.prepare or rdev support-session prepare --build-assets",
+			"create a fresh Connection Entry with configured hosted/relay/mesh/VPN/SSH fallback when LAN-only paths are insufficient",
+			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
+		},
+		"human_surface_rule": "target-side humans receive only user_handoff.message plus user_handoff.copy_paste",
+		"agent_rule":         "follow this runbook before choosing lower-level support-session tools; never make humans assemble low-level connection values",
+		"low_level_entry_rule": map[string]any{
+			"do_not_start_with": []string{
+				"rdev.invites.create",
+				"rdev invite create",
+				"rdev.connection_entry.plan",
+				"rdev connection-entry plan",
+			},
+			"reason": "low-level invite and package materialization surfaces are for reviewed packaging or advanced workflows; fresh Agents should use support_session.connect so helper assets, auto-approval, foreground feedback, and status watching are generated together",
+			"allowed_when": []string{
+				"an operator explicitly asks for package materialization",
+				"managed owned-host service planning has been explicitly approved",
+				"support_session.connect or support_session.prepare returns a standard recovery instruction that names Connection Entry planning",
+			},
+		},
+		"forbidden": []string{
+			"manual ticket/root/gateway/transport/checksum assembly",
+			"Agent-authored PowerShell or shell bootstrap, relay, approval, or polling scripts",
+			"ExecutionPolicy Bypass",
+			"hidden install or persistence",
+			"UAC or sudo bypass",
+			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit approval",
+		},
+	}
+}
+
+func gatewayCandidateRunbookSummary(candidates []GatewayURLCandidate) map[string]any {
+	kinds := []string{}
+	hasStable := false
+	hasLAN := false
+	hasSameMachineOnly := len(candidates) == 0
+	for _, candidate := range candidates {
+		kind := strings.TrimSpace(candidate.Kind)
+		if kind == "" {
+			kind = "unknown"
+		}
+		kinds = append(kinds, kind)
+		if kind == "lan-private" {
+			hasLAN = true
+			hasSameMachineOnly = false
+		}
+		if isStableGatewayCandidateKind(kind) {
+			hasStable = true
+			hasSameMachineOnly = false
+		}
+		if kind != "loopback" && candidate.Scope != "same-machine-only" {
+			hasSameMachineOnly = false
+		}
+	}
+	return map[string]any{
+		"candidate_count":                 len(candidates),
+		"candidate_kinds":                 dedupeStrings(kinds),
+		"has_lan_candidate":               hasLAN,
+		"has_stable_configured_fallback":  hasStable,
+		"has_only_same_machine_candidate": hasSameMachineOnly,
+		"rule":                            "if stable fallback is false, do not promise durable connectivity beyond the current direct/LAN path",
+	}
 }
 
 func standardRecoveryActions(actions []string) []string {
@@ -1088,28 +1282,39 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"--locale", locale,
 	}
 	return map[string]any{
-		"schema_version":                CreatedSchemaVersion,
-		"ok":                            true,
-		"session_mode":                  string(model.HostModeAttendedTemporary),
-		"intent":                        "agent-created-one-command-visible-support-session",
-		"gateway_url":                   gatewayURL,
-		"gateway_url_candidates":        gatewayCandidates,
-		"ticket_code":                   opts.Ticket.Code,
-		"ticket":                        opts.Ticket,
-		"join_url":                      joinURL,
-		"manifest_url":                  manifestURL,
-		"manifest_root_public_key":      opts.ManifestRootPublicKey,
-		"target":                        target,
-		"locale":                        locale,
-		"auto_approve":                  opts.AutoApprove,
-		"recommended_surface":           recommendedSurface,
-		"target_command":                recommended,
-		"target_commands":               targetCommands,
-		"user_handoff":                  userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
-		"connection_attempt_policy":     attemptPolicy,
-		"connection_continuity_policy":  continuityPolicy,
-		"connection_supervision":        connectionSupervision(opts.Ticket.Code, locale, rdevCommand, attemptPolicy, continuityPolicy),
-		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"schema_version":               CreatedSchemaVersion,
+		"ok":                           true,
+		"session_mode":                 string(model.HostModeAttendedTemporary),
+		"intent":                       "agent-created-one-command-visible-support-session",
+		"gateway_url":                  gatewayURL,
+		"gateway_url_candidates":       gatewayCandidates,
+		"ticket_code":                  opts.Ticket.Code,
+		"ticket":                       opts.Ticket,
+		"join_url":                     joinURL,
+		"manifest_url":                 manifestURL,
+		"manifest_root_public_key":     opts.ManifestRootPublicKey,
+		"target":                       target,
+		"locale":                       locale,
+		"auto_approve":                 opts.AutoApprove,
+		"recommended_surface":          recommendedSurface,
+		"target_command":               recommended,
+		"target_commands":              targetCommands,
+		"user_handoff":                 userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
+		"connection_attempt_policy":    attemptPolicy,
+		"connection_continuity_policy": continuityPolicy,
+		"connection_supervision":       connectionSupervision(opts.Ticket.Code, locale, rdevCommand, attemptPolicy, continuityPolicy),
+		"gateway_candidate_preflight":  gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
+		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
+			Phase:       "created",
+			Status:      "waiting",
+			TicketCode:  opts.Ticket.Code,
+			Target:      target,
+			Locale:      locale,
+			GatewayURL:  gatewayURL,
+			Candidates:  gatewayCandidates,
+			AutoApprove: opts.AutoApprove,
+			RdevCommand: rdevCommand,
+		}),
 		"target_bootstrap_requirements": bootstrapRequirements,
 		"target_bootstrap_readiness":    opts.TargetBootstrapReadiness,
 		"watch_connection_status":       statusCommand,
@@ -1654,6 +1859,13 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			Locale:     locale,
 			TimedOut:   false,
 		}),
+		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
+			Phase:      "status",
+			Status:     status,
+			TicketCode: ticketCode,
+			Locale:     locale,
+			TimedOut:   false,
+		}),
 		"active_hosts":  active,
 		"pending_hosts": pending,
 		"revoked_hosts": revoked,
@@ -1813,7 +2025,14 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 		"ticket_code":    ticketCode,
 		"timed_out":      opts.TimedOut,
 		"reason":         reason,
-		"agent_rule":     localizedConnectionRecoveryAgentRule(locale),
+		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
+			Phase:      "recovery",
+			Status:     status,
+			TicketCode: ticketCode,
+			Locale:     locale,
+			TimedOut:   opts.TimedOut,
+		}),
+		"agent_rule": localizedConnectionRecoveryAgentRule(locale),
 		"agent_next_actions": append(agentActions, []string{
 			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud relay use, credentials, or unclear ownership",
 		}...),

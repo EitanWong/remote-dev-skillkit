@@ -215,13 +215,19 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	configuredWatcher := mapFromAny(input.CreatedSession["watch_connection_status_configured_gateway"])
 	supervision := mapFromAny(input.CreatedSession["connection_supervision"])
 	preflight := mapFromAny(input.CreatedSession["gateway_candidate_preflight"])
+	runbook := mapFromAny(input.CreatedSession["agent_connection_runbook"])
+	runbookStandardEntry := mapFromAny(runbook["standard_entry_tool"])
+	runbookLowLevelRule := mapFromAny(runbook["low_level_entry_rule"])
 	readyFile := mapFromAny(input.StartedSession["ready_file"])
 	foregroundFeedback := mapFromAny(input.StartedSession["foreground_feedback"])
 	session := mapFromAny(input.StartedSession["session"])
 	startedHandoff := mapFromAny(input.StartedSession["user_handoff"])
 	startedSupervision := mapFromAny(input.StartedSession["connection_supervision"])
 	startedPreflight := mapFromAny(input.StartedSession["gateway_candidate_preflight"])
+	startedRunbook := mapFromAny(input.StartedSession["agent_connection_runbook"])
 	connectedNext := mapFromAny(input.ConnectedStatus["connected_next_steps"])
+	statusRunbook := mapFromAny(input.ConnectedStatus["agent_connection_runbook"])
+	recoveryRunbook := mapFromAny(input.WaitingRecovery["agent_connection_runbook"])
 	recoveryForbidden := strings.Join(stringSliceFromAny(input.WaitingRecovery["forbidden"]), "\n")
 	copyPaste := stringFromAny(handoff["copy_paste"])
 	targetCommand := stringFromAny(input.CreatedSession["target_command"])
@@ -240,15 +246,21 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "configured_gateway_watcher_omits_gateway_url", Passed: !strings.Contains(strings.Join(stringSliceFromAny(configuredWatcher["command"]), " "), "--gateway-url"), Detail: strings.Join(stringSliceFromAny(configuredWatcher["command"]), " ")},
 		{Name: "created_session_has_connection_supervision", Passed: stringFromAny(supervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(mapFromAny(supervision["mcp_watch_call"])["tool"]) == "rdev.support_session.status" && boolFromAny(mapFromAny(mapFromAny(supervision["mcp_watch_call"])["arguments"])["wait"]) && strings.Contains(stringFromAny(supervision["connected_report_rule"]), "connected_next_steps.user_report"), Detail: stringFromAny(supervision["upgrade_reason"])},
 		{Name: "created_session_has_gateway_candidate_preflight", Passed: stringFromAny(preflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(preflight["candidate_count"]) > 0 && strings.Contains(stringFromAny(preflight["agent_rule"]), "target command owns ordered URL fallback"), Detail: stringFromAny(preflight["preflight_mode"])},
+		{Name: "created_session_has_agent_connection_runbook", Passed: stringFromAny(runbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(runbook["sequence"]), "\n"), "user_handoff.message") && strings.Contains(strings.Join(stringSliceFromAny(runbook["forbidden"]), "\n"), "Agent-authored PowerShell"), Detail: stringFromAny(runbook["phase"])},
+		{Name: "agent_runbook_starts_with_support_session_connect", Passed: stringFromAny(runbookStandardEntry["mcp_tool"]) == "rdev.support_session.connect" && strings.Contains(strings.Join(stringSliceFromAny(runbookStandardEntry["cli_command"]), " "), "support-session connect"), Detail: fmt.Sprintf("%v", runbookStandardEntry)},
+		{Name: "agent_runbook_forbids_low_level_invite_first", Passed: strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.invites.create") && strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.connection_entry.plan"), Detail: fmt.Sprintf("%v", runbookLowLevelRule)},
 		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == true && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
 		{Name: "started_payload_has_top_level_supervision", Passed: stringFromAny(startedSupervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(startedSupervision["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(startedSupervision["continuity_assessment"])},
 		{Name: "started_payload_has_top_level_gateway_preflight", Passed: stringFromAny(startedPreflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(startedPreflight["candidate_count"]) > 0, Detail: stringFromAny(startedPreflight["preflight_mode"])},
+		{Name: "started_payload_has_top_level_agent_runbook", Passed: stringFromAny(startedRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(fmt.Sprintf("%v", startedRunbook["watch"]), "rdev.support_session.status"), Detail: stringFromAny(startedRunbook["phase"])},
 		{Name: "started_payload_has_foreground_feedback", Passed: stringFromAny(foregroundFeedback["schema_version"]) == "rdev.support-session-foreground-feedback.v1" && stringFromAny(foregroundFeedback["event_prefix"]) == "rdev support session event: " && strings.Contains(stringFromAny(foregroundFeedback["connected_rule"]), "connection has been established"), Detail: stringFromAny(foregroundFeedback["event_prefix"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
 		{Name: "auto_approval_connects_first_attended_host", Passed: input.Host.Status == model.HostStatusActive && input.ConnectedStatus["connected"] == true, Detail: string(input.Host.Status)},
 		{Name: "connected_status_has_user_report", Passed: stringFromAny(connectedNext["schema_version"]) == supportsession.ConnectedNextStepsSchemaVersion && strings.TrimSpace(stringFromAny(connectedNext["user_report"])) != "", Detail: stringFromAny(connectedNext["user_report"])},
 		{Name: "connected_status_points_to_capability_probe", Passed: strings.Contains(fmt.Sprintf("%v", connectedNext["mcp_next_calls"]), "rdev.hosts.capabilities"), Detail: fmt.Sprintf("%v", connectedNext["mcp_next_calls"])},
+		{Name: "connected_status_has_agent_runbook", Passed: stringFromAny(statusRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && stringFromAny(statusRunbook["status"]) == "connected", Detail: stringFromAny(statusRunbook["phase"])},
+		{Name: "waiting_recovery_has_agent_runbook", Passed: stringFromAny(recoveryRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(recoveryRunbook["on_timeout_or_failure"]), "\n"), "gateway_candidate_preflight"), Detail: stringFromAny(recoveryRunbook["phase"])},
 		{Name: "waiting_recovery_forbids_custom_scripts", Passed: strings.Contains(recoveryForbidden, "Agent-authored PowerShell") && strings.Contains(recoveryForbidden, "manual ticket/root/gateway/transport"), Detail: recoveryForbidden},
 		{Name: "fresh_agent_surface_forbids_unsafe_shortcuts", Passed: strings.Contains(forbiddenText, "hidden install") && strings.Contains(forbiddenText, "ExecutionPolicy Bypass"), Detail: forbiddenText},
 	}
