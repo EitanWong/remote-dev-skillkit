@@ -36,6 +36,7 @@ const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1
 const ConnectionSupervisionSchemaVersion = "rdev.support-session-connection-supervision.v1"
 const GatewayCandidatePreflightSchemaVersion = "rdev.support-session-gateway-candidate-preflight.v1"
 const AgentConnectionRunbookSchemaVersion = "rdev.support-session-agent-runbook.v1"
+const FreshAgentFailurePreventionSchemaVersion = "rdev.support-session-fresh-agent-failure-prevention.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -849,6 +850,7 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 			"cli_command": []string{rdevCommand, "support-session", "prepare", "--build-assets"},
 			"rule":        "use only to repair missing local helper assets or inspect gateway candidates before creating a fresh support-session entry",
 		},
+		"fresh_agent_failure_prevention": freshAgentFailurePrevention(),
 		"auto_approve": map[string]any{
 			"enabled": opts.AutoApprove,
 			"scope":   "standard attended-temporary first host only",
@@ -892,6 +894,42 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 			"UAC or sudo bypass",
 			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit approval",
 		},
+	}
+}
+
+func freshAgentFailurePrevention() map[string]any {
+	return map[string]any{
+		"schema_version": FreshAgentFailurePreventionSchemaVersion,
+		"purpose":        "keep fresh Agents on the standardized connect/start/watch/recover path instead of recreating fragile gateway, invite, bootstrap, and approval glue",
+		"known_failure_pattern": []string{
+			"manual rdev gateway serve plus rdev invite create can omit verified helper assets and produce target bootstraps that fail with rdev is required",
+			"background or ad hoc gateway process management can disappear before the target joins and leaves the Agent without a ready/status file",
+			"hand-written Windows PowerShell or shell bootstrap code causes model-dependent behavior and can weaken the security contract",
+			"asking humans to choose ticket, root key, gateway URL, transport, release root, checksum, or platform command creates avoidable multi-turn setup failures",
+		},
+		"required_standard_path": []string{
+			"start ordinary connect-this-computer requests with rdev.support_session.connect or rdev support-session connect",
+			"when ready_to_send_to_human=false, run cli_start_now_command exactly in a visible foreground terminal",
+			"send only user_handoff.message plus user_handoff.copy_paste to the human",
+			"watch foreground_feedback, status_file.path, connection_supervision, or rdev.support_session.status wait=true",
+			"report connected_next_steps.user_report immediately when connected=true",
+		},
+		"standard_recovery": []string{
+			"if rdev is missing, recover from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
+			"if helper assets are missing, run rdev support-session connect --start or rdev support-session prepare --build-assets from a valid checkout",
+			"if a LAN-only path times out or will not survive network changes, configure a standard hosted/relay/mesh/VPN/SSH gateway candidate and create a fresh Connection Entry",
+			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
+		},
+		"forbidden_agent_generated_workarounds": []string{
+			"manual ticket/root/gateway/transport/checksum substitution for humans",
+			"PowerShell or shell bootstrap/download scripts written by the Agent",
+			"nohup/background gateway lifecycle glue written by the Agent",
+			"custom relay, mesh, SSH, VPN, or polling scripts outside standard rdev tools",
+			"ExecutionPolicy Bypass",
+			"hidden install or persistence",
+			"manual approval polling loops",
+		},
+		"agent_rule": "treat this as a regression guard: if tempted to write setup code, stop and use the standard rdev support-session connect/start/prepare/status contracts instead",
 	}
 }
 

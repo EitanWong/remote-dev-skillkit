@@ -63,6 +63,15 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `rdev support-session create` may use the first configured
   `RDEV_*_GATEWAY_URL` when no explicit gateway URL was supplied; do not ask
   the human to choose a gateway URL when the runtime has one configured.
+- Read `agent_connection_runbook.fresh_agent_failure_prevention` before writing
+  any setup code. It captures known bad fresh-Agent failure patterns such as
+  manual `gateway serve` plus `invite create`, missing helper assets that make
+  Windows say `rdev is required`, background gateway glue, custom approval
+  polling, and Agent-written PowerShell/shell bootstraps. If you are about to
+  write one of those workarounds, stop and use the returned
+  `cli_start_now_command`, `ready_file.path`, `status_file.path`,
+  `connection_supervision`, or `rdev.support_session.prepare` recovery path
+  instead.
 - For every new visible support session, prefer the high-level connect output.
   If `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only the returned `user_handoff`. If it returns

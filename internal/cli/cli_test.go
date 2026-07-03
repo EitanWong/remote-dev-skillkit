@@ -304,6 +304,76 @@ func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 	}
 }
 
+func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicketWithMetadata(
+		model.HostModeAttendedTemporary,
+		600,
+		cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
+		"foreground status file watcher test",
+		map[string]string{"auto_approve": "attended-temporary"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out bytes.Buffer
+	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
+	go watchForegroundSupportSession(ctx, &out, statusFile, gw, ticket.Code, "en")
+
+	waitForStatusFileEvent(t, statusFile, "waiting")
+	if _, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "fresh-agent-connected-host",
+		OS:           "linux",
+		Arch:         "amd64",
+		Capabilities: ticket.Capabilities,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	statusPayload := waitForStatusFileEvent(t, statusFile, "connected")
+	status := statusPayload.Status
+	connectedNext := status["connected_next_steps"].(map[string]any)
+	if statusPayload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
+		status["schema_version"] != "rdev.support-session-status.v1" ||
+		status["connected"] != true ||
+		!strings.Contains(connectedNext["user_report"].(string), "Connection established") ||
+		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
+		t.Fatalf("expected connected status event in status file, got %#v", statusPayload)
+	}
+	if !strings.Contains(out.String(), `"event":"connected"`) {
+		t.Fatalf("expected connected stderr event, got %s", out.String())
+	}
+}
+
+type supportSessionStatusFileEvent struct {
+	SchemaVersion string         `json:"schema_version"`
+	Event         string         `json:"event"`
+	Status        map[string]any `json:"status"`
+	AgentRule     string         `json:"agent_rule"`
+}
+
+func waitForStatusFileEvent(t *testing.T, path, event string) supportSessionStatusFileEvent {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			last = string(data)
+			var payload supportSessionStatusFileEvent
+			if err := json.Unmarshal(data, &payload); err == nil && payload.Event == event {
+				return payload
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for status file event %q at %s; last=%s", event, path, last)
+	return supportSessionStatusFileEvent{}
+}
+
 func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

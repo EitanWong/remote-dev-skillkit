@@ -28,6 +28,15 @@ metadata, status watching, or approval polling by hand.
   `rdev.connection_entry.plan`, package materialization, or hand-written gateway
   setup unless the operator or a high-level recovery payload explicitly asks
   for that lower-level path.
+- Added `rdev.support-session-fresh-agent-failure-prevention.v1` inside
+  `rdev.support-session-agent-runbook.v1`. The runbook now records the real
+  fresh-Agent failure class where an Agent manually combined gateway startup,
+  invite creation, Windows bootstrap, background process glue, and approval
+  polling, then handed the human a target command that failed with
+  `rdev is required`. The contract tells Agents to stop before writing those
+  workarounds and recover through `cli_start_now_command`, `ready_file.path`,
+  `status_file.path`, `connection_supervision`, or
+  `rdev.support_session.prepare` instead.
 - Reordered the public MCP tool contract so `rdev.support_session.connect` is
   the first listed tool. This makes the high-level connection entry the most
   discoverable choice for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and
@@ -61,6 +70,8 @@ metadata, status watching, or approval polling by hand.
   have a stable local file containing the latest machine-readable foreground
   event, so they can report `event=connected` / `status.connected=true` even
   when a harness cannot stream or parse the long-running terminal output.
+  Regression coverage now exercises the watcher from `waiting` through a real
+  host registration to a connected status-file event.
 - Added `rdev.support-session-gateway-candidate-preflight.v1` to
   support-session prepare, create, start, and high-level connect payloads.
   Fresh Agents now get a machine-readable candidate decision table that

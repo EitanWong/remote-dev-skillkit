@@ -156,6 +156,15 @@ Steps:
     `agent_connection_runbook` first; it is the machine-readable order of
     operations for connecting, waiting, reporting, and recovering without
     custom scripts. Read
+    `agent_connection_runbook.fresh_agent_failure_prevention` before writing
+    any setup code: it captures known bad fresh-Agent failure patterns such as
+    manual `gateway serve` plus `invite create`, missing helper assets that make
+    Windows say `rdev is required`, background gateway glue, custom approval
+    polling, and Agent-written PowerShell/shell bootstraps. If you are about to
+    write one of those workarounds, stop and use the returned
+    `cli_start_now_command`, `ready_file.path`, `status_file.path`,
+    `connection_supervision`, or `rdev.support_session.prepare` recovery path
+    instead. Read
     `gateway_candidate_preflight` before asking me network questions or writing
     probes; it classifies LAN/direct, same-machine, operator-provided, and
     configured hosted/relay/mesh/VPN/SSH candidates and gives the standard next
