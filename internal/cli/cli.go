@@ -1769,24 +1769,28 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		start := fs.Bool("start", false, "when no reachable gateway is configured, start the standard visible foreground gateway in this process")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file when --start is used")
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file when --start is used")
+		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file when --start is used")
+		connectedReportFile := fs.String("connected-report-file", "", "write the exact connected user report text to this file when --start is used")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.supportSessionConnect(ctx, supportSessionConnectOptions{
-			RepoRoot:          *repoRoot,
-			WorkDir:           *workDir,
-			Addr:              *addr,
-			GatewayURL:        *gatewayURL,
-			Target:            *target,
-			Reason:            *reason,
-			TTLSeconds:        *ttl,
-			AutoApprove:       *autoApprove,
-			Locale:            *locale,
-			OperatorTokenFile: *operatorTokenFile,
-			RdevCommand:       *rdevCommand,
-			Start:             *start,
-			ReadyFile:         *readyFile,
-			StatusFile:        *statusFile,
+			RepoRoot:            *repoRoot,
+			WorkDir:             *workDir,
+			Addr:                *addr,
+			GatewayURL:          *gatewayURL,
+			Target:              *target,
+			Reason:              *reason,
+			TTLSeconds:          *ttl,
+			AutoApprove:         *autoApprove,
+			Locale:              *locale,
+			OperatorTokenFile:   *operatorTokenFile,
+			RdevCommand:         *rdevCommand,
+			Start:               *start,
+			ReadyFile:           *readyFile,
+			StatusFile:          *statusFile,
+			HandoffTextFile:     *handoffTextFile,
+			ConnectedReportFile: *connectedReportFile,
 		})
 	case "handoff":
 		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
@@ -1853,21 +1857,25 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file before serving; defaults to the session work dir")
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file before serving; defaults to the session work dir")
+		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file before serving; defaults to the session work dir")
+		connectedReportFile := fs.String("connected-report-file", "", "write the exact connected user report text to this file after the target connects; defaults to the session work dir")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
-			Addr:        *addr,
-			GatewayURL:  *gatewayURL,
-			WorkDir:     *workDir,
-			Target:      *target,
-			Reason:      *reason,
-			TTLSeconds:  *ttl,
-			AutoApprove: *autoApprove,
-			Locale:      *locale,
-			RdevCommand: *rdevCommand,
-			ReadyFile:   *readyFile,
-			StatusFile:  *statusFile,
+			Addr:                *addr,
+			GatewayURL:          *gatewayURL,
+			WorkDir:             *workDir,
+			Target:              *target,
+			Reason:              *reason,
+			TTLSeconds:          *ttl,
+			AutoApprove:         *autoApprove,
+			Locale:              *locale,
+			RdevCommand:         *rdevCommand,
+			ReadyFile:           *readyFile,
+			StatusFile:          *statusFile,
+			HandoffTextFile:     *handoffTextFile,
+			ConnectedReportFile: *connectedReportFile,
 		})
 	case "create":
 		fs := flag.NewFlagSet("support-session create", flag.ContinueOnError)
@@ -1949,34 +1957,38 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 }
 
 type supportSessionStartOptions struct {
-	Addr        string
-	GatewayURL  string
-	WorkDir     string
-	Target      string
-	Reason      string
-	TTLSeconds  int
-	AutoApprove bool
-	Locale      string
-	RdevCommand string
-	ReadyFile   string
-	StatusFile  string
+	Addr                string
+	GatewayURL          string
+	WorkDir             string
+	Target              string
+	Reason              string
+	TTLSeconds          int
+	AutoApprove         bool
+	Locale              string
+	RdevCommand         string
+	ReadyFile           string
+	StatusFile          string
+	HandoffTextFile     string
+	ConnectedReportFile string
 }
 
 type supportSessionConnectOptions struct {
-	RepoRoot          string
-	WorkDir           string
-	Addr              string
-	GatewayURL        string
-	Target            string
-	Reason            string
-	TTLSeconds        int
-	AutoApprove       bool
-	Locale            string
-	OperatorTokenFile string
-	RdevCommand       string
-	Start             bool
-	ReadyFile         string
-	StatusFile        string
+	RepoRoot            string
+	WorkDir             string
+	Addr                string
+	GatewayURL          string
+	Target              string
+	Reason              string
+	TTLSeconds          int
+	AutoApprove         bool
+	Locale              string
+	OperatorTokenFile   string
+	RdevCommand         string
+	Start               bool
+	ReadyFile           string
+	StatusFile          string
+	HandoffTextFile     string
+	ConnectedReportFile string
 }
 
 type supportSessionPrepareOptions struct {
@@ -2013,17 +2025,19 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	}
 	if opts.Start {
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
-			Addr:        opts.Addr,
-			GatewayURL:  opts.GatewayURL,
-			WorkDir:     opts.WorkDir,
-			Target:      opts.Target,
-			Reason:      opts.Reason,
-			TTLSeconds:  opts.TTLSeconds,
-			AutoApprove: opts.AutoApprove,
-			Locale:      opts.Locale,
-			RdevCommand: opts.RdevCommand,
-			ReadyFile:   opts.ReadyFile,
-			StatusFile:  opts.StatusFile,
+			Addr:                opts.Addr,
+			GatewayURL:          opts.GatewayURL,
+			WorkDir:             opts.WorkDir,
+			Target:              opts.Target,
+			Reason:              opts.Reason,
+			TTLSeconds:          opts.TTLSeconds,
+			AutoApprove:         opts.AutoApprove,
+			Locale:              opts.Locale,
+			RdevCommand:         opts.RdevCommand,
+			ReadyFile:           opts.ReadyFile,
+			StatusFile:          opts.StatusFile,
+			HandoffTextFile:     opts.HandoffTextFile,
+			ConnectedReportFile: opts.ConnectedReportFile,
 		})
 	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
@@ -2096,6 +2110,20 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	if absStatusFile, err := filepath.Abs(statusFile); err == nil {
 		statusFile = absStatusFile
+	}
+	handoffTextFile := strings.TrimSpace(opts.HandoffTextFile)
+	if handoffTextFile == "" {
+		handoffTextFile = filepath.Join(workDir, "target-handoff.txt")
+	}
+	if absHandoffTextFile, err := filepath.Abs(handoffTextFile); err == nil {
+		handoffTextFile = absHandoffTextFile
+	}
+	connectedReportFile := strings.TrimSpace(opts.ConnectedReportFile)
+	if connectedReportFile == "" {
+		connectedReportFile = filepath.Join(workDir, "connected-report.txt")
+	}
+	if absConnectedReportFile, err := filepath.Abs(connectedReportFile); err == nil {
+		connectedReportFile = absConnectedReportFile
 	}
 	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
 		RepoRoot:    findSupportSessionRepoRoot("."),
@@ -2188,6 +2216,8 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		WorkDir:                   workDir,
 		ReadyFile:                 readyFile,
 		StatusFile:                statusFile,
+		HandoffTextFile:           handoffTextFile,
+		ConnectedReportFile:       connectedReportFile,
 		Created:                   created,
 		AssetReport:               prepared["asset_report"],
 		ConnectionReadiness:       prepared["connection_readiness"],
@@ -2197,17 +2227,22 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if err := writeJSONFile0600(readyFile, started); err != nil {
 		return err
 	}
+	if err := writeSupportSessionHandoffTextFile0600(handoffTextFile, started); err != nil {
+		return err
+	}
 	if err := writeJSON(a.Stdout, started); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session ready payload written to %s\n", readyFile)
+	_, _ = fmt.Fprintf(a.Stderr, "rdev support session target handoff written to %s\n", handoffTextFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session status file writing to %s\n", statusFile)
+	_, _ = fmt.Fprintf(a.Stderr, "rdev support session connected report will be written to %s\n", connectedReportFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
-	go watchForegroundSupportSession(ctx, a.Stderr, statusFile, gw, ticket.Code, opts.Locale)
+	go watchForegroundSupportSession(ctx, a.Stderr, statusFile, connectedReportFile, gw, ticket.Code, opts.Locale)
 	return listenAndServeGatewayContext(ctx, addr, server.Handler(), nil)
 }
 
-func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFile string, gw *gateway.MemoryGateway, ticketCode, locale string) {
+func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFile, connectedReportFile string, gw *gateway.MemoryGateway, ticketCode, locale string) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	seenPending := false
@@ -2227,6 +2262,7 @@ func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFil
 				Locale:     locale,
 			})
 			if status["connected"] == true {
+				_ = writeSupportSessionConnectedReportFile0600(connectedReportFile, status)
 				writeSupportSessionEvent(out, statusFile, "connected", status)
 				return
 			}
@@ -8621,6 +8657,53 @@ func writeJSONFile0600(path string, value any) error {
 		return err
 	}
 	return os.Chmod(path, 0o600)
+}
+
+func writeTextFile0600(path, text string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("text file path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
+func writeSupportSessionHandoffTextFile0600(path string, started map[string]any) error {
+	envelope, _ := started["target_handoff_envelope"].(map[string]any)
+	text, _ := envelope["full_text"].(string)
+	if strings.TrimSpace(text) == "" {
+		if handoff, ok := started["user_handoff"].(map[string]any); ok {
+			message, _ := handoff["message"].(string)
+			copyPaste, _ := handoff["copy_paste"].(string)
+			text = strings.TrimSpace(message)
+			if strings.TrimSpace(copyPaste) != "" {
+				if text != "" {
+					text += "\n\n"
+				}
+				text += strings.TrimSpace(copyPaste)
+			}
+		}
+	}
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("support session handoff text is empty")
+	}
+	return writeTextFile0600(path, text)
+}
+
+func writeSupportSessionConnectedReportFile0600(path string, status map[string]any) error {
+	next, _ := status["connected_next_steps"].(map[string]any)
+	text, _ := next["user_report"].(string)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return writeTextFile0600(path, text)
 }
 
 func allAcceptanceChecksPassed(checks []acceptance.Check) bool {

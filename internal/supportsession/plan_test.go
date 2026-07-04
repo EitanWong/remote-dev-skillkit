@@ -570,12 +570,14 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		Locale:     "en",
 	})
 	started := BuildStarted(StartedOptions{
-		Addr:       "127.0.0.1:8787",
-		GatewayURL: "http://127.0.0.1:8787",
-		WorkDir:    "work/rdev-support-session",
-		ReadyFile:  "work/rdev-support-session/support-session-ready.json",
-		StatusFile: "work/rdev-support-session/support-session-status.json",
-		Created:    created,
+		Addr:                "127.0.0.1:8787",
+		GatewayURL:          "http://127.0.0.1:8787",
+		WorkDir:             "work/rdev-support-session",
+		ReadyFile:           "work/rdev-support-session/support-session-ready.json",
+		StatusFile:          "work/rdev-support-session/support-session-status.json",
+		HandoffTextFile:     "work/rdev-support-session/target-handoff.txt",
+		ConnectedReportFile: "work/rdev-support-session/connected-report.txt",
+		Created:             created,
 		AssetReport: map[string]any{
 			"schema_version": "rdev.support-session-assets.v1",
 			"all_ready":      true,
@@ -667,11 +669,27 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		!strings.Contains(statusFile["agent_rule"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected status file metadata, got %#v", statusFile)
 	}
+	handoffTextFile := started["handoff_text_file"].(map[string]any)
+	if handoffTextFile["schema_version"] != HandoffTextFileSchemaVersion ||
+		handoffTextFile["path"] != "work/rdev-support-session/target-handoff.txt" ||
+		handoffTextFile["contains"] != "target_handoff_envelope.full_text" ||
+		!strings.Contains(handoffTextFile["agent_rule"].(string), "plain-text") {
+		t.Fatalf("expected handoff text file metadata, got %#v", handoffTextFile)
+	}
+	connectedReportFile := started["connected_report_file"].(map[string]any)
+	if connectedReportFile["schema_version"] != ConnectedReportFileSchemaVersion ||
+		connectedReportFile["path"] != "work/rdev-support-session/connected-report.txt" ||
+		connectedReportFile["contains"] != "connected_next_steps.user_report" ||
+		!strings.Contains(connectedReportFile["agent_rule"].(string), "plain text") {
+		t.Fatalf("expected connected report file metadata, got %#v", connectedReportFile)
+	}
 	contract := started["fresh_agent_connect_contract"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
 		contract["ready_to_send_human"] != true ||
 		contract["ready_file_path"] != "work/rdev-support-session/support-session-ready.json" ||
 		contract["status_file_path"] != "work/rdev-support-session/support-session-status.json" ||
+		contract["handoff_text_file_path"] != "work/rdev-support-session/target-handoff.txt" ||
+		contract["connected_report_file_path"] != "work/rdev-support-session/connected-report.txt" ||
 		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "polling scripts") {
 		t.Fatalf("expected started fresh-Agent connect contract, got %#v", contract)
 	}

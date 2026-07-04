@@ -98,7 +98,11 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   `status_file.path` for the latest connection event when terminal output is
   unavailable, then send the started payload's top-level
   `target_handoff_envelope.full_text`, falling back to top-level
-  `user_handoff` only for older payloads. For lower-level explicit gateway workflows, call
+  `user_handoff` only for older payloads. If `handoff_text_file.path` is
+  present, prefer it over JSON parsing: read the plain text and forward it
+  verbatim to the target-side human. If `connected_report_file.path` is present
+  after connection, read that plain text and report it to the user before
+  creating jobs. For lower-level explicit gateway workflows, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
   CLI. Treat the returned `rdev.support-session-created.v1` as the standard
   one-command session package: it already includes the target command, join URL,
@@ -110,7 +114,10 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   before listening. It also writes the same JSON to `ready_file.path`; use that
   ready file when foreground stdout is hard to parse. It writes the latest
   foreground event to `status_file.path`; read it and report immediately when
-  it shows `event=connected` or `status.connected=true`. Use
+  it shows `event=connected` or `status.connected=true`. It also writes the
+  exact target-side handoff to `handoff_text_file.path` and the connection
+  success report to `connected_report_file.path`; prefer those plain-text files
+  when a fresh Agent or harness has trouble parsing long-running JSON output. Use
   `rdev.support_session.plan` or
   `rdev support-session plan` only for review/debug planning before writing any
   gateway, PowerShell, relay, nohup, approval, or bootstrap steps.

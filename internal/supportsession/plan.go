@@ -30,6 +30,8 @@ const CreatedSchemaVersion = "rdev.support-session-created.v1"
 const StartedSchemaVersion = "rdev.support-session-started.v1"
 const StatusSchemaVersion = "rdev.support-session-status.v1"
 const StatusFileSchemaVersion = "rdev.support-session-status-file.v1"
+const HandoffTextFileSchemaVersion = "rdev.support-session-handoff-text-file.v1"
+const ConnectedReportFileSchemaVersion = "rdev.support-session-connected-report-file.v1"
 const ConnectionAttemptPolicySchemaVersion = "rdev.connection-attempt-policy.v1"
 const UserHandoffSchemaVersion = "rdev.support-session-user-handoff.v1"
 const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recovery.v1"
@@ -143,7 +145,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	}
 	workDir := strings.TrimSpace(opts.WorkDir)
 	selectedPath := "start-foreground-gateway"
-	agentNextStep := "run cli_start_now_command in a visible terminal, then send the returned target_handoff_envelope.full_text"
+	agentNextStep := "run cli_start_now_command in a visible terminal, then prefer handoff_text_file.path when present; otherwise send the returned target_handoff_envelope.full_text"
 	mcpNextTool := ""
 	resolvedCreateGatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if resolvedCreateGatewayURL == "" {
@@ -363,6 +365,8 @@ type StartedOptions struct {
 	WorkDir                   string
 	ReadyFile                 string
 	StatusFile                string
+	HandoffTextFile           string
+	ConnectedReportFile       string
 	Created                   map[string]any
 	AssetReport               any
 	ConnectionReadiness       any
@@ -377,6 +381,8 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	workDir := strings.TrimSpace(opts.WorkDir)
 	readyFile := strings.TrimSpace(opts.ReadyFile)
 	statusFile := strings.TrimSpace(opts.StatusFile)
+	handoffTextFile := strings.TrimSpace(opts.HandoffTextFile)
+	connectedReportFile := strings.TrimSpace(opts.ConnectedReportFile)
 	session := opts.Created
 	payload := map[string]any{
 		"schema_version": StartedSchemaVersion,
@@ -417,14 +423,16 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"connectivity_helper_preflight":          session["connectivity_helper_preflight"],
 		"connection_entry_runner_recommendation": session["connection_entry_runner_recommendation"],
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
-			Phase:              "foreground-started",
-			Ready:              true,
-			TicketCode:         stringFromMap(session, "ticket_code"),
-			RdevCommand:        rdevCommandFromRunbook(session["agent_connection_runbook"]),
-			UserHandoffPresent: session["user_handoff"] != nil,
-			AutoApprove:        boolFromMap(session, "auto_approve"),
-			ReadyFile:          readyFile,
-			StatusFile:         statusFile,
+			Phase:               "foreground-started",
+			Ready:               true,
+			TicketCode:          stringFromMap(session, "ticket_code"),
+			RdevCommand:         rdevCommandFromRunbook(session["agent_connection_runbook"]),
+			UserHandoffPresent:  session["user_handoff"] != nil,
+			AutoApprove:         boolFromMap(session, "auto_approve"),
+			ReadyFile:           readyFile,
+			StatusFile:          statusFile,
+			HandoffTextFile:     handoffTextFile,
+			ConnectedReportFile: connectedReportFile,
 		}),
 		"agent_connection_runbook": firstNonNil(
 			session["agent_connection_runbook"],
@@ -466,6 +474,22 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"contains":              "rdev.support-session-foreground-event.v1",
 			"status_schema_version": StatusSchemaVersion,
 			"agent_rule":            "read this file after starting the foreground gateway when terminal output is unavailable; when event=connected or status.connected=true, immediately report connected_next_steps.user_report",
+		}
+	}
+	if handoffTextFile != "" {
+		payload["handoff_text_file"] = map[string]any{
+			"schema_version": HandoffTextFileSchemaVersion,
+			"path":           handoffTextFile,
+			"contains":       "target_handoff_envelope.full_text",
+			"agent_rule":     "read and forward this plain-text file verbatim to the target-side human; do not rewrite commands or extract ticket/root/gateway fields",
+		}
+	}
+	if connectedReportFile != "" {
+		payload["connected_report_file"] = map[string]any{
+			"schema_version": ConnectedReportFileSchemaVersion,
+			"path":           connectedReportFile,
+			"contains":       "connected_next_steps.user_report",
+			"agent_rule":     "when this file exists or status_file.path reports connected=true, send this plain text to the user before creating jobs",
 		}
 	}
 	return payload
@@ -948,14 +972,16 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 }
 
 type freshAgentConnectContractOptions struct {
-	Phase              string
-	Ready              bool
-	TicketCode         string
-	RdevCommand        string
-	UserHandoffPresent bool
-	AutoApprove        bool
-	ReadyFile          string
-	StatusFile         string
+	Phase               string
+	Ready               bool
+	TicketCode          string
+	RdevCommand         string
+	UserHandoffPresent  bool
+	AutoApprove         bool
+	ReadyFile           string
+	StatusFile          string
+	HandoffTextFile     string
+	ConnectedReportFile string
 }
 
 func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string]any {
@@ -969,7 +995,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 		"intent":              "model-independent-standard-path-for-a-fresh-agent-to-connect-one-target-machine",
 		"phase":               strings.TrimSpace(opts.Phase),
 		"ready_to_send_human": opts.Ready && opts.UserHandoffPresent,
-		"human_surface":       "send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads",
+		"human_surface":       "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads",
 		"first_tool":          "rdev.support_session.connect",
 		"first_cli":           []string{rdevCommand, "support-session", "connect"},
 		"recovery_if_rdev_missing": []string{
@@ -999,7 +1025,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
 		},
-		"status_rule": "after sending target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_next_steps.user_report immediately",
+		"status_rule": "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, connected_report_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately",
 		"auto_approve": map[string]any{
 			"enabled": opts.AutoApprove,
 			"scope":   "first attended-temporary host for the standard visible support-session ticket only",
@@ -1021,6 +1047,12 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 	}
 	if strings.TrimSpace(opts.StatusFile) != "" {
 		contract["status_file_path"] = opts.StatusFile
+	}
+	if strings.TrimSpace(opts.HandoffTextFile) != "" {
+		contract["handoff_text_file_path"] = opts.HandoffTextFile
+	}
+	if strings.TrimSpace(opts.ConnectedReportFile) != "" {
+		contract["connected_report_file_path"] = opts.ConnectedReportFile
 	}
 	return contract
 }
@@ -1071,9 +1103,9 @@ func freshAgentFailurePrevention() map[string]any {
 		"required_standard_path": []string{
 			"start ordinary connect-this-computer requests with rdev.support_session.connect or rdev support-session connect",
 			"when ready_to_send_to_human=false, run cli_start_now_command exactly in a visible foreground terminal",
-			"send only target_handoff_envelope.full_text to the human",
-			"watch foreground_feedback, status_file.path, connection_supervision, or rdev.support_session.status wait=true",
-			"report connected_next_steps.user_report immediately when connected=true",
+			"send handoff_text_file.path when present; otherwise send only target_handoff_envelope.full_text to the human",
+			"watch foreground_feedback, status_file.path, connected_report_file.path, connection_supervision, or rdev.support_session.status wait=true",
+			"report connected_report_file.path when present; otherwise report connected_next_steps.user_report immediately when connected=true",
 		},
 		"standard_recovery": []string{
 			"if rdev is missing, recover from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",

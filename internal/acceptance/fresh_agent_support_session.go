@@ -128,12 +128,14 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 	})
 	connectReachableGateway := supportsession.BuildConnectFromCreated(created)
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
-		Addr:       "0.0.0.0:8787",
-		GatewayURL: gatewayURL,
-		WorkDir:    filepath.Join(outDir, "support-session"),
-		ReadyFile:  filepath.Join(outDir, "support-session", "support-session-ready.json"),
-		StatusFile: filepath.Join(outDir, "support-session", "support-session-status.json"),
-		Created:    created,
+		Addr:                "0.0.0.0:8787",
+		GatewayURL:          gatewayURL,
+		WorkDir:             filepath.Join(outDir, "support-session"),
+		ReadyFile:           filepath.Join(outDir, "support-session", "support-session-ready.json"),
+		StatusFile:          filepath.Join(outDir, "support-session", "support-session-status.json"),
+		HandoffTextFile:     filepath.Join(outDir, "support-session", "target-handoff.txt"),
+		ConnectedReportFile: filepath.Join(outDir, "support-session", "connected-report.txt"),
+		Created:             created,
 	})
 	stableFallback := withFreshAgentGatewayEnv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev", func() map[string]any {
 		stableURL, stableCandidates := supportsession.ConfiguredGatewayURLCandidate()
@@ -290,6 +292,8 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	runbookFailurePrevention := mapFromAny(runbook["fresh_agent_failure_prevention"])
 	readyFile := mapFromAny(input.StartedSession["ready_file"])
 	statusFile := mapFromAny(input.StartedSession["status_file"])
+	handoffTextFile := mapFromAny(input.StartedSession["handoff_text_file"])
+	connectedReportFile := mapFromAny(input.StartedSession["connected_report_file"])
 	foregroundFeedback := mapFromAny(input.StartedSession["foreground_feedback"])
 	session := mapFromAny(input.StartedSession["session"])
 	startedHandoff := mapFromAny(input.StartedSession["user_handoff"])
@@ -352,6 +356,8 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "started_payload_has_foreground_feedback", Passed: stringFromAny(foregroundFeedback["schema_version"]) == "rdev.support-session-foreground-feedback.v1" && stringFromAny(foregroundFeedback["event_prefix"]) == "rdev support session event: " && strings.Contains(stringFromAny(foregroundFeedback["connected_rule"]), "connection has been established"), Detail: stringFromAny(foregroundFeedback["event_prefix"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
 		{Name: "started_payload_exposes_status_file", Passed: stringFromAny(statusFile["schema_version"]) == supportsession.StatusFileSchemaVersion && strings.Contains(stringFromAny(statusFile["path"]), "support-session-status.json") && strings.Contains(stringFromAny(statusFile["agent_rule"]), "connected_next_steps.user_report"), Detail: stringFromAny(statusFile["path"])},
+		{Name: "started_payload_exposes_handoff_text_file", Passed: stringFromAny(handoffTextFile["schema_version"]) == supportsession.HandoffTextFileSchemaVersion && strings.Contains(stringFromAny(handoffTextFile["path"]), "target-handoff.txt") && strings.Contains(stringFromAny(handoffTextFile["agent_rule"]), "plain-text"), Detail: stringFromAny(handoffTextFile["path"])},
+		{Name: "started_payload_exposes_connected_report_file", Passed: stringFromAny(connectedReportFile["schema_version"]) == supportsession.ConnectedReportFileSchemaVersion && strings.Contains(stringFromAny(connectedReportFile["path"]), "connected-report.txt") && strings.Contains(stringFromAny(connectedReportFile["agent_rule"]), "plain text"), Detail: stringFromAny(connectedReportFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
 		{Name: "stable_fallback_handoff_uses_configured_gateway", Passed: stringFromAny(stableFallbackHandoff["selected_path"]) == "create-with-reachable-gateway" && stringFromAny(stableFallbackHandoffArgs["gateway_url"]) == "https://relay.example.test/rdev", Detail: fmt.Sprintf("%v", stableFallbackHandoffArgs)},
 		{Name: "stable_fallback_created_uses_relay_candidate", Passed: strings.Contains(stringFromAny(stableFallbackCreated["target_command"]), "https://relay.example.test/rdev/join/") && strings.Contains(stringFromAny(stableFallbackCreated["target_command"]), "gateway_url_candidates=") && strings.Contains(stringFromAny(mapFromAny(stableFallbackCreated["user_handoff"])["copy_paste"]), "https://relay.example.test/rdev/join/"), Detail: stringFromAny(stableFallbackCreated["target_command"])},

@@ -153,10 +153,16 @@ source of truth.
 The CLI also writes the same started payload to `ready_file.path`
 (`support-session-ready.json` in the session work directory by default), so
 Agents can read top-level `target_handoff_envelope.full_text` from a stable file when a long-running
-foreground terminal makes stdout hard to parse. It also writes the latest
+foreground terminal makes stdout hard to parse. It also writes
+`handoff_text_file.path` (`target-handoff.txt` by default), a plain-text file
+containing the exact target-side human handoff. Fresh Agents should read and
+forward this file verbatim when it is present, instead of parsing JSON or
+rebuilding the command from ticket/root/gateway fields. It also writes the latest
 foreground status event to `status_file.path` (`support-session-status.json` by
 default), so Agents can report `event=connected` without inventing a polling
-loop.
+loop. When the target connects, it writes `connected_report_file.path`
+(`connected-report.txt` by default), a plain-text success report Agents can send
+to the user before creating jobs.
 This is a CLI foreground process rather than an MCP tool because MCP calls
 should not hide or orphan a long-running gateway.
 Agents should not manually combine `rdev gateway serve` and `rdev invite create`

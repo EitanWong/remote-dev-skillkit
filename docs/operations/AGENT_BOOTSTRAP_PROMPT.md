@@ -116,12 +116,16 @@ Steps:
     back to `user_handoff.message` plus `user_handoff.copy_paste` only for
     older payloads. If it returns `ready_to_send_to_human=false`,
     run the returned `cli_start_now_command` visible foreground `rdev support-session connect --start` command,
-    read `ready_file.path` when terminal stdout is hard to parse, read
-    `status_file.path` for the latest machine-readable connection event when
-    terminal output is unavailable, then send only the started payload's
-    top-level `target_handoff_envelope.full_text`, falling back to
-    top-level `user_handoff.message` plus `user_handoff.copy_paste` only for
-    older payloads. Always
+    read `handoff_text_file.path` when present and forward that plain text
+    verbatim to the target-side human. If that file is not present, read
+    `ready_file.path` when terminal stdout is hard to parse, then send only the
+    started payload's top-level `target_handoff_envelope.full_text`, falling
+    back to top-level `user_handoff.message` plus
+    `user_handoff.copy_paste` only for older payloads. Read `status_file.path`
+    for the latest machine-readable connection event when terminal output is
+    unavailable, and read `connected_report_file.path` when it appears after
+    connection establishment so you can report the ready plain-text success
+    message before creating jobs. Always
     read `fresh_agent_connect_contract` when present; it is the
     machine-readable standard path for fresh Agents. It tells you how to recover
     missing `rdev`, what not to ask humans for, and which custom PowerShell,
@@ -238,10 +242,16 @@ Steps:
     `ready_file.path`
     (`support-session-ready.json` in the session work directory by default);
     read that file when the long-running foreground terminal makes stdout hard
-    to parse. It also writes `status_file.path`
+    to parse. It also writes `handoff_text_file.path`
+    (`target-handoff.txt` by default), the exact plain-text target-side handoff
+    to forward verbatim without parsing JSON or rewriting commands. It also
+    writes `status_file.path`
     (`support-session-status.json` by default) with the latest foreground event;
     read it and report immediately when it shows `event=connected` or
-    `status.connected=true`. Use `rdev.support_session.plan` or
+    `status.connected=true`. When the target connects, it writes
+    `connected_report_file.path` (`connected-report.txt` by default), the exact
+    plain-text success report to send to the user before creating jobs. Use
+    `rdev.support_session.plan` or
     `rdev support-session plan`
     only for review/debug planning or when the operator asks for the underlying
     gateway argv.

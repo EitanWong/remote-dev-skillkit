@@ -321,7 +321,8 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 	defer cancel()
 	var out bytes.Buffer
 	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
-	go watchForegroundSupportSession(ctx, &out, statusFile, gw, ticket.Code, "en")
+	connectedReportFile := filepath.Join(t.TempDir(), "connected-report.txt")
+	go watchForegroundSupportSession(ctx, &out, statusFile, connectedReportFile, gw, ticket.Code, "en")
 
 	waitForStatusFileEvent(t, statusFile, "waiting")
 	if _, err := gw.RegisterHost(model.HostRegistration{
@@ -345,6 +346,13 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 	}
 	if !strings.Contains(out.String(), `"event":"connected"`) {
 		t.Fatalf("expected connected stderr event, got %s", out.String())
+	}
+	report, err := os.ReadFile(connectedReportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(report), "Connection established") {
+		t.Fatalf("expected connected report text, got %q", string(report))
 	}
 }
 
@@ -892,6 +900,8 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "support")
 	readyFile := filepath.Join(workDir, "ready", "support-session-ready.json")
 	statusFile := filepath.Join(workDir, "status", "support-session-status.json")
+	handoffTextFile := filepath.Join(workDir, "handoff", "target-handoff.txt")
+	connectedReportFile := filepath.Join(workDir, "status", "connected-report.txt")
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- app.Run(ctx, []string{
@@ -901,6 +911,8 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			"--work-dir", workDir,
 			"--ready-file", readyFile,
 			"--status-file", statusFile,
+			"--handoff-text-file", handoffTextFile,
+			"--connected-report-file", connectedReportFile,
 			"--target", "windows",
 			"--locale", "zh-CN",
 		})
@@ -964,6 +976,18 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			StatusSchemaVersion string `json:"status_schema_version"`
 			AgentRule           string `json:"agent_rule"`
 		} `json:"status_file"`
+		HandoffTextFile struct {
+			SchemaVersion string `json:"schema_version"`
+			Path          string `json:"path"`
+			Contains      string `json:"contains"`
+			AgentRule     string `json:"agent_rule"`
+		} `json:"handoff_text_file"`
+		ConnectedReportFile struct {
+			SchemaVersion string `json:"schema_version"`
+			Path          string `json:"path"`
+			Contains      string `json:"contains"`
+			AgentRule     string `json:"agent_rule"`
+		} `json:"connected_report_file"`
 		ReadyToSendHuman bool   `json:"ready_to_send_to_human"`
 		TargetCommand    string `json:"target_command"`
 		JoinURL          string `json:"join_url"`
@@ -1019,6 +1043,18 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		!strings.Contains(payload.StatusFile.AgentRule, "connected_next_steps.user_report") {
 		t.Fatalf("expected status-file metadata, got %#v", payload.StatusFile)
 	}
+	if payload.HandoffTextFile.SchemaVersion != "rdev.support-session-handoff-text-file.v1" ||
+		payload.HandoffTextFile.Path != handoffTextFile ||
+		payload.HandoffTextFile.Contains != "target_handoff_envelope.full_text" ||
+		!strings.Contains(payload.HandoffTextFile.AgentRule, "plain-text") {
+		t.Fatalf("expected handoff text-file metadata, got %#v", payload.HandoffTextFile)
+	}
+	if payload.ConnectedReportFile.SchemaVersion != "rdev.support-session-connected-report-file.v1" ||
+		payload.ConnectedReportFile.Path != connectedReportFile ||
+		payload.ConnectedReportFile.Contains != "connected_next_steps.user_report" ||
+		!strings.Contains(payload.ConnectedReportFile.AgentRule, "plain text") {
+		t.Fatalf("expected connected report-file metadata, got %#v", payload.ConnectedReportFile)
+	}
 	if !payload.ReadyToSendHuman ||
 		payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
 		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
@@ -1055,6 +1091,14 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	}
 	if statusInfo.Mode().Perm() != 0o600 {
 		t.Fatalf("expected status file permissions 0600, got %v", statusInfo.Mode().Perm())
+	}
+	handoffBytes, err := os.ReadFile(handoffTextFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(handoffBytes), payload.Session.TicketCode) ||
+		!strings.Contains(string(handoffBytes), payload.TargetCommand) {
+		t.Fatalf("expected handoff text file to contain final target command, got %q", string(handoffBytes))
 	}
 	var readyPayload struct {
 		SchemaVersion string `json:"schema_version"`

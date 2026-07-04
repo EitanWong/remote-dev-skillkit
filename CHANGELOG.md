@@ -12,6 +12,17 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added plain-text foreground support-session files for fresh Agents and
+  weaker harnesses. `rdev support-session connect --start` /
+  `rdev support-session start` now write `target-handoff.txt` by default and
+  expose it as `rdev.support-session-handoff-text-file.v1` at
+  `handoff_text_file.path`, containing the exact
+  `target_handoff_envelope.full_text` value to forward to the target-side
+  human. The foreground watcher also writes `connected-report.txt` by default
+  and exposes it as `rdev.support-session-connected-report-file.v1` at
+  `connected_report_file.path` when the target connects, so Agents can
+  proactively report connection success without parsing long-running terminal
+  output or rebuilding messages from JSON fields.
 - Added dev-gateway helper asset self-repair. `rdev gateway serve --dev` now
   defaults `--auto-build-rdev-assets=true`; when no explicit helper asset path
   is configured and a valid checkout plus Go are available, it builds the
@@ -322,6 +333,11 @@ metadata, status watching, or approval polling by hand.
 
 ### Changed
 
+- Shortened the root README and multilingual quick-start install prompts to a
+  compact repository plus full-prompt link. The detailed Agent installation,
+  adaptive connection, support-session, fallback, and recovery protocol now
+  lives in `docs/operations/AGENT_BOOTSTRAP_PROMPT.md` instead of being
+  duplicated across every homepage README.
 - `rdev support-session prepare` and `rdev support-session start` now default
   the listen address to `0.0.0.0:8787` while selecting a recommended private/LAN
   or explicit gateway URL for target commands. Loopback remains available but is

@@ -70,153 +70,12 @@ Already inside Codex, Claude Code, Hermes, OpenClaw/OpenCode, or another
 MCP-capable agent? Copy this into the agent:
 
 ```text
-Bootstrap Remote Dev Skillkit for this agent runtime.
+Install Remote Dev Skillkit for this agent runtime.
 
 Repository: https://github.com/EitanWong/remote-dev-skillkit
+Full install prompt: https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
 
-Clone or update the repository in a safe user/workspace location. Then read
-`docs/operations/AGENT_BOOTSTRAP_PROMPT.md` from the checkout and follow it as
-the source of truth. If cloning is blocked, read the prompt from:
-https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
-
-Install the Skillkit and configure MCP for this agent. Probe OS, shell, Git, Go,
-`rdev`, current agent framework, skill directory, MCP config, and network state
-before acting. Ask one short question when a required value is unclear. For this
-personal computer, prefer local MCP stdio with `rdev mcp serve`; do not require a
-hosted gateway URL.
-
-If `rdev` is missing, do not stop. Recover it by using an existing local rdev
-binary if known, building this checkout with `go install ./cmd/rdev`, using
-`go run ./cmd/rdev bootstrap agent-plan --repo-root .` as a temporary planner,
-or cloning then building in a safe user/workspace location. After `rdev` works,
-run `rdev bootstrap agent-plan --repo-root .` and follow the JSON plan.
-
-When I ask you to work on another machine, always create a Connection Entry.
-Treat it as the universal target-side handoff for every scenario: my own durable
-computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
-or VPN-assisted connectivity. First call `rdev.support_session.connect` or run
-`rdev support-session connect`; it is the high-level "connect a computer"
-entry. If a configured or reachable gateway exists, it creates the session and
-returns the ready `target_handoff_envelope.full_text` plus compatibility
-`user_handoff`. If no gateway is running, it returns
-`cli_start_now_command`, the standard visible foreground
-`rdev support-session connect --start` command, instead of failing or making
-the Agent choose lower-level steps. Do not start ordinary remote-connection
-requests with `rdev.invites.create`, `rdev invite create`,
-`rdev.connection_entry.plan`, or `rdev connection-entry plan`; those lower-level
-surfaces are for reviewed package materialization, explicitly approved managed
-owned hosts, or recovery instructions returned by the high-level tools. Use
-`rdev.support_session.handoff` only for review/debug routing details. If `rdev`, the gateway, or helper assets are
-unclear, call `rdev.support_session.prepare` or run
-`rdev support-session prepare --build-assets`; follow its standard recovery
-actions and use its recommended `gateway_url_candidates` entry instead of
-asking me to choose or assemble a gateway URL. Never give a remote target
-`0.0.0.0` or same-machine loopback unless this is explicitly same-machine
-testing. If this runtime has configured gateway fallbacks such as
-`RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
-`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
-`RDEV_SSH_GATEWAY_URL`, `rdev` automatically appends them to
-`gateway_url_candidates` after direct/LAN candidates and before loopback so the
-target command can fail over without Agent-written glue. `connect`, `handoff`,
-and `create` use the first configured `RDEV_*_GATEWAY_URL` when no explicit
-`gateway_url` is supplied, so fresh Agents do not need to ask me which gateway
-URL to use. Read `gateway_candidate_preflight` before asking me network
-questions or writing probes: it classifies each candidate as LAN, same-machine,
-operator-provided, or configured hosted/relay/mesh/VPN/SSH fallback and gives
-the standard next action. Also read `connectivity_helper_preflight`: it reports
-configured `RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` helper
-metadata for SSH, relay, mesh, and VPN paths, validates tool allow-lists, and
-flags unsafe argv such as shell command strings or `ExecutionPolicy Bypass`
-without executing anything. For durable or restrictive-network connectivity,
-read `connection_entry_runner_recommendation`; it carries the inline invite JSON
-and standard `rdev.connection_entry.plan` / `rdev connection-entry run
---dry-run` path for the self-contained runner, so the Agent does not recreate
-ticket, manifest root, gateway, relay, mesh, VPN, or SSH glue. Also read
-`fresh_agent_connect_contract`; it is the shortest machine-readable contract
-for a newly installed Agent: recover `rdev` instead of stopping, forward
-`target_handoff_envelope.full_text` verbatim when present, fall back to
-`user_handoff.message` plus `user_handoff.copy_paste` only for older payloads,
-wait through the returned watcher/status file, and never ask humans for ticket/root/gateway
-values or generate custom PowerShell/shell/tunnel/polling scripts. Also read
-`agent_connection_runbook`; it is the
-machine-readable order of operations for fresh Agents: run the standard start
-command when needed, send only the handoff, wait, report `connected=true`, and
-recover without custom scripts. Read
-`agent_connection_runbook.fresh_agent_failure_prevention` before writing any
-setup code: it captures known bad fresh-Agent failure patterns such as manual
-`gateway serve` plus `invite create`, missing helper assets that make Windows
-say `rdev is required`, background gateway glue, custom approval polling, and
-Agent-written PowerShell/shell bootstraps. If you are about to write one of
-those workarounds, stop and use the returned `cli_start_now_command`,
-`ready_file.path`, `status_file.path`, `connection_supervision`, or
-`rdev.support_session.prepare` recovery path instead. If a reachable gateway is already running, `connect` returns
-`rdev.support-session-connect.v1` with `ready_to_send_to_human=true`; if no
-gateway is running, it returns `ready_to_send_to_human=false` plus the
-`cli_start_now_command`. If a lower-level path is explicitly needed, call
-`rdev.support_session.create` through MCP or
-`rdev support-session create` through the CLI. That returns the ready
-target-machine command, ticket, join URL, and status watcher in one structured
-payload. It also returns `target_bootstrap_requirements` and, for CLI calls,
-`target_bootstrap_readiness`, so the Agent can detect whether an existing
-gateway can serve verified helper assets for clean targets that do not already
-have `rdev`. If readiness is false for a platform command, run
-`rdev support-session connect --start` or `rdev support-session prepare --build-assets`
-instead of asking the target-side human to install `rdev` manually. The target
-command already tries ordered gateway URL candidates with bounded timeout/retry
-behavior; do not write a custom PowerShell, shell, relay, or polling fallback.
-After the target has registered, `rdev host serve --transport auto` also reuses
-the signed join-manifest gateway candidates and can switch to another reachable
-candidate if the current gateway fails before jobs are processed.
-Read `connection_continuity_policy` as well: if
-`stable_after_lan_change=false`, treat LAN as only the first opportunistic path
-and prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming the
-connection is robust for long-running work.
-Prefer `target_handoff_envelope.full_text` when telling me what to run; it is
-already the complete plain-text message plus exact command/link. Fall back to
-`user_handoff.message` plus `user_handoff.copy_paste` only for older payloads.
-If no gateway is running
-yet, run `rdev support-session connect --start` in a visible foreground
-terminal; it
-auto-prepares verified Windows/macOS/Linux
-helper assets when a source checkout and Go are available, starts the local
-gateway, and prints the same ready session payload before listening. Send only
-the started payload's top-level `target_handoff_envelope.full_text`; fall back
-to top-level `user_handoff.message` plus `user_handoff.copy_paste` only for
-older payloads. Do not read nested session fields or rewrite the command. Keep
-the foreground command open and read
-`foreground_feedback`: it emits machine-readable stderr events prefixed with
-`rdev support session event: `, including `event=connected`, so the Agent can
-tell me the connection is established even before opening a separate watcher.
-When terminal output is unavailable, read `status_file.path`; it stores the
-latest machine-readable foreground event as `support-session-status.json`. Use
-`rdev.support_session.plan` or `rdev support-session plan` only for review/debug
-planning. After giving me the target-machine command, read
-`connection_supervision` and watch `rdev.support_session.status` or
-`rdev support-session status --wait`; the CLI status command can omit
-`--gateway-url` when a configured `RDEV_*_GATEWAY_URL` exists. Created session
-payloads include `watch_connection_status_configured_gateway` with this shorter
-watcher command, and Agents should use it when a configured gateway is present.
-When `connected=true`, tell me the connection has been established before creating jobs. Then follow
-`connected_next_steps`: report `user_report`, inspect
-`rdev.hosts.capabilities`, and create only the smallest scoped job for my task.
-If waiting times out or
-the target does not appear, read the returned `connection_recovery` field and
-follow its standard tools instead of writing custom recovery scripts.
-Do not ask humans to assemble ticket, root, gateway, transport, release, or
-checksum flags. Use `rdev.invites.create`, then materialize it with
-`rdev.connection_entry.plan` or `rdev connection-entry plan`.
-Give the target side only the selected link, visible script, or signed package;
-keep low-level parameters in Agent/tool metadata. Choose `managed` for my own
-long-running machines and `attended-temporary` for third-party or one-off
-repair machines by following `connection_entry_plan.target_selection_policy`.
-Auto-select LAN, hosted, SSH, relay, mesh, or VPN paths as needed; prefer
-existing, open-source/free options such as frp, Chisel, headscale, or WireGuard;
-ask before privileged, persistent, paid, firewall, DNS, cloud, or
-security-policy changes. For company or third-party machines, ask only for
-authorization first, then default to visible attended-temporary mode; let the
-Connection Entry and target-side probes detect Windows/macOS/Linux. Dry-run
-before execute. Do not hardcode private paths, secrets, or server addresses;
-example URLs are placeholders only.
+Clone or update the repository, read the full install prompt, and follow it as the source of truth. If cloning is blocked, open the prompt link directly. Ask one short question only when a required value is unclear.
 ```
 
 For the full copy-paste prompt, see
@@ -351,9 +210,15 @@ use top-level `connection_supervision` or foreground feedback to wait, report
 writes the same payload to `ready_file.path` as
 `support-session-ready.json` under the session work directory by default, so
 Agents can read the file when a long-running foreground terminal makes stdout
-hard to parse. It also writes the latest foreground status event to
+hard to parse. It also writes `handoff_text_file.path` as
+`target-handoff.txt` by default, which is the easiest fresh-Agent path: read
+that plain-text file and send it to the target-side human verbatim, without
+parsing JSON or rebuilding commands. It also writes the latest foreground status event to
 `status_file.path` as `support-session-status.json`, so Agents can detect
-`event=connected` without writing their own polling loop. The Agent
+`event=connected` without writing their own polling loop. When the target
+connects, it writes `connected_report_file.path` as `connected-report.txt` by
+default, so the Agent can proactively report the plain-text connection success
+message before creating jobs. The Agent
 should use `rdev.support_session.plan` or `rdev support-session plan` only for
 review/debug planning. The Agent should not write its own PowerShell, relay,
 nohup, ticket, root, gateway, transport, status polling, or approval glue.

@@ -121,7 +121,11 @@ revocation.
   `status_file.path` for the latest connection event when terminal output is
   unavailable, then send the started payload's top-level
   `target_handoff_envelope.full_text`, falling back to top-level
-  `user_handoff` only for older payloads. For lower-level explicit gateway workflows, use
+  `user_handoff` only for older payloads. If `handoff_text_file.path` is
+  present, read that plain-text file and forward it verbatim to the target-side
+  human instead of parsing JSON or rebuilding commands. If
+  `connected_report_file.path` is present after connection, read that plain text
+  and report it to the user before creating jobs. For lower-level explicit gateway workflows, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
@@ -136,7 +140,9 @@ revocation.
   machine-readable stderr lines prefixed with
   `rdev support session event: `; when `event=connected`, immediately tell the
   user the connection has been established. Use `status_file.path`,
-  `connection_supervision`, or the status watcher as fallback sources of truth.
+  `connected_report_file.path`, `connection_supervision`, or the status watcher
+  as fallback sources of truth. Use `handoff_text_file.path` as the preferred
+  target-side human handoff when it is present.
 - Treat returned `target_command` as the standard fallback surface. It already
   tries ordered gateway URL candidates on the target machine with the returned
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in

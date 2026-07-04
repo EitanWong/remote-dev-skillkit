@@ -33,33 +33,38 @@ one-message flow:
    back to `user_handoff.message` plus `user_handoff.copy_paste` only for older
    payloads;
 5. read `ready_file.path` when foreground stdout is hard to parse;
-6. expose `status_file.path` for the latest machine-readable foreground event
+6. expose `handoff_text_file.path` for the exact plain-text target-side handoff
+   so a fresh Agent can forward one file verbatim instead of parsing JSON;
+7. expose `status_file.path` for the latest machine-readable foreground event
    when terminal output is unavailable, with regression coverage that drives the
    foreground watcher from `waiting` to `connected` after host registration;
-7. expose foreground stderr feedback events so an Agent can report
+8. expose `connected_report_file.path` for the exact plain-text success report
+   after the target connects, so an Agent can proactively tell the user the
+   connection is established before creating jobs;
+9. expose foreground stderr feedback events so an Agent can report
    `event=connected` from the kept-open command;
-8. wait for status with `rdev.support_session.status` as the fallback source of
+10. wait for status with `rdev.support_session.status` as the fallback source of
    truth;
-9. report `connected=true` through `connected_next_steps.user_report`;
-10. fetch a local join page, Windows `bootstrap.ps1`, macOS/Linux
+11. report `connected=true` through `connected_next_steps.user_report`;
+12. fetch a local join page, Windows `bootstrap.ps1`, macOS/Linux
    `bootstrap.sh`, and `/assets/*.sha256` endpoints from a `httptest` gateway
    to prove clean targets can download and SHA-256 verify helper binaries
    instead of being told to install `rdev` manually;
-11. configure `RDEV_RELAY_GATEWAY_URL` during the local gate and prove the
+13. configure `RDEV_RELAY_GATEWAY_URL` during the local gate and prove the
     high-level handoff auto-selects that stable gateway, the target command uses
     the relay join URL, `connection_continuity_policy.stable_after_lan_change`
     is true, and the Agent runbook reports the stable fallback instead of
     asking the Agent to write relay/mesh/VPN/SSH glue;
-12. include signed runtime gateway candidates in the generated target bootstrap
+14. include signed runtime gateway candidates in the generated target bootstrap
     URL, so the fetched join manifest can carry ordered gateway candidates to
     `rdev host serve` and the target host can select a reachable signed
     candidate before registration;
-13. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+15. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
    gateway, transport, or bootstrap glue;
-14. include `rdev.support-session-target-handoff-envelope.v1` on created,
+16. include `rdev.support-session-target-handoff-envelope.v1` on created,
    connected, and started payloads, so Agents no longer need to reconstruct the
    human-facing text from separate fields;
-15. include `agent_connection_runbook.fresh_agent_failure_prevention`, a
+17. include `agent_connection_runbook.fresh_agent_failure_prevention`, a
    machine-readable regression guard for real fresh-Agent failures such as
    manual gateway/invite/bootstrap assembly, missing helper assets that produce
    `rdev is required`, background gateway workarounds, custom approval polling,
