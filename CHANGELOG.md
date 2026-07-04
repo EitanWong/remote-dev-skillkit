@@ -4,6 +4,41 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.21-dev
+
+Current phase: helper/relay adapter evidence moved from package metadata and
+synthetic acceptance input toward the real Connection Entry runner path. The
+standard runner now has regression coverage for executing configured SSH,
+headscale/Tailscale-compatible mesh, and WireGuard helper startup paths before
+host registration, while production claims still require real cross-network
+Windows/macOS/Linux acceptance evidence.
+
+### Added
+
+- Added regression coverage proving `connectionrunner.Run` can execute
+  approved, already-configured `RDEV_SSH_TUNNEL_START_ARGV_JSON`,
+  `RDEV_MESH_START_ARGV_JSON`, and `RDEV_VPN_START_ARGV_JSON` helper paths,
+  wait for their configured gateway override, run `rdev host serve`, and clean
+  up the helper process through the same standard runner flow used by
+  Chisel/frpc relay paths.
+- Added `rdev connection-entry run --result-out <path>` so Agents and release
+  automation can archive the raw `rdev.connection-entry.runner-result.v1`
+  evidence file without parsing stdout or reconstructing result JSON.
+- Updated release smoke so relay/connectivity acceptance evidence is generated
+  by a real `rdev connection-entry plan` plus `rdev connection-entry run`
+  invocation against a temporary gateway and fake reviewed WireGuard helper,
+  instead of hand-writing a runner-result JSON fixture.
+
+### Remaining Gates
+
+- Run real restrictive-network acceptance for SSH tunnel, frp/Chisel,
+  headscale/Tailscale-compatible mesh, and WireGuard paths across clean
+  Windows/macOS/Linux targets, then package the resulting runner/helper/gateway
+  evidence with `rdev acceptance package-relay-adapter`.
+- Continue real deployed hosted provider evidence, real GitHub Release
+  publication/download verification, and remaining durable provider runtime
+  integrations.
+
 ## 0.1.20-dev
 
 Current phase: hosted storage moved from provider contracts toward a real

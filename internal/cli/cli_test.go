@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
+	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
@@ -1840,6 +1841,70 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 	if strings.Contains(stdout.String(), "customer_bootstrap") ||
 		strings.Contains(stdout.String(), "connector_package_plan") {
 		t.Fatalf("connection entry output should not use legacy customer/connector names: %s", stdout.String())
+	}
+}
+
+func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var inviteOut bytes.Buffer
+	inviteApp := NewApp(&inviteOut, &bytes.Buffer{})
+	if err := inviteApp.Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--reason", "runner evidence",
+		"--transport", "auto",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "entry")
+	var planOut bytes.Buffer
+	app := NewApp(&planOut, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"connection-entry", "plan",
+		"--invite-json", inviteOut.String(),
+		"--out", outDir,
+		"--target-os", "linux",
+		"--ownership", "third-party",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var planPayload struct {
+		RunnerPlan struct {
+			ManifestPath string `json:"manifest_path"`
+		} `json:"runner_plan"`
+	}
+	if err := json.Unmarshal(planOut.Bytes(), &planPayload); err != nil {
+		t.Fatalf("invalid connection entry plan JSON: %v\n%s", err, planOut.String())
+	}
+	resultOut := filepath.Join(t.TempDir(), "evidence", "runner-result.json")
+	var runOut bytes.Buffer
+	app = NewApp(&runOut, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"connection-entry", "run",
+		"--runner-manifest", planPayload.RunnerPlan.ManifestPath,
+		"--dry-run",
+		"--probe-timeout", "1s",
+		"--result-out", resultOut,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(resultOut)
+	if err != nil {
+		t.Fatalf("expected runner result evidence: %v", err)
+	}
+	var result connectionrunner.RunResult
+	if err := json.Unmarshal(content, &result); err != nil {
+		t.Fatalf("invalid runner result evidence: %v\n%s", err, string(content))
+	}
+	if result.SchemaVersion != "rdev.connection-entry.runner-result.v1" ||
+		result.SelectedPath != "native-direct-gateway" ||
+		len(result.HostServeArgs) == 0 ||
+		result.Executed {
+		t.Fatalf("unexpected runner evidence: %#v\ncli output: %s", result, runOut.String())
 	}
 }
 

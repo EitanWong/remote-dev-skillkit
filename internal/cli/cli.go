@@ -4584,6 +4584,7 @@ func (a App) connectionEntry(args []string) error {
 		dryRun := fs.Bool("dry-run", false, "probe and print selected path without starting host serve")
 		probeTimeout := fs.Duration("probe-timeout", 5*time.Second, "per-path gateway probe timeout")
 		extraHostArgs := fs.String("host-args", "", "optional comma-separated extra rdev host serve args")
+		resultOut := fs.String("result-out", "", "optional path to write the raw Connection Entry runner result JSON for acceptance evidence")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -4597,6 +4598,11 @@ func (a App) connectionEntry(args []string) error {
 		if err != nil {
 			return err
 		}
+		if strings.TrimSpace(*resultOut) != "" {
+			if err := writeConnectionRunnerResult(*resultOut, result); err != nil {
+				return err
+			}
+		}
 		return writeJSON(a.Stdout, map[string]any{
 			"ok":                     result.SelectedPath != "" && len(result.ManualActionRequired) == 0,
 			"schema":                 result.SchemaVersion,
@@ -4609,6 +4615,18 @@ func (a App) connectionEntry(args []string) error {
 	default:
 		return fmt.Errorf("unknown connection-entry subcommand %q", args[0])
 	}
+}
+
+func writeConnectionRunnerResult(path string, result connectionrunner.RunResult) error {
+	content, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o600)
 }
 
 func (a App) invite(ctx context.Context, args []string) error {

@@ -281,6 +281,114 @@ func TestRunStartsConfiguredHelperBeforeHostServe(t *testing.T) {
 	}
 }
 
+func TestRunStartsConfiguredStandardConnectivityHelpers(t *testing.T) {
+	cases := []struct {
+		name       string
+		gatewayEnv string
+		startEnv   string
+		gatewayURL string
+		tool       string
+		argv       string
+		selected   string
+	}{
+		{
+			name:       "ssh-tunnel",
+			gatewayEnv: "RDEV_SSH_GATEWAY_URL",
+			startEnv:   "RDEV_SSH_TUNNEL_START_ARGV_JSON",
+			gatewayURL: "http://127.0.0.1:8788",
+			tool:       "ssh",
+			argv:       `["ssh","-N","-L","8788:127.0.0.1:8787","gateway-alias"]`,
+			selected:   "existing-ssh-tunnel",
+		},
+		{
+			name:       "headscale-tailscale-mesh",
+			gatewayEnv: "RDEV_MESH_GATEWAY_URL",
+			startEnv:   "RDEV_MESH_START_ARGV_JSON",
+			gatewayURL: "http://100.64.0.10:8787",
+			tool:       "tailscale",
+			argv:       `["tailscale","status","--json"]`,
+			selected:   "existing-headscale-tailscale-mesh",
+		},
+		{
+			name:       "wireguard-vpn",
+			gatewayEnv: "RDEV_VPN_GATEWAY_URL",
+			startEnv:   "RDEV_VPN_START_ARGV_JSON",
+			gatewayURL: "http://10.44.0.1:8787",
+			tool:       "wg",
+			argv:       `["wg","show"]`,
+			selected:   "existing-wireguard-vpn",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.gatewayEnv, tc.gatewayURL)
+			t.Setenv(tc.startEnv, tc.argv)
+			out := filepath.Join(t.TempDir(), "runner")
+			pkg, err := Build(Options{
+				Invite:       testInvite(t),
+				OutDir:       out,
+				TargetOS:     "linux",
+				TargetArch:   "amd64",
+				SessionMode:  string(model.HostModeAttendedTemporary),
+				WritePackage: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var events []string
+			result, err := Run(RunOptions{
+				ManifestPath: pkg.ManifestPath,
+				HTTPProbe: func(rawURL string, timeout time.Duration) error {
+					if rawURL == tc.gatewayURL && slices.Contains(events, "helper-started") {
+						events = append(events, "helper-probed")
+						return nil
+					}
+					return errors.New("not reachable yet")
+				},
+				LookPath: func(name string) (string, error) {
+					if name == tc.tool {
+						return "/usr/local/bin/" + tc.tool, nil
+					}
+					return "", errors.New("not found")
+				},
+				HelperStarter: func(argv []string) (func() error, error) {
+					if executableBaseName(argv[0]) != tc.tool {
+						t.Fatalf("unexpected helper argv: %v", argv)
+					}
+					events = append(events, "helper-started")
+					return func() error {
+						events = append(events, "helper-cleaned")
+						return nil
+					}, nil
+				},
+				CommandRunner: func(command string, args []string) error {
+					events = append(events, "host-serve")
+					if command != "rdev" || !slices.Contains(args, "--gateway") || !slices.Contains(args, tc.gatewayURL) {
+						t.Fatalf("unexpected host serve command: %s %v", command, args)
+					}
+					return nil
+				},
+				ProbeTimeout: time.Second,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.SelectedPath != tc.selected ||
+				result.SelectedGatewayURL != tc.gatewayURL ||
+				!result.HelperStartConfigured ||
+				!result.HelperStarted ||
+				result.HelperStartTool != tc.tool ||
+				!result.Executed {
+				t.Fatalf("expected executed %s helper path, got %#v", tc.selected, result)
+			}
+			want := []string{"helper-started", "helper-probed", "host-serve", "helper-cleaned"}
+			if strings.Join(events, "|") != strings.Join(want, "|") {
+				t.Fatalf("unexpected event order: got %v want %v", events, want)
+			}
+		})
+	}
+}
+
 func TestRunRejectsHelperStartForWrongTool(t *testing.T) {
 	t.Setenv("RDEV_RELAY_GATEWAY_URL", "http://127.0.0.1:8787")
 	t.Setenv("RDEV_RELAY_START_ARGV_JSON", `["sh","-c","chisel client relay.example.invalid"]`)

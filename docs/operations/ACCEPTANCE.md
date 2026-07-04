@@ -75,6 +75,23 @@ The command writes `report.json` with schema
 local contract is intact; the real multi-harness and clean-machine acceptance
 runs remain required before claiming production-grade connectivity.
 
+## Connection Entry Runner Evidence
+
+When collecting real relay, mesh, VPN, or SSH acceptance evidence, generate the
+runner result from the standard runner instead of writing JSON by hand:
+
+```bash
+rdev connection-entry run \
+  --runner-manifest connection-entry-runner.json \
+  --result-out runner-result.json
+```
+
+Use `runner-result.json` as the `--runner-result` input for
+`rdev acceptance package-relay-adapter`. The result uses schema
+`rdev.connection-entry.runner-result.v1` and records the selected path,
+gateway override, helper-start status, transport, host-serve argv, probe
+results, and manual-action requirements.
+
 ## Managed Mac Coding Harness
 
 Run:

@@ -6,6 +6,9 @@ version="${RDEV_SMOKE_VERSION:-v0.1.0-ci-smoke}"
 work_dir="$(mktemp -d /tmp/rdev-release-smoke.XXXXXX)"
 
 cleanup() {
+  if [ -n "${runner_gateway_pid:-}" ]; then
+    kill "$runner_gateway_pid" 2>/dev/null || true
+  fi
   rm -rf "$work_dir"
 }
 trap cleanup EXIT
@@ -132,7 +135,101 @@ done
 
 relay_acceptance_input="$work_dir/relay-acceptance-input"
 mkdir -p "$relay_acceptance_input"
-printf '%s\n' '{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-wireguard-vpn","helper_started":true}' > "$relay_acceptance_input/runner-result.json"
+runner_gateway_dir="$work_dir/runner-gateway"
+mkdir -p "$runner_gateway_dir"
+cat > "$runner_gateway_dir/server.py" <<'PY'
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok\n")
+    def log_message(self, fmt, *args):
+        return
+server = HTTPServer(("127.0.0.1", 0), Handler)
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    f.write(str(server.server_address[1]))
+server.serve_forever()
+PY
+python3 "$runner_gateway_dir/server.py" "$runner_gateway_dir/port" > "$runner_gateway_dir/server.log" 2>&1 &
+runner_gateway_pid=$!
+for _ in $(seq 1 50); do
+	if [ -s "$runner_gateway_dir/port" ]; then
+		runner_gateway_url="http://127.0.0.1:$(cat "$runner_gateway_dir/port")"
+		break
+	fi
+	sleep 0.1
+done
+if [ -z "${runner_gateway_url:-}" ]; then
+	echo "failed to discover runner gateway test server port" >&2
+	exit 1
+fi
+cat > "$relay_acceptance_input/invite.json" <<JSON
+{
+  "schema_version": "rdev.agent-invite.v1",
+  "gateway_url": "https://gateway.example.invalid/v1",
+  "join_url": "https://gateway.example.invalid/join/TEST-CODE",
+  "manifest_url": "https://gateway.example.invalid/v1/tickets/TEST-CODE/manifest",
+  "manifest_root_public_key": "manifest-root:ddddddddddddddddddddddddddddddddddddddddddd",
+  "ticket": {
+    "id": "tkt_ci_smoke",
+    "code": "TEST-CODE",
+    "mode": "attended-temporary",
+    "status": "active",
+    "ttl_seconds": 600,
+    "capabilities": ["shell.user"],
+    "reason": "release smoke",
+    "created_at": "2026-07-02T12:00:00Z",
+    "expires_at": "2026-07-02T12:10:00Z"
+  },
+  "transport": "auto",
+  "created_at": "2026-07-02T12:00:00Z"
+}
+JSON
+go run ./cmd/rdev connection-entry plan \
+	--invite "$relay_acceptance_input/invite.json" \
+	--out "$relay_acceptance_input/connection-entry" \
+	--target-os linux \
+	--ownership third-party \
+	> "$relay_acceptance_input/connection-entry-plan.json"
+fake_bin="$relay_acceptance_input/fake-bin"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/wg" <<'SH'
+#!/bin/sh
+echo "fake wg helper started" >&2
+sleep 1
+SH
+chmod +x "$fake_bin/wg"
+cat > "$fake_bin/rdev-host-smoke" <<'SH'
+#!/bin/sh
+if [ -n "${RDEV_FAKE_RDEV_TRANSCRIPT:-}" ]; then
+  printf 'fake rdev host serve %s\n' "$*" >> "$RDEV_FAKE_RDEV_TRANSCRIPT"
+fi
+exit 0
+SH
+chmod +x "$fake_bin/rdev-host-smoke"
+PATH="$fake_bin:$PATH" \
+HTTP_PROXY= \
+HTTPS_PROXY= \
+ALL_PROXY= \
+NO_PROXY= \
+http_proxy= \
+https_proxy= \
+all_proxy= \
+no_proxy= \
+RDEV_VPN_GATEWAY_URL="$runner_gateway_url" \
+RDEV_VPN_START_ARGV_JSON='["wg","show"]' \
+RDEV_FAKE_RDEV_TRANSCRIPT="$relay_acceptance_input/fake-rdev-transcript.txt" \
+go run ./cmd/rdev connection-entry run \
+	--runner-manifest "$relay_acceptance_input/connection-entry/connection-entry-runner/connection-entry-runner.json" \
+	--rdev-command "$fake_bin/rdev-host-smoke" \
+	--probe-timeout 1s \
+	--result-out "$relay_acceptance_input/runner-result.json" \
+	> "$relay_acceptance_input/runner-output.json"
+kill "$runner_gateway_pid" 2>/dev/null || true
+wait "$runner_gateway_pid" 2>/dev/null || true
+runner_gateway_pid=
 printf '%s\n' 'started reviewed relay helper' > "$relay_acceptance_input/helper-transcript.txt"
 printf '%s\n' '{"ok":true,"status":"healthy"}' > "$relay_acceptance_input/gateway-status.json"
 printf '%s\n' '{"ok":true,"host_status":"active"}' > "$relay_acceptance_input/host-status.json"
