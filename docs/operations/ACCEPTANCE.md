@@ -10,6 +10,43 @@ The target behavior is defined in the canonical final architecture lock,
 envelopes, host-side validation, workspace locks, approval gates, evidence,
 audit, and revocation.
 
+## Evidence Plan Scaffolding
+
+Hosted provider packages write `runtime-evidence-plan.json`. Relay and
+connectivity adapter packages write `acceptance-evidence-plan.json`. Before a
+real deployed-provider or restrictive-network acceptance run, scaffold the
+evidence directory from that plan:
+
+```bash
+rdev acceptance scaffold-evidence \
+  --plan hosted-provider/runtime-evidence-plan.json \
+  --out .rdev/acceptance/hosted-provider-runtime-evidence
+
+rdev acceptance scaffold-evidence \
+  --plan relay-adapter/acceptance-evidence-plan.json \
+  --out .rdev/acceptance/relay-adapter-evidence
+```
+
+The command writes:
+
+| Path | Purpose |
+|---|---|
+| `AGENT_CHECKLIST.md` | Human/Agent checklist with exact preflight, runner, package, and verify commands |
+| `scaffold-report.json` | `rdev.acceptance-evidence-scaffold.v1` report with plan kind, evidence files, commands, checks, and next actions |
+| copied plan JSON | The original machine-readable evidence plan archived next to the scaffold |
+
+By default the scaffold does not create placeholder evidence files. Use
+`--create-placeholders` only when an Agent or operator explicitly wants empty
+slots to fill during a real run. Placeholder files are marked as placeholders
+and must be replaced with real redacted evidence before running any package
+command. The scaffold always reports `ready_for_packaging=false`; production
+claims require the later `rdev acceptance package-*` command and matching
+`rdev acceptance verify-*` command to pass with `ok=true`.
+
+Agents should prefer MCP tool `rdev.acceptance.scaffold_evidence` when
+available, then collect the listed files instead of writing custom PowerShell,
+shell, relay, gateway, or evidence-layout scripts.
+
 ## Fresh-Agent Support-Session Contract Gate
 
 Run:

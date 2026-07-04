@@ -151,13 +151,25 @@ func Tools() []Tool {
 			}, []string{"invite_json"}),
 		},
 		{
+			Name:        "rdev.acceptance.scaffold_evidence",
+			Description: "Create a standard evidence collection directory from runtime-evidence-plan.json or acceptance-evidence-plan.json. Agents use this before real hosted-provider or relay/mesh/VPN/SSH acceptance so file names, package commands, verify commands, checklist, and report paths come from rdev instead of model-authored scripts.",
+			Safety:      "Writes local scaffold files only. Does not create fake acceptance, execute helpers, start gateways, mutate network/cloud resources, or make production claims. Placeholder evidence is opt-in and must be replaced before packaging.",
+			InputSchema: object(map[string]any{
+				"plan":                stringField(),
+				"out_dir":             stringField(),
+				"package_dir":         stringField(),
+				"create_placeholders": boolField(),
+				"force":               boolField(),
+			}, []string{"plan", "out_dir"}),
+		},
+		{
 			Name:        "rdev.relay_adapter.package",
-			Description: "Generate a standard Chisel or frpc relay adapter package for restrictive-network Connection Entries. The package emits reviewed RDEV_RELAY_GATEWAY_URL, RDEV_RELAY_START_ARGV_JSON, and RDEV_RELAY_INSTALL_ACTION_JSON templates plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, or polling scripts.",
+			Description: "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supports Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard packages. The package emits reviewed RDEV_RELAY_*, RDEV_SSH_*, RDEV_MESH_*, or RDEV_VPN_* gateway/helper/install metadata plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, mesh, VPN, or polling scripts.",
 			Safety:      "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",
 			InputSchema: object(map[string]any{
 				"out_dir": stringField(),
 				"name":    stringField(),
-				"adapter": enum("chisel", "frpc"),
+				"adapter": enum("chisel", "frpc", "ssh-tunnel", "headscale-tailscale", "wireguard"),
 				"force":   boolField(),
 			}, []string{"out_dir"}),
 		},

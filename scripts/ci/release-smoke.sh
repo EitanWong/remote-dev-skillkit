@@ -114,6 +114,12 @@ go run ./cmd/rdev hosted-provider verify \
 	--package "$saml_hosted_provider_dir" \
 	> "$work_dir/hosted-provider-s3-saml-verification.json"
 
+hosted_evidence_scaffold_dir="$work_dir/hosted-provider-evidence-scaffold"
+go run ./cmd/rdev acceptance scaffold-evidence \
+	--plan "$external_hosted_provider_dir/runtime-evidence-plan.json" \
+	--out "$hosted_evidence_scaffold_dir" \
+	> "$work_dir/hosted-provider-evidence-scaffold.json"
+
 hosted_runtime_input="$work_dir/hosted-runtime-input"
 mkdir -p "$hosted_runtime_input"
 printf '%s\n' 'gateway started with hosted provider package' > "$hosted_runtime_input/gateway-startup.txt"
@@ -151,6 +157,13 @@ go run ./cmd/rdev relay-adapter package \
 go run ./cmd/rdev relay-adapter verify \
 	--package "$relay_adapter_dir" \
 	> "$work_dir/relay-adapter-verification.json"
+
+relay_evidence_scaffold_dir="$work_dir/relay-adapter-evidence-scaffold"
+go run ./cmd/rdev acceptance scaffold-evidence \
+	--plan "$relay_adapter_dir/acceptance-evidence-plan.json" \
+	--out "$relay_evidence_scaffold_dir" \
+	--create-placeholders \
+	> "$work_dir/relay-adapter-evidence-scaffold.json"
 
 for adapter in ssh-tunnel headscale-tailscale wireguard; do
 	adapter_dir="$work_dir/connectivity-adapter-$adapter"
@@ -519,11 +532,13 @@ saml_hosted_provider_verification = json.loads((root / "hosted-provider-s3-saml-
 saml_hosted_provider_manifest = json.loads((root / "hosted-provider-s3-saml" / "hosted-provider.json").read_text())
 saml_hosted_runtime_contract = json.loads((root / "hosted-provider-s3-saml" / "runtime-contract.json").read_text())
 saml_hosted_runtime_evidence_plan = json.loads((root / "hosted-provider-s3-saml" / "runtime-evidence-plan.json").read_text())
+hosted_evidence_scaffold = json.loads((root / "hosted-provider-evidence-scaffold.json").read_text())
 hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-acceptance-package.json").read_text())
 hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
 relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
 relay_adapter_verification = json.loads((root / "relay-adapter-verification.json").read_text())
 relay_adapter_evidence_plan = json.loads((root / "relay-adapter" / "acceptance-evidence-plan.json").read_text())
+relay_evidence_scaffold = json.loads((root / "relay-adapter-evidence-scaffold.json").read_text())
 connectivity_adapter_packages = {
     adapter: json.loads((root / f"connectivity-adapter-{adapter}-package.json").read_text())
     for adapter in ["ssh-tunnel", "headscale-tailscale", "wireguard"]
@@ -708,6 +723,16 @@ assert len(external_hosted_runtime_contract["required_evidence"]) >= 9, external
 assert external_hosted_runtime_evidence_plan["schema_version"] == "rdev.hosted-provider-runtime-evidence-plan.v1", external_hosted_runtime_evidence_plan
 assert "package-hosted-provider-runtime" in external_hosted_runtime_evidence_plan["package_command"], external_hosted_runtime_evidence_plan
 assert {item["path"] for item in external_hosted_runtime_evidence_plan["evidence_files"]} >= {"gateway-startup.txt", "storage-verification.json", "auth-verification.json", "audit.jsonl"}, external_hosted_runtime_evidence_plan
+assert hosted_evidence_scaffold["schema"] == "rdev.acceptance-evidence-scaffold.v1", hosted_evidence_scaffold
+assert hosted_evidence_scaffold["ok"] is True, hosted_evidence_scaffold
+assert hosted_evidence_scaffold["plan_schema"] == "rdev.hosted-provider-runtime-evidence-plan.v1", hosted_evidence_scaffold
+assert hosted_evidence_scaffold["plan_kind"] == "hosted-provider-runtime", hosted_evidence_scaffold
+assert hosted_evidence_scaffold["ready_for_packaging"] is False, hosted_evidence_scaffold
+assert hosted_evidence_scaffold["create_placeholders"] is False, hosted_evidence_scaffold
+assert "package-hosted-provider-runtime" in hosted_evidence_scaffold["commands"]["package"], hosted_evidence_scaffold
+assert pathlib.Path(hosted_evidence_scaffold["checklist"]).is_file(), hosted_evidence_scaffold
+assert pathlib.Path(hosted_evidence_scaffold["report"]).is_file(), hosted_evidence_scaffold
+assert not (root / "hosted-provider-evidence-scaffold" / "gateway-startup.txt").exists(), hosted_evidence_scaffold
 assert saml_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", saml_hosted_provider_package
 assert saml_hosted_provider_package["ok"] is True, saml_hosted_provider_package
 assert saml_hosted_provider_package["storage_provider"] == "s3-compatible", saml_hosted_provider_package
@@ -742,6 +767,16 @@ assert relay_adapter_evidence_plan["schema_version"] == "rdev.relay-adapter-acce
 assert "--result-out" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
 assert "package-relay-adapter" in relay_adapter_evidence_plan["package_command"], relay_adapter_evidence_plan
 assert {item["path"] for item in relay_adapter_evidence_plan["evidence_files"]} >= {"runner-result.json", "helper-transcript.txt", "connection-status.json", "audit.jsonl"}, relay_adapter_evidence_plan
+assert relay_evidence_scaffold["schema"] == "rdev.acceptance-evidence-scaffold.v1", relay_evidence_scaffold
+assert relay_evidence_scaffold["ok"] is True, relay_evidence_scaffold
+assert relay_evidence_scaffold["plan_schema"] == "rdev.relay-adapter-acceptance-evidence-plan.v1", relay_evidence_scaffold
+assert relay_evidence_scaffold["plan_kind"] == "relay-adapter", relay_evidence_scaffold
+assert relay_evidence_scaffold["ready_for_packaging"] is False, relay_evidence_scaffold
+assert relay_evidence_scaffold["create_placeholders"] is True, relay_evidence_scaffold
+assert "package-relay-adapter" in relay_evidence_scaffold["commands"]["package"], relay_evidence_scaffold
+assert pathlib.Path(relay_evidence_scaffold["checklist"]).is_file(), relay_evidence_scaffold
+assert pathlib.Path(relay_evidence_scaffold["report"]).is_file(), relay_evidence_scaffold
+assert '"placeholder": true' in (root / "relay-adapter-evidence-scaffold" / "runner-result.json").read_text(), relay_evidence_scaffold
 expected_connectivity = {
     "ssh-tunnel": ("ssh-tunnel", "RDEV_SSH_GATEWAY_URL", "manual-review-required"),
     "headscale-tailscale": ("headscale-tailscale", "RDEV_MESH_GATEWAY_URL", "RDEV_MESH_DOWNLOAD_URL"),

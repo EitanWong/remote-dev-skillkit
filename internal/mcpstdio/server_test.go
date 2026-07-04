@@ -21,6 +21,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 )
 
@@ -686,6 +687,44 @@ func TestServerToolCallConnectionEntryPlan(t *testing.T) {
 	missing, ok := structured["missing_inputs"].([]any)
 	if !ok || !containsAnyString(missing, "release_bundle_url") {
 		t.Fatalf("expected missing release inputs, got %#v", structured)
+	}
+}
+
+func TestServerToolCallScaffoldAcceptanceEvidence(t *testing.T) {
+	root := t.TempDir()
+	relayDir := filepath.Join(root, "relay-adapter")
+	if _, err := relayadapter.Build(relayadapter.Options{
+		OutDir:      relayDir,
+		AdapterKind: "ssh-tunnel",
+		GeneratedAt: time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(root, "scaffold")
+	input := mcpRequestLine(t, "rdev.acceptance.scaffold_evidence", map[string]any{
+		"plan":                filepath.Join(relayDir, "acceptance-evidence-plan.json"),
+		"out_dir":             outDir,
+		"create_placeholders": true,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.acceptance-evidence-scaffold.v1" ||
+		structured["plan_schema"] != "rdev.relay-adapter-acceptance-evidence-plan.v1" ||
+		structured["plan_kind"] != "relay-adapter" ||
+		structured["ready_for_packaging"] != false {
+		t.Fatalf("unexpected scaffold payload: %#v", structured)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "AGENT_CHECKLIST.md")); err != nil {
+		t.Fatalf("expected checklist: %v", err)
+	}
+	if content, err := os.ReadFile(filepath.Join(outDir, "runner-result.json")); err != nil || !strings.Contains(string(content), `"placeholder": true`) {
+		t.Fatalf("expected placeholder runner result, err=%v content=%s", err, string(content))
 	}
 }
 

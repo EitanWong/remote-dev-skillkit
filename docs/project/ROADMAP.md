@@ -116,6 +116,14 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `acceptance-evidence-plan.json`, giving Agents standard runner result,
   helper transcript, gateway/host/connection status, audit file names, and
   `rdev connection-entry run --result-out` plus package/verify commands.
+- Acceptance evidence scaffolding through
+  `rdev.acceptance-evidence-scaffold.v1`,
+  `rdev acceptance scaffold-evidence`, and MCP tool
+  `rdev.acceptance.scaffold_evidence`, turning hosted-provider
+  `runtime-evidence-plan.json` and relay/connectivity
+  `acceptance-evidence-plan.json` into standard evidence collection
+  directories, `AGENT_CHECKLIST.md`, resolved package/verify commands, and
+  non-deceptive placeholder behavior before real acceptance runs.
 - Hosted provider runtime acceptance packaging and verification through
   `rdev.acceptance-package.hosted-provider-runtime.v1`,
   `rdev acceptance package-hosted-provider-runtime`,

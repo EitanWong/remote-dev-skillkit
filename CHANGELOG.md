@@ -4,6 +4,43 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.28-dev
+
+Current phase: real acceptance is being made more Agent-native before external
+machine and hosted-provider testing. Hosted provider and connectivity packages
+already carry evidence plans; this release adds a standard scaffold runner so
+Agents create the exact evidence directory, checklist, package command, and
+verify command through `rdev` instead of inventing local scripts or file names.
+
+### Added
+
+- Added `rdev.acceptance-evidence-scaffold.v1` through
+  `rdev acceptance scaffold-evidence --plan <runtime-evidence-plan.json |
+  acceptance-evidence-plan.json> --out <dir>`. The command supports hosted
+  provider runtime evidence plans and relay/connectivity adapter evidence
+  plans, writes `AGENT_CHECKLIST.md`, `scaffold-report.json`, a copy of the
+  source plan, resolved package/verify commands, and standard evidence file
+  metadata.
+- Added MCP tool `rdev.acceptance.scaffold_evidence` so fresh Agents can
+  scaffold hosted-provider or relay/mesh/VPN/SSH acceptance evidence through a
+  standard tool call before collecting real transcripts.
+- Kept scaffold generation non-deceptive by default: it does not create
+  evidence placeholder files unless `--create-placeholders` is explicitly
+  passed, and every scaffold reports `ready_for_packaging=false` until real
+  evidence replaces placeholders and the matching acceptance package verifies.
+- Extended release smoke and tests to generate hosted-provider and relay
+  evidence scaffolds, verify schema/command contracts, and ensure default
+  hosted scaffolds do not create fake evidence files.
+
+### Remaining Gates
+
+- Run real clean-machine Windows/macOS/Linux Connection Entry and fresh-Agent
+  acceptance.
+- Publish signed per-platform Connection Entry archives to GitHub Releases and
+  package real post-release download evidence.
+- Collect real deployed Postgres/Redis/S3/OIDC/SAML hosted provider evidence
+  and real restrictive-network frp/Chisel/headscale/WireGuard/SSH evidence.
+
 ## 0.1.27-dev
 
 Current phase: formal release packages are closing the last local startup-gate

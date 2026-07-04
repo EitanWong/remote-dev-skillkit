@@ -14,6 +14,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
+	"github.com/EitanWong/remote-dev-skillkit/internal/evidenceplan"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
@@ -141,6 +142,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.supportSessionStatus(params.Arguments)
 	case "rdev.connection_entry.plan":
 		data, err = s.connectionEntryPlan(params.Arguments)
+	case "rdev.acceptance.scaffold_evidence":
+		data, err = s.scaffoldAcceptanceEvidence(params.Arguments)
 	case "rdev.relay_adapter.package":
 		data, err = s.relayAdapterPackage(params.Arguments)
 	case "rdev.relay_adapter.verify":
@@ -446,6 +449,17 @@ func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
 		HostName:                       stringArg(args, "host_name", ""),
 		RdevCommand:                    stringArg(args, "rdev_command", ""),
 		Force:                          boolArg(args, "force", false),
+	})
+}
+
+func (s Server) scaffoldAcceptanceEvidence(args map[string]any) (any, error) {
+	return evidenceplan.Build(evidenceplan.Options{
+		PlanPath:           requiredString(args, "plan"),
+		OutDir:             requiredString(args, "out_dir"),
+		PackageDir:         stringArg(args, "package_dir", ""),
+		CreatePlaceholders: boolArg(args, "create_placeholders", false),
+		Force:              boolArg(args, "force", false),
+		GeneratedAt:        time.Now().UTC(),
 	})
 }
 

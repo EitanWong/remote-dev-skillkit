@@ -2465,6 +2465,88 @@ func TestRelayAdapterPackageSupportsMeshSSHAndVPNKinds(t *testing.T) {
 	}
 }
 
+func TestAcceptanceScaffoldEvidenceForHostedProviderAndRelayPlans(t *testing.T) {
+	root := t.TempDir()
+	providerOut := filepath.Join(root, "hosted-provider")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"hosted-provider", "package",
+		"--out", providerOut,
+		"--storage-provider", "postgres",
+		"--auth-provider", "oidc-jwks",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hostedScaffold := filepath.Join(root, "hosted-scaffold")
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "scaffold-evidence",
+		"--plan", filepath.Join(providerOut, "runtime-evidence-plan.json"),
+		"--out", hostedScaffold,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hostedOutput := stdout.String()
+	for _, expected := range []string{
+		`"schema": "rdev.acceptance-evidence-scaffold.v1"`,
+		`"plan_schema": "rdev.hosted-provider-runtime-evidence-plan.v1"`,
+		`"plan_kind": "hosted-provider-runtime"`,
+		`"ready_for_packaging": false`,
+		`"package-hosted-provider-runtime"`,
+	} {
+		if !strings.Contains(hostedOutput, expected) {
+			t.Fatalf("expected %q in hosted scaffold output: %s", expected, hostedOutput)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(hostedScaffold, "gateway-startup.txt")); !os.IsNotExist(err) {
+		t.Fatalf("default hosted scaffold must not create placeholders, err=%v", err)
+	}
+
+	relayOut := filepath.Join(root, "relay-adapter")
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"relay-adapter", "package",
+		"--out", relayOut,
+		"--adapter", "wireguard",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	relayScaffold := filepath.Join(root, "relay-scaffold")
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "scaffold-evidence",
+		"--plan", filepath.Join(relayOut, "acceptance-evidence-plan.json"),
+		"--out", relayScaffold,
+		"--create-placeholders",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	relayOutput := stdout.String()
+	for _, expected := range []string{
+		`"schema": "rdev.acceptance-evidence-scaffold.v1"`,
+		`"plan_schema": "rdev.relay-adapter-acceptance-evidence-plan.v1"`,
+		`"plan_kind": "relay-adapter"`,
+		`"create_placeholders": true`,
+		`"package-relay-adapter"`,
+	} {
+		if !strings.Contains(relayOutput, expected) {
+			t.Fatalf("expected %q in relay scaffold output: %s", expected, relayOutput)
+		}
+	}
+	content, err := os.ReadFile(filepath.Join(relayScaffold, "runner-result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `"placeholder": true`) {
+		t.Fatalf("expected placeholder runner result, got %s", string(content))
+	}
+}
+
 func TestMCPServeProcessesInitialize(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

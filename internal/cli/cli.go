@@ -33,6 +33,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/depsinstall"
 	"github.com/EitanWong/remote-dev-skillkit/internal/enrollmentlifecycle"
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
+	"github.com/EitanWong/remote-dev-skillkit/internal/evidenceplan"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
@@ -1448,6 +1449,25 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyPostReleaseDownloadPackage(*packagePath)
+	case "scaffold-evidence":
+		fs := flag.NewFlagSet("acceptance scaffold-evidence", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "runtime-evidence-plan.json or acceptance-evidence-plan.json")
+		out := fs.String("out", "", "empty output directory for the evidence collection scaffold")
+		packageDir := fs.String("package-dir", "", "optional package directory; defaults to the plan's parent directory")
+		createPlaceholders := fs.Bool("create-placeholders", false, "write obvious placeholder evidence files; replace them before packaging")
+		force := fs.Bool("force", false, "replace an existing output directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceScaffoldEvidence(evidenceplan.Options{
+			PlanPath:           *plan,
+			OutDir:             *out,
+			PackageDir:         *packageDir,
+			CreatePlaceholders: *createPlaceholders,
+			Force:              *force,
+			GeneratedAt:        time.Now(),
+		})
 	case "package-windows-temporary":
 		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1970,6 +1990,39 @@ func (a App) acceptanceVerifyPostReleaseDownloadPackage(packagePath string) erro
 	}
 	if !verification.OK() {
 		return fmt.Errorf("post-release download acceptance package verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptanceScaffoldEvidence(opts evidenceplan.Options) error {
+	scaffold, err := evidenceplan.Build(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  scaffold.OK,
+		"schema":              scaffold.SchemaVersion,
+		"plan_schema":         scaffold.PlanSchema,
+		"plan_kind":           scaffold.PlanKind,
+		"out":                 scaffold.OutDir,
+		"package_dir":         scaffold.PackageDir,
+		"report":              scaffold.ReportPath,
+		"checklist":           scaffold.ChecklistPath,
+		"plan_copy":           scaffold.PlanCopyPath,
+		"ready_for_packaging": scaffold.ReadyForPackaging,
+		"create_placeholders": scaffold.CreatePlaceholders,
+		"evidence_files":      scaffold.EvidenceFiles,
+		"commands":            scaffold.Commands,
+		"checks":              scaffold.Checks,
+		"recommended_actions": scaffold.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !scaffold.OK {
+		return fmt.Errorf("acceptance evidence scaffold failed")
 	}
 	return nil
 }
@@ -8098,6 +8151,8 @@ Usage:
   rdev acceptance verify-relay-adapter-package --package relay-evidence/package.json
   rdev acceptance verify-hosted-provider-runtime-package --package hosted-runtime-evidence/package.json
   rdev acceptance verify-post-release-download-package --package post-release-download-evidence/package.json
+  rdev acceptance scaffold-evidence --plan hosted-provider/runtime-evidence-plan.json --out hosted-runtime-evidence-input
+  rdev acceptance scaffold-evidence --plan relay-adapter/acceptance-evidence-plan.json --out relay-evidence-input
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
