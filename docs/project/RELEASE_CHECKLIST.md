@@ -15,6 +15,7 @@
 - [ ] Confirm macOS artifacts that claim Keychain-backed managed host identity/trust support were built natively with `cgo_enabled=true`, or explicitly document that `keychain:` stores are unavailable in that artifact.
 - [ ] Confirm Windows artifacts that claim DPAPI-backed managed host identity/trust support were built for Windows and have at least cross-compiled `internal/protectedstore` / `rdev-host` coverage; real Windows runtime acceptance remains release-blocking before support claims.
 - [ ] Confirm Linux artifacts that claim libsecret-backed managed host identity/trust support were built for Linux and document the runtime `secret-tool` plus Secret Service requirement; confirm Linux artifacts that claim keyctl-backed managed host identity/trust support were built for Linux and document the runtime `keyctl` plus user keyring requirement. Real Linux service reboot/reconnect acceptance remains release-blocking before support claims.
+- [ ] Generate and verify hosted provider packages with `rdev hosted-provider package` and `rdev hosted-provider verify`; confirm they contain no credentials, private endpoints, local paths, or organization-specific values.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.

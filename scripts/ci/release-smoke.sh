@@ -31,6 +31,21 @@ go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal
   -count=1 \
   > "$work_dir/hosted-storage-auth-smoke.txt"
 
+go test ./internal/hostedprovider ./internal/cli \
+  -run 'TestBuildAndVerifyHostedProviderPackage|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify' \
+  -count=1 \
+  > "$work_dir/hosted-provider-package-smoke.txt"
+
+hosted_provider_dir="$work_dir/hosted-provider"
+go run ./cmd/rdev hosted-provider package \
+  --out "$hosted_provider_dir" \
+  --storage-provider file \
+  --auth-provider hosted-ed25519-jwt \
+  > "$work_dir/hosted-provider-package.json"
+go run ./cmd/rdev hosted-provider verify \
+  --package "$hosted_provider_dir" \
+  > "$work_dir/hosted-provider-verification.json"
+
 go test ./internal/enrollmentlifecycle ./internal/cli \
   -run 'TestBuildFleetRenewalPlan|TestEnrollmentLifecycleKeyCustodyWritesRecord|TestEnrollmentLifecycleFleetRenewalPlanRequiresRevocations|TestEnrollmentLifecycleEmergencyDrillWritesEvidence' \
   -count=1 \
@@ -226,6 +241,8 @@ platform_manifest = json.loads(pathlib.Path(platform_output["manifest"]).read_te
 plan_output = json.loads((root / "plan-output.json").read_text())
 plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 github_project_readiness = json.loads((root / "github-project-readiness.json").read_text())
+hosted_provider_package = json.loads((root / "hosted-provider-package.json").read_text())
+hosted_provider_verification = json.loads((root / "hosted-provider-verification.json").read_text())
 post_release_output = json.loads((root / "post-release-output.json").read_text())
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
@@ -338,6 +355,15 @@ assert github_project_readiness["external_mutation"] is False, github_project_re
 assert github_project_readiness["bootstrap_dry_run"]["labels"] >= 19, github_project_readiness
 assert github_project_readiness["bootstrap_dry_run"]["milestones"] >= 5, github_project_readiness
 assert github_project_readiness["bootstrap_dry_run"]["seed_issues"] >= 9, github_project_readiness
+assert hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", hosted_provider_package
+assert hosted_provider_package["ok"] is True, hosted_provider_package
+assert hosted_provider_package["external_mutation"] is False, hosted_provider_package
+assert hosted_provider_package["storage_provider"] == "file", hosted_provider_package
+assert hosted_provider_package["auth_provider"] == "hosted-ed25519-jwt", hosted_provider_package
+assert hosted_provider_verification["schema"] == "rdev.hosted-provider-package-verification.v1", hosted_provider_verification
+assert hosted_provider_verification["ok"] is True, hosted_provider_verification
+assert hosted_provider_verification["storage_provider"] == "file", hosted_provider_verification
+assert hosted_provider_verification["auth_provider"] == "hosted-ed25519-jwt", hosted_provider_verification
 assert post_release_output["ok"] is True, post_release_output
 assert post_release_plan["schema_version"] == "rdev.post-release-install-plan.v1", post_release_plan
 assert post_release_plan["external_mutation"] is False, post_release_plan
@@ -459,6 +485,8 @@ print(json.dumps({
     "dev_mtls_host_smoke": True,
     "wss_mtls_host_smoke": True,
     "hosted_storage_auth_smoke": True,
+    "hosted_provider_package_schema": hosted_provider_package["schema"],
+    "hosted_provider_package_verification_schema": hosted_provider_verification["schema"],
     "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

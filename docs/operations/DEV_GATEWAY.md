@@ -87,6 +87,26 @@ rdev gateway serve \
 
 `--state` remains a convenience alias for the file provider path.
 
+Hosted provider packages are the reviewable deployment surface for gateway
+storage/auth combinations. They contain provider metadata, gateway argument
+templates, environment variable names, runbook text, and checksums, but no
+credentials or private endpoints.
+
+```bash
+rdev hosted-provider package \
+  --out dist/hosted-provider \
+  --storage-provider file \
+  --auth-provider hosted-ed25519-jwt
+
+rdev hosted-provider verify \
+  --package dist/hosted-provider
+```
+
+The built-in package proves the provider contract for single-node file storage
+and provider-neutral EdDSA JWT auth. Durable third-party hosted providers still
+need real package implementations and deployed backup/restore/retention
+acceptance before production claims.
+
 ## Start
 
 ```bash

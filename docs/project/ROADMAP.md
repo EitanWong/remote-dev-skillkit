@@ -49,6 +49,12 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Gateway state-store provider boundary through `--storage-provider`,
   `--storage-path`, and `rdev gateway storage verify`, with the built-in file
   provider preserving `rdev.gateway-snapshot.v1`.
+- Hosted provider package generation and verification through
+  `rdev.hosted-provider-package.v1`, `rdev hosted-provider package`,
+  `rdev.hosted-provider-package-verification.v1`, and
+  `rdev hosted-provider verify`, producing reviewable storage/auth deployment
+  metadata, gateway args, env templates, checksums, and no-private-surface
+  evidence without bundling credentials or private endpoints.
 - Dev hosted enrollment issuance primitive through `POST /v1/enrollment/certificates`, `rdev gateway serve --dev --enrollment-key`, and `rdev enrollment issue-certificate --gateway ... --root-public-key ...`, issuing pinned-root-verified certificates from a configured gateway issuer while preventing requested certificate capabilities from exceeding the ticket capabilities.
 - Operator-auth protection for dev hosted enrollment issuance through `rdev gateway serve --dev --operator-auth` and `rdev enrollment issue-certificate --operator-token-file`, keeping tokens out of command output while requiring an `issuer` role token.
 - Local enrollment certificate renewal primitive through `rdev enrollment renew-certificate`, preserving the existing certificate scope, requiring the current certificate to verify, optionally checking signed revocation lists before renewal, and emitting a new certificate fingerprint and validity window.
@@ -159,12 +165,14 @@ Exit gate: an operator's managed Mac reconnects after reboot, an agent selects i
 - Linux libsecret protected-store references for managed host identity/trust persistence on hosts with `secret-tool` and a reachable Secret Service.
 - Linux keyctl protected-store references for headless managed host identity/trust runtime storage on hosts with a user keyring; real reboot persistence/reconnect proof remains a separate acceptance gate.
 - Hardware-backed or fleet-managed protected stores beyond the current macOS Keychain, Windows DPAPI, Linux libsecret, Linux keyctl, and file-backed paths.
-- Optional third-party hosted storage/auth provider integrations beyond the
-  built-in file provider and provider-neutral hosted JWT verifier.
+- Optional third-party hosted storage/auth provider runtime integrations beyond
+  the built-in file provider, provider-neutral hosted JWT verifier, and
+  provider-package verification surface.
 - ACP/acpx adapter MVP.
 - Artifact streaming.
-- Durable third-party hosted storage provider packages beyond the current
-  provider boundary.
+- Durable third-party hosted storage/auth runtime provider packages beyond the
+  current provider-package contract, including deployed backup, restore,
+  retention, role-mapping, and failure-mode evidence.
 
 Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, Windows Service has real install/start/reconnect/stop/uninstall acceptance evidence beyond dry-run plans, and a new adapter can be added without bypassing policy.
 

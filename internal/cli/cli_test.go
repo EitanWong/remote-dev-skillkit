@@ -2010,6 +2010,34 @@ func TestGatewayStorageVerifyFileProvider(t *testing.T) {
 	}
 }
 
+func TestHostedProviderPackageAndVerify(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "provider")
+	var packageStdout bytes.Buffer
+	app := NewApp(&packageStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"hosted-provider", "package",
+		"--out", out,
+		"--storage-provider", "file",
+		"--auth-provider", "hosted-ed25519-jwt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(packageStdout.String(), `"schema": "rdev.hosted-provider-package.v1"`) ||
+		!strings.Contains(packageStdout.String(), `"external_mutation": false`) {
+		t.Fatalf("unexpected hosted provider package output: %s", packageStdout.String())
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"hosted-provider", "verify", "--package", out}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.hosted-provider-package-verification.v1"`) ||
+		!strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("unexpected hosted provider verify output: %s", verifyStdout.String())
+	}
+}
+
 func TestMCPServeProcessesInitialize(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

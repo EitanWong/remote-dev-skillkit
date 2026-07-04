@@ -4,6 +4,40 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.14-dev
+
+Current phase: hosted provider work now has a package and verification surface
+instead of only a storage/auth boundary. This is a provider-package contract
+and release-smoke gate, not a claim that external databases, object stores, or
+identity-provider consoles are bundled.
+
+### Added
+
+- Added `rdev.hosted-provider-package.v1` through
+  `rdev hosted-provider package`. The generated package writes
+  `hosted-provider.json`, `HOSTED_PROVIDER.md`, and `gateway.env.example`
+  without credentials, private endpoints, local paths, organization IDs, or
+  provider-specific domains. The package declares the hosted storage provider,
+  hosted auth provider, gateway argument template, required environment
+  variables, approval boundaries, and Agent rules.
+- Added `rdev.hosted-provider-package-verification.v1` through
+  `rdev hosted-provider verify`. Verification checks schema, supported
+  provider kinds, external-mutation status, gateway args, environment
+  declarations, file checksums/sizes, unlisted files, and private-surface
+  hygiene.
+- Updated release smoke to generate and verify a hosted provider package with
+  the built-in `file` storage provider plus `hosted-ed25519-jwt` auth provider,
+  reporting `hosted_provider_package_schema` and
+  `hosted_provider_package_verification_schema`.
+
+### Remaining Gates
+
+- Implement and accept real durable third-party hosted storage/auth providers
+  such as Postgres/S3-compatible/Redis/JWKS/OIDC packages.
+- Prove hosted provider operation in a deployed gateway with backup, retention,
+  restore, role mapping, and failure-mode evidence.
+- Continue real helper/relay adapter acceptance work.
+
 ## 0.1.13-dev
 
 Current phase: formal release packaging is moving from platform candidate

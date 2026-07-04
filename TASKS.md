@@ -105,6 +105,7 @@
 - [x] Protect hosted enrollment revocation refresh with operator auth, `rdev enrollment fetch-revocations --operator-token-file`, and `rdev host serve --operator-token-file`.
 - [x] Add local GitHub project readiness audit with `rdev.github-project-readiness.v1` and wire it into release smoke without external mutation.
 - [x] Add hosted storage/auth foundation with gateway state-store provider boundary, file-backed provider verification, hosted EdDSA JWT operator auth, and combined local/hosted role authorization.
+- [x] Add hosted provider package generation and verification with `rdev.hosted-provider-package.v1`, `rdev.hosted-provider-package-verification.v1`, `rdev hosted-provider package`, `rdev hosted-provider verify`, provider runbook/env template output, no-private-surface checks, and release-smoke coverage.
 - [x] Add production enrollment authority lifecycle evidence for key custody, fleet renewal plans, and emergency drill packages.
 - [x] Add production WSS/mTLS host job transport with WebSocket job delivery, completion/failure/artifact acknowledgements, and TLS/mTLS client certificate reuse.
 - [x] Add AI-native Agent invite workflow with `rdev.agent-invite.v1`, `rdev invite create`, and MCP tool `rdev.invites.create`.
@@ -304,6 +305,7 @@
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
+- [ ] Implement real durable hosted provider runtime packages beyond the built-in file storage and provider-neutral hosted JWT verifier, including deployed backup/restore/retention/failure-mode acceptance.
 - [ ] Complete production Adapter SDK integration for future adapters beyond built-in hostrunner runtime fixture capture.
 
 ## Final End-State Gates

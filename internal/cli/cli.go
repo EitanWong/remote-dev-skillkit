@@ -36,6 +36,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostedprovider"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
@@ -101,6 +102,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.gateway(args[1:])
 	case "operator-auth":
 		return a.operatorAuth(args[1:])
+	case "hosted-provider":
+		return a.hostedProvider(args[1:])
 	case "release":
 		return a.release(args[1:])
 	case "update":
@@ -822,6 +825,99 @@ func (a App) operatorAuthVerifyHosted(authFile string) error {
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func (a App) hostedProvider(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing hosted-provider subcommand")
+	}
+	switch args[0] {
+	case "package":
+		fs := flag.NewFlagSet("hosted-provider package", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "output directory for hosted provider package")
+		name := fs.String("name", "rdev-hosted-provider", "hosted provider package name")
+		storageProvider := fs.String("storage-provider", "file", "storage provider kind: file, postgres, s3-compatible, or redis-stream")
+		authProvider := fs.String("auth-provider", "hosted-ed25519-jwt", "auth provider kind: hosted-ed25519-jwt, oidc-jwks, or saml-assertion")
+		force := fs.Bool("force", false, "replace an existing output directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.hostedProviderPackage(*out, *name, *storageProvider, *authProvider, *force)
+	case "verify":
+		fs := flag.NewFlagSet("hosted-provider verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		packagePath := fs.String("package", "", "hosted provider package directory or hosted-provider.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.hostedProviderVerify(*packagePath)
+	default:
+		return fmt.Errorf("unknown hosted-provider subcommand %q", args[0])
+	}
+}
+
+func (a App) hostedProviderPackage(out, name, storageProvider, authProvider string, force bool) error {
+	pkg, err := hostedprovider.Build(hostedprovider.Options{
+		OutDir:          out,
+		Name:            name,
+		StorageProvider: storageProvider,
+		AuthProvider:    authProvider,
+		GeneratedAt:     time.Now(),
+		Force:           force,
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                pkg.OK(),
+		"schema":            pkg.SchemaVersion,
+		"out":               out,
+		"package":           filepath.Join(out, "hosted-provider.json"),
+		"name":              pkg.Name,
+		"storage_provider":  pkg.Storage.Kind,
+		"auth_provider":     pkg.Auth.Kind,
+		"file_count":        len(pkg.Files),
+		"external_mutation": pkg.ExternalMutation,
+		"checks":            pkg.Checks,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("hosted provider package failed")
+	}
+	return nil
+}
+
+func (a App) hostedProviderVerify(packagePath string) error {
+	verification, err := hostedprovider.Verify(packagePath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"package":             verification.PackagePath,
+		"package_dir":         verification.PackageDir,
+		"name":                verification.Name,
+		"storage_provider":    verification.StorageProvider,
+		"auth_provider":       verification.AuthProvider,
+		"checks":              verification.Checks,
+		"files":               verification.Files,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("hosted provider package verification failed")
+	}
+	return nil
 }
 
 func (a App) acceptance(ctx context.Context, args []string) error {
@@ -7392,6 +7488,8 @@ Usage:
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
   rdev operator-auth init --out .rdev/operator-auth/operators.json --token-dir .rdev/operator-auth/tokens
   rdev operator-auth verify --auth .rdev/operator-auth/operators.json
+  rdev hosted-provider package --out dist/hosted-provider --storage-provider file --auth-provider hosted-ed25519-jwt
+  rdev hosted-provider verify --package dist/hosted-provider
   rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --operator-token-file operator-token.txt
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff
   rdev enrollment verify-certificate --certificate host-enrollment.json --root-public-key enrollment-root:...
