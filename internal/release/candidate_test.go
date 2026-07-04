@@ -1,6 +1,9 @@
 package release
 
 import (
+	"archive/zip"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +48,7 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		"release-bundle.json",
 		"sbom.spdx.json",
 		"provenance.json",
+		"connection-entry-release.zip",
 		"checksums.txt",
 		"rdev",
 		"rdev.rdev-release.json",
@@ -72,6 +76,45 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	if !strings.Contains(string(checksums), "provenance.json") {
 		t.Fatalf("expected provenance checksum, got %s", string(checksums))
 	}
+	if !strings.Contains(string(checksums), "connection-entry-release.zip") {
+		t.Fatalf("expected Connection Entry release archive checksum, got %s", string(checksums))
+	}
+	archiveEntries := readConnectionEntryArchiveForTest(t, filepath.Join(out, "connection-entry-release.zip"))
+	for _, path := range []string{
+		"CONNECTION_ENTRY_RELEASE.md",
+		"connection-entry-release.json",
+		"connection-entry-runner.template.json",
+		"connection-entry-checksums.txt",
+		"release/release-bundle.json",
+		"release/sbom.spdx.json",
+		"release/provenance.json",
+		"launchers/start-connection-entry.sh",
+		"bin/rdev",
+		"bin/rdev.rdev-release.json",
+		"bin/rdev-host.exe",
+		"bin/rdev-host.exe.rdev-release.json",
+		"bin/rdev-verify.exe",
+		"bin/rdev-verify.exe.rdev-release.json",
+	} {
+		if _, ok := archiveEntries[path]; !ok {
+			t.Fatalf("expected Connection Entry archive entry %s", path)
+		}
+	}
+	var entryPackage ConnectionEntryReleasePackage
+	if err := json.Unmarshal(archiveEntries["connection-entry-release.json"], &entryPackage); err != nil {
+		t.Fatal(err)
+	}
+	if entryPackage.SchemaVersion != ConnectionEntryReleasePackageSchemaVersion ||
+		!entryPackage.NoPrivateParameters ||
+		entryPackage.ExecutionMode != "runtime-invite-required" ||
+		len(entryPackage.Launchers) < 1 ||
+		len(entryPackage.Artifacts) < len(candidate.Artifacts) {
+		t.Fatalf("unexpected Connection Entry release package: %#v", entryPackage)
+	}
+	if strings.Contains(string(archiveEntries["connection-entry-release.json"]), filepath.Dir(out)) ||
+		strings.Contains(string(archiveEntries["CONNECTION_ENTRY_RELEASE.md"]), "192.168.") {
+		t.Fatalf("Connection Entry archive leaked private/local metadata")
+	}
 	sbom := readReleaseCandidateTestFile(t, filepath.Join(out, "sbom.spdx.json"))
 	for _, want := range []string{`"spdxVersion": "SPDX-2.3"`, `"fileName": "./rdev-host.exe"`, `"algorithm": "SHA256"`} {
 		if !strings.Contains(sbom, want) {
@@ -95,6 +138,9 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		if !strings.Contains(candidateJSON, want) {
 			t.Fatalf("expected candidate summary to contain %q, got %s", want, candidateJSON)
 		}
+	}
+	if !strings.Contains(candidateJSON, `"connection_entry_path": "connection-entry-release.zip"`) {
+		t.Fatalf("expected candidate summary to include Connection Entry archive path, got %s", candidateJSON)
 	}
 }
 
@@ -322,6 +368,48 @@ func TestVerifyCandidateDetectsTamperedProvenance(t *testing.T) {
 	}
 }
 
+func TestVerifyCandidateDetectsTamperedConnectionEntryReleaseArchive(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdev := writeCandidateArtifactForTest(t, input, "rdev", "cli-binary")
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "host-binary")
+	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+
+	_, err = PrepareCandidate(CandidateOptions{
+		SourceRoot:        filepath.Join("..", ".."),
+		OutDir:            out,
+		Version:           "v0.1.0",
+		GatewayURL:        "https://api.example.com/v1",
+		ArtifactPaths:     []string{rdev, host, verify},
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		Key:               key,
+		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "connection-entry-release.zip"), []byte("not a zip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected tampered Connection Entry release archive to fail verification")
+	}
+	failures := failedCandidateVerificationNames(verification)
+	if !strings.Contains(failures, "connection-entry-release.zip:file_sha256_matches") ||
+		!strings.Contains(failures, "connection_entry_release_archive_exists") {
+		t.Fatalf("expected archive checksum and zip failures, got %s", failures)
+	}
+}
+
 func TestPrepareCandidateRejectsDuplicateArtifactNames(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
@@ -387,4 +475,27 @@ func readReleaseCandidateTestFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(content)
+}
+
+func readConnectionEntryArchiveForTest(t *testing.T, path string) map[string][]byte {
+	t.Helper()
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	entries := map[string][]byte{}
+	for _, file := range reader.File {
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(handle)
+		_ = handle.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries[file.Name] = data
+	}
+	return entries
 }

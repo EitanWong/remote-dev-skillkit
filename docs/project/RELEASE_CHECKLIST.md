@@ -26,6 +26,7 @@
 - [ ] Prepare and verify per-platform candidates with `scripts/release/prepare-platform-candidates.sh`.
 - [ ] Review `rdev.platform-release-candidates.v1`.
 - [ ] Confirm each release candidate contains `sbom.spdx.json` and `provenance.json`, and that `rdev release verify-candidate` passes SBOM coverage/hash checks plus provenance subject/hash checks.
+- [ ] Confirm each release candidate contains `connection-entry-release.zip`, and that `rdev release verify-candidate` passes Connection Entry archive schema, launcher, artifact, checksum, and no-private-parameter checks.
 - [ ] Generate and review a multi-platform GitHub Release dry-run plan with `scripts/github/plan-platform-release.sh`.
 - [ ] Review `rdev.github-platform-release-plan.v1`, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, and `INSTALL_PLATFORMS.md`.
 - [ ] Run `scripts/github/audit-project-readiness.sh --repo <owner/repo> --out <path>` and archive `rdev.github-project-readiness.v1` before external GitHub mutation.

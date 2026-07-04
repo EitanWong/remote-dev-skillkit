@@ -216,6 +216,7 @@ python3 - "$work_dir" <<'PY'
 import json
 import pathlib
 import sys
+import zipfile
 
 root = pathlib.Path(sys.argv[1])
 fresh_agent_output = json.loads((root / "fresh-agent-support-session-output.json").read_text())
@@ -276,8 +277,37 @@ for candidate in platform_manifest["candidates"]:
     candidate_json = json.loads((pathlib.Path(candidate["candidate_dir"]) / "release-candidate.json").read_text())
     assert candidate_json["out_dir"] == ".", candidate_json
     assert candidate_json["provenance_path"] == "provenance.json", candidate_json
+    assert candidate_json["connection_entry_path"] == "connection-entry-release.zip", candidate_json
     assert any(file["path"] == "provenance.json" and file["kind"] == "provenance" for file in candidate_json["files"]), candidate_json["files"]
     assert any(file["path"] == "sbom.spdx.json" and file["kind"] == "sbom" for file in candidate_json["files"]), candidate_json["files"]
+    assert any(file["path"] == "connection-entry-release.zip" and file["kind"] == "connection-entry-release-archive" for file in candidate_json["files"]), candidate_json["files"]
+    entry_archive_path = pathlib.Path(candidate["candidate_dir"]) / "connection-entry-release.zip"
+    assert entry_archive_path.is_file(), candidate_json
+    with zipfile.ZipFile(entry_archive_path) as archive:
+        names = set(archive.namelist())
+        required_archive_entries = {
+            "CONNECTION_ENTRY_RELEASE.md",
+            "connection-entry-release.json",
+            "connection-entry-runner.template.json",
+            "connection-entry-checksums.txt",
+            "release/release-bundle.json",
+            "release/sbom.spdx.json",
+            "release/provenance.json",
+        }
+        artifact_basenames = {pathlib.Path(artifact["artifact_path"]).name for artifact in candidate_json["artifacts"]}
+        if "rdev.exe" in artifact_basenames:
+            required_archive_entries.add("launchers/Start-ConnectionEntry.ps1")
+        else:
+            required_archive_entries.add("launchers/start-connection-entry.sh")
+        assert required_archive_entries.issubset(names), names
+        entry_manifest = json.loads(archive.read("connection-entry-release.json"))
+        assert entry_manifest["schema_version"] == "rdev.connection-entry-release-package.v1", entry_manifest
+        assert entry_manifest["no_private_parameters"] is True, entry_manifest
+        assert entry_manifest["execution_mode"] == "runtime-invite-required", entry_manifest
+        assert len(entry_manifest["launchers"]) >= 1, entry_manifest
+        for artifact in candidate_json["artifacts"]:
+            assert "bin/" + pathlib.Path(artifact["artifact_path"]).name in names, names
+            assert "bin/" + pathlib.Path(artifact["manifest_path"]).name in names, names
     sbom = json.loads((pathlib.Path(candidate["candidate_dir"]) / "sbom.spdx.json").read_text())
     assert sbom["spdxVersion"] == "SPDX-2.3", sbom
     artifact_names = {artifact["name"] for artifact in candidate_json["artifacts"]}
@@ -441,6 +471,7 @@ print(json.dumps({
     "asset_count": len(plan["assets"]),
     "candidate_sbom": True,
     "candidate_provenance": True,
+    "connection_entry_release_archive": True,
     "external_mutation": plan["external_mutation"],
 }, indent=2))
 PY

@@ -4,6 +4,42 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.13-dev
+
+Current phase: formal release packaging is moving from platform candidate
+directories toward verifiable Connection Entry release archives. This is local
+release evidence only; external GitHub Release publication and real download
+verification still require explicit operator approval.
+
+### Added
+
+- Added `rdev.connection-entry-release-package.v1` and
+  `connection-entry-release.zip` generation to every release candidate prepared
+  by `rdev release prepare-candidate`. The archive bundles the platform
+  `rdev` artifacts and release manifests under `bin/`, release metadata under
+  `release/`, a generic runner manifest template, visible shell/PowerShell
+  launchers, human/Agent release notes, and `connection-entry-checksums.txt`.
+  It intentionally carries no ticket, gateway, server address, local path,
+  credential, or session-specific root data; runtime private values still come
+  from signed invite or join-manifest metadata.
+- Added release-candidate verification for the Connection Entry release
+  archive. `rdev release verify-candidate` now opens
+  `connection-entry-release.zip`, validates required entries, schema version,
+  no-private-parameter policy, runtime-invite requirement, launcher and
+  artifact coverage, archive-internal checksums, manifest file hashes/sizes,
+  and private-surface hygiene.
+- Updated release smoke so every per-platform candidate must include and verify
+  the Connection Entry release archive before GitHub release dry-run planning
+  succeeds.
+
+### Remaining Gates
+
+- Publish the signed per-platform Connection Entry archives as GitHub Release
+  assets, then verify real downloads with the post-release install plan.
+- Run clean Windows/macOS/Linux target acceptance against the published
+  archives.
+- Continue production hosted provider and real helper/relay adapter work.
+
 ## 0.1.12-dev
 
 Current phase: real fresh-agent support sessions are standardized so Agents no

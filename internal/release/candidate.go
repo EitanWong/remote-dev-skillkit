@@ -1,12 +1,14 @@
 package release
 
 import (
+	"archive/zip"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,6 +23,8 @@ import (
 
 const CandidateSchemaVersion = "rdev.release-candidate.v1"
 const CandidateVerificationSchemaVersion = "rdev.release-candidate-verification.v1"
+const ConnectionEntryReleasePackageSchemaVersion = "rdev.connection-entry-release-package.v1"
+const connectionEntryReleaseArchivePath = "connection-entry-release.zip"
 
 type CandidateOptions struct {
 	SourceRoot        string
@@ -43,6 +47,7 @@ type Candidate struct {
 	SkillkitPath         string                      `json:"skillkit_path"`
 	SBOMPath             string                      `json:"sbom_path"`
 	ProvenancePath       string                      `json:"provenance_path"`
+	ConnectionEntryPath  string                      `json:"connection_entry_path"`
 	ChecksumsPath        string                      `json:"checksums_path"`
 	Artifacts            []CandidateArtifact         `json:"artifacts"`
 	SkillkitVerification skillkit.VerificationReport `json:"skillkit_verification"`
@@ -68,6 +73,29 @@ type CandidateCheck struct {
 }
 
 type CandidateFile struct {
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
+	Kind      string `json:"kind"`
+}
+
+type ConnectionEntryReleasePackage struct {
+	SchemaVersion       string                              `json:"schema_version"`
+	Version             string                              `json:"version"`
+	GeneratedAt         time.Time                           `json:"generated_at"`
+	RootPublicKey       string                              `json:"root_public_key"`
+	ArchiveKind         string                              `json:"archive_kind"`
+	ExecutionMode       string                              `json:"execution_mode"`
+	NoPrivateParameters bool                                `json:"no_private_parameters"`
+	RequiredRuntimeData []string                            `json:"required_runtime_data"`
+	Artifacts           []ConnectionEntryReleasePackageFile `json:"artifacts"`
+	ReleaseMetadata     []ConnectionEntryReleasePackageFile `json:"release_metadata"`
+	Launchers           []ConnectionEntryReleasePackageFile `json:"launchers"`
+	ChecksumsPath       string                              `json:"checksums_path"`
+	AgentRules          []string                            `json:"agent_rules"`
+}
+
+type ConnectionEntryReleasePackageFile struct {
 	Path      string `json:"path"`
 	SHA256    string `json:"sha256"`
 	SizeBytes int64  `json:"size_bytes"`
@@ -266,6 +294,14 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 	}
 	add("provenance_written", pathExists(provenancePath), provenanceEntry.Path)
 
+	candidate.ConnectionEntryPath = connectionEntryReleaseArchivePath
+	connectionEntryPath := filepath.Join(outDir, candidate.ConnectionEntryPath)
+	connectionEntryEntry, err := WriteConnectionEntryReleaseArchive(connectionEntryPath, outDir, candidate, now)
+	if err != nil {
+		return Candidate{}, err
+	}
+	add("connection_entry_release_archive_written", pathExists(connectionEntryPath), connectionEntryEntry.Path)
+
 	files, err := collectCandidateFiles(outDir, map[string]bool{
 		"release-candidate.json": true,
 		"checksums.txt":          true,
@@ -338,6 +374,7 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 	add("candidate_artifacts_present", len(candidate.Artifacts) > 0, fmt.Sprintf("%d", len(candidate.Artifacts)))
 	add("candidate_sbom_listed", candidateHasFile(candidate.Files, "sbom.spdx.json"), "sbom.spdx.json")
 	add("candidate_provenance_listed", candidateHasFile(candidate.Files, "provenance.json"), "provenance.json")
+	add("candidate_connection_entry_release_archive_listed", candidateHasFile(candidate.Files, connectionEntryReleaseArchivePath), connectionEntryReleaseArchivePath)
 
 	root, rootErr := parseCandidateRootPublicKey(candidate.RootPublicKey)
 	add("candidate_root_public_key_valid", rootErr == nil, errorDetail(rootErr))
@@ -386,6 +423,11 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 
 	provenanceChecks := VerifyCandidateProvenance(candidateDir, candidate)
 	for _, check := range provenanceChecks {
+		verification.Checks = append(verification.Checks, check)
+	}
+
+	connectionEntryChecks := VerifyConnectionEntryReleaseArchive(candidateDir, candidate)
+	for _, check := range connectionEntryChecks {
 		verification.Checks = append(verification.Checks, check)
 	}
 
@@ -534,6 +576,8 @@ func candidateFileKind(path string) string {
 		return "sbom"
 	case path == "provenance.json":
 		return "provenance"
+	case path == connectionEntryReleaseArchivePath:
+		return "connection-entry-release-archive"
 	case strings.HasSuffix(path, ".rdev-release.json"):
 		return "release-manifest"
 	case strings.HasPrefix(path, "skillkit/"):
@@ -580,6 +624,286 @@ func writeCandidate(path string, candidate Candidate) error {
 	}
 	content = append(content, '\n')
 	return os.WriteFile(path, content, 0o644)
+}
+
+type connectionEntryArchiveEntry struct {
+	Path    string
+	Kind    string
+	Content []byte
+}
+
+func WriteConnectionEntryReleaseArchive(path, candidateDir string, candidate Candidate, generatedAt time.Time) (CandidateFile, error) {
+	entries, err := buildConnectionEntryReleaseEntries(candidateDir, candidate, generatedAt)
+	if err != nil {
+		return CandidateFile{}, err
+	}
+	if err := writeZipArchive(path, entries); err != nil {
+		return CandidateFile{}, err
+	}
+	sha, size, err := fileDigest(path)
+	if err != nil {
+		return CandidateFile{}, err
+	}
+	return CandidateFile{
+		Path:      connectionEntryReleaseArchivePath,
+		SHA256:    "sha256:" + sha,
+		SizeBytes: size,
+		Kind:      "connection-entry-release-archive",
+	}, nil
+}
+
+func buildConnectionEntryReleaseEntries(candidateDir string, candidate Candidate, generatedAt time.Time) ([]connectionEntryArchiveEntry, error) {
+	var entries []connectionEntryArchiveEntry
+	addContent := func(path, kind string, content []byte) {
+		entries = append(entries, connectionEntryArchiveEntry{Path: path, Kind: kind, Content: append([]byte(nil), content...)})
+	}
+	addCandidateFile := func(sourcePath, archivePath, kind string) error {
+		if !safeCandidatePath(sourcePath) || !safeCandidatePath(archivePath) {
+			return fmt.Errorf("unsafe connection entry archive path %q -> %q", sourcePath, archivePath)
+		}
+		content, err := os.ReadFile(filepath.Join(candidateDir, filepath.FromSlash(sourcePath)))
+		if err != nil {
+			return err
+		}
+		addContent(archivePath, kind, content)
+		return nil
+	}
+
+	for _, artifact := range candidate.Artifacts {
+		if err := addCandidateFile(artifact.ArtifactPath, "bin/"+filepath.Base(artifact.ArtifactPath), "artifact"); err != nil {
+			return nil, err
+		}
+		if err := addCandidateFile(artifact.ManifestPath, "bin/"+filepath.Base(artifact.ManifestPath), "release-manifest"); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range []struct {
+		source string
+		target string
+		kind   string
+	}{
+		{candidate.ReleaseBundlePath, "release/release-bundle.json", "release-bundle"},
+		{candidate.SBOMPath, "release/sbom.spdx.json", "sbom"},
+		{candidate.ProvenancePath, "release/provenance.json", "provenance"},
+	} {
+		if err := addCandidateFile(item.source, item.target, item.kind); err != nil {
+			return nil, err
+		}
+	}
+
+	addContent("CONNECTION_ENTRY_RELEASE.md", "documentation", []byte(renderConnectionEntryReleaseReadme(candidate)))
+	addContent("connection-entry-runner.template.json", "runner-template", []byte(renderConnectionEntryRunnerTemplate(candidate, generatedAt)))
+	if connectionEntryReleaseUsesWindows(candidate) {
+		addContent("launchers/Start-ConnectionEntry.ps1", "launcher", []byte(renderConnectionEntryPowerShellLauncher()))
+	} else {
+		addContent("launchers/start-connection-entry.sh", "launcher", []byte(renderConnectionEntryShellLauncher()))
+	}
+
+	files := connectionEntryPackageFiles(entries)
+	manifest := buildConnectionEntryReleasePackage(candidate, files, generatedAt)
+	manifestContent, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	manifestContent = append(manifestContent, '\n')
+	addContent("connection-entry-release.json", "package-manifest", manifestContent)
+	checksums := renderConnectionEntryArchiveChecksums(connectionEntryPackageFiles(entries))
+	addContent("connection-entry-checksums.txt", "checksums", []byte(checksums))
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
+}
+
+func buildConnectionEntryReleasePackage(candidate Candidate, files []ConnectionEntryReleasePackageFile, generatedAt time.Time) ConnectionEntryReleasePackage {
+	var artifacts []ConnectionEntryReleasePackageFile
+	var releaseMetadata []ConnectionEntryReleasePackageFile
+	var launchers []ConnectionEntryReleasePackageFile
+	for _, file := range files {
+		switch file.Kind {
+		case "artifact", "release-manifest":
+			artifacts = append(artifacts, file)
+		case "release-bundle", "sbom", "provenance", "runner-template", "documentation":
+			releaseMetadata = append(releaseMetadata, file)
+		case "launcher":
+			launchers = append(launchers, file)
+		}
+	}
+	return ConnectionEntryReleasePackage{
+		SchemaVersion:       ConnectionEntryReleasePackageSchemaVersion,
+		Version:             candidate.Version,
+		GeneratedAt:         generatedAt.UTC(),
+		RootPublicKey:       candidate.RootPublicKey,
+		ArchiveKind:         "generic-connection-entry-release",
+		ExecutionMode:       "runtime-invite-required",
+		NoPrivateParameters: true,
+		RequiredRuntimeData: []string{
+			"join manifest URL or finalized connection-entry-runner.json",
+			"manifest root public key",
+			"ticket code and gateway candidates from the signed invite/join manifest",
+		},
+		Artifacts:       artifacts,
+		ReleaseMetadata: releaseMetadata,
+		Launchers:       launchers,
+		ChecksumsPath:   "connection-entry-checksums.txt",
+		AgentRules: []string{
+			"Verify release/release-bundle.json and connection-entry-checksums.txt before running a binary from this archive.",
+			"Do not ask humans to assemble ticket, gateway, transport, or root-key values by hand.",
+			"Use rdev support-session connect or rdev connection-entry plan to produce the runtime invite data before execution.",
+			"Keep this archive generic; runtime private parameters belong in signed invite metadata, not release assets.",
+		},
+	}
+}
+
+func connectionEntryPackageFiles(entries []connectionEntryArchiveEntry) []ConnectionEntryReleasePackageFile {
+	files := make([]ConnectionEntryReleasePackageFile, 0, len(entries))
+	for _, entry := range entries {
+		sum := sha256.Sum256(entry.Content)
+		files = append(files, ConnectionEntryReleasePackageFile{
+			Path:      entry.Path,
+			SHA256:    "sha256:" + hex.EncodeToString(sum[:]),
+			SizeBytes: int64(len(entry.Content)),
+			Kind:      entry.Kind,
+		})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files
+}
+
+func renderConnectionEntryArchiveChecksums(files []ConnectionEntryReleasePackageFile) string {
+	var builder strings.Builder
+	for _, file := range files {
+		builder.WriteString(strings.TrimPrefix(file.SHA256, "sha256:"))
+		builder.WriteString("  ")
+		builder.WriteString(file.Path)
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
+func connectionEntryReleaseUsesWindows(candidate Candidate) bool {
+	for _, artifact := range candidate.Artifacts {
+		if strings.EqualFold(filepath.Base(artifact.ArtifactPath), "rdev.exe") {
+			return true
+		}
+	}
+	return false
+}
+
+func writeZipArchive(path string, entries []connectionEntryArchiveEntry) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := zip.NewWriter(file)
+	zipTime := time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, entry := range entries {
+		if !safeCandidatePath(entry.Path) {
+			_ = writer.Close()
+			return fmt.Errorf("unsafe connection entry archive entry %q", entry.Path)
+		}
+		header := &zip.FileHeader{
+			Name:     entry.Path,
+			Method:   zip.Deflate,
+			Modified: zipTime,
+		}
+		header.SetMode(0o644)
+		if strings.HasSuffix(entry.Path, ".sh") {
+			header.SetMode(0o755)
+		}
+		w, err := writer.CreateHeader(header)
+		if err != nil {
+			_ = writer.Close()
+			return err
+		}
+		if _, err := w.Write(entry.Content); err != nil {
+			_ = writer.Close()
+			return err
+		}
+	}
+	return writer.Close()
+}
+
+func renderConnectionEntryReleaseReadme(candidate Candidate) string {
+	return fmt.Sprintf(`# Remote Dev Skillkit Connection Entry Release
+
+Schema: %s
+Version: %s
+
+This archive is a generic release package for Connection Entry runners. It
+contains signed release artifacts and visible launchers, but it intentionally
+does not contain private ticket codes, gateway URLs, root pins, server
+addresses, local paths, credentials, or dates that belong to a specific
+operator session.
+
+Agent flow:
+
+1. Verify release/release-bundle.json and connection-entry-checksums.txt.
+2. Create runtime invite data with rdev support-session connect or
+   rdev connection-entry plan.
+3. Materialize a real connection-entry-runner.json from the signed invite or
+   join manifest.
+4. Run the visible launcher from launchers/ or call:
+
+   rdev connection-entry run --runner-manifest connection-entry-runner.json
+
+Humans should receive only the final link, visible command, or package selected
+by the Agent. They should not hand-assemble ticket, gateway, transport, release,
+checksum, or root-key parameters.
+`, ConnectionEntryReleasePackageSchemaVersion, candidate.Version)
+}
+
+func renderConnectionEntryRunnerTemplate(candidate Candidate, generatedAt time.Time) string {
+	payload := map[string]any{
+		"schema_version":          "rdev.connection-entry-runner-template.v1",
+		"runner_manifest_schema":  "rdev.connection-entry.runner.v1",
+		"version":                 candidate.Version,
+		"generated_at":            generatedAt.UTC(),
+		"release_root_public_key": candidate.RootPublicKey,
+		"execution_mode":          "runtime-invite-required",
+		"missing_inputs": []string{
+			"manifest_url",
+			"manifest_root_public_key",
+			"gateway_url",
+			"ticket_code",
+		},
+		"standard_tools": []string{
+			"rdev support-session connect",
+			"rdev connection-entry plan",
+			"rdev connection-entry run --runner-manifest connection-entry-runner.json",
+		},
+		"private_parameter_policy": "release archive must stay generic; runtime values come from signed invite or join manifest metadata",
+	}
+	content, _ := json.MarshalIndent(payload, "", "  ")
+	return string(append(content, '\n'))
+}
+
+func renderConnectionEntryShellLauncher() string {
+	return `#!/bin/sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PACKAGE_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+MANIFEST="${1:-$PACKAGE_DIR/connection-entry-runner.json}"
+if [ ! -f "$MANIFEST" ]; then
+  echo "Missing runtime connection-entry-runner.json." >&2
+  echo "Ask your Agent to run rdev support-session connect or rdev connection-entry plan first." >&2
+  exit 2
+fi
+exec "$PACKAGE_DIR/bin/rdev" connection-entry run --runner-manifest "$MANIFEST"
+`
+}
+
+func renderConnectionEntryPowerShellLauncher() string {
+	return `$ErrorActionPreference = 'Stop'
+$PackageDir = Split-Path -Parent $PSScriptRoot
+$ManifestPath = if ($args.Count -gt 0) { $args[0] } else { Join-Path $PackageDir 'connection-entry-runner.json' }
+if (-not (Test-Path -LiteralPath $ManifestPath)) {
+  Write-Error 'Missing runtime connection-entry-runner.json. Ask your Agent to run rdev support-session connect or rdev connection-entry plan first.'
+  exit 2
+}
+& (Join-Path $PackageDir 'bin\rdev.exe') connection-entry run --runner-manifest $ManifestPath
+`
 }
 
 func publicCandidateBundleVerification(verification BundleVerification) BundleVerification {
@@ -786,6 +1110,212 @@ func verifyCandidateChecksumFile(candidateDir string, files []CandidateFile) []C
 		CandidateCheck{Name: "checksums_have_no_unexpected_files", Passed: len(unexpected) == 0, Detail: strings.Join(unexpected, ",")},
 	)
 	return checks
+}
+
+func VerifyConnectionEntryReleaseArchive(candidateDir string, candidate Candidate) []CandidateCheck {
+	archivePath := filepath.Join(candidateDir, connectionEntryReleaseArchivePath)
+	reader, err := zip.OpenReader(archivePath)
+	checks := []CandidateCheck{{Name: "connection_entry_release_archive_exists", Passed: err == nil, Detail: connectionEntryReleaseArchivePath}}
+	if err != nil {
+		return checks
+	}
+	defer reader.Close()
+
+	entries := map[string][]byte{}
+	var unsafe []string
+	var duplicate []string
+	for _, file := range reader.File {
+		name := filepath.ToSlash(file.Name)
+		if !safeCandidatePath(name) {
+			unsafe = append(unsafe, name)
+			continue
+		}
+		if _, exists := entries[name]; exists {
+			duplicate = append(duplicate, name)
+			continue
+		}
+		content, err := readZipFile(file)
+		if err != nil {
+			checks = append(checks, CandidateCheck{Name: "connection_entry_release_archive_readable", Passed: false, Detail: name + ":" + err.Error()})
+			continue
+		}
+		entries[name] = content
+	}
+	sort.Strings(unsafe)
+	sort.Strings(duplicate)
+	checks = append(checks,
+		CandidateCheck{Name: "connection_entry_archive_paths_safe", Passed: len(unsafe) == 0, Detail: strings.Join(unsafe, ",")},
+		CandidateCheck{Name: "connection_entry_archive_paths_unique", Passed: len(duplicate) == 0, Detail: strings.Join(duplicate, ",")},
+	)
+
+	required := []string{
+		"CONNECTION_ENTRY_RELEASE.md",
+		"connection-entry-release.json",
+		"connection-entry-runner.template.json",
+		"connection-entry-checksums.txt",
+		"release/release-bundle.json",
+		"release/sbom.spdx.json",
+		"release/provenance.json",
+	}
+	if connectionEntryReleaseUsesWindows(candidate) {
+		required = append(required, "launchers/Start-ConnectionEntry.ps1")
+	} else {
+		required = append(required, "launchers/start-connection-entry.sh")
+	}
+	var missing []string
+	for _, path := range required {
+		if _, ok := entries[path]; !ok {
+			missing = append(missing, path)
+		}
+	}
+	for _, artifact := range candidate.Artifacts {
+		for _, path := range []string{
+			"bin/" + filepath.Base(artifact.ArtifactPath),
+			"bin/" + filepath.Base(artifact.ManifestPath),
+		} {
+			if _, ok := entries[path]; !ok {
+				missing = append(missing, path)
+			}
+		}
+	}
+	sort.Strings(missing)
+	checks = append(checks, CandidateCheck{Name: "connection_entry_archive_required_files_present", Passed: len(missing) == 0, Detail: strings.Join(missing, ",")})
+
+	manifestContent, ok := entries["connection-entry-release.json"]
+	if !ok {
+		return checks
+	}
+	var manifest ConnectionEntryReleasePackage
+	err = json.Unmarshal(manifestContent, &manifest)
+	checks = append(checks, CandidateCheck{Name: "connection_entry_release_manifest_json_valid", Passed: err == nil, Detail: errorDetail(err)})
+	if err != nil {
+		return checks
+	}
+	checks = append(checks,
+		CandidateCheck{Name: "connection_entry_release_manifest_schema", Passed: manifest.SchemaVersion == ConnectionEntryReleasePackageSchemaVersion, Detail: manifest.SchemaVersion},
+		CandidateCheck{Name: "connection_entry_release_version_matches_candidate", Passed: manifest.Version == candidate.Version, Detail: manifest.Version},
+		CandidateCheck{Name: "connection_entry_release_root_matches_candidate", Passed: manifest.RootPublicKey == candidate.RootPublicKey, Detail: manifest.RootPublicKey},
+		CandidateCheck{Name: "connection_entry_release_no_private_parameters", Passed: manifest.NoPrivateParameters, Detail: fmt.Sprintf("%t", manifest.NoPrivateParameters)},
+		CandidateCheck{Name: "connection_entry_release_requires_runtime_invite", Passed: manifest.ExecutionMode == "runtime-invite-required" && len(manifest.RequiredRuntimeData) > 0, Detail: manifest.ExecutionMode},
+		CandidateCheck{Name: "connection_entry_release_launchers_present", Passed: len(manifest.Launchers) >= 1, Detail: fmt.Sprintf("%d", len(manifest.Launchers))},
+		CandidateCheck{Name: "connection_entry_release_artifacts_present", Passed: len(manifest.Artifacts) >= len(candidate.Artifacts), Detail: fmt.Sprintf("%d", len(manifest.Artifacts))},
+	)
+
+	checks = append(checks, verifyConnectionEntryArchiveChecksums(entries)...)
+	checks = append(checks, verifyConnectionEntryManifestFiles(manifest, entries)...)
+	checks = append(checks, CandidateCheck{Name: "connection_entry_archive_no_private_surface", Passed: connectionEntryArchiveHasNoPrivateSurface(entries), Detail: "no ticket/root/gateway placeholders with private values"})
+	return checks
+}
+
+func readZipFile(file *zip.File) ([]byte, error) {
+	reader, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
+}
+
+func verifyConnectionEntryArchiveChecksums(entries map[string][]byte) []CandidateCheck {
+	content, ok := entries["connection-entry-checksums.txt"]
+	checks := []CandidateCheck{{Name: "connection_entry_archive_checksums_present", Passed: ok, Detail: "connection-entry-checksums.txt"}}
+	if !ok {
+		return checks
+	}
+	listed := map[string]string{}
+	var malformed []string
+	for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "  ", 2)
+		if len(parts) != 2 || !isHexSHA256String(parts[0]) || !safeCandidatePath(parts[1]) {
+			malformed = append(malformed, line)
+			continue
+		}
+		listed[parts[1]] = parts[0]
+	}
+	var missing []string
+	var mismatch []string
+	var unexpected []string
+	for path, data := range entries {
+		if path == "connection-entry-checksums.txt" {
+			continue
+		}
+		want := sha256.Sum256(data)
+		got, ok := listed[path]
+		if !ok {
+			missing = append(missing, path)
+			continue
+		}
+		if got != hex.EncodeToString(want[:]) {
+			mismatch = append(mismatch, path)
+		}
+	}
+	for path := range listed {
+		if path == "connection-entry-checksums.txt" {
+			unexpected = append(unexpected, path)
+			continue
+		}
+		if _, ok := entries[path]; !ok {
+			unexpected = append(unexpected, path)
+		}
+	}
+	sort.Strings(malformed)
+	sort.Strings(missing)
+	sort.Strings(mismatch)
+	sort.Strings(unexpected)
+	checks = append(checks,
+		CandidateCheck{Name: "connection_entry_archive_checksum_lines_valid", Passed: len(malformed) == 0, Detail: strings.Join(malformed, ",")},
+		CandidateCheck{Name: "connection_entry_archive_checksums_cover_entries", Passed: len(missing) == 0, Detail: strings.Join(missing, ",")},
+		CandidateCheck{Name: "connection_entry_archive_checksums_match_entries", Passed: len(mismatch) == 0, Detail: strings.Join(mismatch, ",")},
+		CandidateCheck{Name: "connection_entry_archive_checksums_have_no_unexpected_entries", Passed: len(unexpected) == 0, Detail: strings.Join(unexpected, ",")},
+	)
+	return checks
+}
+
+func verifyConnectionEntryManifestFiles(manifest ConnectionEntryReleasePackage, entries map[string][]byte) []CandidateCheck {
+	var missing []string
+	var mismatch []string
+	for _, file := range append(append([]ConnectionEntryReleasePackageFile{}, manifest.Artifacts...), append(manifest.ReleaseMetadata, manifest.Launchers...)...) {
+		content, ok := entries[file.Path]
+		if !ok {
+			missing = append(missing, file.Path)
+			continue
+		}
+		sum := sha256.Sum256(content)
+		if file.SHA256 != "sha256:"+hex.EncodeToString(sum[:]) || file.SizeBytes != int64(len(content)) {
+			mismatch = append(mismatch, file.Path)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(mismatch)
+	return []CandidateCheck{
+		{Name: "connection_entry_release_manifest_files_exist", Passed: len(missing) == 0, Detail: strings.Join(missing, ",")},
+		{Name: "connection_entry_release_manifest_files_match", Passed: len(mismatch) == 0, Detail: strings.Join(mismatch, ",")},
+	}
+}
+
+func connectionEntryArchiveHasNoPrivateSurface(entries map[string][]byte) bool {
+	for path, content := range entries {
+		if strings.HasPrefix(path, "bin/") {
+			continue
+		}
+		text := string(content)
+		if strings.Contains(text, "/Users/") ||
+			strings.Contains(text, "192.168.") ||
+			strings.Contains(text, "10.0.") ||
+			strings.Contains(text, "ticket_code\":\"") ||
+			strings.Contains(text, "gateway_url\":\"http") ||
+			strings.Contains(text, "manifest_url\":\"http") {
+			return false
+		}
+		if filepath.IsAbs(path) || strings.Contains(path, `\`) {
+			return false
+		}
+	}
+	return true
 }
 
 func findUnlistedCandidateFiles(candidateDir string, files []CandidateFile) ([]string, error) {
