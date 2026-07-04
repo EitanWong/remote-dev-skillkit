@@ -81,6 +81,8 @@ func TestBuildAndVerifyAdditionalConnectivityAdapterPackages(t *testing.T) {
 		startArgvEnv     string
 		installActionEnv string
 		pathID           string
+		installTool      string
+		installURLVar    string
 	}{
 		{
 			adapter:          "ssh",
@@ -90,6 +92,8 @@ func TestBuildAndVerifyAdditionalConnectivityAdapterPackages(t *testing.T) {
 			startArgvEnv:     "RDEV_SSH_TUNNEL_START_ARGV_JSON",
 			installActionEnv: "RDEV_SSH_INSTALL_ACTION_JSON",
 			pathID:           "existing-ssh-tunnel",
+			installTool:      "ssh",
+			installURLVar:    "",
 		},
 		{
 			adapter:          "headscale",
@@ -99,6 +103,8 @@ func TestBuildAndVerifyAdditionalConnectivityAdapterPackages(t *testing.T) {
 			startArgvEnv:     "RDEV_MESH_START_ARGV_JSON",
 			installActionEnv: "RDEV_MESH_INSTALL_ACTION_JSON",
 			pathID:           "existing-headscale-tailscale-mesh",
+			installTool:      "tailscale",
+			installURLVar:    "RDEV_MESH_DOWNLOAD_URL",
 		},
 		{
 			adapter:          "wireguard",
@@ -108,6 +114,8 @@ func TestBuildAndVerifyAdditionalConnectivityAdapterPackages(t *testing.T) {
 			startArgvEnv:     "RDEV_VPN_START_ARGV_JSON",
 			installActionEnv: "RDEV_VPN_INSTALL_ACTION_JSON",
 			pathID:           "existing-wireguard-vpn",
+			installTool:      "wg",
+			installURLVar:    "RDEV_VPN_DOWNLOAD_URL",
 		},
 	}
 	for _, tc := range cases {
@@ -130,6 +138,17 @@ func TestBuildAndVerifyAdditionalConnectivityAdapterPackages(t *testing.T) {
 				pkg.RunnerEnv.ConnectionPathID != tc.pathID ||
 				pkg.ConnectionPathID != tc.pathID {
 				t.Fatalf("unexpected package: %#v", pkg)
+			}
+			if pkg.InstallAction.Tool != tc.installTool {
+				t.Fatalf("unexpected install action tool: %#v", pkg.InstallAction)
+			}
+			installArgv := strings.Join(pkg.InstallAction.Argv, " ")
+			if tc.installURLVar == "" {
+				if installArgv != "manual-review-required" {
+					t.Fatalf("expected manual review for %s, got %#v", tc.adapter, pkg.InstallAction)
+				}
+			} else if !strings.Contains(installArgv, "rdev deps install") || !strings.Contains(installArgv, tc.installURLVar) {
+				t.Fatalf("expected standard deps install action for %s, got %#v", tc.adapter, pkg.InstallAction)
 			}
 			verification, err := Verify(out)
 			if err != nil {

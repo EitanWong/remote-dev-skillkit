@@ -334,8 +334,9 @@ fallback first, then configured helper gateway overrides such as
 `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
 `RDEV_SSH_GATEWAY_URL` when they are unambiguous. If an approved user-scoped
 install action is present, the runner can use `rdev deps install` to download,
-SHA-256 verify, unpack, and use helper binaries such as `chisel` or `frpc` from
-a user/workspace tools directory without changing PATH or installing services.
+SHA-256 verify, unpack, and use helper binaries such as `chisel`, `frpc`,
+`tailscale`, or `wg` from a user/workspace tools directory without changing
+PATH or installing services.
 Creating credentials, changing firewall/DNS/routes, starting persistent
 connectivity, installing mesh/VPN drivers or services, or using paid/cloud
 relays still requires explicit approval. Real signed
@@ -500,7 +501,10 @@ SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard connectivity
 adapter packages can be generated and verified with
 `rdev relay-adapter package` / `rdev relay-adapter verify`, giving Agents
 standard `RDEV_RELAY_*`, `RDEV_SSH_*`, `RDEV_MESH_*`, and `RDEV_VPN_*` runner
-metadata instead of custom tunnel scripts. Real
+metadata instead of custom tunnel scripts. Chisel/frpc, mesh `tailscale`, and
+VPN `wg` helper binaries share the reviewed `rdev deps install` path for
+SHA-256 verified user/workspace-scoped repair; enrollment, keys, routes, DNS,
+firewall, services, and privileged VPN/mesh setup remain approval-gated. Real
 hosted gateway storage/auth runs can be archived and verified with
 `rdev acceptance package-hosted-provider-runtime` /
 `rdev acceptance verify-hosted-provider-runtime-package`, covering startup,

@@ -4,6 +4,43 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.25-dev
+
+Current phase: restrictive-network helpers are moving from package metadata
+toward safer self-repair inside the standard Connection Entry runner. Mesh and
+VPN helpers can now use the same SHA-256 verified user/workspace-scoped
+dependency install path that Chisel/frpc use, while enrollment, keys, routes,
+DNS, services, firewall, and privileged network changes remain approval-gated.
+
+### Added
+
+- Extended `rdev deps install` and `internal/depsinstall` to support
+  `tailscale` and `wg` helper binaries in addition to `chisel` and `frpc`.
+  Aliases such as `headscale-tailscale`, `tailscale-compatible`,
+  `wireguard`, `wireguard-tools`, and `wg-quick` normalize to the safe
+  executable helper names. The installer still only downloads an explicit URL,
+  verifies SHA-256, unpacks or copies the binary into a user/workspace tools
+  directory, and refuses hidden services, PATH mutation, drivers, firewall,
+  DNS, route, OS policy, or privileged installation.
+- Updated `rdev relay-adapter package --adapter headscale-tailscale` and
+  `--adapter wireguard` so generated packages expose standard
+  `RDEV_MESH_INSTALL_ACTION_JSON` and `RDEV_VPN_INSTALL_ACTION_JSON` templates
+  that call `rdev deps install --tool tailscale` or `--tool wg` with reviewed
+  download URLs and SHA-256 values instead of returning only
+  `manual-review-required`.
+- Added regression coverage for mesh/VPN helper dependency install reports,
+  alias normalization, package install-action generation, CLI plan-only output,
+  and continued rejection of unsupported privileged helper daemons.
+
+### Remaining Gates
+
+- Run real restrictive-network acceptance for SSH tunnel, frp/Chisel,
+  headscale/Tailscale-compatible mesh, and WireGuard paths across clean
+  Windows/macOS/Linux targets, then package the resulting runner/helper/gateway
+  evidence with `rdev acceptance package-relay-adapter`.
+- Continue real deployed hosted provider evidence, SAML runtime integration,
+  and GitHub Release publication/download verification.
+
 ## 0.1.24-dev
 
 Current phase: hosted auth is moving from provider contracts toward real

@@ -345,9 +345,9 @@ func adapterDescriptor(kind string) descriptor {
 			GatewayURLVar:     "RDEV_MESH_GATEWAY_URL",
 			StartArgvVar:      "RDEV_MESH_START_ARGV_JSON",
 			InstallActionVar:  "RDEV_MESH_INSTALL_ACTION_JSON",
-			Helper:            helper("tailscale", []string{"headscale-compatible"}, "tailscale status --json", "use-existing-enrollment-only"),
+			Helper:            helper("tailscale", []string{"headscale-compatible"}, "rdev deps install --tool tailscale --url ${RDEV_MESH_DOWNLOAD_URL} --expected-sha256 ${RDEV_MESH_SHA256}", "configured-helper-executable-existing-enrollment-only"),
 			StartArgvTemplate: []string{"tailscale", "status", "--json"},
-			InstallAction:     installAction("tailscale", "MESH", false),
+			InstallAction:     installAction("tailscale", "MESH", true),
 		}
 	case "wireguard":
 		return descriptor{
@@ -355,9 +355,9 @@ func adapterDescriptor(kind string) descriptor {
 			GatewayURLVar:     "RDEV_VPN_GATEWAY_URL",
 			StartArgvVar:      "RDEV_VPN_START_ARGV_JSON",
 			InstallActionVar:  "RDEV_VPN_INSTALL_ACTION_JSON",
-			Helper:            helper("wg", []string{"wg-quick", "wireguard"}, "wg show", "use-active-tunnel-only"),
+			Helper:            helper("wg", []string{"wg-quick", "wireguard"}, "rdev deps install --tool wg --url ${RDEV_VPN_DOWNLOAD_URL} --expected-sha256 ${RDEV_VPN_SHA256}", "configured-helper-executable-active-tunnel-only"),
 			StartArgvTemplate: []string{"wg", "show"},
-			InstallAction:     installAction("wg", "VPN", false),
+			InstallAction:     installAction("wg", "VPN", true),
 		}
 	default:
 		return descriptor{

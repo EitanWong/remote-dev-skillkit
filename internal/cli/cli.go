@@ -209,7 +209,7 @@ func (a App) deps(ctx context.Context, args []string) error {
 	case "install":
 		fs := flag.NewFlagSet("deps install", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		tool := fs.String("tool", "", "dependency tool to install: chisel or frpc")
+		tool := fs.String("tool", "", "dependency tool to install: chisel, frpc, tailscale, or wg")
 		scope := fs.String("scope", "user", "install scope: user or workspace")
 		version := fs.String("version", "", "optional dependency version label")
 		platform := fs.String("platform", runtime.GOOS+"/"+runtime.GOARCH, "target platform, for example linux/amd64")
@@ -7963,7 +7963,7 @@ Usage:
   rdev update check --repo EitanWong/remote-dev-skillkit
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
-  rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256> --execute
+  rdev deps install --tool tailscale --scope user --platform linux/amd64 --url https://example.com/tailscale.zip --expected-sha256 <sha256> --execute
   rdev support-session handoff --target auto --locale auto
   rdev support-session start --target auto --locale auto
   rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto

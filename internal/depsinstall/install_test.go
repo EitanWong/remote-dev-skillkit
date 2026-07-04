@@ -66,6 +66,49 @@ func TestInstallDownloadsVerifiesAndExtractsChisel(t *testing.T) {
 	}
 }
 
+func TestInstallDownloadsVerifiesAndExtractsMeshAndVPNHelpers(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		tool        string
+		archiveName string
+		content     string
+	}{
+		{name: "tailscale", tool: "tailscale", archiveName: "tailscale", content: "fake-tailscale"},
+		{name: "wireguard alias", tool: "wireguard", archiveName: "wg", content: "fake-wg"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			archive := zipBytes(t, tc.archiveName, tc.content)
+			sum := sha256.Sum256(archive)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write(archive)
+			}))
+			defer server.Close()
+			report, err := Install(context.Background(), server.Client(), Options{
+				Tool:           tc.tool,
+				Scope:          "workspace",
+				Platform:       "linux/amd64",
+				URL:            server.URL + "/" + tc.archiveName + ".zip",
+				ExpectedSHA256: hex.EncodeToString(sum[:]),
+				InstallDir:     filepath.Join(t.TempDir(), "tools"),
+				Execute:        true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !report.OK() || !report.Executed || report.InstalledBinary == "" {
+				t.Fatalf("expected executed install report, got %#v", report)
+			}
+			content, err := os.ReadFile(report.InstalledBinary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != tc.content {
+				t.Fatalf("unexpected binary content %q", string(content))
+			}
+		})
+	}
+}
+
 func TestInstallRejectsChecksumMismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("not expected"))
@@ -87,10 +130,10 @@ func TestInstallRejectsChecksumMismatch(t *testing.T) {
 
 func TestInstallRejectsPrivilegedTools(t *testing.T) {
 	report, err := Install(context.Background(), nil, Options{
-		Tool:           "wireguard",
+		Tool:           "tailscaled",
 		Scope:          "user",
 		Platform:       "linux/amd64",
-		URL:            "https://example.invalid/wg.zip",
+		URL:            "https://example.invalid/tailscaled.zip",
 		ExpectedSHA256: strings.Repeat("c", 64),
 		InstallDir:     filepath.Join(t.TempDir(), "tools"),
 		Execute:        false,

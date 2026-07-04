@@ -163,6 +163,10 @@ func normalizeTool(value string) string {
 		return "chisel"
 	case "frp", "frpc":
 		return "frpc"
+	case "headscale-tailscale", "tailscale-compatible", "tailscale":
+		return "tailscale"
+	case "wireguard", "wireguard-tools", "wg", "wg-quick":
+		return "wg"
 	default:
 		return value
 	}
@@ -170,7 +174,7 @@ func normalizeTool(value string) string {
 
 func supportedTool(tool string) bool {
 	switch normalizeTool(tool) {
-	case "chisel", "frpc":
+	case "chisel", "frpc", "tailscale", "wg":
 		return true
 	default:
 		return false

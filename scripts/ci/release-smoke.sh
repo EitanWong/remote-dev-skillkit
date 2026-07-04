@@ -511,6 +511,10 @@ connectivity_adapter_packages = {
     adapter: json.loads((root / f"connectivity-adapter-{adapter}-package.json").read_text())
     for adapter in ["ssh-tunnel", "headscale-tailscale", "wireguard"]
 }
+connectivity_adapter_manifests = {
+    adapter: json.loads((root / f"connectivity-adapter-{adapter}" / "relay-adapter.json").read_text())
+    for adapter in ["ssh-tunnel", "headscale-tailscale", "wireguard"]
+}
 connectivity_adapter_verifications = {
     adapter: json.loads((root / f"connectivity-adapter-{adapter}-verification.json").read_text())
     for adapter in ["ssh-tunnel", "headscale-tailscale", "wireguard"]
@@ -693,17 +697,24 @@ assert relay_adapter_verification["schema"] == "rdev.relay-adapter-package-verif
 assert relay_adapter_verification["ok"] is True, relay_adapter_verification
 assert relay_adapter_verification["adapter_kind"] == "chisel", relay_adapter_verification
 expected_connectivity = {
-    "ssh-tunnel": ("ssh-tunnel", "RDEV_SSH_GATEWAY_URL"),
-    "headscale-tailscale": ("headscale-tailscale", "RDEV_MESH_GATEWAY_URL"),
-    "wireguard": ("wireguard", "RDEV_VPN_GATEWAY_URL"),
+    "ssh-tunnel": ("ssh-tunnel", "RDEV_SSH_GATEWAY_URL", "manual-review-required"),
+    "headscale-tailscale": ("headscale-tailscale", "RDEV_MESH_GATEWAY_URL", "RDEV_MESH_DOWNLOAD_URL"),
+    "wireguard": ("wireguard", "RDEV_VPN_GATEWAY_URL", "RDEV_VPN_DOWNLOAD_URL"),
 }
-for adapter, (kind, gateway_var) in expected_connectivity.items():
+for adapter, (kind, gateway_var, install_marker) in expected_connectivity.items():
     package = connectivity_adapter_packages[adapter]
+    manifest = connectivity_adapter_manifests[adapter]
     verification = connectivity_adapter_verifications[adapter]
     assert package["schema"] == "rdev.relay-adapter-package.v1", package
     assert package["ok"] is True, package
     assert package["adapter_kind"] == kind, package
     assert package["runner_env"]["gateway_url_var"] == gateway_var, package
+    assert manifest["adapter_kind"] == kind, manifest
+    install_argv = " ".join(manifest["install_action_template"]["argv"])
+    assert install_marker in install_argv, manifest
+    if adapter != "ssh-tunnel":
+        assert "rdev deps install" in install_argv, manifest
+        assert manifest["install_action_template"]["requires_elevation"] is False, manifest
     assert verification["schema"] == "rdev.relay-adapter-package-verification.v1", verification
     assert verification["ok"] is True, verification
     assert verification["adapter_kind"] == kind, verification

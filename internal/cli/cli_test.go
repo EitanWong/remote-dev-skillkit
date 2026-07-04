@@ -7737,6 +7737,37 @@ func TestDepsInstallPlanOnlyOutputsReport(t *testing.T) {
 	}
 }
 
+func TestDepsInstallPlanOnlySupportsMeshAndVPNHelpers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tool string
+		want string
+	}{
+		{name: "tailscale", tool: "tailscale", want: `"tool": "tailscale"`},
+		{name: "wireguard alias", tool: "wireguard", want: `"tool": "wg"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			app := NewApp(&stdout, &bytes.Buffer{})
+			if err := app.Run(context.Background(), []string{
+				"deps", "install",
+				"--tool", tc.tool,
+				"--scope", "workspace",
+				"--platform", "linux/amd64",
+				"--url", "https://example.com/" + tc.tool + ".zip",
+				"--expected-sha256", strings.Repeat("e", 64),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stdout.String(), tc.want) ||
+				!strings.Contains(stdout.String(), `"ok": true`) ||
+				!strings.Contains(stdout.String(), `"execute": false`) {
+				t.Fatalf("unexpected deps install output: %s", stdout.String())
+			}
+		})
+	}
+}
+
 func writeCLIArtifactForTest(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
