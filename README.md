@@ -493,6 +493,11 @@ evidence commands. Hosted provider packages can be generated and verified with
 relay adapter packages can be generated and verified with
 `rdev relay-adapter package` / `rdev relay-adapter verify`, giving Agents
 standard `RDEV_RELAY_*` runner metadata instead of custom tunnel scripts. Real
+hosted gateway storage/auth runs can be archived and verified with
+`rdev acceptance package-hosted-provider-runtime` /
+`rdev acceptance verify-hosted-provider-runtime-package`, covering startup,
+storage/auth verification, backup, restore, retention, role probes,
+failure-mode evidence, audit, redaction, and checksums. Real
 relay runs can be archived and verified with
 `rdev acceptance package-relay-adapter` /
 `rdev acceptance verify-relay-adapter-package`. Release candidates now also
@@ -502,8 +507,9 @@ no-private-parameter checks.
 
 Still gated before a production-grade hosted release: real platform acceptance
 evidence for Windows/Linux/macOS service modes, real durable third-party hosted
-storage/auth runtime providers, real helper/relay adapter acceptance, and final
-external GitHub publishing plus download-verification steps.
+storage/auth runtime providers beyond the current runtime evidence packager,
+real helper/relay adapter acceptance, and final external GitHub publishing plus
+download-verification steps.
 
 ## Documentation Map
 

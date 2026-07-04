@@ -46,6 +46,11 @@ go test ./internal/acceptance ./internal/cli \
 	-count=1 \
 	> "$work_dir/relay-adapter-acceptance-package-smoke.txt"
 
+go test ./internal/acceptance ./internal/cli \
+	-run 'TestPackageAndVerifyHostedProviderRuntimeEvidence|TestVerifyHostedProviderRuntimeRejectsMissingDurabilityEvidence|TestAcceptancePackageHostedProviderRuntime' \
+	-count=1 \
+	> "$work_dir/hosted-provider-runtime-acceptance-package-smoke.txt"
+
 hosted_provider_dir="$work_dir/hosted-provider"
 go run ./cmd/rdev hosted-provider package \
 	--out "$hosted_provider_dir" \
@@ -55,6 +60,35 @@ go run ./cmd/rdev hosted-provider package \
 go run ./cmd/rdev hosted-provider verify \
 	--package "$hosted_provider_dir" \
 	> "$work_dir/hosted-provider-verification.json"
+
+hosted_runtime_input="$work_dir/hosted-runtime-input"
+mkdir -p "$hosted_runtime_input"
+printf '%s\n' 'gateway started with hosted provider package' > "$hosted_runtime_input/gateway-startup.txt"
+printf '%s\n' '{"ok":true,"provider":"file"}' > "$hosted_runtime_input/storage-verification.json"
+printf '%s\n' '{"ok":true,"provider":"hosted-ed25519-jwt"}' > "$hosted_runtime_input/auth-verification.json"
+printf '%s\n' 'snapshot copied to reviewed backup location' > "$hosted_runtime_input/backup-evidence.txt"
+printf '%s\n' 'restored snapshot and verified audit chain' > "$hosted_runtime_input/restore-evidence.txt"
+printf '%s\n' 'retention policy reviewed for release smoke' > "$hosted_runtime_input/retention-evidence.txt"
+printf '%s\n' '{"probes":[{"role":"operator","authorized":true},{"role":"viewer","authorized":false}]}' > "$hosted_runtime_input/role-mapping-evidence.json"
+printf '%s\n' '{"ok":true,"failure_mode_tested":true,"mode":"invalid auth rejected"}' > "$hosted_runtime_input/failure-mode-evidence.json"
+printf '%s\n' 'gateway_start' 'storage_verify' 'auth_verify' 'role_probe' 'failure_probe' 'cleanup' > "$hosted_runtime_input/audit.txt"
+hosted_runtime_dir="$work_dir/hosted-runtime-acceptance"
+go run ./cmd/rdev acceptance package-hosted-provider-runtime \
+	--hosted-provider-package "$hosted_provider_dir" \
+	--out "$hosted_runtime_dir" \
+	--gateway-startup "$hosted_runtime_input/gateway-startup.txt" \
+	--storage-verification "$hosted_runtime_input/storage-verification.json" \
+	--auth-verification "$hosted_runtime_input/auth-verification.json" \
+	--backup-evidence "$hosted_runtime_input/backup-evidence.txt" \
+	--restore-evidence "$hosted_runtime_input/restore-evidence.txt" \
+	--retention-evidence "$hosted_runtime_input/retention-evidence.txt" \
+	--role-mapping-evidence "$hosted_runtime_input/role-mapping-evidence.json" \
+	--failure-mode-evidence "$hosted_runtime_input/failure-mode-evidence.json" \
+	--audit "$hosted_runtime_input/audit.txt" \
+	> "$work_dir/hosted-provider-runtime-acceptance-package.json"
+go run ./cmd/rdev acceptance verify-hosted-provider-runtime-package \
+	--package "$hosted_runtime_dir" \
+	> "$work_dir/hosted-provider-runtime-acceptance-verification.json"
 
 relay_adapter_dir="$work_dir/relay-adapter"
 go run ./cmd/rdev relay-adapter package \
@@ -285,6 +319,8 @@ plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 github_project_readiness = json.loads((root / "github-project-readiness.json").read_text())
 hosted_provider_package = json.loads((root / "hosted-provider-package.json").read_text())
 hosted_provider_verification = json.loads((root / "hosted-provider-verification.json").read_text())
+hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-acceptance-package.json").read_text())
+hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
 relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
 relay_adapter_verification = json.loads((root / "relay-adapter-verification.json").read_text())
 relay_adapter_acceptance_package = json.loads((root / "relay-adapter-acceptance-package.json").read_text())
@@ -410,6 +446,14 @@ assert hosted_provider_verification["schema"] == "rdev.hosted-provider-package-v
 assert hosted_provider_verification["ok"] is True, hosted_provider_verification
 assert hosted_provider_verification["storage_provider"] == "file", hosted_provider_verification
 assert hosted_provider_verification["auth_provider"] == "hosted-ed25519-jwt", hosted_provider_verification
+assert hosted_provider_runtime_package["schema"] == "rdev.acceptance-package.hosted-provider-runtime.v1", hosted_provider_runtime_package
+assert hosted_provider_runtime_package["ok"] is True, hosted_provider_runtime_package
+assert hosted_provider_runtime_package["storage_provider"] == "file", hosted_provider_runtime_package
+assert hosted_provider_runtime_package["auth_provider"] == "hosted-ed25519-jwt", hosted_provider_runtime_package
+assert hosted_provider_runtime_package["runtime_claim"] == "single-node-hosted-smoke", hosted_provider_runtime_package
+assert hosted_provider_runtime_verification["schema"] == "rdev.acceptance-verification.hosted-provider-runtime-package.v1", hosted_provider_runtime_verification
+assert hosted_provider_runtime_verification["ok"] is True, hosted_provider_runtime_verification
+assert hosted_provider_runtime_verification["runtime_claim"] == "single-node-hosted-smoke", hosted_provider_runtime_verification
 assert relay_adapter_package["schema"] == "rdev.relay-adapter-package.v1", relay_adapter_package
 assert relay_adapter_package["ok"] is True, relay_adapter_package
 assert relay_adapter_package["external_mutation"] is False, relay_adapter_package
@@ -545,6 +589,8 @@ print(json.dumps({
     "hosted_storage_auth_smoke": True,
     "hosted_provider_package_schema": hosted_provider_package["schema"],
     "hosted_provider_package_verification_schema": hosted_provider_verification["schema"],
+    "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],
+    "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],
     "relay_adapter_package_schema": relay_adapter_package["schema"],
     "relay_adapter_package_verification_schema": relay_adapter_verification["schema"],
     "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],

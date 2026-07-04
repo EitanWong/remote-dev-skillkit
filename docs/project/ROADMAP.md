@@ -71,6 +71,16 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   helper, gateway, host, connection-status, audit, redaction, and checksum
   evidence while requiring `selected_path=existing-frp-or-chisel-relay` and
   `connected=true`.
+- Hosted provider runtime acceptance packaging and verification through
+  `rdev.acceptance-package.hosted-provider-runtime.v1`,
+  `rdev acceptance package-hosted-provider-runtime`,
+  `rdev.acceptance-verification.hosted-provider-runtime-package.v1`, and
+  `rdev acceptance verify-hosted-provider-runtime-package`, archiving a
+  verified hosted-provider package, gateway startup transcript, storage/auth
+  verification, backup, restore, retention, role-mapping authorization probes,
+  failure-mode probes, audit, redaction, and checksums. Built-in `file` plus
+  `hosted-ed25519-jwt` evidence remains scoped as a single-node hosted smoke;
+  external durable provider support still requires deployed provider evidence.
 - Dev hosted enrollment issuance primitive through `POST /v1/enrollment/certificates`, `rdev gateway serve --dev --enrollment-key`, and `rdev enrollment issue-certificate --gateway ... --root-public-key ...`, issuing pinned-root-verified certificates from a configured gateway issuer while preventing requested certificate capabilities from exceeding the ticket capabilities.
 - Operator-auth protection for dev hosted enrollment issuance through `rdev gateway serve --dev --operator-auth` and `rdev enrollment issue-certificate --operator-token-file`, keeping tokens out of command output while requiring an `issuer` role token.
 - Local enrollment certificate renewal primitive through `rdev enrollment renew-certificate`, preserving the existing certificate scope, requiring the current certificate to verify, optionally checking signed revocation lists before renewal, and emitting a new certificate fingerprint and validity window.
@@ -187,7 +197,8 @@ Exit gate: an operator's managed Mac reconnects after reboot, an agent selects i
 - ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable third-party hosted storage/auth runtime provider packages beyond the
-  current provider-package contract, including deployed backup, restore,
+  current provider-package contract and hosted runtime evidence packager,
+  including deployed Postgres/S3-compatible/Redis/OIDC/SAML backup, restore,
   retention, role-mapping, and failure-mode evidence.
 
 Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, Windows Service has real install/start/reconnect/stop/uninstall acceptance evidence beyond dry-run plans, and a new adapter can be added without bypassing policy.

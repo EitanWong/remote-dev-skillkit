@@ -1297,6 +1297,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyRelayAdapterPackage(*packagePath)
+	case "verify-hosted-provider-runtime-package":
+		fs := flag.NewFlagSet("acceptance verify-hosted-provider-runtime-package", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		packagePath := fs.String("package", "", "hosted provider runtime acceptance package directory or package.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerifyHostedProviderRuntimePackage(*packagePath)
 	case "package-windows-temporary":
 		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1412,6 +1420,38 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			ConnectionStatusPath:    *connectionStatus,
 			AuditPath:               *auditPath,
 			NotesPath:               *notes,
+		})
+	case "package-hosted-provider-runtime":
+		fs := flag.NewFlagSet("acceptance package-hosted-provider-runtime", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		hostedPackage := fs.String("hosted-provider-package", "", "verified hosted provider package directory or hosted-provider.json")
+		out := fs.String("out", "", "empty output directory for packaged hosted provider runtime evidence")
+		gatewayStartup := fs.String("gateway-startup", "", "gateway startup or deployment transcript")
+		storageVerification := fs.String("storage-verification", "", "storage provider verification output")
+		authVerification := fs.String("auth-verification", "", "hosted auth verification output")
+		backupEvidence := fs.String("backup-evidence", "", "backup evidence or single-node smoke backup note")
+		restoreEvidence := fs.String("restore-evidence", "", "restore evidence or single-node smoke restore note")
+		retentionEvidence := fs.String("retention-evidence", "", "retention policy evidence")
+		roleMappingEvidence := fs.String("role-mapping-evidence", "", "role mapping and authorization probe evidence")
+		failureModeEvidence := fs.String("failure-mode-evidence", "", "failure-mode evidence for storage/auth outages or rejected credentials")
+		auditPath := fs.String("audit", "", "audit export or transcript covering startup, authz probes, storage checks, and cleanup")
+		notes := fs.String("notes", "", "optional operator notes file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptancePackageHostedProviderRuntime(acceptance.HostedProviderRuntimePackageOptions{
+			HostedProviderPackagePath: *hostedPackage,
+			OutDir:                    *out,
+			GatewayStartupPath:        *gatewayStartup,
+			StorageVerificationPath:   *storageVerification,
+			AuthVerificationPath:      *authVerification,
+			BackupEvidencePath:        *backupEvidence,
+			RestoreEvidencePath:       *restoreEvidence,
+			RetentionEvidencePath:     *retentionEvidence,
+			RoleMappingEvidencePath:   *roleMappingEvidence,
+			FailureModeEvidencePath:   *failureModeEvidence,
+			AuditPath:                 *auditPath,
+			NotesPath:                 *notes,
 		})
 	default:
 		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
@@ -1712,6 +1752,34 @@ func (a App) acceptanceVerifyRelayAdapterPackage(packagePath string) error {
 	return nil
 }
 
+func (a App) acceptanceVerifyHostedProviderRuntimePackage(packagePath string) error {
+	verification, err := acceptance.VerifyHostedProviderRuntimeAcceptancePackage(packagePath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"package":             verification.PackagePath,
+		"package_schema":      verification.PackageSchema,
+		"storage_provider":    verification.StorageProvider,
+		"auth_provider":       verification.AuthProvider,
+		"runtime_claim":       verification.RuntimeClaim,
+		"checks":              verification.Checks,
+		"files":               verification.Files,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("hosted provider runtime acceptance package verification failed")
+	}
+	return nil
+}
+
 func (a App) acceptancePackageWindowsTemporary(opts acceptance.WindowsTemporaryPackageOptions) error {
 	pkg, err := acceptance.PackageWindowsTemporaryEvidence(opts)
 	if err != nil {
@@ -1816,6 +1884,36 @@ func (a App) acceptancePackageRelayAdapter(opts acceptance.RelayAdapterPackageOp
 	}
 	if !pkg.OK() {
 		return fmt.Errorf("relay adapter acceptance package verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptancePackageHostedProviderRuntime(opts acceptance.HostedProviderRuntimePackageOptions) error {
+	pkg, err := acceptance.PackageHostedProviderRuntimeEvidence(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    pkg.OK(),
+		"schema":                pkg.SchemaVersion,
+		"out":                   pkg.OutDir,
+		"package":               filepath.Join(pkg.OutDir, "package.json"),
+		"checksums":             filepath.Join(pkg.OutDir, "checksums.txt"),
+		"storage_provider":      pkg.StorageProvider,
+		"auth_provider":         pkg.AuthProvider,
+		"runtime_claim":         pkg.RuntimeClaim,
+		"checks":                pkg.Checks,
+		"files":                 pkg.Files,
+		"redaction_rule_counts": pkg.RedactionRuleCounts,
+		"recommended_actions":   pkg.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("hosted provider runtime acceptance package verification failed")
 	}
 	return nil
 }
@@ -7701,10 +7799,12 @@ Usage:
   rdev acceptance verify-windows-managed-service --plan windows-service-plan/windows-managed-service-plan.json
   rdev acceptance verify-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json
   rdev acceptance verify-relay-adapter-package --package relay-evidence/package.json
+  rdev acceptance verify-hosted-provider-runtime-package --package hosted-runtime-evidence/package.json
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --runner-result runner-result.json --helper-transcript helper.txt --gateway-status gateway-status.json --host-status host-status.json --connection-status connection-status.json --audit audit.jsonl
+  rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --gateway-startup gateway-startup.txt --storage-verification storage.json --auth-verification auth.json --backup-evidence backup.txt --restore-evidence restore.txt --retention-evidence retention.txt --role-mapping-evidence roles.json --failure-mode-evidence failure.json --audit audit.jsonl
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json

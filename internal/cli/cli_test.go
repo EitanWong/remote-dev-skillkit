@@ -8407,6 +8407,71 @@ func TestAcceptancePackageRelayAdapter(t *testing.T) {
 	}
 }
 
+func TestAcceptancePackageHostedProviderRuntime(t *testing.T) {
+	root := t.TempDir()
+	providerOut := filepath.Join(root, "hosted-provider")
+	var providerStdout bytes.Buffer
+	app := NewApp(&providerStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"hosted-provider", "package",
+		"--out", providerOut,
+		"--storage-provider", "file",
+		"--auth-provider", "hosted-ed25519-jwt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeHostedProviderRuntimeEvidenceForCLITest(t, root)
+	var stdout bytes.Buffer
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-hosted-provider-runtime",
+		"--hosted-provider-package", providerOut,
+		"--out", filepath.Join(root, "hosted-runtime-evidence"),
+		"--gateway-startup", evidence.gatewayStartup,
+		"--storage-verification", evidence.storageVerification,
+		"--auth-verification", evidence.authVerification,
+		"--backup-evidence", evidence.backupEvidence,
+		"--restore-evidence", evidence.restoreEvidence,
+		"--retention-evidence", evidence.retentionEvidence,
+		"--role-mapping-evidence", evidence.roleMappingEvidence,
+		"--failure-mode-evidence", evidence.failureModeEvidence,
+		"--audit", evidence.audit,
+	}); err != nil {
+		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+	}
+	var payload struct {
+		OK           bool              `json:"ok"`
+		Schema       string            `json:"schema"`
+		Package      string            `json:"package"`
+		RuntimeClaim string            `json:"runtime_claim"`
+		Redactions   map[string]int    `json:"redaction_rule_counts"`
+		Files        []json.RawMessage `json:"files"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != "rdev.acceptance-package.hosted-provider-runtime.v1" ||
+		payload.RuntimeClaim != "single-node-hosted-smoke" {
+		t.Fatalf("unexpected hosted runtime package output: %s", stdout.String())
+	}
+	if payload.Redactions["github_token"] != 1 {
+		t.Fatalf("expected github token redaction, got %#v", payload.Redactions)
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "verify-hosted-provider-runtime-package",
+		"--package", payload.Package,
+	}); err != nil {
+		t.Fatalf("expected verify command to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.acceptance-verification.hosted-provider-runtime-package.v1"`) ||
+		!strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("unexpected hosted runtime verify output: %s", verifyStdout.String())
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
 }
@@ -8442,6 +8507,52 @@ func writeRelayAdapterEvidenceForCLITest(t *testing.T, root string) relayAdapter
 		hostStatus:       hostStatus,
 		connectionStatus: connectionStatus,
 		audit:            audit,
+	}
+}
+
+type hostedProviderRuntimeEvidenceForCLITest struct {
+	gatewayStartup      string
+	storageVerification string
+	authVerification    string
+	backupEvidence      string
+	restoreEvidence     string
+	retentionEvidence   string
+	roleMappingEvidence string
+	failureModeEvidence string
+	audit               string
+}
+
+func writeHostedProviderRuntimeEvidenceForCLITest(t *testing.T, root string) hostedProviderRuntimeEvidenceForCLITest {
+	t.Helper()
+	evidenceRoot := filepath.Join(root, "hosted-runtime-fixture")
+	gatewayStartup := filepath.Join(evidenceRoot, "gateway-startup.txt")
+	storageVerification := filepath.Join(evidenceRoot, "storage-verification.json")
+	authVerification := filepath.Join(evidenceRoot, "auth-verification.json")
+	backupEvidence := filepath.Join(evidenceRoot, "backup-evidence.txt")
+	restoreEvidence := filepath.Join(evidenceRoot, "restore-evidence.txt")
+	retentionEvidence := filepath.Join(evidenceRoot, "retention-evidence.txt")
+	roleMappingEvidence := filepath.Join(evidenceRoot, "role-mapping-evidence.json")
+	failureModeEvidence := filepath.Join(evidenceRoot, "failure-mode-evidence.json")
+	audit := filepath.Join(evidenceRoot, "audit.txt")
+	writeFileForCLITest(t, gatewayStartup, "gateway started with hosted provider package\ntoken ghp_abcdefghijklmnopqrstuvwx\n")
+	writeFileForCLITest(t, storageVerification, `{"ok":true,"provider":"file"}`+"\n")
+	writeFileForCLITest(t, authVerification, `{"ok":true,"provider":"hosted-ed25519-jwt"}`+"\n")
+	writeFileForCLITest(t, backupEvidence, "snapshot copied to reviewed backup location\n")
+	writeFileForCLITest(t, restoreEvidence, "restored snapshot and verified audit chain\n")
+	writeFileForCLITest(t, retentionEvidence, "retention policy reviewed for release smoke\n")
+	writeFileForCLITest(t, roleMappingEvidence, `{"probes":[{"role":"operator","authorized":true},{"role":"viewer","authorized":false}]}`+"\n")
+	writeFileForCLITest(t, failureModeEvidence, `{"ok":true,"failure_mode_tested":true,"mode":"invalid auth rejected"}`+"\n")
+	writeFileForCLITest(t, audit, "gateway_start\nstorage_verify\nauth_verify\nrole_probe\nfailure_probe\ncleanup\n")
+	return hostedProviderRuntimeEvidenceForCLITest{
+		gatewayStartup:      gatewayStartup,
+		storageVerification: storageVerification,
+		authVerification:    authVerification,
+		backupEvidence:      backupEvidence,
+		restoreEvidence:     restoreEvidence,
+		retentionEvidence:   retentionEvidence,
+		roleMappingEvidence: roleMappingEvidence,
+		failureModeEvidence: failureModeEvidence,
+		audit:               audit,
 	}
 }
 

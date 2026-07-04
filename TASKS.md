@@ -108,6 +108,7 @@
 - [x] Add hosted provider package generation and verification with `rdev.hosted-provider-package.v1`, `rdev.hosted-provider-package-verification.v1`, `rdev hosted-provider package`, `rdev hosted-provider verify`, provider runbook/env template output, no-private-surface checks, and release-smoke coverage.
 - [x] Add first standard relay adapter package generation and verification for Chisel/frpc with `rdev.relay-adapter-package.v1`, `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter package`, `rdev relay-adapter verify`, MCP tools `rdev.relay_adapter.package` / `rdev.relay_adapter.verify`, runner `RDEV_RELAY_*` metadata, safe helper argv/install-action checks, no-private-surface checks, and release-smoke coverage.
 - [x] Add relay adapter acceptance evidence packaging and verification with `rdev.acceptance-package.relay-adapter.v1`, `rdev.acceptance-verification.relay-adapter-package.v1`, `rdev acceptance package-relay-adapter`, `rdev acceptance verify-relay-adapter-package`, runner-result relay-path checks, connected-status checks, redaction, checksums, and release-smoke coverage.
+- [x] Add hosted provider runtime acceptance evidence packaging and verification with `rdev.acceptance-package.hosted-provider-runtime.v1`, `rdev.acceptance-verification.hosted-provider-runtime-package.v1`, `rdev acceptance package-hosted-provider-runtime`, `rdev acceptance verify-hosted-provider-runtime-package`, storage/auth verification checks, backup/restore/retention evidence checks, role-mapping authorization probes, failure-mode probes, redaction, checksums, and release-smoke coverage.
 - [x] Add production enrollment authority lifecycle evidence for key custody, fleet renewal plans, and emergency drill packages.
 - [x] Add production WSS/mTLS host job transport with WebSocket job delivery, completion/failure/artifact acknowledgements, and TLS/mTLS client certificate reuse.
 - [x] Add AI-native Agent invite workflow with `rdev.agent-invite.v1`, `rdev invite create`, and MCP tool `rdev.invites.create`.
@@ -307,7 +308,7 @@
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
-- [ ] Implement real durable hosted provider runtime packages beyond the built-in file storage and provider-neutral hosted JWT verifier, including deployed backup/restore/retention/failure-mode acceptance.
+- [ ] Implement real durable hosted provider runtime packages beyond the built-in file storage, provider-neutral hosted JWT verifier, provider-package contract, and runtime acceptance evidence packager, including deployed Postgres/S3-compatible/Redis/OIDC/SAML backup/restore/retention/failure-mode acceptance.
 - [ ] Complete production Adapter SDK integration for future adapters beyond built-in hostrunner runtime fixture capture.
 
 ## Final End-State Gates

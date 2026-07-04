@@ -4,6 +4,46 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.16-dev
+
+Current phase: hosted provider work now has a runtime acceptance evidence
+package/verifier, so deployed gateway storage/auth proof can be archived with
+the same release-gate discipline as relay evidence. This is still not a claim
+that third-party Postgres, object storage, Redis, OIDC, or SAML providers are
+bundled.
+
+### Added
+
+- Added `rdev.acceptance-package.hosted-provider-runtime.v1` through
+  `rdev acceptance package-hosted-provider-runtime`. The package archives a
+  verified `hosted-provider.json`, hosted provider verification output,
+  gateway startup transcript, storage verification, hosted auth verification,
+  backup evidence, restore evidence, retention policy evidence, role mapping
+  and authorization probes, failure-mode evidence, audit transcript, redaction
+  metadata, and checksums.
+- Added `rdev.acceptance-verification.hosted-provider-runtime-package.v1`
+  through `rdev acceptance verify-hosted-provider-runtime-package`.
+  Verification requires provider-package checks to pass, storage/auth
+  verification to report `ok=true`, role probes to include both an authorized
+  and denied decision, failure-mode evidence to pass, required evidence files
+  to exist, and package files to avoid private endpoints, secrets, local paths,
+  or organization-specific values.
+- Updated release smoke to generate and verify a single-node hosted runtime
+  smoke package for the built-in `file` storage provider plus
+  `hosted-ed25519-jwt` verifier, while keeping the runtime claim scoped as
+  `single-node-hosted-smoke`.
+
+### Remaining Gates
+
+- Implement or integrate real durable hosted provider runtime packages for
+  external providers such as Postgres, S3-compatible object storage,
+  Redis-stream, OIDC/JWKS, and SAML.
+- Run deployed hosted gateway acceptance with backup, restore, retention,
+  role-mapping, authz denial, and failure-mode evidence, then publish the
+  resulting hosted provider runtime acceptance package as release evidence.
+- Continue GitHub Release publication/download verification and additional
+  relay/mesh/VPN/SSH adapter acceptance work.
+
 ## 0.1.15-dev
 
 Current phase: helper/relay work now has a first standard adapter-package
