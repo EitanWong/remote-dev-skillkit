@@ -20,5 +20,9 @@ func evidenceContentIsPlaceholder(content []byte) bool {
 }
 
 func acceptanceEvidencePath(path string) bool {
-	return strings.HasPrefix(path, "evidence/")
+	clean := strings.TrimPrefix(strings.ReplaceAll(path, "\\", "/"), "./")
+	return strings.HasPrefix(clean, "evidence/") ||
+		strings.HasPrefix(clean, "platforms/") ||
+		strings.HasPrefix(clean, "skillkit/") ||
+		clean == "post-release/post-release-install-verification.json"
 }

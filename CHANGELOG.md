@@ -35,6 +35,11 @@ transcript file names or package commands after GitHub Release assets exist.
   `ready_for_packaging=true`, and the existing
   `rdev acceptance package-post-release-download` path can consume the
   scaffold's copied plan and evidence directories.
+- Hardened post-release download evidence packaging and verification so
+  scaffold placeholders under platform, Skillkit, and post-release
+  verification evidence paths are rejected even if an Agent skips the
+  readiness status command or an archived package manifest is tampered to match
+  placeholder file checksums.
 
 ### Remaining Gates
 

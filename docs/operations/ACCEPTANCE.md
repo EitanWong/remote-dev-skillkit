@@ -99,6 +99,12 @@ and is not a scaffold placeholder. Agents should prefer MCP tools
 `rdev.acceptance.scaffold_post_release_download` and
 `rdev.acceptance.post_release_evidence_status` when available.
 
+The post-release download evidence packager and verifier also reject scaffold
+placeholders under archived platform evidence, Skillkit evidence, and the
+post-release install verification evidence path. The readiness command is the
+recommended early check, but it is not the only guard; the package and verify
+commands must still fail closed if placeholder evidence reaches them.
+
 ## Fresh-Agent Support-Session Contract Gate
 
 Run:

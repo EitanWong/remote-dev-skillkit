@@ -439,6 +439,16 @@ if go run ./cmd/rdev acceptance post-release-evidence-status \
   echo "placeholder post-release evidence status unexpectedly succeeded" >&2
   exit 1
 fi
+if go run ./cmd/rdev acceptance package-post-release-download \
+  --plan "$post_release_scaffold_dir/post-release-install-plan.json" \
+  --plan-verification "$post_release_scaffold_dir/post-release-install-verification.json" \
+  --out "$work_dir/post-release-download-placeholder-acceptance" \
+  --evidence-dir "$post_release_scaffold_dir/platform-download-evidence" \
+  --skillkit-evidence-dir "$post_release_scaffold_dir/skillkit-download-evidence" \
+  > "$work_dir/post-release-download-placeholder-package.json" 2> "$work_dir/post-release-download-placeholder-package.err"; then
+  echo "placeholder post-release evidence package unexpectedly succeeded" >&2
+  exit 1
+fi
 
 post_release_evidence_dir="$work_dir/post-release-download-evidence-input"
 post_release_skillkit_evidence_dir="$work_dir/post-release-download-skillkit-input"
@@ -652,6 +662,7 @@ post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_te
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
 post_release_download_scaffold = json.loads((root / "post-release-download-scaffold.json").read_text())
 post_release_download_status_placeholder = json.loads((root / "post-release-download-status-placeholder.json").read_text())
+post_release_download_placeholder_package = json.loads((root / "post-release-download-placeholder-package.json").read_text())
 post_release_download_status_ready = json.loads((root / "post-release-download-status-ready.json").read_text())
 post_release_download_package = json.loads((root / "post-release-download-acceptance-package.json").read_text())
 post_release_download_verification = json.loads((root / "post-release-download-acceptance-verification.json").read_text())
@@ -946,6 +957,11 @@ assert post_release_download_scaffold["skillkit_included"] is True, post_release
 assert post_release_download_status_placeholder["schema"] == "rdev.post-release-download-evidence-status.v1", post_release_download_status_placeholder
 assert post_release_download_status_placeholder["ready_for_packaging"] is False, post_release_download_status_placeholder
 assert post_release_download_status_placeholder["placeholder_count"] >= 8, post_release_download_status_placeholder
+assert post_release_download_placeholder_package["schema"] == "rdev.acceptance-package.post-release-download.v1", post_release_download_placeholder_package
+assert post_release_download_placeholder_package["ok"] is False, post_release_download_placeholder_package
+post_release_placeholder_failures = {check["name"] for check in post_release_download_placeholder_package["checks"] if check["passed"] is False}
+assert "platform_linux-amd64_transcript_present" in post_release_placeholder_failures, post_release_download_placeholder_package
+assert "skillkit_transcript_present" in post_release_placeholder_failures, post_release_download_placeholder_package
 assert post_release_download_status_ready["schema"] == "rdev.post-release-download-evidence-status.v1", post_release_download_status_ready
 assert post_release_download_status_ready["ready_for_packaging"] is True, post_release_download_status_ready
 assert post_release_download_status_ready["required_ready"] == post_release_download_status_ready["required_total"], post_release_download_status_ready
@@ -1093,6 +1109,7 @@ print(json.dumps({
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
     "post_release_download_acceptance_package_schema": post_release_download_package["schema"],
     "post_release_download_acceptance_verification_schema": post_release_download_verification["schema"],
+    "post_release_download_placeholder_package_rejected": True,
     "post_release_download_scaffold_schema": post_release_download_scaffold["schema"],
     "post_release_download_status_schema": post_release_download_status_ready["schema"],
     "post_release_download_status_ready": post_release_download_status_ready["ready_for_packaging"],

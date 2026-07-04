@@ -80,6 +80,80 @@ func TestVerifyPostReleaseDownloadEvidenceRejectsMissingPlatformBundleVerify(t *
 	}
 }
 
+func TestPostReleaseDownloadRejectsScaffoldPlaceholderEvidence(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64"}, true)
+	placeholder := []byte("PLACEHOLDER ONLY - replace with real redacted evidence before packaging.\nEvidence: linux transcript\n")
+	if err := os.WriteFile(filepath.Join(fixture.evidenceDir, "linux-amd64-transcript.txt"), placeholder, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.skillkitDir, "skillkit-transcript.txt"), placeholder, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := PackagePostReleaseDownloadEvidence(PostReleaseDownloadPackageOptions{
+		PlanPath:             fixture.plan,
+		PlanVerificationPath: fixture.planVerification,
+		OutDir:               filepath.Join(root, "package"),
+		EvidenceDir:          fixture.evidenceDir,
+		SkillkitEvidenceDir:  fixture.skillkitDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatal("expected package to fail with scaffold placeholder post-release evidence")
+	}
+	failures := failedPostReleaseAcceptanceChecks(pkg.Checks)
+	if !strings.Contains(failures, "platform-linux-amd64-transcript_copied") ||
+		!strings.Contains(failures, "platform_linux-amd64_transcript_present") ||
+		!strings.Contains(failures, "skillkit-transcript_copied") ||
+		!strings.Contains(failures, "skillkit_transcript_present") {
+		t.Fatalf("expected placeholder copy and presence failures, got %s", failures)
+	}
+}
+
+func TestVerifyPostReleaseDownloadRejectsArchivedPlaceholderEvidence(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64"}, false)
+	pkg, err := PackagePostReleaseDownloadEvidence(PostReleaseDownloadPackageOptions{
+		PlanPath:             fixture.plan,
+		PlanVerificationPath: fixture.planVerification,
+		OutDir:               filepath.Join(root, "package"),
+		EvidenceDir:          fixture.evidenceDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := filepath.Join(pkg.OutDir, "platforms", "linux-amd64", "transcript.txt")
+	content := []byte("{\n  \"placeholder\": true,\n  \"replace_before_packaging\": true,\n  \"evidence_name\": \"linux transcript\"\n}\n")
+	if err := os.WriteFile(archived, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := range pkg.Files {
+		if pkg.Files[i].Path == "platforms/linux-amd64/transcript.txt" {
+			pkg.Files[i].SizeBytes = len(content)
+			pkg.Files[i].SHA256 = "sha256:" + fileSHA256Bytes(content)
+		}
+	}
+	manifest, err := json.MarshalIndent(pkg, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkg.OutDir, "package.json"), append(manifest, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	verification, err := VerifyPostReleaseDownloadAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected verification to fail with archived placeholder evidence")
+	}
+	if failures := failedPostReleaseFileChecks(verification.Files); !strings.Contains(failures, "platforms/linux-amd64/transcript.txt:file_not_placeholder") {
+		t.Fatalf("expected file_not_placeholder failure, got %s", failures)
+	}
+}
+
 type postReleaseDownloadFixture struct {
 	plan             string
 	planVerification string
@@ -159,6 +233,18 @@ func failedPostReleaseAcceptanceChecks(checks []Check) string {
 	for _, check := range checks {
 		if !check.Passed {
 			failed = append(failed, check.Name)
+		}
+	}
+	return strings.Join(failed, ",")
+}
+
+func failedPostReleaseFileChecks(files []RelayPackageFileCheck) string {
+	var failed []string
+	for _, file := range files {
+		for _, check := range file.Checks {
+			if !check.Passed {
+				failed = append(failed, file.Path+":"+check.Name)
+			}
 		}
 	}
 	return strings.Join(failed, ",")
