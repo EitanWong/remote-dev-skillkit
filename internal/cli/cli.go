@@ -4918,6 +4918,7 @@ func (a App) connectionEntry(args []string) error {
 		extraHostArgs := fs.String("host-args", "", "optional comma-separated extra rdev host serve args")
 		resultOut := fs.String("result-out", "", "optional path to write the raw Connection Entry runner result JSON for acceptance evidence")
 		helperTranscriptOut := fs.String("helper-transcript-out", "", "optional path to write standard helper transcript evidence for relay/connectivity acceptance")
+		evidenceDir := fs.String("evidence-dir", "", "optional directory to write runner-result.json, helper-transcript.txt, gateway-status.json, host-status.json, connection-status.json, and audit.jsonl")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -4941,7 +4942,15 @@ func (a App) connectionEntry(args []string) error {
 				return err
 			}
 		}
-		return writeJSON(a.Stdout, map[string]any{
+		var evidenceReport connectionrunner.EvidenceReport
+		if strings.TrimSpace(*evidenceDir) != "" {
+			var err error
+			evidenceReport, err = connectionrunner.WriteAcceptanceEvidence(*evidenceDir, result, time.Now().UTC())
+			if err != nil {
+				return err
+			}
+		}
+		payload := map[string]any{
 			"ok":                     result.SelectedPath != "" && len(result.ManualActionRequired) == 0,
 			"schema":                 result.SchemaVersion,
 			"runner_result":          result,
@@ -4950,7 +4959,11 @@ func (a App) connectionEntry(args []string) error {
 			"helper_transcript":      strings.TrimSpace(*helperTranscriptOut),
 			"manual_action_required": result.ManualActionRequired,
 			"approval_required":      result.ApprovalRequired,
-		})
+		}
+		if strings.TrimSpace(*evidenceDir) != "" {
+			payload["evidence_report"] = evidenceReport
+		}
+		return writeJSON(a.Stdout, payload)
 	default:
 		return fmt.Errorf("unknown connection-entry subcommand %q", args[0])
 	}
@@ -4969,11 +4982,7 @@ func writeConnectionRunnerResult(path string, result connectionrunner.RunResult)
 }
 
 func writeConnectionRunnerHelperTranscript(path string, result connectionrunner.RunResult) error {
-	lines := append([]string(nil), result.HelperTranscript...)
-	if len(lines) == 0 {
-		lines = []string{"no_helper_transcript selected_path=" + result.SelectedPath}
-	}
-	content := []byte(strings.Join(lines, "\n") + "\n")
+	content := []byte(connectionrunner.HelperTranscriptTextForEvidence(result))
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -8269,8 +8278,8 @@ Usage:
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
   rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party
-  rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --dry-run --result-out runner-result.json --helper-transcript-out helper-transcript.txt
-  RDEV_RELAY_GATEWAY_URL=http://127.0.0.1:8787 rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --result-out runner-result.json --helper-transcript-out helper-transcript.txt
+  rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --dry-run --evidence-dir relay-evidence
+  RDEV_RELAY_GATEWAY_URL=http://127.0.0.1:8787 rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --evidence-dir relay-evidence
   rdev connection-entry plan --invite invite.json --out managed-entry --target-os linux --ownership owned --managed-binary /opt/rdev/rdev --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:...
   rdev adapter scaffold --adapter claude-code --out examples/adapters/claude-code-lifecycle.json
   rdev adapter verify-result --artifact shell-result.json --adapter shell --schema rdev.shell-result.v1

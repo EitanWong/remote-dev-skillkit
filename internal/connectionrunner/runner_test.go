@@ -297,6 +297,35 @@ func TestRunStartsConfiguredHelperBeforeHostServe(t *testing.T) {
 	if strings.Join(events, "|") != strings.Join(want, "|") {
 		t.Fatalf("unexpected event order: got %v want %v", events, want)
 	}
+
+	evidenceDir := filepath.Join(t.TempDir(), "evidence")
+	report, err := WriteAcceptanceEvidence(evidenceDir, result, time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SchemaVersion != EvidenceSchemaVersion || !report.Connected {
+		t.Fatalf("unexpected evidence report: %#v", report)
+	}
+	for _, name := range []string{"runner-result.json", "helper-transcript.txt", "gateway-status.json", "host-status.json", "connection-status.json", "audit.jsonl", "evidence-report.json"} {
+		if _, err := os.Stat(filepath.Join(evidenceDir, name)); err != nil {
+			t.Fatalf("expected evidence file %s: %v", name, err)
+		}
+	}
+	helperTranscript, err := os.ReadFile(filepath.Join(evidenceDir, "helper-transcript.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(helperTranscript), "helper_started tool=chisel") ||
+		!strings.Contains(string(helperTranscript), "helper_cleanup_succeeded tool=chisel") {
+		t.Fatalf("unexpected helper transcript:\n%s", string(helperTranscript))
+	}
+	connectionStatus, err := os.ReadFile(filepath.Join(evidenceDir, "connection-status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(connectionStatus), `"connected": true`) {
+		t.Fatalf("unexpected connection status:\n%s", string(connectionStatus))
+	}
 }
 
 func TestRunStartsConfiguredStandardConnectivityHelpers(t *testing.T) {

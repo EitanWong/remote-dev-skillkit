@@ -115,7 +115,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `rdev.relay-adapter-acceptance-evidence-plan.v1` and
   `acceptance-evidence-plan.json`, giving Agents standard runner result,
   helper transcript, gateway/host/connection status, audit file names, and
-  `rdev connection-entry run --result-out` plus package/verify commands.
+  `rdev connection-entry run --evidence-dir` plus package/verify commands.
 - Acceptance evidence scaffolding through
   `rdev.acceptance-evidence-scaffold.v1`,
   `rdev acceptance scaffold-evidence`, and MCP tool

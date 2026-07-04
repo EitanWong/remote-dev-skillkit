@@ -332,16 +332,11 @@ go run ./cmd/rdev connection-entry run \
 	--runner-manifest "$relay_acceptance_input/connection-entry/connection-entry-runner/connection-entry-runner.json" \
 	--rdev-command "$fake_bin/rdev-host-smoke" \
 	--probe-timeout 1s \
-	--result-out "$relay_acceptance_input/runner-result.json" \
-	--helper-transcript-out "$relay_acceptance_input/helper-transcript.txt" \
+	--evidence-dir "$relay_acceptance_input" \
 	> "$relay_acceptance_input/runner-output.json"
 kill "$runner_gateway_pid" 2>/dev/null || true
 wait "$runner_gateway_pid" 2>/dev/null || true
 runner_gateway_pid=
-printf '%s\n' '{"ok":true,"status":"healthy"}' > "$relay_acceptance_input/gateway-status.json"
-printf '%s\n' '{"ok":true,"host_status":"active"}' > "$relay_acceptance_input/host-status.json"
-printf '%s\n' '{"ok":true,"connected":true}' > "$relay_acceptance_input/connection-status.json"
-printf '%s\n' 'helper_start' 'host_registered' 'cleanup' > "$relay_acceptance_input/audit.txt"
 relay_acceptance_dir="$work_dir/relay-acceptance"
 go run ./cmd/rdev acceptance package-relay-adapter \
 	--relay-package "$relay_adapter_dir" \
@@ -351,7 +346,7 @@ go run ./cmd/rdev acceptance package-relay-adapter \
 	--gateway-status "$relay_acceptance_input/gateway-status.json" \
 	--host-status "$relay_acceptance_input/host-status.json" \
 	--connection-status "$relay_acceptance_input/connection-status.json" \
-	--audit "$relay_acceptance_input/audit.txt" \
+	--audit "$relay_acceptance_input/audit.jsonl" \
 	> "$work_dir/relay-adapter-acceptance-package.json"
 go run ./cmd/rdev acceptance verify-relay-adapter-package \
 	--package "$relay_acceptance_dir" \
@@ -883,9 +878,8 @@ assert relay_adapter_verification["schema"] == "rdev.relay-adapter-package-verif
 assert relay_adapter_verification["ok"] is True, relay_adapter_verification
 assert relay_adapter_verification["adapter_kind"] == "chisel", relay_adapter_verification
 assert relay_adapter_evidence_plan["schema_version"] == "rdev.relay-adapter-acceptance-evidence-plan.v1", relay_adapter_evidence_plan
-assert "--result-out" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
-assert "--helper-transcript-out" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
-assert "--helper-transcript-out" in relay_adapter_evidence_plan["run_command"], relay_adapter_evidence_plan
+assert "--evidence-dir" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
+assert "--evidence-dir" in relay_adapter_evidence_plan["run_command"], relay_adapter_evidence_plan
 assert "package-relay-adapter" in relay_adapter_evidence_plan["package_command"], relay_adapter_evidence_plan
 assert {item["path"] for item in relay_adapter_evidence_plan["evidence_files"]} >= {"runner-result.json", "helper-transcript.txt", "connection-status.json", "audit.jsonl"}, relay_adapter_evidence_plan
 assert relay_evidence_scaffold["schema"] == "rdev.acceptance-evidence-scaffold.v1", relay_evidence_scaffold
@@ -931,6 +925,8 @@ assert relay_adapter_acceptance_package["schema"] == "rdev.acceptance-package.re
 assert relay_adapter_acceptance_package["ok"] is True, relay_adapter_acceptance_package
 assert relay_adapter_acceptance_package["selected_path"] == "existing-wireguard-vpn", relay_adapter_acceptance_package
 assert "helper_started tool=wg" in (root / "relay-acceptance-input" / "helper-transcript.txt").read_text(), relay_adapter_acceptance_package
+assert json.loads((root / "relay-acceptance-input" / "connection-status.json").read_text())["connected"] is True, relay_adapter_acceptance_package
+assert (root / "relay-acceptance-input" / "audit.jsonl").read_text().count("runner-audit-event") >= 4, relay_adapter_acceptance_package
 assert set(relay_adapter_acceptance_package["accepted_paths"]) >= {
     "existing-frp-or-chisel-relay",
     "existing-ssh-tunnel",
@@ -1111,6 +1107,7 @@ print(json.dumps({
     "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
     "relay_adapter_helper_transcript_from_runner": True,
+    "relay_adapter_status_audit_from_runner": True,
     "post_release_download_acceptance_package_schema": post_release_download_package["schema"],
     "post_release_download_acceptance_verification_schema": post_release_download_verification["schema"],
     "post_release_download_placeholder_package_rejected": True,

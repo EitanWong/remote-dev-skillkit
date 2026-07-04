@@ -45,6 +45,13 @@ transcript file names or package commands after GitHub Release assets exist.
   Agents to generate both `runner-result.json` and `helper-transcript.txt`
   from the runner, reducing hand-written helper evidence during real
   restrictive-network acceptance.
+- Added `rdev connection-entry run --evidence-dir <dir>` with
+  `rdev.connection-entry.runner-evidence.v1`. The runner now writes
+  `runner-result.json`, `helper-transcript.txt`, `gateway-status.json`,
+  `host-status.json`, `connection-status.json`, `audit.jsonl`, and
+  `evidence-report.json` as one standard evidence directory. Relay/connectivity
+  evidence plans now use `--evidence-dir .`, and release smoke packages the
+  runner-generated status and audit files instead of hand-written fixtures.
 
 ### Remaining Gates
 

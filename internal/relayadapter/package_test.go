@@ -51,7 +51,8 @@ func TestBuildAndVerifyRelayAdapterPackage(t *testing.T) {
 		plan.ConnectionPathID != "existing-frp-or-chisel-relay" ||
 		plan.PackagePath != "relay-adapter.json" ||
 		plan.ExternalMutation ||
-		!slices.Contains(plan.DryRunCommand, "--result-out") ||
+		!slices.Contains(plan.DryRunCommand, "--evidence-dir") ||
+		!slices.Contains(plan.RunCommand, "--evidence-dir") ||
 		!slices.Contains(plan.PackageCommand, "package-relay-adapter") ||
 		!slices.Contains(plan.VerifyCommand, "verify-relay-adapter-package") {
 		t.Fatalf("unexpected acceptance evidence plan: %#v", plan)

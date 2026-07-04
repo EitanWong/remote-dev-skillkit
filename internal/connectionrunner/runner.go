@@ -25,6 +25,7 @@ import (
 const (
 	ManifestSchemaVersion = "rdev.connection-entry.runner.v1"
 	PlanSchemaVersion     = "rdev.connection-entry.runner-plan.v1"
+	EvidenceSchemaVersion = "rdev.connection-entry.runner-evidence.v1"
 )
 
 type Options struct {
@@ -205,6 +206,20 @@ type ToolResult struct {
 
 type DependencyInstallResult struct {
 	InstalledBinary string `json:"installed_binary,omitempty"`
+}
+
+type EvidenceReport struct {
+	SchemaVersion    string    `json:"schema_version"`
+	GeneratedAt      time.Time `json:"generated_at"`
+	Directory        string    `json:"directory"`
+	RunnerResult     string    `json:"runner_result"`
+	HelperTranscript string    `json:"helper_transcript"`
+	GatewayStatus    string    `json:"gateway_status"`
+	HostStatus       string    `json:"host_status"`
+	ConnectionStatus string    `json:"connection_status"`
+	Audit            string    `json:"audit"`
+	SelectedPath     string    `json:"selected_path,omitempty"`
+	Connected        bool      `json:"connected"`
 }
 
 func Build(opts Options) (Package, error) {
@@ -532,6 +547,159 @@ func cleanupHelper(result *RunResult, cleanup func() error, helperTool string) {
 	}
 	result.HelperCleanupSucceeded = true
 	appendHelperTranscript(result, "helper_cleanup_succeeded tool="+helperTool)
+}
+
+func WriteAcceptanceEvidence(dir string, result RunResult, generatedAt time.Time) (EvidenceReport, error) {
+	if strings.TrimSpace(dir) == "" {
+		return EvidenceReport{}, errors.New("evidence directory is required")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return EvidenceReport{}, err
+	}
+	if err := os.MkdirAll(abs, 0o700); err != nil {
+		return EvidenceReport{}, err
+	}
+	if generatedAt.IsZero() {
+		generatedAt = time.Now().UTC()
+	}
+	report := EvidenceReport{
+		SchemaVersion:    EvidenceSchemaVersion,
+		GeneratedAt:      generatedAt.UTC(),
+		Directory:        abs,
+		RunnerResult:     filepath.Join(abs, "runner-result.json"),
+		HelperTranscript: filepath.Join(abs, "helper-transcript.txt"),
+		GatewayStatus:    filepath.Join(abs, "gateway-status.json"),
+		HostStatus:       filepath.Join(abs, "host-status.json"),
+		ConnectionStatus: filepath.Join(abs, "connection-status.json"),
+		Audit:            filepath.Join(abs, "audit.jsonl"),
+		SelectedPath:     result.SelectedPath,
+		Connected:        result.Executed && len(result.ManualActionRequired) == 0,
+	}
+	if err := writeJSONFile(report.RunnerResult, result); err != nil {
+		return EvidenceReport{}, err
+	}
+	if err := writeTextFile(report.HelperTranscript, HelperTranscriptTextForEvidence(result)); err != nil {
+		return EvidenceReport{}, err
+	}
+	if err := writeJSONFile(report.GatewayStatus, gatewayStatusEvidence(result)); err != nil {
+		return EvidenceReport{}, err
+	}
+	if err := writeJSONFile(report.HostStatus, hostStatusEvidence(result)); err != nil {
+		return EvidenceReport{}, err
+	}
+	if err := writeJSONFile(report.ConnectionStatus, connectionStatusEvidence(result)); err != nil {
+		return EvidenceReport{}, err
+	}
+	if err := writeTextFile(report.Audit, auditEvidenceJSONL(result, generatedAt.UTC())); err != nil {
+		return EvidenceReport{}, err
+	}
+	if err := writeJSONFile(filepath.Join(abs, "evidence-report.json"), report); err != nil {
+		return EvidenceReport{}, err
+	}
+	return report, nil
+}
+
+func HelperTranscriptTextForEvidence(result RunResult) string {
+	lines := append([]string(nil), result.HelperTranscript...)
+	if len(lines) == 0 {
+		lines = []string{"no_helper_transcript selected_path=" + result.SelectedPath}
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func gatewayStatusEvidence(result RunResult) map[string]any {
+	reachable := selectedPathProbeOK(result) || helperTranscriptHas(result, "helper_gateway_reachable")
+	return map[string]any{
+		"schema_version":  "rdev.connection-entry.gateway-status.v1",
+		"ok":              result.SelectedPath != "" && reachable,
+		"selected_path":   result.SelectedPath,
+		"gateway_present": result.SelectedGatewayURL != "",
+		"reachable":       reachable,
+	}
+}
+
+func hostStatusEvidence(result RunResult) map[string]any {
+	status := "not-executed"
+	if result.Executed {
+		status = "completed"
+	} else if len(result.ManualActionRequired) > 0 {
+		status = "manual-action-required"
+	}
+	return map[string]any{
+		"schema_version":     "rdev.connection-entry.host-status.v1",
+		"ok":                 result.Executed,
+		"host_status":        status,
+		"selected_path":      result.SelectedPath,
+		"host_serve_invoked": helperTranscriptHas(result, "host_serve_invoked"),
+		"host_serve_done":    result.Executed,
+	}
+}
+
+func connectionStatusEvidence(result RunResult) map[string]any {
+	connected := result.Executed && len(result.ManualActionRequired) == 0
+	return map[string]any{
+		"schema_version": "rdev.connection-entry.connection-status.v1",
+		"ok":             connected,
+		"connected":      connected,
+		"selected_path":  result.SelectedPath,
+		"transport":      result.SelectedTransport,
+		"helper_started": result.HelperStarted,
+		"host_executed":  result.Executed,
+	}
+}
+
+func auditEvidenceJSONL(result RunResult, generatedAt time.Time) string {
+	events := []map[string]any{
+		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "selected_path", "selected_path": result.SelectedPath},
+		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "helper_start", "configured": result.HelperStartConfigured, "started": result.HelperStarted, "tool": result.HelperStartTool},
+		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "host_serve", "executed": result.Executed},
+		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "cleanup", "attempted": result.HelperCleanupAttempted, "succeeded": result.HelperCleanupSucceeded},
+	}
+	var builder strings.Builder
+	for _, event := range events {
+		content, err := json.Marshal(event)
+		if err != nil {
+			continue
+		}
+		builder.Write(content)
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
+func selectedPathProbeOK(result RunResult) bool {
+	for _, probe := range result.ProbeResults {
+		if probe.PathID == result.SelectedPath && probe.OK {
+			return true
+		}
+	}
+	return false
+}
+
+func helperTranscriptHas(result RunResult, marker string) bool {
+	for _, line := range result.HelperTranscript {
+		if strings.Contains(line, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeJSONFile(path string, value any) error {
+	content, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	return writeTextFile(path, string(content))
+}
+
+func writeTextFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 func writePackage(pkg *Package, rdevCommand string) error {

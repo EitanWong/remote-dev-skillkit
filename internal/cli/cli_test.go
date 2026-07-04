@@ -1882,6 +1882,7 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 	}
 	resultOut := filepath.Join(t.TempDir(), "evidence", "runner-result.json")
 	helperTranscriptOut := filepath.Join(t.TempDir(), "evidence", "helper-transcript.txt")
+	evidenceDir := filepath.Join(t.TempDir(), "standard-evidence")
 	var runOut bytes.Buffer
 	app = NewApp(&runOut, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
@@ -1891,6 +1892,7 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 		"--probe-timeout", "1s",
 		"--result-out", resultOut,
 		"--helper-transcript-out", helperTranscriptOut,
+		"--evidence-dir", evidenceDir,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1916,6 +1918,14 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 		!strings.Contains(string(helperTranscript), "dry_run no_execution") ||
 		!strings.Contains(runOut.String(), `"helper_transcript": "`+helperTranscriptOut+`"`) {
 		t.Fatalf("unexpected helper transcript evidence:\n%s\ncli output: %s", string(helperTranscript), runOut.String())
+	}
+	for _, expected := range []string{"runner-result.json", "helper-transcript.txt", "gateway-status.json", "host-status.json", "connection-status.json", "audit.jsonl", "evidence-report.json"} {
+		if _, err := os.Stat(filepath.Join(evidenceDir, expected)); err != nil {
+			t.Fatalf("expected standard evidence file %s: %v", expected, err)
+		}
+	}
+	if !strings.Contains(runOut.String(), `"schema_version": "rdev.connection-entry.runner-evidence.v1"`) {
+		t.Fatalf("expected evidence report in output: %s", runOut.String())
 	}
 }
 
