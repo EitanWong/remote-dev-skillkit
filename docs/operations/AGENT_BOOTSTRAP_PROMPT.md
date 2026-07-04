@@ -112,13 +112,16 @@ Steps:
     codes, manifest roots, gateway URLs, transports, release roots, or checksum
     flags. First call `rdev.support_session.connect` through MCP or run
     `rdev support-session connect`. If it returns `ready_to_send_to_human=true`,
-    send only the returned `user_handoff.message` plus
-    `user_handoff.copy_paste`. If it returns `ready_to_send_to_human=false`,
+    forward `target_handoff_envelope.full_text` verbatim when present; fall
+    back to `user_handoff.message` plus `user_handoff.copy_paste` only for
+    older payloads. If it returns `ready_to_send_to_human=false`,
     run the returned `cli_start_now_command` visible foreground `rdev support-session connect --start` command,
     read `ready_file.path` when terminal stdout is hard to parse, read
     `status_file.path` for the latest machine-readable connection event when
     terminal output is unavailable, then send only the started payload's
-    top-level `user_handoff.message` plus `user_handoff.copy_paste`. Always
+    top-level `target_handoff_envelope.full_text`, falling back to
+    top-level `user_handoff.message` plus `user_handoff.copy_paste` only for
+    older payloads. Always
     read `fresh_agent_connect_contract` when present; it is the
     machine-readable standard path for fresh Agents. It tells you how to recover
     missing `rdev`, what not to ask humans for, and which custom PowerShell,
@@ -202,11 +205,13 @@ Steps:
     network scripts when a LAN-only path times out. Treat
     `connection_supervision.automatic_downgrade_boundaries` as the source of
     truth for post-registration signed gateway candidate failover. Prefer
-    `user_handoff.message` plus `user_handoff.copy_paste` when telling me what
-    to run on the target machine. When `user_handoff.target` is `auto`, follow
-    `user_handoff.auto_target_rule`: send the join URL first, and use the
-    returned platform command only if I ask for a terminal command or cannot
-    open the page. Also read `target_bootstrap_requirements` and, for CLI
+    `target_handoff_envelope.full_text` when telling me what to run on the
+    target machine; it is already the complete localized plain-text handoff.
+    Use `user_handoff.message` plus `user_handoff.copy_paste` only for older
+    payloads. When `target_handoff_envelope.target` or `user_handoff.target` is
+    `auto`, follow the returned `auto_target_rule`: send the join URL first,
+    and use the returned platform command only if I ask for a terminal command
+    or cannot open the page. Also read `target_bootstrap_requirements` and, for CLI
     create calls, `target_bootstrap_readiness`. If an existing gateway cannot
     serve the verified helper assets for the selected platform, use the
     standard `rdev support-session connect --start` or
@@ -217,12 +222,13 @@ Steps:
     foreground terminal. It
     prepares verified Windows/macOS/Linux helper assets when a checkout and Go
     are available, starts the local gateway, and prints
-    `rdev.support-session-started.v1` with top-level `user_handoff`,
+    `rdev.support-session-started.v1` with top-level
+    `target_handoff_envelope`, `user_handoff`,
     `target_command`, `join_url`, `connection_supervision`, status watcher,
     asset report, recommended gateway URL candidates, and connection readiness
     plus `agent_connection_runbook` and `gateway_candidate_preflight` before listening. It keeps the full created session under `session` for
     compatibility, but fresh Agents should send only the top-level
-    `user_handoff.message` plus `user_handoff.copy_paste`, then use top-level
+    `target_handoff_envelope.full_text`, then use top-level
     `connection_supervision` to wait, report, and recover. Also read
     `foreground_feedback`: the foreground command emits machine-readable stderr
     lines prefixed with `rdev support session event: `, and `event=connected`

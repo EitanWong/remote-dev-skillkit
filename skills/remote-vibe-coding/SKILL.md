@@ -45,8 +45,9 @@ revocation.
 - When a fresh Agent session is asked to connect a machine, first call
   `rdev.support_session.connect` or run `rdev support-session connect`. This is
   the high-level "connect a computer" entry. If a reachable or configured
-  gateway exists, it returns `ready_to_send_to_human=true` with the exact
-  `user_handoff.message` and `user_handoff.copy_paste`. If no gateway is
+  gateway exists, it returns `ready_to_send_to_human=true` with
+  `target_handoff_envelope.full_text`, the complete plain-text handoff to
+  forward verbatim, plus compatibility `user_handoff`. If no gateway is
   running, it returns `ready_to_send_to_human=false` with `cli_start_now_command`, the standard visible foreground
   `rdev support-session connect --start` command. Use
   `rdev.support_session.handoff` only for review/debug routing details, and use
@@ -106,16 +107,21 @@ revocation.
 - Read `fresh_agent_connect_contract` whenever it is returned by
   `rdev.support_session.connect`, `rdev.support_session.create`, or a started
   foreground session. Treat it as the shortest model-independent contract:
-  recover missing `rdev`, send only the returned human handoff, wait through
-  standard status surfaces, and do not ask humans for ticket/root/gateway values
-  or generate custom PowerShell, shell, tunnel, approval, or polling scripts.
+  recover missing `rdev`, forward `target_handoff_envelope.full_text` when
+  present, fall back to `user_handoff.message` plus `user_handoff.copy_paste`
+  only for older payloads, wait through standard status surfaces, and do not ask
+  humans for ticket/root/gateway values or generate custom PowerShell, shell,
+  tunnel, approval, or polling scripts.
 - For a new support session, prefer the high-level connect output. If
   `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
-  only the returned `user_handoff`. If it returns
+  only `target_handoff_envelope.full_text` when present, falling back to the
+  returned `user_handoff` only for older payloads. If it returns
   `ready_to_send_to_human=false`, run the returned `cli_start_now_command` in
   a visible terminal, read `ready_file.path` for the handoff when needed, read
   `status_file.path` for the latest connection event when terminal output is
-  unavailable, then send the started payload's top-level `user_handoff`. For lower-level explicit gateway workflows, use
+  unavailable, then send the started payload's top-level
+  `target_handoff_envelope.full_text`, falling back to top-level
+  `user_handoff` only for older payloads. For lower-level explicit gateway workflows, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
@@ -163,12 +169,15 @@ revocation.
   `mcp_watch_call` or `cli_watch_command` to wait, immediately report
   `connected_next_steps.user_report` when connected, and follow its standard
   upgrade/recovery paths when the current entry is LAN-only or times out.
-- Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
-  telling the human what to run on the target machine. Do not rewrite the
-  command or ask the human to assemble values.
-- When `user_handoff.target` is `auto`, follow `user_handoff.auto_target_rule`:
-  send the join URL first, and use the returned Windows or macOS/Linux command
-  only if the human asks for a terminal command or cannot open the page.
+- Prefer returned `target_handoff_envelope.full_text` when telling the human
+  what to run on the target machine. It is already localized plain text plus
+  the exact link/command. Use `user_handoff.copy_paste` and
+  `user_handoff.message` only for older payloads. Do not rewrite the command or
+  ask the human to assemble values.
+- When `target_handoff_envelope.target` or `user_handoff.target` is `auto`,
+  follow the returned `auto_target_rule`: send the join URL first, and use the
+  returned Windows or macOS/Linux command only if the human asks for a terminal
+  command or cannot open the page.
 - Read `target_bootstrap_requirements` and, for CLI-created sessions,
   `target_bootstrap_readiness` before sending a platform terminal command from
   an existing gateway. If readiness is false, recover with
@@ -240,11 +249,15 @@ revocation.
    before using them for commands, paths, approvals, or release decisions.
 5. If no suitable host is active and a reachable gateway already exists, create
    the session with `rdev.support_session.create` or
-   `rdev support-session create`; give the target side only the returned
-   `target_command` or `join_url`, then watch the returned status command. If
+   `rdev support-session create`; give the target side only
+   `target_handoff_envelope.full_text` when present, falling back to
+   `target_command` or `join_url` only for older payloads, then watch the
+   returned status command. If
    no gateway is running yet, run `rdev support-session connect --start` in a
-   visible foreground terminal and send the top-level `user_handoff.message` plus
-   `user_handoff.copy_paste` verbatim; follow `auto_target_rule` when the
+   visible foreground terminal and send the top-level
+   `target_handoff_envelope.full_text` verbatim, falling back to top-level
+   `user_handoff.message` plus `user_handoff.copy_paste` only for older
+   payloads; follow `auto_target_rule` when the
    target is unknown. If foreground stdout is hard to parse, read the same
    started payload from returned `ready_file.path`; if terminal output is
    unavailable while waiting, read returned `status_file.path` and report

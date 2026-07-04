@@ -270,7 +270,7 @@ func TestServerToolCallSupportSessionHandoff(t *testing.T) {
 		structured["mcp_next_tool"] != "rdev.support_session.create" ||
 		args["gateway_url"] != "http://192.0.2.44:8787" ||
 		args["target"] != "windows" ||
-		!strings.Contains(structured["agent_next_step"].(string), "user_handoff") ||
+		!strings.Contains(structured["agent_next_step"].(string), "target_handoff_envelope.full_text") ||
 		!strings.Contains(forbidden, "Agent-authored PowerShell") {
 		t.Fatalf("expected support-session handoff contract, got %#v", structured)
 	}
@@ -413,7 +413,7 @@ func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 	runbook := structured["agent_connection_runbook"].(map[string]any)
 	if runbook["schema_version"] != "rdev.support-session-agent-runbook.v1" ||
 		runbook["phase"] != "prepare" ||
-		!strings.Contains(fmt.Sprintf("%v", runbook["sequence"]), "user_handoff.message") {
+		!strings.Contains(fmt.Sprintf("%v", runbook["sequence"]), "target_handoff_envelope.full_text") {
 		t.Fatalf("expected MCP prepare Agent runbook, got %#v", runbook)
 	}
 }

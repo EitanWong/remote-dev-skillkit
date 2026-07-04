@@ -97,7 +97,8 @@ computer, a third-party temporary repair machine, LAN, hosted, relay, mesh, SSH,
 or VPN-assisted connectivity. First call `rdev.support_session.connect` or run
 `rdev support-session connect`; it is the high-level "connect a computer"
 entry. If a configured or reachable gateway exists, it creates the session and
-returns the ready `user_handoff`. If no gateway is running, it returns
+returns the ready `target_handoff_envelope.full_text` plus compatibility
+`user_handoff`. If no gateway is running, it returns
 `cli_start_now_command`, the standard visible foreground
 `rdev support-session connect --start` command, instead of failing or making
 the Agent choose lower-level steps. Do not start ordinary remote-connection
@@ -132,9 +133,10 @@ and standard `rdev.connection_entry.plan` / `rdev connection-entry run
 --dry-run` path for the self-contained runner, so the Agent does not recreate
 ticket, manifest root, gateway, relay, mesh, VPN, or SSH glue. Also read
 `fresh_agent_connect_contract`; it is the shortest machine-readable contract
-for a newly installed Agent: recover `rdev` instead of stopping, send only
-`user_handoff.message` plus `user_handoff.copy_paste`, wait through the
-returned watcher/status file, and never ask humans for ticket/root/gateway
+for a newly installed Agent: recover `rdev` instead of stopping, forward
+`target_handoff_envelope.full_text` verbatim when present, fall back to
+`user_handoff.message` plus `user_handoff.copy_paste` only for older payloads,
+wait through the returned watcher/status file, and never ask humans for ticket/root/gateway
 values or generate custom PowerShell/shell/tunnel/polling scripts. Also read
 `agent_connection_runbook`; it is the
 machine-readable order of operations for fresh Agents: run the standard start
@@ -169,16 +171,19 @@ Read `connection_continuity_policy` as well: if
 `stable_after_lan_change=false`, treat LAN as only the first opportunistic path
 and prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming the
 connection is robust for long-running work.
-Prefer `user_handoff.message` plus
-`user_handoff.copy_paste` when telling me what to run. If no gateway is running
+Prefer `target_handoff_envelope.full_text` when telling me what to run; it is
+already the complete plain-text message plus exact command/link. Fall back to
+`user_handoff.message` plus `user_handoff.copy_paste` only for older payloads.
+If no gateway is running
 yet, run `rdev support-session connect --start` in a visible foreground
 terminal; it
 auto-prepares verified Windows/macOS/Linux
 helper assets when a source checkout and Go are available, starts the local
 gateway, and prints the same ready session payload before listening. Send only
-the started payload's top-level `user_handoff.message` plus
-`user_handoff.copy_paste`; do not read nested session fields or rewrite the
-command. Keep the foreground command open and read
+the started payload's top-level `target_handoff_envelope.full_text`; fall back
+to top-level `user_handoff.message` plus `user_handoff.copy_paste` only for
+older payloads. Do not read nested session fields or rewrite the command. Keep
+the foreground command open and read
 `foreground_feedback`: it emits machine-readable stderr events prefixed with
 `rdev support session event: `, including `event=connected`, so the Agent can
 tell me the connection is established even before opening a separate watcher.
@@ -291,14 +296,15 @@ The Agent should start with `rdev.support_session.connect` or
 `rdev support-session connect`. That first-contact contract returns
 `rdev.support-session-connect.v1` and collapses the ordinary decision tree: when
 a reachable gateway or configured `RDEV_*_GATEWAY_URL` exists, it creates the
-session and returns a ready `user_handoff`; when no gateway is running, it
+session and returns a ready `target_handoff_envelope.full_text`; when no gateway is running, it
 returns `cli_start_now_command`, the standard visible foreground
 `rdev support-session connect --start` command, plus a `support-session start`
 compatibility fallback.
 `rdev.support_session.handoff` remains available for review/debug routing
 details, but fresh Agents should not use it as the normal first step. The
 created/started session then returns
-`rdev.support-session-created.v1`: the ready Windows/macOS/Linux target command,
+`rdev.support-session-created.v1`: the ready `target_handoff_envelope.full_text`,
+Windows/macOS/Linux target command,
 join URL, manifest root, real ticket code, and status watcher with no
 placeholders. It also includes `target_bootstrap_requirements` and, for CLI
 create calls against an existing gateway, `target_bootstrap_readiness`. Those
@@ -312,11 +318,12 @@ instead of Agent-written glue. After registration, `rdev host serve --transport
 auto` keeps the signed join-manifest gateway candidates and can switch the job
 runtime to another reachable candidate if the current gateway fails before any
 work is processed. The same payload includes
-`user_handoff.message` and `user_handoff.copy_paste`, which is the exact
-human-facing text and command/link the Agent should send. When the target OS is
-unknown, `user_handoff.auto_target_rule` tells the Agent to send the join URL
-first and use the returned platform command only when the human asks for a
-terminal command or cannot open the page.
+`target_handoff_envelope.full_text`, which is the exact human-facing text and
+command/link the Agent should send. `user_handoff` remains for compatibility.
+When the target OS is unknown, `target_handoff_envelope.auto_target_rule` and
+`user_handoff.auto_target_rule` tell the Agent to send the join URL first and
+use the returned platform command only when the human asks for a terminal
+command or cannot open the page.
 When the handoff/readiness output shows `rdev`, gateway state, or target helper
 assets are unclear, the Agent
 should call `rdev.support_session.prepare` or run
@@ -330,14 +337,15 @@ commands, then keep raw address selection out of human chat. If no gateway is
 running yet, the Agent should run `rdev support-session connect --start` in a
 visible foreground terminal; that command auto-prepares verified helper assets when
 possible, starts the local gateway, and prints
-`rdev.support-session-started.v1` with top-level `user_handoff`,
+`rdev.support-session-started.v1` with top-level `target_handoff_envelope`,
+`user_handoff`,
 `target_command`, `join_url`, `connection_supervision`, and status watcher
 fields plus the same `gateway_candidate_preflight` decision table and
 `agent_connection_runbook`. It also includes `foreground_feedback`, a stderr event contract for the
 same foreground command; when the Agent sees `event=connected`, it should
 immediately report that the connection has been established. It keeps the full
 created session under `session` for compatibility, but fresh Agents should send
-only the top-level `user_handoff.message` plus `user_handoff.copy_paste`, then
+only the top-level `target_handoff_envelope.full_text`, then
 use top-level `connection_supervision` or foreground feedback to wait, report
 `connected=true`, and choose standard upgrade/recovery tools. It also
 writes the same payload to `ready_file.path` as

@@ -33,15 +33,17 @@ LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
 `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
 `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
 configured, it creates the attended-temporary support session and returns
-`ready_to_send_to_human=true` with the exact `user_handoff.message` and
-`user_handoff.copy_paste`. If no gateway is present, it returns
+`ready_to_send_to_human=true` with `target_handoff_envelope.full_text`, the
+complete plain-text message/link/command Agents can forward verbatim. The older
+`user_handoff.message` and `user_handoff.copy_paste` fields remain for
+compatibility. If no gateway is present, it returns
 `ready_to_send_to_human=false` with `cli_start_now_command`, the standard foreground
 `rdev support-session connect --start` command to run in a visible terminal. Agents should
 follow the connect payload instead of choosing between handoff/create/start/plan
 themselves or writing bootstrap, relay, approval-polling, or recovery scripts.
 The payload includes `fresh_agent_connect_contract`, which is the shortest
 machine-readable standard path for a newly installed Agent: recover missing
-`rdev`, send only the returned handoff, wait through the standard status
+`rdev`, forward `target_handoff_envelope.full_text` when present, wait through the standard status
 surfaces, and do not ask humans for ticket/root/gateway values or generate
 custom PowerShell, shell, tunnel, approval, or polling scripts.
 
@@ -82,12 +84,12 @@ mesh, VPN, or SSH metadata by hand. It also includes
 `connection_supervision`, the Agent-side contract for
 waiting, proactively reporting `connected=true`, and choosing standard
 prepare/runner/Connection Entry upgrade or recovery tools when the first path is
-LAN-only or times out. It also includes `user_handoff` with a localized
-`message` and exact `copy_paste` value; Agents should send that to the human
-verbatim. When
-`user_handoff.target` is `auto`, Agents should follow
-`user_handoff.auto_target_rule`: send the join URL first, then use the returned
-platform command only when a terminal command is needed. The payload also
+LAN-only or times out. It also includes `target_handoff_envelope` with
+`full_text`, `copy_paste`, platform fallbacks, and `auto_target_rule`; Agents
+should forward `full_text` to the human verbatim and use `user_handoff` only
+for compatibility. When the target is `auto`, Agents should follow the returned
+`auto_target_rule`: send the join URL first, then use the returned platform
+command only when a terminal command is needed. The payload also
 includes `target_bootstrap_requirements`; CLI-created sessions can include
 `target_bootstrap_readiness` after probing gateway `/assets` endpoints. If an
 existing gateway cannot serve the verified helper assets for the selected
@@ -130,7 +132,7 @@ When no suitable gateway is running yet, Agents should run
 `rdev support-session connect --start` as a visible foreground CLI process. It starts the
 local gateway, creates the attended-temporary ticket, prints
 `rdev.support-session-started.v1`, mirrors the created session's
-`user_handoff`, `target_command`, `join_url`, `connection_supervision`, and
+`target_handoff_envelope`, `user_handoff`, `target_command`, `join_url`, `connection_supervision`, and
 watcher at the top level, keeps the full `rdev.support-session-created.v1`
 under `session` for compatibility, includes `asset_report` and
 `connection_readiness`, includes `agent_connection_runbook`, includes
@@ -150,8 +152,7 @@ as they see `event=connected`; the MCP/CLI status watcher remains the fallback
 source of truth.
 The CLI also writes the same started payload to `ready_file.path`
 (`support-session-ready.json` in the session work directory by default), so
-Agents can read top-level `user_handoff.message` and
-`user_handoff.copy_paste` from a stable file when a long-running
+Agents can read top-level `target_handoff_envelope.full_text` from a stable file when a long-running
 foreground terminal makes stdout hard to parse. It also writes the latest
 foreground status event to `status_file.path` (`support-session-status.json` by
 default), so Agents can report `event=connected` without inventing a polling

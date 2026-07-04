@@ -25,8 +25,9 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
 - When a fresh Agent session is asked to connect a machine, first call
   `rdev.support_session.connect` or run `rdev support-session connect`. This is
   the high-level "connect a computer" entry. If a reachable or configured
-  gateway exists, it returns `ready_to_send_to_human=true` with the exact
-  `user_handoff.message` and `user_handoff.copy_paste`. If no gateway is
+  gateway exists, it returns `ready_to_send_to_human=true` with
+  `target_handoff_envelope.full_text`, the complete plain-text handoff to
+  forward verbatim, plus compatibility `user_handoff`. If no gateway is
   running, it returns `ready_to_send_to_human=false` with `cli_start_now_command`, the standard visible foreground
   `rdev support-session connect --start` command. Use
   `rdev.support_session.handoff` only for review/debug routing details, and use
@@ -82,17 +83,22 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   instead.
 - Read `fresh_agent_connect_contract` whenever it appears in
   support-session output. It is the shortest model-independent contract for a
-  newly installed Agent: recover missing `rdev`, send only the returned human
-  handoff, wait through the standard watcher/status surfaces, and do not ask
+  newly installed Agent: recover missing `rdev`, forward
+  `target_handoff_envelope.full_text` when present, fall back to
+  `user_handoff.message` plus `user_handoff.copy_paste` only for older
+  payloads, wait through the standard watcher/status surfaces, and do not ask
   humans for ticket/root/gateway values or generate custom PowerShell, shell,
   tunnel, approval, or polling scripts.
 - For every new visible support session, prefer the high-level connect output.
-  If `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
-  only the returned `user_handoff`. If it returns
+  If `rdev.support_session.connect` returns `ready_to_send_to_human=true`,
+  send only `target_handoff_envelope.full_text` when present, falling back to
+  the returned `user_handoff` only for older payloads. If it returns
   `ready_to_send_to_human=false`, run the returned `cli_start_now_command` in
   a visible terminal, read `ready_file.path` for the handoff when needed, read
   `status_file.path` for the latest connection event when terminal output is
-  unavailable, then send the started payload's top-level `user_handoff`. For lower-level explicit gateway workflows, call
+  unavailable, then send the started payload's top-level
+  `target_handoff_envelope.full_text`, falling back to top-level
+  `user_handoff` only for older payloads. For lower-level explicit gateway workflows, call
   `rdev.support_session.create` over MCP or `rdev support-session create` over
   CLI. Treat the returned `rdev.support-session-created.v1` as the standard
   one-command session package: it already includes the target command, join URL,
@@ -139,12 +145,15 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
   LAN-only path times out. Treat
   `connection_supervision.automatic_downgrade_boundaries` as the standard
   source for post-registration signed gateway candidate failover.
-- Prefer returned `user_handoff.copy_paste` and `user_handoff.message` when
-  telling the human what to run on the target machine. Do not rewrite the
-  command or ask the human to assemble values.
-- When `user_handoff.target` is `auto`, follow `user_handoff.auto_target_rule`:
-  send the join URL first, and use the returned Windows or macOS/Linux command
-  only if the human asks for a terminal command or cannot open the page.
+- Prefer returned `target_handoff_envelope.full_text` when telling the human
+  what to run on the target machine. It is already localized plain text plus
+  the exact link/command. Use `user_handoff.copy_paste` and
+  `user_handoff.message` only for older payloads. Do not rewrite the command or
+  ask the human to assemble values.
+- When `target_handoff_envelope.target` or `user_handoff.target` is `auto`,
+  follow the returned `auto_target_rule`: send the join URL first, and use the
+  returned Windows or macOS/Linux command only if the human asks for a terminal
+  command or cannot open the page.
 - Read `target_bootstrap_requirements` and, for CLI-created sessions,
   `target_bootstrap_readiness` before sending a platform terminal command from
   an existing gateway. If readiness is false, recover with
@@ -260,13 +269,16 @@ Use this skill when a user asks to connect to a remote machine for troubleshooti
    cannot be supplied by the invite, signed manifest, Connection Entry plan, or
    local probes.
 6. If a reachable gateway exists, create the standard support session with
-   `rdev.support_session.create` or `rdev support-session create`; send only the
-   returned `user_handoff.copy_paste`, `target_command`, or `join_url` to the
-   target-side human. If no explicit gateway URL was supplied, let create use a
+   `rdev.support_session.create` or `rdev support-session create`; send only
+   returned `target_handoff_envelope.full_text` when present, falling back to
+   `user_handoff.copy_paste`, `target_command`, or `join_url` only for older
+   payloads. If no explicit gateway URL was supplied, let create use a
    configured `RDEV_*_GATEWAY_URL` before asking for configuration. If no
   gateway exists, run `rdev support-session connect --start` in a visible
-  foreground terminal and send only top-level `user_handoff.message` plus
-  `user_handoff.copy_paste`. Then use returned `connection_supervision` to
+  foreground terminal and send only top-level
+  `target_handoff_envelope.full_text`, falling back to top-level
+  `user_handoff.message` plus `user_handoff.copy_paste` only for older
+  payloads. Then use returned `connection_supervision` to
   wait, report connection establishment, and recover through standard tools.
   Also read `foreground_feedback` from the started payload: the foreground
   process emits machine-readable stderr events prefixed with

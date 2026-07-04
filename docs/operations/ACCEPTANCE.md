@@ -26,9 +26,12 @@ checks that the standard tool payloads still let a fresh Agent do the intended
 one-message flow:
 
 1. call `rdev.support_session.connect` first;
-2. return ready `user_handoff` when a gateway is reachable;
+2. return ready `target_handoff_envelope.full_text` and compatibility
+   `user_handoff` when a gateway is reachable;
 3. return `cli_start_now_command` for visible foreground `rdev support-session connect --start` when no gateway is running;
-4. send only `user_handoff.message` plus `user_handoff.copy_paste` to the human;
+4. forward `target_handoff_envelope.full_text` verbatim to the human, falling
+   back to `user_handoff.message` plus `user_handoff.copy_paste` only for older
+   payloads;
 5. read `ready_file.path` when foreground stdout is hard to parse;
 6. expose `status_file.path` for the latest machine-readable foreground event
    when terminal output is unavailable, with regression coverage that drives the
@@ -53,7 +56,10 @@ one-message flow:
     candidate before registration;
 13. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
    gateway, transport, or bootstrap glue;
-14. include `agent_connection_runbook.fresh_agent_failure_prevention`, a
+14. include `rdev.support-session-target-handoff-envelope.v1` on created,
+   connected, and started payloads, so Agents no longer need to reconstruct the
+   human-facing text from separate fields;
+15. include `agent_connection_runbook.fresh_agent_failure_prevention`, a
    machine-readable regression guard for real fresh-Agent failures such as
    manual gateway/invite/bootstrap assembly, missing helper assets that produce
    `rdev is required`, background gateway workarounds, custom approval polling,

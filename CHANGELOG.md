@@ -12,6 +12,14 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added `rdev.support-session-target-handoff-envelope.v1` to high-level
+  support-session created, connected, and foreground-started payloads. Fresh
+  Agents now receive `target_handoff_envelope.full_text`, a complete localized
+  plain-text handoff that can be forwarded to the target-side human verbatim,
+  plus structured fallbacks for join URL, Windows command, and macOS/Linux
+  command. This removes another model-dependent step where Agents previously
+  had to reconstruct the human message from `user_handoff.message` and
+  `user_handoff.copy_paste`.
 - Added `rdev.support-session-fresh-agent-connect-contract.v1` to high-level
   support-session connect, created, and started payloads. Fresh Agents now get a
   compact model-independent contract that says how to recover missing `rdev`,
@@ -250,22 +258,25 @@ metadata, status watching, or approval polling by hand.
   `rdev.support-session-started.v1`. `rdev support-session start` now writes the
   same started payload to `support-session-ready.json` by default, or to
   `--ready-file`, before serving. Fresh Agents can read `ready_file.path` when a
-  long-running foreground terminal makes stdout hard to parse, then send
-  top-level `user_handoff.message` plus `user_handoff.copy_paste` without
-  inventing extra scripts or asking the human to assemble ticket/gateway values.
+	  long-running foreground terminal makes stdout hard to parse, then forward
+	  top-level `target_handoff_envelope.full_text` when present, falling back to
+	  `user_handoff.message` plus `user_handoff.copy_paste` only for older
+	  payloads, without inventing extra scripts or asking the human to assemble
+	  ticket/gateway values.
 - Added `rdev acceptance fresh-agent-support-session` with schema
   `rdev.acceptance.fresh-agent-support-session.v1`. This local contract gate
   verifies the fresh-Agent connect/handoff/create/start/status flow: one
-  high-level connect entry, one standard selected path, one human
-  `user_handoff`, ready-file fallback, waitable status,
+	  high-level connect entry, one standard selected path, one ready
+	  `target_handoff_envelope` plus compatibility `user_handoff`, ready-file fallback, waitable status,
   `connected_next_steps.user_report`, and forbidden ad hoc bootstrap, polling,
   relay, ticket/root/gateway/transport assembly, hidden install, or
   `ExecutionPolicy Bypass` shortcuts.
 - Added high-level `rdev support-session connect` and MCP tool
   `rdev.support_session.connect` with schema `rdev.support-session-connect.v1`.
   Fresh Agents can now call one "connect a computer" entry first: when a
-  reachable or configured gateway exists it creates the session and returns the
-  ready `user_handoff`; when no gateway is running it returns the standard
+	  reachable or configured gateway exists it creates the session and returns the
+	  ready `target_handoff_envelope.full_text` plus compatibility
+	  `user_handoff`; when no gateway is running it returns the standard
   `cli_start_now_command` foreground `rdev support-session connect --start` command instead of failing or
   forcing model-dependent handoff/create/start decisions.
 - Added `rdev support-session create` and MCP tool

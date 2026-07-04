@@ -277,6 +277,7 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["selected_path"] != "created-with-reachable-gateway" ||
 		connect["ready_to_send_to_human"] != true ||
 		connect["user_handoff"] == nil ||
+		connect["target_handoff_envelope"] == nil ||
 		connect["connection_supervision"] == nil ||
 		connect["gateway_candidate_preflight"] == nil ||
 		connect["connectivity_helper_preflight"] == nil ||
@@ -293,9 +294,17 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		contract["ready_to_send_human"] != true ||
 		contract["ticket_code"] != "ABCD-1234" ||
 		autoApprove["enabled"] != true ||
+		!strings.Contains(contract["human_surface"].(string), "target_handoff_envelope.full_text") ||
 		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "manifest root public key") ||
 		!strings.Contains(contract["status_rule"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected ready fresh-Agent connect contract, got %#v", contract)
+	}
+	envelope := connect["target_handoff_envelope"].(map[string]any)
+	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
+		envelope["ready_to_forward"] != true ||
+		!strings.Contains(envelope["full_text"].(string), "ABCD-1234") ||
+		!strings.Contains(envelope["agent_rule"].(string), "send full_text verbatim") {
+		t.Fatalf("expected ready target handoff envelope, got %#v", envelope)
 	}
 	connectHelperPreflight := connect["connectivity_helper_preflight"].(map[string]any)
 	createdHelperPreflight := created["connectivity_helper_preflight"].(map[string]any)
@@ -353,6 +362,15 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(handoff["agent_next_step"].(string), "wait=true") ||
 		!strings.Contains(handoff["agent_rule"].(string), "do not rewrite") {
 		t.Fatalf("expected ready localized user handoff, got %#v", handoff)
+	}
+	envelope := created["target_handoff_envelope"].(map[string]any)
+	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
+		envelope["ready_to_forward"] != true ||
+		envelope["copy_paste"] != created["target_command"] ||
+		!strings.Contains(envelope["full_text"].(string), envelope["message"].(string)) ||
+		!strings.Contains(envelope["full_text"].(string), created["target_command"].(string)) ||
+		!strings.Contains(strings.Join(envelope["forbidden"].([]string), "\n"), "ExecutionPolicy Bypass") {
+		t.Fatalf("expected target handoff envelope, got %#v", envelope)
 	}
 	macLinuxCommand := created["target_commands"].(map[string]string)["macos_linux"]
 	if !strings.Contains(macLinuxCommand, "--connect-timeout 2") ||
@@ -587,6 +605,12 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		started["connection_entry_runner_recommendation"] == nil {
 		t.Fatalf("expected top-level human handoff mirror, got %#v", started)
 	}
+	envelope := started["target_handoff_envelope"].(map[string]any)
+	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
+		envelope["copy_paste"] != started["target_command"] ||
+		!strings.Contains(envelope["after_send"].(string), "connected_next_steps.user_report") {
+		t.Fatalf("expected started top-level target handoff envelope, got %#v", envelope)
+	}
 	startedHelperPreflight := started["connectivity_helper_preflight"].(map[string]any)
 	sessionHelperPreflight := session["connectivity_helper_preflight"].(map[string]any)
 	if startedHelperPreflight["schema_version"] != sessionHelperPreflight["schema_version"] ||
@@ -619,7 +643,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	}
 	runbook := started["agent_connection_runbook"].(map[string]any)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
-		!strings.Contains(strings.Join(runbook["sequence"].([]string), "\n"), "user_handoff.message") {
+		!strings.Contains(strings.Join(runbook["sequence"].([]string), "\n"), "target_handoff_envelope.full_text") {
 		t.Fatalf("expected top-level Agent runbook, got %#v", runbook)
 	}
 	feedback := started["foreground_feedback"].(map[string]any)
@@ -632,7 +656,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	if readyFile["schema_version"] != "rdev.support-session-ready-file.v1" ||
 		readyFile["path"] != "work/rdev-support-session/support-session-ready.json" ||
 		readyFile["contains"] != StartedSchemaVersion ||
-		!strings.Contains(readyFile["agent_rule"].(string), "user_handoff.copy_paste") {
+		!strings.Contains(readyFile["agent_rule"].(string), "target_handoff_envelope.full_text") {
 		t.Fatalf("expected ready file metadata, got %#v", readyFile)
 	}
 	statusFile := started["status_file"].(map[string]any)

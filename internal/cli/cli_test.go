@@ -481,7 +481,7 @@ func TestSupportSessionHandoffSelectsCreateWhenGatewayExists(t *testing.T) {
 		payload.MCPNextTool != "rdev.support_session.create" ||
 		payload.MCPNextArguments["gateway_url"] != "http://192.0.2.10:8787" ||
 		payload.MCPNextArguments["target"] != "windows" ||
-		!strings.Contains(payload.AgentNextStep, "user_handoff") ||
+		!strings.Contains(payload.AgentNextStep, "target_handoff_envelope.full_text") ||
 		!slices.Contains(payload.Forbidden, "Agent-authored PowerShell or shell bootstrap/recovery scripts") {
 		t.Fatalf("expected create handoff route, got %#v", payload)
 	}
@@ -657,7 +657,7 @@ func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.
 		!strings.Contains(payload.GatewayCandidatePreflight.AgentRule, "target command owns ordered URL fallback") ||
 		payload.AgentConnectionRunbook.SchemaVersion != "rdev.support-session-agent-runbook.v1" ||
 		payload.AgentConnectionRunbook.Phase != "prepare" ||
-		!slices.Contains(payload.AgentConnectionRunbook.Sequence, "send only user_handoff.message plus user_handoff.copy_paste to the target-side human") ||
+		!slices.Contains(payload.AgentConnectionRunbook.Sequence, "send only target_handoff_envelope.full_text to the target-side human") ||
 		!payload.AssetReport.AllReady ||
 		!payload.AssetReport.BuildAssets ||
 		len(payload.AssetReport.Assets) != 5 {
@@ -1009,7 +1009,7 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	if payload.ReadyFile.SchemaVersion != "rdev.support-session-ready-file.v1" ||
 		payload.ReadyFile.Path != readyFile ||
 		payload.ReadyFile.Contains != "rdev.support-session-started.v1" ||
-		!strings.Contains(payload.ReadyFile.AgentRule, "user_handoff.copy_paste") {
+		!strings.Contains(payload.ReadyFile.AgentRule, "target_handoff_envelope.full_text") {
 		t.Fatalf("expected ready-file metadata, got %#v", payload.ReadyFile)
 	}
 	if payload.StatusFile.SchemaVersion != "rdev.support-session-status-file.v1" ||
