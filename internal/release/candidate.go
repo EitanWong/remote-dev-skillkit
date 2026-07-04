@@ -80,19 +80,20 @@ type CandidateFile struct {
 }
 
 type ConnectionEntryReleasePackage struct {
-	SchemaVersion       string                              `json:"schema_version"`
-	Version             string                              `json:"version"`
-	GeneratedAt         time.Time                           `json:"generated_at"`
-	RootPublicKey       string                              `json:"root_public_key"`
-	ArchiveKind         string                              `json:"archive_kind"`
-	ExecutionMode       string                              `json:"execution_mode"`
-	NoPrivateParameters bool                                `json:"no_private_parameters"`
-	RequiredRuntimeData []string                            `json:"required_runtime_data"`
-	Artifacts           []ConnectionEntryReleasePackageFile `json:"artifacts"`
-	ReleaseMetadata     []ConnectionEntryReleasePackageFile `json:"release_metadata"`
-	Launchers           []ConnectionEntryReleasePackageFile `json:"launchers"`
-	ChecksumsPath       string                              `json:"checksums_path"`
-	AgentRules          []string                            `json:"agent_rules"`
+	SchemaVersion            string                              `json:"schema_version"`
+	Version                  string                              `json:"version"`
+	GeneratedAt              time.Time                           `json:"generated_at"`
+	RootPublicKey            string                              `json:"root_public_key"`
+	ArchiveKind              string                              `json:"archive_kind"`
+	ExecutionMode            string                              `json:"execution_mode"`
+	NoPrivateParameters      bool                                `json:"no_private_parameters"`
+	RequiredRuntimeData      []string                            `json:"required_runtime_data"`
+	RequiredReleaseArtifacts []string                            `json:"required_release_artifacts"`
+	Artifacts                []ConnectionEntryReleasePackageFile `json:"artifacts"`
+	ReleaseMetadata          []ConnectionEntryReleasePackageFile `json:"release_metadata"`
+	Launchers                []ConnectionEntryReleasePackageFile `json:"launchers"`
+	ChecksumsPath            string                              `json:"checksums_path"`
+	AgentRules               []string                            `json:"agent_rules"`
 }
 
 type ConnectionEntryReleasePackageFile struct {
@@ -694,9 +695,9 @@ func buildConnectionEntryReleaseEntries(candidateDir string, candidate Candidate
 	addContent("CONNECTION_ENTRY_RELEASE.md", "documentation", []byte(renderConnectionEntryReleaseReadme(candidate)))
 	addContent("connection-entry-runner.template.json", "runner-template", []byte(renderConnectionEntryRunnerTemplate(candidate, generatedAt)))
 	if connectionEntryReleaseUsesWindows(candidate) {
-		addContent("launchers/Start-ConnectionEntry.ps1", "launcher", []byte(renderConnectionEntryPowerShellLauncher()))
+		addContent("launchers/Start-ConnectionEntry.ps1", "launcher", []byte(renderConnectionEntryPowerShellLauncher(candidate)))
 	} else {
-		addContent("launchers/start-connection-entry.sh", "launcher", []byte(renderConnectionEntryShellLauncher()))
+		addContent("launchers/start-connection-entry.sh", "launcher", []byte(renderConnectionEntryShellLauncher(candidate)))
 	}
 
 	files := connectionEntryPackageFiles(entries)
@@ -741,12 +742,14 @@ func buildConnectionEntryReleasePackage(candidate Candidate, files []ConnectionE
 			"manifest root public key",
 			"ticket code and gateway candidates from the signed invite/join manifest",
 		},
-		Artifacts:       artifacts,
-		ReleaseMetadata: releaseMetadata,
-		Launchers:       launchers,
-		ChecksumsPath:   "connection-entry-checksums.txt",
+		RequiredReleaseArtifacts: connectionEntryRequiredReleaseArtifacts(candidate),
+		Artifacts:                artifacts,
+		ReleaseMetadata:          releaseMetadata,
+		Launchers:                launchers,
+		ChecksumsPath:            "connection-entry-checksums.txt",
 		AgentRules: []string{
-			"Verify release/release-bundle.json and connection-entry-checksums.txt before running a binary from this archive.",
+			"Run the visible launcher; it verifies release/release-bundle.json with the packaged rdev-verify binary before running any packaged rdev binary.",
+			"Verify connection-entry-checksums.txt before redistributing this archive.",
 			"Do not ask humans to assemble ticket, gateway, transport, or root-key values by hand.",
 			"Use rdev support-session connect or rdev connection-entry plan to produce the runtime invite data before execution.",
 			"Keep this archive generic; runtime private parameters belong in signed invite metadata, not release assets.",
@@ -787,6 +790,47 @@ func connectionEntryReleaseUsesWindows(candidate Candidate) bool {
 		}
 	}
 	return false
+}
+
+func connectionEntryRequiredReleaseArtifacts(candidate Candidate) []string {
+	var required []string
+	for _, artifact := range candidate.Artifacts {
+		name := strings.TrimSpace(artifact.Name)
+		if name == "" {
+			name = filepath.Base(artifact.ArtifactPath)
+		}
+		if name != "" {
+			required = append(required, name)
+		}
+	}
+	return cleanStringList(required)
+}
+
+func connectionEntryArtifactBase(candidate Candidate, preferred string) string {
+	for _, artifact := range candidate.Artifacts {
+		base := filepath.Base(artifact.ArtifactPath)
+		if base == preferred {
+			return base
+		}
+	}
+	if strings.HasSuffix(preferred, ".exe") {
+		return preferred
+	}
+	for _, artifact := range candidate.Artifacts {
+		base := filepath.Base(artifact.ArtifactPath)
+		if base == preferred+".exe" {
+			return base
+		}
+	}
+	return preferred
+}
+
+func connectionEntryRequiredArtifactsCSV(candidate Candidate) string {
+	return strings.Join(connectionEntryRequiredReleaseArtifacts(candidate), ",")
+}
+
+func singleQuoteShell(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func writeZipArchive(path string, entries []connectionEntryArchiveEntry) error {
@@ -839,14 +883,16 @@ operator session.
 
 Agent flow:
 
-1. Verify release/release-bundle.json and connection-entry-checksums.txt.
+1. Verify connection-entry-checksums.txt before redistributing this archive.
 2. Create runtime invite data with rdev support-session connect or
    rdev connection-entry plan.
 3. Materialize a real connection-entry-runner.json from the signed invite or
    join manifest.
-4. Run the visible launcher from launchers/ or call:
+4. Run the visible launcher from launchers/. The launcher first verifies
+   release/release-bundle.json with the packaged rdev-verify binary and pinned
+   release root before it runs packaged rdev:
 
-   rdev connection-entry run --runner-manifest connection-entry-runner.json
+   rdev-verify --bundle release/release-bundle.json --root-public-key <pinned-root> --require-artifacts <packaged-artifacts>
 
 Humans should receive only the final link, visible command, or package selected
 by the Agent. They should not hand-assemble ticket, gateway, transport, release,
@@ -879,31 +925,74 @@ func renderConnectionEntryRunnerTemplate(candidate Candidate, generatedAt time.T
 	return string(append(content, '\n'))
 }
 
-func renderConnectionEntryShellLauncher() string {
-	return `#!/bin/sh
+func renderConnectionEntryShellLauncher(candidate Candidate) string {
+	rdevName := connectionEntryArtifactBase(candidate, "rdev")
+	verifyName := connectionEntryArtifactBase(candidate, "rdev-verify")
+	return fmt.Sprintf(`#!/bin/sh
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 MANIFEST="${1:-$PACKAGE_DIR/connection-entry-runner.json}"
+RDEV="$PACKAGE_DIR/bin/%s"
+VERIFY="$PACKAGE_DIR/bin/%s"
+BUNDLE="$PACKAGE_DIR/release/release-bundle.json"
+ROOT_PUBLIC_KEY=%s
+REQUIRED_ARTIFACTS=%s
 if [ ! -f "$MANIFEST" ]; then
   echo "Missing runtime connection-entry-runner.json." >&2
   echo "Ask your Agent to run rdev support-session connect or rdev connection-entry plan first." >&2
   exit 2
 fi
-exec "$PACKAGE_DIR/bin/rdev" connection-entry run --runner-manifest "$MANIFEST"
-`
+if [ ! -x "$RDEV" ]; then
+  echo "Missing packaged rdev binary: $RDEV" >&2
+  exit 2
+fi
+if [ ! -x "$VERIFY" ]; then
+  echo "Missing packaged rdev-verify binary: $VERIFY" >&2
+  exit 2
+fi
+if [ ! -f "$BUNDLE" ]; then
+  echo "Missing release bundle: $BUNDLE" >&2
+  exit 2
+fi
+"$VERIFY" --bundle "$BUNDLE" --root-public-key "$ROOT_PUBLIC_KEY" --require-artifacts "$REQUIRED_ARTIFACTS" >/dev/null
+exec "$RDEV" connection-entry run --runner-manifest "$MANIFEST"
+`, rdevName, verifyName, singleQuoteShell(candidate.RootPublicKey), singleQuoteShell(connectionEntryRequiredArtifactsCSV(candidate)))
 }
 
-func renderConnectionEntryPowerShellLauncher() string {
-	return `$ErrorActionPreference = 'Stop'
+func renderConnectionEntryPowerShellLauncher(candidate Candidate) string {
+	return fmt.Sprintf(`$ErrorActionPreference = 'Stop'
 $PackageDir = Split-Path -Parent $PSScriptRoot
 $ManifestPath = if ($args.Count -gt 0) { $args[0] } else { Join-Path $PackageDir 'connection-entry-runner.json' }
+$Rdev = Join-Path $PackageDir 'bin\rdev.exe'
+$Verifier = Join-Path $PackageDir 'bin\rdev-verify.exe'
+$Bundle = Join-Path $PackageDir 'release\release-bundle.json'
+$RootPublicKey = '%s'
+$RequiredArtifacts = '%s'
 if (-not (Test-Path -LiteralPath $ManifestPath)) {
   Write-Error 'Missing runtime connection-entry-runner.json. Ask your Agent to run rdev support-session connect or rdev connection-entry plan first.'
   exit 2
 }
-& (Join-Path $PackageDir 'bin\rdev.exe') connection-entry run --runner-manifest $ManifestPath
-`
+if (-not (Test-Path -LiteralPath $Rdev)) {
+  Write-Error "Missing packaged rdev binary: $Rdev"
+  exit 2
+}
+if (-not (Test-Path -LiteralPath $Verifier)) {
+  Write-Error "Missing packaged rdev-verify binary: $Verifier"
+  exit 2
+}
+if (-not (Test-Path -LiteralPath $Bundle)) {
+  Write-Error "Missing release bundle: $Bundle"
+  exit 2
+}
+& $Verifier --bundle $Bundle --root-public-key $RootPublicKey --require-artifacts $RequiredArtifacts | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  Write-Error 'Release bundle verification failed; refusing to run packaged rdev.'
+  exit $LASTEXITCODE
+}
+& $Rdev connection-entry run --runner-manifest $ManifestPath
+exit $LASTEXITCODE
+`, strings.ReplaceAll(candidate.RootPublicKey, "'", "''"), strings.ReplaceAll(connectionEntryRequiredArtifactsCSV(candidate), "'", "''"))
 }
 
 func publicCandidateBundleVerification(verification BundleVerification) BundleVerification {
@@ -1197,12 +1286,14 @@ func VerifyConnectionEntryReleaseArchive(candidateDir string, candidate Candidat
 		CandidateCheck{Name: "connection_entry_release_root_matches_candidate", Passed: manifest.RootPublicKey == candidate.RootPublicKey, Detail: manifest.RootPublicKey},
 		CandidateCheck{Name: "connection_entry_release_no_private_parameters", Passed: manifest.NoPrivateParameters, Detail: fmt.Sprintf("%t", manifest.NoPrivateParameters)},
 		CandidateCheck{Name: "connection_entry_release_requires_runtime_invite", Passed: manifest.ExecutionMode == "runtime-invite-required" && len(manifest.RequiredRuntimeData) > 0, Detail: manifest.ExecutionMode},
+		CandidateCheck{Name: "connection_entry_release_required_artifacts_present", Passed: len(manifest.RequiredReleaseArtifacts) > 0, Detail: strings.Join(manifest.RequiredReleaseArtifacts, ",")},
 		CandidateCheck{Name: "connection_entry_release_launchers_present", Passed: len(manifest.Launchers) >= 1, Detail: fmt.Sprintf("%d", len(manifest.Launchers))},
 		CandidateCheck{Name: "connection_entry_release_artifacts_present", Passed: len(manifest.Artifacts) >= len(candidate.Artifacts), Detail: fmt.Sprintf("%d", len(manifest.Artifacts))},
 	)
 
 	checks = append(checks, verifyConnectionEntryArchiveChecksums(entries)...)
 	checks = append(checks, verifyConnectionEntryManifestFiles(manifest, entries)...)
+	checks = append(checks, verifyConnectionEntryLaunchersVerifyBundle(candidate, entries)...)
 	checks = append(checks, CandidateCheck{Name: "connection_entry_archive_no_private_surface", Passed: connectionEntryArchiveHasNoPrivateSurface(entries), Detail: "no ticket/root/gateway placeholders with private values"})
 	return checks
 }
@@ -1294,6 +1385,23 @@ func verifyConnectionEntryManifestFiles(manifest ConnectionEntryReleasePackage, 
 	return []CandidateCheck{
 		{Name: "connection_entry_release_manifest_files_exist", Passed: len(missing) == 0, Detail: strings.Join(missing, ",")},
 		{Name: "connection_entry_release_manifest_files_match", Passed: len(mismatch) == 0, Detail: strings.Join(mismatch, ",")},
+	}
+}
+
+func verifyConnectionEntryLaunchersVerifyBundle(candidate Candidate, entries map[string][]byte) []CandidateCheck {
+	var launcherContent []string
+	for path, content := range entries {
+		if strings.HasPrefix(path, "launchers/") {
+			launcherContent = append(launcherContent, string(content))
+		}
+	}
+	joined := strings.Join(launcherContent, "\n")
+	required := connectionEntryRequiredArtifactsCSV(candidate)
+	return []CandidateCheck{
+		{Name: "connection_entry_launchers_use_packaged_verifier", Passed: strings.Contains(joined, "rdev-verify"), Detail: "rdev-verify"},
+		{Name: "connection_entry_launchers_verify_release_bundle", Passed: strings.Contains(joined, "--bundle") && (strings.Contains(joined, "release/release-bundle.json") || strings.Contains(joined, "release\\release-bundle.json")), Detail: "release-bundle.json"},
+		{Name: "connection_entry_launchers_pin_release_root", Passed: strings.Contains(joined, "--root-public-key") && strings.Contains(joined, candidate.RootPublicKey), Detail: candidate.RootPublicKey},
+		{Name: "connection_entry_launchers_require_release_artifacts", Passed: strings.Contains(joined, "--require-artifacts") && required != "" && strings.Contains(joined, required), Detail: required},
 	}
 }
 

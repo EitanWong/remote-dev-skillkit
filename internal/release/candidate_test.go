@@ -107,9 +107,23 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	if entryPackage.SchemaVersion != ConnectionEntryReleasePackageSchemaVersion ||
 		!entryPackage.NoPrivateParameters ||
 		entryPackage.ExecutionMode != "runtime-invite-required" ||
+		strings.Join(entryPackage.RequiredReleaseArtifacts, ",") != "rdev,rdev-host.exe,rdev-verify.exe" ||
 		len(entryPackage.Launchers) < 1 ||
 		len(entryPackage.Artifacts) < len(candidate.Artifacts) {
 		t.Fatalf("unexpected Connection Entry release package: %#v", entryPackage)
+	}
+	launcher := string(archiveEntries["launchers/start-connection-entry.sh"])
+	for _, want := range []string{
+		"rdev-verify",
+		"--bundle",
+		"--root-public-key",
+		"--require-artifacts",
+		candidate.RootPublicKey,
+		"rdev,rdev-host.exe,rdev-verify.exe",
+	} {
+		if !strings.Contains(launcher, want) {
+			t.Fatalf("expected Connection Entry launcher to contain %q, got %s", want, launcher)
+		}
 	}
 	if strings.Contains(string(archiveEntries["connection-entry-release.json"]), filepath.Dir(out)) ||
 		strings.Contains(string(archiveEntries["CONNECTION_ENTRY_RELEASE.md"]), "192.168.") {

@@ -145,6 +145,9 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Skillkit direct install through `rdev skillkit install`, dry-running by default, requiring `--execute` before local copy, refusing existing skill conflicts unless `--force`, and preserving `external_mutation=false`.
 - Release candidate packaging that stages built artifacts, signed manifests, signed release bundle, verified Skillkit bundle, SPDX 2.3 SBOM, local provenance attestation, checksums, verifiable `connection-entry-release.zip` archives, and `release-candidate.json` with package-relative public paths.
 - Release candidate verification that checks staged or downloaded candidates, including SBOM coverage/hash consistency, provenance subject/hash consistency, Connection Entry release archive schema/checksums/no-private-parameter policy, and no leaked local candidate paths before publication or installation.
+- Connection Entry release launchers verify the packaged signed release bundle
+  with packaged `rdev-verify`, pinned release root, and required artifact set
+  before running packaged `rdev connection-entry run`.
 - Host startup release gates through `rdev host serve --release-bundle --release-root-public-key --release-require-artifacts`, verifying signed release bundles before host registration or job polling.
 - Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, per-artifact `cgo_enabled` metadata, SPDX 2.3 SBOM, `provenance.json`, and checksums before candidate packaging.
 - Per-platform release candidate automation through `scripts/release/prepare-platform-candidates.sh`, grouping real build artifacts by `GOOS/GOARCH`, producing one verified candidate per target, and writing `rdev.platform-release-candidates.v1`.

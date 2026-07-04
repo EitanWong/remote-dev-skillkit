@@ -615,7 +615,15 @@ for candidate in platform_manifest["candidates"]:
         assert entry_manifest["schema_version"] == "rdev.connection-entry-release-package.v1", entry_manifest
         assert entry_manifest["no_private_parameters"] is True, entry_manifest
         assert entry_manifest["execution_mode"] == "runtime-invite-required", entry_manifest
+        required_artifacts = ",".join(artifact["name"] for artifact in candidate_json["artifacts"])
+        assert entry_manifest["required_release_artifacts"] == [artifact["name"] for artifact in candidate_json["artifacts"]], entry_manifest
         assert len(entry_manifest["launchers"]) >= 1, entry_manifest
+        launcher_paths = [path for path in names if path.startswith("launchers/")]
+        launcher_text = "\n".join(archive.read(path).decode() for path in launcher_paths)
+        assert "rdev-verify" in launcher_text, launcher_text
+        assert "--bundle" in launcher_text and ("release/release-bundle.json" in launcher_text or "release\\release-bundle.json" in launcher_text), launcher_text
+        assert "--root-public-key" in launcher_text and candidate_json["root_public_key"] in launcher_text, launcher_text
+        assert "--require-artifacts" in launcher_text and required_artifacts in launcher_text, launcher_text
         for artifact in candidate_json["artifacts"]:
             assert "bin/" + pathlib.Path(artifact["artifact_path"]).name in names, names
             assert "bin/" + pathlib.Path(artifact["manifest_path"]).name in names, names

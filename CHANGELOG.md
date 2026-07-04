@@ -4,6 +4,37 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.27-dev
+
+Current phase: formal release packages are closing the last local startup-gate
+gap before public release evidence. Connection Entry release archives now make
+their visible launchers verify the signed release bundle with the packaged
+standalone verifier before running packaged `rdev`.
+
+### Added
+
+- Added `required_release_artifacts` to
+  `rdev.connection-entry-release-package.v1` so the release archive records the
+  exact packaged binaries that must be present in the signed release bundle
+  before target-side execution.
+- Updated generated Connection Entry shell and PowerShell launchers to run the
+  packaged `rdev-verify --bundle release/release-bundle.json
+  --root-public-key <pinned-root> --require-artifacts <packaged-artifacts>`
+  gate before invoking `rdev connection-entry run`.
+- Extended release-candidate verification and release smoke to fail if a
+  Connection Entry archive launcher does not use the packaged verifier, pin the
+  release root, pass `--bundle`, and require the packaged artifact set.
+
+### Remaining Gates
+
+- Publish signed per-platform Connection Entry release archives to GitHub
+  Releases and verify real downloads with
+  `rdev acceptance package-post-release-download`.
+- Run real clean-machine Windows/macOS/Linux Connection Entry and fresh-Agent
+  acceptance, plus real restrictive-network frp/Chisel/headscale/WireGuard/SSH
+  evidence.
+- Continue real deployed Postgres/Redis/S3/OIDC/SAML hosted provider evidence.
+
 ## 0.1.26-dev
 
 Current phase: hosted auth is closing the last provider-contract-only runtime

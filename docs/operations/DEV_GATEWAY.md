@@ -1221,6 +1221,11 @@ bundle signature, every listed artifact manifest, artifact and manifest
 SHA-256/size, and required artifact presence before publishing. The standalone
 verifier supports the same bundle check for target-host or bootstrap contexts
 after the verifier binary itself has been hash-pinned.
+Generated `connection-entry-release.zip` archives also embed this startup gate:
+their visible launchers call the packaged `rdev-verify --bundle
+release/release-bundle.json --root-public-key <pinned-root>
+--require-artifacts <packaged-artifacts>` before running packaged `rdev
+connection-entry run`.
 
 For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
 

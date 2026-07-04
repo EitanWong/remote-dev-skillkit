@@ -340,9 +340,12 @@ PATH or installing services.
 Creating credentials, changing firewall/DNS/routes, starting persistent
 connectivity, installing mesh/VPN drivers or services, or using paid/cloud
 relays still requires explicit approval. Real signed
-per-platform release archives still require release assets, but the runner
-contract is now real code rather than a script-only fallback plan. It does not
-create hidden persistence, weaken OS policy, or open inbound firewall ports.
+per-platform release archives now include visible launchers that verify the
+packaged signed release bundle with `rdev-verify` before running packaged
+`rdev`, but public GitHub Release downloads still need real post-release
+evidence. The runner contract is real code rather than a script-only fallback
+plan. It does not create hidden persistence, weaken OS policy, or open inbound
+firewall ports.
 
 `connection_entry_plan.target_selection_policy` tells the Agent how to choose
 the right shape. If the target is your own personal or fleet machine, the Agent

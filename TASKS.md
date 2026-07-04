@@ -359,7 +359,7 @@
 - [x] Gateway can load a signed `rdev.host-enrollment-revocations.v1` list and reject host registration with a revoked enrollment certificate.
 - [x] Dev gateway can publish configured enrollment revocations, and operators can fetch them with pinned-root verification before using them in CLI or MCP checks.
 - [x] Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate.
-- [ ] Production releases verify signed manifests and binaries before host execution.
+- [x] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 - [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.
 - [x] Post-release download/install transcripts can be packaged and independently verified as release evidence after GitHub Release publication.
