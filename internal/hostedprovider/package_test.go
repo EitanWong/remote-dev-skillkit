@@ -30,6 +30,7 @@ func TestBuildAndVerifyHostedProviderPackage(t *testing.T) {
 			t.Fatalf("expected hosted provider file %s: %v", path, err)
 		}
 	}
+	assertFileContains(t, filepath.Join(out, "HOSTED_PROVIDER.md"), "scaffold-evidence --hosted-provider-package")
 	content, err := os.ReadFile(filepath.Join(out, "hosted-provider.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +51,10 @@ func TestBuildAndVerifyHostedProviderPackage(t *testing.T) {
 		plan.ExternalMutation ||
 		!slices.Contains(plan.PackageCommand, "package-hosted-provider-runtime") ||
 		!slices.Contains(plan.PackageCommand, "--evidence-dir") ||
-		!slices.Contains(plan.VerifyCommand, "verify-hosted-provider-runtime-package") {
+		!slices.Contains(plan.VerifyCommand, "verify-hosted-provider-runtime-package") ||
+		!slices.ContainsFunc(plan.AgentRules, func(rule string) bool {
+			return strings.Contains(rule, "scaffold-evidence --hosted-provider-package")
+		}) {
 		t.Fatalf("unexpected runtime evidence plan: %#v", plan)
 	}
 	planPaths := map[string]bool{}
@@ -74,6 +78,17 @@ func TestBuildAndVerifyHostedProviderPackage(t *testing.T) {
 		verification.StorageProvider != "file" ||
 		verification.AuthProvider != "hosted-ed25519-jwt" {
 		t.Fatalf("unexpected verification: %#v", verification)
+	}
+}
+
+func assertFileContains(t *testing.T, path, needle string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), needle) {
+		t.Fatalf("expected %q in %s:\n%s", needle, path, string(content))
 	}
 }
 

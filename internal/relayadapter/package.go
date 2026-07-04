@@ -219,6 +219,7 @@ func Build(opts Options) (Package, error) {
 		},
 		AgentRules: []string{
 			"Use this package to set the declared RDEV_* gateway, helper argv, and install-action variables; do not write ad hoc SSH, relay, mesh, VPN, PowerShell, shell, or polling scripts.",
+			"Scaffold restrictive-network evidence with rdev acceptance scaffold-evidence --relay-adapter-package <relay-adapter-package-dir> before collecting real helper or connectivity evidence.",
 			"Ask one short question only when the endpoint, credential, identity, privilege, enrollment, route, or persistence decision is unclear.",
 			"Keep real endpoints, credentials, keys, private IPs, local paths, and organization identifiers outside this package.",
 			"Run the Connection Entry runner in dry-run mode before execution so rdev selects the path and reports evidence.",
@@ -488,6 +489,7 @@ func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEviden
 		PackageCommand:   packageCommand,
 		VerifyCommand:    []string{"rdev", "acceptance", "verify-relay-adapter-package", "--package", "<relay-adapter-evidence-out>/package.json"},
 		AgentRules: []string{
+			"Start with rdev acceptance scaffold-evidence --relay-adapter-package <relay-adapter-package-dir> --out <relay-adapter-evidence-input>; do not hand-pick acceptance-evidence-plan.json unless an operator is reviewing an override.",
 			"Use rdev connection-entry run --evidence-dir . to create runner-result.json, helper-transcript.txt, gateway-status.json, host-status.json, connection-status.json, audit.jsonl, and evidence-report.json; do not hand-write runner evidence.",
 			"Use rdev acceptance package-relay-adapter --evidence-dir . from this plan when packaging real restrictive-network evidence.",
 			"Redact helper endpoints, credentials, private IPs, local paths, usernames, and hostnames before sharing evidence outside the operator account.",
@@ -526,12 +528,22 @@ func verifyAcceptanceEvidencePlan(dir string, pkg Package) []Check {
 	add("acceptance_evidence_plan_package_command", stringSliceContains(plan.PackageCommand, "package-relay-adapter") && stringSliceContains(plan.PackageCommand, "--relay-package"), strings.Join(plan.PackageCommand, " "))
 	add("acceptance_evidence_plan_verify_command", stringSliceContains(plan.VerifyCommand, "verify-relay-adapter-package"), strings.Join(plan.VerifyCommand, " "))
 	add("acceptance_evidence_plan_agent_rules", len(plan.AgentRules) >= 3, fmt.Sprintf("%d", len(plan.AgentRules)))
+	add("acceptance_evidence_plan_scaffold_rule", stringSliceContainsSubstring(plan.AgentRules, "scaffold-evidence --relay-adapter-package"), strings.Join(plan.AgentRules, " | "))
 	return checks
 }
 
 func stringSliceContains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContainsSubstring(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
 			return true
 		}
 	}
@@ -623,11 +635,15 @@ This package gives Agents a standard connectivity helper surface for restrictive
 networks. It contains no real relay, SSH, mesh, VPN, credential, private IP,
 local path, organization identifier, or server address.
 
-Before collecting real restrictive-network evidence, read
-acceptance-evidence-plan.json. It gives Agents the standard runner result,
-status, helper transcript, audit file names, and rdev acceptance
-package-relay-adapter command so they do not invent relay-specific evidence
-layouts.
+Before collecting real restrictive-network evidence, scaffold from the package
+directory:
+
+    rdev acceptance scaffold-evidence --relay-adapter-package <relay-adapter-package-dir> --out <relay-adapter-evidence-input>
+
+The scaffold reads acceptance-evidence-plan.json for Agents, writes the
+standard runner/status/helper/audit checklist, and keeps package/verify
+commands inside rdev instead of model-authored relay scripts. Read
+acceptance-evidence-plan.json directly only for a reviewed operator override.
 
 Runner environment:
 

@@ -207,6 +207,7 @@ func Build(opts Options) (Package, error) {
 		Environment:      environment(storageProvider, authProvider),
 		AgentRules: []string{
 			"Verify this package before using it to configure a hosted gateway.",
+			"Scaffold runtime evidence with rdev acceptance scaffold-evidence --hosted-provider-package <provider-package-dir> before collecting real hosted-provider evidence.",
 			"Do not place secrets, private endpoints, organization IDs, or local machine paths in this package.",
 			"Ask the operator for one missing value at a time when provider credentials or deployment URLs are unclear.",
 			"Treat external database, object storage, identity provider, DNS, cloud, and paid resource changes as approval-required.",
@@ -533,6 +534,7 @@ func runtimeEvidencePlan(pkg Package, generatedAt time.Time) RuntimeEvidencePlan
 		VerifyCommand:     []string{"rdev", "acceptance", "verify-hosted-provider-runtime-package", "--package", "<hosted-runtime-evidence-out>/package.json"},
 		PreflightCommands: []string{"rdev hosted-provider verify --package <provider-package-dir>", pkg.Storage.VerifyCommand, pkg.Auth.VerifyCommand},
 		AgentRules: []string{
+			"Start with rdev acceptance scaffold-evidence --hosted-provider-package <provider-package-dir> --out <hosted-runtime-evidence-input>; do not hand-pick runtime-evidence-plan.json unless an operator is reviewing an override.",
 			"Collect the evidence files named here under one directory; do not invent alternate file names or omit required probes.",
 			"Use rdev acceptance package-hosted-provider-runtime --evidence-dir . from this plan when packaging runtime evidence.",
 			"Run storage and auth verification before packaging runtime evidence.",
@@ -582,6 +584,15 @@ func stringSliceContains(values []string, want string) bool {
 	return false
 }
 
+func stringSliceContainsSubstring(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func verifyRuntimeEvidencePlan(dir string, pkg Package) []Check {
 	var checks []Check
 	add := func(name string, passed bool, detail string) {
@@ -606,6 +617,7 @@ func verifyRuntimeEvidencePlan(dir string, pkg Package) []Check {
 	add("runtime_evidence_plan_package_command", stringSliceContains(plan.PackageCommand, "package-hosted-provider-runtime") && stringSliceContains(plan.PackageCommand, "--hosted-provider-package"), strings.Join(plan.PackageCommand, " "))
 	add("runtime_evidence_plan_verify_command", stringSliceContains(plan.VerifyCommand, "verify-hosted-provider-runtime-package"), strings.Join(plan.VerifyCommand, " "))
 	add("runtime_evidence_plan_agent_rules", len(plan.AgentRules) >= 3, fmt.Sprintf("%d", len(plan.AgentRules)))
+	add("runtime_evidence_plan_scaffold_rule", stringSliceContainsSubstring(plan.AgentRules, "scaffold-evidence --hosted-provider-package"), strings.Join(plan.AgentRules, " | "))
 	return checks
 }
 
@@ -748,10 +760,14 @@ This package describes a hosted gateway provider boundary for Remote Dev
 Skillkit. It contains no credentials, private endpoints, organization IDs, or
 machine-local paths.
 
-Before collecting real runtime evidence, read runtime-evidence-plan.json.
-It gives Agents the standard evidence file names, verification commands, and
-rdev acceptance package-hosted-provider-runtime command so they do not invent
-provider-specific evidence layouts.
+Before collecting real runtime evidence, scaffold from the package directory:
+
+    rdev acceptance scaffold-evidence --hosted-provider-package <provider-package-dir> --out <hosted-runtime-evidence-input>
+
+The scaffold reads runtime-evidence-plan.json for Agents, writes the standard
+evidence checklist, and keeps package/verify commands inside rdev instead of
+model-authored path glue. Read runtime-evidence-plan.json directly only for a
+reviewed operator override.
 
 Storage provider: %s
 Auth provider: %s

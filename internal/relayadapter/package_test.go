@@ -29,6 +29,7 @@ func TestBuildAndVerifyRelayAdapterPackage(t *testing.T) {
 			t.Fatalf("expected relay adapter file %s: %v", path, err)
 		}
 	}
+	assertFileContains(t, filepath.Join(out, "RELAY_ADAPTER.md"), "scaffold-evidence --relay-adapter-package")
 	content, err := os.ReadFile(filepath.Join(out, "relay-adapter.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +56,10 @@ func TestBuildAndVerifyRelayAdapterPackage(t *testing.T) {
 		!slices.Contains(plan.RunCommand, "--evidence-dir") ||
 		!slices.Contains(plan.PackageCommand, "package-relay-adapter") ||
 		!slices.Contains(plan.PackageCommand, "--evidence-dir") ||
-		!slices.Contains(plan.VerifyCommand, "verify-relay-adapter-package") {
+		!slices.Contains(plan.VerifyCommand, "verify-relay-adapter-package") ||
+		!slices.ContainsFunc(plan.AgentRules, func(rule string) bool {
+			return strings.Contains(rule, "scaffold-evidence --relay-adapter-package")
+		}) {
 		t.Fatalf("unexpected acceptance evidence plan: %#v", plan)
 	}
 	planPaths := map[string]bool{}
@@ -78,6 +82,17 @@ func TestBuildAndVerifyRelayAdapterPackage(t *testing.T) {
 	if verification.SchemaVersion != VerificationSchemaVersion ||
 		verification.AdapterKind != "chisel" {
 		t.Fatalf("unexpected verification: %#v", verification)
+	}
+}
+
+func assertFileContains(t *testing.T, path, needle string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), needle) {
+		t.Fatalf("expected %q in %s:\n%s", needle, path, string(content))
 	}
 }
 

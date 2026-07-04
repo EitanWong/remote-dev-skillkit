@@ -78,6 +78,11 @@ transcript file names or package commands after GitHub Release assets exist.
   scaffold hosted-provider and relay/connectivity evidence from the package
   directory directly, while `--plan` remains available for reviewed operator
   overrides.
+- Updated generated hosted-provider and relay-adapter package runbooks plus
+  evidence-plan Agent rules to point fresh Agents at package-level
+  `rdev acceptance scaffold-evidence --hosted-provider-package` /
+  `--relay-adapter-package` commands. Package verifiers now check that the
+  generated evidence plans preserve those scaffold-first rules.
 
 ### Remaining Gates
 
