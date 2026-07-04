@@ -321,7 +321,7 @@ func hostedProviderRuntimeClaimFromKinds(storageProvider, authProvider string) s
 	if storageProvider == "file" && authProvider == "hosted-ed25519-jwt" {
 		return "single-node-hosted-smoke"
 	}
-	return "external-durable-hosted-runtime-evidence-required"
+	return "external-durable-hosted-runtime-evidence"
 }
 
 func hostedEvidenceOK(root, path string) bool {

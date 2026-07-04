@@ -23,7 +23,7 @@ func TestPackageAndVerifyHostedProviderRuntimeEvidence(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	evidence := writeHostedProviderRuntimeEvidenceForTest(t, root)
+	evidence := writeHostedProviderRuntimeEvidenceForTest(t, root, "file", "hosted-ed25519-jwt")
 	pkg, err := PackageHostedProviderRuntimeEvidence(HostedProviderRuntimePackageOptions{
 		HostedProviderPackagePath: providerDir,
 		OutDir:                    filepath.Join(root, "package"),
@@ -60,6 +60,56 @@ func TestPackageAndVerifyHostedProviderRuntimeEvidence(t *testing.T) {
 	}
 }
 
+func TestPackageAndVerifyExternalHostedProviderRuntimeEvidence(t *testing.T) {
+	root := t.TempDir()
+	providerDir := filepath.Join(root, "hosted-provider")
+	if _, err := hostedprovider.Build(hostedprovider.Options{
+		OutDir:          providerDir,
+		Name:            "external-hosted-runtime",
+		StorageProvider: "postgres",
+		AuthProvider:    "oidc-jwks",
+		GeneratedAt:     time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeHostedProviderRuntimeEvidenceForTest(t, root, "postgres", "oidc-jwks")
+	pkg, err := PackageHostedProviderRuntimeEvidence(HostedProviderRuntimePackageOptions{
+		HostedProviderPackagePath: providerDir,
+		OutDir:                    filepath.Join(root, "package"),
+		GatewayStartupPath:        evidence.gatewayStartup,
+		StorageVerificationPath:   evidence.storageVerification,
+		AuthVerificationPath:      evidence.authVerification,
+		BackupEvidencePath:        evidence.backupEvidence,
+		RestoreEvidencePath:       evidence.restoreEvidence,
+		RetentionEvidencePath:     evidence.retentionEvidence,
+		RoleMappingEvidencePath:   evidence.roleMappingEvidence,
+		FailureModeEvidencePath:   evidence.failureModeEvidence,
+		AuditPath:                 evidence.audit,
+		Now:                       time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected external hosted runtime package ok: %#v", pkg.Checks)
+	}
+	if pkg.RuntimeClaim != "external-durable-hosted-runtime-evidence" ||
+		pkg.StorageProvider != "postgres" ||
+		pkg.AuthProvider != "oidc-jwks" {
+		t.Fatalf("unexpected external runtime package: %#v", pkg)
+	}
+	verification, err := VerifyHostedProviderRuntimeAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected verification ok: %#v", verification.Checks)
+	}
+	if verification.RuntimeClaim != "external-durable-hosted-runtime-evidence" {
+		t.Fatalf("unexpected verification runtime claim %q", verification.RuntimeClaim)
+	}
+}
+
 func TestVerifyHostedProviderRuntimeRejectsMissingDurabilityEvidence(t *testing.T) {
 	root := t.TempDir()
 	providerDir := filepath.Join(root, "hosted-provider")
@@ -71,7 +121,7 @@ func TestVerifyHostedProviderRuntimeRejectsMissingDurabilityEvidence(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	evidence := writeHostedProviderRuntimeEvidenceForTest(t, root)
+	evidence := writeHostedProviderRuntimeEvidenceForTest(t, root, "file", "hosted-ed25519-jwt")
 	pkg, err := PackageHostedProviderRuntimeEvidence(HostedProviderRuntimePackageOptions{
 		HostedProviderPackagePath: providerDir,
 		OutDir:                    filepath.Join(root, "package"),
@@ -120,7 +170,7 @@ type hostedProviderRuntimeEvidenceForTest struct {
 	audit               string
 }
 
-func writeHostedProviderRuntimeEvidenceForTest(t *testing.T, root string) hostedProviderRuntimeEvidenceForTest {
+func writeHostedProviderRuntimeEvidenceForTest(t *testing.T, root, storageProvider, authProvider string) hostedProviderRuntimeEvidenceForTest {
 	t.Helper()
 	dir := filepath.Join(root, "runtime-evidence")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -148,8 +198,8 @@ func writeHostedProviderRuntimeEvidenceForTest(t *testing.T, root string) hosted
 	}
 	return hostedProviderRuntimeEvidenceForTest{
 		gatewayStartup:      write("gateway-startup.txt", "gateway started with hosted provider package\nexported token ghp_abcdefghijklmnopqrstuvwx\n"),
-		storageVerification: write("storage-verification.json", map[string]any{"ok": true, "provider": "file"}),
-		authVerification:    write("auth-verification.json", map[string]any{"ok": true, "provider": "hosted-ed25519-jwt"}),
+		storageVerification: write("storage-verification.json", map[string]any{"ok": true, "provider": storageProvider}),
+		authVerification:    write("auth-verification.json", map[string]any{"ok": true, "provider": authProvider}),
 		backupEvidence:      write("backup-evidence.txt", "snapshot copied to reviewed backup location\n"),
 		restoreEvidence:     write("restore-evidence.txt", "restored snapshot and verified audit chain\n"),
 		retentionEvidence:   write("retention-evidence.txt", "retention policy reviewed for release smoke\n"),

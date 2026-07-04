@@ -4,6 +4,46 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.18-dev
+
+Current phase: hosted provider packages now include provider-specific runtime
+contracts instead of treating Postgres, S3-compatible storage, Redis streams,
+OIDC/JWKS, and SAML as generic external placeholders. This is still not a
+claim that a deployed third-party provider has been accepted; real production
+claims require runtime evidence from an actual deployment.
+
+### Added
+
+- Added `rdev.hosted-provider-runtime-contract.v1` to hosted provider packages.
+  `rdev hosted-provider package` now writes `runtime-contract.json` and
+  `HOSTED_PROVIDER_RUNTIME.md` alongside `hosted-provider.json`, the runbook,
+  and `gateway.env.example`.
+- Added provider-specific runtime descriptors and environment requirements for
+  `postgres`, `s3-compatible`, `redis-stream`, `oidc-jwks`, and
+  `saml-assertion`. The package records required verification, backup,
+  restore, retention, role-mapping, failure-mode, and audit evidence without
+  embedding endpoints, credentials, tenant identifiers, private paths, or
+  organization-specific values.
+- Updated hosted provider CLI output to expose `runtime_contract_schema` and
+  `runtime_status`, so Agents can distinguish single-node smoke packages from
+  durable runtime-evidence-required packages without opening package files.
+- Updated release smoke to generate and verify a `postgres` + `oidc-jwks`
+  hosted provider package and assert the runtime contract schema and evidence
+  requirements.
+- Updated hosted runtime acceptance tests so a complete external provider
+  evidence package can verify with runtime claim
+  `external-durable-hosted-runtime-evidence`.
+
+### Remaining Gates
+
+- Run a deployed hosted gateway against real Postgres/S3-compatible/Redis and
+  OIDC/JWKS or SAML provider configurations, then package the resulting
+  startup, storage/auth, backup, restore, retention, role-mapping,
+  failure-mode, audit, and redaction evidence with
+  `rdev acceptance package-hosted-provider-runtime`.
+- Continue GitHub Release publication/download verification and real
+  helper/relay adapter execution evidence.
+
 ## 0.1.17-dev
 
 Current phase: restrictive-network adapter packaging now covers more of the

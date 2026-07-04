@@ -89,7 +89,8 @@ rdev gateway serve \
 
 Hosted provider packages are the reviewable deployment surface for gateway
 storage/auth combinations. They contain provider metadata, gateway argument
-templates, environment variable names, runbook text, and checksums, but no
+templates, environment variable names, runbook text, checksums, and
+`rdev.hosted-provider-runtime-contract.v1` evidence requirements, but no
 credentials or private endpoints.
 
 ```bash
@@ -103,9 +104,12 @@ rdev hosted-provider verify \
 ```
 
 The built-in package proves the provider contract for single-node file storage
-and provider-neutral EdDSA JWT auth. Durable third-party hosted providers still
-need real package implementations and deployed backup/restore/retention
-acceptance before production claims.
+and provider-neutral EdDSA JWT auth. External packages for Postgres,
+S3-compatible storage, Redis streams, OIDC/JWKS, and SAML emit
+`runtime-contract.json` and `HOSTED_PROVIDER_RUNTIME.md` so operators and
+Agents know which verification, backup, restore, retention, role-mapping,
+failure-mode, and audit evidence must be collected. Durable third-party hosted
+providers still need real deployed gateway evidence before production claims.
 
 ## Start
 
@@ -1148,7 +1152,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 
 - In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot, but the built-in file provider is not a multi-node database, distributed lock manager, or backup policy.
 - WSS/mTLS host job transport is implemented for local release validation through `--transport wss`, `--tls-cert`, `--tls-key`, `--client-ca`, `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`. Real NAT, proxy, and platform-service acceptance still require target-environment evidence.
-- Hosted operator auth is provider-neutral EdDSA JWT verification. It is not a bundled OIDC/SAML/SCIM connector, SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
+- Hosted operator auth is provider-neutral EdDSA JWT verification. Hosted provider packages can describe OIDC/JWKS and SAML runtime evidence requirements, but this is not a bundled SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
 - TLS lifecycle automation such as ACME issuance, certificate rotation, and public gateway deployment remains operator-managed. The gateway and host load explicit PEM material and enforce client certificates when `--client-ca` is configured.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.

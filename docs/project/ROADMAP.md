@@ -55,6 +55,12 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `rdev hosted-provider verify`, producing reviewable storage/auth deployment
   metadata, gateway args, env templates, checksums, and no-private-surface
   evidence without bundling credentials or private endpoints.
+- Provider-specific hosted runtime contracts through
+  `rdev.hosted-provider-runtime-contract.v1`, `runtime-contract.json`, and
+  `HOSTED_PROVIDER_RUNTIME.md`, covering Postgres, S3-compatible object
+  storage, Redis streams, OIDC/JWKS, and SAML runtime evidence requirements
+  for verification, backup, restore, retention, role mapping, failure-mode
+  probes, audit, operator approval, and unsupported production claims.
 - Relay adapter package generation and verification through
   `rdev.relay-adapter-package.v1`, `rdev relay-adapter package`,
   `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter verify`,
@@ -200,10 +206,10 @@ Exit gate: an operator's managed Mac reconnects after reboot, an agent selects i
   provider-package verification surface.
 - ACP/acpx adapter MVP.
 - Artifact streaming.
-- Durable third-party hosted storage/auth runtime provider packages beyond the
-  current provider-package contract and hosted runtime evidence packager,
-  including deployed Postgres/S3-compatible/Redis/OIDC/SAML backup, restore,
-  retention, role-mapping, and failure-mode evidence.
+- Durable third-party hosted storage/auth runtime integrations beyond the
+  current provider-specific runtime contracts and hosted runtime evidence
+  packager, including deployed Postgres/S3-compatible/Redis/OIDC/SAML backup,
+  restore, retention, role-mapping, and failure-mode evidence.
 
 Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, Windows Service has real install/start/reconnect/stop/uninstall acceptance evidence beyond dry-run plans, and a new adapter can be added without bypassing policy.
 

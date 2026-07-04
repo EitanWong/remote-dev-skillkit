@@ -106,6 +106,7 @@
 - [x] Add local GitHub project readiness audit with `rdev.github-project-readiness.v1` and wire it into release smoke without external mutation.
 - [x] Add hosted storage/auth foundation with gateway state-store provider boundary, file-backed provider verification, hosted EdDSA JWT operator auth, and combined local/hosted role authorization.
 - [x] Add hosted provider package generation and verification with `rdev.hosted-provider-package.v1`, `rdev.hosted-provider-package-verification.v1`, `rdev hosted-provider package`, `rdev hosted-provider verify`, provider runbook/env template output, no-private-surface checks, and release-smoke coverage.
+- [x] Add provider-specific hosted runtime contracts with `rdev.hosted-provider-runtime-contract.v1`, `runtime-contract.json`, `HOSTED_PROVIDER_RUNTIME.md`, Postgres/S3-compatible/Redis/OIDC-JWKS/SAML environment and evidence requirements, CLI runtime status output, no-private-surface checks, and release-smoke coverage.
 - [x] Add first standard relay adapter package generation and verification for Chisel/frpc with `rdev.relay-adapter-package.v1`, `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter package`, `rdev relay-adapter verify`, MCP tools `rdev.relay_adapter.package` / `rdev.relay_adapter.verify`, runner `RDEV_RELAY_*` metadata, safe helper argv/install-action checks, no-private-surface checks, and release-smoke coverage.
 - [x] Extend standard connectivity adapter package generation and verification to SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard with `RDEV_SSH_*`, `RDEV_MESH_*`, and `RDEV_VPN_*` runner metadata, MCP discoverability, manual-review-required install boundaries, no-private-surface checks, and release-smoke coverage.
 - [x] Add relay adapter acceptance evidence packaging and verification with `rdev.acceptance-package.relay-adapter.v1`, `rdev.acceptance-verification.relay-adapter-package.v1`, `rdev acceptance package-relay-adapter`, `rdev acceptance verify-relay-adapter-package`, standard connectivity path checks for Chisel/frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard, connected-status checks, redaction, checksums, selected-path reporting, and release-smoke coverage.
@@ -309,7 +310,7 @@
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
-- [ ] Implement real durable hosted provider runtime packages beyond the built-in file storage, provider-neutral hosted JWT verifier, provider-package contract, and runtime acceptance evidence packager, including deployed Postgres/S3-compatible/Redis/OIDC/SAML backup/restore/retention/failure-mode acceptance.
+- [ ] Implement real durable hosted provider runtime integrations beyond provider-specific runtime contracts and the runtime acceptance evidence packager, including deployed Postgres/S3-compatible/Redis/OIDC/SAML gateway operation with backup/restore/retention/failure-mode acceptance.
 - [ ] Complete production Adapter SDK integration for future adapters beyond built-in hostrunner runtime fixture capture.
 
 ## Final End-State Gates

@@ -489,7 +489,10 @@ adapter paths for shell, PowerShell, Codex, Claude Code, and ACP/acpx. The
 current line also includes WSS/mTLS host job transport, hosted-auth verifier
 configuration, a storage-provider boundary, and enrollment authority lifecycle
 evidence commands. Hosted provider packages can be generated and verified with
-`rdev hosted-provider package` / `rdev hosted-provider verify`. Chisel/frpc,
+`rdev hosted-provider package` / `rdev hosted-provider verify`; packages now
+include `rdev.hosted-provider-runtime-contract.v1` runtime contracts for
+Postgres, S3-compatible storage, Redis streams, OIDC/JWKS, and SAML evidence
+requirements without embedding private endpoints or credentials. Chisel/frpc,
 SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard connectivity
 adapter packages can be generated and verified with
 `rdev relay-adapter package` / `rdev relay-adapter verify`, giving Agents
@@ -509,7 +512,8 @@ no-private-parameter checks.
 
 Still gated before a production-grade hosted release: real platform acceptance
 evidence for Windows/Linux/macOS service modes, real durable third-party hosted
-storage/auth runtime providers beyond the current runtime evidence packager,
+storage/auth runtime integrations beyond the current provider-specific runtime
+contracts and runtime evidence packager,
 real helper/relay adapter acceptance, and final external GitHub publishing plus
 download-verification steps.
 

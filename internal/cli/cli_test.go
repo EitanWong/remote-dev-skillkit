@@ -2023,7 +2023,8 @@ func TestHostedProviderPackageAndVerify(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(packageStdout.String(), `"schema": "rdev.hosted-provider-package.v1"`) ||
-		!strings.Contains(packageStdout.String(), `"external_mutation": false`) {
+		!strings.Contains(packageStdout.String(), `"external_mutation": false`) ||
+		!strings.Contains(packageStdout.String(), `"runtime_contract_schema": "rdev.hosted-provider-runtime-contract.v1"`) {
 		t.Fatalf("unexpected hosted provider package output: %s", packageStdout.String())
 	}
 
@@ -2034,6 +2035,42 @@ func TestHostedProviderPackageAndVerify(t *testing.T) {
 	}
 	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.hosted-provider-package-verification.v1"`) ||
 		!strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("unexpected hosted provider verify output: %s", verifyStdout.String())
+	}
+}
+
+func TestHostedProviderExternalRuntimeContractPackageAndVerify(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "provider")
+	var packageStdout bytes.Buffer
+	app := NewApp(&packageStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"hosted-provider", "package",
+		"--out", out,
+		"--storage-provider", "postgres",
+		"--auth-provider", "oidc-jwks",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(packageStdout.String(), `"schema": "rdev.hosted-provider-package.v1"`) ||
+		!strings.Contains(packageStdout.String(), `"storage_provider": "postgres"`) ||
+		!strings.Contains(packageStdout.String(), `"auth_provider": "oidc-jwks"`) ||
+		!strings.Contains(packageStdout.String(), `"runtime_status": "durable-runtime-evidence-required"`) {
+		t.Fatalf("unexpected hosted provider package output: %s", packageStdout.String())
+	}
+	for _, expected := range []string{"hosted-provider.json", "runtime-contract.json", "HOSTED_PROVIDER_RUNTIME.md"} {
+		if _, err := os.Stat(filepath.Join(out, expected)); err != nil {
+			t.Fatalf("expected %s: %v", expected, err)
+		}
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"hosted-provider", "verify", "--package", out}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.hosted-provider-package-verification.v1"`) ||
+		!strings.Contains(verifyStdout.String(), `"ok": true`) ||
+		!strings.Contains(verifyStdout.String(), `"storage_provider": "postgres"`) {
 		t.Fatalf("unexpected hosted provider verify output: %s", verifyStdout.String())
 	}
 }

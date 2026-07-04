@@ -61,6 +61,16 @@ go run ./cmd/rdev hosted-provider verify \
 	--package "$hosted_provider_dir" \
 	> "$work_dir/hosted-provider-verification.json"
 
+external_hosted_provider_dir="$work_dir/hosted-provider-postgres-oidc"
+go run ./cmd/rdev hosted-provider package \
+	--out "$external_hosted_provider_dir" \
+	--storage-provider postgres \
+	--auth-provider oidc-jwks \
+	> "$work_dir/hosted-provider-postgres-oidc-package.json"
+go run ./cmd/rdev hosted-provider verify \
+	--package "$external_hosted_provider_dir" \
+	> "$work_dir/hosted-provider-postgres-oidc-verification.json"
+
 hosted_runtime_input="$work_dir/hosted-runtime-input"
 mkdir -p "$hosted_runtime_input"
 printf '%s\n' 'gateway started with hosted provider package' > "$hosted_runtime_input/gateway-startup.txt"
@@ -330,6 +340,9 @@ plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 github_project_readiness = json.loads((root / "github-project-readiness.json").read_text())
 hosted_provider_package = json.loads((root / "hosted-provider-package.json").read_text())
 hosted_provider_verification = json.loads((root / "hosted-provider-verification.json").read_text())
+external_hosted_provider_package = json.loads((root / "hosted-provider-postgres-oidc-package.json").read_text())
+external_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-oidc-verification.json").read_text())
+external_hosted_runtime_contract = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-contract.json").read_text())
 hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-acceptance-package.json").read_text())
 hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
 relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
@@ -465,6 +478,15 @@ assert hosted_provider_verification["schema"] == "rdev.hosted-provider-package-v
 assert hosted_provider_verification["ok"] is True, hosted_provider_verification
 assert hosted_provider_verification["storage_provider"] == "file", hosted_provider_verification
 assert hosted_provider_verification["auth_provider"] == "hosted-ed25519-jwt", hosted_provider_verification
+assert external_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", external_hosted_provider_package
+assert external_hosted_provider_package["ok"] is True, external_hosted_provider_package
+assert external_hosted_provider_package["storage_provider"] == "postgres", external_hosted_provider_package
+assert external_hosted_provider_package["auth_provider"] == "oidc-jwks", external_hosted_provider_package
+assert external_hosted_provider_verification["schema"] == "rdev.hosted-provider-package-verification.v1", external_hosted_provider_verification
+assert external_hosted_provider_verification["ok"] is True, external_hosted_provider_verification
+assert external_hosted_runtime_contract["schema_version"] == "rdev.hosted-provider-runtime-contract.v1", external_hosted_runtime_contract
+assert external_hosted_runtime_contract["runtime_status"] == "durable-runtime-evidence-required", external_hosted_runtime_contract
+assert len(external_hosted_runtime_contract["required_evidence"]) >= 9, external_hosted_runtime_contract
 assert hosted_provider_runtime_package["schema"] == "rdev.acceptance-package.hosted-provider-runtime.v1", hosted_provider_runtime_package
 assert hosted_provider_runtime_package["ok"] is True, hosted_provider_runtime_package
 assert hosted_provider_runtime_package["storage_provider"] == "file", hosted_provider_runtime_package
@@ -631,6 +653,8 @@ print(json.dumps({
     "hosted_storage_auth_smoke": True,
     "hosted_provider_package_schema": hosted_provider_package["schema"],
     "hosted_provider_package_verification_schema": hosted_provider_verification["schema"],
+    "external_hosted_provider_package_schema": external_hosted_provider_package["schema"],
+    "external_hosted_provider_runtime_contract_schema": external_hosted_runtime_contract["schema_version"],
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],
     "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],
     "relay_adapter_package_schema": relay_adapter_package["schema"],
