@@ -1400,7 +1400,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		relayPackage := fs.String("relay-package", "", "verified relay adapter package directory or relay-adapter.json")
 		out := fs.String("out", "", "empty output directory for packaged relay adapter evidence")
-		runnerResult := fs.String("runner-result", "", "Connection Entry runner result JSON selecting existing-frp-or-chisel-relay")
+		runnerResult := fs.String("runner-result", "", "Connection Entry runner result JSON selecting a standard connectivity adapter path")
 		helperTranscript := fs.String("helper-transcript", "", "helper start transcript or supervisor evidence")
 		gatewayStatus := fs.String("gateway-status", "", "gateway health/status JSON or transcript")
 		hostStatus := fs.String("host-status", "", "host registration/status JSON or transcript")
@@ -1737,6 +1737,8 @@ func (a App) acceptanceVerifyRelayAdapterPackage(packagePath string) error {
 		"schema":              verification.SchemaVersion,
 		"package":             verification.PackagePath,
 		"package_schema":      verification.PackageSchema,
+		"selected_path":       verification.SelectedPath,
+		"accepted_paths":      verification.AcceptedPaths,
 		"checks":              verification.Checks,
 		"files":               verification.Files,
 		"recommended_actions": verification.RecommendedActions,
@@ -1872,6 +1874,8 @@ func (a App) acceptancePackageRelayAdapter(opts acceptance.RelayAdapterPackageOp
 		"out":                   pkg.OutDir,
 		"package":               filepath.Join(pkg.OutDir, "package.json"),
 		"checksums":             filepath.Join(pkg.OutDir, "checksums.txt"),
+		"selected_path":         pkg.SelectedPath,
+		"accepted_paths":        pkg.AcceptedPaths,
 		"checks":                pkg.Checks,
 		"files":                 pkg.Files,
 		"redaction_rule_counts": pkg.RedactionRuleCounts,

@@ -12,43 +12,66 @@ import (
 )
 
 func TestPackageAndVerifyRelayAdapterEvidence(t *testing.T) {
-	root := t.TempDir()
-	relayDir := filepath.Join(root, "relay")
-	if _, err := relayadapter.Build(relayadapter.Options{
-		OutDir:      relayDir,
-		AdapterKind: "chisel",
-		GeneratedAt: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
-	}); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name        string
+		adapterKind string
+		selected    string
+	}{
+		{name: "chisel relay", adapterKind: "chisel", selected: "existing-frp-or-chisel-relay"},
+		{name: "ssh tunnel", adapterKind: "ssh-tunnel", selected: "existing-ssh-tunnel"},
+		{name: "headscale mesh", adapterKind: "headscale-tailscale", selected: "existing-headscale-tailscale-mesh"},
+		{name: "wireguard vpn", adapterKind: "wireguard", selected: "existing-wireguard-vpn"},
 	}
-	evidence := writeRelayAdapterEvidenceForTest(t, root)
-	pkg, err := PackageRelayAdapterEvidence(RelayAdapterPackageOptions{
-		RelayAdapterPackagePath: relayDir,
-		OutDir:                  filepath.Join(root, "package"),
-		RunnerResultPath:        evidence.runnerResult,
-		HelperTranscriptPath:    evidence.helperTranscript,
-		GatewayStatusPath:       evidence.gatewayStatus,
-		HostStatusPath:          evidence.hostStatus,
-		ConnectionStatusPath:    evidence.connectionStatus,
-		AuditPath:               evidence.audit,
-		Now:                     time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !pkg.OK() {
-		t.Fatalf("expected relay package ok: %#v", pkg.Checks)
-	}
-	if pkg.RedactionRuleCounts["github_token"] != 1 {
-		t.Fatalf("expected github token redaction, got %#v", pkg.RedactionRuleCounts)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			relayDir := filepath.Join(root, "relay")
+			if _, err := relayadapter.Build(relayadapter.Options{
+				OutDir:      relayDir,
+				AdapterKind: tc.adapterKind,
+				GeneratedAt: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			evidence := writeRelayAdapterEvidenceForTest(t, root, tc.selected)
+			pkg, err := PackageRelayAdapterEvidence(RelayAdapterPackageOptions{
+				RelayAdapterPackagePath: relayDir,
+				OutDir:                  filepath.Join(root, "package"),
+				RunnerResultPath:        evidence.runnerResult,
+				HelperTranscriptPath:    evidence.helperTranscript,
+				GatewayStatusPath:       evidence.gatewayStatus,
+				HostStatusPath:          evidence.hostStatus,
+				ConnectionStatusPath:    evidence.connectionStatus,
+				AuditPath:               evidence.audit,
+				Now:                     time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !pkg.OK() {
+				t.Fatalf("expected relay package ok: %#v", pkg.Checks)
+			}
+			if pkg.SelectedPath != tc.selected {
+				t.Fatalf("expected selected path %q, got %q", tc.selected, pkg.SelectedPath)
+			}
+			if len(pkg.AcceptedPaths) != 4 {
+				t.Fatalf("expected accepted paths, got %#v", pkg.AcceptedPaths)
+			}
+			if pkg.RedactionRuleCounts["github_token"] != 1 {
+				t.Fatalf("expected github token redaction, got %#v", pkg.RedactionRuleCounts)
+			}
 
-	verification, err := VerifyRelayAdapterAcceptancePackage(pkg.OutDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !verification.OK() {
-		t.Fatalf("expected verification ok: %#v", verification.Checks)
+			verification, err := VerifyRelayAdapterAcceptancePackage(pkg.OutDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !verification.OK() {
+				t.Fatalf("expected verification ok: %#v", verification.Checks)
+			}
+			if verification.SelectedPath != tc.selected {
+				t.Fatalf("expected verified selected path %q, got %q", tc.selected, verification.SelectedPath)
+			}
+		})
 	}
 }
 
@@ -62,7 +85,7 @@ func TestVerifyRelayAdapterEvidenceRejectsMissingConnection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	evidence := writeRelayAdapterEvidenceForTest(t, root)
+	evidence := writeRelayAdapterEvidenceForTest(t, root, "existing-frp-or-chisel-relay")
 	if err := os.WriteFile(evidence.connectionStatus, []byte(`{"connected":false}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +119,45 @@ func TestVerifyRelayAdapterEvidenceRejectsMissingConnection(t *testing.T) {
 	}
 }
 
+func TestVerifyRelayAdapterEvidenceRejectsUnknownConnectivityPath(t *testing.T) {
+	root := t.TempDir()
+	relayDir := filepath.Join(root, "relay")
+	if _, err := relayadapter.Build(relayadapter.Options{
+		OutDir:      relayDir,
+		AdapterKind: "chisel",
+		GeneratedAt: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeRelayAdapterEvidenceForTest(t, root, "agent-authored-custom-tunnel")
+	pkg, err := PackageRelayAdapterEvidence(RelayAdapterPackageOptions{
+		RelayAdapterPackagePath: relayDir,
+		OutDir:                  filepath.Join(root, "package"),
+		RunnerResultPath:        evidence.runnerResult,
+		HelperTranscriptPath:    evidence.helperTranscript,
+		GatewayStatusPath:       evidence.gatewayStatus,
+		HostStatusPath:          evidence.hostStatus,
+		ConnectionStatusPath:    evidence.connectionStatus,
+		AuditPath:               evidence.audit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatal("expected package to fail when runner selects an unknown connectivity path")
+	}
+	verification, err := VerifyRelayAdapterAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected verification to fail")
+	}
+	if failures := failedRelayAcceptanceChecks(verification.Checks); !strings.Contains(failures, "runner_selected_standard_connectivity_path") {
+		t.Fatalf("expected standard path failure, got %s", failures)
+	}
+}
+
 type relayAdapterEvidenceForTest struct {
 	runnerResult     string
 	helperTranscript string
@@ -105,7 +167,7 @@ type relayAdapterEvidenceForTest struct {
 	audit            string
 }
 
-func writeRelayAdapterEvidenceForTest(t *testing.T, root string) relayAdapterEvidenceForTest {
+func writeRelayAdapterEvidenceForTest(t *testing.T, root, selectedPath string) relayAdapterEvidenceForTest {
 	t.Helper()
 	dir := filepath.Join(root, "evidence")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -134,7 +196,7 @@ func writeRelayAdapterEvidenceForTest(t *testing.T, root string) relayAdapterEvi
 	return relayAdapterEvidenceForTest{
 		runnerResult: write("runner-result.json", map[string]any{
 			"schema_version":       "rdev.connection-entry.runner-result.v1",
-			"selected_path":        "existing-frp-or-chisel-relay",
+			"selected_path":        selectedPath,
 			"selected_gateway_url": "https://relay.example.invalid/rdev",
 			"helper_started":       true,
 		}),

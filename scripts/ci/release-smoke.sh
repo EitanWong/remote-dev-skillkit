@@ -112,7 +112,7 @@ done
 
 relay_acceptance_input="$work_dir/relay-acceptance-input"
 mkdir -p "$relay_acceptance_input"
-printf '%s\n' '{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-frp-or-chisel-relay","helper_started":true}' > "$relay_acceptance_input/runner-result.json"
+printf '%s\n' '{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-wireguard-vpn","helper_started":true}' > "$relay_acceptance_input/runner-result.json"
 printf '%s\n' 'started reviewed relay helper' > "$relay_acceptance_input/helper-transcript.txt"
 printf '%s\n' '{"ok":true,"status":"healthy"}' > "$relay_acceptance_input/gateway-status.json"
 printf '%s\n' '{"ok":true,"host_status":"active"}' > "$relay_acceptance_input/host-status.json"
@@ -498,8 +498,16 @@ for adapter, (kind, gateway_var) in expected_connectivity.items():
     assert verification["adapter_kind"] == kind, verification
 assert relay_adapter_acceptance_package["schema"] == "rdev.acceptance-package.relay-adapter.v1", relay_adapter_acceptance_package
 assert relay_adapter_acceptance_package["ok"] is True, relay_adapter_acceptance_package
+assert relay_adapter_acceptance_package["selected_path"] == "existing-wireguard-vpn", relay_adapter_acceptance_package
+assert set(relay_adapter_acceptance_package["accepted_paths"]) >= {
+    "existing-frp-or-chisel-relay",
+    "existing-ssh-tunnel",
+    "existing-headscale-tailscale-mesh",
+    "existing-wireguard-vpn",
+}, relay_adapter_acceptance_package
 assert relay_adapter_acceptance_verification["schema"] == "rdev.acceptance-verification.relay-adapter-package.v1", relay_adapter_acceptance_verification
 assert relay_adapter_acceptance_verification["ok"] is True, relay_adapter_acceptance_verification
+assert relay_adapter_acceptance_verification["selected_path"] == "existing-wireguard-vpn", relay_adapter_acceptance_verification
 assert post_release_output["ok"] is True, post_release_output
 assert post_release_plan["schema_version"] == "rdev.post-release-install-plan.v1", post_release_plan
 assert post_release_plan["external_mutation"] is False, post_release_plan

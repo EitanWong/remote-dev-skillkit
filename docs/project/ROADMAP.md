@@ -71,7 +71,9 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `rdev.acceptance-verification.relay-adapter-package.v1`, and
   `rdev acceptance verify-relay-adapter-package`, archiving real runner,
   helper, gateway, host, connection-status, audit, redaction, and checksum
-  evidence while requiring `selected_path=existing-frp-or-chisel-relay` and
+  evidence while requiring a standard connectivity adapter `selected_path`
+  (`existing-frp-or-chisel-relay`, `existing-ssh-tunnel`,
+  `existing-headscale-tailscale-mesh`, or `existing-wireguard-vpn`) and
   `connected=true`.
 - Hosted provider runtime acceptance packaging and verification through
   `rdev.acceptance-package.hosted-provider-runtime.v1`,

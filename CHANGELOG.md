@@ -31,6 +31,13 @@ cross-network execution evidence.
 - Updated MCP tool metadata and release smoke so MCP-capable Agents discover
   the new adapter kinds and CI verifies package/verify output for
   `ssh-tunnel`, `headscale-tailscale`, and `wireguard`.
+- Generalized relay adapter acceptance packaging and verification so release
+  evidence can now prove any standard Connection Entry connectivity path:
+  `existing-frp-or-chisel-relay`, `existing-ssh-tunnel`,
+  `existing-headscale-tailscale-mesh`, or `existing-wireguard-vpn`. Package and
+  verification JSON now expose `selected_path` plus `accepted_paths`, keeping
+  Agents from treating Chisel/frpc as the only acceptable restrictive-network
+  proof surface.
 
 ### Remaining Gates
 
@@ -112,8 +119,8 @@ is not yet real cross-network acceptance evidence for a deployed relay service.
   `rdev acceptance verify-relay-adapter-package`. The package/verifier archives
   the verified relay adapter package, Connection Entry runner result, helper
   transcript, gateway status, host status, connection status, audit transcript,
-  checksums, and redacted evidence. It fails unless the runner selected
-  `existing-frp-or-chisel-relay` and the connection status reports
+  checksums, and redacted evidence. It fails unless the runner selected a
+  standard connectivity adapter path and the connection status reports
   `connected=true`.
 - Updated release smoke to generate and verify a Chisel relay adapter package
   and a relay adapter acceptance package, reporting

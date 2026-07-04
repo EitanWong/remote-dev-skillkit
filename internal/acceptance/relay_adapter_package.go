@@ -18,6 +18,13 @@ import (
 const RelayAdapterPackageSchemaVersion = "rdev.acceptance-package.relay-adapter.v1"
 const RelayAdapterPackageVerificationSchemaVersion = "rdev.acceptance-verification.relay-adapter-package.v1"
 
+var standardConnectivityAdapterPaths = []string{
+	"existing-frp-or-chisel-relay",
+	"existing-ssh-tunnel",
+	"existing-headscale-tailscale-mesh",
+	"existing-wireguard-vpn",
+}
+
 type RelayAdapterPackageOptions struct {
 	RelayAdapterPackagePath string
 	OutDir                  string
@@ -38,6 +45,8 @@ type RelayAdapterAcceptancePackage struct {
 	RelayAdapterPackage string                    `json:"relay_adapter_package"`
 	RelayAdapterSchema  string                    `json:"relay_adapter_schema"`
 	RelayVerification   relayadapter.Verification `json:"relay_adapter_verification"`
+	SelectedPath        string                    `json:"selected_path,omitempty"`
+	AcceptedPaths       []string                  `json:"accepted_paths"`
 	Checks              []Check                   `json:"checks"`
 	Files               []AcceptancePackageFile   `json:"files"`
 	RedactionRuleCounts map[string]int            `json:"redaction_rule_counts,omitempty"`
@@ -50,6 +59,8 @@ type RelayAdapterAcceptanceVerification struct {
 	PackagePath        string                  `json:"package_path"`
 	PackageSchema      string                  `json:"package_schema"`
 	GeneratedAt        time.Time               `json:"generated_at"`
+	SelectedPath       string                  `json:"selected_path,omitempty"`
+	AcceptedPaths      []string                `json:"accepted_paths"`
 	Checks             []Check                 `json:"checks"`
 	Files              []RelayPackageFileCheck `json:"files"`
 	RecommendedActions []string                `json:"recommended_actions,omitempty"`
@@ -137,9 +148,10 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 		RelayAdapterPackage: relayPackagePath,
 		RelayAdapterSchema:  relayPkg.SchemaVersion,
 		RelayVerification:   verification,
+		AcceptedPaths:       append([]string(nil), standardConnectivityAdapterPaths...),
 		RequiredEvidence: []string{
 			"verified relay-adapter.json",
-			"Connection Entry runner dry-run or run result selecting existing-frp-or-chisel-relay",
+			"Connection Entry runner dry-run or run result selecting a standard connectivity adapter path",
 			"helper startup transcript or process supervisor evidence",
 			"gateway status or health evidence",
 			"host status or registration evidence",
@@ -176,8 +188,10 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 	files = append(files, copyOptionalEvidence(outDir, "evidence/audit.txt", "audit", opts.AuditPath, redactor, add)...)
 	files = append(files, copyNotesEvidence(outDir, opts.NotesPath, redactor, add)...)
 
+	selectedPath := runnerResultSelectedConnectivityPath(outDir, "evidence/runner-result.json")
+	pkg.SelectedPath = selectedPath
 	add("runner_result_present", fileEntryKindPresent(files, "runner-result"), opts.RunnerResultPath)
-	add("runner_selected_relay_path", runnerResultSelectsRelay(outDir, "evidence/runner-result.json"), opts.RunnerResultPath)
+	add("runner_selected_standard_connectivity_path", selectedPath != "", selectedPath)
 	add("helper_transcript_present", fileEntryKindPresent(files, "helper-transcript"), opts.HelperTranscriptPath)
 	add("gateway_status_present", fileEntryKindPresent(files, "gateway-status"), opts.GatewayStatusPath)
 	add("host_status_present", fileEntryKindPresent(files, "host-status"), opts.HostStatusPath)
@@ -202,7 +216,7 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 		pkg.RecommendedActions = []string{
 			"Collect missing relay adapter evidence from the real restrictive-network run.",
 			"Re-run package-relay-adapter after redacting helper transcripts, status output, and audit logs.",
-			"Do not publish this relay adapter acceptance package as release evidence until every check passes.",
+			"Confirm the runner result selects one of the accepted standard connectivity adapter paths before publishing release evidence.",
 		}
 	}
 	content, err := json.MarshalIndent(pkg, "", "  ")
@@ -234,6 +248,8 @@ func VerifyRelayAdapterAcceptancePackage(packagePath string) (RelayAdapterAccept
 		PackagePath:   manifestPath,
 		PackageSchema: pkg.SchemaVersion,
 		GeneratedAt:   time.Now().UTC(),
+		SelectedPath:  pkg.SelectedPath,
+		AcceptedPaths: append([]string(nil), standardConnectivityAdapterPaths...),
 	}
 	add := func(name string, passed bool, detail string) {
 		verification.Checks = append(verification.Checks, Check{Name: name, Passed: passed, Detail: detail})
@@ -250,12 +266,16 @@ func VerifyRelayAdapterAcceptancePackage(packagePath string) (RelayAdapterAccept
 	add("host_status_present", packageKindPresent(pkg.Files, "host-status"), "")
 	add("connection_status_present", packageKindPresent(pkg.Files, "connection-status"), "")
 	add("audit_present", packageKindPresent(pkg.Files, "audit"), "")
-	add("runner_selected_relay_path", runnerResultSelectsRelay(dir, "evidence/runner-result.json"), "")
+	selectedPath := runnerResultSelectedConnectivityPath(dir, "evidence/runner-result.json")
+	if verification.SelectedPath == "" {
+		verification.SelectedPath = selectedPath
+	}
+	add("runner_selected_standard_connectivity_path", selectedPath != "", selectedPath)
 	add("connection_status_connected", connectionStatusConnected(dir, "evidence/connection-status.json"), "")
 	if !verification.OK() {
 		verification.RecommendedActions = []string{
 			"Regenerate the relay adapter acceptance package from a complete real run.",
-			"Confirm the runner result selects existing-frp-or-chisel-relay and connection status reports connected=true.",
+			"Confirm the runner result selects a standard connectivity adapter path and connection status reports connected=true.",
 			"Do not attach this package to release evidence until verification passes.",
 		}
 	}
@@ -342,12 +362,17 @@ func verifyAcceptancePackageFiles(root string, files []AcceptancePackageFile) []
 	return checks
 }
 
-func runnerResultSelectsRelay(root, path string) bool {
+func runnerResultSelectedConnectivityPath(root, path string) string {
 	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
 	if err != nil {
-		return false
+		return ""
 	}
-	return jsonContainsStringField(content, "selected_path", "existing-frp-or-chisel-relay")
+	for _, accepted := range standardConnectivityAdapterPaths {
+		if jsonContainsStringField(content, "selected_path", accepted) {
+			return accepted
+		}
+	}
+	return ""
 }
 
 func connectionStatusConnected(root, path string) bool {

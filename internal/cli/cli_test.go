@@ -8421,10 +8421,12 @@ func TestAcceptancePackageRelayAdapter(t *testing.T) {
 		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
 	}
 	var payload struct {
-		OK      bool   `json:"ok"`
-		Schema  string `json:"schema"`
-		Package string `json:"package"`
-		Files   []struct {
+		OK            bool     `json:"ok"`
+		Schema        string   `json:"schema"`
+		Package       string   `json:"package"`
+		SelectedPath  string   `json:"selected_path"`
+		AcceptedPaths []string `json:"accepted_paths"`
+		Files         []struct {
 			Path string `json:"path"`
 			Kind string `json:"kind"`
 		} `json:"files"`
@@ -8435,6 +8437,10 @@ func TestAcceptancePackageRelayAdapter(t *testing.T) {
 	}
 	if !payload.OK || payload.Schema != "rdev.acceptance-package.relay-adapter.v1" {
 		t.Fatalf("unexpected package output: %s", stdout.String())
+	}
+	if payload.SelectedPath != "existing-wireguard-vpn" ||
+		!slices.Contains(payload.AcceptedPaths, "existing-ssh-tunnel") {
+		t.Fatalf("unexpected connectivity path output: %#v", payload)
 	}
 	if payload.RedactionRuleCounts["github_token"] != 1 {
 		t.Fatalf("expected github token redaction, got %#v", payload.RedactionRuleCounts)
@@ -8541,7 +8547,7 @@ func writeRelayAdapterEvidenceForCLITest(t *testing.T, root string) relayAdapter
 	hostStatus := filepath.Join(evidenceRoot, "host-status.json")
 	connectionStatus := filepath.Join(evidenceRoot, "connection-status.json")
 	audit := filepath.Join(evidenceRoot, "audit.txt")
-	writeFileForCLITest(t, runnerResult, `{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-frp-or-chisel-relay","helper_started":true}`+"\n")
+	writeFileForCLITest(t, runnerResult, `{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-wireguard-vpn","helper_started":true}`+"\n")
 	writeFileForCLITest(t, helperTranscript, "started reviewed relay helper\ntoken ghp_abcdefghijklmnopqrstuvwx\n")
 	writeFileForCLITest(t, gatewayStatus, `{"ok":true,"status":"healthy"}`+"\n")
 	writeFileForCLITest(t, hostStatus, `{"ok":true,"host_status":"active"}`+"\n")
