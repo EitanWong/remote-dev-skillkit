@@ -54,6 +54,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   upsert/load, runtime probe verification, inline-password rejection for
   connection info, and hosted provider package gateway args for
   `postgres` + `hosted-ed25519-jwt`.
+- Built-in Redis stream gateway state-store runtime through
+  `--storage-provider redis-stream`, `redis-cli` snapshot key load/save,
+  Redis stream append/probe events, inline-credential rejection for Redis URLs,
+  runtime probe verification, and hosted provider package gateway args for
+  `redis-stream` + `hosted-ed25519-jwt`.
 - Hosted provider package generation and verification through
   `rdev.hosted-provider-package.v1`, `rdev hosted-provider package`,
   `rdev.hosted-provider-package-verification.v1`, and
@@ -220,10 +225,11 @@ Exit gate: an operator's managed Mac reconnects after reboot, an agent selects i
 - ACP/acpx adapter MVP.
 - Artifact streaming.
 - Durable third-party hosted storage/auth runtime integrations beyond the
-  built-in Postgres state-store path, current provider-specific runtime
-  contracts, and hosted runtime evidence packager, including deployed Postgres
-  backup, restore, retention, role-mapping, and failure-mode evidence plus
-  S3-compatible/Redis/OIDC/SAML gateway operation evidence.
+  built-in Postgres and Redis stream state-store paths, current
+  provider-specific runtime contracts, and hosted runtime evidence packager,
+  including deployed Postgres/Redis backup or replay/restore, retention,
+  role-mapping, and failure-mode evidence plus S3-compatible/OIDC/SAML gateway
+  operation evidence.
 
 Exit gate: one gateway manages multiple Mac/Windows/Linux hosts, trust rotation reaches managed hosts, audit/artifact spools survive reconnect, Windows Service has real install/start/reconnect/stop/uninstall acceptance evidence beyond dry-run plans, and a new adapter can be added without bypassing policy.
 

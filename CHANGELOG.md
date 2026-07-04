@@ -4,6 +4,43 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.22-dev
+
+Current phase: hosted storage continues moving from provider contracts toward
+real runtime paths. The gateway now has a built-in Redis stream state-store
+provider through `redis-cli`, while production hosted claims still require real
+deployed Redis persistence/replication, replay/restore, retention, failure-mode,
+role-mapping, audit, and redaction evidence.
+
+### Added
+
+- Added `gateway.RedisStreamStateStore` and `--storage-provider redis-stream`
+  support for `rdev gateway serve` / `rdev gateway storage verify`. The provider
+  uses `redis-cli`, stores the current `rdev.gateway-snapshot.v1` at a snapshot
+  key, appends snapshot/probe events to a Redis stream, performs runtime probe
+  readback/cleanup, and rejects inline Redis URL credentials so secrets stay in
+  `REDISCLI_AUTH`, environment injection, or an operator-approved secret
+  manager.
+- Updated `rdev hosted-provider package --storage-provider redis-stream
+  --auth-provider hosted-ed25519-jwt` so the generated gateway args use the
+  built-in `rdev gateway serve --storage-provider redis-stream` runtime path
+  instead of a placeholder reviewed launcher.
+- Updated hosted provider package metadata, acceptance docs, and release smoke
+  to verify Redis stream state-store tests, inline credential rejection,
+  Redis hosted-JWT package generation/verification, and Redis runtime gateway
+  args.
+
+### Remaining Gates
+
+- Run a real Redis-backed gateway with persistence/replication policy, replay or
+  restore evidence, retention, role-mapping, failure-mode, audit, and redaction
+  evidence, then package it with
+  `rdev acceptance package-hosted-provider-runtime`.
+- Continue S3-compatible object storage, OIDC/JWKS, and SAML runtime
+  integrations beyond their current contracts.
+- Continue real helper/relay adapter acceptance and GitHub Release
+  publication/download verification.
+
 ## 0.1.21-dev
 
 Current phase: helper/relay adapter evidence moved from package metadata and

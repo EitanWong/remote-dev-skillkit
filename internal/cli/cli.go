@@ -4915,8 +4915,8 @@ func (a App) gateway(args []string) error {
 		addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 		auditLog := fs.String("audit-log", "", "optional JSONL audit log path")
 		statePath := fs.String("state", "", "optional development gateway JSON snapshot path; requires --signing-key")
-		storageProvider := fs.String("storage-provider", "", "gateway state storage provider: file or postgres")
-		storagePath := fs.String("storage-path", "", "gateway state storage path for file, or libpq connection info/service name for postgres")
+		storageProvider := fs.String("storage-provider", "", "gateway state storage provider: file, postgres, or redis-stream")
+		storagePath := fs.String("storage-path", "", "gateway state storage path for file, libpq connection info/service name for postgres, or redis:// URL for redis-stream")
 		signingKey := fs.String("signing-key", "", "optional persistent Ed25519 signing key file")
 		signingKeyID := fs.String("signing-key-id", signing.DefaultKeyID, "signing key id for new or existing signing key file")
 		manifestSigningKey := fs.String("manifest-signing-key", "", "optional Ed25519 key file for signing join manifests")
@@ -4978,8 +4978,8 @@ func (a App) gateway(args []string) error {
 		case "verify":
 			fs := flag.NewFlagSet("gateway storage verify", flag.ContinueOnError)
 			fs.SetOutput(a.Stderr)
-			provider := fs.String("provider", gateway.FileStateStoreProvider, "gateway state storage provider: file or postgres")
-			path := fs.String("path", "", "gateway state storage path for file, or libpq connection info/service name for postgres")
+			provider := fs.String("provider", gateway.FileStateStoreProvider, "gateway state storage provider: file, postgres, or redis-stream")
+			path := fs.String("path", "", "gateway state storage path for file, libpq connection info/service name for postgres, or redis:// URL for redis-stream")
 			if err := fs.Parse(args[2:]); err != nil {
 				return err
 			}
@@ -5823,6 +5823,8 @@ func newGatewayStateStore(provider, path string) (gateway.StateStore, error) {
 		return gateway.NewFileStateStore(path)
 	case gateway.PostgresStateStoreProvider:
 		return gateway.NewPostgresStateStore(path)
+	case gateway.RedisStreamStateStoreProvider:
+		return gateway.NewRedisStreamStateStore(path)
 	default:
 		return nil, fmt.Errorf("unsupported gateway storage provider %q", provider)
 	}

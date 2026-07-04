@@ -30,12 +30,12 @@ go test ./internal/wsproto ./internal/cli \
   > "$work_dir/wss-mtls-host-smoke.txt"
 
 go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal/cli \
-  -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
+  -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestRedisStreamStateStoreRoundTripThroughRedisCLI|TestRedisStreamStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestGatewayStorageVerifyRedisRejectsInlineCredentials|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
   -count=1 \
   > "$work_dir/hosted-storage-auth-smoke.txt"
 
 go test ./internal/hostedprovider ./internal/cli \
-	-run 'TestBuildAndVerifyHostedProviderPackage|TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify' \
+	-run 'TestBuildAndVerifyHostedProviderPackage|TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildRedisHostedJWTProviderUsesBuiltInGatewayRuntime|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify|TestHostedProviderRedisHostedJWTUsesBuiltInGatewayRuntime' \
 	-count=1 \
 	> "$work_dir/hosted-provider-package-smoke.txt"
 
@@ -73,6 +73,16 @@ go run ./cmd/rdev hosted-provider package \
 go run ./cmd/rdev hosted-provider verify \
 	--package "$postgres_hosted_provider_dir" \
 	> "$work_dir/hosted-provider-postgres-jwt-verification.json"
+
+redis_hosted_provider_dir="$work_dir/hosted-provider-redis-jwt"
+go run ./cmd/rdev hosted-provider package \
+	--out "$redis_hosted_provider_dir" \
+	--storage-provider redis-stream \
+	--auth-provider hosted-ed25519-jwt \
+	> "$work_dir/hosted-provider-redis-jwt-package.json"
+go run ./cmd/rdev hosted-provider verify \
+	--package "$redis_hosted_provider_dir" \
+	> "$work_dir/hosted-provider-redis-jwt-verification.json"
 
 external_hosted_provider_dir="$work_dir/hosted-provider-postgres-oidc"
 go run ./cmd/rdev hosted-provider package \
@@ -473,6 +483,9 @@ hosted_provider_verification = json.loads((root / "hosted-provider-verification.
 postgres_hosted_provider_package = json.loads((root / "hosted-provider-postgres-jwt-package.json").read_text())
 postgres_hosted_provider_manifest = json.loads((root / "hosted-provider-postgres-jwt" / "hosted-provider.json").read_text())
 postgres_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-jwt-verification.json").read_text())
+redis_hosted_provider_package = json.loads((root / "hosted-provider-redis-jwt-package.json").read_text())
+redis_hosted_provider_manifest = json.loads((root / "hosted-provider-redis-jwt" / "hosted-provider.json").read_text())
+redis_hosted_provider_verification = json.loads((root / "hosted-provider-redis-jwt-verification.json").read_text())
 external_hosted_provider_package = json.loads((root / "hosted-provider-postgres-oidc-package.json").read_text())
 external_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-oidc-verification.json").read_text())
 external_hosted_runtime_contract = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-contract.json").read_text())
@@ -621,6 +634,14 @@ assert postgres_hosted_provider_verification["schema"] == "rdev.hosted-provider-
 assert postgres_hosted_provider_verification["ok"] is True, postgres_hosted_provider_verification
 assert postgres_hosted_provider_manifest["gateway_args"][:6] == ["rdev", "gateway", "serve", "--storage-provider", "postgres", "--storage-path"], postgres_hosted_provider_manifest["gateway_args"]
 assert "operator-reviewed-hosted-gateway-launcher" not in postgres_hosted_provider_manifest["gateway_args"], postgres_hosted_provider_manifest["gateway_args"]
+assert redis_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", redis_hosted_provider_package
+assert redis_hosted_provider_package["ok"] is True, redis_hosted_provider_package
+assert redis_hosted_provider_package["storage_provider"] == "redis-stream", redis_hosted_provider_package
+assert redis_hosted_provider_package["auth_provider"] == "hosted-ed25519-jwt", redis_hosted_provider_package
+assert redis_hosted_provider_verification["schema"] == "rdev.hosted-provider-package-verification.v1", redis_hosted_provider_verification
+assert redis_hosted_provider_verification["ok"] is True, redis_hosted_provider_verification
+assert redis_hosted_provider_manifest["gateway_args"][:6] == ["rdev", "gateway", "serve", "--storage-provider", "redis-stream", "--storage-path"], redis_hosted_provider_manifest["gateway_args"]
+assert "operator-reviewed-hosted-gateway-launcher" not in redis_hosted_provider_manifest["gateway_args"], redis_hosted_provider_manifest["gateway_args"]
 assert external_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", external_hosted_provider_package
 assert external_hosted_provider_package["ok"] is True, external_hosted_provider_package
 assert external_hosted_provider_package["storage_provider"] == "postgres", external_hosted_provider_package
@@ -804,6 +825,8 @@ print(json.dumps({
     "hosted_provider_package_verification_schema": hosted_provider_verification["schema"],
     "postgres_hosted_provider_package_schema": postgres_hosted_provider_package["schema"],
     "postgres_hosted_provider_runtime_gateway_args": True,
+    "redis_hosted_provider_package_schema": redis_hosted_provider_package["schema"],
+    "redis_hosted_provider_runtime_gateway_args": True,
     "external_hosted_provider_package_schema": external_hosted_provider_package["schema"],
     "external_hosted_provider_runtime_contract_schema": external_hosted_runtime_contract["schema_version"],
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],

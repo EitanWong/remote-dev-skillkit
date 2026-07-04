@@ -69,13 +69,16 @@ operator paths.
 ## Storage
 
 Gateway state persistence is routed through a state-store provider boundary.
-The built-in providers are `file` and `postgres`; future hosted providers
-should implement the same load/save contract instead of changing HTTP
-handlers. The Postgres provider uses `psql`/libpq, stores the current
-`rdev.gateway-snapshot.v1` as JSONB in `rdev_gateway_snapshots`, and refuses
-inline passwords in `--storage-path`. Use a libpq service file, `.pgpass`,
+The built-in providers are `file`, `postgres`, and `redis-stream`; future
+hosted providers should implement the same load/save contract instead of
+changing HTTP handlers. The Postgres provider uses `psql`/libpq, stores the
+current `rdev.gateway-snapshot.v1` as JSONB in
+`rdev_gateway_snapshots`, and refuses inline passwords in `--storage-path`.
+The Redis stream provider uses `redis-cli`, stores the current snapshot key,
+and appends snapshot/probe events to a Redis stream while refusing inline URL
+credentials. Use libpq service files, `.pgpass`, `REDISCLI_AUTH`,
 environment injection, or an operator-approved secret manager instead of
-placing database passwords in process arguments.
+placing database or Redis passwords in process arguments.
 
 ```bash
 rdev gateway storage verify \
@@ -85,6 +88,10 @@ rdev gateway storage verify \
 rdev gateway storage verify \
   --provider postgres \
   --path service=rdev_gateway
+
+rdev gateway storage verify \
+  --provider redis-stream \
+  --path rediss://redis.example.invalid:6379/0
 
 rdev gateway serve \
   --dev \
@@ -99,6 +106,13 @@ rdev gateway serve \
   --signing-key .rdev/keys/gateway-signing-key.json \
   --storage-provider postgres \
   --storage-path service=rdev_gateway
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --storage-provider redis-stream \
+  --storage-path rediss://redis.example.invalid:6379/0
 ```
 
 `--state` remains a convenience alias for the file provider path.
@@ -120,8 +134,10 @@ rdev hosted-provider verify \
 ```
 
 The built-in package proves the provider contract for single-node file storage
-and provider-neutral EdDSA JWT auth. External packages for Postgres,
-S3-compatible storage, Redis streams, OIDC/JWKS, and SAML emit
+and provider-neutral EdDSA JWT auth. Built-in Postgres and Redis stream runtime
+paths can be used with hosted EdDSA JWT auth and still require real deployment
+evidence before production claims. External packages for S3-compatible storage,
+OIDC/JWKS, and SAML emit
 `runtime-contract.json` and `HOSTED_PROVIDER_RUNTIME.md` so operators and
 Agents know which verification, backup, restore, retention, role-mapping,
 failure-mode, and audit evidence must be collected. Durable third-party hosted

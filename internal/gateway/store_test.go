@@ -131,6 +131,89 @@ func TestPostgresStateStoreVerifyRuntime(t *testing.T) {
 	}
 }
 
+func TestRedisStreamStateStoreRejectsInlineCredentials(t *testing.T) {
+	for _, rawURL := range []string{
+		"redis://default:secret@example.invalid:6379/0",
+		"rediss://user@example.invalid:6379/0",
+		"redis://example.invalid:6379/0?password=secret",
+	} {
+		if _, err := NewRedisStreamStateStore(rawURL); err == nil {
+			t.Fatalf("expected inline credential rejection for %q", rawURL)
+		}
+	}
+}
+
+func TestRedisStreamStateStoreRoundTripThroughRedisCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake redis-cli shell fixture uses POSIX shell")
+	}
+	root := t.TempDir()
+	publicKey, privateKey := gatewaySnapshotKeyPair(t)
+	now := time.Date(2026, 7, 4, 20, 30, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "redis store round trip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewRedisStreamStateStore("rediss://redis.example.invalid:6379/0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.CLIPath = writeFakeRedisCLI(t, root)
+	store.Timeout = 2 * time.Second
+	snapshot, err := store.SaveFrom(gw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Tickets) != 1 || snapshot.Tickets[0].ID != ticket.ID {
+		t.Fatalf("unexpected saved snapshot: %#v", snapshot.Tickets)
+	}
+	restarted := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+	loaded, ok, err := store.LoadInto(restarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected redis-stream state store load")
+	}
+	if len(loaded.Tickets) != 1 || loaded.Tickets[0].ID != ticket.ID {
+		t.Fatalf("unexpected loaded snapshot: %#v", loaded.Tickets)
+	}
+	transcript, err := os.ReadFile(filepath.Join(root, "redis-transcript.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(transcript); !strings.Contains(text, "SET rdev:gateway:snapshot:current") ||
+		!strings.Contains(text, "GET rdev:gateway:snapshot:current") ||
+		!strings.Contains(text, "XADD rdev:gateway:snapshots") {
+		t.Fatalf("fake redis transcript missing expected commands:\n%s", text)
+	}
+}
+
+func TestRedisStreamStateStoreVerifyRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake redis-cli shell fixture uses POSIX shell")
+	}
+	root := t.TempDir()
+	store, err := NewRedisStreamStateStore("redis://redis.example.invalid:6379/0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.CLIPath = writeFakeRedisCLI(t, root)
+	store.Timeout = 2 * time.Second
+	if err := store.VerifyRuntime(); err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := os.ReadFile(filepath.Join(root, "redis-transcript.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(transcript); !strings.Contains(text, "DEL rdev:gateway:verify:") ||
+		!strings.Contains(text, "XADD rdev:gateway:snapshots") {
+		t.Fatalf("expected verify Redis commands, got:\n%s", text)
+	}
+}
+
 func writeFakePSQL(t *testing.T, root string) string {
 	t.Helper()
 	script := filepath.Join(root, "fake-psql.sh")
@@ -166,6 +249,61 @@ if not match:
 with open(state, "w", encoding="utf-8") as handle:
     handle.write(match.group(1).strip())
 PY
+    ;;
+esac
+`
+	if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+func writeFakeRedisCLI(t *testing.T, root string) string {
+	t.Helper()
+	script := filepath.Join(root, "fake-redis-cli.sh")
+	state := filepath.Join(root, "redis-state.json")
+	transcript := filepath.Join(root, "redis-transcript.txt")
+	content := `#!/bin/sh
+set -eu
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --raw)
+      shift
+      ;;
+    --url)
+      url="$2"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+cmd="$1"
+shift || true
+printf '%s %s\n' "$cmd" "$*" >> "` + transcript + `"
+case "$cmd" in
+  SET)
+    printf '%s' "$2" > "` + state + `"
+    printf 'OK\n'
+    ;;
+  GET)
+    if [ -f "` + state + `" ]; then
+      cat "` + state + `"
+      printf '\n'
+    fi
+    ;;
+  DEL)
+    rm -f "` + state + `"
+    printf '1\n'
+    ;;
+  XADD)
+    printf '0-1\n'
+    ;;
+  *)
+    echo "unsupported fake redis command: $cmd" >&2
+    exit 2
     ;;
 esac
 `

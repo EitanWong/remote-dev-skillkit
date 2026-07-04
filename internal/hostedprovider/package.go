@@ -327,11 +327,11 @@ func storageDescriptor(provider string) Provider {
 		return Provider{
 			Kind:             "redis-stream",
 			Schema:           "rdev.hosted-storage.redis-stream.v1",
-			Implementation:   "provider-runtime-package",
+			Implementation:   "built-in-redis-cli-runtime",
 			RuntimeStatus:    "durable-runtime-evidence-required",
 			RequiredSettings: []string{"RDEV_REDIS_URL_SECRET_REF", "RDEV_REDIS_STREAM_PREFIX", "RDEV_REDIS_TLS_MODE", "RDEV_REDIS_RETENTION_POLICY_REF"},
-			VerifyCommand:    "rdev hosted-provider verify --package <provider-package> && <operator-reviewed-redis-stream-health-probe>",
-			Notes:            []string{"Use a secret reference for the Redis URL; do not include hostnames or credentials in this package.", "Runtime evidence must prove stream append/read, consumer recovery, persistence/replication policy, retention, and unavailable-store behavior."},
+			VerifyCommand:    "rdev gateway storage verify --provider redis-stream --path <redis-url-from-secret-ref>",
+			Notes:            []string{"Use a secret reference for the Redis URL; do not include hostnames or credentials in this package.", "The built-in runtime uses redis-cli, stores the current gateway snapshot key, and appends snapshot/probe events to a Redis stream.", "Production evidence must still prove persistence/replication, retention, backup/restore or replay policy, role mapping, failure modes, and audit redaction."},
 		}
 	default:
 		return Provider{
@@ -392,7 +392,7 @@ func authDescriptor(provider string) Provider {
 }
 
 func gatewayArgs(storageProvider, authProvider string) []string {
-	if authProvider == "hosted-ed25519-jwt" && (storageProvider == "file" || storageProvider == "postgres") {
+	if authProvider == "hosted-ed25519-jwt" && (storageProvider == "file" || storageProvider == "postgres" || storageProvider == "redis-stream") {
 		args := []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
 		args = append(args, "--hosted-operator-auth", "${RDEV_HOSTED_OPERATOR_AUTH_FILE}")
 		return args
@@ -495,6 +495,7 @@ func storageEnvironment(provider string) []EnvVar {
 		}
 	case "redis-stream":
 		return []EnvVar{
+			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "Redis URL for the built-in redis-stream gateway state store. Do not include inline credentials; use REDISCLI_AUTH or an operator-approved secret injector.", Secret: false},
 			{Name: "RDEV_REDIS_URL_SECRET_REF", Required: true, Description: "Secret-manager reference for the Redis URL.", Secret: true},
 			{Name: "RDEV_REDIS_STREAM_PREFIX", Required: true, Description: "Reviewed stream key prefix for gateway state and audit events.", Secret: false},
 			{Name: "RDEV_REDIS_TLS_MODE", Required: true, Description: "Reviewed Redis TLS mode.", Secret: false},

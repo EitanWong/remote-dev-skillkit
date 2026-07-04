@@ -2083,6 +2083,14 @@ func TestGatewayStorageVerifyPostgresRejectsInlinePassword(t *testing.T) {
 	}
 }
 
+func TestGatewayStorageVerifyRedisRejectsInlineCredentials(t *testing.T) {
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{"gateway", "storage", "verify", "--provider", "redis-stream", "--path", "redis://default:secret@example.invalid:6379/0"})
+	if err == nil || !strings.Contains(err.Error(), "must not contain inline credentials") {
+		t.Fatalf("expected inline credential rejection, got %v", err)
+	}
+}
+
 func TestHostedProviderPackageAndVerify(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "provider")
 	var packageStdout bytes.Buffer
@@ -2145,6 +2153,52 @@ func TestHostedProviderExternalRuntimeContractPackageAndVerify(t *testing.T) {
 		!strings.Contains(verifyStdout.String(), `"ok": true`) ||
 		!strings.Contains(verifyStdout.String(), `"storage_provider": "postgres"`) {
 		t.Fatalf("unexpected hosted provider verify output: %s", verifyStdout.String())
+	}
+}
+
+func TestHostedProviderRedisHostedJWTUsesBuiltInGatewayRuntime(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "provider")
+	var packageStdout bytes.Buffer
+	app := NewApp(&packageStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"hosted-provider", "package",
+		"--out", out,
+		"--storage-provider", "redis-stream",
+		"--auth-provider", "hosted-ed25519-jwt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output := packageStdout.String()
+	if !strings.Contains(output, `"storage_provider": "redis-stream"`) ||
+		!strings.Contains(output, `"auth_provider": "hosted-ed25519-jwt"`) ||
+		!strings.Contains(output, `"redis-stream"`) ||
+		strings.Contains(output, "operator-reviewed-hosted-gateway-launcher") {
+		t.Fatalf("unexpected redis hosted provider package output: %s", output)
+	}
+	var manifest struct {
+		GatewayArgs []string `json:"gateway_args"`
+	}
+	content, err := os.ReadFile(filepath.Join(out, "hosted-provider.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(manifest.GatewayArgs, " ")
+	if !strings.Contains(joined, "gateway serve --storage-provider redis-stream") ||
+		!strings.Contains(joined, "--hosted-operator-auth") {
+		t.Fatalf("expected built-in redis gateway args, got %#v", manifest.GatewayArgs)
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"hosted-provider", "verify", "--package", out}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) ||
+		!strings.Contains(verifyStdout.String(), `"storage_provider": "redis-stream"`) {
+		t.Fatalf("unexpected verify output: %s", verifyStdout.String())
 	}
 }
 
