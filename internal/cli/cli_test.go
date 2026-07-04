@@ -2055,6 +2055,75 @@ func TestOperatorAuthVerifyHosted(t *testing.T) {
 	}
 }
 
+func TestOperatorAuthVerifyOIDCJWKSWithToken(t *testing.T) {
+	now := time.Now().UTC()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"keys": []map[string]string{{
+				"kty": "RSA",
+				"kid": "oidc-key",
+				"use": "sig",
+				"alg": "RS256",
+				"n":   operatorauth.EncodeRSAJWKValue(privateKey.PublicKey.N),
+				"e":   operatorauth.EncodeRSAJWKValue(big.NewInt(int64(privateKey.PublicKey.E))),
+			}},
+		})
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	authPath := filepath.Join(root, "oidc-jwks-auth.json")
+	authFile := operatorauth.OIDCJWKSFile{
+		SchemaVersion:    operatorauth.OIDCJWKSSchemaVersion,
+		Issuer:           "https://issuer.example.test/",
+		Audience:         "rdev-gateway",
+		JWKSURL:          server.URL,
+		RolesClaim:       "rdev_roles",
+		ClockSkewSeconds: 30,
+	}
+	content, err := json.Marshal(authFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	token, err := operatorauth.SignOIDCJWKSToken("oidc-key", privateKey, operatorauth.OIDCClaims{
+		Issuer:    "https://issuer.example.test/",
+		Subject:   "operator@example.test",
+		Audiences: []string{"rdev-gateway"},
+		ExpiresAt: now.Add(time.Hour).Unix(),
+		Roles:     []string{operatorauth.RoleOperator},
+	}, "rdev_roles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(root, "operator.jwt")
+	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"operator-auth", "verify-oidc-jwks",
+		"--auth", authPath,
+		"--token-file", tokenPath,
+		"--role", "operator",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"ok": true`) ||
+		!strings.Contains(output, `"schema_version": "rdev.oidc-jwks-operator-auth.v1"`) ||
+		!strings.Contains(output, `"token_verified": true`) ||
+		!strings.Contains(output, `"key_count": 1`) {
+		t.Fatalf("unexpected OIDC JWKS verify output: %s", output)
+	}
+}
+
 func TestGatewayStorageVerifyRejectsUnknownProvider(t *testing.T) {
 	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
 	err := app.Run(context.Background(), []string{"gateway", "storage", "verify", "--provider", "unknown", "--path", filepath.Join(t.TempDir(), "state.json")})

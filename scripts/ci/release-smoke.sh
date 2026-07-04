@@ -30,12 +30,12 @@ go test ./internal/wsproto ./internal/cli \
   > "$work_dir/wss-mtls-host-smoke.txt"
 
 go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal/cli \
-  -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestRedisStreamStateStoreRoundTripThroughRedisCLI|TestRedisStreamStateStoreVerifyRuntime|TestS3CompatibleStateStoreRoundTripThroughAWSCLI|TestS3CompatibleStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestGatewayStorageVerifyRedisRejectsInlineCredentials|TestGatewayStorageVerifyS3CompatibleRejectsUnsafeLocation|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
+  -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestRedisStreamStateStoreRoundTripThroughRedisCLI|TestRedisStreamStateStoreVerifyRuntime|TestS3CompatibleStateStoreRoundTripThroughAWSCLI|TestS3CompatibleStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestGatewayStorageVerifyRedisRejectsInlineCredentials|TestGatewayStorageVerifyS3CompatibleRejectsUnsafeLocation|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOIDCJWKSVerifierAuthorizesRS256TokenByRole|TestOIDCJWKSVerifierRejectsUnsafeJWKSURL|TestOperatorAuthVerifyHosted|TestOperatorAuthVerifyOIDCJWKSWithToken' \
   -count=1 \
   > "$work_dir/hosted-storage-auth-smoke.txt"
 
 go test ./internal/hostedprovider ./internal/cli \
-	-run 'TestBuildAndVerifyHostedProviderPackage|TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildRedisHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildS3CompatibleHostedJWTProviderUsesBuiltInGatewayRuntime|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify|TestHostedProviderRedisHostedJWTUsesBuiltInGatewayRuntime|TestHostedProviderS3CompatibleHostedJWTUsesBuiltInGatewayRuntime' \
+	-run 'TestBuildAndVerifyHostedProviderPackage|TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildRedisHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildS3CompatibleHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildPostgresOIDCJWKSProviderUsesBuiltInGatewayRuntime|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify|TestHostedProviderRedisHostedJWTUsesBuiltInGatewayRuntime|TestHostedProviderS3CompatibleHostedJWTUsesBuiltInGatewayRuntime' \
 	-count=1 \
 	> "$work_dir/hosted-provider-package-smoke.txt"
 
@@ -501,6 +501,7 @@ s3_hosted_provider_manifest = json.loads((root / "hosted-provider-s3-jwt" / "hos
 s3_hosted_provider_verification = json.loads((root / "hosted-provider-s3-jwt-verification.json").read_text())
 external_hosted_provider_package = json.loads((root / "hosted-provider-postgres-oidc-package.json").read_text())
 external_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-oidc-verification.json").read_text())
+external_hosted_provider_manifest = json.loads((root / "hosted-provider-postgres-oidc" / "hosted-provider.json").read_text())
 external_hosted_runtime_contract = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-contract.json").read_text())
 hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-acceptance-package.json").read_text())
 hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
@@ -669,6 +670,9 @@ assert external_hosted_provider_package["storage_provider"] == "postgres", exter
 assert external_hosted_provider_package["auth_provider"] == "oidc-jwks", external_hosted_provider_package
 assert external_hosted_provider_verification["schema"] == "rdev.hosted-provider-package-verification.v1", external_hosted_provider_verification
 assert external_hosted_provider_verification["ok"] is True, external_hosted_provider_verification
+assert external_hosted_provider_manifest["gateway_args"][:6] == ["rdev", "gateway", "serve", "--storage-provider", "postgres", "--storage-path"], external_hosted_provider_manifest["gateway_args"]
+assert "--oidc-jwks-operator-auth" in external_hosted_provider_manifest["gateway_args"], external_hosted_provider_manifest["gateway_args"]
+assert "operator-reviewed-hosted-gateway-launcher" not in external_hosted_provider_manifest["gateway_args"], external_hosted_provider_manifest["gateway_args"]
 assert external_hosted_runtime_contract["schema_version"] == "rdev.hosted-provider-runtime-contract.v1", external_hosted_runtime_contract
 assert external_hosted_runtime_contract["runtime_status"] == "durable-runtime-evidence-required", external_hosted_runtime_contract
 assert len(external_hosted_runtime_contract["required_evidence"]) >= 9, external_hosted_runtime_contract
@@ -851,6 +855,7 @@ print(json.dumps({
     "s3_hosted_provider_package_schema": s3_hosted_provider_package["schema"],
     "s3_hosted_provider_runtime_gateway_args": True,
     "external_hosted_provider_package_schema": external_hosted_provider_package["schema"],
+    "oidc_jwks_hosted_provider_runtime_gateway_args": True,
     "external_hosted_provider_runtime_contract_schema": external_hosted_runtime_contract["schema_version"],
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],
     "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],

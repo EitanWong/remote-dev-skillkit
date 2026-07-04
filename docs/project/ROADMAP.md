@@ -46,6 +46,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `rdev operator-auth verify-hosted`, and `rdev gateway serve --dev
   --hosted-operator-auth`, with generic EdDSA JWT issuer/audience/key/role
   validation and no provider-specific hardcoded domains.
+- OIDC/JWKS operator auth runtime through
+  `rdev.oidc-jwks-operator-auth.v1`, `rdev operator-auth verify-oidc-jwks`,
+  and `rdev gateway serve --dev --oidc-jwks-operator-auth`, with RS256 JWKS
+  fetch, JWT signature, issuer, audience, expiry/not-before, subject, and role
+  validation while rejecting unsafe JWKS URLs.
 - Gateway state-store provider boundary through `--storage-provider`,
   `--storage-path`, and `rdev gateway storage verify`, with the built-in file
   provider preserving `rdev.gateway-snapshot.v1`.

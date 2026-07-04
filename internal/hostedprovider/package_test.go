@@ -59,12 +59,13 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 		authProvider     string
 		requiredEnv      []string
 		requiredEvidence []string
+		reviewedLauncher bool
 	}{
 		{
 			name:            "postgres oidc",
 			storageProvider: "postgres",
 			authProvider:    "oidc-jwks",
-			requiredEnv:     []string{"RDEV_POSTGRES_DSN_SECRET_REF", "RDEV_POSTGRES_BACKUP_COMMAND_REF", "RDEV_OIDC_JWKS_REF", "RDEV_HOSTED_RUNTIME_CONFIG"},
+			requiredEnv:     []string{"RDEV_POSTGRES_DSN_SECRET_REF", "RDEV_POSTGRES_BACKUP_COMMAND_REF", "RDEV_OIDC_OPERATOR_AUTH_FILE", "RDEV_OIDC_JWKS_REF", "RDEV_HOSTED_RUNTIME_CONFIG"},
 			requiredEvidence: []string{
 				"storage-verification",
 				"auth-verification",
@@ -73,6 +74,7 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 				"retention-evidence",
 				"failure-mode-evidence",
 			},
+			reviewedLauncher: false,
 		},
 		{
 			name:            "s3 saml",
@@ -84,6 +86,7 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 				"role-mapping-evidence",
 				"audit",
 			},
+			reviewedLauncher: true,
 		},
 	}
 	for _, tc := range cases {
@@ -126,9 +129,14 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 					t.Fatalf("missing evidence %q in %#v", expected, pkg.Runtime.RequiredEvidence)
 				}
 			}
-			if !slices.Contains(pkg.GatewayArgs, "--provider-package") ||
-				!slices.Contains(pkg.GatewayArgs, "${RDEV_HOSTED_RUNTIME_CONFIG}") {
-				t.Fatalf("expected reviewed external gateway launcher, got %#v", pkg.GatewayArgs)
+			if tc.reviewedLauncher {
+				if !slices.Contains(pkg.GatewayArgs, "--provider-package") ||
+					!slices.Contains(pkg.GatewayArgs, "${RDEV_HOSTED_RUNTIME_CONFIG}") {
+					t.Fatalf("expected reviewed external gateway launcher, got %#v", pkg.GatewayArgs)
+				}
+			} else if slices.Contains(pkg.GatewayArgs, "operator-reviewed-hosted-gateway-launcher") ||
+				!slices.Contains(pkg.GatewayArgs, "--oidc-jwks-operator-auth") {
+				t.Fatalf("expected built-in OIDC JWKS gateway launcher, got %#v", pkg.GatewayArgs)
 			}
 			if !slices.ContainsFunc(pkg.Files, func(file PackageFile) bool {
 				return file.Path == "runtime-contract.json" && file.Kind == "runtime-contract"
@@ -254,6 +262,43 @@ func TestBuildS3CompatibleHostedJWTProviderUsesBuiltInGatewayRuntime(t *testing.
 		envNames[env.Name] = true
 	}
 	for _, expected := range []string{"RDEV_GATEWAY_STORAGE_PATH", "RDEV_S3_ENDPOINT_SECRET_REF", "RDEV_S3_BUCKET_SECRET_REF", "RDEV_HOSTED_OPERATOR_AUTH_FILE"} {
+		if !envNames[expected] {
+			t.Fatalf("missing env %q in %#v", expected, pkg.Environment)
+		}
+	}
+}
+
+func TestBuildPostgresOIDCJWKSProviderUsesBuiltInGatewayRuntime(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "provider")
+	pkg, err := Build(Options{
+		OutDir:          out,
+		Name:            "postgres-oidc",
+		StorageProvider: "postgres",
+		AuthProvider:    "oidc-jwks",
+		GeneratedAt:     time.Date(2026, 7, 4, 23, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected package ok: %#v", pkg.Checks)
+	}
+	expectedArgs := "rdev gateway serve --storage-provider postgres --storage-path ${RDEV_GATEWAY_STORAGE_PATH} --oidc-jwks-operator-auth ${RDEV_OIDC_OPERATOR_AUTH_FILE}"
+	if strings.Join(pkg.GatewayArgs, " ") != expectedArgs {
+		t.Fatalf("expected built-in OIDC JWKS gateway args %q, got %#v", expectedArgs, pkg.GatewayArgs)
+	}
+	if slices.Contains(pkg.GatewayArgs, "operator-reviewed-hosted-gateway-launcher") {
+		t.Fatalf("OIDC JWKS package should not use placeholder launcher: %#v", pkg.GatewayArgs)
+	}
+	if pkg.Auth.Implementation != "built-in-rs256-jwks-runtime" ||
+		!strings.Contains(pkg.Auth.VerifyCommand, "rdev operator-auth verify-oidc-jwks") {
+		t.Fatalf("expected built-in OIDC JWKS runtime descriptor, got %#v", pkg.Auth)
+	}
+	envNames := map[string]bool{}
+	for _, env := range pkg.Environment {
+		envNames[env.Name] = true
+	}
+	for _, expected := range []string{"RDEV_GATEWAY_STORAGE_PATH", "RDEV_OIDC_OPERATOR_AUTH_FILE", "RDEV_OIDC_ISSUER", "RDEV_OIDC_AUDIENCE"} {
 		if !envNames[expected] {
 			t.Fatalf("missing env %q in %#v", expected, pkg.Environment)
 		}

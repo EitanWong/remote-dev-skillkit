@@ -362,11 +362,11 @@ func authDescriptor(provider string) Provider {
 		return Provider{
 			Kind:             "oidc-jwks",
 			Schema:           "rdev.hosted-auth.oidc-jwks.v1",
-			Implementation:   "provider-runtime-package",
+			Implementation:   "built-in-rs256-jwks-runtime",
 			RuntimeStatus:    "durable-runtime-evidence-required",
-			RequiredSettings: []string{"RDEV_OIDC_ISSUER", "RDEV_OIDC_AUDIENCE", "RDEV_OIDC_JWKS_REF", "RDEV_OIDC_ROLE_CLAIM", "RDEV_OIDC_CLOCK_SKEW_SECONDS"},
-			VerifyCommand:    "rdev hosted-provider verify --package <provider-package> && <operator-reviewed-oidc-jwks-probe>",
-			Notes:            []string{"Keep tenant domains and JWKS URLs in runtime config or secret references, not in the public package.", "Runtime evidence must prove valid token acceptance, invalid issuer/audience/key rejection, role mapping, and key rotation behavior."},
+			RequiredSettings: []string{"RDEV_OIDC_OPERATOR_AUTH_FILE", "RDEV_OIDC_ISSUER", "RDEV_OIDC_AUDIENCE", "RDEV_OIDC_JWKS_REF", "RDEV_OIDC_ROLE_CLAIM", "RDEV_OIDC_CLOCK_SKEW_SECONDS"},
+			VerifyCommand:    "rdev operator-auth verify-oidc-jwks --auth <oidc-jwks-auth-file> --token-file <operator-token-jwt-file> --role operator",
+			Notes:            []string{"Keep tenant domains and JWKS URLs in runtime config or secret references, not in the public package.", "The built-in runtime verifies RS256 JWTs against a fetched JWKS, issuer, audience, exp/nbf, and role claims.", "Runtime evidence must prove valid token acceptance, invalid issuer/audience/key rejection, role mapping, and key rotation behavior."},
 		}
 	case "saml-assertion":
 		return Provider{
@@ -392,15 +392,29 @@ func authDescriptor(provider string) Provider {
 }
 
 func gatewayArgs(storageProvider, authProvider string) []string {
-	if authProvider == "hosted-ed25519-jwt" && (storageProvider == "file" || storageProvider == "postgres" || storageProvider == "redis-stream" || storageProvider == "s3-compatible") {
+	if authProvider == "hosted-ed25519-jwt" && builtInGatewayStorageProvider(storageProvider) {
 		args := []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
 		args = append(args, "--hosted-operator-auth", "${RDEV_HOSTED_OPERATOR_AUTH_FILE}")
 		return args
 	}
-	if storageProvider != "file" || authProvider != "hosted-ed25519-jwt" {
+	if authProvider == "oidc-jwks" && builtInGatewayStorageProvider(storageProvider) {
+		args := []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
+		args = append(args, "--oidc-jwks-operator-auth", "${RDEV_OIDC_OPERATOR_AUTH_FILE}")
+		return args
+	}
+	if storageProvider != "file" || (authProvider != "hosted-ed25519-jwt" && authProvider != "oidc-jwks") {
 		return []string{"operator-reviewed-hosted-gateway-launcher", "--provider-package", "${RDEV_HOSTED_PROVIDER_PACKAGE}", "--runtime-config", "${RDEV_HOSTED_RUNTIME_CONFIG}"}
 	}
 	return []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
+}
+
+func builtInGatewayStorageProvider(provider string) bool {
+	switch provider {
+	case "file", "postgres", "redis-stream", "s3-compatible":
+		return true
+	default:
+		return false
+	}
 }
 
 func environment(storageProvider, authProvider string) []EnvVar {
@@ -515,6 +529,7 @@ func authEnvironment(provider string) []EnvVar {
 	switch provider {
 	case "oidc-jwks":
 		return []EnvVar{
+			{Name: "RDEV_OIDC_OPERATOR_AUTH_FILE", Required: true, Description: "Path to rdev.oidc-jwks-operator-auth.v1 runtime verifier config.", Secret: false},
 			{Name: "RDEV_OIDC_ISSUER", Required: true, Description: "Reviewed issuer identifier or runtime config reference.", Secret: false},
 			{Name: "RDEV_OIDC_AUDIENCE", Required: true, Description: "Reviewed audience value for gateway operator tokens.", Secret: false},
 			{Name: "RDEV_OIDC_JWKS_REF", Required: true, Description: "Reviewed JWKS URL/config reference or pinned key-set reference.", Secret: false},

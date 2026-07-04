@@ -681,31 +681,32 @@ type trustRevokeOptions struct {
 }
 
 type gatewayServeOptions struct {
-	Addr                    string
-	AuditLog                string
-	StatePath               string
-	StorageProvider         string
-	StoragePath             string
-	SigningKeyPath          string
-	SigningKeyID            string
-	ManifestSigningKeyPath  string
-	ManifestSigningKeyID    string
-	EnrollmentRootPublicKey string
-	EnrollmentKeyPath       string
-	EnrollmentKeyID         string
-	EnrollmentRevocations   string
-	TLSCertPath             string
-	TLSKeyPath              string
-	ClientCAPath            string
-	OperatorAuthPath        string
-	HostedOperatorAuthPath  string
-	RdevAssetsDir           string
-	AutoBuildRdevAssets     bool
-	RdevWindowsAMD64Path    string
-	RdevDarwinARM64Path     string
-	RdevDarwinAMD64Path     string
-	RdevLinuxAMD64Path      string
-	RdevLinuxARM64Path      string
+	Addr                     string
+	AuditLog                 string
+	StatePath                string
+	StorageProvider          string
+	StoragePath              string
+	SigningKeyPath           string
+	SigningKeyID             string
+	ManifestSigningKeyPath   string
+	ManifestSigningKeyID     string
+	EnrollmentRootPublicKey  string
+	EnrollmentKeyPath        string
+	EnrollmentKeyID          string
+	EnrollmentRevocations    string
+	TLSCertPath              string
+	TLSKeyPath               string
+	ClientCAPath             string
+	OperatorAuthPath         string
+	HostedOperatorAuthPath   string
+	OIDCJWKSOperatorAuthPath string
+	RdevAssetsDir            string
+	AutoBuildRdevAssets      bool
+	RdevWindowsAMD64Path     string
+	RdevDarwinARM64Path      string
+	RdevDarwinAMD64Path      string
+	RdevLinuxAMD64Path       string
+	RdevLinuxARM64Path       string
 }
 
 func (a App) operatorAuth(args []string) error {
@@ -739,6 +740,16 @@ func (a App) operatorAuth(args []string) error {
 			return err
 		}
 		return a.operatorAuthVerifyHosted(*authFile)
+	case "verify-oidc-jwks":
+		fs := flag.NewFlagSet("operator-auth verify-oidc-jwks", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		authFile := fs.String("auth", "", "OIDC JWKS operator auth JSON path")
+		tokenFile := fs.String("token-file", "", "optional file containing a compact JWT to verify")
+		role := fs.String("role", operatorauth.RoleOperator, "role required when --token-file is supplied")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.operatorAuthVerifyOIDCJWKS(*authFile, *tokenFile, *role)
 	default:
 		return fmt.Errorf("unknown operator-auth subcommand %q", args[0])
 	}
@@ -824,6 +835,58 @@ func (a App) operatorAuthVerifyHosted(authFile string) error {
 		"audience":       file.Audience,
 		"roles_claim":    rolesClaim,
 		"key_count":      len(file.Keys),
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) operatorAuthVerifyOIDCJWKS(authFile, tokenFile, role string) error {
+	if strings.TrimSpace(authFile) == "" {
+		return fmt.Errorf("--auth is required")
+	}
+	verifier, file, err := operatorauth.LoadOIDCJWKS(authFile)
+	if err != nil {
+		return err
+	}
+	rolesClaim := strings.TrimSpace(file.RolesClaim)
+	if rolesClaim == "" {
+		rolesClaim = "roles"
+	}
+	payload := map[string]any{
+		"schema_version":      file.SchemaVersion,
+		"auth_file":           authFile,
+		"ok":                  true,
+		"issuer":              file.Issuer,
+		"audience":            file.Audience,
+		"jwks_url_configured": strings.TrimSpace(file.JWKSURL) != "",
+		"roles_claim":         rolesClaim,
+		"key_count":           verifier.KeyCount(),
+		"token_verified":      false,
+	}
+	if strings.TrimSpace(tokenFile) != "" {
+		content, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return err
+		}
+		token := strings.TrimSpace(string(content))
+		if token == "" {
+			return fmt.Errorf("token file is empty")
+		}
+		requiredRole := strings.TrimSpace(role)
+		if requiredRole == "" {
+			requiredRole = operatorauth.RoleOperator
+		}
+		if !verifier.AuthorizeBearer("Bearer "+token, requiredRole) {
+			return fmt.Errorf("OIDC JWKS token verification failed for role %q", requiredRole)
+		}
+		claims, err := verifier.VerifyToken(token)
+		if err != nil {
+			return err
+		}
+		payload["token_verified"] = true
+		payload["subject"] = claims.Subject
+		payload["roles"] = claims.Roles
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -4930,6 +4993,7 @@ func (a App) gateway(args []string) error {
 		clientCA := fs.String("client-ca", "", "optional client CA PEM path; when set, require and verify client certificates")
 		operatorAuth := fs.String("operator-auth", "", "optional operator auth JSON file requiring bearer tokens for control-plane APIs")
 		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
+		oidcJWKSOperatorAuth := fs.String("oidc-jwks-operator-auth", "", "optional OIDC JWKS operator auth JSON file for RS256 JWT role tokens")
 		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
 		autoBuildRdevAssets := fs.Bool("auto-build-rdev-assets", true, "auto-build missing platform rdev helpers for dev gateway Connection Entry bootstraps when a checkout and Go are available")
 		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
@@ -4944,31 +5008,32 @@ func (a App) gateway(args []string) error {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
 		return a.gatewayServeDev(gatewayServeOptions{
-			Addr:                    *addr,
-			AuditLog:                *auditLog,
-			StatePath:               *statePath,
-			StorageProvider:         *storageProvider,
-			StoragePath:             *storagePath,
-			SigningKeyPath:          *signingKey,
-			SigningKeyID:            *signingKeyID,
-			ManifestSigningKeyPath:  *manifestSigningKey,
-			ManifestSigningKeyID:    *manifestSigningKeyID,
-			EnrollmentRootPublicKey: *enrollmentRootPublicKey,
-			EnrollmentKeyPath:       *enrollmentKey,
-			EnrollmentKeyID:         *enrollmentKeyID,
-			EnrollmentRevocations:   *enrollmentRevocations,
-			TLSCertPath:             *tlsCert,
-			TLSKeyPath:              *tlsKey,
-			ClientCAPath:            *clientCA,
-			OperatorAuthPath:        *operatorAuth,
-			HostedOperatorAuthPath:  *hostedOperatorAuth,
-			RdevAssetsDir:           *rdevAssetsDir,
-			AutoBuildRdevAssets:     *autoBuildRdevAssets,
-			RdevWindowsAMD64Path:    *rdevWindowsAMD64,
-			RdevDarwinARM64Path:     *rdevDarwinARM64,
-			RdevDarwinAMD64Path:     *rdevDarwinAMD64,
-			RdevLinuxAMD64Path:      *rdevLinuxAMD64,
-			RdevLinuxARM64Path:      *rdevLinuxARM64,
+			Addr:                     *addr,
+			AuditLog:                 *auditLog,
+			StatePath:                *statePath,
+			StorageProvider:          *storageProvider,
+			StoragePath:              *storagePath,
+			SigningKeyPath:           *signingKey,
+			SigningKeyID:             *signingKeyID,
+			ManifestSigningKeyPath:   *manifestSigningKey,
+			ManifestSigningKeyID:     *manifestSigningKeyID,
+			EnrollmentRootPublicKey:  *enrollmentRootPublicKey,
+			EnrollmentKeyPath:        *enrollmentKey,
+			EnrollmentKeyID:          *enrollmentKeyID,
+			EnrollmentRevocations:    *enrollmentRevocations,
+			TLSCertPath:              *tlsCert,
+			TLSKeyPath:               *tlsKey,
+			ClientCAPath:             *clientCA,
+			OperatorAuthPath:         *operatorAuth,
+			HostedOperatorAuthPath:   *hostedOperatorAuth,
+			OIDCJWKSOperatorAuthPath: *oidcJWKSOperatorAuth,
+			RdevAssetsDir:            *rdevAssetsDir,
+			AutoBuildRdevAssets:      *autoBuildRdevAssets,
+			RdevWindowsAMD64Path:     *rdevWindowsAMD64,
+			RdevDarwinARM64Path:      *rdevDarwinARM64,
+			RdevDarwinAMD64Path:      *rdevDarwinAMD64,
+			RdevLinuxAMD64Path:       *rdevLinuxAMD64,
+			RdevLinuxARM64Path:       *rdevLinuxARM64,
 		})
 	case "storage":
 		if len(args) < 2 {
@@ -5620,17 +5685,25 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		principals = file.Principals
 		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway operator auth loaded from %s principals=%d\n", opts.OperatorAuthPath, len(file.Principals))
 	}
-	var hostedIssuers []*operatorauth.HostedIssuer
+	var hostedSources []operatorauth.BearerAuthSource
 	if opts.HostedOperatorAuthPath != "" {
 		hosted, file, err := operatorauth.LoadHosted(opts.HostedOperatorAuthPath)
 		if err != nil {
 			return err
 		}
-		hostedIssuers = append(hostedIssuers, hosted)
+		hostedSources = append(hostedSources, hosted)
 		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway hosted operator auth loaded from %s issuer=%s audience=%s keys=%d\n", opts.HostedOperatorAuthPath, file.Issuer, file.Audience, len(file.Keys))
 	}
-	if len(hostedIssuers) > 0 {
-		combined, err := operatorauth.NewCombined(principals, hostedIssuers...)
+	if opts.OIDCJWKSOperatorAuthPath != "" {
+		oidc, file, err := operatorauth.LoadOIDCJWKS(opts.OIDCJWKSOperatorAuthPath)
+		if err != nil {
+			return err
+		}
+		hostedSources = append(hostedSources, oidc)
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway OIDC JWKS operator auth loaded from %s issuer=%s audience=%s keys=%d\n", opts.OIDCJWKSOperatorAuthPath, file.Issuer, file.Audience, oidc.KeyCount())
+	}
+	if len(hostedSources) > 0 {
+		combined, err := operatorauth.NewCombinedSources(principals, hostedSources...)
 		if err != nil {
 			return err
 		}
@@ -7908,9 +7981,11 @@ Usage:
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
   rdev operator-auth init --out .rdev/operator-auth/operators.json --token-dir .rdev/operator-auth/tokens
   rdev operator-auth verify --auth .rdev/operator-auth/operators.json
+  rdev operator-auth verify-oidc-jwks --auth .rdev/operator-auth/oidc-jwks.json --token-file .rdev/operator-auth/operator.jwt --role operator
   rdev gateway storage verify --provider postgres --path service=rdev_gateway
   rdev hosted-provider package --out dist/hosted-provider --storage-provider file --auth-provider hosted-ed25519-jwt
   rdev hosted-provider package --out dist/hosted-provider-postgres --storage-provider postgres --auth-provider hosted-ed25519-jwt
+  rdev hosted-provider package --out dist/hosted-provider-postgres-oidc --storage-provider postgres --auth-provider oidc-jwks
   rdev hosted-provider verify --package dist/hosted-provider
   rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --operator-token-file operator-token.txt
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff

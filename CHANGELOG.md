@@ -4,6 +4,47 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.24-dev
+
+Current phase: hosted auth is moving from provider contracts toward real
+runtime paths. The gateway now has a built-in OIDC/JWKS operator-auth verifier
+for RS256 JWTs, while production hosted claims still require real identity
+provider deployment evidence for key rotation, role mapping, failure modes,
+audit, and redaction.
+
+### Added
+
+- Added `rdev.oidc-jwks-operator-auth.v1` and
+  `operatorauth.OIDCJWKSVerifier` for OIDC/JWKS operator auth. The runtime
+  fetches JWKS, accepts supported RS256 RSA signing keys, verifies compact JWT
+  signatures, issuer, audience, `exp`, `nbf`, subject, and role claims, and
+  rejects unsafe JWKS URLs containing credentials, query strings, fragments, or
+  non-localhost plain HTTP.
+- Added `rdev operator-auth verify-oidc-jwks --auth <file>
+  [--token-file <jwt> --role <role>]` so operators and Agents can verify OIDC
+  JWKS configuration and optionally prove a real operator token before
+  packaging hosted auth evidence.
+- Added `rdev gateway serve --oidc-jwks-operator-auth <file>` so hosted
+  gateways can authorize control-plane requests with OIDC/JWKS role tokens in
+  addition to local hashed tokens and provider-neutral hosted EdDSA JWT files.
+- Updated `rdev hosted-provider package --auth-provider oidc-jwks` for built-in
+  storage providers so generated gateway args use
+  `--oidc-jwks-operator-auth ${RDEV_OIDC_OPERATOR_AUTH_FILE}` instead of a
+  placeholder reviewed launcher.
+- Updated release smoke to verify OIDC/JWKS RS256 token validation, unsafe JWKS
+  URL rejection, OIDC hosted-provider package generation/verification, and real
+  OIDC gateway args.
+
+### Remaining Gates
+
+- Run a real OIDC/JWKS identity-provider integration with valid and invalid
+  token probes, issuer/audience/key rejection, role mapping, key rotation,
+  failure-mode, audit, and redaction evidence, then package it with
+  `rdev acceptance package-hosted-provider-runtime`.
+- Continue SAML runtime integration beyond its current contract.
+- Continue real helper/relay adapter acceptance and GitHub Release
+  publication/download verification.
+
 ## 0.1.23-dev
 
 Current phase: hosted storage continues moving from provider contracts toward

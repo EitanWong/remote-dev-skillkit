@@ -66,6 +66,29 @@ issuer, audience, key id, `exp`, `nbf`, and role claims. It is provider-neutral:
 the project does not hardcode Okta, Auth0, cloud domains, private hosts, or
 operator paths.
 
+OIDC/JWKS operator auth can be configured with a runtime verifier file:
+
+```bash
+rdev operator-auth verify-oidc-jwks \
+  --auth .rdev/operator-auth/oidc-jwks.json \
+  --token-file .rdev/operator-auth/operator.jwt \
+  --role operator
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --oidc-jwks-operator-auth .rdev/operator-auth/oidc-jwks.json
+```
+
+The OIDC/JWKS auth file uses schema
+`rdev.oidc-jwks-operator-auth.v1`. The runtime fetches JWKS, accepts supported
+RS256 RSA signing keys, and validates JWT signature, issuer, audience, `exp`,
+`nbf`, subject, and role claims. JWKS URLs must not contain credentials, query
+strings, or fragments; plain HTTP is accepted only for localhost test
+endpoints. Keep tenant domains, JWKS URLs, and role-claim choices in reviewed
+runtime config or secret references, not in public packages.
+
 ## Storage
 
 Gateway state persistence is routed through a state-store provider boundary.
@@ -1198,7 +1221,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 
 - In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot. `--storage-provider postgres`, `--storage-provider redis-stream`, and `--storage-provider s3-compatible` add built-in `psql`/libpq, `redis-cli`, and `aws s3api` state-store runtimes, but production claims still require real backup or replay, restore, retention, role-mapping, failure-mode, audit, and redaction evidence.
 - WSS/mTLS host job transport is implemented for local release validation through `--transport wss`, `--tls-cert`, `--tls-key`, `--client-ca`, `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`. Real NAT, proxy, and platform-service acceptance still require target-environment evidence.
-- Hosted operator auth is provider-neutral EdDSA JWT verification. Hosted provider packages can describe OIDC/JWKS and SAML runtime evidence requirements, but this is not a bundled SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
+- Hosted operator auth includes provider-neutral EdDSA JWT verification and built-in OIDC/JWKS RS256 verification. Hosted provider packages can describe SAML runtime evidence requirements, but this is not a bundled SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
 - TLS lifecycle automation such as ACME issuance, certificate rotation, and public gateway deployment remains operator-managed. The gateway and host load explicit PEM material and enforce client certificates when `--client-ca` is configured.
 - Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.

@@ -39,7 +39,12 @@ type File struct {
 
 type Authorizer struct {
 	principals []Principal
-	hosted     []*HostedIssuer
+	hosted     []BearerAuthSource
+}
+
+type BearerAuthSource interface {
+	Enabled() bool
+	AuthorizeBearer(header string, allowedRoles ...string) bool
 }
 
 type InitResult struct {
@@ -79,6 +84,14 @@ func New(principals []Principal) (*Authorizer, error) {
 }
 
 func NewCombined(principals []Principal, hosted ...*HostedIssuer) (*Authorizer, error) {
+	sources := make([]BearerAuthSource, 0, len(hosted))
+	for _, issuer := range hosted {
+		sources = append(sources, issuer)
+	}
+	return NewCombinedSources(principals, sources...)
+}
+
+func NewCombinedSources(principals []Principal, hosted ...BearerAuthSource) (*Authorizer, error) {
 	if len(principals) == 0 && len(hosted) == 0 {
 		return nil, fmt.Errorf("operator auth requires at least one principal or hosted issuer")
 	}
