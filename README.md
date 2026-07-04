@@ -488,15 +488,16 @@ host enrollment certificates, revocations, workspace locks, approval gates,
 audit/evidence export, release bundle verification, SBOM/provenance support, and
 adapter paths for shell, PowerShell, Codex, Claude Code, and ACP/acpx. The
 current line also includes WSS/mTLS host job transport, hosted-auth verifier
-configuration, a storage-provider boundary with built-in `file` and
-`postgres` state-store providers, and enrollment authority lifecycle evidence
-commands. Hosted provider packages can be generated and verified with
+configuration, a storage-provider boundary with built-in `file`, `postgres`,
+`redis-stream`, and `s3-compatible` state-store providers, SAML/OIDC/JWKS auth
+runtime paths, and enrollment authority lifecycle evidence commands. Hosted
+provider packages can be generated and verified with
 `rdev hosted-provider package` / `rdev hosted-provider verify`; packages now
 include `rdev.hosted-provider-runtime-contract.v1` runtime contracts for
-Postgres, S3-compatible storage, Redis streams, OIDC/JWKS, and SAML evidence
-requirements without embedding private endpoints or credentials. The Postgres
-state-store path uses `psql`/libpq and rejects inline passwords so secrets stay
-outside process arguments. Chisel/frpc,
+Postgres, S3-compatible storage, Redis streams, OIDC/JWKS, and SAML runtime
+evidence requirements without embedding private endpoints or credentials. The
+Postgres state-store path uses `psql`/libpq and rejects inline passwords so
+secrets stay outside process arguments. Chisel/frpc,
 SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard connectivity
 adapter packages can be generated and verified with
 `rdev relay-adapter package` / `rdev relay-adapter verify`, giving Agents
@@ -519,11 +520,12 @@ no-private-parameter checks.
 
 Still gated before a production-grade hosted release: real platform acceptance
 evidence for Windows/Linux/macOS service modes, real durable third-party hosted
-storage/auth runtime evidence beyond the built-in Postgres state-store path,
-current provider-specific runtime contracts, and runtime evidence packager,
-real helper/relay adapter acceptance, and final external GitHub publishing plus
-real public download verification. The post-release download verifier package
-now exists, so those real transcripts can be archived with checksums and
+storage/auth runtime evidence beyond the built-in Postgres, Redis,
+S3-compatible, OIDC/JWKS, and SAML runtime paths, current provider-specific
+runtime contracts, and runtime evidence packager, real helper/relay adapter
+acceptance, and final external GitHub publishing plus real public download
+verification. The post-release download verifier package now exists, so those
+real transcripts can be archived with checksums and
 redaction once a release is published.
 
 ## Documentation Map

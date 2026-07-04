@@ -51,6 +51,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   and `rdev gateway serve --dev --oidc-jwks-operator-auth`, with RS256 JWKS
   fetch, JWT signature, issuer, audience, expiry/not-before, subject, and role
   validation while rejecting unsafe JWKS URLs.
+- SAML operator auth runtime through `rdev.saml-operator-auth.v1`, `rdev
+  operator-auth verify-saml`, and `rdev gateway serve --dev
+  --saml-operator-auth`, with signed SAMLResponse verification, IdP issuer,
+  audience, assertion consumer recipient, time-condition, SHA-256-or-better XML
+  signature, certificate trust, subject, and role-attribute validation.
 - Gateway state-store provider boundary through `--storage-provider`,
   `--storage-path`, and `rdev gateway storage verify`, with the built-in file
   provider preserving `rdev.gateway-snapshot.v1`.

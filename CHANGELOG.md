@@ -4,6 +4,45 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.26-dev
+
+Current phase: hosted auth is closing the last provider-contract-only runtime
+gap. SAML operator auth now has a built-in gateway verifier path, while real
+hosted claims still require deployed IdP evidence for role mapping, certificate
+rotation, failure probes, audit, and redaction.
+
+### Added
+
+- Added `rdev.saml-operator-auth.v1` and `operatorauth.SAMLVerifier` for
+  signed SAMLResponse bearer authorization. The verifier uses established
+  SAML/XMLDSig libraries, validates IdP issuer, audience, assertion consumer
+  recipient, assertion time conditions, SHA-256-or-better XML signature
+  algorithms, certificate trust, subject mapping, and role attributes, and
+  rejects private key material in SAML certificate config.
+- Added `rdev operator-auth verify-saml --auth <file>
+  [--response-file <base64-saml-response-file> --role <role>]` so operators
+  and Agents can verify SAML config and optionally prove a real operator
+  assertion before packaging hosted auth evidence.
+- Added `rdev gateway serve --saml-operator-auth <file>` so hosted gateways can
+  authorize control-plane requests with signed SAMLResponse bearer tokens in
+  addition to local hashed tokens, provider-neutral EdDSA JWT files, and
+  OIDC/JWKS RS256 JWTs.
+- Updated `rdev hosted-provider package --auth-provider saml-assertion` for
+  built-in storage providers so generated gateway args use
+  `--saml-operator-auth ${RDEV_SAML_OPERATOR_AUTH_FILE}` instead of a
+  placeholder reviewed launcher, with release-smoke coverage for S3-compatible
+  storage plus SAML auth.
+
+### Remaining Gates
+
+- Run a real SAML IdP integration with valid and invalid assertion probes,
+  issuer/audience/recipient/certificate rejection, role mapping, certificate
+  rotation, failure-mode, audit, and redaction evidence, then package it with
+  `rdev acceptance package-hosted-provider-runtime`.
+- Continue real deployed Postgres/Redis/S3/OIDC hosted provider evidence,
+  real helper/relay adapter acceptance, and GitHub Release publication/download
+  verification.
+
 ## 0.1.25-dev
 
 Current phase: restrictive-network helpers are moving from package metadata

@@ -80,13 +80,13 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 			name:            "s3 saml",
 			storageProvider: "s3-compatible",
 			authProvider:    "saml-assertion",
-			requiredEnv:     []string{"RDEV_S3_BUCKET_SECRET_REF", "RDEV_S3_RETENTION_POLICY_REF", "RDEV_SAML_METADATA_REF", "RDEV_HOSTED_PROVIDER_PACKAGE"},
+			requiredEnv:     []string{"RDEV_S3_BUCKET_SECRET_REF", "RDEV_S3_RETENTION_POLICY_REF", "RDEV_SAML_OPERATOR_AUTH_FILE", "RDEV_SAML_CERTIFICATE_REF"},
 			requiredEvidence: []string{
 				"gateway-startup",
 				"role-mapping-evidence",
 				"audit",
 			},
-			reviewedLauncher: true,
+			reviewedLauncher: false,
 		},
 	}
 	for _, tc := range cases {
@@ -134,9 +134,12 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 					!slices.Contains(pkg.GatewayArgs, "${RDEV_HOSTED_RUNTIME_CONFIG}") {
 					t.Fatalf("expected reviewed external gateway launcher, got %#v", pkg.GatewayArgs)
 				}
-			} else if slices.Contains(pkg.GatewayArgs, "operator-reviewed-hosted-gateway-launcher") ||
-				!slices.Contains(pkg.GatewayArgs, "--oidc-jwks-operator-auth") {
+			} else if slices.Contains(pkg.GatewayArgs, "operator-reviewed-hosted-gateway-launcher") {
+				t.Fatalf("expected built-in gateway launcher, got %#v", pkg.GatewayArgs)
+			} else if tc.authProvider == "oidc-jwks" && !slices.Contains(pkg.GatewayArgs, "--oidc-jwks-operator-auth") {
 				t.Fatalf("expected built-in OIDC JWKS gateway launcher, got %#v", pkg.GatewayArgs)
+			} else if tc.authProvider == "saml-assertion" && !slices.Contains(pkg.GatewayArgs, "--saml-operator-auth") {
+				t.Fatalf("expected built-in SAML gateway launcher, got %#v", pkg.GatewayArgs)
 			}
 			if !slices.ContainsFunc(pkg.Files, func(file PackageFile) bool {
 				return file.Path == "runtime-contract.json" && file.Kind == "runtime-contract"

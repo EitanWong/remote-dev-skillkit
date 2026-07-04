@@ -81,6 +81,27 @@ rdev gateway serve \
   --oidc-jwks-operator-auth .rdev/operator-auth/oidc-jwks.json
 ```
 
+SAML operator auth can be configured with a runtime verifier file:
+
+```bash
+rdev operator-auth verify-saml \
+  --auth .rdev/operator-auth/saml.json \
+  --response-file .rdev/operator-auth/operator.samlresponse \
+  --role operator
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --saml-operator-auth .rdev/operator-auth/saml.json
+```
+
+The SAML auth file uses schema `rdev.saml-operator-auth.v1` and validates
+signed SAMLResponse bearer tokens, IdP issuer, audience, assertion consumer
+recipient, assertion time conditions, certificate trust, subject mapping, and
+operator role attributes. Runtime config must keep tenant-specific metadata and
+certificate material outside public docs and provider packages.
+
 The OIDC/JWKS auth file uses schema
 `rdev.oidc-jwks-operator-auth.v1`. The runtime fetches JWKS, accepts supported
 RS256 RSA signing keys, and validates JWT signature, issuer, audience, `exp`,

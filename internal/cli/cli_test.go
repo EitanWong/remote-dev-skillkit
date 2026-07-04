@@ -2124,6 +2124,55 @@ func TestOperatorAuthVerifyOIDCJWKSWithToken(t *testing.T) {
 	}
 }
 
+func TestOperatorAuthVerifySAMLConfig(t *testing.T) {
+	now := time.Now().UTC()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "rdev test idp"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	authPath := filepath.Join(root, "saml-auth.json")
+	authFile := operatorauth.SAMLFile{
+		SchemaVersion:        operatorauth.SAMLSchemaVersion,
+		IDPIssuer:            "https://idp.example.test/saml",
+		Audience:             "rdev-gateway",
+		AssertionConsumerURL: "https://gateway.example.test/saml/acs",
+		RoleAttribute:        "rdev_roles",
+		CertificatePEM:       string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})),
+	}
+	content, err := json.Marshal(authFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"operator-auth", "verify-saml", "--auth", authPath}); err != nil {
+		t.Fatal(err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"ok": true`) ||
+		!strings.Contains(output, `"schema_version": "rdev.saml-operator-auth.v1"`) ||
+		!strings.Contains(output, `"certificate_count": 1`) ||
+		!strings.Contains(output, `"response_verified": false`) {
+		t.Fatalf("unexpected SAML verify output: %s", output)
+	}
+}
+
 func TestGatewayStorageVerifyRejectsUnknownProvider(t *testing.T) {
 	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
 	err := app.Run(context.Background(), []string{"gateway", "storage", "verify", "--provider", "unknown", "--path", filepath.Join(t.TempDir(), "state.json")})

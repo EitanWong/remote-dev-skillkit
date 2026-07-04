@@ -700,6 +700,7 @@ type gatewayServeOptions struct {
 	OperatorAuthPath         string
 	HostedOperatorAuthPath   string
 	OIDCJWKSOperatorAuthPath string
+	SAMLOperatorAuthPath     string
 	RdevAssetsDir            string
 	AutoBuildRdevAssets      bool
 	RdevWindowsAMD64Path     string
@@ -750,6 +751,16 @@ func (a App) operatorAuth(args []string) error {
 			return err
 		}
 		return a.operatorAuthVerifyOIDCJWKS(*authFile, *tokenFile, *role)
+	case "verify-saml":
+		fs := flag.NewFlagSet("operator-auth verify-saml", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		authFile := fs.String("auth", "", "SAML operator auth JSON path")
+		responseFile := fs.String("response-file", "", "optional file containing a base64 SAMLResponse to verify")
+		role := fs.String("role", operatorauth.RoleOperator, "role required when --response-file is supplied")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.operatorAuthVerifySAML(*authFile, *responseFile, *role)
 	default:
 		return fmt.Errorf("unknown operator-auth subcommand %q", args[0])
 	}
@@ -885,6 +896,58 @@ func (a App) operatorAuthVerifyOIDCJWKS(authFile, tokenFile, role string) error 
 			return err
 		}
 		payload["token_verified"] = true
+		payload["subject"] = claims.Subject
+		payload["roles"] = claims.Roles
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+func (a App) operatorAuthVerifySAML(authFile, responseFile, role string) error {
+	if strings.TrimSpace(authFile) == "" {
+		return fmt.Errorf("--auth is required")
+	}
+	verifier, file, err := operatorauth.LoadSAML(authFile)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"schema_version":               file.SchemaVersion,
+		"auth_file":                    authFile,
+		"ok":                           true,
+		"idp_issuer":                   file.IDPIssuer,
+		"audience":                     file.Audience,
+		"assertion_consumer_url":       file.AssertionConsumerURL,
+		"role_attribute":               file.RoleAttribute,
+		"subject_attribute":            file.SubjectAttribute,
+		"certificate_configured":       verifier.CertificateCount() > 0,
+		"certificate_count":            verifier.CertificateCount(),
+		"response_verified":            false,
+		"response_signature_validated": false,
+	}
+	if strings.TrimSpace(responseFile) != "" {
+		content, err := os.ReadFile(responseFile)
+		if err != nil {
+			return err
+		}
+		response := strings.TrimSpace(string(content))
+		if response == "" {
+			return fmt.Errorf("response file is empty")
+		}
+		requiredRole := strings.TrimSpace(role)
+		if requiredRole == "" {
+			requiredRole = operatorauth.RoleOperator
+		}
+		if !verifier.AuthorizeBearer("Bearer "+response, requiredRole) {
+			return fmt.Errorf("SAML response verification failed for role %q", requiredRole)
+		}
+		claims, err := verifier.VerifyResponse(response)
+		if err != nil {
+			return err
+		}
+		payload["response_verified"] = true
+		payload["response_signature_validated"] = claims.ResponseSignatureValidated
 		payload["subject"] = claims.Subject
 		payload["roles"] = claims.Roles
 	}
@@ -4994,6 +5057,7 @@ func (a App) gateway(args []string) error {
 		operatorAuth := fs.String("operator-auth", "", "optional operator auth JSON file requiring bearer tokens for control-plane APIs")
 		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
 		oidcJWKSOperatorAuth := fs.String("oidc-jwks-operator-auth", "", "optional OIDC JWKS operator auth JSON file for RS256 JWT role tokens")
+		samlOperatorAuth := fs.String("saml-operator-auth", "", "optional SAML operator auth JSON file for signed SAMLResponse bearer tokens")
 		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
 		autoBuildRdevAssets := fs.Bool("auto-build-rdev-assets", true, "auto-build missing platform rdev helpers for dev gateway Connection Entry bootstraps when a checkout and Go are available")
 		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
@@ -5027,6 +5091,7 @@ func (a App) gateway(args []string) error {
 			OperatorAuthPath:         *operatorAuth,
 			HostedOperatorAuthPath:   *hostedOperatorAuth,
 			OIDCJWKSOperatorAuthPath: *oidcJWKSOperatorAuth,
+			SAMLOperatorAuthPath:     *samlOperatorAuth,
 			RdevAssetsDir:            *rdevAssetsDir,
 			AutoBuildRdevAssets:      *autoBuildRdevAssets,
 			RdevWindowsAMD64Path:     *rdevWindowsAMD64,
@@ -5701,6 +5766,14 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		}
 		hostedSources = append(hostedSources, oidc)
 		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway OIDC JWKS operator auth loaded from %s issuer=%s audience=%s keys=%d\n", opts.OIDCJWKSOperatorAuthPath, file.Issuer, file.Audience, oidc.KeyCount())
+	}
+	if opts.SAMLOperatorAuthPath != "" {
+		saml, file, err := operatorauth.LoadSAML(opts.SAMLOperatorAuthPath)
+		if err != nil {
+			return err
+		}
+		hostedSources = append(hostedSources, saml)
+		_, _ = fmt.Fprintf(a.Stderr, "rdev gateway SAML operator auth loaded from %s issuer=%s audience=%s certificates=%d\n", opts.SAMLOperatorAuthPath, file.IDPIssuer, file.Audience, saml.CertificateCount())
 	}
 	if len(hostedSources) > 0 {
 		combined, err := operatorauth.NewCombinedSources(principals, hostedSources...)
@@ -7982,6 +8055,7 @@ Usage:
   rdev operator-auth init --out .rdev/operator-auth/operators.json --token-dir .rdev/operator-auth/tokens
   rdev operator-auth verify --auth .rdev/operator-auth/operators.json
   rdev operator-auth verify-oidc-jwks --auth .rdev/operator-auth/oidc-jwks.json --token-file .rdev/operator-auth/operator.jwt --role operator
+  rdev operator-auth verify-saml --auth .rdev/operator-auth/saml.json --response-file .rdev/operator-auth/operator.samlresponse --role operator
   rdev gateway storage verify --provider postgres --path service=rdev_gateway
   rdev hosted-provider package --out dist/hosted-provider --storage-provider file --auth-provider hosted-ed25519-jwt
   rdev hosted-provider package --out dist/hosted-provider-postgres --storage-provider postgres --auth-provider hosted-ed25519-jwt

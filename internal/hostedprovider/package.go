@@ -371,12 +371,12 @@ func authDescriptor(provider string) Provider {
 	case "saml-assertion":
 		return Provider{
 			Kind:             "saml-assertion",
-			Schema:           "rdev.hosted-auth.saml-assertion.v1",
-			Implementation:   "provider-runtime-package",
+			Schema:           "rdev.saml-operator-auth.v1",
+			Implementation:   "built-in-signed-saml-runtime",
 			RuntimeStatus:    "durable-runtime-evidence-required",
-			RequiredSettings: []string{"RDEV_SAML_METADATA_REF", "RDEV_SAML_AUDIENCE", "RDEV_SAML_ROLE_ATTRIBUTE", "RDEV_SAML_CLOCK_SKEW_SECONDS"},
-			VerifyCommand:    "rdev hosted-provider verify --package <provider-package> && <operator-reviewed-saml-probe>",
-			Notes:            []string{"Keep IdP metadata and certificate material in reviewed runtime config or secret references, not in this package.", "Runtime evidence must prove signed assertion acceptance, unsigned/expired/wrong-audience rejection, and role mapping."},
+			RequiredSettings: []string{"RDEV_SAML_OPERATOR_AUTH_FILE", "RDEV_SAML_IDP_ISSUER", "RDEV_SAML_AUDIENCE", "RDEV_SAML_ASSERTION_CONSUMER_URL", "RDEV_SAML_ROLE_ATTRIBUTE", "RDEV_SAML_CERTIFICATE_REF"},
+			VerifyCommand:    "rdev operator-auth verify-saml --auth <saml-auth-file> --response-file <saml-response-file> --role operator",
+			Notes:            []string{"Keep IdP domains, tenant metadata, and certificate material in reviewed runtime config or secret references, not in the public package.", "The built-in runtime verifies signed SAMLResponse bearer tokens, issuer, audience, recipient, assertion time conditions, SHA-256-or-better XML signatures, and role attributes.", "Runtime evidence must prove signed assertion acceptance, unsigned/expired/wrong-audience rejection, role mapping, and IdP certificate rotation behavior."},
 		}
 	default:
 		return Provider{
@@ -402,7 +402,12 @@ func gatewayArgs(storageProvider, authProvider string) []string {
 		args = append(args, "--oidc-jwks-operator-auth", "${RDEV_OIDC_OPERATOR_AUTH_FILE}")
 		return args
 	}
-	if storageProvider != "file" || (authProvider != "hosted-ed25519-jwt" && authProvider != "oidc-jwks") {
+	if authProvider == "saml-assertion" && builtInGatewayStorageProvider(storageProvider) {
+		args := []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
+		args = append(args, "--saml-operator-auth", "${RDEV_SAML_OPERATOR_AUTH_FILE}")
+		return args
+	}
+	if storageProvider != "file" || (authProvider != "hosted-ed25519-jwt" && authProvider != "oidc-jwks" && authProvider != "saml-assertion") {
 		return []string{"operator-reviewed-hosted-gateway-launcher", "--provider-package", "${RDEV_HOSTED_PROVIDER_PACKAGE}", "--runtime-config", "${RDEV_HOSTED_RUNTIME_CONFIG}"}
 	}
 	return []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
@@ -429,7 +434,7 @@ func environment(storageProvider, authProvider string) []EnvVar {
 	} else {
 		env = append(env, authEnvironment(authProvider)...)
 	}
-	if storageProvider != "file" || authProvider != "hosted-ed25519-jwt" {
+	if storageProvider != "file" || (authProvider != "hosted-ed25519-jwt" && authProvider != "oidc-jwks" && authProvider != "saml-assertion") {
 		env = append(env, EnvVar{Name: "RDEV_HOSTED_PROVIDER_PACKAGE", Required: true, Description: "Path to the verified hosted-provider package directory or hosted-provider.json.", Secret: false})
 		env = append(env, EnvVar{Name: "RDEV_HOSTED_RUNTIME_CONFIG", Required: true, Description: "Path to the reviewed runtime config assembled by the operator for this provider package.", Secret: false})
 	}
@@ -537,10 +542,12 @@ func authEnvironment(provider string) []EnvVar {
 		}
 	case "saml-assertion":
 		return []EnvVar{
-			{Name: "RDEV_SAML_METADATA_REF", Required: true, Description: "Reviewed SAML IdP metadata or certificate reference.", Secret: false},
+			{Name: "RDEV_SAML_OPERATOR_AUTH_FILE", Required: true, Description: "Path to rdev.saml-operator-auth.v1 runtime verifier config.", Secret: false},
+			{Name: "RDEV_SAML_IDP_ISSUER", Required: true, Description: "Reviewed SAML IdP issuer identifier or runtime config reference.", Secret: false},
 			{Name: "RDEV_SAML_AUDIENCE", Required: true, Description: "Reviewed SAML audience for gateway operator assertions.", Secret: false},
+			{Name: "RDEV_SAML_ASSERTION_CONSUMER_URL", Required: true, Description: "Reviewed assertion consumer URL expected in SAMLResponse recipient and destination fields.", Secret: false},
 			{Name: "RDEV_SAML_ROLE_ATTRIBUTE", Required: true, Description: "Reviewed SAML attribute used for operator role mapping.", Secret: false},
-			{Name: "RDEV_SAML_CLOCK_SKEW_SECONDS", Required: true, Description: "Reviewed maximum assertion clock skew in seconds.", Secret: false},
+			{Name: "RDEV_SAML_CERTIFICATE_REF", Required: true, Description: "Reviewed IdP signing certificate reference used to populate certificate_pem or certificate_file in runtime config.", Secret: false},
 		}
 	default:
 		return []EnvVar{{Name: "RDEV_HOSTED_AUTH_CONFIG", Required: true, Description: "Path to the reviewed external hosted auth provider configuration.", Secret: false}}

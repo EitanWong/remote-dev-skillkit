@@ -104,6 +104,16 @@ go run ./cmd/rdev hosted-provider verify \
 	--package "$external_hosted_provider_dir" \
 	> "$work_dir/hosted-provider-postgres-oidc-verification.json"
 
+saml_hosted_provider_dir="$work_dir/hosted-provider-s3-saml"
+go run ./cmd/rdev hosted-provider package \
+	--out "$saml_hosted_provider_dir" \
+	--storage-provider s3-compatible \
+	--auth-provider saml-assertion \
+	> "$work_dir/hosted-provider-s3-saml-package.json"
+go run ./cmd/rdev hosted-provider verify \
+	--package "$saml_hosted_provider_dir" \
+	> "$work_dir/hosted-provider-s3-saml-verification.json"
+
 hosted_runtime_input="$work_dir/hosted-runtime-input"
 mkdir -p "$hosted_runtime_input"
 printf '%s\n' 'gateway started with hosted provider package' > "$hosted_runtime_input/gateway-startup.txt"
@@ -503,6 +513,10 @@ external_hosted_provider_package = json.loads((root / "hosted-provider-postgres-
 external_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-oidc-verification.json").read_text())
 external_hosted_provider_manifest = json.loads((root / "hosted-provider-postgres-oidc" / "hosted-provider.json").read_text())
 external_hosted_runtime_contract = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-contract.json").read_text())
+saml_hosted_provider_package = json.loads((root / "hosted-provider-s3-saml-package.json").read_text())
+saml_hosted_provider_verification = json.loads((root / "hosted-provider-s3-saml-verification.json").read_text())
+saml_hosted_provider_manifest = json.loads((root / "hosted-provider-s3-saml" / "hosted-provider.json").read_text())
+saml_hosted_runtime_contract = json.loads((root / "hosted-provider-s3-saml" / "runtime-contract.json").read_text())
 hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-acceptance-package.json").read_text())
 hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
 relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
@@ -680,6 +694,18 @@ assert "operator-reviewed-hosted-gateway-launcher" not in external_hosted_provid
 assert external_hosted_runtime_contract["schema_version"] == "rdev.hosted-provider-runtime-contract.v1", external_hosted_runtime_contract
 assert external_hosted_runtime_contract["runtime_status"] == "durable-runtime-evidence-required", external_hosted_runtime_contract
 assert len(external_hosted_runtime_contract["required_evidence"]) >= 9, external_hosted_runtime_contract
+assert saml_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", saml_hosted_provider_package
+assert saml_hosted_provider_package["ok"] is True, saml_hosted_provider_package
+assert saml_hosted_provider_package["storage_provider"] == "s3-compatible", saml_hosted_provider_package
+assert saml_hosted_provider_package["auth_provider"] == "saml-assertion", saml_hosted_provider_package
+assert saml_hosted_provider_verification["schema"] == "rdev.hosted-provider-package-verification.v1", saml_hosted_provider_verification
+assert saml_hosted_provider_verification["ok"] is True, saml_hosted_provider_verification
+assert saml_hosted_provider_manifest["gateway_args"][:6] == ["rdev", "gateway", "serve", "--storage-provider", "s3-compatible", "--storage-path"], saml_hosted_provider_manifest["gateway_args"]
+assert "--saml-operator-auth" in saml_hosted_provider_manifest["gateway_args"], saml_hosted_provider_manifest["gateway_args"]
+assert "operator-reviewed-hosted-gateway-launcher" not in saml_hosted_provider_manifest["gateway_args"], saml_hosted_provider_manifest["gateway_args"]
+assert saml_hosted_runtime_contract["schema_version"] == "rdev.hosted-provider-runtime-contract.v1", saml_hosted_runtime_contract
+assert saml_hosted_runtime_contract["runtime_status"] == "durable-runtime-evidence-required", saml_hosted_runtime_contract
+assert any(item["example_command"].startswith("rdev operator-auth verify-saml") for item in saml_hosted_runtime_contract["required_evidence"] if item["name"] == "auth-verification"), saml_hosted_runtime_contract
 assert hosted_provider_runtime_package["schema"] == "rdev.acceptance-package.hosted-provider-runtime.v1", hosted_provider_runtime_package
 assert hosted_provider_runtime_package["ok"] is True, hosted_provider_runtime_package
 assert hosted_provider_runtime_package["storage_provider"] == "file", hosted_provider_runtime_package
@@ -868,6 +894,9 @@ print(json.dumps({
     "external_hosted_provider_package_schema": external_hosted_provider_package["schema"],
     "oidc_jwks_hosted_provider_runtime_gateway_args": True,
     "external_hosted_provider_runtime_contract_schema": external_hosted_runtime_contract["schema_version"],
+    "saml_hosted_provider_package_schema": saml_hosted_provider_package["schema"],
+    "saml_hosted_provider_runtime_gateway_args": True,
+    "saml_hosted_provider_runtime_contract_schema": saml_hosted_runtime_contract["schema_version"],
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],
     "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],
     "relay_adapter_package_schema": relay_adapter_package["schema"],
