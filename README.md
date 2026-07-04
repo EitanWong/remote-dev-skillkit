@@ -492,10 +492,13 @@ evidence commands. Hosted provider packages can be generated and verified with
 `rdev hosted-provider package` / `rdev hosted-provider verify`. Chisel/frpc
 relay adapter packages can be generated and verified with
 `rdev relay-adapter package` / `rdev relay-adapter verify`, giving Agents
-standard `RDEV_RELAY_*` runner metadata instead of custom tunnel scripts.
-Release candidates now also include a verifiable `connection-entry-release.zip`
-with platform artifacts, release metadata, runner template, visible launchers,
-archive checksums, and no-private-parameter checks.
+standard `RDEV_RELAY_*` runner metadata instead of custom tunnel scripts. Real
+relay runs can be archived and verified with
+`rdev acceptance package-relay-adapter` /
+`rdev acceptance verify-relay-adapter-package`. Release candidates now also
+include a verifiable `connection-entry-release.zip` with platform artifacts,
+release metadata, runner template, visible launchers, archive checksums, and
+no-private-parameter checks.
 
 Still gated before a production-grade hosted release: real platform acceptance
 evidence for Windows/Linux/macOS service modes, real durable third-party hosted

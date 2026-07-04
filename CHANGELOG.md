@@ -29,15 +29,27 @@ is not yet real cross-network acceptance evidence for a deployed relay service.
   `rdev.relay_adapter.verify` so fresh Agents can discover and verify relay
   adapter packages instead of inventing PowerShell, shell, tunnel, approval, or
   polling scripts.
-- Updated release smoke to generate and verify a Chisel relay adapter package,
-  reporting `relay_adapter_package_schema` and
-  `relay_adapter_package_verification_schema`.
+- Added `rdev.acceptance-package.relay-adapter.v1` through
+  `rdev acceptance package-relay-adapter`, plus
+  `rdev.acceptance-verification.relay-adapter-package.v1` through
+  `rdev acceptance verify-relay-adapter-package`. The package/verifier archives
+  the verified relay adapter package, Connection Entry runner result, helper
+  transcript, gateway status, host status, connection status, audit transcript,
+  checksums, and redacted evidence. It fails unless the runner selected
+  `existing-frp-or-chisel-relay` and the connection status reports
+  `connected=true`.
+- Updated release smoke to generate and verify a Chisel relay adapter package
+  and a relay adapter acceptance package, reporting
+  `relay_adapter_package_schema`,
+  `relay_adapter_package_verification_schema`,
+  `relay_adapter_acceptance_package_schema`, and
+  `relay_adapter_acceptance_verification_schema`.
 
 ### Remaining Gates
 
 - Run real restrictive-network acceptance for Chisel and frpc across clean
-  Windows/macOS/Linux targets with a deployed relay endpoint and redacted
-  evidence bundle.
+  Windows/macOS/Linux targets with a deployed relay endpoint and publish the
+  resulting `rdev.acceptance-package.relay-adapter.v1` evidence bundle.
 - Add headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel adapter
   packages with equivalent verification and runner evidence.
 - Continue real hosted provider runtime and GitHub Release publication work.

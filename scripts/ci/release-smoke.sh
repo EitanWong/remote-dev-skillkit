@@ -41,6 +41,11 @@ go test ./internal/relayadapter ./internal/cli \
 	-count=1 \
 	> "$work_dir/relay-adapter-package-smoke.txt"
 
+go test ./internal/acceptance ./internal/cli \
+	-run 'TestPackageAndVerifyRelayAdapterEvidence|TestVerifyRelayAdapterEvidenceRejectsMissingConnection|TestAcceptancePackageRelayAdapter' \
+	-count=1 \
+	> "$work_dir/relay-adapter-acceptance-package-smoke.txt"
+
 hosted_provider_dir="$work_dir/hosted-provider"
 go run ./cmd/rdev hosted-provider package \
 	--out "$hosted_provider_dir" \
@@ -59,6 +64,29 @@ go run ./cmd/rdev relay-adapter package \
 go run ./cmd/rdev relay-adapter verify \
 	--package "$relay_adapter_dir" \
 	> "$work_dir/relay-adapter-verification.json"
+
+relay_acceptance_input="$work_dir/relay-acceptance-input"
+mkdir -p "$relay_acceptance_input"
+printf '%s\n' '{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-frp-or-chisel-relay","helper_started":true}' > "$relay_acceptance_input/runner-result.json"
+printf '%s\n' 'started reviewed relay helper' > "$relay_acceptance_input/helper-transcript.txt"
+printf '%s\n' '{"ok":true,"status":"healthy"}' > "$relay_acceptance_input/gateway-status.json"
+printf '%s\n' '{"ok":true,"host_status":"active"}' > "$relay_acceptance_input/host-status.json"
+printf '%s\n' '{"ok":true,"connected":true}' > "$relay_acceptance_input/connection-status.json"
+printf '%s\n' 'helper_start' 'host_registered' 'cleanup' > "$relay_acceptance_input/audit.txt"
+relay_acceptance_dir="$work_dir/relay-acceptance"
+go run ./cmd/rdev acceptance package-relay-adapter \
+	--relay-package "$relay_adapter_dir" \
+	--out "$relay_acceptance_dir" \
+	--runner-result "$relay_acceptance_input/runner-result.json" \
+	--helper-transcript "$relay_acceptance_input/helper-transcript.txt" \
+	--gateway-status "$relay_acceptance_input/gateway-status.json" \
+	--host-status "$relay_acceptance_input/host-status.json" \
+	--connection-status "$relay_acceptance_input/connection-status.json" \
+	--audit "$relay_acceptance_input/audit.txt" \
+	> "$work_dir/relay-adapter-acceptance-package.json"
+go run ./cmd/rdev acceptance verify-relay-adapter-package \
+	--package "$relay_acceptance_dir" \
+	> "$work_dir/relay-adapter-acceptance-verification.json"
 
 go test ./internal/enrollmentlifecycle ./internal/cli \
 	-run 'TestBuildFleetRenewalPlan|TestEnrollmentLifecycleKeyCustodyWritesRecord|TestEnrollmentLifecycleFleetRenewalPlanRequiresRevocations|TestEnrollmentLifecycleEmergencyDrillWritesEvidence' \
@@ -259,6 +287,8 @@ hosted_provider_package = json.loads((root / "hosted-provider-package.json").rea
 hosted_provider_verification = json.loads((root / "hosted-provider-verification.json").read_text())
 relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
 relay_adapter_verification = json.loads((root / "relay-adapter-verification.json").read_text())
+relay_adapter_acceptance_package = json.loads((root / "relay-adapter-acceptance-package.json").read_text())
+relay_adapter_acceptance_verification = json.loads((root / "relay-adapter-acceptance-verification.json").read_text())
 post_release_output = json.loads((root / "post-release-output.json").read_text())
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
@@ -388,6 +418,10 @@ assert relay_adapter_package["runner_env"]["gateway_url_var"] == "RDEV_RELAY_GAT
 assert relay_adapter_verification["schema"] == "rdev.relay-adapter-package-verification.v1", relay_adapter_verification
 assert relay_adapter_verification["ok"] is True, relay_adapter_verification
 assert relay_adapter_verification["adapter_kind"] == "chisel", relay_adapter_verification
+assert relay_adapter_acceptance_package["schema"] == "rdev.acceptance-package.relay-adapter.v1", relay_adapter_acceptance_package
+assert relay_adapter_acceptance_package["ok"] is True, relay_adapter_acceptance_package
+assert relay_adapter_acceptance_verification["schema"] == "rdev.acceptance-verification.relay-adapter-package.v1", relay_adapter_acceptance_verification
+assert relay_adapter_acceptance_verification["ok"] is True, relay_adapter_acceptance_verification
 assert post_release_output["ok"] is True, post_release_output
 assert post_release_plan["schema_version"] == "rdev.post-release-install-plan.v1", post_release_plan
 assert post_release_plan["external_mutation"] is False, post_release_plan
@@ -513,6 +547,8 @@ print(json.dumps({
     "hosted_provider_package_verification_schema": hosted_provider_verification["schema"],
     "relay_adapter_package_schema": relay_adapter_package["schema"],
     "relay_adapter_package_verification_schema": relay_adapter_verification["schema"],
+    "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],
+    "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
     "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

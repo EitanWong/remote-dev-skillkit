@@ -1289,6 +1289,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyLinuxManagedService(*plan)
+	case "verify-relay-adapter-package":
+		fs := flag.NewFlagSet("acceptance verify-relay-adapter-package", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		packagePath := fs.String("package", "", "relay adapter acceptance package directory or package.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerifyRelayAdapterPackage(*packagePath)
 	case "package-windows-temporary":
 		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1377,6 +1385,32 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			JobEvidenceDir:          *jobEvidenceDir,
 			StopTranscriptPath:      *stopTranscript,
 			UninstallTranscriptPath: *uninstallTranscript,
+			NotesPath:               *notes,
+		})
+	case "package-relay-adapter":
+		fs := flag.NewFlagSet("acceptance package-relay-adapter", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		relayPackage := fs.String("relay-package", "", "verified relay adapter package directory or relay-adapter.json")
+		out := fs.String("out", "", "empty output directory for packaged relay adapter evidence")
+		runnerResult := fs.String("runner-result", "", "Connection Entry runner result JSON selecting existing-frp-or-chisel-relay")
+		helperTranscript := fs.String("helper-transcript", "", "helper start transcript or supervisor evidence")
+		gatewayStatus := fs.String("gateway-status", "", "gateway health/status JSON or transcript")
+		hostStatus := fs.String("host-status", "", "host registration/status JSON or transcript")
+		connectionStatus := fs.String("connection-status", "", "support-session status JSON or connection supervision output")
+		auditPath := fs.String("audit", "", "audit export or transcript covering helper start, registration, and cleanup")
+		notes := fs.String("notes", "", "optional operator notes file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptancePackageRelayAdapter(acceptance.RelayAdapterPackageOptions{
+			RelayAdapterPackagePath: *relayPackage,
+			OutDir:                  *out,
+			RunnerResultPath:        *runnerResult,
+			HelperTranscriptPath:    *helperTranscript,
+			GatewayStatusPath:       *gatewayStatus,
+			HostStatusPath:          *hostStatus,
+			ConnectionStatusPath:    *connectionStatus,
+			AuditPath:               *auditPath,
 			NotesPath:               *notes,
 		})
 	default:
@@ -1653,6 +1687,31 @@ func (a App) acceptanceVerifyLinuxManagedService(planPath string) error {
 	return nil
 }
 
+func (a App) acceptanceVerifyRelayAdapterPackage(packagePath string) error {
+	verification, err := acceptance.VerifyRelayAdapterAcceptancePackage(packagePath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"package":             verification.PackagePath,
+		"package_schema":      verification.PackageSchema,
+		"checks":              verification.Checks,
+		"files":               verification.Files,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("relay adapter acceptance package verification failed")
+	}
+	return nil
+}
+
 func (a App) acceptancePackageWindowsTemporary(opts acceptance.WindowsTemporaryPackageOptions) error {
 	pkg, err := acceptance.PackageWindowsTemporaryEvidence(opts)
 	if err != nil {
@@ -1730,6 +1789,33 @@ func (a App) acceptancePackageLinuxManagedService(opts acceptance.LinuxManagedSe
 	}
 	if !pkg.OK() {
 		return fmt.Errorf("linux managed service acceptance package verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptancePackageRelayAdapter(opts acceptance.RelayAdapterPackageOptions) error {
+	pkg, err := acceptance.PackageRelayAdapterEvidence(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    pkg.OK(),
+		"schema":                pkg.SchemaVersion,
+		"out":                   pkg.OutDir,
+		"package":               filepath.Join(pkg.OutDir, "package.json"),
+		"checksums":             filepath.Join(pkg.OutDir, "checksums.txt"),
+		"checks":                pkg.Checks,
+		"files":                 pkg.Files,
+		"redaction_rule_counts": pkg.RedactionRuleCounts,
+		"recommended_actions":   pkg.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("relay adapter acceptance package verification failed")
 	}
 	return nil
 }
@@ -7614,9 +7700,11 @@ Usage:
   rdev acceptance verify-windows-temporary --plan windows-plan/windows-temporary-plan.json
   rdev acceptance verify-windows-managed-service --plan windows-service-plan/windows-managed-service-plan.json
   rdev acceptance verify-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json
+  rdev acceptance verify-relay-adapter-package --package relay-evidence/package.json
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
+  rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --runner-result runner-result.json --helper-transcript helper.txt --gateway-status gateway-status.json --host-status host-status.json --connection-status connection-status.json --audit audit.jsonl
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json

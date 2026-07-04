@@ -8345,8 +8345,104 @@ func TestAcceptancePackageLinuxManagedService(t *testing.T) {
 	}
 }
 
+func TestAcceptancePackageRelayAdapter(t *testing.T) {
+	root := t.TempDir()
+	relayOut := filepath.Join(root, "relay")
+	var relayStdout bytes.Buffer
+	app := NewApp(&relayStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"relay-adapter", "package",
+		"--out", relayOut,
+		"--adapter", "chisel",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeRelayAdapterEvidenceForCLITest(t, root)
+	var stdout bytes.Buffer
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-relay-adapter",
+		"--relay-package", relayOut,
+		"--out", filepath.Join(root, "relay-evidence"),
+		"--runner-result", evidence.runnerResult,
+		"--helper-transcript", evidence.helperTranscript,
+		"--gateway-status", evidence.gatewayStatus,
+		"--host-status", evidence.hostStatus,
+		"--connection-status", evidence.connectionStatus,
+		"--audit", evidence.audit,
+	}); err != nil {
+		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+	}
+	var payload struct {
+		OK      bool   `json:"ok"`
+		Schema  string `json:"schema"`
+		Package string `json:"package"`
+		Files   []struct {
+			Path string `json:"path"`
+			Kind string `json:"kind"`
+		} `json:"files"`
+		RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != "rdev.acceptance-package.relay-adapter.v1" {
+		t.Fatalf("unexpected package output: %s", stdout.String())
+	}
+	if payload.RedactionRuleCounts["github_token"] != 1 {
+		t.Fatalf("expected github token redaction, got %#v", payload.RedactionRuleCounts)
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "verify-relay-adapter-package",
+		"--package", payload.Package,
+	}); err != nil {
+		t.Fatalf("expected verify command to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.acceptance-verification.relay-adapter-package.v1"`) ||
+		!strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("unexpected verify output: %s", verifyStdout.String())
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
+}
+
+type relayAdapterEvidenceForCLITest struct {
+	runnerResult     string
+	helperTranscript string
+	gatewayStatus    string
+	hostStatus       string
+	connectionStatus string
+	audit            string
+}
+
+func writeRelayAdapterEvidenceForCLITest(t *testing.T, root string) relayAdapterEvidenceForCLITest {
+	t.Helper()
+	evidenceRoot := filepath.Join(root, "relay-package-fixture")
+	runnerResult := filepath.Join(evidenceRoot, "runner-result.json")
+	helperTranscript := filepath.Join(evidenceRoot, "helper-transcript.txt")
+	gatewayStatus := filepath.Join(evidenceRoot, "gateway-status.json")
+	hostStatus := filepath.Join(evidenceRoot, "host-status.json")
+	connectionStatus := filepath.Join(evidenceRoot, "connection-status.json")
+	audit := filepath.Join(evidenceRoot, "audit.txt")
+	writeFileForCLITest(t, runnerResult, `{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-frp-or-chisel-relay","helper_started":true}`+"\n")
+	writeFileForCLITest(t, helperTranscript, "started reviewed relay helper\ntoken ghp_abcdefghijklmnopqrstuvwx\n")
+	writeFileForCLITest(t, gatewayStatus, `{"ok":true,"status":"healthy"}`+"\n")
+	writeFileForCLITest(t, hostStatus, `{"ok":true,"host_status":"active"}`+"\n")
+	writeFileForCLITest(t, connectionStatus, `{"ok":true,"connected":true}`+"\n")
+	writeFileForCLITest(t, audit, "helper_start\nhost_registered\ncleanup\n")
+	return relayAdapterEvidenceForCLITest{
+		runnerResult:     runnerResult,
+		helperTranscript: helperTranscript,
+		gatewayStatus:    gatewayStatus,
+		hostStatus:       hostStatus,
+		connectionStatus: connectionStatus,
+		audit:            audit,
+	}
 }
 
 type linuxPackageEvidenceForCLITest struct {

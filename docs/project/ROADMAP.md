@@ -63,6 +63,14 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   reviewed dependency install actions, approval boundaries, checksums, and
   no-private-surface evidence without bundling relay endpoints, credentials,
   private IPs, or local paths.
+- Relay adapter acceptance packaging and verification through
+  `rdev.acceptance-package.relay-adapter.v1`,
+  `rdev acceptance package-relay-adapter`,
+  `rdev.acceptance-verification.relay-adapter-package.v1`, and
+  `rdev acceptance verify-relay-adapter-package`, archiving real runner,
+  helper, gateway, host, connection-status, audit, redaction, and checksum
+  evidence while requiring `selected_path=existing-frp-or-chisel-relay` and
+  `connected=true`.
 - Dev hosted enrollment issuance primitive through `POST /v1/enrollment/certificates`, `rdev gateway serve --dev --enrollment-key`, and `rdev enrollment issue-certificate --gateway ... --root-public-key ...`, issuing pinned-root-verified certificates from a configured gateway issuer while preventing requested certificate capabilities from exceeding the ticket capabilities.
 - Operator-auth protection for dev hosted enrollment issuance through `rdev gateway serve --dev --operator-auth` and `rdev enrollment issue-certificate --operator-token-file`, keeping tokens out of command output while requiring an `issuer` role token.
 - Local enrollment certificate renewal primitive through `rdev enrollment renew-certificate`, preserving the existing certificate scope, requiring the current certificate to verify, optionally checking signed revocation lists before renewal, and emitting a new certificate fingerprint and validity window.
