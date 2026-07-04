@@ -392,14 +392,15 @@ func authDescriptor(provider string) Provider {
 }
 
 func gatewayArgs(storageProvider, authProvider string) []string {
+	if authProvider == "hosted-ed25519-jwt" && (storageProvider == "file" || storageProvider == "postgres") {
+		args := []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
+		args = append(args, "--hosted-operator-auth", "${RDEV_HOSTED_OPERATOR_AUTH_FILE}")
+		return args
+	}
 	if storageProvider != "file" || authProvider != "hosted-ed25519-jwt" {
 		return []string{"operator-reviewed-hosted-gateway-launcher", "--provider-package", "${RDEV_HOSTED_PROVIDER_PACKAGE}", "--runtime-config", "${RDEV_HOSTED_RUNTIME_CONFIG}"}
 	}
-	args := []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
-	if authProvider == "hosted-ed25519-jwt" {
-		args = append(args, "--hosted-operator-auth", "${RDEV_HOSTED_OPERATOR_AUTH_FILE}")
-	}
-	return args
+	return []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
 }
 
 func environment(storageProvider, authProvider string) []EnvVar {
@@ -479,7 +480,8 @@ func storageEnvironment(provider string) []EnvVar {
 	switch provider {
 	case "postgres":
 		return []EnvVar{
-			{Name: "RDEV_POSTGRES_DSN_SECRET_REF", Required: true, Description: "Secret-manager reference for the PostgreSQL DSN.", Secret: true},
+			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "libpq connection info or service name for the built-in Postgres gateway state store. Do not include inline passwords; use PGSERVICE, .pgpass, or an operator-approved secret injector.", Secret: false},
+			{Name: "RDEV_POSTGRES_DSN_SECRET_REF", Required: true, Description: "Secret-manager reference for the PostgreSQL connection info used to populate RDEV_GATEWAY_STORAGE_PATH at runtime.", Secret: true},
 			{Name: "RDEV_POSTGRES_TLS_MODE", Required: true, Description: "Reviewed PostgreSQL TLS mode, for example require or verify-full.", Secret: false},
 			{Name: "RDEV_POSTGRES_MIGRATIONS_REF", Required: true, Description: "Reviewed migration bundle or schema bootstrap reference.", Secret: false},
 			{Name: "RDEV_POSTGRES_BACKUP_COMMAND_REF", Required: true, Description: "Reviewed backup command or managed backup policy reference.", Secret: false},

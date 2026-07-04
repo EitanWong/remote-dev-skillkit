@@ -2010,6 +2010,14 @@ func TestGatewayStorageVerifyFileProvider(t *testing.T) {
 	}
 }
 
+func TestGatewayStorageVerifyPostgresRejectsInlinePassword(t *testing.T) {
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{"gateway", "storage", "verify", "--provider", "postgres", "--path", "postgres://rdev:secret@example.invalid/rdev"})
+	if err == nil || !strings.Contains(err.Error(), "must not contain inline passwords") {
+		t.Fatalf("expected inline password rejection, got %v", err)
+	}
+}
+
 func TestHostedProviderPackageAndVerify(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "provider")
 	var packageStdout bytes.Buffer

@@ -69,13 +69,22 @@ operator paths.
 ## Storage
 
 Gateway state persistence is routed through a state-store provider boundary.
-The built-in provider is `file`; future hosted providers should implement the
-same load/save contract instead of changing HTTP handlers.
+The built-in providers are `file` and `postgres`; future hosted providers
+should implement the same load/save contract instead of changing HTTP
+handlers. The Postgres provider uses `psql`/libpq, stores the current
+`rdev.gateway-snapshot.v1` as JSONB in `rdev_gateway_snapshots`, and refuses
+inline passwords in `--storage-path`. Use a libpq service file, `.pgpass`,
+environment injection, or an operator-approved secret manager instead of
+placing database passwords in process arguments.
 
 ```bash
 rdev gateway storage verify \
   --provider file \
   --path .rdev/gateway/state.json
+
+rdev gateway storage verify \
+  --provider postgres \
+  --path service=rdev_gateway
 
 rdev gateway serve \
   --dev \
@@ -83,6 +92,13 @@ rdev gateway serve \
   --signing-key .rdev/keys/gateway-signing-key.json \
   --storage-provider file \
   --storage-path .rdev/gateway/state.json
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --storage-provider postgres \
+  --storage-path service=rdev_gateway
 ```
 
 `--state` remains a convenience alias for the file provider path.
@@ -96,7 +112,7 @@ credentials or private endpoints.
 ```bash
 rdev hosted-provider package \
   --out dist/hosted-provider \
-  --storage-provider file \
+  --storage-provider postgres \
   --auth-provider hosted-ed25519-jwt
 
 rdev hosted-provider verify \
@@ -1150,7 +1166,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 
 ## Limitations
 
-- In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot, but the built-in file provider is not a multi-node database, distributed lock manager, or backup policy.
+- In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot. `--storage-provider postgres` adds a built-in `psql`/libpq JSONB snapshot store, but production claims still require real backup, restore, retention, role-mapping, failure-mode, audit, and redaction evidence.
 - WSS/mTLS host job transport is implemented for local release validation through `--transport wss`, `--tls-cert`, `--tls-key`, `--client-ca`, `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`. Real NAT, proxy, and platform-service acceptance still require target-environment evidence.
 - Hosted operator auth is provider-neutral EdDSA JWT verification. Hosted provider packages can describe OIDC/JWKS and SAML runtime evidence requirements, but this is not a bundled SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
 - TLS lifecycle automation such as ACME issuance, certificate rotation, and public gateway deployment remains operator-managed. The gateway and host load explicit PEM material and enforce client certificates when `--client-ca` is configured.

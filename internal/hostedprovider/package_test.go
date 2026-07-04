@@ -157,6 +157,39 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 	}
 }
 
+func TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "provider")
+	pkg, err := Build(Options{
+		OutDir:          out,
+		Name:            "postgres-hosted-jwt",
+		StorageProvider: "postgres",
+		AuthProvider:    "hosted-ed25519-jwt",
+		GeneratedAt:     time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected package ok: %#v", pkg.Checks)
+	}
+	expectedArgs := "rdev gateway serve --storage-provider postgres --storage-path ${RDEV_GATEWAY_STORAGE_PATH} --hosted-operator-auth ${RDEV_HOSTED_OPERATOR_AUTH_FILE}"
+	if strings.Join(pkg.GatewayArgs, " ") != expectedArgs {
+		t.Fatalf("expected built-in postgres gateway args %q, got %#v", expectedArgs, pkg.GatewayArgs)
+	}
+	if slices.Contains(pkg.GatewayArgs, "operator-reviewed-hosted-gateway-launcher") {
+		t.Fatalf("postgres hosted JWT package should not use placeholder launcher: %#v", pkg.GatewayArgs)
+	}
+	envNames := map[string]bool{}
+	for _, env := range pkg.Environment {
+		envNames[env.Name] = true
+	}
+	for _, expected := range []string{"RDEV_GATEWAY_STORAGE_PATH", "RDEV_POSTGRES_DSN_SECRET_REF", "RDEV_HOSTED_OPERATOR_AUTH_FILE"} {
+		if !envNames[expected] {
+			t.Fatalf("missing env %q in %#v", expected, pkg.Environment)
+		}
+	}
+}
+
 func TestVerifyHostedProviderPackageDetectsTamperedFile(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "provider")
 	_, err := Build(Options{

@@ -27,12 +27,12 @@ go test ./internal/wsproto ./internal/cli \
   > "$work_dir/wss-mtls-host-smoke.txt"
 
 go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal/cli \
-  -run 'TestFileStateStoreRoundTrip|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
+  -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
   -count=1 \
   > "$work_dir/hosted-storage-auth-smoke.txt"
 
 go test ./internal/hostedprovider ./internal/cli \
-	-run 'TestBuildAndVerifyHostedProviderPackage|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify' \
+	-run 'TestBuildAndVerifyHostedProviderPackage|TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify' \
 	-count=1 \
 	> "$work_dir/hosted-provider-package-smoke.txt"
 
@@ -60,6 +60,16 @@ go run ./cmd/rdev hosted-provider package \
 go run ./cmd/rdev hosted-provider verify \
 	--package "$hosted_provider_dir" \
 	> "$work_dir/hosted-provider-verification.json"
+
+postgres_hosted_provider_dir="$work_dir/hosted-provider-postgres-jwt"
+go run ./cmd/rdev hosted-provider package \
+	--out "$postgres_hosted_provider_dir" \
+	--storage-provider postgres \
+	--auth-provider hosted-ed25519-jwt \
+	> "$work_dir/hosted-provider-postgres-jwt-package.json"
+go run ./cmd/rdev hosted-provider verify \
+	--package "$postgres_hosted_provider_dir" \
+	> "$work_dir/hosted-provider-postgres-jwt-verification.json"
 
 external_hosted_provider_dir="$work_dir/hosted-provider-postgres-oidc"
 go run ./cmd/rdev hosted-provider package \
@@ -363,6 +373,9 @@ plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 github_project_readiness = json.loads((root / "github-project-readiness.json").read_text())
 hosted_provider_package = json.loads((root / "hosted-provider-package.json").read_text())
 hosted_provider_verification = json.loads((root / "hosted-provider-verification.json").read_text())
+postgres_hosted_provider_package = json.loads((root / "hosted-provider-postgres-jwt-package.json").read_text())
+postgres_hosted_provider_manifest = json.loads((root / "hosted-provider-postgres-jwt" / "hosted-provider.json").read_text())
+postgres_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-jwt-verification.json").read_text())
 external_hosted_provider_package = json.loads((root / "hosted-provider-postgres-oidc-package.json").read_text())
 external_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-oidc-verification.json").read_text())
 external_hosted_runtime_contract = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-contract.json").read_text())
@@ -503,6 +516,14 @@ assert hosted_provider_verification["schema"] == "rdev.hosted-provider-package-v
 assert hosted_provider_verification["ok"] is True, hosted_provider_verification
 assert hosted_provider_verification["storage_provider"] == "file", hosted_provider_verification
 assert hosted_provider_verification["auth_provider"] == "hosted-ed25519-jwt", hosted_provider_verification
+assert postgres_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", postgres_hosted_provider_package
+assert postgres_hosted_provider_package["ok"] is True, postgres_hosted_provider_package
+assert postgres_hosted_provider_package["storage_provider"] == "postgres", postgres_hosted_provider_package
+assert postgres_hosted_provider_package["auth_provider"] == "hosted-ed25519-jwt", postgres_hosted_provider_package
+assert postgres_hosted_provider_verification["schema"] == "rdev.hosted-provider-package-verification.v1", postgres_hosted_provider_verification
+assert postgres_hosted_provider_verification["ok"] is True, postgres_hosted_provider_verification
+assert postgres_hosted_provider_manifest["gateway_args"][:6] == ["rdev", "gateway", "serve", "--storage-provider", "postgres", "--storage-path"], postgres_hosted_provider_manifest["gateway_args"]
+assert "operator-reviewed-hosted-gateway-launcher" not in postgres_hosted_provider_manifest["gateway_args"], postgres_hosted_provider_manifest["gateway_args"]
 assert external_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", external_hosted_provider_package
 assert external_hosted_provider_package["ok"] is True, external_hosted_provider_package
 assert external_hosted_provider_package["storage_provider"] == "postgres", external_hosted_provider_package
@@ -684,6 +705,8 @@ print(json.dumps({
     "hosted_storage_auth_smoke": True,
     "hosted_provider_package_schema": hosted_provider_package["schema"],
     "hosted_provider_package_verification_schema": hosted_provider_verification["schema"],
+    "postgres_hosted_provider_package_schema": postgres_hosted_provider_package["schema"],
+    "postgres_hosted_provider_runtime_gateway_args": True,
     "external_hosted_provider_package_schema": external_hosted_provider_package["schema"],
     "external_hosted_provider_runtime_contract_schema": external_hosted_runtime_contract["schema_version"],
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],

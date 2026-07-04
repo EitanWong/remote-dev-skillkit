@@ -4897,8 +4897,8 @@ func (a App) gateway(args []string) error {
 		addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 		auditLog := fs.String("audit-log", "", "optional JSONL audit log path")
 		statePath := fs.String("state", "", "optional development gateway JSON snapshot path; requires --signing-key")
-		storageProvider := fs.String("storage-provider", "", "gateway state storage provider: file")
-		storagePath := fs.String("storage-path", "", "gateway state storage path for --storage-provider=file")
+		storageProvider := fs.String("storage-provider", "", "gateway state storage provider: file or postgres")
+		storagePath := fs.String("storage-path", "", "gateway state storage path for file, or libpq connection info/service name for postgres")
 		signingKey := fs.String("signing-key", "", "optional persistent Ed25519 signing key file")
 		signingKeyID := fs.String("signing-key-id", signing.DefaultKeyID, "signing key id for new or existing signing key file")
 		manifestSigningKey := fs.String("manifest-signing-key", "", "optional Ed25519 key file for signing join manifests")
@@ -4960,8 +4960,8 @@ func (a App) gateway(args []string) error {
 		case "verify":
 			fs := flag.NewFlagSet("gateway storage verify", flag.ContinueOnError)
 			fs.SetOutput(a.Stderr)
-			provider := fs.String("provider", gateway.FileStateStoreProvider, "gateway state storage provider: file")
-			path := fs.String("path", "", "gateway state storage path for provider=file")
+			provider := fs.String("provider", gateway.FileStateStoreProvider, "gateway state storage provider: file or postgres")
+			path := fs.String("path", "", "gateway state storage path for file, or libpq connection info/service name for postgres")
 			if err := fs.Parse(args[2:]); err != nil {
 				return err
 			}
@@ -4979,14 +4979,35 @@ func (a App) gatewayStorageVerify(provider, path string) error {
 	if err != nil {
 		return err
 	}
+	checks := []map[string]any{}
+	add := func(name string, ok bool, detail string) {
+		checks = append(checks, map[string]any{"name": name, "ok": ok, "detail": detail})
+	}
+	add("store_constructed", true, store.Describe())
+	runtimeOK := true
+	if verifier, ok := store.(interface{ VerifyRuntime() error }); ok {
+		if err := verifier.VerifyRuntime(); err != nil {
+			runtimeOK = false
+			add("runtime_probe", false, err.Error())
+		} else {
+			add("runtime_probe", true, "round-trip ok")
+		}
+	}
 	payload := map[string]any{
-		"ok":       true,
+		"ok":       runtimeOK,
 		"provider": strings.TrimSpace(provider),
 		"store":    store.Describe(),
+		"checks":   checks,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(payload)
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !runtimeOK {
+		return fmt.Errorf("gateway storage verification failed")
+	}
+	return nil
 }
 
 func (a App) audit(args []string) error {
@@ -5782,6 +5803,8 @@ func newGatewayStateStore(provider, path string) (gateway.StateStore, error) {
 	switch strings.TrimSpace(provider) {
 	case gateway.FileStateStoreProvider:
 		return gateway.NewFileStateStore(path)
+	case gateway.PostgresStateStoreProvider:
+		return gateway.NewPostgresStateStore(path)
 	default:
 		return nil, fmt.Errorf("unsupported gateway storage provider %q", provider)
 	}
@@ -7863,7 +7886,9 @@ Usage:
   rdev adapter verify-runtime --artifact adapter-runtime-fixture.json --adapter claude-code --require-result-artifact
   rdev operator-auth init --out .rdev/operator-auth/operators.json --token-dir .rdev/operator-auth/tokens
   rdev operator-auth verify --auth .rdev/operator-auth/operators.json
+  rdev gateway storage verify --provider postgres --path service=rdev_gateway
   rdev hosted-provider package --out dist/hosted-provider --storage-provider file --auth-provider hosted-ed25519-jwt
+  rdev hosted-provider package --out dist/hosted-provider-postgres --storage-provider postgres --auth-provider hosted-ed25519-jwt
   rdev hosted-provider verify --package dist/hosted-provider
   rdev enrollment issue-certificate --gateway http://127.0.0.1:8787 --out host-enrollment.json --root-public-key enrollment-root:... --ticket-code ABCD-1234 --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --operator-token-file operator-token.txt
   rdev enrollment sign-certificate --out host-enrollment.json --key .rdev/keys/enrollment-root.json --ticket-code ABCD-1234 --mode managed --name managed-mac --os darwin --arch arm64 --identity-key-id host --identity-public-key <base64url> --identity-fingerprint sha256:... --capabilities codex.run,git.diff

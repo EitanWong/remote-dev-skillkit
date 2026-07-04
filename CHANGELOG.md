@@ -4,6 +4,40 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.20-dev
+
+Current phase: hosted storage moved from provider contracts toward a real
+runtime path. The gateway now has a built-in Postgres state-store provider
+implemented through `psql`/libpq, while production hosted claims still require
+a real deployed database run and packaged backup/restore/retention evidence.
+
+### Added
+
+- Added `gateway.PostgresStateStore` and `--storage-provider postgres` support
+  for `rdev gateway serve` / `rdev gateway storage verify`. The provider stores
+  `rdev.gateway-snapshot.v1` as JSONB in `rdev_gateway_snapshots`, performs
+  schema bootstrap, upsert, load, and runtime probe SQL through `psql`, and
+  rejects inline passwords in connection info so credentials stay in libpq
+  service files, `.pgpass`, environment injection, or an operator-approved
+  secret manager.
+- Updated `rdev hosted-provider package --storage-provider postgres
+  --auth-provider hosted-ed25519-jwt` so the generated gateway args use the
+  built-in `rdev gateway serve --storage-provider postgres` runtime path
+  instead of a placeholder reviewed launcher.
+- Updated release smoke to verify the Postgres state-store fake-`psql`
+  round-trip, inline password rejection, and Postgres hosted-JWT package
+  gateway args.
+
+### Remaining Gates
+
+- Run a real Postgres-backed gateway with managed backup, restore, retention,
+  role-mapping, failure-mode, audit, and redaction evidence, then package it
+  with `rdev acceptance package-hosted-provider-runtime`.
+- Continue S3-compatible object storage, Redis stream, OIDC/JWKS, and SAML
+  runtime integrations beyond their current contracts.
+- Continue real helper/relay adapter acceptance and GitHub Release
+  publication/download verification.
+
 ## 0.1.19-dev
 
 Current phase: formal release packaging now has a standard post-release
