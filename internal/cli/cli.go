@@ -46,6 +46,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/service"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
@@ -104,6 +105,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.operatorAuth(args[1:])
 	case "hosted-provider":
 		return a.hostedProvider(args[1:])
+	case "relay-adapter":
+		return a.relayAdapter(args[1:])
 	case "release":
 		return a.release(args[1:])
 	case "update":
@@ -916,6 +919,99 @@ func (a App) hostedProviderVerify(packagePath string) error {
 	}
 	if !verification.OK() {
 		return fmt.Errorf("hosted provider package verification failed")
+	}
+	return nil
+}
+
+func (a App) relayAdapter(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing relay-adapter subcommand")
+	}
+	switch args[0] {
+	case "package":
+		fs := flag.NewFlagSet("relay-adapter package", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "output directory for relay adapter package")
+		name := fs.String("name", "", "relay adapter package name")
+		adapterKind := fs.String("adapter", "chisel", "relay adapter kind: chisel or frpc")
+		force := fs.Bool("force", false, "replace an existing output directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.relayAdapterPackage(*out, *name, *adapterKind, *force)
+	case "verify":
+		fs := flag.NewFlagSet("relay-adapter verify", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		packagePath := fs.String("package", "", "relay adapter package directory or relay-adapter.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.relayAdapterVerify(*packagePath)
+	default:
+		return fmt.Errorf("unknown relay-adapter subcommand %q", args[0])
+	}
+}
+
+func (a App) relayAdapterPackage(out, name, adapterKind string, force bool) error {
+	pkg, err := relayadapter.Build(relayadapter.Options{
+		OutDir:      out,
+		Name:        name,
+		AdapterKind: adapterKind,
+		GeneratedAt: time.Now(),
+		Force:       force,
+	})
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                pkg.OK(),
+		"schema":            pkg.SchemaVersion,
+		"out":               out,
+		"package":           filepath.Join(out, "relay-adapter.json"),
+		"name":              pkg.Name,
+		"adapter_kind":      pkg.AdapterKind,
+		"helper_tool":       pkg.Helper.Tool,
+		"external_mutation": pkg.ExternalMutation,
+		"runner_env":        pkg.RunnerEnv,
+		"file_count":        len(pkg.Files),
+		"approval_required": pkg.ApprovalRequired,
+		"evidence_required": pkg.EvidenceRequired,
+		"checks":            pkg.Checks,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("relay adapter package failed")
+	}
+	return nil
+}
+
+func (a App) relayAdapterVerify(packagePath string) error {
+	verification, err := relayadapter.Verify(packagePath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"package":             verification.PackagePath,
+		"package_dir":         verification.PackageDir,
+		"name":                verification.Name,
+		"adapter_kind":        verification.AdapterKind,
+		"checks":              verification.Checks,
+		"files":               verification.Files,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("relay adapter package verification failed")
 	}
 	return nil
 }

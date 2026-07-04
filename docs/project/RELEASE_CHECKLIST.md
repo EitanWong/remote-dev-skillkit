@@ -16,6 +16,7 @@
 - [ ] Confirm Windows artifacts that claim DPAPI-backed managed host identity/trust support were built for Windows and have at least cross-compiled `internal/protectedstore` / `rdev-host` coverage; real Windows runtime acceptance remains release-blocking before support claims.
 - [ ] Confirm Linux artifacts that claim libsecret-backed managed host identity/trust support were built for Linux and document the runtime `secret-tool` plus Secret Service requirement; confirm Linux artifacts that claim keyctl-backed managed host identity/trust support were built for Linux and document the runtime `keyctl` plus user keyring requirement. Real Linux service reboot/reconnect acceptance remains release-blocking before support claims.
 - [ ] Generate and verify hosted provider packages with `rdev hosted-provider package` and `rdev hosted-provider verify`; confirm they contain no credentials, private endpoints, local paths, or organization-specific values.
+- [ ] Generate and verify relay adapter packages with `rdev relay-adapter package` and `rdev relay-adapter verify`; confirm Chisel/frpc runner metadata contains no real relay endpoints, credentials, private IPs, local paths, or secrets.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.

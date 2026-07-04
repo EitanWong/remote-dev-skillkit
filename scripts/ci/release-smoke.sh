@@ -32,23 +32,37 @@ go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal
   > "$work_dir/hosted-storage-auth-smoke.txt"
 
 go test ./internal/hostedprovider ./internal/cli \
-  -run 'TestBuildAndVerifyHostedProviderPackage|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify' \
-  -count=1 \
-  > "$work_dir/hosted-provider-package-smoke.txt"
+	-run 'TestBuildAndVerifyHostedProviderPackage|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify' \
+	-count=1 \
+	> "$work_dir/hosted-provider-package-smoke.txt"
+
+go test ./internal/relayadapter ./internal/cli \
+	-run 'TestBuildAndVerifyRelayAdapterPackage|TestBuildAndVerifyFRPCRelayAdapterPackage|TestVerifyRelayAdapterPackageDetectsUnsafeHelperSurface|TestRelayAdapterPackageAndVerify' \
+	-count=1 \
+	> "$work_dir/relay-adapter-package-smoke.txt"
 
 hosted_provider_dir="$work_dir/hosted-provider"
 go run ./cmd/rdev hosted-provider package \
-  --out "$hosted_provider_dir" \
-  --storage-provider file \
-  --auth-provider hosted-ed25519-jwt \
+	--out "$hosted_provider_dir" \
+	--storage-provider file \
+	--auth-provider hosted-ed25519-jwt \
   > "$work_dir/hosted-provider-package.json"
 go run ./cmd/rdev hosted-provider verify \
-  --package "$hosted_provider_dir" \
-  > "$work_dir/hosted-provider-verification.json"
+	--package "$hosted_provider_dir" \
+	> "$work_dir/hosted-provider-verification.json"
+
+relay_adapter_dir="$work_dir/relay-adapter"
+go run ./cmd/rdev relay-adapter package \
+	--out "$relay_adapter_dir" \
+	--adapter chisel \
+	> "$work_dir/relay-adapter-package.json"
+go run ./cmd/rdev relay-adapter verify \
+	--package "$relay_adapter_dir" \
+	> "$work_dir/relay-adapter-verification.json"
 
 go test ./internal/enrollmentlifecycle ./internal/cli \
-  -run 'TestBuildFleetRenewalPlan|TestEnrollmentLifecycleKeyCustodyWritesRecord|TestEnrollmentLifecycleFleetRenewalPlanRequiresRevocations|TestEnrollmentLifecycleEmergencyDrillWritesEvidence' \
-  -count=1 \
+	-run 'TestBuildFleetRenewalPlan|TestEnrollmentLifecycleKeyCustodyWritesRecord|TestEnrollmentLifecycleFleetRenewalPlanRequiresRevocations|TestEnrollmentLifecycleEmergencyDrillWritesEvidence' \
+	-count=1 \
   > "$work_dir/enrollment-lifecycle-smoke.txt"
 
 go test ./internal/model ./internal/cli ./internal/httpapi \
@@ -243,6 +257,8 @@ plan = json.loads(pathlib.Path(plan_output["plan"]).read_text())
 github_project_readiness = json.loads((root / "github-project-readiness.json").read_text())
 hosted_provider_package = json.loads((root / "hosted-provider-package.json").read_text())
 hosted_provider_verification = json.loads((root / "hosted-provider-verification.json").read_text())
+relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
+relay_adapter_verification = json.loads((root / "relay-adapter-verification.json").read_text())
 post_release_output = json.loads((root / "post-release-output.json").read_text())
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
@@ -364,6 +380,14 @@ assert hosted_provider_verification["schema"] == "rdev.hosted-provider-package-v
 assert hosted_provider_verification["ok"] is True, hosted_provider_verification
 assert hosted_provider_verification["storage_provider"] == "file", hosted_provider_verification
 assert hosted_provider_verification["auth_provider"] == "hosted-ed25519-jwt", hosted_provider_verification
+assert relay_adapter_package["schema"] == "rdev.relay-adapter-package.v1", relay_adapter_package
+assert relay_adapter_package["ok"] is True, relay_adapter_package
+assert relay_adapter_package["external_mutation"] is False, relay_adapter_package
+assert relay_adapter_package["adapter_kind"] == "chisel", relay_adapter_package
+assert relay_adapter_package["runner_env"]["gateway_url_var"] == "RDEV_RELAY_GATEWAY_URL", relay_adapter_package
+assert relay_adapter_verification["schema"] == "rdev.relay-adapter-package-verification.v1", relay_adapter_verification
+assert relay_adapter_verification["ok"] is True, relay_adapter_verification
+assert relay_adapter_verification["adapter_kind"] == "chisel", relay_adapter_verification
 assert post_release_output["ok"] is True, post_release_output
 assert post_release_plan["schema_version"] == "rdev.post-release-install-plan.v1", post_release_plan
 assert post_release_plan["external_mutation"] is False, post_release_plan
@@ -487,6 +511,8 @@ print(json.dumps({
     "hosted_storage_auth_smoke": True,
     "hosted_provider_package_schema": hosted_provider_package["schema"],
     "hosted_provider_package_verification_schema": hosted_provider_verification["schema"],
+    "relay_adapter_package_schema": relay_adapter_package["schema"],
+    "relay_adapter_package_verification_schema": relay_adapter_verification["schema"],
     "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

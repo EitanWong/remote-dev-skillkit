@@ -55,6 +55,14 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `rdev hosted-provider verify`, producing reviewable storage/auth deployment
   metadata, gateway args, env templates, checksums, and no-private-surface
   evidence without bundling credentials or private endpoints.
+- Relay adapter package generation and verification through
+  `rdev.relay-adapter-package.v1`, `rdev relay-adapter package`,
+  `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter verify`,
+  and MCP tools `rdev.relay_adapter.package` / `rdev.relay_adapter.verify`,
+  producing Chisel/frpc runner `RDEV_RELAY_*` metadata, safe helper argv,
+  reviewed dependency install actions, approval boundaries, checksums, and
+  no-private-surface evidence without bundling relay endpoints, credentials,
+  private IPs, or local paths.
 - Dev hosted enrollment issuance primitive through `POST /v1/enrollment/certificates`, `rdev gateway serve --dev --enrollment-key`, and `rdev enrollment issue-certificate --gateway ... --root-public-key ...`, issuing pinned-root-verified certificates from a configured gateway issuer while preventing requested certificate capabilities from exceeding the ticket capabilities.
 - Operator-auth protection for dev hosted enrollment issuance through `rdev gateway serve --dev --operator-auth` and `rdev enrollment issue-certificate --operator-token-file`, keeping tokens out of command output while requiring an `issuer` role token.
 - Local enrollment certificate renewal primitive through `rdev enrollment renew-certificate`, preserving the existing certificate scope, requiring the current certificate to verify, optionally checking signed revocation lists before renewal, and emitting a new certificate fingerprint and validity window.

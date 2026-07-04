@@ -21,11 +21,22 @@ Agent-first session tools include:
 - `rdev.support_session.status`
 - `rdev.invites.create`
 - `rdev.connection_entry.plan`
+- `rdev.relay_adapter.package`
+- `rdev.relay_adapter.verify`
 
 Connection Entry is the universal target-side handoff. MCP clients should not
 invent narrower public names such as customer link or connector package plan:
 the same contract covers owned managed hosts, third-party temporary support,
 LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
+
+`rdev.relay_adapter.package` and `rdev.relay_adapter.verify` generate and
+verify standard Chisel/frpc relay adapter packages for restrictive-network
+Connection Entries. Agents should use these tools to prepare reviewed
+`RDEV_RELAY_GATEWAY_URL`, `RDEV_RELAY_START_ARGV_JSON`, and
+`RDEV_RELAY_INSTALL_ACTION_JSON` metadata, then dry-run the Connection Entry
+runner. They should not write custom relay, PowerShell, shell, tunnel, approval
+polling, or bootstrap scripts. The package contains no real relay endpoint,
+credential, private IP, local path, or secret.
 
 `rdev.support_session.connect` returns `rdev.support-session-connect.v1` in
 `structuredContent`. Fresh Agents should call it first when a human says

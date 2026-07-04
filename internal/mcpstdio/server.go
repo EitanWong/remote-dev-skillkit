@@ -17,6 +17,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
+	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
@@ -140,6 +141,10 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.supportSessionStatus(params.Arguments)
 	case "rdev.connection_entry.plan":
 		data, err = s.connectionEntryPlan(params.Arguments)
+	case "rdev.relay_adapter.package":
+		data, err = s.relayAdapterPackage(params.Arguments)
+	case "rdev.relay_adapter.verify":
+		data, err = s.relayAdapterVerify(params.Arguments)
 	case "rdev.tickets.create":
 		data, err = s.createTicket(params.Arguments)
 	case "rdev.tickets.revoke":
@@ -442,6 +447,20 @@ func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
 		RdevCommand:                    stringArg(args, "rdev_command", ""),
 		Force:                          boolArg(args, "force", false),
 	})
+}
+
+func (s Server) relayAdapterPackage(args map[string]any) (any, error) {
+	return relayadapter.Build(relayadapter.Options{
+		OutDir:      requiredString(args, "out_dir"),
+		Name:        stringArg(args, "name", ""),
+		AdapterKind: stringArg(args, "adapter", "chisel"),
+		GeneratedAt: time.Now().UTC(),
+		Force:       boolArg(args, "force", false),
+	})
+}
+
+func (s Server) relayAdapterVerify(args map[string]any) (any, error) {
+	return relayadapter.Verify(requiredString(args, "package"))
 }
 
 func (s Server) createTicket(args map[string]any) (any, error) {

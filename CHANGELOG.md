@@ -4,6 +4,44 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.15-dev
+
+Current phase: helper/relay work now has a first standard adapter-package
+surface for Chisel/frpc relay paths. This moves restrictive-network setup away
+from model-authored tunnel scripts and into verifiable `rdev` metadata, but it
+is not yet real cross-network acceptance evidence for a deployed relay service.
+
+### Added
+
+- Added `rdev.relay-adapter-package.v1` through
+  `rdev relay-adapter package`. The generated package writes
+  `relay-adapter.json`, `RELAY_ADAPTER.md`, and `runner.env.example` for
+  Chisel or frpc without real relay endpoints, credentials, private IPs, local
+  paths, organization IDs, or secrets. It declares the standard
+  `RDEV_RELAY_GATEWAY_URL`, `RDEV_RELAY_START_ARGV_JSON`, and
+  `RDEV_RELAY_INSTALL_ACTION_JSON` runner surface, helper install template,
+  approval boundaries, evidence requirements, and Agent rules.
+- Added `rdev.relay-adapter-package-verification.v1` through
+  `rdev relay-adapter verify`. Verification checks schema, supported adapter
+  kind, safe helper argv, safe dependency install action, file
+  checksums/sizes, unlisted files, and no-private-surface hygiene.
+- Added MCP tools `rdev.relay_adapter.package` and
+  `rdev.relay_adapter.verify` so fresh Agents can discover and verify relay
+  adapter packages instead of inventing PowerShell, shell, tunnel, approval, or
+  polling scripts.
+- Updated release smoke to generate and verify a Chisel relay adapter package,
+  reporting `relay_adapter_package_schema` and
+  `relay_adapter_package_verification_schema`.
+
+### Remaining Gates
+
+- Run real restrictive-network acceptance for Chisel and frpc across clean
+  Windows/macOS/Linux targets with a deployed relay endpoint and redacted
+  evidence bundle.
+- Add headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel adapter
+  packages with equivalent verification and runner evidence.
+- Continue real hosted provider runtime and GitHub Release publication work.
+
 ## 0.1.14-dev
 
 Current phase: hosted provider work now has a package and verification surface

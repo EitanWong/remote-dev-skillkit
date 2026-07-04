@@ -489,9 +489,12 @@ adapter paths for shell, PowerShell, Codex, Claude Code, and ACP/acpx. The
 current line also includes WSS/mTLS host job transport, hosted-auth verifier
 configuration, a storage-provider boundary, and enrollment authority lifecycle
 evidence commands. Hosted provider packages can be generated and verified with
-`rdev hosted-provider package` / `rdev hosted-provider verify`, and release
-candidates now also include a verifiable `connection-entry-release.zip` with
-platform artifacts, release metadata, runner template, visible launchers,
+`rdev hosted-provider package` / `rdev hosted-provider verify`. Chisel/frpc
+relay adapter packages can be generated and verified with
+`rdev relay-adapter package` / `rdev relay-adapter verify`, giving Agents
+standard `RDEV_RELAY_*` runner metadata instead of custom tunnel scripts.
+Release candidates now also include a verifiable `connection-entry-release.zip`
+with platform artifacts, release metadata, runner template, visible launchers,
 archive checksums, and no-private-parameter checks.
 
 Still gated before a production-grade hosted release: real platform acceptance

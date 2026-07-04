@@ -151,6 +151,25 @@ func Tools() []Tool {
 			}, []string{"invite_json"}),
 		},
 		{
+			Name:        "rdev.relay_adapter.package",
+			Description: "Generate a standard Chisel or frpc relay adapter package for restrictive-network Connection Entries. The package emits reviewed RDEV_RELAY_GATEWAY_URL, RDEV_RELAY_START_ARGV_JSON, and RDEV_RELAY_INSTALL_ACTION_JSON templates plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, or polling scripts.",
+			Safety:      "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",
+			InputSchema: object(map[string]any{
+				"out_dir": stringField(),
+				"name":    stringField(),
+				"adapter": enum("chisel", "frpc"),
+				"force":   boolField(),
+			}, []string{"out_dir"}),
+		},
+		{
+			Name:        "rdev.relay_adapter.verify",
+			Description: "Verify a relay adapter package before an Agent exports RDEV_RELAY_* environment variables or dry-runs the Connection Entry runner. Checks schema, supported adapter kind, safe helper argv, safe dependency install action, file checksums, and no-private-surface hygiene.",
+			Safety:      "Read-only verification. Does not execute helpers, install dependencies, start relay tunnels, or mutate remote/network state.",
+			InputSchema: object(map[string]any{
+				"package": stringField(),
+			}, []string{"package"}),
+		},
+		{
 			Name:        "rdev.tickets.create",
 			Description: "Create a short-lived support or remote development ticket for a target host.",
 			Safety:      "Creates access path; does not execute on host.",

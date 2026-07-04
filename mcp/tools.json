@@ -497,6 +497,56 @@
       }
     },
     {
+      "name": "rdev.relay_adapter.package",
+      "description": "Generate a standard Chisel or frpc relay adapter package for restrictive-network Connection Entries. The package emits reviewed RDEV_RELAY_GATEWAY_URL, RDEV_RELAY_START_ARGV_JSON, and RDEV_RELAY_INSTALL_ACTION_JSON templates plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, or polling scripts.",
+      "safety": "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "enum": [
+              "chisel",
+              "frpc"
+            ],
+            "type": "string"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "out_dir": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "out_dir"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.relay_adapter.verify",
+      "description": "Verify a relay adapter package before an Agent exports RDEV_RELAY_* environment variables or dry-runs the Connection Entry runner. Checks schema, supported adapter kind, safe helper argv, safe dependency install action, file checksums, and no-private-surface hygiene.",
+      "safety": "Read-only verification. Does not execute helpers, install dependencies, start relay tunnels, or mutate remote/network state.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "package": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "package"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.tickets.create",
       "description": "Create a short-lived support or remote development ticket for a target host.",
       "safety": "Creates access path; does not execute on host.",

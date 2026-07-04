@@ -2038,6 +2038,35 @@ func TestHostedProviderPackageAndVerify(t *testing.T) {
 	}
 }
 
+func TestRelayAdapterPackageAndVerify(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "relay")
+	var packageStdout bytes.Buffer
+	app := NewApp(&packageStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"relay-adapter", "package",
+		"--out", out,
+		"--adapter", "chisel",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(packageStdout.String(), `"schema": "rdev.relay-adapter-package.v1"`) ||
+		!strings.Contains(packageStdout.String(), `"external_mutation": false`) ||
+		!strings.Contains(packageStdout.String(), `"adapter_kind": "chisel"`) {
+		t.Fatalf("unexpected relay adapter package output: %s", packageStdout.String())
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"relay-adapter", "verify", "--package", out}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.relay-adapter-package-verification.v1"`) ||
+		!strings.Contains(verifyStdout.String(), `"ok": true`) ||
+		!strings.Contains(verifyStdout.String(), `"adapter_kind": "chisel"`) {
+		t.Fatalf("unexpected relay adapter verify output: %s", verifyStdout.String())
+	}
+}
+
 func TestMCPServeProcessesInitialize(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
