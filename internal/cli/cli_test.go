@@ -8562,6 +8562,58 @@ func TestAcceptancePackageHostedProviderRuntime(t *testing.T) {
 	}
 }
 
+func TestAcceptancePackagePostReleaseDownload(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadEvidenceForCLITest(t, root)
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-post-release-download",
+		"--plan", fixture.plan,
+		"--plan-verification", fixture.planVerification,
+		"--out", filepath.Join(root, "post-release-download-evidence"),
+		"--evidence-dir", fixture.evidenceDir,
+		"--skillkit-evidence-dir", fixture.skillkitDir,
+	}); err != nil {
+		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+	}
+	var payload struct {
+		OK              bool              `json:"ok"`
+		Schema          string            `json:"schema"`
+		Package         string            `json:"package"`
+		Repo            string            `json:"repo"`
+		Tag             string            `json:"tag"`
+		PlatformTargets []string          `json:"platform_targets"`
+		Skillkit        bool              `json:"skillkit_included"`
+		Redactions      map[string]int    `json:"redaction_rule_counts"`
+		Files           []json.RawMessage `json:"files"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != "rdev.acceptance-package.post-release-download.v1" ||
+		payload.Repo != "EitanWong/remote-dev-skillkit" || payload.Tag != "v0.1.18-dev" ||
+		len(payload.PlatformTargets) != 2 || !payload.Skillkit {
+		t.Fatalf("unexpected post-release download package output: %s", stdout.String())
+	}
+	if payload.Redactions["github_token"] != 2 {
+		t.Fatalf("expected github token redaction, got %#v", payload.Redactions)
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "verify-post-release-download-package",
+		"--package", payload.Package,
+	}); err != nil {
+		t.Fatalf("expected verify command to pass: %v\n%s", err, verifyStdout.String())
+	}
+	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.acceptance-verification.post-release-download-package.v1"`) ||
+		!strings.Contains(verifyStdout.String(), `"ok": true`) {
+		t.Fatalf("unexpected post-release download verify output: %s", verifyStdout.String())
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
 }
@@ -8643,6 +8695,68 @@ func writeHostedProviderRuntimeEvidenceForCLITest(t *testing.T, root string) hos
 		roleMappingEvidence: roleMappingEvidence,
 		failureModeEvidence: failureModeEvidence,
 		audit:               audit,
+	}
+}
+
+type postReleaseDownloadEvidenceForCLITest struct {
+	plan             string
+	planVerification string
+	evidenceDir      string
+	skillkitDir      string
+}
+
+func writePostReleaseDownloadEvidenceForCLITest(t *testing.T, root string) postReleaseDownloadEvidenceForCLITest {
+	t.Helper()
+	dir := filepath.Join(root, "post-release-download")
+	evidenceDir := filepath.Join(dir, "platform-evidence")
+	skillkitDir := filepath.Join(dir, "skillkit-evidence")
+	for _, path := range []string{evidenceDir, skillkitDir} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	targets := []string{"linux/amd64", "windows/amd64"}
+	platforms := make([]map[string]string, 0, len(targets))
+	write := func(path, content string) string {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	writeJSON := func(path string, value any) string {
+		t.Helper()
+		content, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return write(path, string(content)+"\n")
+	}
+	for _, target := range targets {
+		platforms = append(platforms, map[string]string{"target": target})
+		slug := strings.ReplaceAll(target, "/", "-")
+		write(filepath.Join(evidenceDir, slug+"-transcript.txt"), "downloaded "+target+"\nghp_abcdefghijklmnopqrstuvwx\n")
+		writeJSON(filepath.Join(evidenceDir, slug+"-candidate-verify.json"), map[string]any{"ok": true})
+		writeJSON(filepath.Join(evidenceDir, slug+"-bundle-verify.json"), map[string]any{"ok": true})
+	}
+	write(filepath.Join(skillkitDir, "skillkit-transcript.txt"), "downloaded skillkit\n")
+	writeJSON(filepath.Join(skillkitDir, "skillkit-verify.json"), map[string]any{"ok": true})
+	plan := writeJSON(filepath.Join(dir, "post-release-install-plan.json"), map[string]any{
+		"schema_version": "rdev.post-release-install-plan.v1",
+		"repo":           "EitanWong/remote-dev-skillkit",
+		"tag":            "v0.1.18-dev",
+		"platforms":      platforms,
+		"skillkit":       map[string]any{"archive": map[string]any{"name": "remote-dev-skillkit.tar.gz"}},
+	})
+	planVerification := writeJSON(filepath.Join(dir, "post-release-install-verification.json"), map[string]any{
+		"schema_version": "rdev.post-release-install-verification.v1",
+		"ok":             true,
+	})
+	return postReleaseDownloadEvidenceForCLITest{
+		plan:             plan,
+		planVerification: planVerification,
+		evidenceDir:      evidenceDir,
+		skillkitDir:      skillkitDir,
 	}
 }
 

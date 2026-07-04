@@ -4,6 +4,42 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.19-dev
+
+Current phase: formal release packaging now has a standard post-release
+download evidence package. This still does not create or publish a GitHub
+Release; it gives operators and Agents a reproducible way to archive real
+download/install verification transcripts after release assets exist.
+
+### Added
+
+- Added `rdev.acceptance-package.post-release-download.v1` through
+  `rdev acceptance package-post-release-download`. The package archives a
+  verified `rdev.post-release-install-plan.v1`, the corresponding
+  `rdev.post-release-install-verification.v1`, per-platform download
+  transcripts, per-platform `rdev release verify-candidate` outputs,
+  per-platform `rdev-verify --bundle` outputs, optional Skillkit
+  download/verify evidence, checksums, redaction metadata, and no-private
+  surface checks.
+- Added `rdev.acceptance-verification.post-release-download-package.v1`
+  through `rdev acceptance verify-post-release-download-package`.
+  Verification requires the plan-verification output to report `ok=true`, every
+  planned platform to have transcript/candidate/bundle evidence, candidate and
+  bundle verification evidence to report `ok=true`, and Skillkit verification
+  evidence to report `ok=true` when the plan includes Skillkit.
+- Updated release smoke so the local formal-release gate now packages and
+  verifies synthetic post-release download evidence in addition to generating
+  and verifying the post-release install plan.
+
+### Remaining Gates
+
+- Create the real GitHub Release only after explicit operator approval.
+- Run the generated post-release verification scripts against real public
+  release downloads on macOS, Linux, Windows, and Skillkit, then package the
+  transcripts with `rdev acceptance package-post-release-download`.
+- Continue real hosted provider runtime deployment evidence and real
+  restrictive-network helper/relay adapter execution evidence.
+
 ## 0.1.18-dev
 
 Current phase: hosted provider packages now include provider-specific runtime

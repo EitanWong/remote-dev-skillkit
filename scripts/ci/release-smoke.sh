@@ -212,6 +212,29 @@ scripts/github/verify-post-release-install-plan.sh \
   --plan "$post_release_dir/post-release-install-plan.json" \
   > "$work_dir/post-release-verification.json"
 
+post_release_evidence_dir="$work_dir/post-release-download-evidence-input"
+post_release_skillkit_evidence_dir="$work_dir/post-release-download-skillkit-input"
+mkdir -p "$post_release_evidence_dir" "$post_release_skillkit_evidence_dir"
+printf '%s\n' 'downloaded linux/amd64 release archive and verified checksum' > "$post_release_evidence_dir/linux-amd64-transcript.txt"
+printf '%s\n' '{"ok":true,"schema_version":"rdev.release-candidate-verification.v1"}' > "$post_release_evidence_dir/linux-amd64-candidate-verify.json"
+printf '%s\n' '{"ok":true,"schema_version":"rdev.release-bundle-verification.v1"}' > "$post_release_evidence_dir/linux-amd64-bundle-verify.json"
+printf '%s\n' 'downloaded windows/amd64 release archive and verified checksum' > "$post_release_evidence_dir/windows-amd64-transcript.txt"
+printf '%s\n' '{"ok":true,"schema_version":"rdev.release-candidate-verification.v1"}' > "$post_release_evidence_dir/windows-amd64-candidate-verify.json"
+printf '%s\n' '{"ok":true,"schema_version":"rdev.release-bundle-verification.v1"}' > "$post_release_evidence_dir/windows-amd64-bundle-verify.json"
+printf '%s\n' 'downloaded and verified Skillkit archive' > "$post_release_skillkit_evidence_dir/skillkit-transcript.txt"
+printf '%s\n' '{"ok":true,"schema_version":"rdev.skillkit-bundle-verification.v1"}' > "$post_release_skillkit_evidence_dir/skillkit-verify.json"
+post_release_download_package_dir="$work_dir/post-release-download-acceptance"
+go run ./cmd/rdev acceptance package-post-release-download \
+  --plan "$post_release_dir/post-release-install-plan.json" \
+  --plan-verification "$work_dir/post-release-verification.json" \
+  --out "$post_release_download_package_dir" \
+  --evidence-dir "$post_release_evidence_dir" \
+  --skillkit-evidence-dir "$post_release_skillkit_evidence_dir" \
+  > "$work_dir/post-release-download-acceptance-package.json"
+go run ./cmd/rdev acceptance verify-post-release-download-package \
+  --package "$post_release_download_package_dir" \
+  > "$work_dir/post-release-download-acceptance-verification.json"
+
 first_skillkit_dir="$(python3 - "$platform_candidates_dir/platform-candidates.json" <<'PY'
 import json
 import pathlib
@@ -360,6 +383,8 @@ relay_adapter_acceptance_verification = json.loads((root / "relay-adapter-accept
 post_release_output = json.loads((root / "post-release-output.json").read_text())
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
+post_release_download_package = json.loads((root / "post-release-download-acceptance-package.json").read_text())
+post_release_download_verification = json.loads((root / "post-release-download-acceptance-verification.json").read_text())
 post_release_tampered = json.loads((root / "post-release-tampered-verification.json").read_text())
 skillkit_install_plan_output = json.loads((root / "skillkit-install-plan-output.json").read_text())
 skillkit_verification = json.loads((root / "skillkit-verification.json").read_text())
@@ -544,6 +569,12 @@ assert (post_release_plan_dir / post_release_plan["skillkit"]["verification_scri
 assert post_release_verification["schema_version"] == "rdev.post-release-install-verification.v1", post_release_verification
 assert post_release_verification["ok"] is True, post_release_verification
 assert post_release_verification["external_mutation"] is False, post_release_verification
+assert post_release_download_package["schema"] == "rdev.acceptance-package.post-release-download.v1", post_release_download_package
+assert post_release_download_package["ok"] is True, post_release_download_package
+assert set(post_release_download_package["platform_targets"]) == {"linux/amd64", "windows/amd64"}, post_release_download_package
+assert post_release_download_package["skillkit_included"] is True, post_release_download_package
+assert post_release_download_verification["schema"] == "rdev.acceptance-verification.post-release-download-package.v1", post_release_download_verification
+assert post_release_download_verification["ok"] is True, post_release_download_verification
 assert post_release_tampered["schema_version"] == "rdev.post-release-install-verification.v1", post_release_tampered
 assert post_release_tampered["ok"] is False, post_release_tampered
 assert any(check["name"].endswith("script_matches_commands") for check in post_release_tampered["failed_checks"]), post_release_tampered
@@ -662,6 +693,8 @@ print(json.dumps({
     "connectivity_adapter_package_kinds": sorted(package["adapter_kind"] for package in connectivity_adapter_packages.values()),
     "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
+    "post_release_download_acceptance_package_schema": post_release_download_package["schema"],
+    "post_release_download_acceptance_verification_schema": post_release_download_verification["schema"],
     "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

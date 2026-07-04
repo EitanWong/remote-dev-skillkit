@@ -174,6 +174,7 @@
 - [x] Add regression coverage that drives the foreground status-file watcher from `waiting` to `connected` after a real in-memory host registration, proving Agents can read connected feedback from `status_file.path`.
 - [x] Add foreground `target-handoff.txt` and `connected-report.txt` output with `rdev.support-session-handoff-text-file.v1` and `rdev.support-session-connected-report-file.v1` metadata so fresh Agents can forward the target-side command and connection-success report from plain-text files instead of parsing JSON or terminal streams.
 - [x] Shorten the root and multilingual README install prompts to a compact repository plus full-prompt link, keeping the detailed Agent installation and connection protocol in `docs/operations/AGENT_BOOTSTRAP_PROMPT.md` instead of duplicating it across homepage docs.
+- [x] Add post-release download acceptance evidence packaging and verification with `rdev.acceptance-package.post-release-download.v1`, `rdev acceptance package-post-release-download`, `rdev.acceptance-verification.post-release-download-package.v1`, and `rdev acceptance verify-post-release-download-package`, so real GitHub Release download transcripts, release-candidate verification, signed bundle verification, Skillkit verification, redaction, and checksums can be archived after publication.
 - [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.
 - [ ] Run real fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode acceptance to confirm the Agent calls `rdev.support_session.create` when a gateway is reachable, uses `rdev support-session connect --start` when no gateway exists, reserves `rdev.support_session.plan` for review/debug, and never invents gateway/bootstrap code.
 - [ ] Run clean Windows target acceptance using the `connect --start` generated PowerShell handoff to prove `/assets/rdev-windows-amd64.exe` self-repair, SHA-256 verification, auto-approved first host registration, status wait, revocation, and no-persistence cleanup.
@@ -296,7 +297,7 @@
 - [ ] Add hardware-backed or fleet-managed protected host identity/trust storage beyond Keychain, DPAPI, libsecret, keyctl, and local files.
 - [x] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
-- [ ] Publish signed per-platform Connection Entry release archives to GitHub Releases and verify real downloads with post-release install transcripts.
+- [ ] Publish signed per-platform Connection Entry release archives to GitHub Releases and verify real downloads with post-release install transcripts packaged by `rdev acceptance package-post-release-download`.
 - [ ] Add real restrictive-network acceptance evidence for frp, Chisel, headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel paths across Windows/macOS/Linux using the standard connectivity adapter packages and `rdev acceptance package-relay-adapter`.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.
@@ -354,6 +355,7 @@
 - [ ] Production releases verify signed manifests and binaries before host execution.
 - [x] Post-release download/install verification can be planned locally from `rdev.github-platform-release-plan.v1` without GitHub mutation.
 - [x] Post-release install plans can be independently verified and tampered verification scripts are rejected.
+- [x] Post-release download/install transcripts can be packaged and independently verified as release evidence after GitHub Release publication.
 - [x] GitHub labels, milestones, issue templates, project-management docs, CI, and release planning scripts can be audited locally before external GitHub mutation.
 - [x] Built-in shell, PowerShell, Codex, Claude Code, and acpx adapters pass public adapterkit result-artifact conformance checks.
 - [x] MCP stdio exposes adapter result-artifact conformance as `rdev.adapter.verify_result`.

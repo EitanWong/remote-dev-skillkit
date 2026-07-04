@@ -1,0 +1,165 @@
+package acceptance
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestPackageAndVerifyPostReleaseDownloadEvidence(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64", "windows/amd64"}, true)
+	pkg, err := PackagePostReleaseDownloadEvidence(PostReleaseDownloadPackageOptions{
+		PlanPath:             fixture.plan,
+		PlanVerificationPath: fixture.planVerification,
+		OutDir:               filepath.Join(root, "package"),
+		EvidenceDir:          fixture.evidenceDir,
+		SkillkitEvidenceDir:  fixture.skillkitDir,
+		Now:                  time.Date(2026, 7, 4, 13, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected post-release package ok: %#v", pkg.Checks)
+	}
+	if pkg.SchemaVersion != PostReleaseDownloadPackageSchemaVersion {
+		t.Fatalf("unexpected schema %q", pkg.SchemaVersion)
+	}
+	if pkg.Repo != "EitanWong/remote-dev-skillkit" || pkg.Tag != "v0.1.18-dev" {
+		t.Fatalf("unexpected repo/tag: %#v", pkg)
+	}
+	if !pkg.SkillkitIncluded || len(pkg.PlatformTargets) != 2 {
+		t.Fatalf("unexpected target metadata: %#v", pkg)
+	}
+	if pkg.RedactionRuleCounts["github_token"] != 2 {
+		t.Fatalf("expected github token redaction, got %#v", pkg.RedactionRuleCounts)
+	}
+	verification, err := VerifyPostReleaseDownloadAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected verification ok: %#v", verification.Checks)
+	}
+	if verification.PackageSchema != PostReleaseDownloadPackageSchemaVersion {
+		t.Fatalf("unexpected package schema %q", verification.PackageSchema)
+	}
+}
+
+func TestVerifyPostReleaseDownloadEvidenceRejectsMissingPlatformBundleVerify(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64"}, false)
+	if err := os.Remove(filepath.Join(fixture.evidenceDir, "linux-amd64-bundle-verify.json")); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := PackagePostReleaseDownloadEvidence(PostReleaseDownloadPackageOptions{
+		PlanPath:             fixture.plan,
+		PlanVerificationPath: fixture.planVerification,
+		OutDir:               filepath.Join(root, "package"),
+		EvidenceDir:          fixture.evidenceDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatal("expected package to fail without bundle verify evidence")
+	}
+	verification, err := VerifyPostReleaseDownloadAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected verification to fail")
+	}
+	if failures := failedPostReleaseAcceptanceChecks(verification.Checks); !strings.Contains(failures, "platform_linux-amd64_bundle_verify_present") {
+		t.Fatalf("expected missing bundle verification failure, got %s", failures)
+	}
+}
+
+type postReleaseDownloadFixture struct {
+	plan             string
+	planVerification string
+	evidenceDir      string
+	skillkitDir      string
+}
+
+func writePostReleaseDownloadFixture(t *testing.T, root string, targets []string, includeSkillkit bool) postReleaseDownloadFixture {
+	t.Helper()
+	dir := filepath.Join(root, "post-release-fixture")
+	evidenceDir := filepath.Join(dir, "platform-evidence")
+	skillkitDir := filepath.Join(dir, "skillkit-evidence")
+	if err := os.MkdirAll(evidenceDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skillkitDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	platforms := make([]map[string]any, 0, len(targets))
+	for _, target := range targets {
+		platforms = append(platforms, map[string]any{"target": target})
+		slug := postReleaseTargetSlug(target)
+		writeFixtureFile(t, evidenceDir, slug+"-transcript.txt", "downloaded and verified "+target+"\nghp_abcdefghijklmnopqrstuvwx\n")
+		writeFixtureJSON(t, evidenceDir, slug+"-candidate-verify.json", map[string]any{"ok": true, "schema_version": "rdev.release-candidate-verification.v1"})
+		writeFixtureJSON(t, evidenceDir, slug+"-bundle-verify.json", map[string]any{"ok": true, "schema_version": "rdev.release-bundle-verification.v1"})
+	}
+	skillkit := map[string]any{}
+	if includeSkillkit {
+		skillkit = map[string]any{
+			"archive": map[string]any{"name": "remote-dev-skillkit.tar.gz"},
+		}
+		writeFixtureFile(t, skillkitDir, "skillkit-transcript.txt", "downloaded skillkit archive\n")
+		writeFixtureJSON(t, skillkitDir, "skillkit-verify.json", map[string]any{"ok": true, "schema_version": "rdev.skillkit-verification.v1"})
+	}
+	plan := filepath.Join(dir, "post-release-install-plan.json")
+	writeFixtureJSON(t, dir, "post-release-install-plan.json", map[string]any{
+		"schema_version": "rdev.post-release-install-plan.v1",
+		"repo":           "EitanWong/remote-dev-skillkit",
+		"tag":            "v0.1.18-dev",
+		"platforms":      platforms,
+		"skillkit":       skillkit,
+	})
+	planVerification := filepath.Join(dir, "post-release-install-verification.json")
+	writeFixtureJSON(t, dir, "post-release-install-verification.json", map[string]any{
+		"schema_version": "rdev.post-release-install-verification.v1",
+		"ok":             true,
+	})
+	return postReleaseDownloadFixture{
+		plan:             plan,
+		planVerification: planVerification,
+		evidenceDir:      evidenceDir,
+		skillkitDir:      skillkitDir,
+	}
+}
+
+func writeFixtureJSON(t *testing.T, dir, name string, value any) {
+	t.Helper()
+	content, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, dir, name, string(content)+"\n")
+}
+
+func writeFixtureFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func failedPostReleaseAcceptanceChecks(checks []Check) string {
+	var failed []string
+	for _, check := range checks {
+		if !check.Passed {
+			failed = append(failed, check.Name)
+		}
+	}
+	return strings.Join(failed, ",")
+}

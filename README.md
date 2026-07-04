@@ -515,7 +515,9 @@ evidence for Windows/Linux/macOS service modes, real durable third-party hosted
 storage/auth runtime integrations beyond the current provider-specific runtime
 contracts and runtime evidence packager,
 real helper/relay adapter acceptance, and final external GitHub publishing plus
-download-verification steps.
+real public download verification. The post-release download verifier package
+now exists, so those real transcripts can be archived with checksums and
+redaction once a release is published.
 
 ## Documentation Map
 

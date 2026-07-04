@@ -127,6 +127,14 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - GitHub project readiness auditing through `scripts/github/audit-project-readiness.sh`, producing `rdev.github-project-readiness.v1` from local docs, templates, CI, release scripts, and `bootstrap-project.sh --dry-run` without external mutation.
 - Post-release install verification planning through `scripts/github/plan-post-release-install.sh`, producing `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification commands from a local GitHub Release dry-run plan without external mutation.
 - Post-release install plan verification through `scripts/github/verify-post-release-install-plan.sh`, checking the generated plan and scripts before they are archived as release evidence and rejecting tampered verification scripts in CI smoke.
+- Post-release download acceptance packaging and verification through
+  `rdev.acceptance-package.post-release-download.v1`,
+  `rdev acceptance package-post-release-download`,
+  `rdev.acceptance-verification.post-release-download-package.v1`, and
+  `rdev acceptance verify-post-release-download-package`, archiving real
+  published-release download transcripts, per-platform candidate verification,
+  per-platform signed bundle verification, Skillkit verification, redaction,
+  checksums, and no-private-surface evidence after a GitHub Release exists.
 - Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, Codex, Claude Code, and acpx result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
 - Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled jobs.
 - Strong symlink/workspace escape regression tests.

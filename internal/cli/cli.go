@@ -1308,6 +1308,14 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceVerifyHostedProviderRuntimePackage(*packagePath)
+	case "verify-post-release-download-package":
+		fs := flag.NewFlagSet("acceptance verify-post-release-download-package", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		packagePath := fs.String("package", "", "post-release download acceptance package directory or package.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceVerifyPostReleaseDownloadPackage(*packagePath)
 	case "package-windows-temporary":
 		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -1455,6 +1463,26 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			FailureModeEvidencePath:   *failureModeEvidence,
 			AuditPath:                 *auditPath,
 			NotesPath:                 *notes,
+		})
+	case "package-post-release-download":
+		fs := flag.NewFlagSet("acceptance package-post-release-download", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		plan := fs.String("plan", "", "post-release-install-plan.json from scripts/github/plan-post-release-install.sh")
+		planVerification := fs.String("plan-verification", "", "rdev.post-release-install-verification.v1 output from verify-post-release-install-plan.sh")
+		out := fs.String("out", "", "empty output directory for packaged post-release download evidence")
+		evidenceDir := fs.String("evidence-dir", "", "directory containing per-platform transcripts and verification JSON named <target-slug>-transcript.txt, <target-slug>-candidate-verify.json, and <target-slug>-bundle-verify.json")
+		skillkitEvidenceDir := fs.String("skillkit-evidence-dir", "", "directory containing skillkit-transcript.txt and skillkit-verify.json when the plan includes Skillkit")
+		notes := fs.String("notes", "", "optional operator notes file")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptancePackagePostReleaseDownload(acceptance.PostReleaseDownloadPackageOptions{
+			PlanPath:             *plan,
+			PlanVerificationPath: *planVerification,
+			OutDir:               *out,
+			EvidenceDir:          *evidenceDir,
+			SkillkitEvidenceDir:  *skillkitEvidenceDir,
+			NotesPath:            *notes,
 		})
 	default:
 		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
@@ -1785,6 +1813,35 @@ func (a App) acceptanceVerifyHostedProviderRuntimePackage(packagePath string) er
 	return nil
 }
 
+func (a App) acceptanceVerifyPostReleaseDownloadPackage(packagePath string) error {
+	verification, err := acceptance.VerifyPostReleaseDownloadAcceptancePackage(packagePath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"package":             verification.PackagePath,
+		"package_schema":      verification.PackageSchema,
+		"repo":                verification.Repo,
+		"tag":                 verification.Tag,
+		"platform_targets":    verification.PlatformTargets,
+		"skillkit_included":   verification.SkillkitIncluded,
+		"checks":              verification.Checks,
+		"files":               verification.Files,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("post-release download acceptance package verification failed")
+	}
+	return nil
+}
+
 func (a App) acceptancePackageWindowsTemporary(opts acceptance.WindowsTemporaryPackageOptions) error {
 	pkg, err := acceptance.PackageWindowsTemporaryEvidence(opts)
 	if err != nil {
@@ -1921,6 +1978,37 @@ func (a App) acceptancePackageHostedProviderRuntime(opts acceptance.HostedProvid
 	}
 	if !pkg.OK() {
 		return fmt.Errorf("hosted provider runtime acceptance package verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptancePackagePostReleaseDownload(opts acceptance.PostReleaseDownloadPackageOptions) error {
+	pkg, err := acceptance.PackagePostReleaseDownloadEvidence(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                    pkg.OK(),
+		"schema":                pkg.SchemaVersion,
+		"out":                   pkg.OutDir,
+		"package":               filepath.Join(pkg.OutDir, "package.json"),
+		"checksums":             filepath.Join(pkg.OutDir, "checksums.txt"),
+		"repo":                  pkg.Repo,
+		"tag":                   pkg.Tag,
+		"platform_targets":      pkg.PlatformTargets,
+		"skillkit_included":     pkg.SkillkitIncluded,
+		"checks":                pkg.Checks,
+		"files":                 pkg.Files,
+		"redaction_rule_counts": pkg.RedactionRuleCounts,
+		"recommended_actions":   pkg.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !pkg.OK() {
+		return fmt.Errorf("post-release download acceptance package verification failed")
 	}
 	return nil
 }
@@ -7807,11 +7895,13 @@ Usage:
   rdev acceptance verify-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json
   rdev acceptance verify-relay-adapter-package --package relay-evidence/package.json
   rdev acceptance verify-hosted-provider-runtime-package --package hosted-runtime-evidence/package.json
+  rdev acceptance verify-post-release-download-package --package post-release-download-evidence/package.json
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --runner-result runner-result.json --helper-transcript helper.txt --gateway-status gateway-status.json --host-status host-status.json --connection-status connection-status.json --audit audit.jsonl
   rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --gateway-startup gateway-startup.txt --storage-verification storage.json --auth-verification auth.json --backup-evidence backup.txt --restore-evidence restore.txt --retention-evidence retention.txt --role-mapping-evidence roles.json --failure-mode-evidence failure.json --audit audit.jsonl
+  rdev acceptance package-post-release-download --plan post-release-install/post-release-install-plan.json --plan-verification post-release-verification.json --out post-release-download-evidence --evidence-dir platform-download-evidence --skillkit-evidence-dir skillkit-download-evidence
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json

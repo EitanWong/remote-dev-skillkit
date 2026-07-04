@@ -38,6 +38,7 @@
 - [ ] Archive `rdev.post-release-install-plan.v1`, `VERIFY_INSTALL.md`, generated platform verification scripts, and Skillkit verification script.
 - [ ] Verify the post-release install plan with `scripts/github/verify-post-release-install-plan.sh`.
 - [ ] Archive `rdev.post-release-install-verification.v1`.
+- [ ] After release assets exist, package and verify real download evidence with `rdev acceptance package-post-release-download` and `rdev acceptance verify-post-release-download-package`; confirm every planned platform has transcript, `rdev release verify-candidate ok=true`, `rdev-verify --bundle ok=true`, Skillkit verification when applicable, redaction, and checksums.
 - [ ] Prepare a local release candidate with `rdev release prepare-candidate`.
 - [ ] Verify the local release candidate with `rdev release verify-candidate`.
 - [ ] Generate and review a GitHub Release dry-run plan with `scripts/github/plan-release.sh`.
@@ -83,6 +84,13 @@
 - [ ] Create GitHub release.
 - [ ] Verify release downloads.
 - [ ] Run generated post-release verification scripts for macOS, Linux, Windows, and Skillkit where applicable.
+- [ ] Store real post-release evidence in a directory using these names before packaging:
+  - `<target-slug>-transcript.txt`, for example `linux-amd64-transcript.txt`;
+  - `<target-slug>-candidate-verify.json`, produced by `rdev release verify-candidate` and containing `ok=true`;
+  - `<target-slug>-bundle-verify.json`, produced by `rdev-verify --bundle` and containing `ok=true`;
+  - `skillkit-transcript.txt` and `skillkit-verify.json` when Skillkit is in the post-release plan.
+- [ ] Package those transcripts with `rdev acceptance package-post-release-download --plan <post-release-install-plan.json> --plan-verification <post-release-install-verification.json> --out <evidence-out> --evidence-dir <platform-evidence-dir> --skillkit-evidence-dir <skillkit-evidence-dir>`.
+- [ ] Verify the package with `rdev acceptance verify-post-release-download-package --package <evidence-out>/package.json` before claiming public download acceptance.
 - [ ] Install on a clean Windows VM.
 - [ ] Install on macOS.
 - [ ] Install on Linux.
