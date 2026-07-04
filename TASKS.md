@@ -107,6 +107,7 @@
 - [x] Add hosted storage/auth foundation with gateway state-store provider boundary, file-backed provider verification, hosted EdDSA JWT operator auth, and combined local/hosted role authorization.
 - [x] Add hosted provider package generation and verification with `rdev.hosted-provider-package.v1`, `rdev.hosted-provider-package-verification.v1`, `rdev hosted-provider package`, `rdev hosted-provider verify`, provider runbook/env template output, no-private-surface checks, and release-smoke coverage.
 - [x] Add first standard relay adapter package generation and verification for Chisel/frpc with `rdev.relay-adapter-package.v1`, `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter package`, `rdev relay-adapter verify`, MCP tools `rdev.relay_adapter.package` / `rdev.relay_adapter.verify`, runner `RDEV_RELAY_*` metadata, safe helper argv/install-action checks, no-private-surface checks, and release-smoke coverage.
+- [x] Extend standard connectivity adapter package generation and verification to SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard with `RDEV_SSH_*`, `RDEV_MESH_*`, and `RDEV_VPN_*` runner metadata, MCP discoverability, manual-review-required install boundaries, no-private-surface checks, and release-smoke coverage.
 - [x] Add relay adapter acceptance evidence packaging and verification with `rdev.acceptance-package.relay-adapter.v1`, `rdev.acceptance-verification.relay-adapter-package.v1`, `rdev acceptance package-relay-adapter`, `rdev acceptance verify-relay-adapter-package`, runner-result relay-path checks, connected-status checks, redaction, checksums, and release-smoke coverage.
 - [x] Add hosted provider runtime acceptance evidence packaging and verification with `rdev.acceptance-package.hosted-provider-runtime.v1`, `rdev.acceptance-verification.hosted-provider-runtime-package.v1`, `rdev acceptance package-hosted-provider-runtime`, `rdev acceptance verify-hosted-provider-runtime-package`, storage/auth verification checks, backup/restore/retention evidence checks, role-mapping authorization probes, failure-mode probes, redaction, checksums, and release-smoke coverage.
 - [x] Add production enrollment authority lifecycle evidence for key custody, fleet renewal plans, and emergency drill packages.
@@ -295,7 +296,7 @@
 - [x] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [ ] Publish signed per-platform Connection Entry release archives to GitHub Releases and verify real downloads with post-release install transcripts.
-- [ ] Add real restrictive-network acceptance evidence for frp, Chisel, headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel paths across Windows/macOS/Linux.
+- [ ] Add real restrictive-network acceptance evidence for frp, Chisel, headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel paths across Windows/macOS/Linux using the standard connectivity adapter packages and `rdev acceptance package-relay-adapter`.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.
 - [x] Add Linux managed-service acceptance package generation for start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence.
@@ -304,7 +305,7 @@
 - [x] Add cancellation artifact conformance for built-in shell, PowerShell, Codex, Claude Code, and acpx result evidence.
 - [ ] Generalize runtime cooperative cancellation across future Adapter SDK implementations.
 - [x] Add Claude Code adapter.
-- [ ] Add Tailscale/headscale adapter.
+- [x] Add Tailscale/headscale adapter package/verifier surface.
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.

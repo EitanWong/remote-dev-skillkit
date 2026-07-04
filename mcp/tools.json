@@ -498,15 +498,18 @@
     },
     {
       "name": "rdev.relay_adapter.package",
-      "description": "Generate a standard Chisel or frpc relay adapter package for restrictive-network Connection Entries. The package emits reviewed RDEV_RELAY_GATEWAY_URL, RDEV_RELAY_START_ARGV_JSON, and RDEV_RELAY_INSTALL_ACTION_JSON templates plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, or polling scripts.",
-      "safety": "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",
+      "description": "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supported adapter kinds include Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard. The package emits reviewed RDEV_* gateway, helper argv, and install-action templates plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, mesh, VPN, tunnel, or polling scripts.",
+      "safety": "Writes local package files only. Does not create relay accounts, mesh enrollments, SSH/WireGuard keys, mutate firewall/DNS/routes, install helpers, start tunnels, or include real endpoints, credentials, private IPs, local paths, or secrets.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "adapter": {
             "enum": [
               "chisel",
-              "frpc"
+              "frpc",
+              "ssh-tunnel",
+              "headscale-tailscale",
+              "wireguard"
             ],
             "type": "string"
           },

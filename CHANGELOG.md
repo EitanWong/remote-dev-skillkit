@@ -4,6 +4,43 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.17-dev
+
+Current phase: restrictive-network adapter packaging now covers more of the
+standard Connection Entry helper paths. Agents can generate verified packages
+for SSH tunnels, headscale/Tailscale-compatible mesh, and WireGuard in addition
+to Chisel/frpc, which keeps helper setup inside `rdev` metadata instead of
+model-authored tunnel scripts. This is package/verifier coverage, not real
+cross-network execution evidence.
+
+### Added
+
+- Extended `rdev relay-adapter package` / `rdev relay-adapter verify` to
+  support `ssh-tunnel`, `headscale-tailscale`, and `wireguard` adapter kinds.
+  The generated packages now expose the matching runner metadata:
+  `RDEV_SSH_GATEWAY_URL` / `RDEV_SSH_TUNNEL_START_ARGV_JSON` /
+  `RDEV_SSH_INSTALL_ACTION_JSON`,
+  `RDEV_MESH_GATEWAY_URL` / `RDEV_MESH_START_ARGV_JSON` /
+  `RDEV_MESH_INSTALL_ACTION_JSON`, and
+  `RDEV_VPN_GATEWAY_URL` / `RDEV_VPN_START_ARGV_JSON` /
+  `RDEV_VPN_INSTALL_ACTION_JSON`.
+- Kept non-relay helpers scoped to existing reviewed configurations by default.
+  SSH, mesh, and WireGuard packages use `manual-review-required` install-action
+  metadata because key creation, profile import, enrollment, route/DNS/firewall
+  mutation, and service persistence remain operator-approved actions.
+- Updated MCP tool metadata and release smoke so MCP-capable Agents discover
+  the new adapter kinds and CI verifies package/verify output for
+  `ssh-tunnel`, `headscale-tailscale`, and `wireguard`.
+
+### Remaining Gates
+
+- Run real restrictive-network acceptance for SSH tunnel, headscale/Tailscale,
+  WireGuard, Chisel, and frpc paths across clean Windows/macOS/Linux targets,
+  then package evidence with `rdev acceptance package-relay-adapter`.
+- Add deeper runtime execution support where appropriate for mesh/VPN helper
+  startup after explicit operator approval, without weakening the existing
+  no-hidden-persistence and no-privilege-bypass rules.
+
 ## 0.1.16-dev
 
 Current phase: hosted provider work now has a runtime acceptance evidence

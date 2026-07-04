@@ -933,7 +933,7 @@ func (a App) relayAdapter(args []string) error {
 		fs.SetOutput(a.Stderr)
 		out := fs.String("out", "", "output directory for relay adapter package")
 		name := fs.String("name", "", "relay adapter package name")
-		adapterKind := fs.String("adapter", "chisel", "relay adapter kind: chisel or frpc")
+		adapterKind := fs.String("adapter", "chisel", "connectivity adapter kind: chisel, frpc, ssh-tunnel, headscale-tailscale, or wireguard")
 		force := fs.Bool("force", false, "replace an existing output directory")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err

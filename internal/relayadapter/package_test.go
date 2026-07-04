@@ -72,6 +72,76 @@ func TestBuildAndVerifyFRPCRelayAdapterPackage(t *testing.T) {
 	}
 }
 
+func TestBuildAndVerifyAdditionalConnectivityAdapterPackages(t *testing.T) {
+	cases := []struct {
+		adapter          string
+		kind             string
+		tool             string
+		gatewayEnv       string
+		startArgvEnv     string
+		installActionEnv string
+		pathID           string
+	}{
+		{
+			adapter:          "ssh",
+			kind:             "ssh-tunnel",
+			tool:             "ssh",
+			gatewayEnv:       "RDEV_SSH_GATEWAY_URL",
+			startArgvEnv:     "RDEV_SSH_TUNNEL_START_ARGV_JSON",
+			installActionEnv: "RDEV_SSH_INSTALL_ACTION_JSON",
+			pathID:           "existing-ssh-tunnel",
+		},
+		{
+			adapter:          "headscale",
+			kind:             "headscale-tailscale",
+			tool:             "tailscale",
+			gatewayEnv:       "RDEV_MESH_GATEWAY_URL",
+			startArgvEnv:     "RDEV_MESH_START_ARGV_JSON",
+			installActionEnv: "RDEV_MESH_INSTALL_ACTION_JSON",
+			pathID:           "existing-headscale-tailscale-mesh",
+		},
+		{
+			adapter:          "wireguard",
+			kind:             "wireguard",
+			tool:             "wg",
+			gatewayEnv:       "RDEV_VPN_GATEWAY_URL",
+			startArgvEnv:     "RDEV_VPN_START_ARGV_JSON",
+			installActionEnv: "RDEV_VPN_INSTALL_ACTION_JSON",
+			pathID:           "existing-wireguard-vpn",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.adapter, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "adapter")
+			pkg, err := Build(Options{
+				OutDir:      out,
+				AdapterKind: tc.adapter,
+				GeneratedAt: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !pkg.OK() ||
+				pkg.AdapterKind != tc.kind ||
+				pkg.Helper.Tool != tc.tool ||
+				pkg.RunnerEnv.GatewayURLVar != tc.gatewayEnv ||
+				pkg.RunnerEnv.StartArgvVar != tc.startArgvEnv ||
+				pkg.RunnerEnv.InstallActionVar != tc.installActionEnv ||
+				pkg.RunnerEnv.ConnectionPathID != tc.pathID ||
+				pkg.ConnectionPathID != tc.pathID {
+				t.Fatalf("unexpected package: %#v", pkg)
+			}
+			verification, err := Verify(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !verification.OK() || verification.AdapterKind != tc.kind {
+				t.Fatalf("expected verification ok: %#v", verification)
+			}
+		})
+	}
+}
+
 func TestVerifyRelayAdapterPackageDetectsUnsafeHelperSurface(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "relay")
 	_, err := Build(Options{

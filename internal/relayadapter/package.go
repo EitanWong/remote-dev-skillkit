@@ -32,6 +32,7 @@ type Package struct {
 	ProductionClaim   string        `json:"production_claim"`
 	RunnerEnv         RunnerEnv     `json:"runner_env"`
 	Helper            Helper        `json:"helper"`
+	ConnectionPathID  string        `json:"connection_path_id"`
 	StartArgvTemplate []string      `json:"start_argv_template"`
 	InstallAction     InstallAction `json:"install_action_template"`
 	EvidenceRequired  []string      `json:"evidence_required"`
@@ -151,44 +152,46 @@ func Build(opts Options) (Package, error) {
 	kind := normalizeKind(opts.AdapterKind)
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
-		name = "rdev-" + kind + "-relay-adapter"
+		name = "rdev-" + kind + "-connectivity-adapter"
 	}
+	descriptor := adapterDescriptor(kind)
 	pkg := Package{
 		SchemaVersion:    PackageSchemaVersion,
 		Name:             name,
 		GeneratedAt:      now.UTC(),
 		AdapterKind:      kind,
 		ExternalMutation: false,
-		ProductionClaim:  "relay-adapter-package-surface-only",
+		ProductionClaim:  "connectivity-adapter-package-surface-only",
 		RunnerEnv: RunnerEnv{
-			GatewayURLVar:     "RDEV_RELAY_GATEWAY_URL",
-			StartArgvVar:      "RDEV_RELAY_START_ARGV_JSON",
-			InstallActionVar:  "RDEV_RELAY_INSTALL_ACTION_JSON",
-			ConnectionPathID:  "existing-frp-or-chisel-relay",
+			GatewayURLVar:     descriptor.GatewayURLVar,
+			StartArgvVar:      descriptor.StartArgvVar,
+			InstallActionVar:  descriptor.InstallActionVar,
+			ConnectionPathID:  descriptor.ConnectionPathID,
 			RunnerCommandHint: "rdev connection-entry run --runner-manifest <connection-entry-runner.json> --dry-run",
 		},
-		Helper:            helper(kind),
-		StartArgvTemplate: startArgvTemplate(kind),
-		InstallAction:     installAction(kind),
+		Helper:            descriptor.Helper,
+		ConnectionPathID:  descriptor.ConnectionPathID,
+		StartArgvTemplate: descriptor.StartArgvTemplate,
+		InstallAction:     descriptor.InstallAction,
 		EvidenceRequired: []string{
-			"relay adapter package verification",
-			"helper binary detection or SHA-256 verified install report",
+			"connectivity adapter package verification",
+			"helper binary detection or reviewed install report",
 			"redacted helper start argv",
-			"selected RDEV_RELAY_GATEWAY_URL",
-			"Connection Entry runner result with selected_path=existing-frp-or-chisel-relay",
+			"selected gateway override environment variable",
+			"Connection Entry runner result with selected_path=" + descriptor.ConnectionPathID,
 			"host registration and transport fallback evidence from rdev host serve",
 		},
 		ApprovalRequired: []string{
-			"creating relay accounts or credentials",
-			"editing relay server configuration",
+			"creating connectivity accounts, keys, profiles, auth keys, or credentials",
+			"editing relay, SSH, mesh, or VPN configuration",
 			"opening firewall, NAT, DNS, or routing paths",
 			"installing persistent services, drivers, or privileged network components",
-			"using paid relay or cloud resources",
+			"using paid relay, mesh, VPN, cloud, or third-party resources",
 		},
 		AgentRules: []string{
-			"Use this package to set RDEV_RELAY_GATEWAY_URL, RDEV_RELAY_START_ARGV_JSON, and RDEV_RELAY_INSTALL_ACTION_JSON; do not write ad hoc relay scripts.",
-			"Ask one short question only when the relay endpoint, credential, privilege, or persistence decision is unclear.",
-			"Keep real relay endpoints, credentials, private IPs, local paths, and organization identifiers outside this package.",
+			"Use this package to set the declared RDEV_* gateway, helper argv, and install-action variables; do not write ad hoc SSH, relay, mesh, VPN, PowerShell, shell, or polling scripts.",
+			"Ask one short question only when the endpoint, credential, identity, privilege, enrollment, route, or persistence decision is unclear.",
+			"Keep real endpoints, credentials, keys, private IPs, local paths, and organization identifiers outside this package.",
 			"Run the Connection Entry runner in dry-run mode before execution so rdev selects the path and reports evidence.",
 		},
 	}
@@ -256,8 +259,8 @@ func Verify(path string) (Verification, error) {
 	add("schema_version", pkg.SchemaVersion == PackageSchemaVersion, pkg.SchemaVersion)
 	add("adapter_kind_supported", supportedKind(pkg.AdapterKind), pkg.AdapterKind)
 	add("external_mutation_false", !pkg.ExternalMutation, fmt.Sprintf("%t", pkg.ExternalMutation))
-	add("production_claim_is_scoped", pkg.ProductionClaim == "relay-adapter-package-surface-only", pkg.ProductionClaim)
-	add("runner_env_declared", runnerEnvDeclared(pkg.RunnerEnv), fmt.Sprintf("%#v", pkg.RunnerEnv))
+	add("production_claim_is_scoped", pkg.ProductionClaim == "connectivity-adapter-package-surface-only", pkg.ProductionClaim)
+	add("runner_env_declared", runnerEnvDeclaredForKind(pkg.AdapterKind, pkg.RunnerEnv), fmt.Sprintf("%#v", pkg.RunnerEnv))
 	add("start_argv_template_safe", safeStartArgv(pkg.AdapterKind, pkg.StartArgvTemplate), strings.Join(pkg.StartArgvTemplate, " "))
 	add("install_action_safe", safeInstallAction(pkg.AdapterKind, pkg.InstallAction), strings.Join(pkg.InstallAction.Argv, " "))
 	add("agent_rules_present", len(pkg.AgentRules) >= 3, fmt.Sprintf("%d", len(pkg.AgentRules)))
@@ -284,6 +287,12 @@ func normalizeKind(value string) string {
 		return "chisel"
 	case "frp", "frpc":
 		return "frpc"
+	case "ssh", "openssh", "ssh-tunnel":
+		return "ssh-tunnel"
+	case "headscale", "tailscale", "headscale-tailscale", "tailscale-compatible":
+		return "headscale-tailscale"
+	case "wireguard", "wg", "wg-quick":
+		return "wireguard"
 	default:
 		return value
 	}
@@ -291,57 +300,106 @@ func normalizeKind(value string) string {
 
 func supportedKind(kind string) bool {
 	switch normalizeKind(kind) {
-	case "chisel", "frpc":
+	case "chisel", "frpc", "ssh-tunnel", "headscale-tailscale", "wireguard":
 		return true
 	default:
 		return false
 	}
 }
 
-func helper(kind string) Helper {
+type descriptor struct {
+	ConnectionPathID  string
+	GatewayURLVar     string
+	StartArgvVar      string
+	InstallActionVar  string
+	Helper            Helper
+	StartArgvTemplate []string
+	InstallAction     InstallAction
+}
+
+func adapterDescriptor(kind string) descriptor {
 	switch normalizeKind(kind) {
 	case "frpc":
-		return Helper{
-			Tool:              "frpc",
-			Aliases:           []string{"frp"},
-			Scope:             "user-or-workspace",
-			SupportedPlatform: []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"},
-			VerifyCommand:     "rdev deps install --tool frpc --url ${RDEV_FRPC_DOWNLOAD_URL} --expected-sha256 ${RDEV_FRPC_SHA256}",
-			RuntimeStatus:     "configured-helper-executable",
+		return descriptor{
+			ConnectionPathID:  "existing-frp-or-chisel-relay",
+			GatewayURLVar:     "RDEV_RELAY_GATEWAY_URL",
+			StartArgvVar:      "RDEV_RELAY_START_ARGV_JSON",
+			InstallActionVar:  "RDEV_RELAY_INSTALL_ACTION_JSON",
+			Helper:            helper("frpc", []string{"frp"}, "rdev deps install --tool frpc --url ${RDEV_FRPC_DOWNLOAD_URL} --expected-sha256 ${RDEV_FRPC_SHA256}", "configured-helper-executable"),
+			StartArgvTemplate: []string{"frpc", "-c", "${RDEV_FRPC_CONFIG}"},
+			InstallAction:     installAction("frpc", "FRPC", true),
+		}
+	case "ssh-tunnel":
+		return descriptor{
+			ConnectionPathID:  "existing-ssh-tunnel",
+			GatewayURLVar:     "RDEV_SSH_GATEWAY_URL",
+			StartArgvVar:      "RDEV_SSH_TUNNEL_START_ARGV_JSON",
+			InstallActionVar:  "RDEV_SSH_INSTALL_ACTION_JSON",
+			Helper:            helper("ssh", []string{"openssh"}, "ssh -V", "use-existing-config-only"),
+			StartArgvTemplate: []string{"ssh", "-N", "-L", "${RDEV_SSH_LOCAL_FORWARD}", "${RDEV_SSH_TARGET_ALIAS}"},
+			InstallAction:     installAction("ssh", "SSH", false),
+		}
+	case "headscale-tailscale":
+		return descriptor{
+			ConnectionPathID:  "existing-headscale-tailscale-mesh",
+			GatewayURLVar:     "RDEV_MESH_GATEWAY_URL",
+			StartArgvVar:      "RDEV_MESH_START_ARGV_JSON",
+			InstallActionVar:  "RDEV_MESH_INSTALL_ACTION_JSON",
+			Helper:            helper("tailscale", []string{"headscale-compatible"}, "tailscale status --json", "use-existing-enrollment-only"),
+			StartArgvTemplate: []string{"tailscale", "status", "--json"},
+			InstallAction:     installAction("tailscale", "MESH", false),
+		}
+	case "wireguard":
+		return descriptor{
+			ConnectionPathID:  "existing-wireguard-vpn",
+			GatewayURLVar:     "RDEV_VPN_GATEWAY_URL",
+			StartArgvVar:      "RDEV_VPN_START_ARGV_JSON",
+			InstallActionVar:  "RDEV_VPN_INSTALL_ACTION_JSON",
+			Helper:            helper("wg", []string{"wg-quick", "wireguard"}, "wg show", "use-active-tunnel-only"),
+			StartArgvTemplate: []string{"wg", "show"},
+			InstallAction:     installAction("wg", "VPN", false),
 		}
 	default:
-		return Helper{
-			Tool:              "chisel",
-			Scope:             "user-or-workspace",
-			SupportedPlatform: []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"},
-			VerifyCommand:     "rdev deps install --tool chisel --url ${RDEV_CHISEL_DOWNLOAD_URL} --expected-sha256 ${RDEV_CHISEL_SHA256}",
-			RuntimeStatus:     "configured-helper-executable",
+		return descriptor{
+			ConnectionPathID:  "existing-frp-or-chisel-relay",
+			GatewayURLVar:     "RDEV_RELAY_GATEWAY_URL",
+			StartArgvVar:      "RDEV_RELAY_START_ARGV_JSON",
+			InstallActionVar:  "RDEV_RELAY_INSTALL_ACTION_JSON",
+			Helper:            helper("chisel", nil, "rdev deps install --tool chisel --url ${RDEV_CHISEL_DOWNLOAD_URL} --expected-sha256 ${RDEV_CHISEL_SHA256}", "configured-helper-executable"),
+			StartArgvTemplate: []string{"chisel", "client", "${RDEV_CHISEL_SERVER}", "R:${RDEV_RELAY_REMOTE_PORT}:127.0.0.1:${RDEV_GATEWAY_LOCAL_PORT}"},
+			InstallAction:     installAction("chisel", "CHISEL", true),
 		}
 	}
 }
 
-func startArgvTemplate(kind string) []string {
-	switch normalizeKind(kind) {
-	case "frpc":
-		return []string{"frpc", "-c", "${RDEV_FRPC_CONFIG}"}
-	default:
-		return []string{"chisel", "client", "${RDEV_CHISEL_SERVER}", "R:${RDEV_RELAY_REMOTE_PORT}:127.0.0.1:${RDEV_GATEWAY_LOCAL_PORT}"}
+func helper(tool string, aliases []string, verifyCommand, runtimeStatus string) Helper {
+	return Helper{
+		Tool:              tool,
+		Aliases:           aliases,
+		Scope:             "user-or-workspace",
+		SupportedPlatform: []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"},
+		VerifyCommand:     verifyCommand,
+		RuntimeStatus:     runtimeStatus,
 	}
 }
 
-func installAction(kind string) InstallAction {
-	tool := normalizeKind(kind)
-	prefix := "CHISEL"
-	if tool == "frpc" {
-		prefix = "FRPC"
+func installAction(tool, prefix string, downloadable bool) InstallAction {
+	tool = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(tool)), ".exe")
+	argv := []string{"manual-review-required"}
+	expectedSHA := "not-applicable-existing-helper"
+	reason := "Use an existing reviewed helper installation or operator-approved install plan."
+	if downloadable {
+		argv = []string{"rdev", "deps", "install", "--tool", tool, "--scope", "user", "--url", "${RDEV_" + prefix + "_DOWNLOAD_URL}", "--expected-sha256", "${RDEV_" + prefix + "_SHA256}", "--execute"}
+		expectedSHA = "${RDEV_" + prefix + "_SHA256}"
+		reason = "Install the reviewed open-source relay helper when the target does not already have it."
 	}
 	return InstallAction{
 		SchemaVersion:     "rdev.connection-entry.dependency-install-action.v1",
 		Tool:              tool,
-		Argv:              []string{"rdev", "deps", "install", "--tool", tool, "--scope", "user", "--url", "${RDEV_" + prefix + "_DOWNLOAD_URL}", "--expected-sha256", "${RDEV_" + prefix + "_SHA256}", "--execute"},
+		Argv:              argv,
 		Scope:             "user",
-		Reason:            "Install the reviewed open-source relay helper when the target does not already have it.",
-		ExpectedSHA256:    "${RDEV_" + prefix + "_SHA256}",
+		Reason:            reason,
+		ExpectedSHA256:    expectedSHA,
 		RequiresElevation: false,
 	}
 }
@@ -351,8 +409,8 @@ func packageChecks(pkg Package) []Check {
 		{Name: "schema_version", Passed: pkg.SchemaVersion == PackageSchemaVersion, Detail: pkg.SchemaVersion},
 		{Name: "adapter_kind_supported", Passed: supportedKind(pkg.AdapterKind), Detail: pkg.AdapterKind},
 		{Name: "external_mutation_false", Passed: !pkg.ExternalMutation, Detail: fmt.Sprintf("%t", pkg.ExternalMutation)},
-		{Name: "production_claim_scoped", Passed: pkg.ProductionClaim == "relay-adapter-package-surface-only", Detail: pkg.ProductionClaim},
-		{Name: "runner_env_declared", Passed: runnerEnvDeclared(pkg.RunnerEnv), Detail: pkg.RunnerEnv.ConnectionPathID},
+		{Name: "production_claim_scoped", Passed: pkg.ProductionClaim == "connectivity-adapter-package-surface-only", Detail: pkg.ProductionClaim},
+		{Name: "runner_env_declared", Passed: runnerEnvDeclaredForKind(pkg.AdapterKind, pkg.RunnerEnv), Detail: pkg.RunnerEnv.ConnectionPathID},
 		{Name: "start_argv_template_safe", Passed: safeStartArgv(pkg.AdapterKind, pkg.StartArgvTemplate), Detail: strings.Join(pkg.StartArgvTemplate, " ")},
 		{Name: "install_action_safe", Passed: safeInstallAction(pkg.AdapterKind, pkg.InstallAction), Detail: strings.Join(pkg.InstallAction.Argv, " ")},
 		{Name: "approval_boundaries_declared", Passed: len(pkg.ApprovalRequired) >= 3, Detail: fmt.Sprintf("%d", len(pkg.ApprovalRequired))},
@@ -360,11 +418,12 @@ func packageChecks(pkg Package) []Check {
 	}
 }
 
-func runnerEnvDeclared(env RunnerEnv) bool {
-	return env.GatewayURLVar == "RDEV_RELAY_GATEWAY_URL" &&
-		env.StartArgvVar == "RDEV_RELAY_START_ARGV_JSON" &&
-		env.InstallActionVar == "RDEV_RELAY_INSTALL_ACTION_JSON" &&
-		env.ConnectionPathID == "existing-frp-or-chisel-relay"
+func runnerEnvDeclaredForKind(kind string, env RunnerEnv) bool {
+	descriptor := adapterDescriptor(kind)
+	return env.GatewayURLVar == descriptor.GatewayURLVar &&
+		env.StartArgvVar == descriptor.StartArgvVar &&
+		env.InstallActionVar == descriptor.InstallActionVar &&
+		env.ConnectionPathID == descriptor.ConnectionPathID
 }
 
 func safeStartArgv(kind string, argv []string) bool {
@@ -391,6 +450,9 @@ func safeInstallAction(kind string, action InstallAction) bool {
 	joined := strings.ToLower(strings.Join(action.Argv, "\n"))
 	if strings.Contains(joined, "executionpolicy") || strings.Contains(joined, "bypass") || strings.Contains(joined, "encodedcommand") {
 		return false
+	}
+	if strings.Join(action.Argv, " ") == "manual-review-required" {
+		return kind == "ssh-tunnel" || kind == "headscale-tailscale" || kind == "wireguard"
 	}
 	return strings.Contains(joined, "rdev") && strings.Contains(joined, "deps") && strings.Contains(joined, "install")
 }
@@ -437,9 +499,9 @@ Schema: %s
 Name: %s
 Adapter: %s
 
-This package gives Agents a standard relay helper surface for restrictive
-networks. It contains no real relay endpoint, credential, private IP, local
-path, organization identifier, or server address.
+This package gives Agents a standard connectivity helper surface for restrictive
+networks. It contains no real relay, SSH, mesh, VPN, credential, private IP,
+local path, organization identifier, or server address.
 
 Runner environment:
 
@@ -463,15 +525,22 @@ credential changes require explicit operator approval.
 func renderEnvTemplate(pkg Package) string {
 	startArgv, _ := json.Marshal(pkg.StartArgvTemplate)
 	install, _ := json.Marshal(pkg.InstallAction)
-	return fmt.Sprintf(`# Reviewed relay gateway URL reachable by the target host.
+	installValue := string(install)
+	installNote := "Optional reviewed helper install action. Requires SHA-256 before execution."
+	if len(pkg.InstallAction.Argv) == 1 && pkg.InstallAction.Argv[0] == "manual-review-required" {
+		installValue = ""
+		installNote = "Optional reviewed helper install action. Leave empty unless the operator provides a real reviewed JSON action; enrollment, key, route, profile, or service changes require approval."
+	}
+	return fmt.Sprintf(`# Reviewed gateway URL reachable by the target host through this helper path.
 %s=
 
-# Reviewed helper argv. Keep credentials in external secret/config files.
+# Reviewed helper argv. Keep credentials, keys, and real endpoints in external
+# secret/config files.
 %s=%s
 
-# Optional reviewed helper install action. Requires SHA-256 before execution.
+# %s
 %s=%s
-`, pkg.RunnerEnv.GatewayURLVar, pkg.RunnerEnv.StartArgvVar, startArgv, pkg.RunnerEnv.InstallActionVar, install)
+`, pkg.RunnerEnv.GatewayURLVar, pkg.RunnerEnv.StartArgvVar, startArgv, installNote, pkg.RunnerEnv.InstallActionVar, installValue)
 }
 
 func resolveManifest(path string) (string, string, error) {

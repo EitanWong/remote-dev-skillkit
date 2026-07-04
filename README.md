@@ -489,10 +489,12 @@ adapter paths for shell, PowerShell, Codex, Claude Code, and ACP/acpx. The
 current line also includes WSS/mTLS host job transport, hosted-auth verifier
 configuration, a storage-provider boundary, and enrollment authority lifecycle
 evidence commands. Hosted provider packages can be generated and verified with
-`rdev hosted-provider package` / `rdev hosted-provider verify`. Chisel/frpc
-relay adapter packages can be generated and verified with
+`rdev hosted-provider package` / `rdev hosted-provider verify`. Chisel/frpc,
+SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard connectivity
+adapter packages can be generated and verified with
 `rdev relay-adapter package` / `rdev relay-adapter verify`, giving Agents
-standard `RDEV_RELAY_*` runner metadata instead of custom tunnel scripts. Real
+standard `RDEV_RELAY_*`, `RDEV_SSH_*`, `RDEV_MESH_*`, and `RDEV_VPN_*` runner
+metadata instead of custom tunnel scripts. Real
 hosted gateway storage/auth runs can be archived and verified with
 `rdev acceptance package-hosted-provider-runtime` /
 `rdev acceptance verify-hosted-provider-runtime-package`, covering startup,

@@ -59,10 +59,12 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `rdev.relay-adapter-package.v1`, `rdev relay-adapter package`,
   `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter verify`,
   and MCP tools `rdev.relay_adapter.package` / `rdev.relay_adapter.verify`,
-  producing Chisel/frpc runner `RDEV_RELAY_*` metadata, safe helper argv,
-  reviewed dependency install actions, approval boundaries, checksums, and
-  no-private-surface evidence without bundling relay endpoints, credentials,
-  private IPs, or local paths.
+  producing Chisel/frpc `RDEV_RELAY_*`, SSH tunnel `RDEV_SSH_*`,
+  headscale/Tailscale-compatible `RDEV_MESH_*`, and WireGuard `RDEV_VPN_*`
+  runner metadata, safe helper argv, reviewed dependency or manual-review
+  install actions, approval boundaries, checksums, and no-private-surface
+  evidence without bundling relay endpoints, SSH identities, mesh auth keys,
+  WireGuard keys, credentials, private IPs, or local paths.
 - Relay adapter acceptance packaging and verification through
   `rdev.acceptance-package.relay-adapter.v1`,
   `rdev acceptance package-relay-adapter`,

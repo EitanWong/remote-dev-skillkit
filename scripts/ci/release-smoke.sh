@@ -37,7 +37,7 @@ go test ./internal/hostedprovider ./internal/cli \
 	> "$work_dir/hosted-provider-package-smoke.txt"
 
 go test ./internal/relayadapter ./internal/cli \
-	-run 'TestBuildAndVerifyRelayAdapterPackage|TestBuildAndVerifyFRPCRelayAdapterPackage|TestVerifyRelayAdapterPackageDetectsUnsafeHelperSurface|TestRelayAdapterPackageAndVerify' \
+	-run 'TestBuildAndVerifyRelayAdapterPackage|TestBuildAndVerifyFRPCRelayAdapterPackage|TestBuildAndVerifyAdditionalConnectivityAdapterPackages|TestVerifyRelayAdapterPackageDetectsUnsafeHelperSurface|TestRelayAdapterPackageAndVerify|TestRelayAdapterPackageSupportsMeshSSHAndVPNKinds' \
 	-count=1 \
 	> "$work_dir/relay-adapter-package-smoke.txt"
 
@@ -98,6 +98,17 @@ go run ./cmd/rdev relay-adapter package \
 go run ./cmd/rdev relay-adapter verify \
 	--package "$relay_adapter_dir" \
 	> "$work_dir/relay-adapter-verification.json"
+
+for adapter in ssh-tunnel headscale-tailscale wireguard; do
+	adapter_dir="$work_dir/connectivity-adapter-$adapter"
+	go run ./cmd/rdev relay-adapter package \
+		--out "$adapter_dir" \
+		--adapter "$adapter" \
+		> "$work_dir/connectivity-adapter-$adapter-package.json"
+	go run ./cmd/rdev relay-adapter verify \
+		--package "$adapter_dir" \
+		> "$work_dir/connectivity-adapter-$adapter-verification.json"
+done
 
 relay_acceptance_input="$work_dir/relay-acceptance-input"
 mkdir -p "$relay_acceptance_input"
@@ -323,6 +334,14 @@ hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-ac
 hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
 relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
 relay_adapter_verification = json.loads((root / "relay-adapter-verification.json").read_text())
+connectivity_adapter_packages = {
+    adapter: json.loads((root / f"connectivity-adapter-{adapter}-package.json").read_text())
+    for adapter in ["ssh-tunnel", "headscale-tailscale", "wireguard"]
+}
+connectivity_adapter_verifications = {
+    adapter: json.loads((root / f"connectivity-adapter-{adapter}-verification.json").read_text())
+    for adapter in ["ssh-tunnel", "headscale-tailscale", "wireguard"]
+}
 relay_adapter_acceptance_package = json.loads((root / "relay-adapter-acceptance-package.json").read_text())
 relay_adapter_acceptance_verification = json.loads((root / "relay-adapter-acceptance-verification.json").read_text())
 post_release_output = json.loads((root / "post-release-output.json").read_text())
@@ -462,6 +481,21 @@ assert relay_adapter_package["runner_env"]["gateway_url_var"] == "RDEV_RELAY_GAT
 assert relay_adapter_verification["schema"] == "rdev.relay-adapter-package-verification.v1", relay_adapter_verification
 assert relay_adapter_verification["ok"] is True, relay_adapter_verification
 assert relay_adapter_verification["adapter_kind"] == "chisel", relay_adapter_verification
+expected_connectivity = {
+    "ssh-tunnel": ("ssh-tunnel", "RDEV_SSH_GATEWAY_URL"),
+    "headscale-tailscale": ("headscale-tailscale", "RDEV_MESH_GATEWAY_URL"),
+    "wireguard": ("wireguard", "RDEV_VPN_GATEWAY_URL"),
+}
+for adapter, (kind, gateway_var) in expected_connectivity.items():
+    package = connectivity_adapter_packages[adapter]
+    verification = connectivity_adapter_verifications[adapter]
+    assert package["schema"] == "rdev.relay-adapter-package.v1", package
+    assert package["ok"] is True, package
+    assert package["adapter_kind"] == kind, package
+    assert package["runner_env"]["gateway_url_var"] == gateway_var, package
+    assert verification["schema"] == "rdev.relay-adapter-package-verification.v1", verification
+    assert verification["ok"] is True, verification
+    assert verification["adapter_kind"] == kind, verification
 assert relay_adapter_acceptance_package["schema"] == "rdev.acceptance-package.relay-adapter.v1", relay_adapter_acceptance_package
 assert relay_adapter_acceptance_package["ok"] is True, relay_adapter_acceptance_package
 assert relay_adapter_acceptance_verification["schema"] == "rdev.acceptance-verification.relay-adapter-package.v1", relay_adapter_acceptance_verification
@@ -593,6 +627,7 @@ print(json.dumps({
     "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],
     "relay_adapter_package_schema": relay_adapter_package["schema"],
     "relay_adapter_package_verification_schema": relay_adapter_verification["schema"],
+    "connectivity_adapter_package_kinds": sorted(package["adapter_kind"] for package in connectivity_adapter_packages.values()),
     "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
     "enrollment_lifecycle_smoke": True,

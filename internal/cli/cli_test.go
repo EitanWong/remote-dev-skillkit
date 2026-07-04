@@ -2067,6 +2067,53 @@ func TestRelayAdapterPackageAndVerify(t *testing.T) {
 	}
 }
 
+func TestRelayAdapterPackageSupportsMeshSSHAndVPNKinds(t *testing.T) {
+	for _, tc := range []struct {
+		adapter    string
+		kind       string
+		helperTool string
+		envVar     string
+	}{
+		{adapter: "ssh-tunnel", kind: "ssh-tunnel", helperTool: "ssh", envVar: "RDEV_SSH_GATEWAY_URL"},
+		{adapter: "headscale-tailscale", kind: "headscale-tailscale", helperTool: "tailscale", envVar: "RDEV_MESH_GATEWAY_URL"},
+		{adapter: "wireguard", kind: "wireguard", helperTool: "wg", envVar: "RDEV_VPN_GATEWAY_URL"},
+	} {
+		t.Run(tc.adapter, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "adapter")
+			var packageStdout bytes.Buffer
+			app := NewApp(&packageStdout, &bytes.Buffer{})
+			if err := app.Run(context.Background(), []string{
+				"relay-adapter", "package",
+				"--out", out,
+				"--adapter", tc.adapter,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			output := packageStdout.String()
+			for _, expected := range []string{
+				`"schema": "rdev.relay-adapter-package.v1"`,
+				`"adapter_kind": "` + tc.kind + `"`,
+				`"helper_tool": "` + tc.helperTool + `"`,
+				tc.envVar,
+			} {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("expected %q in output: %s", expected, output)
+				}
+			}
+
+			var verifyStdout bytes.Buffer
+			app = NewApp(&verifyStdout, &bytes.Buffer{})
+			if err := app.Run(context.Background(), []string{"relay-adapter", "verify", "--package", out}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(verifyStdout.String(), `"ok": true`) ||
+				!strings.Contains(verifyStdout.String(), `"adapter_kind": "`+tc.kind+`"`) {
+				t.Fatalf("unexpected verify output: %s", verifyStdout.String())
+			}
+		})
+	}
+}
+
 func TestMCPServeProcessesInitialize(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
