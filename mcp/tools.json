@@ -548,6 +548,58 @@
       }
     },
     {
+      "name": "rdev.acceptance.scaffold_post_release_download",
+      "description": "Create a standard evidence collection directory from a verified post-release install plan so Agents collect public GitHub Release download transcripts, candidate verification, bundle verification, and Skillkit evidence with stable file names before packaging.",
+      "safety": "Writes local scaffold files only. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims. Placeholder evidence is opt-in and must be replaced before packaging.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "create_placeholders": {
+            "type": "boolean"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "out_dir": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_verification": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan",
+          "plan_verification",
+          "out_dir"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.acceptance.post_release_evidence_status",
+      "description": "Read a post-release download evidence scaffold and report whether every required platform and Skillkit evidence file is present, non-empty, and not a scaffold placeholder before packaging.",
+      "safety": "Read-only status check. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "scaffold": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "scaffold"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.relay_adapter.package",
       "description": "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supports Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard packages. The package emits reviewed RDEV_RELAY_*, RDEV_SSH_*, RDEV_MESH_*, or RDEV_VPN_* gateway/helper/install metadata plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, mesh, VPN, or polling scripts.",
       "safety": "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",

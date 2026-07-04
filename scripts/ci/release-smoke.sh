@@ -426,6 +426,20 @@ scripts/github/verify-post-release-install-plan.sh \
   --plan "$post_release_dir/post-release-install-plan.json" \
   > "$work_dir/post-release-verification.json"
 
+post_release_scaffold_dir="$work_dir/post-release-download-scaffold"
+go run ./cmd/rdev acceptance scaffold-post-release-download \
+  --plan "$post_release_dir/post-release-install-plan.json" \
+  --plan-verification "$work_dir/post-release-verification.json" \
+  --out "$post_release_scaffold_dir" \
+  --create-placeholders \
+  > "$work_dir/post-release-download-scaffold.json"
+if go run ./cmd/rdev acceptance post-release-evidence-status \
+  --scaffold "$post_release_scaffold_dir" \
+  > "$work_dir/post-release-download-status-placeholder.json" 2> "$work_dir/post-release-download-status-placeholder.err"; then
+  echo "placeholder post-release evidence status unexpectedly succeeded" >&2
+  exit 1
+fi
+
 post_release_evidence_dir="$work_dir/post-release-download-evidence-input"
 post_release_skillkit_evidence_dir="$work_dir/post-release-download-skillkit-input"
 mkdir -p "$post_release_evidence_dir" "$post_release_skillkit_evidence_dir"
@@ -437,13 +451,24 @@ printf '%s\n' '{"ok":true,"schema_version":"rdev.release-candidate-verification.
 printf '%s\n' '{"ok":true,"schema_version":"rdev.release-bundle-verification.v1"}' > "$post_release_evidence_dir/windows-amd64-bundle-verify.json"
 printf '%s\n' 'downloaded and verified Skillkit archive' > "$post_release_skillkit_evidence_dir/skillkit-transcript.txt"
 printf '%s\n' '{"ok":true,"schema_version":"rdev.skillkit-bundle-verification.v1"}' > "$post_release_skillkit_evidence_dir/skillkit-verify.json"
+cp "$post_release_evidence_dir/linux-amd64-transcript.txt" "$post_release_scaffold_dir/platform-download-evidence/linux-amd64-transcript.txt"
+cp "$post_release_evidence_dir/linux-amd64-candidate-verify.json" "$post_release_scaffold_dir/platform-download-evidence/linux-amd64-candidate-verify.json"
+cp "$post_release_evidence_dir/linux-amd64-bundle-verify.json" "$post_release_scaffold_dir/platform-download-evidence/linux-amd64-bundle-verify.json"
+cp "$post_release_evidence_dir/windows-amd64-transcript.txt" "$post_release_scaffold_dir/platform-download-evidence/windows-amd64-transcript.txt"
+cp "$post_release_evidence_dir/windows-amd64-candidate-verify.json" "$post_release_scaffold_dir/platform-download-evidence/windows-amd64-candidate-verify.json"
+cp "$post_release_evidence_dir/windows-amd64-bundle-verify.json" "$post_release_scaffold_dir/platform-download-evidence/windows-amd64-bundle-verify.json"
+cp "$post_release_skillkit_evidence_dir/skillkit-transcript.txt" "$post_release_scaffold_dir/skillkit-download-evidence/skillkit-transcript.txt"
+cp "$post_release_skillkit_evidence_dir/skillkit-verify.json" "$post_release_scaffold_dir/skillkit-download-evidence/skillkit-verify.json"
+go run ./cmd/rdev acceptance post-release-evidence-status \
+  --scaffold "$post_release_scaffold_dir" \
+  > "$work_dir/post-release-download-status-ready.json"
 post_release_download_package_dir="$work_dir/post-release-download-acceptance"
 go run ./cmd/rdev acceptance package-post-release-download \
-  --plan "$post_release_dir/post-release-install-plan.json" \
-  --plan-verification "$work_dir/post-release-verification.json" \
+  --plan "$post_release_scaffold_dir/post-release-install-plan.json" \
+  --plan-verification "$post_release_scaffold_dir/post-release-install-verification.json" \
   --out "$post_release_download_package_dir" \
-  --evidence-dir "$post_release_evidence_dir" \
-  --skillkit-evidence-dir "$post_release_skillkit_evidence_dir" \
+  --evidence-dir "$post_release_scaffold_dir/platform-download-evidence" \
+  --skillkit-evidence-dir "$post_release_scaffold_dir/skillkit-download-evidence" \
   > "$work_dir/post-release-download-acceptance-package.json"
 go run ./cmd/rdev acceptance verify-post-release-download-package \
   --package "$post_release_download_package_dir" \
@@ -625,6 +650,9 @@ relay_adapter_acceptance_verification = json.loads((root / "relay-adapter-accept
 post_release_output = json.loads((root / "post-release-output.json").read_text())
 post_release_plan = json.loads(pathlib.Path(post_release_output["plan"]).read_text())
 post_release_verification = json.loads((root / "post-release-verification.json").read_text())
+post_release_download_scaffold = json.loads((root / "post-release-download-scaffold.json").read_text())
+post_release_download_status_placeholder = json.loads((root / "post-release-download-status-placeholder.json").read_text())
+post_release_download_status_ready = json.loads((root / "post-release-download-status-ready.json").read_text())
 post_release_download_package = json.loads((root / "post-release-download-acceptance-package.json").read_text())
 post_release_download_verification = json.loads((root / "post-release-download-acceptance-verification.json").read_text())
 post_release_tampered = json.loads((root / "post-release-tampered-verification.json").read_text())
@@ -912,6 +940,15 @@ assert (post_release_plan_dir / post_release_plan["skillkit"]["verification_scri
 assert post_release_verification["schema_version"] == "rdev.post-release-install-verification.v1", post_release_verification
 assert post_release_verification["ok"] is True, post_release_verification
 assert post_release_verification["external_mutation"] is False, post_release_verification
+assert post_release_download_scaffold["schema"] == "rdev.post-release-download-evidence-scaffold.v1", post_release_download_scaffold
+assert post_release_download_scaffold["ready_for_packaging"] is False, post_release_download_scaffold
+assert post_release_download_scaffold["skillkit_included"] is True, post_release_download_scaffold
+assert post_release_download_status_placeholder["schema"] == "rdev.post-release-download-evidence-status.v1", post_release_download_status_placeholder
+assert post_release_download_status_placeholder["ready_for_packaging"] is False, post_release_download_status_placeholder
+assert post_release_download_status_placeholder["placeholder_count"] >= 8, post_release_download_status_placeholder
+assert post_release_download_status_ready["schema"] == "rdev.post-release-download-evidence-status.v1", post_release_download_status_ready
+assert post_release_download_status_ready["ready_for_packaging"] is True, post_release_download_status_ready
+assert post_release_download_status_ready["required_ready"] == post_release_download_status_ready["required_total"], post_release_download_status_ready
 assert post_release_download_package["schema"] == "rdev.acceptance-package.post-release-download.v1", post_release_download_package
 assert post_release_download_package["ok"] is True, post_release_download_package
 assert set(post_release_download_package["platform_targets"]) == {"linux/amd64", "windows/amd64"}, post_release_download_package
@@ -1056,6 +1093,9 @@ print(json.dumps({
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
     "post_release_download_acceptance_package_schema": post_release_download_package["schema"],
     "post_release_download_acceptance_verification_schema": post_release_download_verification["schema"],
+    "post_release_download_scaffold_schema": post_release_download_scaffold["schema"],
+    "post_release_download_status_schema": post_release_download_status_ready["schema"],
+    "post_release_download_status_ready": post_release_download_status_ready["ready_for_packaging"],
     "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

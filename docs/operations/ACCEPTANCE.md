@@ -67,6 +67,38 @@ Agents should prefer MCP tool `rdev.acceptance.scaffold_evidence` when
 available, then collect the listed files instead of writing custom PowerShell,
 shell, relay, gateway, or evidence-layout scripts.
 
+## Post-Release Download Evidence Scaffolding
+
+After generating and verifying a post-release install plan, scaffold the public
+download evidence directory before GitHub Release download verification:
+
+```bash
+rdev acceptance scaffold-post-release-download \
+  --plan post-release-install/post-release-install-plan.json \
+  --plan-verification post-release-verification.json \
+  --out .rdev/acceptance/post-release-download-evidence
+```
+
+The command writes `rdev.post-release-download-evidence-scaffold.v1`,
+`AGENT_CHECKLIST.md`, copied plan/verification JSON, platform evidence
+directories, Skillkit evidence directories when required, and the exact
+`rdev acceptance package-post-release-download` / verify commands. Use
+`--create-placeholders` only to create obvious local collection slots.
+
+Before packaging, check readiness:
+
+```bash
+rdev acceptance post-release-evidence-status \
+  --scaffold .rdev/acceptance/post-release-download-evidence
+```
+
+The status command emits `rdev.post-release-download-evidence-status.v1` and
+exits nonzero until every planned platform transcript, candidate verification,
+bundle verification, and required Skillkit evidence file exists, is non-empty,
+and is not a scaffold placeholder. Agents should prefer MCP tools
+`rdev.acceptance.scaffold_post_release_download` and
+`rdev.acceptance.post_release_evidence_status` when available.
+
 ## Fresh-Agent Support-Session Contract Gate
 
 Run:

@@ -86,11 +86,13 @@
 - [ ] Create GitHub release.
 - [ ] Verify release downloads.
 - [ ] Run generated post-release verification scripts for macOS, Linux, Windows, and Skillkit where applicable.
+- [ ] Scaffold public download evidence with `rdev acceptance scaffold-post-release-download --plan <post-release-install-plan.json> --plan-verification <post-release-install-verification.json> --out <post-release-scaffold>`.
 - [ ] Store real post-release evidence in a directory using these names before packaging:
   - `<target-slug>-transcript.txt`, for example `linux-amd64-transcript.txt`;
   - `<target-slug>-candidate-verify.json`, produced by `rdev release verify-candidate` and containing `ok=true`;
   - `<target-slug>-bundle-verify.json`, produced by `rdev-verify --bundle` and containing `ok=true`;
   - `skillkit-transcript.txt` and `skillkit-verify.json` when Skillkit is in the post-release plan.
+- [ ] Run `rdev acceptance post-release-evidence-status --scaffold <post-release-scaffold>` and require `ready_for_packaging=true`.
 - [ ] Package those transcripts with `rdev acceptance package-post-release-download --plan <post-release-install-plan.json> --plan-verification <post-release-install-verification.json> --out <evidence-out> --evidence-dir <platform-evidence-dir> --skillkit-evidence-dir <skillkit-evidence-dir>`.
 - [ ] Verify the package with `rdev acceptance verify-post-release-download-package --package <evidence-out>/package.json` before claiming public download acceptance.
 - [ ] Install on a clean Windows VM.

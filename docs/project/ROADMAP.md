@@ -187,6 +187,15 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   published-release download transcripts, per-platform candidate verification,
   per-platform signed bundle verification, Skillkit verification, redaction,
   checksums, and no-private-surface evidence after a GitHub Release exists.
+- Post-release download evidence scaffolding and readiness checks through
+  `rdev.post-release-download-evidence-scaffold.v1`,
+  `rdev acceptance scaffold-post-release-download`,
+  `rdev.post-release-download-evidence-status.v1`,
+  `rdev acceptance post-release-evidence-status`, and MCP tools
+  `rdev.acceptance.scaffold_post_release_download` /
+  `rdev.acceptance.post_release_evidence_status`, so Agents collect public
+  download evidence with stable file names and fail closed on missing, empty,
+  or placeholder evidence before packaging.
 - Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, Codex, Claude Code, and acpx result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
 - Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled jobs.
 - Strong symlink/workspace escape regression tests.

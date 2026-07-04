@@ -171,6 +171,26 @@ func Tools() []Tool {
 			}, []string{"scaffold"}),
 		},
 		{
+			Name:        "rdev.acceptance.scaffold_post_release_download",
+			Description: "Create a standard evidence collection directory from a verified post-release install plan so Agents collect public GitHub Release download transcripts, candidate verification, bundle verification, and Skillkit evidence with stable file names before packaging.",
+			Safety:      "Writes local scaffold files only. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims. Placeholder evidence is opt-in and must be replaced before packaging.",
+			InputSchema: object(map[string]any{
+				"plan":                stringField(),
+				"plan_verification":   stringField(),
+				"out_dir":             stringField(),
+				"create_placeholders": boolField(),
+				"force":               boolField(),
+			}, []string{"plan", "plan_verification", "out_dir"}),
+		},
+		{
+			Name:        "rdev.acceptance.post_release_evidence_status",
+			Description: "Read a post-release download evidence scaffold and report whether every required platform and Skillkit evidence file is present, non-empty, and not a scaffold placeholder before packaging.",
+			Safety:      "Read-only status check. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims.",
+			InputSchema: object(map[string]any{
+				"scaffold": stringField(),
+			}, []string{"scaffold"}),
+		},
+		{
 			Name:        "rdev.relay_adapter.package",
 			Description: "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supports Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard packages. The package emits reviewed RDEV_RELAY_*, RDEV_SSH_*, RDEV_MESH_*, or RDEV_VPN_* gateway/helper/install metadata plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, mesh, VPN, or polling scripts.",
 			Safety:      "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/acceptance"
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionentry"
@@ -146,6 +147,10 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.scaffoldAcceptanceEvidence(params.Arguments)
 	case "rdev.acceptance.evidence_status":
 		data, err = s.acceptanceEvidenceStatus(params.Arguments)
+	case "rdev.acceptance.scaffold_post_release_download":
+		data, err = s.scaffoldPostReleaseDownloadEvidence(params.Arguments)
+	case "rdev.acceptance.post_release_evidence_status":
+		data, err = s.postReleaseDownloadEvidenceStatus(params.Arguments)
 	case "rdev.relay_adapter.package":
 		data, err = s.relayAdapterPackage(params.Arguments)
 	case "rdev.relay_adapter.verify":
@@ -469,6 +474,24 @@ func (s Server) acceptanceEvidenceStatus(args map[string]any) (any, error) {
 	return evidenceplan.StatusForScaffold(evidenceplan.StatusOptions{
 		ScaffoldPath: requiredString(args, "scaffold"),
 		GeneratedAt:  time.Now().UTC(),
+	})
+}
+
+func (s Server) scaffoldPostReleaseDownloadEvidence(args map[string]any) (any, error) {
+	return acceptance.ScaffoldPostReleaseDownloadEvidence(acceptance.PostReleaseDownloadScaffoldOptions{
+		PlanPath:             requiredString(args, "plan"),
+		PlanVerificationPath: requiredString(args, "plan_verification"),
+		OutDir:               requiredString(args, "out_dir"),
+		CreatePlaceholders:   boolArg(args, "create_placeholders", false),
+		Force:                boolArg(args, "force", false),
+		Now:                  time.Now().UTC(),
+	})
+}
+
+func (s Server) postReleaseDownloadEvidenceStatus(args map[string]any) (any, error) {
+	return acceptance.StatusPostReleaseDownloadEvidence(acceptance.PostReleaseDownloadStatusOptions{
+		ScaffoldPath: requiredString(args, "scaffold"),
+		Now:          time.Now().UTC(),
 	})
 }
 

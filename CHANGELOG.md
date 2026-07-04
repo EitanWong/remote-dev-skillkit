@@ -4,6 +4,47 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.29-dev
+
+Current phase: formal release package evidence is being made as Agent-native as
+hosted-provider and relay evidence. Post-release download evidence now has a
+standard scaffold and readiness gate, so Agents do not invent public download
+transcript file names or package commands after GitHub Release assets exist.
+
+### Added
+
+- Added `rdev.post-release-download-evidence-scaffold.v1` through
+  `rdev acceptance scaffold-post-release-download --plan
+  <post-release-install-plan.json> --plan-verification
+  <post-release-install-verification.json> --out <dir>`. The scaffold writes
+  `AGENT_CHECKLIST.md`, `scaffold-report.json`, copied plan/verification JSON,
+  stable platform and Skillkit evidence directories, standard evidence file
+  metadata, and exact package/verify commands.
+- Added `rdev.post-release-download-evidence-status.v1` through
+  `rdev acceptance post-release-evidence-status --scaffold
+  <dir|scaffold-report.json>`. The status command fails closed until every
+  planned platform transcript, candidate verification, bundle verification,
+  and required Skillkit evidence file exists, is non-empty, and is not a
+  scaffold placeholder.
+- Added MCP tools `rdev.acceptance.scaffold_post_release_download` and
+  `rdev.acceptance.post_release_evidence_status` so fresh Agents can prepare
+  and inspect public-download evidence without writing custom shell,
+  PowerShell, or file-layout code.
+- Extended release smoke and tests to prove placeholder post-release download
+  evidence is not ready, filled scaffold evidence reports
+  `ready_for_packaging=true`, and the existing
+  `rdev acceptance package-post-release-download` path can consume the
+  scaffold's copied plan and evidence directories.
+
+### Remaining Gates
+
+- Publish signed per-platform Connection Entry archives to GitHub Releases and
+  collect real public download transcripts with the new scaffold/status flow.
+- Run real clean-machine Windows/macOS/Linux Connection Entry and fresh-Agent
+  acceptance.
+- Collect real deployed Postgres/Redis/S3/OIDC/SAML hosted provider evidence
+  and real restrictive-network frp/Chisel/headscale/WireGuard/SSH evidence.
+
 ## 0.1.28-dev
 
 Current phase: real acceptance is being made more Agent-native before external

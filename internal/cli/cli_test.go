@@ -9089,6 +9089,70 @@ func TestAcceptancePackagePostReleaseDownload(t *testing.T) {
 	}
 }
 
+func TestAcceptanceScaffoldPostReleaseDownload(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadEvidenceForCLITest(t, root)
+	out := filepath.Join(root, "post-release-scaffold")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "scaffold-post-release-download",
+		"--plan", fixture.plan,
+		"--plan-verification", fixture.planVerification,
+		"--out", out,
+		"--create-placeholders",
+	}); err != nil {
+		t.Fatalf("expected scaffold command to pass: %v\n%s", err, stdout.String())
+	}
+	for _, expected := range []string{
+		`"schema": "rdev.post-release-download-evidence-scaffold.v1"`,
+		`"ready_for_packaging": false`,
+		`"skillkit_included": true`,
+		`"platform_evidence_dir"`,
+		`"package-post-release-download"`,
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("expected %q in scaffold output: %s", expected, stdout.String())
+		}
+	}
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"acceptance", "post-release-evidence-status",
+		"--scaffold", out,
+	})
+	if err == nil {
+		t.Fatal("placeholder post-release evidence status should fail")
+	}
+	if !strings.Contains(stdout.String(), `"schema": "rdev.post-release-download-evidence-status.v1"`) ||
+		!strings.Contains(stdout.String(), `"placeholder_count": 8`) ||
+		!strings.Contains(stdout.String(), `"ready_for_packaging": false`) {
+		t.Fatalf("unexpected placeholder status: %s", stdout.String())
+	}
+
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "linux-amd64-transcript.txt"), filepath.Join(out, "platform-download-evidence", "linux-amd64-transcript.txt"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "linux-amd64-candidate-verify.json"), filepath.Join(out, "platform-download-evidence", "linux-amd64-candidate-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "linux-amd64-bundle-verify.json"), filepath.Join(out, "platform-download-evidence", "linux-amd64-bundle-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "windows-amd64-transcript.txt"), filepath.Join(out, "platform-download-evidence", "windows-amd64-transcript.txt"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "windows-amd64-candidate-verify.json"), filepath.Join(out, "platform-download-evidence", "windows-amd64-candidate-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "windows-amd64-bundle-verify.json"), filepath.Join(out, "platform-download-evidence", "windows-amd64-bundle-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.skillkitDir, "skillkit-transcript.txt"), filepath.Join(out, "skillkit-download-evidence", "skillkit-transcript.txt"))
+	copyFileForCLITest(t, filepath.Join(fixture.skillkitDir, "skillkit-verify.json"), filepath.Join(out, "skillkit-download-evidence", "skillkit-verify.json"))
+
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "post-release-evidence-status",
+		"--scaffold", out,
+	}); err != nil {
+		t.Fatalf("real post-release evidence status should pass: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"ready_for_packaging": true`) ||
+		!strings.Contains(stdout.String(), `"required_ready": 8`) {
+		t.Fatalf("unexpected ready status: %s", stdout.String())
+	}
+}
+
 func timeNowForTest() time.Time {
 	return time.Now().UTC().Add(-time.Minute)
 }
@@ -9336,6 +9400,15 @@ func writeFileForCLITest(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func copyFileForCLITest(t *testing.T, source, dest string) {
+	t.Helper()
+	content, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFileForCLITest(t, dest, string(content))
 }
 
 func signReleaseArtifactWithCLIForTest(t *testing.T, dir, keyPath, name, content string) string {

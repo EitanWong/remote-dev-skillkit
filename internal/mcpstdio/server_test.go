@@ -744,6 +744,60 @@ func TestServerToolCallScaffoldAcceptanceEvidence(t *testing.T) {
 	}
 }
 
+func TestServerToolCallScaffoldPostReleaseDownloadEvidence(t *testing.T) {
+	root := t.TempDir()
+	plan := filepath.Join(root, "post-release-install-plan.json")
+	planVerification := filepath.Join(root, "post-release-install-verification.json")
+	if err := os.WriteFile(plan, []byte(`{
+  "schema_version": "rdev.post-release-install-plan.v1",
+  "repo": "EitanWong/remote-dev-skillkit",
+  "tag": "v0.1.28-dev",
+  "platforms": [{"target": "linux/amd64"}],
+  "skillkit": {"archive": {"name": "remote-dev-skillkit.tar.gz"}}
+}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(planVerification, []byte(`{"schema_version":"rdev.post-release-install-verification.v1","ok":true}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(root, "scaffold")
+	input := mcpRequestLine(t, "rdev.acceptance.scaffold_post_release_download", map[string]any{
+		"plan":                plan,
+		"plan_verification":   planVerification,
+		"out_dir":             outDir,
+		"create_placeholders": true,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.post-release-download-evidence-scaffold.v1" ||
+		structured["ready_for_packaging"] != false ||
+		structured["skillkit_included"] != true {
+		t.Fatalf("unexpected post-release scaffold payload: %#v", structured)
+	}
+	statusInput := mcpRequestLine(t, "rdev.acceptance.post_release_evidence_status", map[string]any{
+		"scaffold": outDir,
+	})
+	out.Reset()
+	if err := server.Serve(context.Background(), strings.NewReader(statusInput), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines = responseLines(t, out.String())
+	result = lines[0]["result"].(map[string]any)
+	structured = result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.post-release-download-evidence-status.v1" ||
+		structured["ready_for_packaging"] != false ||
+		structured["placeholder_count"].(float64) == 0 {
+		t.Fatalf("unexpected post-release status payload: %#v", structured)
+	}
+}
+
 func TestServerToolCallConnectionEntryPlanWritesPackagePlan(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	inviteIn := mcpRequestLine(t, "rdev.invites.create", map[string]any{
