@@ -134,15 +134,7 @@ go run ./cmd/rdev acceptance scaffold-evidence \
 if go run ./cmd/rdev acceptance package-hosted-provider-runtime \
 	--hosted-provider-package "$hosted_provider_dir" \
 	--out "$work_dir/hosted-placeholder-package" \
-	--gateway-startup "$hosted_placeholder_scaffold_dir/gateway-startup.txt" \
-	--storage-verification "$hosted_placeholder_scaffold_dir/storage-verification.json" \
-	--auth-verification "$hosted_placeholder_scaffold_dir/auth-verification.json" \
-	--backup-evidence "$hosted_placeholder_scaffold_dir/backup-evidence.txt" \
-	--restore-evidence "$hosted_placeholder_scaffold_dir/restore-evidence.txt" \
-	--retention-evidence "$hosted_placeholder_scaffold_dir/retention-evidence.txt" \
-	--role-mapping-evidence "$hosted_placeholder_scaffold_dir/role-mapping-evidence.json" \
-	--failure-mode-evidence "$hosted_placeholder_scaffold_dir/failure-mode-evidence.json" \
-	--audit "$hosted_placeholder_scaffold_dir/audit.jsonl" \
+	--evidence-dir "$hosted_placeholder_scaffold_dir" \
 	> "$work_dir/hosted-placeholder-package.json" 2> "$work_dir/hosted-placeholder-package.err"; then
 	echo "placeholder hosted evidence package unexpectedly succeeded" >&2
 	exit 1
@@ -158,7 +150,7 @@ printf '%s\n' 'restored snapshot and verified audit chain' > "$hosted_runtime_in
 printf '%s\n' 'retention policy reviewed for release smoke' > "$hosted_runtime_input/retention-evidence.txt"
 printf '%s\n' '{"probes":[{"role":"operator","authorized":true},{"role":"viewer","authorized":false}]}' > "$hosted_runtime_input/role-mapping-evidence.json"
 printf '%s\n' '{"ok":true,"failure_mode_tested":true,"mode":"invalid auth rejected"}' > "$hosted_runtime_input/failure-mode-evidence.json"
-printf '%s\n' 'gateway_start' 'storage_verify' 'auth_verify' 'role_probe' 'failure_probe' 'cleanup' > "$hosted_runtime_input/audit.txt"
+printf '%s\n' '{"event":"gateway_start"}' '{"event":"storage_verify"}' '{"event":"auth_verify"}' '{"event":"role_probe"}' '{"event":"failure_probe"}' '{"event":"cleanup"}' > "$hosted_runtime_input/audit.jsonl"
 hosted_ready_scaffold_dir="$work_dir/hosted-provider-ready-scaffold"
 go run ./cmd/rdev acceptance scaffold-evidence \
 	--plan "$hosted_provider_dir/runtime-evidence-plan.json" \
@@ -172,7 +164,7 @@ cp "$hosted_runtime_input/restore-evidence.txt" "$hosted_ready_scaffold_dir/rest
 cp "$hosted_runtime_input/retention-evidence.txt" "$hosted_ready_scaffold_dir/retention-evidence.txt"
 cp "$hosted_runtime_input/role-mapping-evidence.json" "$hosted_ready_scaffold_dir/role-mapping-evidence.json"
 cp "$hosted_runtime_input/failure-mode-evidence.json" "$hosted_ready_scaffold_dir/failure-mode-evidence.json"
-cp "$hosted_runtime_input/audit.txt" "$hosted_ready_scaffold_dir/audit.jsonl"
+cp "$hosted_runtime_input/audit.jsonl" "$hosted_ready_scaffold_dir/audit.jsonl"
 go run ./cmd/rdev acceptance evidence-status \
 	--scaffold "$hosted_ready_scaffold_dir" \
 	> "$work_dir/hosted-provider-evidence-status-ready.json"
@@ -180,15 +172,7 @@ hosted_runtime_dir="$work_dir/hosted-runtime-acceptance"
 go run ./cmd/rdev acceptance package-hosted-provider-runtime \
 	--hosted-provider-package "$hosted_provider_dir" \
 	--out "$hosted_runtime_dir" \
-	--gateway-startup "$hosted_runtime_input/gateway-startup.txt" \
-	--storage-verification "$hosted_runtime_input/storage-verification.json" \
-	--auth-verification "$hosted_runtime_input/auth-verification.json" \
-	--backup-evidence "$hosted_runtime_input/backup-evidence.txt" \
-	--restore-evidence "$hosted_runtime_input/restore-evidence.txt" \
-	--retention-evidence "$hosted_runtime_input/retention-evidence.txt" \
-	--role-mapping-evidence "$hosted_runtime_input/role-mapping-evidence.json" \
-	--failure-mode-evidence "$hosted_runtime_input/failure-mode-evidence.json" \
-	--audit "$hosted_runtime_input/audit.txt" \
+	--evidence-dir "$hosted_runtime_input" \
 	> "$work_dir/hosted-provider-runtime-acceptance-package.json"
 go run ./cmd/rdev acceptance verify-hosted-provider-runtime-package \
 	--package "$hosted_runtime_dir" \
@@ -815,6 +799,7 @@ assert external_hosted_runtime_contract["runtime_status"] == "durable-runtime-ev
 assert len(external_hosted_runtime_contract["required_evidence"]) >= 9, external_hosted_runtime_contract
 assert external_hosted_runtime_evidence_plan["schema_version"] == "rdev.hosted-provider-runtime-evidence-plan.v1", external_hosted_runtime_evidence_plan
 assert "package-hosted-provider-runtime" in external_hosted_runtime_evidence_plan["package_command"], external_hosted_runtime_evidence_plan
+assert "--evidence-dir" in external_hosted_runtime_evidence_plan["package_command"], external_hosted_runtime_evidence_plan
 assert {item["path"] for item in external_hosted_runtime_evidence_plan["evidence_files"]} >= {"gateway-startup.txt", "storage-verification.json", "auth-verification.json", "audit.jsonl"}, external_hosted_runtime_evidence_plan
 assert hosted_evidence_scaffold["schema"] == "rdev.acceptance-evidence-scaffold.v1", hosted_evidence_scaffold
 assert hosted_evidence_scaffold["ok"] is True, hosted_evidence_scaffold
@@ -851,6 +836,7 @@ assert saml_hosted_runtime_contract["runtime_status"] == "durable-runtime-eviden
 assert any(item["example_command"].startswith("rdev operator-auth verify-saml") for item in saml_hosted_runtime_contract["required_evidence"] if item["name"] == "auth-verification"), saml_hosted_runtime_contract
 assert saml_hosted_runtime_evidence_plan["schema_version"] == "rdev.hosted-provider-runtime-evidence-plan.v1", saml_hosted_runtime_evidence_plan
 assert "package-hosted-provider-runtime" in saml_hosted_runtime_evidence_plan["package_command"], saml_hosted_runtime_evidence_plan
+assert "--evidence-dir" in saml_hosted_runtime_evidence_plan["package_command"], saml_hosted_runtime_evidence_plan
 assert hosted_provider_runtime_package["schema"] == "rdev.acceptance-package.hosted-provider-runtime.v1", hosted_provider_runtime_package
 assert hosted_provider_runtime_package["ok"] is True, hosted_provider_runtime_package
 assert hosted_provider_runtime_package["storage_provider"] == "file", hosted_provider_runtime_package
@@ -1088,6 +1074,7 @@ print(json.dumps({
     "hosted_provider_placeholder_rejected": True,
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],
     "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],
+    "hosted_provider_package_from_evidence_dir": True,
     "relay_adapter_package_schema": relay_adapter_package["schema"],
     "relay_adapter_package_verification_schema": relay_adapter_verification["schema"],
     "relay_adapter_acceptance_evidence_plan_schema": relay_adapter_evidence_plan["schema_version"],

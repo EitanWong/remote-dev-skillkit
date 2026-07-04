@@ -89,8 +89,9 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Hosted provider runtime evidence plans through
   `rdev.hosted-provider-runtime-evidence-plan.v1` and
   `runtime-evidence-plan.json`, giving Agents standard evidence file names,
-  preflight commands, and `rdev acceptance package-hosted-provider-runtime` /
-  verify commands for real deployed evidence collection.
+  preflight commands, and
+  `rdev acceptance package-hosted-provider-runtime --evidence-dir` / verify
+  commands for real deployed evidence collection.
 - Relay adapter package generation and verification through
   `rdev.relay-adapter-package.v1`, `rdev relay-adapter package`,
   `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter verify`,

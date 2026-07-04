@@ -19,6 +19,7 @@ const HostedProviderRuntimeVerificationSchemaVersion = "rdev.acceptance-verifica
 type HostedProviderRuntimePackageOptions struct {
 	HostedProviderPackagePath string
 	OutDir                    string
+	EvidenceDirPath           string
 	GatewayStartupPath        string
 	StorageVerificationPath   string
 	AuthVerificationPath      string
@@ -100,6 +101,11 @@ func PackageHostedProviderRuntimeEvidence(opts HostedProviderRuntimePackageOptio
 	if strings.TrimSpace(opts.OutDir) == "" {
 		return HostedProviderRuntimeAcceptancePackage{}, fmt.Errorf("output directory is required")
 	}
+	var err error
+	opts, err = resolveHostedRuntimeEvidenceDir(opts)
+	if err != nil {
+		return HostedProviderRuntimeAcceptancePackage{}, err
+	}
 	outDir, err := filepath.Abs(opts.OutDir)
 	if err != nil {
 		return HostedProviderRuntimeAcceptancePackage{}, err
@@ -180,7 +186,7 @@ func PackageHostedProviderRuntimeEvidence(opts HostedProviderRuntimePackageOptio
 	files = append(files, copyOptionalEvidence(outDir, "evidence/retention-evidence.txt", "retention-evidence", opts.RetentionEvidencePath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/role-mapping-evidence.json", "role-mapping-evidence", opts.RoleMappingEvidencePath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/failure-mode-evidence.json", "failure-mode-evidence", opts.FailureModeEvidencePath, redactor, add)...)
-	files = append(files, copyOptionalEvidence(outDir, "evidence/audit.txt", "audit", opts.AuditPath, redactor, add)...)
+	files = append(files, copyOptionalEvidence(outDir, "evidence/audit.jsonl", "audit", opts.AuditPath, redactor, add)...)
 	files = append(files, copyNotesEvidence(outDir, opts.NotesPath, redactor, add)...)
 
 	add("gateway_startup_present", fileEntryKindPresent(files, "gateway-startup"), opts.GatewayStartupPath)
@@ -226,6 +232,37 @@ func PackageHostedProviderRuntimeEvidence(opts HostedProviderRuntimePackageOptio
 		return HostedProviderRuntimeAcceptancePackage{}, err
 	}
 	return pkg, nil
+}
+
+func resolveHostedRuntimeEvidenceDir(opts HostedProviderRuntimePackageOptions) (HostedProviderRuntimePackageOptions, error) {
+	if strings.TrimSpace(opts.EvidenceDirPath) == "" {
+		return opts, nil
+	}
+	dir, err := filepath.Abs(opts.EvidenceDirPath)
+	if err != nil {
+		return HostedProviderRuntimePackageOptions{}, err
+	}
+	if info, err := os.Stat(dir); err != nil {
+		return HostedProviderRuntimePackageOptions{}, err
+	} else if !info.IsDir() {
+		return HostedProviderRuntimePackageOptions{}, fmt.Errorf("hosted runtime evidence path is not a directory: %s", dir)
+	}
+	fill := func(current, name string) string {
+		if strings.TrimSpace(current) != "" {
+			return current
+		}
+		return filepath.Join(dir, name)
+	}
+	opts.GatewayStartupPath = fill(opts.GatewayStartupPath, "gateway-startup.txt")
+	opts.StorageVerificationPath = fill(opts.StorageVerificationPath, "storage-verification.json")
+	opts.AuthVerificationPath = fill(opts.AuthVerificationPath, "auth-verification.json")
+	opts.BackupEvidencePath = fill(opts.BackupEvidencePath, "backup-evidence.txt")
+	opts.RestoreEvidencePath = fill(opts.RestoreEvidencePath, "restore-evidence.txt")
+	opts.RetentionEvidencePath = fill(opts.RetentionEvidencePath, "retention-evidence.txt")
+	opts.RoleMappingEvidencePath = fill(opts.RoleMappingEvidencePath, "role-mapping-evidence.json")
+	opts.FailureModeEvidencePath = fill(opts.FailureModeEvidencePath, "failure-mode-evidence.json")
+	opts.AuditPath = fill(opts.AuditPath, "audit.jsonl")
+	return opts, nil
 }
 
 func VerifyHostedProviderRuntimeAcceptancePackage(packagePath string) (HostedProviderRuntimeAcceptanceVerification, error) {

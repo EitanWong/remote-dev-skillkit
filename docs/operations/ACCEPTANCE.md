@@ -63,6 +63,24 @@ runtime and relay/connectivity acceptance packagers reject scaffold placeholder
 files; verification also fails if placeholder markers appear in archived
 `evidence/` files.
 
+Package hosted-provider runtime evidence through the same directory-level
+contract:
+
+```bash
+rdev acceptance package-hosted-provider-runtime \
+  --hosted-provider-package hosted-provider \
+  --out .rdev/acceptance/hosted-provider-runtime-package \
+  --evidence-dir .rdev/acceptance/hosted-provider-runtime-evidence
+```
+
+The package command reads the standard hosted runtime file names from the
+evidence directory, including `gateway-startup.txt`,
+`storage-verification.json`, `auth-verification.json`,
+`backup-evidence.txt`, `restore-evidence.txt`, `retention-evidence.txt`,
+`role-mapping-evidence.json`, `failure-mode-evidence.json`, and `audit.jsonl`.
+Agents should not pass those as separate file flags unless a reviewed operator
+override is needed.
+
 Agents should prefer MCP tool `rdev.acceptance.scaffold_evidence` when
 available, then collect the listed files instead of writing custom PowerShell,
 shell, relay, gateway, or evidence-layout scripts.

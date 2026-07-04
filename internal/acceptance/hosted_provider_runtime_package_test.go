@@ -27,15 +27,7 @@ func TestPackageAndVerifyHostedProviderRuntimeEvidence(t *testing.T) {
 	pkg, err := PackageHostedProviderRuntimeEvidence(HostedProviderRuntimePackageOptions{
 		HostedProviderPackagePath: providerDir,
 		OutDir:                    filepath.Join(root, "package"),
-		GatewayStartupPath:        evidence.gatewayStartup,
-		StorageVerificationPath:   evidence.storageVerification,
-		AuthVerificationPath:      evidence.authVerification,
-		BackupEvidencePath:        evidence.backupEvidence,
-		RestoreEvidencePath:       evidence.restoreEvidence,
-		RetentionEvidencePath:     evidence.retentionEvidence,
-		RoleMappingEvidencePath:   evidence.roleMappingEvidence,
-		FailureModeEvidencePath:   evidence.failureModeEvidence,
-		AuditPath:                 evidence.audit,
+		EvidenceDirPath:           evidence.dir,
 		Now:                       time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -49,6 +41,9 @@ func TestPackageAndVerifyHostedProviderRuntimeEvidence(t *testing.T) {
 	}
 	if pkg.RedactionRuleCounts["github_token"] != 1 {
 		t.Fatalf("expected github token redaction, got %#v", pkg.RedactionRuleCounts)
+	}
+	if !hostedRuntimePackageHasPath(pkg.Files, "evidence/audit.jsonl") {
+		t.Fatalf("expected audit.jsonl from evidence dir in package: %#v", pkg.Files)
 	}
 
 	verification, err := VerifyHostedProviderRuntimeAcceptancePackage(pkg.OutDir)
@@ -207,6 +202,7 @@ func TestHostedProviderRuntimeRejectsScaffoldPlaceholderEvidence(t *testing.T) {
 }
 
 type hostedProviderRuntimeEvidenceForTest struct {
+	dir                 string
 	gatewayStartup      string
 	storageVerification string
 	authVerification    string
@@ -258,8 +254,18 @@ func writeHostedProviderRuntimeEvidenceForTest(t *testing.T, root, storageProvid
 			},
 		}),
 		failureModeEvidence: write("failure-mode-evidence.json", map[string]any{"ok": true, "failure_mode_tested": true, "mode": "invalid auth rejected"}),
-		audit:               write("audit.txt", "gateway_start\nstorage_verify\nauth_verify\nrole_probe\nfailure_probe\ncleanup\n"),
+		dir:                 dir,
+		audit:               write("audit.jsonl", `{"event":"gateway_start"}`+"\n"+`{"event":"storage_verify"}`+"\n"+`{"event":"auth_verify"}`+"\n"+`{"event":"role_probe"}`+"\n"+`{"event":"failure_probe"}`+"\n"+`{"event":"cleanup"}`+"\n"),
 	}
+}
+
+func hostedRuntimePackageHasPath(files []AcceptancePackageFile, path string) bool {
+	for _, file := range files {
+		if file.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 func failedHostedRuntimeAcceptanceChecks(checks []Check) string {

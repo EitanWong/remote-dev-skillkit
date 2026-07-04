@@ -1632,6 +1632,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		hostedPackage := fs.String("hosted-provider-package", "", "verified hosted provider package directory or hosted-provider.json")
 		out := fs.String("out", "", "empty output directory for packaged hosted provider runtime evidence")
+		evidenceDir := fs.String("evidence-dir", "", "directory containing standard hosted provider runtime evidence files")
 		gatewayStartup := fs.String("gateway-startup", "", "gateway startup or deployment transcript")
 		storageVerification := fs.String("storage-verification", "", "storage provider verification output")
 		authVerification := fs.String("auth-verification", "", "hosted auth verification output")
@@ -1648,6 +1649,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		return a.acceptancePackageHostedProviderRuntime(acceptance.HostedProviderRuntimePackageOptions{
 			HostedProviderPackagePath: *hostedPackage,
 			OutDir:                    *out,
+			EvidenceDirPath:           *evidenceDir,
 			GatewayStartupPath:        *gatewayStartup,
 			StorageVerificationPath:   *storageVerification,
 			AuthVerificationPath:      *authVerification,
@@ -8337,7 +8339,7 @@ Usage:
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --evidence-dir relay-evidence-input
-  rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --gateway-startup gateway-startup.txt --storage-verification storage.json --auth-verification auth.json --backup-evidence backup.txt --restore-evidence restore.txt --retention-evidence retention.txt --role-mapping-evidence roles.json --failure-mode-evidence failure.json --audit audit.jsonl
+  rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --evidence-dir hosted-runtime-evidence-input
   rdev acceptance package-post-release-download --plan post-release-install/post-release-install-plan.json --plan-verification post-release-verification.json --out post-release-download-evidence --evidence-dir platform-download-evidence --skillkit-evidence-dir skillkit-download-evidence
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...

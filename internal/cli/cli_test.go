@@ -9015,15 +9015,7 @@ func TestAcceptancePackageHostedProviderRuntime(t *testing.T) {
 		"acceptance", "package-hosted-provider-runtime",
 		"--hosted-provider-package", providerOut,
 		"--out", filepath.Join(root, "hosted-runtime-evidence"),
-		"--gateway-startup", evidence.gatewayStartup,
-		"--storage-verification", evidence.storageVerification,
-		"--auth-verification", evidence.authVerification,
-		"--backup-evidence", evidence.backupEvidence,
-		"--restore-evidence", evidence.restoreEvidence,
-		"--retention-evidence", evidence.retentionEvidence,
-		"--role-mapping-evidence", evidence.roleMappingEvidence,
-		"--failure-mode-evidence", evidence.failureModeEvidence,
-		"--audit", evidence.audit,
+		"--evidence-dir", evidence.dir,
 	}); err != nil {
 		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
 	}
@@ -9221,6 +9213,7 @@ func writeRelayAdapterEvidenceForCLITest(t *testing.T, root string) relayAdapter
 }
 
 type hostedProviderRuntimeEvidenceForCLITest struct {
+	dir                 string
 	gatewayStartup      string
 	storageVerification string
 	authVerification    string
@@ -9243,7 +9236,7 @@ func writeHostedProviderRuntimeEvidenceForCLITest(t *testing.T, root string) hos
 	retentionEvidence := filepath.Join(evidenceRoot, "retention-evidence.txt")
 	roleMappingEvidence := filepath.Join(evidenceRoot, "role-mapping-evidence.json")
 	failureModeEvidence := filepath.Join(evidenceRoot, "failure-mode-evidence.json")
-	audit := filepath.Join(evidenceRoot, "audit.txt")
+	audit := filepath.Join(evidenceRoot, "audit.jsonl")
 	writeFileForCLITest(t, gatewayStartup, "gateway started with hosted provider package\ntoken ghp_abcdefghijklmnopqrstuvwx\n")
 	writeFileForCLITest(t, storageVerification, `{"ok":true,"provider":"file"}`+"\n")
 	writeFileForCLITest(t, authVerification, `{"ok":true,"provider":"hosted-ed25519-jwt"}`+"\n")
@@ -9252,8 +9245,9 @@ func writeHostedProviderRuntimeEvidenceForCLITest(t *testing.T, root string) hos
 	writeFileForCLITest(t, retentionEvidence, "retention policy reviewed for release smoke\n")
 	writeFileForCLITest(t, roleMappingEvidence, `{"probes":[{"role":"operator","authorized":true},{"role":"viewer","authorized":false}]}`+"\n")
 	writeFileForCLITest(t, failureModeEvidence, `{"ok":true,"failure_mode_tested":true,"mode":"invalid auth rejected"}`+"\n")
-	writeFileForCLITest(t, audit, "gateway_start\nstorage_verify\nauth_verify\nrole_probe\nfailure_probe\ncleanup\n")
+	writeFileForCLITest(t, audit, `{"event":"gateway_start"}`+"\n"+`{"event":"storage_verify"}`+"\n"+`{"event":"auth_verify"}`+"\n"+`{"event":"role_probe"}`+"\n"+`{"event":"failure_probe"}`+"\n"+`{"event":"cleanup"}`+"\n")
 	return hostedProviderRuntimeEvidenceForCLITest{
+		dir:                 evidenceRoot,
 		gatewayStartup:      gatewayStartup,
 		storageVerification: storageVerification,
 		authVerification:    authVerification,

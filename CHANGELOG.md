@@ -57,6 +57,12 @@ transcript file names or package commands after GitHub Release assets exist.
   directly, archives `audit.jsonl` under the same standard name, and keeps
   evidence-plan package commands directory-level so Agents do not pass six
   individual evidence file flags.
+- Added `rdev acceptance package-hosted-provider-runtime --evidence-dir <dir>`.
+  Hosted runtime acceptance packaging now consumes the standard scaffolded
+  evidence directory, archives `audit.jsonl` under the same standard name, and
+  keeps hosted runtime evidence-plan package commands directory-level so Agents
+  do not pass nine individual gateway/storage/auth/backup/restore/role/audit
+  file flags.
 
 ### Remaining Gates
 

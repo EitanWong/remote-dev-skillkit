@@ -519,9 +519,7 @@ func runtimeEvidencePlan(pkg Package, generatedAt time.Time) RuntimeEvidencePlan
 		"rdev", "acceptance", "package-hosted-provider-runtime",
 		"--hosted-provider-package", "<provider-package-dir>",
 		"--out", "<hosted-runtime-evidence-out>",
-	}
-	for _, file := range evidenceFiles {
-		packageCommand = append(packageCommand, file.Flag, file.Path)
+		"--evidence-dir", ".",
 	}
 	return RuntimeEvidencePlan{
 		SchemaVersion:     RuntimeEvidencePlanSchemaVersion,
@@ -535,7 +533,8 @@ func runtimeEvidencePlan(pkg Package, generatedAt time.Time) RuntimeEvidencePlan
 		VerifyCommand:     []string{"rdev", "acceptance", "verify-hosted-provider-runtime-package", "--package", "<hosted-runtime-evidence-out>/package.json"},
 		PreflightCommands: []string{"rdev hosted-provider verify --package <provider-package-dir>", pkg.Storage.VerifyCommand, pkg.Auth.VerifyCommand},
 		AgentRules: []string{
-			"Collect the evidence files named here; do not invent alternate file names or omit required probes.",
+			"Collect the evidence files named here under one directory; do not invent alternate file names or omit required probes.",
+			"Use rdev acceptance package-hosted-provider-runtime --evidence-dir . from this plan when packaging runtime evidence.",
 			"Run storage and auth verification before packaging runtime evidence.",
 			"Redact secrets, private endpoints, usernames, tenant IDs, local paths, and hostnames before sharing evidence outside the operator account.",
 			"If a runtime value is unclear, ask one short question instead of guessing.",

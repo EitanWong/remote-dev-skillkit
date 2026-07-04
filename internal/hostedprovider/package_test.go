@@ -49,6 +49,7 @@ func TestBuildAndVerifyHostedProviderPackage(t *testing.T) {
 		plan.PackagePath != "hosted-provider.json" ||
 		plan.ExternalMutation ||
 		!slices.Contains(plan.PackageCommand, "package-hosted-provider-runtime") ||
+		!slices.Contains(plan.PackageCommand, "--evidence-dir") ||
 		!slices.Contains(plan.VerifyCommand, "verify-hosted-provider-runtime-package") {
 		t.Fatalf("unexpected runtime evidence plan: %#v", plan)
 	}
