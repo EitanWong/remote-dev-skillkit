@@ -137,6 +137,26 @@ Keep the lower-level `--plan`, `--plan-verification`, `--evidence-dir`, and
 Agents should use the scaffold-level command so they do not assemble evidence
 paths by hand.
 
+## Release Evidence Index
+
+After real hosted-provider, relay/connectivity, and post-release download
+evidence packages verify, build one local release-evidence index:
+
+```bash
+rdev acceptance release-evidence-index \
+  --out .rdev/acceptance/release-evidence-index \
+  --hosted-provider-runtime-package .rdev/acceptance/hosted-provider-runtime-package \
+  --relay-adapter-package .rdev/acceptance/relay-adapter-package \
+  --post-release-download-package .rdev/acceptance/post-release-download-package
+```
+
+The command emits `rdev.acceptance-release-evidence-index.v1`, writes
+`release-evidence-index.json` and `checksums.txt`, and fails closed until all
+three release-blocking evidence tracks verify. It records package manifest
+hashes and verification summaries instead of copying each package manifest, so
+the index does not re-archive local source paths from package metadata. Agents
+should prefer MCP tool `rdev.acceptance.release_evidence_index` when available.
+
 ## Fresh-Agent Support-Session Contract Gate
 
 Run:

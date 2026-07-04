@@ -21,6 +21,7 @@
 - [ ] Generate and verify connectivity adapter packages with `rdev relay-adapter package` and `rdev relay-adapter verify`; confirm Chisel/frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard runner metadata contains no real endpoints, credentials, private IPs, local paths, keys, or secrets.
 - [ ] Scaffold relay/connectivity adapter evidence with `rdev acceptance scaffold-evidence --plan <relay-adapter>/acceptance-evidence-plan.json --out <evidence-input>`; use `--create-placeholders` only when the placeholders will be replaced by real redacted transcripts before packaging; after collecting evidence, run `rdev acceptance evidence-status --scaffold <evidence-input>` and require `ready_for_packaging=true` before packaging.
 - [ ] Package and verify real relay/connectivity adapter acceptance evidence with `rdev acceptance package-relay-adapter` and `rdev acceptance verify-relay-adapter-package`; confirm the runner selected the expected standard path, the connection status reports `connected=true`, and helper/audit evidence is redacted.
+- [ ] After hosted-provider, relay/connectivity, and post-release download acceptance packages verify, run `rdev acceptance release-evidence-index --out <release-evidence-index> --hosted-provider-runtime-package <hosted-runtime-evidence> --relay-adapter-package <relay-evidence> --post-release-download-package <post-release-download-evidence>` and require `ok=true`.
 - [ ] Generate SHA-256 checksums.
 - [ ] Sign release artifacts.
 - [ ] Sign and verify the release manifest index.
@@ -95,6 +96,7 @@
 - [ ] Run `rdev acceptance post-release-evidence-status --scaffold <post-release-scaffold>` and require `ready_for_packaging=true`.
 - [ ] Package those transcripts with `rdev acceptance package-post-release-download --scaffold <post-release-scaffold> --out <evidence-out>`.
 - [ ] Verify the package with `rdev acceptance verify-post-release-download-package --package <evidence-out>/package.json` before claiming public download acceptance.
+- [ ] Run `rdev acceptance release-evidence-index --out <release-evidence-index> --hosted-provider-runtime-package <hosted-runtime-evidence> --relay-adapter-package <relay-evidence> --post-release-download-package <evidence-out>` and require `ok=true` before claiming the combined release evidence gate is closed.
 - [ ] Install on a clean Windows VM.
 - [ ] Install on macOS.
 - [ ] Install on Linux.

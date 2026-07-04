@@ -446,6 +446,13 @@ go run ./cmd/rdev acceptance package-post-release-download \
 go run ./cmd/rdev acceptance verify-post-release-download-package \
   --package "$post_release_download_package_dir" \
   > "$work_dir/post-release-download-acceptance-verification.json"
+release_evidence_index_dir="$work_dir/release-evidence-index"
+go run ./cmd/rdev acceptance release-evidence-index \
+  --out "$release_evidence_index_dir" \
+  --hosted-provider-runtime-package "$hosted_runtime_dir" \
+  --relay-adapter-package "$relay_acceptance_dir" \
+  --post-release-download-package "$post_release_download_package_dir" \
+  > "$work_dir/release-evidence-index.json"
 
 first_skillkit_dir="$(python3 - "$platform_candidates_dir/platform-candidates.json" <<'PY'
 import json
@@ -629,6 +636,8 @@ post_release_download_placeholder_package = json.loads((root / "post-release-dow
 post_release_download_status_ready = json.loads((root / "post-release-download-status-ready.json").read_text())
 post_release_download_package = json.loads((root / "post-release-download-acceptance-package.json").read_text())
 post_release_download_verification = json.loads((root / "post-release-download-acceptance-verification.json").read_text())
+release_evidence_index = json.loads((root / "release-evidence-index.json").read_text())
+release_evidence_index_manifest = json.loads((root / "release-evidence-index" / "release-evidence-index.json").read_text())
 post_release_tampered = json.loads((root / "post-release-tampered-verification.json").read_text())
 skillkit_install_plan_output = json.loads((root / "skillkit-install-plan-output.json").read_text())
 skillkit_verification = json.loads((root / "skillkit-verification.json").read_text())
@@ -942,6 +951,14 @@ assert set(post_release_download_package["platform_targets"]) == {"linux/amd64",
 assert post_release_download_package["skillkit_included"] is True, post_release_download_package
 assert post_release_download_verification["schema"] == "rdev.acceptance-verification.post-release-download-package.v1", post_release_download_verification
 assert post_release_download_verification["ok"] is True, post_release_download_verification
+assert release_evidence_index["schema"] == "rdev.acceptance-release-evidence-index.v1", release_evidence_index
+assert release_evidence_index["ok"] is True, release_evidence_index
+assert release_evidence_index["hosted_provider_runtime"]["ok"] is True, release_evidence_index
+assert release_evidence_index["post_release_download"]["ok"] is True, release_evidence_index
+assert len(release_evidence_index["relay_adapters"]) == 1 and release_evidence_index["relay_adapters"][0]["ok"] is True, release_evidence_index
+assert release_evidence_index_manifest["schema_version"] == "rdev.acceptance-release-evidence-index.v1", release_evidence_index_manifest
+assert release_evidence_index_manifest["out_dir"] == ".", release_evidence_index_manifest
+assert (root / "release-evidence-index" / "checksums.txt").is_file(), release_evidence_index
 assert post_release_tampered["schema_version"] == "rdev.post-release-install-verification.v1", post_release_tampered
 assert post_release_tampered["ok"] is False, post_release_tampered
 assert any(check["name"].endswith("script_matches_commands") for check in post_release_tampered["failed_checks"]), post_release_tampered
@@ -1089,6 +1106,8 @@ print(json.dumps({
     "post_release_download_status_schema": post_release_download_status_ready["schema"],
     "post_release_download_status_ready": post_release_download_status_ready["ready_for_packaging"],
     "post_release_download_package_from_scaffold": True,
+    "release_evidence_index_schema": release_evidence_index["schema"],
+    "release_evidence_index_ok": release_evidence_index["ok"],
     "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

@@ -202,6 +202,12 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   download evidence with stable file names and fail closed on missing, empty,
   or placeholder evidence before packaging with
   `rdev acceptance package-post-release-download --scaffold <dir>`.
+- Combined release evidence indexing through
+  `rdev.acceptance-release-evidence-index.v1`,
+  `rdev acceptance release-evidence-index`, and MCP tool
+  `rdev.acceptance.release_evidence_index`, so hosted provider runtime,
+  relay/connectivity, and post-release download acceptance packages are
+  verified together before production release claims.
 - Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, Codex, Claude Code, and acpx result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
 - Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled jobs.
 - Strong symlink/workspace escape regression tests.

@@ -798,6 +798,32 @@ func TestServerToolCallScaffoldPostReleaseDownloadEvidence(t *testing.T) {
 	}
 }
 
+func TestServerToolCallReleaseEvidenceIndex(t *testing.T) {
+	root := t.TempDir()
+	input := mcpRequestLine(t, "rdev.acceptance.release_evidence_index", map[string]any{
+		"out_dir": root,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.acceptance-release-evidence-index.v1" ||
+		structured["ok"] != false {
+		t.Fatalf("unexpected release evidence index payload: %#v", structured)
+	}
+	checks := structured["checks"].([]any)
+	if len(checks) == 0 {
+		t.Fatalf("expected missing-gate checks: %#v", structured)
+	}
+	if _, err := os.Stat(filepath.Join(root, "release-evidence-index.json")); err != nil {
+		t.Fatalf("expected release evidence index file: %v", err)
+	}
+}
+
 func TestServerToolCallConnectionEntryPlanWritesPackagePlan(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	inviteIn := mcpRequestLine(t, "rdev.invites.create", map[string]any{

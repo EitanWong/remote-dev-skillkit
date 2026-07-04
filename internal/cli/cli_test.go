@@ -9122,6 +9122,55 @@ func TestAcceptancePackagePostReleaseDownload(t *testing.T) {
 	}
 }
 
+func TestAcceptanceReleaseEvidenceIndex(t *testing.T) {
+	root := t.TempDir()
+	hostedPackage := writeHostedRuntimePackageForCLIIndexTest(t, root)
+	relayPackage := writeRelayPackageForCLIIndexTest(t, root)
+	postReleasePackage := writePostReleasePackageForCLIIndexTest(t, root)
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "release-evidence-index",
+		"--out", filepath.Join(root, "release-evidence-index"),
+		"--hosted-provider-runtime-package", hostedPackage,
+		"--relay-adapter-package", relayPackage,
+		"--post-release-download-package", postReleasePackage,
+	}); err != nil {
+		t.Fatalf("expected release evidence index to pass: %v\n%s", err, stdout.String())
+	}
+	var payload struct {
+		OK                    bool   `json:"ok"`
+		Schema                string `json:"schema"`
+		Index                 string `json:"index"`
+		HostedProviderRuntime struct {
+			OK           bool   `json:"ok"`
+			RuntimeClaim string `json:"runtime_claim"`
+		} `json:"hosted_provider_runtime"`
+		RelayAdapters []struct {
+			OK           bool   `json:"ok"`
+			SelectedPath string `json:"selected_path"`
+		} `json:"relay_adapters"`
+		PostReleaseDownload struct {
+			OK              bool     `json:"ok"`
+			PlatformTargets []string `json:"platform_targets"`
+		} `json:"post_release_download"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid release evidence index json: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK || payload.Schema != "rdev.acceptance-release-evidence-index.v1" ||
+		!payload.HostedProviderRuntime.OK || payload.HostedProviderRuntime.RuntimeClaim == "" ||
+		len(payload.RelayAdapters) != 1 || !payload.RelayAdapters[0].OK ||
+		payload.RelayAdapters[0].SelectedPath != "existing-wireguard-vpn" ||
+		!payload.PostReleaseDownload.OK || len(payload.PostReleaseDownload.PlatformTargets) != 2 {
+		t.Fatalf("unexpected release evidence index: %s", stdout.String())
+	}
+	if _, err := os.Stat(payload.Index); err != nil {
+		t.Fatalf("expected index file: %v", err)
+	}
+}
+
 func TestAcceptanceScaffoldPostReleaseDownload(t *testing.T) {
 	root := t.TempDir()
 	fixture := writePostReleaseDownloadEvidenceForCLITest(t, root)
@@ -9185,6 +9234,101 @@ func TestAcceptanceScaffoldPostReleaseDownload(t *testing.T) {
 		!strings.Contains(stdout.String(), `"required_ready": 8`) {
 		t.Fatalf("unexpected ready status: %s", stdout.String())
 	}
+}
+
+func writeHostedRuntimePackageForCLIIndexTest(t *testing.T, root string) string {
+	t.Helper()
+	providerOut := filepath.Join(root, "hosted-provider")
+	var providerStdout bytes.Buffer
+	app := NewApp(&providerStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"hosted-provider", "package",
+		"--out", providerOut,
+		"--storage-provider", "file",
+		"--auth-provider", "hosted-ed25519-jwt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeHostedProviderRuntimeEvidenceForCLITest(t, root)
+	out := filepath.Join(root, "hosted-runtime-evidence")
+	var stdout bytes.Buffer
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-hosted-provider-runtime",
+		"--hosted-provider-package", providerOut,
+		"--out", out,
+		"--evidence-dir", evidence.dir,
+	}); err != nil {
+		t.Fatalf("expected hosted package command to pass: %v\n%s", err, stdout.String())
+	}
+	return out
+}
+
+func writeRelayPackageForCLIIndexTest(t *testing.T, root string) string {
+	t.Helper()
+	relayOut := filepath.Join(root, "relay")
+	var relayStdout bytes.Buffer
+	app := NewApp(&relayStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"relay-adapter", "package",
+		"--out", relayOut,
+		"--adapter", "wireguard",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeRelayAdapterEvidenceForCLITest(t, root)
+	out := filepath.Join(root, "relay-evidence")
+	var stdout bytes.Buffer
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-relay-adapter",
+		"--relay-package", relayOut,
+		"--out", out,
+		"--evidence-dir", evidence.dir,
+	}); err != nil {
+		t.Fatalf("expected relay package command to pass: %v\n%s", err, stdout.String())
+	}
+	return out
+}
+
+func writePostReleasePackageForCLIIndexTest(t *testing.T, root string) string {
+	t.Helper()
+	fixture := writePostReleaseDownloadEvidenceForCLITest(t, root)
+	scaffoldDir := filepath.Join(root, "post-release-download-scaffold-for-index")
+	var scaffoldStdout bytes.Buffer
+	app := NewApp(&scaffoldStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "scaffold-post-release-download",
+		"--plan", fixture.plan,
+		"--plan-verification", fixture.planVerification,
+		"--out", scaffoldDir,
+		"--create-placeholders",
+	}); err != nil {
+		t.Fatalf("expected scaffold command to pass: %v\n%s", err, scaffoldStdout.String())
+	}
+	for _, name := range []string{
+		"linux-amd64-transcript.txt",
+		"linux-amd64-candidate-verify.json",
+		"linux-amd64-bundle-verify.json",
+		"windows-amd64-transcript.txt",
+		"windows-amd64-candidate-verify.json",
+		"windows-amd64-bundle-verify.json",
+	} {
+		copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, name), filepath.Join(scaffoldDir, "platform-download-evidence", name))
+	}
+	copyFileForCLITest(t, filepath.Join(fixture.skillkitDir, "skillkit-transcript.txt"), filepath.Join(scaffoldDir, "skillkit-download-evidence", "skillkit-transcript.txt"))
+	copyFileForCLITest(t, filepath.Join(fixture.skillkitDir, "skillkit-verify.json"), filepath.Join(scaffoldDir, "skillkit-download-evidence", "skillkit-verify.json"))
+	out := filepath.Join(root, "post-release-download-evidence")
+	var stdout bytes.Buffer
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-post-release-download",
+		"--scaffold", scaffoldDir,
+		"--out", out,
+	}); err != nil {
+		t.Fatalf("expected post-release package command to pass: %v\n%s", err, stdout.String())
+	}
+	return out
 }
 
 func timeNowForTest() time.Time {

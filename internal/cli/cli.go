@@ -1683,6 +1683,22 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			SkillkitEvidenceDir:  *skillkitEvidenceDir,
 			NotesPath:            *notes,
 		})
+	case "release-evidence-index":
+		fs := flag.NewFlagSet("acceptance release-evidence-index", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		out := fs.String("out", "", "empty output directory for the release evidence index")
+		hostedProviderRuntimePackage := fs.String("hosted-provider-runtime-package", "", "hosted provider runtime acceptance package directory or package.json")
+		relayAdapterPackages := fs.String("relay-adapter-package", "", "comma-separated relay/connectivity acceptance package directories or package.json files")
+		postReleaseDownloadPackage := fs.String("post-release-download-package", "", "post-release download acceptance package directory or package.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceReleaseEvidenceIndex(acceptance.ReleaseEvidenceIndexOptions{
+			OutDir:                           *out,
+			HostedProviderRuntimePackagePath: *hostedProviderRuntimePackage,
+			RelayAdapterPackagePaths:         splitCommaList(*relayAdapterPackages),
+			PostReleaseDownloadPackagePath:   *postReleaseDownloadPackage,
+		})
 	default:
 		return fmt.Errorf("unknown acceptance subcommand %q", args[0])
 	}
@@ -2347,6 +2363,35 @@ func (a App) acceptancePackagePostReleaseDownload(opts acceptance.PostReleaseDow
 	}
 	if !pkg.OK() {
 		return fmt.Errorf("post-release download acceptance package verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptanceReleaseEvidenceIndex(opts acceptance.ReleaseEvidenceIndexOptions) error {
+	index, err := acceptance.BuildReleaseEvidenceIndex(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                      index.OK,
+		"schema":                  index.SchemaVersion,
+		"out":                     opts.OutDir,
+		"index":                   filepath.Join(opts.OutDir, index.IndexPath),
+		"checksums":               filepath.Join(opts.OutDir, index.ChecksumsPath),
+		"hosted_provider_runtime": index.HostedProviderRuntime,
+		"relay_adapters":          index.RelayAdapters,
+		"post_release_download":   index.PostReleaseDownload,
+		"checks":                  index.Checks,
+		"required_evidence":       index.RequiredEvidence,
+		"recommended_actions":     index.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !index.OK {
+		return fmt.Errorf("release evidence index is incomplete")
 	}
 	return nil
 }
@@ -8343,6 +8388,7 @@ Usage:
   rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --evidence-dir relay-evidence-input
   rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --evidence-dir hosted-runtime-evidence-input
   rdev acceptance package-post-release-download --scaffold post-release-download-evidence-input --out post-release-download-evidence
+  rdev acceptance release-evidence-index --out release-evidence-index --hosted-provider-runtime-package hosted-runtime-evidence --relay-adapter-package relay-evidence --post-release-download-package post-release-download-evidence
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json
@@ -9520,6 +9566,21 @@ func splitCapabilities(value string) []string {
 		}
 	}
 	return capabilities
+}
+
+func splitCommaList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
 }
 
 func parseJSONStringArray(raw, name string) ([]string, error) {

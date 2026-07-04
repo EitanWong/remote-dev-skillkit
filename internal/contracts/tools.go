@@ -191,6 +191,17 @@ func Tools() []Tool {
 			}, []string{"scaffold"}),
 		},
 		{
+			Name:        "rdev.acceptance.release_evidence_index",
+			Description: "Verify and index the three release-blocking acceptance evidence packages after real runs: hosted provider runtime, relay/connectivity helper, and post-release public download evidence. Agents use this as the final local release-evidence gate instead of manually deciding whether separate packages are enough for production claims.",
+			Safety:      "Verifies local package manifests and writes a local index/checksums only. Does not publish releases, download assets, execute helpers, start gateways, mutate hosted providers, mutate GitHub, or make production claims.",
+			InputSchema: object(map[string]any{
+				"out_dir":                         stringField(),
+				"hosted_provider_runtime_package": stringField(),
+				"relay_adapter_packages":          stringArray(),
+				"post_release_download_package":   stringField(),
+			}, []string{"out_dir"}),
+		},
+		{
 			Name:        "rdev.relay_adapter.package",
 			Description: "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supports Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard packages. The package emits reviewed RDEV_RELAY_*, RDEV_SSH_*, RDEV_MESH_*, or RDEV_VPN_* gateway/helper/install metadata plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, mesh, VPN, or polling scripts.",
 			Safety:      "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",

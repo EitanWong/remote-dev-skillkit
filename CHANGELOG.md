@@ -64,6 +64,13 @@ transcript file names or package commands after GitHub Release assets exist.
   keeps hosted runtime evidence-plan package commands directory-level so Agents
   do not pass nine individual gateway/storage/auth/backup/restore/role/audit
   file flags.
+- Added `rdev.acceptance-release-evidence-index.v1` through
+  `rdev acceptance release-evidence-index` and MCP tool
+  `rdev.acceptance.release_evidence_index`. The index verifies hosted provider
+  runtime, relay/connectivity, and post-release download acceptance packages
+  together, writes `release-evidence-index.json` plus `checksums.txt`, records
+  package manifest hashes without copying source-path-heavy package manifests,
+  and fails closed until all three release-blocking evidence tracks verify.
 
 ### Remaining Gates
 

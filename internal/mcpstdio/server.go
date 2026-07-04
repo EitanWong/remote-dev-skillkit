@@ -151,6 +151,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.scaffoldPostReleaseDownloadEvidence(params.Arguments)
 	case "rdev.acceptance.post_release_evidence_status":
 		data, err = s.postReleaseDownloadEvidenceStatus(params.Arguments)
+	case "rdev.acceptance.release_evidence_index":
+		data, err = s.releaseEvidenceIndex(params.Arguments)
 	case "rdev.relay_adapter.package":
 		data, err = s.relayAdapterPackage(params.Arguments)
 	case "rdev.relay_adapter.verify":
@@ -492,6 +494,16 @@ func (s Server) postReleaseDownloadEvidenceStatus(args map[string]any) (any, err
 	return acceptance.StatusPostReleaseDownloadEvidence(acceptance.PostReleaseDownloadStatusOptions{
 		ScaffoldPath: requiredString(args, "scaffold"),
 		Now:          time.Now().UTC(),
+	})
+}
+
+func (s Server) releaseEvidenceIndex(args map[string]any) (any, error) {
+	return acceptance.BuildReleaseEvidenceIndex(acceptance.ReleaseEvidenceIndexOptions{
+		OutDir:                           requiredString(args, "out_dir"),
+		HostedProviderRuntimePackagePath: stringArg(args, "hosted_provider_runtime_package", ""),
+		RelayAdapterPackagePaths:         stringSliceArg(args, "relay_adapter_packages"),
+		PostReleaseDownloadPackagePath:   stringArg(args, "post_release_download_package", ""),
+		Now:                              time.Now().UTC(),
 	})
 }
 
