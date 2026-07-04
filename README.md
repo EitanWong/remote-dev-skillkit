@@ -370,8 +370,11 @@ instead of writing tunnel commands. `rdev support-session create` can now omit
 explicit nor configured reachable gateway exists, use
 `rdev support-session connect --start`.
 If an operator intentionally starts a low-level dev gateway, prefer
-`--rdev-assets-dir <dir>` over five individual helper flags so `/assets`
-contains the verified Windows/macOS/Linux bootstrap helpers.
+the default `--auto-build-rdev-assets` behavior from a source checkout with Go.
+It prepares the verified Windows/macOS/Linux helpers served from `/assets`, so
+clean targets do not fail with "rdev is required" even if an Agent accidentally
+uses `gateway serve` plus `invite create`. Use `--rdev-assets-dir <dir>` or the
+platform-specific helper flags only for reviewed explicit asset locations.
 
 For lower-level package materialization, the Agent creates an invite and
 materializes it before asking anyone on the target side to do anything. The

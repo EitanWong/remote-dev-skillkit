@@ -694,6 +694,7 @@ type gatewayServeOptions struct {
 	OperatorAuthPath        string
 	HostedOperatorAuthPath  string
 	RdevAssetsDir           string
+	AutoBuildRdevAssets     bool
 	RdevWindowsAMD64Path    string
 	RdevDarwinARM64Path     string
 	RdevDarwinAMD64Path     string
@@ -4405,6 +4406,7 @@ func (a App) gateway(args []string) error {
 		operatorAuth := fs.String("operator-auth", "", "optional operator auth JSON file requiring bearer tokens for control-plane APIs")
 		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
 		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
+		autoBuildRdevAssets := fs.Bool("auto-build-rdev-assets", true, "auto-build missing platform rdev helpers for dev gateway Connection Entry bootstraps when a checkout and Go are available")
 		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
 		rdevDarwinARM64 := fs.String("rdev-darwin-arm64", "", "optional rdev helper served to macOS arm64 Connection Entry bootstraps")
 		rdevDarwinAMD64 := fs.String("rdev-darwin-amd64", "", "optional rdev helper served to macOS amd64 Connection Entry bootstraps")
@@ -4436,6 +4438,7 @@ func (a App) gateway(args []string) error {
 			OperatorAuthPath:        *operatorAuth,
 			HostedOperatorAuthPath:  *hostedOperatorAuth,
 			RdevAssetsDir:           *rdevAssetsDir,
+			AutoBuildRdevAssets:     *autoBuildRdevAssets,
 			RdevWindowsAMD64Path:    *rdevWindowsAMD64,
 			RdevDarwinARM64Path:     *rdevDarwinARM64,
 			RdevDarwinAMD64Path:     *rdevDarwinAMD64,
@@ -5087,6 +5090,18 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		}
 		auth = combined
 	}
+	if opts.AutoBuildRdevAssets && !gatewayHasExplicitAssetConfig(opts) {
+		assetsDir, ready, err := prepareGatewayAutoBuildRdevAssets(context.Background(), opts.Addr)
+		if err != nil {
+			return err
+		}
+		if ready && strings.TrimSpace(assetsDir) != "" {
+			opts.RdevAssetsDir = assetsDir
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev auto-built rdev helper assets at %s\n", assetsDir)
+		} else {
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev warning: target bootstrap self-repair assets are not all ready; use rdev support-session connect --start or --rdev-assets-dir for one-command target setup\n")
+		}
+	}
 	server := httpapi.NewServerWithOperatorAuthAndStateStore(gw, store, auth)
 	server.Assets = gatewayAssetConfig(opts)
 	if opts.SigningKeyPath != "" {
@@ -5137,6 +5152,33 @@ func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 		assets.RdevLinuxARM64Path = opts.RdevLinuxARM64Path
 	}
 	return assets
+}
+
+func gatewayHasExplicitAssetConfig(opts gatewayServeOptions) bool {
+	return strings.TrimSpace(opts.RdevAssetsDir) != "" ||
+		strings.TrimSpace(opts.RdevWindowsAMD64Path) != "" ||
+		strings.TrimSpace(opts.RdevDarwinARM64Path) != "" ||
+		strings.TrimSpace(opts.RdevDarwinAMD64Path) != "" ||
+		strings.TrimSpace(opts.RdevLinuxAMD64Path) != "" ||
+		strings.TrimSpace(opts.RdevLinuxARM64Path) != ""
+}
+
+func prepareGatewayAutoBuildRdevAssets(ctx context.Context, addr string) (string, bool, error) {
+	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
+		RepoRoot:    findSupportSessionRepoRoot("."),
+		WorkDir:     "",
+		Addr:        addr,
+		BuildAssets: true,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	assetsDir, _ := prepared["bin_dir"].(string)
+	ready := false
+	if assetReport, ok := prepared["asset_report"].(map[string]any); ok {
+		ready = assetReport["all_ready"] == true
+	}
+	return assetsDir, ready, nil
 }
 
 func gatewayTLSConfig(opts gatewayServeOptions) (*tls.Config, error) {

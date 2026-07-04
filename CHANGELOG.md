@@ -12,6 +12,14 @@ metadata, status watching, or approval polling by hand.
 
 ### Added
 
+- Added dev-gateway helper asset self-repair. `rdev gateway serve --dev` now
+  defaults `--auto-build-rdev-assets=true`; when no explicit helper asset path
+  is configured and a valid checkout plus Go are available, it builds the
+  Windows/macOS/Linux `rdev` helpers and serves them from `/assets`. This
+  hardens the accidental low-level `gateway serve` plus `invite create` path so
+  clean Windows targets no longer fall back to "rdev is required" when a fresh
+  Agent chooses the wrong entry surface. Explicit `--rdev-assets-dir` and
+  platform-specific asset flags still override the auto-built helpers.
 - Added `rdev.support-session-target-handoff-envelope.v1` to high-level
   support-session created, connected, and foreground-started payloads. Fresh
   Agents now receive `target_handoff_envelope.full_text`, a complete localized
@@ -159,8 +167,9 @@ metadata, status watching, or approval polling by hand.
   instead of claiming durable connectivity from a LAN-only first contact.
 - Added `rdev.support-session-connection-supervision.v1` to created, started,
   and high-level connect payloads. Fresh Agents now get one machine-readable
-  watch/report/upgrade contract after sending the human handoff: wait with the
-  returned MCP or CLI status command, report
+  watch/report/upgrade contract after forwarding
+  `target_handoff_envelope.full_text`: wait with the returned MCP or CLI status
+  command, report
   `connected_next_steps.user_report` when `connected=true`, and use standard
   prepare/runner/Connection Entry upgrade or recovery tools when a LAN-only path
   times out instead of writing polling, relay, bootstrap, or network scripts.

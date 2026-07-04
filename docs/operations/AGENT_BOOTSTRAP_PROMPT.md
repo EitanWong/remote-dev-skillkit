@@ -261,10 +261,12 @@ Steps:
     Do not write ad hoc PowerShell, shell, relay, nohup, approval, or bootstrap
     code when the plan can provide it. Do not manually combine
     `rdev gateway serve` plus `rdev invite create` for a normal support session;
-    that path can miss verified bootstrap helper assets. If a low-level dev
-    gateway is explicitly required, configure helper assets with
-    `--rdev-assets-dir` or the platform-specific asset flags before generating
-    human-facing target commands. For lower-level package materialization
+    use `rdev support-session connect --start` so ready/status files,
+    auto-approval, and helper assets are created together. If a low-level dev
+    gateway is explicitly required, keep the default
+    `--auto-build-rdev-assets` behavior enabled from a valid checkout with Go,
+    or configure helper assets with `--rdev-assets-dir` / platform-specific
+    asset flags before generating human-facing target commands. For lower-level package materialization
     or when `rdev.support_session.create` is not sufficient, use
     `rdev.invites.create` or `rdev invite create` so the Agent receives
     `connection_entry`, `connection_entry.package_catalog`,

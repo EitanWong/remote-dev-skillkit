@@ -10,6 +10,16 @@ certificates signed by that CA. Host job transport supports short polling,
 long polling, and WSS; WSS reuses the same TLS/mTLS client settings as the
 HTTPS API.
 
+For Connection Entry bootstraps, the dev gateway defaults
+`--auto-build-rdev-assets=true`. When no explicit `--rdev-assets-dir` or
+platform-specific helper flag is set, and the command is run from a valid
+checkout with Go available, it builds the Windows/macOS/Linux `rdev` helpers
+and serves them from `/assets`. This keeps accidental low-level
+`gateway serve` plus `invite create` flows from giving clean targets a
+bootstrap that fails with "rdev is required". Operators can disable the
+behavior with `--auto-build-rdev-assets=false` or override it with reviewed
+explicit asset paths.
+
 ## Operator Auth
 
 For local production-like control-plane preflight, initialize hashed operator

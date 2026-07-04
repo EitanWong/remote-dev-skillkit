@@ -160,10 +160,12 @@ loop.
 This is a CLI foreground process rather than an MCP tool because MCP calls
 should not hide or orphan a long-running gateway.
 Agents should not manually combine `rdev gateway serve` and `rdev invite create`
-for ordinary support sessions; that low-level path can omit bootstrap helper
-assets. If a dev gateway is intentionally started by hand, configure
-`--rdev-assets-dir` or the platform-specific `--rdev-*` asset flags before
-issuing target-side commands.
+for ordinary support sessions; use `rdev support-session connect --start` so
+ready/status files, scoped auto-approval, and helper assets are generated as one
+standard flow. If a dev gateway is intentionally started by hand, keep the
+default `--auto-build-rdev-assets` behavior enabled from a valid checkout with
+Go, or configure `--rdev-assets-dir` / platform-specific `--rdev-*` asset flags
+before issuing target-side commands.
 
 `rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
 `structuredContent`. Agents should call it before inventing any gateway,

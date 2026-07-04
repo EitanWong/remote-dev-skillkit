@@ -1144,6 +1144,27 @@ func TestGatewayAssetConfigUsesDirectoryWithExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestGatewayServeDevAutoBuildsRdevAssets(t *testing.T) {
+	assetsDir, ready, err := prepareGatewayAutoBuildRdevAssets(context.Background(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ready {
+		t.Fatalf("expected gateway helper assets to be ready in %s", assetsDir)
+	}
+	assets := gatewayAssetConfig(gatewayServeOptions{RdevAssetsDir: assetsDir})
+	if assets.RdevWindowsAMD64Path == "" {
+		t.Fatalf("expected auto-built Windows helper asset path, got %#v", assets)
+	}
+	info, err := os.Stat(assets.RdevWindowsAMD64Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.IsDir() || info.Size() == 0 {
+		t.Fatalf("expected non-empty Windows helper asset, got %#v", info)
+	}
+}
+
 func waitForHTTP(t *testing.T, endpoint string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)

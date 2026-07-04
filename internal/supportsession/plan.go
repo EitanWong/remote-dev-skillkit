@@ -654,7 +654,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"connection_readiness":     connectionReadiness,
 		"missing_inputs":           missingInputs,
 		"standard_recovery":        recoveryActions,
-		"target_handoff_policy":    "give the target-side human only the generated target_command or join_url",
+		"target_handoff_policy":    "give the target-side human only target_handoff_envelope.full_text when present; use generated target_command or join_url only as compatibility fallback fields",
 		"forbidden":                []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
 		"recommended_next_step":    recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
 		"command_to_connect_start": []string{"rdev", "support-session", "connect", "--start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
@@ -999,7 +999,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
 		},
-		"status_rule": "after sending the human handoff, wait with returned connection_supervision, foreground_feedback, status_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_next_steps.user_report immediately",
+		"status_rule": "after sending target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_next_steps.user_report immediately",
 		"auto_approve": map[string]any{
 			"enabled": opts.AutoApprove,
 			"scope":   "first attended-temporary host for the standard visible support-session ticket only",
@@ -1440,7 +1440,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 			"--dry-run",
 		},
 		"agent_sequence": []string{
-			"use the simple user_handoff first for ordinary attended temporary support",
+			"use target_handoff_envelope.full_text first for ordinary attended temporary support; user_handoff remains a compatibility fallback",
 			"when durable or restrictive-network connectivity is required, materialize this invite with rdev.connection_entry.plan",
 			"dry-run the generated runner before execution so direct/LAN/proxy/helper paths are selected by rdev, not by model-authored scripts",
 			"give the target-side human only the generated visible launcher or package entry point",
@@ -1992,7 +1992,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		},
 		"human_message": localizedCreatedMessage(locale),
 		"agent_flow": []string{
-			"give the target-side human only target_command or join_url",
+			"give the target-side human only target_handoff_envelope.full_text when present; use target_command or join_url only as compatibility fallback fields",
 			"target_command already tries ordered gateway URL candidates with bounded per-candidate timeouts and retry policy; do not write your own fallback script",
 			"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
 			"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
@@ -2233,7 +2233,7 @@ func connectionSupervision(ticketCode, locale, rdevCommand string, attemptPolicy
 		"standard_upgrade_paths":         []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence approval", "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
 		"automatic_downgrade_boundaries": []string{"target command owns ordered URL fallback and bounded timeouts", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "host runtime may reuse signed join-manifest gateway candidates after registration if the current gateway fails before processing jobs", "status timeout returns connection_recovery for standard recovery"},
 		"requires_operator_approval_for": continuityPolicy["requires_operator_approval_for"],
-		"agent_rule":                     "after sending user_handoff, use this supervision contract to wait, report connected=true, and choose standard upgrade/recovery tools; do not write polling, relay, bootstrap, or network mutation scripts",
+		"agent_rule":                     "after sending target_handoff_envelope.full_text, use this supervision contract to wait, report connected=true, and choose standard upgrade/recovery tools; do not write polling, relay, bootstrap, or network mutation scripts",
 		"human_surface_rule":             "humans receive only target_handoff_envelope.full_text; supervision fields are for the Agent runtime",
 		"forbidden":                      []string{"custom polling loops", "Agent-authored PowerShell or shell relay/bootstrap scripts", "manual ticket/root/gateway/transport assembly", "ExecutionPolicy Bypass", "hidden install or persistence"},
 	}
