@@ -2223,8 +2223,12 @@ func TestHostedProviderPackageAndVerify(t *testing.T) {
 	}
 	if !strings.Contains(packageStdout.String(), `"schema": "rdev.hosted-provider-package.v1"`) ||
 		!strings.Contains(packageStdout.String(), `"external_mutation": false`) ||
-		!strings.Contains(packageStdout.String(), `"runtime_contract_schema": "rdev.hosted-provider-runtime-contract.v1"`) {
+		!strings.Contains(packageStdout.String(), `"runtime_contract_schema": "rdev.hosted-provider-runtime-contract.v1"`) ||
+		!strings.Contains(packageStdout.String(), `"runtime_evidence_plan_schema": "rdev.hosted-provider-runtime-evidence-plan.v1"`) {
 		t.Fatalf("unexpected hosted provider package output: %s", packageStdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(out, "runtime-evidence-plan.json")); err != nil {
+		t.Fatalf("expected runtime evidence plan: %v", err)
 	}
 
 	var verifyStdout bytes.Buffer
@@ -2233,7 +2237,8 @@ func TestHostedProviderPackageAndVerify(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.hosted-provider-package-verification.v1"`) ||
-		!strings.Contains(verifyStdout.String(), `"ok": true`) {
+		!strings.Contains(verifyStdout.String(), `"ok": true`) ||
+		!strings.Contains(verifyStdout.String(), `"runtime_evidence_plan_schema": "rdev.hosted-provider-runtime-evidence-plan.v1"`) {
 		t.Fatalf("unexpected hosted provider verify output: %s", verifyStdout.String())
 	}
 }
@@ -2256,7 +2261,7 @@ func TestHostedProviderExternalRuntimeContractPackageAndVerify(t *testing.T) {
 		!strings.Contains(packageStdout.String(), `"runtime_status": "durable-runtime-evidence-required"`) {
 		t.Fatalf("unexpected hosted provider package output: %s", packageStdout.String())
 	}
-	for _, expected := range []string{"hosted-provider.json", "runtime-contract.json", "HOSTED_PROVIDER_RUNTIME.md"} {
+	for _, expected := range []string{"hosted-provider.json", "runtime-contract.json", "runtime-evidence-plan.json", "HOSTED_PROVIDER_RUNTIME.md"} {
 		if _, err := os.Stat(filepath.Join(out, expected)); err != nil {
 			t.Fatalf("expected %s: %v", expected, err)
 		}
@@ -2392,8 +2397,12 @@ func TestRelayAdapterPackageAndVerify(t *testing.T) {
 	}
 	if !strings.Contains(packageStdout.String(), `"schema": "rdev.relay-adapter-package.v1"`) ||
 		!strings.Contains(packageStdout.String(), `"external_mutation": false`) ||
-		!strings.Contains(packageStdout.String(), `"adapter_kind": "chisel"`) {
+		!strings.Contains(packageStdout.String(), `"adapter_kind": "chisel"`) ||
+		!strings.Contains(packageStdout.String(), `"acceptance_evidence_plan_schema": "rdev.relay-adapter-acceptance-evidence-plan.v1"`) {
 		t.Fatalf("unexpected relay adapter package output: %s", packageStdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(out, "acceptance-evidence-plan.json")); err != nil {
+		t.Fatalf("expected acceptance evidence plan: %v", err)
 	}
 
 	var verifyStdout bytes.Buffer
@@ -2403,7 +2412,8 @@ func TestRelayAdapterPackageAndVerify(t *testing.T) {
 	}
 	if !strings.Contains(verifyStdout.String(), `"schema": "rdev.relay-adapter-package-verification.v1"`) ||
 		!strings.Contains(verifyStdout.String(), `"ok": true`) ||
-		!strings.Contains(verifyStdout.String(), `"adapter_kind": "chisel"`) {
+		!strings.Contains(verifyStdout.String(), `"adapter_kind": "chisel"`) ||
+		!strings.Contains(verifyStdout.String(), `"acceptance_evidence_plan_schema": "rdev.relay-adapter-acceptance-evidence-plan.v1"`) {
 		t.Fatalf("unexpected relay adapter verify output: %s", verifyStdout.String())
 	}
 }

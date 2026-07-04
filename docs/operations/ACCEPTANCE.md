@@ -78,7 +78,9 @@ runs remain required before claiming production-grade connectivity.
 ## Connection Entry Runner Evidence
 
 When collecting real relay, mesh, VPN, or SSH acceptance evidence, generate the
-runner result from the standard runner instead of writing JSON by hand:
+runner result from the standard runner instead of writing JSON by hand. If the
+connectivity adapter package includes `acceptance-evidence-plan.json`, read it
+first and use its standard file names and package/verify commands.
 
 ```bash
 rdev connection-entry run \

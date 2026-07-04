@@ -15,6 +15,7 @@ import (
 const PackageSchemaVersion = "rdev.hosted-provider-package.v1"
 const VerificationSchemaVersion = "rdev.hosted-provider-package-verification.v1"
 const RuntimeContractSchemaVersion = "rdev.hosted-provider-runtime-contract.v1"
+const RuntimeEvidencePlanSchemaVersion = "rdev.hosted-provider-runtime-evidence-plan.v1"
 
 type Options struct {
 	OutDir          string
@@ -34,11 +35,38 @@ type Package struct {
 	Storage          Provider        `json:"storage"`
 	Auth             Provider        `json:"auth"`
 	Runtime          RuntimeContract `json:"runtime"`
+	EvidencePlanPath string          `json:"evidence_plan_path"`
 	GatewayArgs      []string        `json:"gateway_args"`
 	Environment      []EnvVar        `json:"environment"`
 	Files            []PackageFile   `json:"files"`
 	Checks           []Check         `json:"checks"`
 	AgentRules       []string        `json:"agent_rules"`
+}
+
+type RuntimeEvidencePlan struct {
+	SchemaVersion     string             `json:"schema_version"`
+	GeneratedAt       time.Time          `json:"generated_at"`
+	StorageProvider   string             `json:"storage_provider"`
+	AuthProvider      string             `json:"auth_provider"`
+	PackagePath       string             `json:"package_path"`
+	ExternalMutation  bool               `json:"external_mutation"`
+	EvidenceFiles     []EvidencePlanFile `json:"evidence_files"`
+	PackageCommand    []string           `json:"package_command"`
+	VerifyCommand     []string           `json:"verify_command"`
+	PreflightCommands []string           `json:"preflight_commands"`
+	AgentRules        []string           `json:"agent_rules"`
+	ApprovalRequired  []string           `json:"approval_required"`
+	UnsupportedClaims []string           `json:"unsupported_claims"`
+}
+
+type EvidencePlanFile struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Kind        string `json:"kind"`
+	Required    bool   `json:"required"`
+	Flag        string `json:"flag"`
+	Description string `json:"description"`
+	CommandHint string `json:"command_hint,omitempty"`
 }
 
 type Provider struct {
@@ -174,6 +202,7 @@ func Build(opts Options) (Package, error) {
 		Storage:          storageDescriptor(storageProvider),
 		Auth:             authDescriptor(authProvider),
 		Runtime:          runtimeContract(storageProvider, authProvider),
+		EvidencePlanPath: "runtime-evidence-plan.json",
 		GatewayArgs:      gatewayArgs(storageProvider, authProvider),
 		Environment:      environment(storageProvider, authProvider),
 		AgentRules: []string{
@@ -203,6 +232,16 @@ func Build(opts Options) (Package, error) {
 		kind    string
 		content []byte
 	}{"runtime-contract.json", "runtime-contract", append(runtimeContent, '\n')})
+	evidencePlan := runtimeEvidencePlan(pkg, now)
+	evidencePlanContent, err := json.MarshalIndent(evidencePlan, "", "  ")
+	if err != nil {
+		return Package{}, err
+	}
+	files = append(files, struct {
+		path    string
+		kind    string
+		content []byte
+	}{"runtime-evidence-plan.json", "runtime-evidence-plan", append(evidencePlanContent, '\n')})
 	for _, file := range files {
 		if err := os.WriteFile(filepath.Join(outDir, file.path), file.content, 0o644); err != nil {
 			return Package{}, err
@@ -265,6 +304,7 @@ func Verify(path string) (Verification, error) {
 	add("runtime_contract_present", pkg.Runtime.SchemaVersion == RuntimeContractSchemaVersion, pkg.Runtime.SchemaVersion)
 	add("runtime_contract_matches_providers", pkg.Runtime.StorageProvider == pkg.Storage.Kind && pkg.Runtime.AuthProvider == pkg.Auth.Kind, pkg.Runtime.StorageProvider+"/"+pkg.Runtime.AuthProvider)
 	add("runtime_evidence_declared", len(pkg.Runtime.RequiredEvidence) >= 6, fmt.Sprintf("%d", len(pkg.Runtime.RequiredEvidence)))
+	add("runtime_evidence_plan_declared", pkg.EvidencePlanPath == "runtime-evidence-plan.json", pkg.EvidencePlanPath)
 	add("environment_declared", len(pkg.Environment) > 0, fmt.Sprintf("%d", len(pkg.Environment)))
 	add("agent_rules_present", len(pkg.AgentRules) >= 3, fmt.Sprintf("%d", len(pkg.AgentRules)))
 	add("no_private_surface", noPrivateSurface(content), "manifest")
@@ -272,6 +312,7 @@ func Verify(path string) (Verification, error) {
 		v.Checks = append(v.Checks, check)
 	}
 	v.Files = verifyFiles(dir, pkg.Files)
+	v.Checks = append(v.Checks, verifyRuntimeEvidencePlan(dir, pkg)...)
 	if unlisted := unlistedFiles(dir, pkg.Files); len(unlisted) > 0 {
 		add("no_unlisted_files", false, strings.Join(unlisted, ","))
 	} else {
@@ -455,9 +496,118 @@ func packageChecks(pkg Package) []Check {
 		{Name: "runtime_contract_declared", Passed: pkg.Runtime.SchemaVersion == RuntimeContractSchemaVersion, Detail: pkg.Runtime.SchemaVersion},
 		{Name: "runtime_contract_provider_match", Passed: pkg.Runtime.StorageProvider == pkg.Storage.Kind && pkg.Runtime.AuthProvider == pkg.Auth.Kind, Detail: pkg.Runtime.StorageProvider + "/" + pkg.Runtime.AuthProvider},
 		{Name: "runtime_evidence_requirements_declared", Passed: len(pkg.Runtime.RequiredEvidence) >= 6, Detail: fmt.Sprintf("%d", len(pkg.Runtime.RequiredEvidence))},
+		{Name: "runtime_evidence_plan_declared", Passed: pkg.EvidencePlanPath == "runtime-evidence-plan.json", Detail: pkg.EvidencePlanPath},
 		{Name: "environment_declared", Passed: len(pkg.Environment) > 0, Detail: fmt.Sprintf("%d", len(pkg.Environment))},
 		{Name: "no_secret_environment_values", Passed: envHasNoSecretValues(pkg.Environment), Detail: fmt.Sprintf("%d", len(pkg.Environment))},
 	}
+}
+
+func runtimeEvidencePlan(pkg Package, generatedAt time.Time) RuntimeEvidencePlan {
+	evidenceFiles := make([]EvidencePlanFile, 0, len(pkg.Runtime.RequiredEvidence))
+	for _, requirement := range pkg.Runtime.RequiredEvidence {
+		evidenceFiles = append(evidenceFiles, EvidencePlanFile{
+			Name:        requirement.Name,
+			Path:        hostedEvidencePath(requirement.Name, requirement.Kind),
+			Kind:        requirement.Kind,
+			Required:    requirement.Required,
+			Flag:        "--" + requirement.Name,
+			Description: requirement.Description,
+			CommandHint: requirement.ExampleCommand,
+		})
+	}
+	packageCommand := []string{
+		"rdev", "acceptance", "package-hosted-provider-runtime",
+		"--hosted-provider-package", "<provider-package-dir>",
+		"--out", "<hosted-runtime-evidence-out>",
+	}
+	for _, file := range evidenceFiles {
+		packageCommand = append(packageCommand, file.Flag, file.Path)
+	}
+	return RuntimeEvidencePlan{
+		SchemaVersion:     RuntimeEvidencePlanSchemaVersion,
+		GeneratedAt:       generatedAt.UTC(),
+		StorageProvider:   pkg.Storage.Kind,
+		AuthProvider:      pkg.Auth.Kind,
+		PackagePath:       "hosted-provider.json",
+		ExternalMutation:  false,
+		EvidenceFiles:     evidenceFiles,
+		PackageCommand:    packageCommand,
+		VerifyCommand:     []string{"rdev", "acceptance", "verify-hosted-provider-runtime-package", "--package", "<hosted-runtime-evidence-out>/package.json"},
+		PreflightCommands: []string{"rdev hosted-provider verify --package <provider-package-dir>", pkg.Storage.VerifyCommand, pkg.Auth.VerifyCommand},
+		AgentRules: []string{
+			"Collect the evidence files named here; do not invent alternate file names or omit required probes.",
+			"Run storage and auth verification before packaging runtime evidence.",
+			"Redact secrets, private endpoints, usernames, tenant IDs, local paths, and hostnames before sharing evidence outside the operator account.",
+			"If a runtime value is unclear, ask one short question instead of guessing.",
+		},
+		ApprovalRequired:  append([]string(nil), pkg.Runtime.OperatorApprovalRequired...),
+		UnsupportedClaims: append([]string(nil), pkg.Runtime.UnsupportedClaims...),
+	}
+}
+
+func hostedEvidencePath(name, kind string) string {
+	switch name {
+	case "gateway-startup":
+		return "gateway-startup.txt"
+	case "storage-verification":
+		return "storage-verification.json"
+	case "auth-verification":
+		return "auth-verification.json"
+	case "backup-evidence":
+		return "backup-evidence.txt"
+	case "restore-evidence":
+		return "restore-evidence.txt"
+	case "retention-evidence":
+		return "retention-evidence.txt"
+	case "role-mapping-evidence":
+		return "role-mapping-evidence.json"
+	case "failure-mode-evidence":
+		return "failure-mode-evidence.json"
+	case "audit":
+		return "audit.jsonl"
+	default:
+		ext := ".txt"
+		if kind == "json" {
+			ext = ".json"
+		}
+		return name + ext
+	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func verifyRuntimeEvidencePlan(dir string, pkg Package) []Check {
+	var checks []Check
+	add := func(name string, passed bool, detail string) {
+		checks = append(checks, Check{Name: name, Passed: passed, Detail: detail})
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "runtime-evidence-plan.json"))
+	add("runtime_evidence_plan_exists", err == nil, "runtime-evidence-plan.json")
+	if err != nil {
+		return checks
+	}
+	var plan RuntimeEvidencePlan
+	err = json.Unmarshal(content, &plan)
+	add("runtime_evidence_plan_json_valid", err == nil, errorDetail(err))
+	if err != nil {
+		return checks
+	}
+	add("runtime_evidence_plan_schema", plan.SchemaVersion == RuntimeEvidencePlanSchemaVersion, plan.SchemaVersion)
+	add("runtime_evidence_plan_provider_match", plan.StorageProvider == pkg.Storage.Kind && plan.AuthProvider == pkg.Auth.Kind, plan.StorageProvider+"/"+plan.AuthProvider)
+	add("runtime_evidence_plan_package_path", plan.PackagePath == "hosted-provider.json", plan.PackagePath)
+	add("runtime_evidence_plan_external_mutation_false", !plan.ExternalMutation, fmt.Sprintf("%t", plan.ExternalMutation))
+	add("runtime_evidence_plan_files_cover_contract", len(plan.EvidenceFiles) >= len(pkg.Runtime.RequiredEvidence), fmt.Sprintf("%d/%d", len(plan.EvidenceFiles), len(pkg.Runtime.RequiredEvidence)))
+	add("runtime_evidence_plan_package_command", stringSliceContains(plan.PackageCommand, "package-hosted-provider-runtime") && stringSliceContains(plan.PackageCommand, "--hosted-provider-package"), strings.Join(plan.PackageCommand, " "))
+	add("runtime_evidence_plan_verify_command", stringSliceContains(plan.VerifyCommand, "verify-hosted-provider-runtime-package"), strings.Join(plan.VerifyCommand, " "))
+	add("runtime_evidence_plan_agent_rules", len(plan.AgentRules) >= 3, fmt.Sprintf("%d", len(plan.AgentRules)))
+	return checks
 }
 
 func runtimeContract(storageProvider, authProvider string) RuntimeContract {
@@ -598,6 +748,11 @@ Name: %s
 This package describes a hosted gateway provider boundary for Remote Dev
 Skillkit. It contains no credentials, private endpoints, organization IDs, or
 machine-local paths.
+
+Before collecting real runtime evidence, read runtime-evidence-plan.json.
+It gives Agents the standard evidence file names, verification commands, and
+rdev acceptance package-hosted-provider-runtime command so they do not invent
+provider-specific evidence layouts.
 
 Storage provider: %s
 Auth provider: %s

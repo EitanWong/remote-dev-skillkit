@@ -513,14 +513,17 @@ external_hosted_provider_package = json.loads((root / "hosted-provider-postgres-
 external_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-oidc-verification.json").read_text())
 external_hosted_provider_manifest = json.loads((root / "hosted-provider-postgres-oidc" / "hosted-provider.json").read_text())
 external_hosted_runtime_contract = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-contract.json").read_text())
+external_hosted_runtime_evidence_plan = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-evidence-plan.json").read_text())
 saml_hosted_provider_package = json.loads((root / "hosted-provider-s3-saml-package.json").read_text())
 saml_hosted_provider_verification = json.loads((root / "hosted-provider-s3-saml-verification.json").read_text())
 saml_hosted_provider_manifest = json.loads((root / "hosted-provider-s3-saml" / "hosted-provider.json").read_text())
 saml_hosted_runtime_contract = json.loads((root / "hosted-provider-s3-saml" / "runtime-contract.json").read_text())
+saml_hosted_runtime_evidence_plan = json.loads((root / "hosted-provider-s3-saml" / "runtime-evidence-plan.json").read_text())
 hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-acceptance-package.json").read_text())
 hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
 relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_text())
 relay_adapter_verification = json.loads((root / "relay-adapter-verification.json").read_text())
+relay_adapter_evidence_plan = json.loads((root / "relay-adapter" / "acceptance-evidence-plan.json").read_text())
 connectivity_adapter_packages = {
     adapter: json.loads((root / f"connectivity-adapter-{adapter}-package.json").read_text())
     for adapter in ["ssh-tunnel", "headscale-tailscale", "wireguard"]
@@ -702,6 +705,9 @@ assert "operator-reviewed-hosted-gateway-launcher" not in external_hosted_provid
 assert external_hosted_runtime_contract["schema_version"] == "rdev.hosted-provider-runtime-contract.v1", external_hosted_runtime_contract
 assert external_hosted_runtime_contract["runtime_status"] == "durable-runtime-evidence-required", external_hosted_runtime_contract
 assert len(external_hosted_runtime_contract["required_evidence"]) >= 9, external_hosted_runtime_contract
+assert external_hosted_runtime_evidence_plan["schema_version"] == "rdev.hosted-provider-runtime-evidence-plan.v1", external_hosted_runtime_evidence_plan
+assert "package-hosted-provider-runtime" in external_hosted_runtime_evidence_plan["package_command"], external_hosted_runtime_evidence_plan
+assert {item["path"] for item in external_hosted_runtime_evidence_plan["evidence_files"]} >= {"gateway-startup.txt", "storage-verification.json", "auth-verification.json", "audit.jsonl"}, external_hosted_runtime_evidence_plan
 assert saml_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", saml_hosted_provider_package
 assert saml_hosted_provider_package["ok"] is True, saml_hosted_provider_package
 assert saml_hosted_provider_package["storage_provider"] == "s3-compatible", saml_hosted_provider_package
@@ -714,6 +720,8 @@ assert "operator-reviewed-hosted-gateway-launcher" not in saml_hosted_provider_m
 assert saml_hosted_runtime_contract["schema_version"] == "rdev.hosted-provider-runtime-contract.v1", saml_hosted_runtime_contract
 assert saml_hosted_runtime_contract["runtime_status"] == "durable-runtime-evidence-required", saml_hosted_runtime_contract
 assert any(item["example_command"].startswith("rdev operator-auth verify-saml") for item in saml_hosted_runtime_contract["required_evidence"] if item["name"] == "auth-verification"), saml_hosted_runtime_contract
+assert saml_hosted_runtime_evidence_plan["schema_version"] == "rdev.hosted-provider-runtime-evidence-plan.v1", saml_hosted_runtime_evidence_plan
+assert "package-hosted-provider-runtime" in saml_hosted_runtime_evidence_plan["package_command"], saml_hosted_runtime_evidence_plan
 assert hosted_provider_runtime_package["schema"] == "rdev.acceptance-package.hosted-provider-runtime.v1", hosted_provider_runtime_package
 assert hosted_provider_runtime_package["ok"] is True, hosted_provider_runtime_package
 assert hosted_provider_runtime_package["storage_provider"] == "file", hosted_provider_runtime_package
@@ -730,6 +738,10 @@ assert relay_adapter_package["runner_env"]["gateway_url_var"] == "RDEV_RELAY_GAT
 assert relay_adapter_verification["schema"] == "rdev.relay-adapter-package-verification.v1", relay_adapter_verification
 assert relay_adapter_verification["ok"] is True, relay_adapter_verification
 assert relay_adapter_verification["adapter_kind"] == "chisel", relay_adapter_verification
+assert relay_adapter_evidence_plan["schema_version"] == "rdev.relay-adapter-acceptance-evidence-plan.v1", relay_adapter_evidence_plan
+assert "--result-out" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
+assert "package-relay-adapter" in relay_adapter_evidence_plan["package_command"], relay_adapter_evidence_plan
+assert {item["path"] for item in relay_adapter_evidence_plan["evidence_files"]} >= {"runner-result.json", "helper-transcript.txt", "connection-status.json", "audit.jsonl"}, relay_adapter_evidence_plan
 expected_connectivity = {
     "ssh-tunnel": ("ssh-tunnel", "RDEV_SSH_GATEWAY_URL", "manual-review-required"),
     "headscale-tailscale": ("headscale-tailscale", "RDEV_MESH_GATEWAY_URL", "RDEV_MESH_DOWNLOAD_URL"),
@@ -905,10 +917,12 @@ print(json.dumps({
     "saml_hosted_provider_package_schema": saml_hosted_provider_package["schema"],
     "saml_hosted_provider_runtime_gateway_args": True,
     "saml_hosted_provider_runtime_contract_schema": saml_hosted_runtime_contract["schema_version"],
+    "hosted_provider_runtime_evidence_plan_schema": external_hosted_runtime_evidence_plan["schema_version"],
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],
     "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],
     "relay_adapter_package_schema": relay_adapter_package["schema"],
     "relay_adapter_package_verification_schema": relay_adapter_verification["schema"],
+    "relay_adapter_acceptance_evidence_plan_schema": relay_adapter_evidence_plan["schema_version"],
     "connectivity_adapter_package_kinds": sorted(package["adapter_kind"] for package in connectivity_adapter_packages.values()),
     "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],

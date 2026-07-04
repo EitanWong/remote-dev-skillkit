@@ -86,6 +86,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   storage, Redis streams, OIDC/JWKS, and SAML runtime evidence requirements
   for verification, backup, restore, retention, role mapping, failure-mode
   probes, audit, operator approval, and unsupported production claims.
+- Hosted provider runtime evidence plans through
+  `rdev.hosted-provider-runtime-evidence-plan.v1` and
+  `runtime-evidence-plan.json`, giving Agents standard evidence file names,
+  preflight commands, and `rdev acceptance package-hosted-provider-runtime` /
+  verify commands for real deployed evidence collection.
 - Relay adapter package generation and verification through
   `rdev.relay-adapter-package.v1`, `rdev relay-adapter package`,
   `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter verify`,
@@ -106,6 +111,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   (`existing-frp-or-chisel-relay`, `existing-ssh-tunnel`,
   `existing-headscale-tailscale-mesh`, or `existing-wireguard-vpn`) and
   `connected=true`.
+- Relay/connectivity adapter acceptance evidence plans through
+  `rdev.relay-adapter-acceptance-evidence-plan.v1` and
+  `acceptance-evidence-plan.json`, giving Agents standard runner result,
+  helper transcript, gateway/host/connection status, audit file names, and
+  `rdev connection-entry run --result-out` plus package/verify commands.
 - Hosted provider runtime acceptance packaging and verification through
   `rdev.acceptance-package.hosted-provider-runtime.v1`,
   `rdev acceptance package-hosted-provider-runtime`,

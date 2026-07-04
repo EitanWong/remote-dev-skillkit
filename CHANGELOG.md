@@ -9,7 +9,9 @@ publication still requires explicit operator approval.
 Current phase: formal release packages are closing the last local startup-gate
 gap before public release evidence. Connection Entry release archives now make
 their visible launchers verify the signed release bundle with the packaged
-standalone verifier before running packaged `rdev`.
+standalone verifier before running packaged `rdev`. Hosted provider and relay
+adapter packages now also carry machine-readable evidence collection plans so
+Agents stop inventing real-acceptance file names and package commands.
 
 ### Added
 
@@ -24,6 +26,21 @@ standalone verifier before running packaged `rdev`.
 - Extended release-candidate verification and release smoke to fail if a
   Connection Entry archive launcher does not use the packaged verifier, pin the
   release root, pass `--bundle`, and require the packaged artifact set.
+- Added `rdev.hosted-provider-runtime-evidence-plan.v1` as
+  `runtime-evidence-plan.json` in hosted provider packages. The plan lists the
+  standard gateway, storage, auth, backup, restore, retention, role-mapping,
+  failure-mode, and audit evidence files plus the exact
+  `rdev acceptance package-hosted-provider-runtime` / verify commands Agents
+  should use for real deployed evidence.
+- Added `rdev.relay-adapter-acceptance-evidence-plan.v1` as
+  `acceptance-evidence-plan.json` in relay/connectivity adapter packages. The
+  plan lists standard `runner-result.json`, helper transcript, gateway/host/
+  connection status, and audit evidence files, plus the exact
+  `rdev connection-entry run --result-out`,
+  `rdev acceptance package-relay-adapter`, and verify commands.
+- Extended hosted provider and relay adapter verification, CLI output, tests,
+  and release smoke to validate the new evidence-plan schemas and command
+  contracts.
 
 ### Remaining Gates
 

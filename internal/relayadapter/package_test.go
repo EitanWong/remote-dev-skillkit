@@ -1,8 +1,10 @@
 package relayadapter
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +24,7 @@ func TestBuildAndVerifyRelayAdapterPackage(t *testing.T) {
 	if !pkg.OK() {
 		t.Fatalf("expected package ok: %#v", pkg.Checks)
 	}
-	for _, path := range []string{"relay-adapter.json", "RELAY_ADAPTER.md", "runner.env.example"} {
+	for _, path := range []string{"relay-adapter.json", "RELAY_ADAPTER.md", "runner.env.example", "acceptance-evidence-plan.json"} {
 		if _, err := os.Stat(filepath.Join(out, path)); err != nil {
 			t.Fatalf("expected relay adapter file %s: %v", path, err)
 		}
@@ -35,6 +37,33 @@ func TestBuildAndVerifyRelayAdapterPackage(t *testing.T) {
 		strings.Contains(string(content), "192.168.") ||
 		strings.Contains(string(content), "BEGIN PRIVATE KEY") {
 		t.Fatalf("relay adapter package leaked private material: %s", string(content))
+	}
+	planContent, err := os.ReadFile(filepath.Join(out, "acceptance-evidence-plan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan AcceptanceEvidencePlan
+	if err := json.Unmarshal(planContent, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.SchemaVersion != AcceptanceEvidencePlanSchemaVersion ||
+		plan.AdapterKind != "chisel" ||
+		plan.ConnectionPathID != "existing-frp-or-chisel-relay" ||
+		plan.PackagePath != "relay-adapter.json" ||
+		plan.ExternalMutation ||
+		!slices.Contains(plan.DryRunCommand, "--result-out") ||
+		!slices.Contains(plan.PackageCommand, "package-relay-adapter") ||
+		!slices.Contains(plan.VerifyCommand, "verify-relay-adapter-package") {
+		t.Fatalf("unexpected acceptance evidence plan: %#v", plan)
+	}
+	planPaths := map[string]bool{}
+	for _, file := range plan.EvidenceFiles {
+		planPaths[file.Path] = true
+	}
+	for _, expected := range []string{"runner-result.json", "helper-transcript.txt", "gateway-status.json", "host-status.json", "connection-status.json", "audit.jsonl"} {
+		if !planPaths[expected] {
+			t.Fatalf("missing evidence plan path %q in %#v", expected, plan.EvidenceFiles)
+		}
 	}
 
 	verification, err := Verify(out)
@@ -141,6 +170,12 @@ func TestBuildAndVerifyAdditionalConnectivityAdapterPackages(t *testing.T) {
 			}
 			if pkg.InstallAction.Tool != tc.installTool {
 				t.Fatalf("unexpected install action tool: %#v", pkg.InstallAction)
+			}
+			if pkg.EvidencePlanPath != "acceptance-evidence-plan.json" ||
+				!slices.ContainsFunc(pkg.Files, func(file PackageFile) bool {
+					return file.Path == "acceptance-evidence-plan.json" && file.Kind == "acceptance-evidence-plan"
+				}) {
+				t.Fatalf("missing acceptance evidence plan: %#v", pkg.Files)
 			}
 			installArgv := strings.Join(pkg.InstallAction.Argv, " ")
 			if tc.installURLVar == "" {

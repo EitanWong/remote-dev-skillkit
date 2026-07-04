@@ -999,18 +999,20 @@ func (a App) hostedProviderPackage(out, name, storageProvider, authProvider stri
 		return err
 	}
 	payload := map[string]any{
-		"ok":                      pkg.OK(),
-		"schema":                  pkg.SchemaVersion,
-		"out":                     out,
-		"package":                 filepath.Join(out, "hosted-provider.json"),
-		"name":                    pkg.Name,
-		"storage_provider":        pkg.Storage.Kind,
-		"auth_provider":           pkg.Auth.Kind,
-		"runtime_contract_schema": pkg.Runtime.SchemaVersion,
-		"runtime_status":          pkg.Runtime.RuntimeStatus,
-		"file_count":              len(pkg.Files),
-		"external_mutation":       pkg.ExternalMutation,
-		"checks":                  pkg.Checks,
+		"ok":                           pkg.OK(),
+		"schema":                       pkg.SchemaVersion,
+		"out":                          out,
+		"package":                      filepath.Join(out, "hosted-provider.json"),
+		"name":                         pkg.Name,
+		"storage_provider":             pkg.Storage.Kind,
+		"auth_provider":                pkg.Auth.Kind,
+		"runtime_contract_schema":      pkg.Runtime.SchemaVersion,
+		"runtime_evidence_plan_schema": hostedprovider.RuntimeEvidencePlanSchemaVersion,
+		"evidence_plan":                filepath.Join(out, pkg.EvidencePlanPath),
+		"runtime_status":               pkg.Runtime.RuntimeStatus,
+		"file_count":                   len(pkg.Files),
+		"external_mutation":            pkg.ExternalMutation,
+		"checks":                       pkg.Checks,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1029,17 +1031,18 @@ func (a App) hostedProviderVerify(packagePath string) error {
 		return err
 	}
 	payload := map[string]any{
-		"ok":                      verification.OK(),
-		"schema":                  verification.SchemaVersion,
-		"package":                 verification.PackagePath,
-		"package_dir":             verification.PackageDir,
-		"name":                    verification.Name,
-		"storage_provider":        verification.StorageProvider,
-		"auth_provider":           verification.AuthProvider,
-		"runtime_contract_schema": hostedprovider.RuntimeContractSchemaVersion,
-		"checks":                  verification.Checks,
-		"files":                   verification.Files,
-		"recommended_actions":     verification.RecommendedActions,
+		"ok":                           verification.OK(),
+		"schema":                       verification.SchemaVersion,
+		"package":                      verification.PackagePath,
+		"package_dir":                  verification.PackageDir,
+		"name":                         verification.Name,
+		"storage_provider":             verification.StorageProvider,
+		"auth_provider":                verification.AuthProvider,
+		"runtime_contract_schema":      hostedprovider.RuntimeContractSchemaVersion,
+		"runtime_evidence_plan_schema": hostedprovider.RuntimeEvidencePlanSchemaVersion,
+		"checks":                       verification.Checks,
+		"files":                        verification.Files,
+		"recommended_actions":          verification.RecommendedActions,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1093,19 +1096,21 @@ func (a App) relayAdapterPackage(out, name, adapterKind string, force bool) erro
 		return err
 	}
 	payload := map[string]any{
-		"ok":                pkg.OK(),
-		"schema":            pkg.SchemaVersion,
-		"out":               out,
-		"package":           filepath.Join(out, "relay-adapter.json"),
-		"name":              pkg.Name,
-		"adapter_kind":      pkg.AdapterKind,
-		"helper_tool":       pkg.Helper.Tool,
-		"external_mutation": pkg.ExternalMutation,
-		"runner_env":        pkg.RunnerEnv,
-		"file_count":        len(pkg.Files),
-		"approval_required": pkg.ApprovalRequired,
-		"evidence_required": pkg.EvidenceRequired,
-		"checks":            pkg.Checks,
+		"ok":                              pkg.OK(),
+		"schema":                          pkg.SchemaVersion,
+		"out":                             out,
+		"package":                         filepath.Join(out, "relay-adapter.json"),
+		"name":                            pkg.Name,
+		"adapter_kind":                    pkg.AdapterKind,
+		"helper_tool":                     pkg.Helper.Tool,
+		"acceptance_evidence_plan_schema": relayadapter.AcceptanceEvidencePlanSchemaVersion,
+		"evidence_plan":                   filepath.Join(out, pkg.EvidencePlanPath),
+		"external_mutation":               pkg.ExternalMutation,
+		"runner_env":                      pkg.RunnerEnv,
+		"file_count":                      len(pkg.Files),
+		"approval_required":               pkg.ApprovalRequired,
+		"evidence_required":               pkg.EvidenceRequired,
+		"checks":                          pkg.Checks,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -1124,15 +1129,16 @@ func (a App) relayAdapterVerify(packagePath string) error {
 		return err
 	}
 	payload := map[string]any{
-		"ok":                  verification.OK(),
-		"schema":              verification.SchemaVersion,
-		"package":             verification.PackagePath,
-		"package_dir":         verification.PackageDir,
-		"name":                verification.Name,
-		"adapter_kind":        verification.AdapterKind,
-		"checks":              verification.Checks,
-		"files":               verification.Files,
-		"recommended_actions": verification.RecommendedActions,
+		"ok":                              verification.OK(),
+		"schema":                          verification.SchemaVersion,
+		"package":                         verification.PackagePath,
+		"package_dir":                     verification.PackageDir,
+		"name":                            verification.Name,
+		"adapter_kind":                    verification.AdapterKind,
+		"acceptance_evidence_plan_schema": relayadapter.AcceptanceEvidencePlanSchemaVersion,
+		"checks":                          verification.Checks,
+		"files":                           verification.Files,
+		"recommended_actions":             verification.RecommendedActions,
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")

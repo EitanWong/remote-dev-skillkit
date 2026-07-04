@@ -196,10 +196,12 @@ and provider-neutral EdDSA JWT auth. Built-in Postgres, Redis stream, and
 S3-compatible runtime paths can be used with hosted EdDSA JWT auth and still
 require real deployment evidence before production claims. External packages
 for OIDC/JWKS and SAML emit `runtime-contract.json` and
-`HOSTED_PROVIDER_RUNTIME.md` so operators and Agents know which verification,
-backup, restore, retention, role-mapping, failure-mode, and audit evidence must
-be collected. Durable third-party hosted providers still need real deployed
-gateway evidence before production claims.
+`HOSTED_PROVIDER_RUNTIME.md` plus `runtime-evidence-plan.json` so operators
+and Agents know which verification, backup, restore, retention, role-mapping,
+failure-mode, and audit evidence files must be collected and which
+`rdev acceptance package-hosted-provider-runtime` command to run. Durable
+third-party hosted providers still need real deployed gateway evidence before
+production claims.
 
 ## Start
 

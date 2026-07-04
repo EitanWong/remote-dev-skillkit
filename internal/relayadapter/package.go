@@ -14,6 +14,7 @@ import (
 
 const PackageSchemaVersion = "rdev.relay-adapter-package.v1"
 const VerificationSchemaVersion = "rdev.relay-adapter-package-verification.v1"
+const AcceptanceEvidencePlanSchemaVersion = "rdev.relay-adapter-acceptance-evidence-plan.v1"
 
 type Options struct {
 	OutDir      string
@@ -35,11 +36,38 @@ type Package struct {
 	ConnectionPathID  string        `json:"connection_path_id"`
 	StartArgvTemplate []string      `json:"start_argv_template"`
 	InstallAction     InstallAction `json:"install_action_template"`
+	EvidencePlanPath  string        `json:"evidence_plan_path"`
 	EvidenceRequired  []string      `json:"evidence_required"`
 	ApprovalRequired  []string      `json:"approval_required"`
 	AgentRules        []string      `json:"agent_rules"`
 	Files             []PackageFile `json:"files"`
 	Checks            []Check       `json:"checks"`
+}
+
+type AcceptanceEvidencePlan struct {
+	SchemaVersion     string             `json:"schema_version"`
+	GeneratedAt       time.Time          `json:"generated_at"`
+	AdapterKind       string             `json:"adapter_kind"`
+	ConnectionPathID  string             `json:"connection_path_id"`
+	PackagePath       string             `json:"package_path"`
+	ExternalMutation  bool               `json:"external_mutation"`
+	EvidenceFiles     []EvidencePlanFile `json:"evidence_files"`
+	DryRunCommand     []string           `json:"dry_run_command"`
+	RunCommand        []string           `json:"run_command"`
+	PackageCommand    []string           `json:"package_command"`
+	VerifyCommand     []string           `json:"verify_command"`
+	AgentRules        []string           `json:"agent_rules"`
+	ApprovalRequired  []string           `json:"approval_required"`
+	UnsupportedClaims []string           `json:"unsupported_claims"`
+}
+
+type EvidencePlanFile struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Kind        string `json:"kind"`
+	Required    bool   `json:"required"`
+	Flag        string `json:"flag"`
+	Description string `json:"description"`
 }
 
 type RunnerEnv struct {
@@ -173,6 +201,7 @@ func Build(opts Options) (Package, error) {
 		ConnectionPathID:  descriptor.ConnectionPathID,
 		StartArgvTemplate: descriptor.StartArgvTemplate,
 		InstallAction:     descriptor.InstallAction,
+		EvidencePlanPath:  "acceptance-evidence-plan.json",
 		EvidenceRequired: []string{
 			"connectivity adapter package verification",
 			"helper binary detection or reviewed install report",
@@ -204,6 +233,16 @@ func Build(opts Options) (Package, error) {
 		{"RELAY_ADAPTER.md", "documentation", []byte(renderReadme(pkg))},
 		{"runner.env.example", "env-template", []byte(renderEnvTemplate(pkg))},
 	}
+	evidencePlan := acceptanceEvidencePlan(pkg, now)
+	evidencePlanContent, err := json.MarshalIndent(evidencePlan, "", "  ")
+	if err != nil {
+		return Package{}, err
+	}
+	files = append(files, struct {
+		path    string
+		kind    string
+		content []byte
+	}{"acceptance-evidence-plan.json", "acceptance-evidence-plan", append(evidencePlanContent, '\n')})
 	for _, file := range files {
 		if err := os.WriteFile(filepath.Join(outDir, file.path), file.content, 0o644); err != nil {
 			return Package{}, err
@@ -263,12 +302,14 @@ func Verify(path string) (Verification, error) {
 	add("runner_env_declared", runnerEnvDeclaredForKind(pkg.AdapterKind, pkg.RunnerEnv), fmt.Sprintf("%#v", pkg.RunnerEnv))
 	add("start_argv_template_safe", safeStartArgv(pkg.AdapterKind, pkg.StartArgvTemplate), strings.Join(pkg.StartArgvTemplate, " "))
 	add("install_action_safe", safeInstallAction(pkg.AdapterKind, pkg.InstallAction), strings.Join(pkg.InstallAction.Argv, " "))
+	add("acceptance_evidence_plan_declared", pkg.EvidencePlanPath == "acceptance-evidence-plan.json", pkg.EvidencePlanPath)
 	add("agent_rules_present", len(pkg.AgentRules) >= 3, fmt.Sprintf("%d", len(pkg.AgentRules)))
 	add("no_private_surface", noPrivateSurface(content), "manifest")
 	for _, check := range packageChecks(pkg) {
 		v.Checks = append(v.Checks, check)
 	}
 	v.Files = verifyFiles(dir, pkg.Files)
+	v.Checks = append(v.Checks, verifyAcceptanceEvidencePlan(dir, pkg)...)
 	if unlisted := unlistedFiles(dir, pkg.Files); len(unlisted) > 0 {
 		add("no_unlisted_files", false, strings.Join(unlisted, ","))
 	} else {
@@ -413,9 +454,90 @@ func packageChecks(pkg Package) []Check {
 		{Name: "runner_env_declared", Passed: runnerEnvDeclaredForKind(pkg.AdapterKind, pkg.RunnerEnv), Detail: pkg.RunnerEnv.ConnectionPathID},
 		{Name: "start_argv_template_safe", Passed: safeStartArgv(pkg.AdapterKind, pkg.StartArgvTemplate), Detail: strings.Join(pkg.StartArgvTemplate, " ")},
 		{Name: "install_action_safe", Passed: safeInstallAction(pkg.AdapterKind, pkg.InstallAction), Detail: strings.Join(pkg.InstallAction.Argv, " ")},
+		{Name: "acceptance_evidence_plan_declared", Passed: pkg.EvidencePlanPath == "acceptance-evidence-plan.json", Detail: pkg.EvidencePlanPath},
 		{Name: "approval_boundaries_declared", Passed: len(pkg.ApprovalRequired) >= 3, Detail: fmt.Sprintf("%d", len(pkg.ApprovalRequired))},
 		{Name: "evidence_required_declared", Passed: len(pkg.EvidenceRequired) >= 4, Detail: fmt.Sprintf("%d", len(pkg.EvidenceRequired))},
 	}
+}
+
+func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEvidencePlan {
+	files := []EvidencePlanFile{
+		{Name: "runner-result", Path: "runner-result.json", Kind: "json", Required: true, Flag: "--runner-result", Description: "Raw rdev.connection-entry.runner-result.v1 from rdev connection-entry run --result-out."},
+		{Name: "helper-transcript", Path: "helper-transcript.txt", Kind: "transcript", Required: true, Flag: "--helper-transcript", Description: "Redacted helper startup, detection, or reviewed install transcript."},
+		{Name: "gateway-status", Path: "gateway-status.json", Kind: "json", Required: true, Flag: "--gateway-status", Description: "Gateway status or health probe evidence for the selected helper path."},
+		{Name: "host-status", Path: "host-status.json", Kind: "json", Required: true, Flag: "--host-status", Description: "Host registration or host serve status evidence."},
+		{Name: "connection-status", Path: "connection-status.json", Kind: "json", Required: true, Flag: "--connection-status", Description: "Connection status with connected=true for the selected standard path."},
+		{Name: "audit", Path: "audit.jsonl", Kind: "transcript", Required: true, Flag: "--audit", Description: "Redacted audit transcript covering helper start, host registration, status, and cleanup."},
+	}
+	packageCommand := []string{
+		"rdev", "acceptance", "package-relay-adapter",
+		"--relay-package", "<relay-adapter-package-dir>",
+		"--out", "<relay-adapter-evidence-out>",
+	}
+	for _, file := range files {
+		packageCommand = append(packageCommand, file.Flag, file.Path)
+	}
+	return AcceptanceEvidencePlan{
+		SchemaVersion:    AcceptanceEvidencePlanSchemaVersion,
+		GeneratedAt:      generatedAt.UTC(),
+		AdapterKind:      pkg.AdapterKind,
+		ConnectionPathID: pkg.ConnectionPathID,
+		PackagePath:      "relay-adapter.json",
+		ExternalMutation: false,
+		EvidenceFiles:    files,
+		DryRunCommand:    []string{"rdev", "connection-entry", "run", "--runner-manifest", "connection-entry-runner.json", "--dry-run", "--result-out", "runner-result.json"},
+		RunCommand:       []string{"rdev", "connection-entry", "run", "--runner-manifest", "connection-entry-runner.json", "--result-out", "runner-result.json"},
+		PackageCommand:   packageCommand,
+		VerifyCommand:    []string{"rdev", "acceptance", "verify-relay-adapter-package", "--package", "<relay-adapter-evidence-out>/package.json"},
+		AgentRules: []string{
+			"Use rdev connection-entry run --result-out to create runner-result.json; do not hand-write runner evidence.",
+			"Use the file names and package command from this plan when collecting real restrictive-network evidence.",
+			"Redact helper endpoints, credentials, private IPs, local paths, usernames, and hostnames before sharing evidence outside the operator account.",
+			"If endpoint, credential, identity, route, privilege, or persistence is unclear, ask one short question instead of guessing.",
+		},
+		ApprovalRequired: append([]string(nil), pkg.ApprovalRequired...),
+		UnsupportedClaims: []string{
+			"This package and plan do not prove a deployed relay, SSH tunnel, mesh, or VPN path by themselves.",
+			"Production connectivity claims require a verified rdev.acceptance-package.relay-adapter.v1 evidence bundle from a real target environment.",
+		},
+	}
+}
+
+func verifyAcceptanceEvidencePlan(dir string, pkg Package) []Check {
+	var checks []Check
+	add := func(name string, passed bool, detail string) {
+		checks = append(checks, Check{Name: name, Passed: passed, Detail: detail})
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "acceptance-evidence-plan.json"))
+	add("acceptance_evidence_plan_exists", err == nil, "acceptance-evidence-plan.json")
+	if err != nil {
+		return checks
+	}
+	var plan AcceptanceEvidencePlan
+	err = json.Unmarshal(content, &plan)
+	add("acceptance_evidence_plan_json_valid", err == nil, errorDetail(err))
+	if err != nil {
+		return checks
+	}
+	add("acceptance_evidence_plan_schema", plan.SchemaVersion == AcceptanceEvidencePlanSchemaVersion, plan.SchemaVersion)
+	add("acceptance_evidence_plan_adapter_match", plan.AdapterKind == pkg.AdapterKind && plan.ConnectionPathID == pkg.ConnectionPathID, plan.AdapterKind+"/"+plan.ConnectionPathID)
+	add("acceptance_evidence_plan_package_path", plan.PackagePath == "relay-adapter.json", plan.PackagePath)
+	add("acceptance_evidence_plan_external_mutation_false", !plan.ExternalMutation, fmt.Sprintf("%t", plan.ExternalMutation))
+	add("acceptance_evidence_plan_files_declared", len(plan.EvidenceFiles) >= 6, fmt.Sprintf("%d", len(plan.EvidenceFiles)))
+	add("acceptance_evidence_plan_uses_runner_result_out", stringSliceContains(plan.DryRunCommand, "--result-out") && stringSliceContains(plan.RunCommand, "--result-out"), strings.Join(plan.RunCommand, " "))
+	add("acceptance_evidence_plan_package_command", stringSliceContains(plan.PackageCommand, "package-relay-adapter") && stringSliceContains(plan.PackageCommand, "--relay-package"), strings.Join(plan.PackageCommand, " "))
+	add("acceptance_evidence_plan_verify_command", stringSliceContains(plan.VerifyCommand, "verify-relay-adapter-package"), strings.Join(plan.VerifyCommand, " "))
+	add("acceptance_evidence_plan_agent_rules", len(plan.AgentRules) >= 3, fmt.Sprintf("%d", len(plan.AgentRules)))
+	return checks
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func runnerEnvDeclaredForKind(kind string, env RunnerEnv) bool {
@@ -502,6 +624,12 @@ Adapter: %s
 This package gives Agents a standard connectivity helper surface for restrictive
 networks. It contains no real relay, SSH, mesh, VPN, credential, private IP,
 local path, organization identifier, or server address.
+
+Before collecting real restrictive-network evidence, read
+acceptance-evidence-plan.json. It gives Agents the standard runner result,
+status, helper transcript, audit file names, and rdev acceptance
+package-relay-adapter command so they do not invent relay-specific evidence
+layouts.
 
 Runner environment:
 

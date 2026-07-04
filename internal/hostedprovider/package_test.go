@@ -25,7 +25,7 @@ func TestBuildAndVerifyHostedProviderPackage(t *testing.T) {
 	if !pkg.OK() {
 		t.Fatalf("expected package ok: %#v", pkg.Checks)
 	}
-	for _, path := range []string{"hosted-provider.json", "HOSTED_PROVIDER.md", "HOSTED_PROVIDER_RUNTIME.md", "gateway.env.example", "runtime-contract.json"} {
+	for _, path := range []string{"hosted-provider.json", "HOSTED_PROVIDER.md", "HOSTED_PROVIDER_RUNTIME.md", "gateway.env.example", "runtime-contract.json", "runtime-evidence-plan.json"} {
 		if _, err := os.Stat(filepath.Join(out, path)); err != nil {
 			t.Fatalf("expected hosted provider file %s: %v", path, err)
 		}
@@ -36,6 +36,30 @@ func TestBuildAndVerifyHostedProviderPackage(t *testing.T) {
 	}
 	if strings.Contains(string(content), filepath.Dir(out)) || strings.Contains(string(content), "BEGIN PRIVATE KEY") {
 		t.Fatalf("hosted provider package leaked private material: %s", string(content))
+	}
+	planContent, err := os.ReadFile(filepath.Join(out, "runtime-evidence-plan.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan RuntimeEvidencePlan
+	if err := json.Unmarshal(planContent, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.SchemaVersion != RuntimeEvidencePlanSchemaVersion ||
+		plan.PackagePath != "hosted-provider.json" ||
+		plan.ExternalMutation ||
+		!slices.Contains(plan.PackageCommand, "package-hosted-provider-runtime") ||
+		!slices.Contains(plan.VerifyCommand, "verify-hosted-provider-runtime-package") {
+		t.Fatalf("unexpected runtime evidence plan: %#v", plan)
+	}
+	planPaths := map[string]bool{}
+	for _, file := range plan.EvidenceFiles {
+		planPaths[file.Path] = true
+	}
+	for _, expected := range []string{"gateway-startup.txt", "storage-verification.json", "auth-verification.json", "backup-evidence.txt", "restore-evidence.txt", "retention-evidence.txt", "role-mapping-evidence.json", "failure-mode-evidence.json", "audit.jsonl"} {
+		if !planPaths[expected] {
+			t.Fatalf("missing evidence plan path %q in %#v", expected, plan.EvidenceFiles)
+		}
 	}
 
 	verification, err := Verify(out)
@@ -145,6 +169,11 @@ func TestBuildExternalHostedProviderRuntimeContract(t *testing.T) {
 				return file.Path == "runtime-contract.json" && file.Kind == "runtime-contract"
 			}) {
 				t.Fatalf("missing runtime contract file: %#v", pkg.Files)
+			}
+			if !slices.ContainsFunc(pkg.Files, func(file PackageFile) bool {
+				return file.Path == "runtime-evidence-plan.json" && file.Kind == "runtime-evidence-plan"
+			}) {
+				t.Fatalf("missing runtime evidence plan file: %#v", pkg.Files)
 			}
 			content, err := os.ReadFile(filepath.Join(out, "runtime-contract.json"))
 			if err != nil {
