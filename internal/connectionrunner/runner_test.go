@@ -275,6 +275,24 @@ func TestRunStartsConfiguredHelperBeforeHostServe(t *testing.T) {
 	if !result.HelperStartConfigured || !result.HelperStarted || !result.Executed {
 		t.Fatalf("expected helper and host serve execution, got %#v", result)
 	}
+	transcript := strings.Join(result.HelperTranscript, "\n")
+	for _, expected := range []string{
+		"selected_path existing-frp-or-chisel-relay",
+		"helper_start_configured tool=chisel",
+		"helper_started tool=chisel",
+		"helper_gateway_reachable selected_path=existing-frp-or-chisel-relay",
+		"host_serve_invoked",
+		"host_serve_completed",
+		"helper_cleanup_attempted tool=chisel",
+		"helper_cleanup_succeeded tool=chisel",
+	} {
+		if !strings.Contains(transcript, expected) {
+			t.Fatalf("expected helper transcript to contain %q, got %#v", expected, result.HelperTranscript)
+		}
+	}
+	if !result.HelperCleanupAttempted || !result.HelperCleanupSucceeded {
+		t.Fatalf("expected cleanup evidence, got %#v", result)
+	}
 	want := []string{"helper-started", "helper-probed", "host-serve", "helper-cleaned"}
 	if strings.Join(events, "|") != strings.Join(want, "|") {
 		t.Fatalf("unexpected event order: got %v want %v", events, want)
@@ -485,6 +503,11 @@ func TestRunInstallsMissingHelperDependencyBeforeHostServe(t *testing.T) {
 	if !result.DependencyInstallConfigured || !result.DependencyInstalled || result.DependencyInstallTool != "chisel" ||
 		!result.HelperStarted || !result.Executed {
 		t.Fatalf("expected install, helper start, and host serve, got %#v", result)
+	}
+	transcript := strings.Join(result.HelperTranscript, "\n")
+	if !strings.Contains(transcript, "dependency_install_configured tool=chisel") ||
+		!strings.Contains(transcript, "dependency_installed tool=chisel") {
+		t.Fatalf("expected dependency install transcript, got %#v", result.HelperTranscript)
 	}
 	want := []string{"dependency-installed", "helper-started", "helper-probed", "host-serve", "helper-cleaned"}
 	if strings.Join(events, "|") != strings.Join(want, "|") {

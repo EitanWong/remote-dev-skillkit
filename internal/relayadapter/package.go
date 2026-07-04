@@ -463,7 +463,7 @@ func packageChecks(pkg Package) []Check {
 func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEvidencePlan {
 	files := []EvidencePlanFile{
 		{Name: "runner-result", Path: "runner-result.json", Kind: "json", Required: true, Flag: "--runner-result", Description: "Raw rdev.connection-entry.runner-result.v1 from rdev connection-entry run --result-out."},
-		{Name: "helper-transcript", Path: "helper-transcript.txt", Kind: "transcript", Required: true, Flag: "--helper-transcript", Description: "Redacted helper startup, detection, or reviewed install transcript."},
+		{Name: "helper-transcript", Path: "helper-transcript.txt", Kind: "transcript", Required: true, Flag: "--helper-transcript", Description: "Standard helper transcript from rdev connection-entry run --helper-transcript-out, plus any extra redacted supervisor notes from the real run."},
 		{Name: "gateway-status", Path: "gateway-status.json", Kind: "json", Required: true, Flag: "--gateway-status", Description: "Gateway status or health probe evidence for the selected helper path."},
 		{Name: "host-status", Path: "host-status.json", Kind: "json", Required: true, Flag: "--host-status", Description: "Host registration or host serve status evidence."},
 		{Name: "connection-status", Path: "connection-status.json", Kind: "json", Required: true, Flag: "--connection-status", Description: "Connection status with connected=true for the selected standard path."},
@@ -485,12 +485,12 @@ func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEviden
 		PackagePath:      "relay-adapter.json",
 		ExternalMutation: false,
 		EvidenceFiles:    files,
-		DryRunCommand:    []string{"rdev", "connection-entry", "run", "--runner-manifest", "connection-entry-runner.json", "--dry-run", "--result-out", "runner-result.json"},
-		RunCommand:       []string{"rdev", "connection-entry", "run", "--runner-manifest", "connection-entry-runner.json", "--result-out", "runner-result.json"},
+		DryRunCommand:    []string{"rdev", "connection-entry", "run", "--runner-manifest", "connection-entry-runner.json", "--dry-run", "--result-out", "runner-result.json", "--helper-transcript-out", "helper-transcript.txt"},
+		RunCommand:       []string{"rdev", "connection-entry", "run", "--runner-manifest", "connection-entry-runner.json", "--result-out", "runner-result.json", "--helper-transcript-out", "helper-transcript.txt"},
 		PackageCommand:   packageCommand,
 		VerifyCommand:    []string{"rdev", "acceptance", "verify-relay-adapter-package", "--package", "<relay-adapter-evidence-out>/package.json"},
 		AgentRules: []string{
-			"Use rdev connection-entry run --result-out to create runner-result.json; do not hand-write runner evidence.",
+			"Use rdev connection-entry run --result-out and --helper-transcript-out to create runner-result.json and helper-transcript.txt; do not hand-write runner evidence.",
 			"Use the file names and package command from this plan when collecting real restrictive-network evidence.",
 			"Redact helper endpoints, credentials, private IPs, local paths, usernames, and hostnames before sharing evidence outside the operator account.",
 			"If endpoint, credential, identity, route, privilege, or persistence is unclear, ask one short question instead of guessing.",

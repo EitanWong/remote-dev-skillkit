@@ -40,6 +40,11 @@ transcript file names or package commands after GitHub Release assets exist.
   verification evidence paths are rejected even if an Agent skips the
   readiness status command or an archived package manifest is tampered to match
   placeholder file checksums.
+- Added standard helper transcript output to `rdev connection-entry run` through
+  `--helper-transcript-out <path>`. Relay/connectivity evidence plans now tell
+  Agents to generate both `runner-result.json` and `helper-transcript.txt`
+  from the runner, reducing hand-written helper evidence during real
+  restrictive-network acceptance.
 
 ### Remaining Gates
 

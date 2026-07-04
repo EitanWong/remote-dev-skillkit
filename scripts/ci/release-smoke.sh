@@ -333,11 +333,11 @@ go run ./cmd/rdev connection-entry run \
 	--rdev-command "$fake_bin/rdev-host-smoke" \
 	--probe-timeout 1s \
 	--result-out "$relay_acceptance_input/runner-result.json" \
+	--helper-transcript-out "$relay_acceptance_input/helper-transcript.txt" \
 	> "$relay_acceptance_input/runner-output.json"
 kill "$runner_gateway_pid" 2>/dev/null || true
 wait "$runner_gateway_pid" 2>/dev/null || true
 runner_gateway_pid=
-printf '%s\n' 'started reviewed relay helper' > "$relay_acceptance_input/helper-transcript.txt"
 printf '%s\n' '{"ok":true,"status":"healthy"}' > "$relay_acceptance_input/gateway-status.json"
 printf '%s\n' '{"ok":true,"host_status":"active"}' > "$relay_acceptance_input/host-status.json"
 printf '%s\n' '{"ok":true,"connected":true}' > "$relay_acceptance_input/connection-status.json"
@@ -884,6 +884,8 @@ assert relay_adapter_verification["ok"] is True, relay_adapter_verification
 assert relay_adapter_verification["adapter_kind"] == "chisel", relay_adapter_verification
 assert relay_adapter_evidence_plan["schema_version"] == "rdev.relay-adapter-acceptance-evidence-plan.v1", relay_adapter_evidence_plan
 assert "--result-out" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
+assert "--helper-transcript-out" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
+assert "--helper-transcript-out" in relay_adapter_evidence_plan["run_command"], relay_adapter_evidence_plan
 assert "package-relay-adapter" in relay_adapter_evidence_plan["package_command"], relay_adapter_evidence_plan
 assert {item["path"] for item in relay_adapter_evidence_plan["evidence_files"]} >= {"runner-result.json", "helper-transcript.txt", "connection-status.json", "audit.jsonl"}, relay_adapter_evidence_plan
 assert relay_evidence_scaffold["schema"] == "rdev.acceptance-evidence-scaffold.v1", relay_evidence_scaffold
@@ -928,6 +930,7 @@ for adapter, (kind, gateway_var, install_marker) in expected_connectivity.items(
 assert relay_adapter_acceptance_package["schema"] == "rdev.acceptance-package.relay-adapter.v1", relay_adapter_acceptance_package
 assert relay_adapter_acceptance_package["ok"] is True, relay_adapter_acceptance_package
 assert relay_adapter_acceptance_package["selected_path"] == "existing-wireguard-vpn", relay_adapter_acceptance_package
+assert "helper_started tool=wg" in (root / "relay-acceptance-input" / "helper-transcript.txt").read_text(), relay_adapter_acceptance_package
 assert set(relay_adapter_acceptance_package["accepted_paths"]) >= {
     "existing-frp-or-chisel-relay",
     "existing-ssh-tunnel",
@@ -1107,6 +1110,7 @@ print(json.dumps({
     "connectivity_adapter_package_kinds": sorted(package["adapter_kind"] for package in connectivity_adapter_packages.values()),
     "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
+    "relay_adapter_helper_transcript_from_runner": True,
     "post_release_download_acceptance_package_schema": post_release_download_package["schema"],
     "post_release_download_acceptance_verification_schema": post_release_download_verification["schema"],
     "post_release_download_placeholder_package_rejected": True,

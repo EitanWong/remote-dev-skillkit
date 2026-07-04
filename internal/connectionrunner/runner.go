@@ -182,6 +182,9 @@ type RunResult struct {
 	HelperStartConfigured       bool          `json:"helper_start_configured"`
 	HelperStarted               bool          `json:"helper_started"`
 	HelperStartTool             string        `json:"helper_start_tool,omitempty"`
+	HelperCleanupAttempted      bool          `json:"helper_cleanup_attempted,omitempty"`
+	HelperCleanupSucceeded      bool          `json:"helper_cleanup_succeeded,omitempty"`
+	HelperTranscript            []string      `json:"helper_transcript,omitempty"`
 	ProbeResults                []ProbeResult `json:"probe_results"`
 	ToolResults                 []ToolResult  `json:"tool_results"`
 	ApprovalRequired            []string      `json:"approval_required,omitempty"`
@@ -417,6 +420,7 @@ func Run(opts RunOptions) (RunResult, error) {
 	result.ProbeResults = probes
 	if selected == nil {
 		result.ManualActionRequired = append(result.ManualActionRequired, "no usable direct, proxy, relay, mesh, VPN, or SSH path was detected; provide a gateway, relay, mesh, VPN, SSH, or hosted route for this Connection Entry")
+		appendHelperTranscript(&result, "manual_action_required no_usable_connection_path")
 		return result, nil
 	}
 	result.SelectedPath = selected.ID
@@ -424,23 +428,33 @@ func Run(opts RunOptions) (RunResult, error) {
 	result.SelectedGatewayURL = firstNonEmpty(selected.GatewayOverride, manifest.GatewayURL)
 	result.ApprovalRequired = append(result.ApprovalRequired, selected.ApprovalRequired...)
 	result.HostServeArgs = hostServeArgs(manifest, result.SelectedGatewayURL, result.SelectedTransport, opts.ExtraHostArgs)
+	appendHelperTranscript(&result, "selected_path "+selected.ID)
+	appendHelperTranscript(&result, "selected_transport "+result.SelectedTransport)
 	installAction, installTool, installConfigured, err := dependencyInstallAction(*selected, manifest.Mode)
 	if err != nil {
 		return result, err
 	}
 	result.DependencyInstallConfigured = installConfigured
 	result.DependencyInstallTool = installTool
+	if installConfigured {
+		appendHelperTranscript(&result, "dependency_install_configured tool="+installTool)
+	}
 	helperArgv, helperTool, helperStartConfigured, err := helperStartArgv(*selected)
 	if err != nil {
 		return result, err
 	}
 	result.HelperStartConfigured = helperStartConfigured
 	result.HelperStartTool = helperTool
+	if helperStartConfigured {
+		appendHelperTranscript(&result, "helper_start_configured tool="+helperTool)
+	}
 	if len(result.ApprovalRequired) > 0 && selected.Status != "auto-executable-when-already-configured" {
 		result.ManualActionRequired = append(result.ManualActionRequired, result.ApprovalRequired...)
+		appendHelperTranscript(&result, "manual_action_required approval_required")
 		return result, nil
 	}
 	if opts.DryRun {
+		appendHelperTranscript(&result, "dry_run no_execution")
 		return result, nil
 	}
 	commandRunner := opts.CommandRunner
@@ -457,6 +471,7 @@ func Run(opts RunOptions) (RunResult, error) {
 			return result, fmt.Errorf("install dependency %s: %w", installTool, err)
 		}
 		result.DependencyInstalled = true
+		appendHelperTranscript(&result, "dependency_installed tool="+installTool)
 		installedPath := strings.TrimSpace(installResult.InstalledBinary)
 		if installedPath == "" {
 			var err error
@@ -468,30 +483,55 @@ func Run(opts RunOptions) (RunResult, error) {
 		result.ToolResults = appendOrReplaceToolResult(result.ToolResults, ToolResult{Name: installTool, Found: true, Path: installedPath})
 		helperArgv = replaceHelperArgvTool(helperArgv, installTool, installedPath)
 	}
+	var cleanup func() error
 	if helperStartConfigured {
 		helperStarter := opts.HelperStarter
 		if helperStarter == nil {
 			helperStarter = startHelperCommand
 		}
-		cleanup, err := helperStarter(helperArgv)
+		cleanup, err = helperStarter(helperArgv)
 		if err != nil {
 			return result, fmt.Errorf("start helper %s: %w", helperTool, err)
 		}
 		result.HelperStarted = true
-		if cleanup != nil {
-			defer func() {
-				_ = cleanup()
-			}()
-		}
+		appendHelperTranscript(&result, "helper_started tool="+helperTool)
 		if err := waitForGateway(result.SelectedGatewayURL, httpProbe, probeTimeout); err != nil {
+			cleanupHelper(&result, cleanup, helperTool)
 			return result, fmt.Errorf("helper gateway not reachable after starting %s: %w", helperTool, err)
 		}
+		appendHelperTranscript(&result, "helper_gateway_reachable selected_path="+result.SelectedPath)
 	}
+	appendHelperTranscript(&result, "host_serve_invoked")
 	if err := commandRunner(rdevCommand, result.HostServeArgs); err != nil {
+		cleanupHelper(&result, cleanup, helperTool)
 		return result, err
 	}
 	result.Executed = true
+	appendHelperTranscript(&result, "host_serve_completed")
+	cleanupHelper(&result, cleanup, helperTool)
 	return result, nil
+}
+
+func appendHelperTranscript(result *RunResult, line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	result.HelperTranscript = append(result.HelperTranscript, line)
+}
+
+func cleanupHelper(result *RunResult, cleanup func() error, helperTool string) {
+	if cleanup == nil || result.HelperCleanupAttempted {
+		return
+	}
+	result.HelperCleanupAttempted = true
+	appendHelperTranscript(result, "helper_cleanup_attempted tool="+helperTool)
+	if err := cleanup(); err != nil {
+		appendHelperTranscript(result, "helper_cleanup_failed tool="+helperTool)
+		return
+	}
+	result.HelperCleanupSucceeded = true
+	appendHelperTranscript(result, "helper_cleanup_succeeded tool="+helperTool)
 }
 
 func writePackage(pkg *Package, rdevCommand string) error {

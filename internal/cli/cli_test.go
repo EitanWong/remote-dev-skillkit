@@ -1881,6 +1881,7 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 		t.Fatalf("invalid connection entry plan JSON: %v\n%s", err, planOut.String())
 	}
 	resultOut := filepath.Join(t.TempDir(), "evidence", "runner-result.json")
+	helperTranscriptOut := filepath.Join(t.TempDir(), "evidence", "helper-transcript.txt")
 	var runOut bytes.Buffer
 	app = NewApp(&runOut, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
@@ -1889,6 +1890,7 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 		"--dry-run",
 		"--probe-timeout", "1s",
 		"--result-out", resultOut,
+		"--helper-transcript-out", helperTranscriptOut,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1905,6 +1907,15 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 		len(result.HostServeArgs) == 0 ||
 		result.Executed {
 		t.Fatalf("unexpected runner evidence: %#v\ncli output: %s", result, runOut.String())
+	}
+	helperTranscript, err := os.ReadFile(helperTranscriptOut)
+	if err != nil {
+		t.Fatalf("expected helper transcript evidence: %v", err)
+	}
+	if !strings.Contains(string(helperTranscript), "selected_path native-direct-gateway") ||
+		!strings.Contains(string(helperTranscript), "dry_run no_execution") ||
+		!strings.Contains(runOut.String(), `"helper_transcript": "`+helperTranscriptOut+`"`) {
+		t.Fatalf("unexpected helper transcript evidence:\n%s\ncli output: %s", string(helperTranscript), runOut.String())
 	}
 }
 
