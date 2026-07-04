@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 const FileStateStoreProvider = "file"
 const PostgresStateStoreProvider = "postgres"
 const RedisStreamStateStoreProvider = "redis-stream"
+const S3CompatibleStateStoreProvider = "s3-compatible"
 
 type StateStore interface {
 	LoadInto(*MemoryGateway) (Snapshot, bool, error)
@@ -374,4 +376,189 @@ func redisURLHasInlineSecret(rawURL string) bool {
 func redisKeySuffix(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
+}
+
+type S3CompatibleStateStore struct {
+	Bucket  string
+	Prefix  string
+	AWSPath string
+	Timeout time.Duration
+}
+
+func NewS3CompatibleStateStore(location string) (S3CompatibleStateStore, error) {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location is required")
+	}
+	parsed, err := url.Parse(location)
+	if err != nil {
+		return S3CompatibleStateStore{}, fmt.Errorf("parse s3-compatible state store location: %w", err)
+	}
+	if parsed.Scheme != "s3" {
+		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location must use s3://bucket/prefix")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location must not contain credentials, query parameters, or fragments; use AWS_PROFILE, AWS_* environment, or an operator-approved secret injector")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location missing bucket")
+	}
+	prefix := strings.Trim(parsed.EscapedPath(), "/")
+	if prefix == "" {
+		prefix = "rdev/gateway"
+	}
+	return S3CompatibleStateStore{
+		Bucket:  parsed.Host,
+		Prefix:  prefix,
+		AWSPath: "aws",
+		Timeout: 10 * time.Second,
+	}, nil
+}
+
+func (s S3CompatibleStateStore) LoadInto(gw *MemoryGateway) (Snapshot, bool, error) {
+	if gw == nil {
+		return Snapshot{}, false, fmt.Errorf("gateway is required")
+	}
+	tmp, err := os.CreateTemp("", "rdev-s3-snapshot-*.json")
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		return Snapshot{}, false, err
+	}
+	defer os.Remove(tmpPath)
+	_, err = s.runAWSOutput("s3api", "get-object", "--bucket", s.Bucket, "--key", s.snapshotKey(), tmpPath)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "nosuchkey") || strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return Snapshot{}, false, nil
+		}
+		return Snapshot{}, false, err
+	}
+	raw, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	content := strings.TrimSpace(string(raw))
+	if content == "" {
+		return Snapshot{}, false, nil
+	}
+	var snapshot Snapshot
+	if err := json.Unmarshal([]byte(content), &snapshot); err != nil {
+		return Snapshot{}, false, fmt.Errorf("parse s3-compatible gateway snapshot: %w", err)
+	}
+	if err := gw.RestoreSnapshot(snapshot); err != nil {
+		return Snapshot{}, false, err
+	}
+	return snapshot, true, nil
+}
+
+func (s S3CompatibleStateStore) SaveFrom(gw *MemoryGateway) (Snapshot, error) {
+	if gw == nil {
+		return Snapshot{}, fmt.Errorf("gateway is required")
+	}
+	snapshot := gw.Snapshot()
+	content, err := json.Marshal(snapshot)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err := s.putObject(s.snapshotKey(), content); err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (s S3CompatibleStateStore) Describe() string {
+	return S3CompatibleStateStoreProvider + ":s3-location"
+}
+
+func (s S3CompatibleStateStore) VerifyRuntime() error {
+	probeKey := s.key("verify-" + redisKeySuffix([]byte(time.Now().UTC().Format(time.RFC3339Nano))) + ".json")
+	probe := []byte(`{"schema_version":"rdev.gateway-storage-probe.v1","ok":true}`)
+	if err := s.putObject(probeKey, probe); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp("", "rdev-s3-probe-*.json")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	_, err = s.runAWSOutput("s3api", "get-object", "--bucket", s.Bucket, "--key", probeKey, tmpPath)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return err
+	}
+	output := string(raw)
+	if !strings.Contains(output, `"ok": true`) && !strings.Contains(output, `"ok":true`) {
+		return fmt.Errorf("s3-compatible state store probe readback did not contain ok=true")
+	}
+	if _, err := s.runAWSOutput("s3api", "delete-object", "--bucket", s.Bucket, "--key", probeKey); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s S3CompatibleStateStore) snapshotKey() string {
+	return s.key("snapshot-current.json")
+}
+
+func (s S3CompatibleStateStore) key(name string) string {
+	prefix := strings.Trim(strings.TrimSpace(s.Prefix), "/")
+	if prefix == "" {
+		return name
+	}
+	return prefix + "/" + strings.TrimLeft(name, "/")
+}
+
+func (s S3CompatibleStateStore) putObject(key string, content []byte) error {
+	tmp, err := os.CreateTemp("", "rdev-s3-put-*.json")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	defer os.Remove(tmpPath)
+	_, err = s.runAWSOutput("s3api", "put-object", "--bucket", s.Bucket, "--key", key, "--body", tmpPath)
+	return err
+}
+
+func (s S3CompatibleStateStore) runAWSOutput(args ...string) (string, error) {
+	awsPath := strings.TrimSpace(s.AWSPath)
+	if awsPath == "" {
+		awsPath = "aws"
+	}
+	timeout := s.Timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, awsPath, args...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf("aws s3-compatible state store command failed: %s", detail)
+	}
+	return stdout.String(), nil
 }

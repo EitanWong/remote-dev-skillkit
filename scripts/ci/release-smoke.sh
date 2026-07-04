@@ -30,12 +30,12 @@ go test ./internal/wsproto ./internal/cli \
   > "$work_dir/wss-mtls-host-smoke.txt"
 
 go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal/cli \
-  -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestRedisStreamStateStoreRoundTripThroughRedisCLI|TestRedisStreamStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestGatewayStorageVerifyRedisRejectsInlineCredentials|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
+  -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestRedisStreamStateStoreRoundTripThroughRedisCLI|TestRedisStreamStateStoreVerifyRuntime|TestS3CompatibleStateStoreRoundTripThroughAWSCLI|TestS3CompatibleStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestGatewayStorageVerifyRedisRejectsInlineCredentials|TestGatewayStorageVerifyS3CompatibleRejectsUnsafeLocation|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOperatorAuthVerifyHosted' \
   -count=1 \
   > "$work_dir/hosted-storage-auth-smoke.txt"
 
 go test ./internal/hostedprovider ./internal/cli \
-	-run 'TestBuildAndVerifyHostedProviderPackage|TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildRedisHostedJWTProviderUsesBuiltInGatewayRuntime|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify|TestHostedProviderRedisHostedJWTUsesBuiltInGatewayRuntime' \
+	-run 'TestBuildAndVerifyHostedProviderPackage|TestBuildPostgresHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildRedisHostedJWTProviderUsesBuiltInGatewayRuntime|TestBuildS3CompatibleHostedJWTProviderUsesBuiltInGatewayRuntime|TestVerifyHostedProviderPackageDetectsTamperedFile|TestHostedProviderPackageAndVerify|TestHostedProviderRedisHostedJWTUsesBuiltInGatewayRuntime|TestHostedProviderS3CompatibleHostedJWTUsesBuiltInGatewayRuntime' \
 	-count=1 \
 	> "$work_dir/hosted-provider-package-smoke.txt"
 
@@ -83,6 +83,16 @@ go run ./cmd/rdev hosted-provider package \
 go run ./cmd/rdev hosted-provider verify \
 	--package "$redis_hosted_provider_dir" \
 	> "$work_dir/hosted-provider-redis-jwt-verification.json"
+
+s3_hosted_provider_dir="$work_dir/hosted-provider-s3-jwt"
+go run ./cmd/rdev hosted-provider package \
+	--out "$s3_hosted_provider_dir" \
+	--storage-provider s3-compatible \
+	--auth-provider hosted-ed25519-jwt \
+	> "$work_dir/hosted-provider-s3-jwt-package.json"
+go run ./cmd/rdev hosted-provider verify \
+	--package "$s3_hosted_provider_dir" \
+	> "$work_dir/hosted-provider-s3-jwt-verification.json"
 
 external_hosted_provider_dir="$work_dir/hosted-provider-postgres-oidc"
 go run ./cmd/rdev hosted-provider package \
@@ -486,6 +496,9 @@ postgres_hosted_provider_verification = json.loads((root / "hosted-provider-post
 redis_hosted_provider_package = json.loads((root / "hosted-provider-redis-jwt-package.json").read_text())
 redis_hosted_provider_manifest = json.loads((root / "hosted-provider-redis-jwt" / "hosted-provider.json").read_text())
 redis_hosted_provider_verification = json.loads((root / "hosted-provider-redis-jwt-verification.json").read_text())
+s3_hosted_provider_package = json.loads((root / "hosted-provider-s3-jwt-package.json").read_text())
+s3_hosted_provider_manifest = json.loads((root / "hosted-provider-s3-jwt" / "hosted-provider.json").read_text())
+s3_hosted_provider_verification = json.loads((root / "hosted-provider-s3-jwt-verification.json").read_text())
 external_hosted_provider_package = json.loads((root / "hosted-provider-postgres-oidc-package.json").read_text())
 external_hosted_provider_verification = json.loads((root / "hosted-provider-postgres-oidc-verification.json").read_text())
 external_hosted_runtime_contract = json.loads((root / "hosted-provider-postgres-oidc" / "runtime-contract.json").read_text())
@@ -642,6 +655,14 @@ assert redis_hosted_provider_verification["schema"] == "rdev.hosted-provider-pac
 assert redis_hosted_provider_verification["ok"] is True, redis_hosted_provider_verification
 assert redis_hosted_provider_manifest["gateway_args"][:6] == ["rdev", "gateway", "serve", "--storage-provider", "redis-stream", "--storage-path"], redis_hosted_provider_manifest["gateway_args"]
 assert "operator-reviewed-hosted-gateway-launcher" not in redis_hosted_provider_manifest["gateway_args"], redis_hosted_provider_manifest["gateway_args"]
+assert s3_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", s3_hosted_provider_package
+assert s3_hosted_provider_package["ok"] is True, s3_hosted_provider_package
+assert s3_hosted_provider_package["storage_provider"] == "s3-compatible", s3_hosted_provider_package
+assert s3_hosted_provider_package["auth_provider"] == "hosted-ed25519-jwt", s3_hosted_provider_package
+assert s3_hosted_provider_verification["schema"] == "rdev.hosted-provider-package-verification.v1", s3_hosted_provider_verification
+assert s3_hosted_provider_verification["ok"] is True, s3_hosted_provider_verification
+assert s3_hosted_provider_manifest["gateway_args"][:6] == ["rdev", "gateway", "serve", "--storage-provider", "s3-compatible", "--storage-path"], s3_hosted_provider_manifest["gateway_args"]
+assert "operator-reviewed-hosted-gateway-launcher" not in s3_hosted_provider_manifest["gateway_args"], s3_hosted_provider_manifest["gateway_args"]
 assert external_hosted_provider_package["schema"] == "rdev.hosted-provider-package.v1", external_hosted_provider_package
 assert external_hosted_provider_package["ok"] is True, external_hosted_provider_package
 assert external_hosted_provider_package["storage_provider"] == "postgres", external_hosted_provider_package
@@ -827,6 +848,8 @@ print(json.dumps({
     "postgres_hosted_provider_runtime_gateway_args": True,
     "redis_hosted_provider_package_schema": redis_hosted_provider_package["schema"],
     "redis_hosted_provider_runtime_gateway_args": True,
+    "s3_hosted_provider_package_schema": s3_hosted_provider_package["schema"],
+    "s3_hosted_provider_runtime_gateway_args": True,
     "external_hosted_provider_package_schema": external_hosted_provider_package["schema"],
     "external_hosted_provider_runtime_contract_schema": external_hosted_runtime_contract["schema_version"],
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],

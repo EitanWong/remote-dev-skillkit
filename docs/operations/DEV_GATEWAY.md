@@ -69,16 +69,19 @@ operator paths.
 ## Storage
 
 Gateway state persistence is routed through a state-store provider boundary.
-The built-in providers are `file`, `postgres`, and `redis-stream`; future
-hosted providers should implement the same load/save contract instead of
-changing HTTP handlers. The Postgres provider uses `psql`/libpq, stores the
-current `rdev.gateway-snapshot.v1` as JSONB in
+The built-in providers are `file`, `postgres`, `redis-stream`, and
+`s3-compatible`; future hosted providers should implement the same load/save
+contract instead of changing HTTP handlers. The Postgres provider uses
+`psql`/libpq, stores the current `rdev.gateway-snapshot.v1` as JSONB in
 `rdev_gateway_snapshots`, and refuses inline passwords in `--storage-path`.
 The Redis stream provider uses `redis-cli`, stores the current snapshot key,
 and appends snapshot/probe events to a Redis stream while refusing inline URL
-credentials. Use libpq service files, `.pgpass`, `REDISCLI_AUTH`,
-environment injection, or an operator-approved secret manager instead of
-placing database or Redis passwords in process arguments.
+credentials. The S3-compatible provider uses `aws s3api`, stores the current
+snapshot object at `s3://bucket/prefix/snapshot-current.json`, and refuses
+credentials, query strings, and fragments in `--storage-path`. Use libpq
+service files, `.pgpass`, `REDISCLI_AUTH`, `AWS_PROFILE`, `AWS_*` environment
+injection, endpoint config, or an operator-approved secret manager instead of
+placing database, Redis, or object-storage secrets in process arguments.
 
 ```bash
 rdev gateway storage verify \
@@ -92,6 +95,10 @@ rdev gateway storage verify \
 rdev gateway storage verify \
   --provider redis-stream \
   --path rediss://redis.example.invalid:6379/0
+
+rdev gateway storage verify \
+  --provider s3-compatible \
+  --path s3://example-bucket/rdev/gateway
 
 rdev gateway serve \
   --dev \
@@ -113,6 +120,13 @@ rdev gateway serve \
   --signing-key .rdev/keys/gateway-signing-key.json \
   --storage-provider redis-stream \
   --storage-path rediss://redis.example.invalid:6379/0
+
+rdev gateway serve \
+  --dev \
+  --addr 127.0.0.1:8787 \
+  --signing-key .rdev/keys/gateway-signing-key.json \
+  --storage-provider s3-compatible \
+  --storage-path s3://example-bucket/rdev/gateway
 ```
 
 `--state` remains a convenience alias for the file provider path.
@@ -134,14 +148,14 @@ rdev hosted-provider verify \
 ```
 
 The built-in package proves the provider contract for single-node file storage
-and provider-neutral EdDSA JWT auth. Built-in Postgres and Redis stream runtime
-paths can be used with hosted EdDSA JWT auth and still require real deployment
-evidence before production claims. External packages for S3-compatible storage,
-OIDC/JWKS, and SAML emit
-`runtime-contract.json` and `HOSTED_PROVIDER_RUNTIME.md` so operators and
-Agents know which verification, backup, restore, retention, role-mapping,
-failure-mode, and audit evidence must be collected. Durable third-party hosted
-providers still need real deployed gateway evidence before production claims.
+and provider-neutral EdDSA JWT auth. Built-in Postgres, Redis stream, and
+S3-compatible runtime paths can be used with hosted EdDSA JWT auth and still
+require real deployment evidence before production claims. External packages
+for OIDC/JWKS and SAML emit `runtime-contract.json` and
+`HOSTED_PROVIDER_RUNTIME.md` so operators and Agents know which verification,
+backup, restore, retention, role-mapping, failure-mode, and audit evidence must
+be collected. Durable third-party hosted providers still need real deployed
+gateway evidence before production claims.
 
 ## Start
 
@@ -1182,7 +1196,7 @@ The script hash-pins `rdev-verify.exe` before using it to verify the signed rele
 
 ## Limitations
 
-- In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot. `--storage-provider postgres` adds a built-in `psql`/libpq JSONB snapshot store, but production claims still require real backup, restore, retention, role-mapping, failure-mode, audit, and redaction evidence.
+- In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot. `--storage-provider postgres`, `--storage-provider redis-stream`, and `--storage-provider s3-compatible` add built-in `psql`/libpq, `redis-cli`, and `aws s3api` state-store runtimes, but production claims still require real backup or replay, restore, retention, role-mapping, failure-mode, audit, and redaction evidence.
 - WSS/mTLS host job transport is implemented for local release validation through `--transport wss`, `--tls-cert`, `--tls-key`, `--client-ca`, `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`. Real NAT, proxy, and platform-service acceptance still require target-environment evidence.
 - Hosted operator auth is provider-neutral EdDSA JWT verification. Hosted provider packages can describe OIDC/JWKS and SAML runtime evidence requirements, but this is not a bundled SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
 - TLS lifecycle automation such as ACME issuance, certificate rotation, and public gateway deployment remains operator-managed. The gateway and host load explicit PEM material and enforce client certificates when `--client-ca` is configured.

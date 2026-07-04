@@ -4,6 +4,43 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.23-dev
+
+Current phase: hosted storage continues moving from provider contracts toward
+real runtime paths. The gateway now has a built-in S3-compatible object storage
+state-store provider through `aws s3api`, while production hosted claims still
+require real deployed object-storage versioning or backup, restore, retention,
+role-mapping, failure-mode, audit, and redaction evidence.
+
+### Added
+
+- Added `gateway.S3CompatibleStateStore` and `--storage-provider
+  s3-compatible` support for `rdev gateway serve` / `rdev gateway storage
+  verify`. The provider stores the current `rdev.gateway-snapshot.v1` at
+  `s3://bucket/prefix/snapshot-current.json`, performs put/get/delete runtime
+  probes through `aws s3api`, and rejects credentials, query strings, and
+  fragments in storage locations so credentials stay in `AWS_PROFILE`, `AWS_*`
+  environment injection, endpoint config, or an operator-approved secret
+  manager.
+- Updated `rdev hosted-provider package --storage-provider s3-compatible
+  --auth-provider hosted-ed25519-jwt` so the generated gateway args use the
+  built-in `rdev gateway serve --storage-provider s3-compatible` runtime path
+  instead of a placeholder reviewed launcher.
+- Updated hosted provider package metadata and release smoke to verify
+  S3-compatible state-store tests, unsafe location rejection, S3 hosted-JWT
+  package generation/verification, and S3 runtime gateway args.
+
+### Remaining Gates
+
+- Run a real S3-compatible gateway with endpoint credentials supplied through a
+  reviewed secret path, versioning or backup, restore, retention, role-mapping,
+  failure-mode, audit, and redaction evidence, then package it with
+  `rdev acceptance package-hosted-provider-runtime`.
+- Continue OIDC/JWKS and SAML runtime integrations beyond their current
+  contracts.
+- Continue real helper/relay adapter acceptance and GitHub Release
+  publication/download verification.
+
 ## 0.1.22-dev
 
 Current phase: hosted storage continues moving from provider contracts toward

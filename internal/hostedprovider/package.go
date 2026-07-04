@@ -317,11 +317,11 @@ func storageDescriptor(provider string) Provider {
 		return Provider{
 			Kind:             "s3-compatible",
 			Schema:           "rdev.hosted-storage.s3-compatible.v1",
-			Implementation:   "provider-runtime-package",
+			Implementation:   "built-in-aws-cli-runtime",
 			RuntimeStatus:    "durable-runtime-evidence-required",
-			RequiredSettings: []string{"RDEV_S3_ENDPOINT_SECRET_REF", "RDEV_S3_BUCKET_SECRET_REF", "RDEV_S3_REGION", "RDEV_S3_KMS_POLICY_REF", "RDEV_S3_RETENTION_POLICY_REF"},
-			VerifyCommand:    "rdev hosted-provider verify --package <provider-package> && <operator-reviewed-s3-health-probe>",
-			Notes:            []string{"Use secret references for endpoint, bucket, access key, and secret key material.", "Runtime evidence must prove object write/read/list, versioning or backup, restore, retention, and denied credential behavior."},
+			RequiredSettings: []string{"RDEV_GATEWAY_STORAGE_PATH", "RDEV_S3_ENDPOINT_SECRET_REF", "RDEV_S3_BUCKET_SECRET_REF", "RDEV_S3_REGION", "RDEV_S3_KMS_POLICY_REF", "RDEV_S3_RETENTION_POLICY_REF"},
+			VerifyCommand:    "rdev gateway storage verify --provider s3-compatible --path <s3-bucket-prefix-from-secret-ref>",
+			Notes:            []string{"Use a secret reference for endpoint, bucket, access key, and secret key material; expose the final s3://bucket/prefix only at runtime.", "The built-in runtime uses aws s3api to store and load the current gateway snapshot object.", "Production evidence must still prove versioning or backup, restore, retention, denied credential behavior, role mapping, failure modes, and audit redaction."},
 		}
 	case "redis-stream":
 		return Provider{
@@ -392,7 +392,7 @@ func authDescriptor(provider string) Provider {
 }
 
 func gatewayArgs(storageProvider, authProvider string) []string {
-	if authProvider == "hosted-ed25519-jwt" && (storageProvider == "file" || storageProvider == "postgres" || storageProvider == "redis-stream") {
+	if authProvider == "hosted-ed25519-jwt" && (storageProvider == "file" || storageProvider == "postgres" || storageProvider == "redis-stream" || storageProvider == "s3-compatible") {
 		args := []string{"rdev", "gateway", "serve", "--storage-provider", storageProvider, "--storage-path", "${RDEV_GATEWAY_STORAGE_PATH}"}
 		args = append(args, "--hosted-operator-auth", "${RDEV_HOSTED_OPERATOR_AUTH_FILE}")
 		return args
@@ -488,9 +488,11 @@ func storageEnvironment(provider string) []EnvVar {
 		}
 	case "s3-compatible":
 		return []EnvVar{
+			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "s3://bucket/prefix for the built-in S3-compatible gateway state store. Do not include endpoint query strings, credentials, or fragments; use AWS_PROFILE, AWS_* environment, endpoint config, or an operator-approved secret injector.", Secret: false},
 			{Name: "RDEV_S3_ENDPOINT_SECRET_REF", Required: true, Description: "Secret-manager reference for the S3-compatible endpoint.", Secret: true},
 			{Name: "RDEV_S3_BUCKET_SECRET_REF", Required: true, Description: "Secret-manager reference for bucket and access policy configuration.", Secret: true},
 			{Name: "RDEV_S3_REGION", Required: true, Description: "Reviewed region or placement label.", Secret: false},
+			{Name: "RDEV_S3_KMS_POLICY_REF", Required: true, Description: "Reviewed server-side encryption or KMS policy reference.", Secret: false},
 			{Name: "RDEV_S3_RETENTION_POLICY_REF", Required: true, Description: "Reviewed lifecycle, versioning, and retention policy reference.", Secret: false},
 		}
 	case "redis-stream":

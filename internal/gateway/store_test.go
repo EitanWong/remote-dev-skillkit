@@ -214,6 +214,89 @@ func TestRedisStreamStateStoreVerifyRuntime(t *testing.T) {
 	}
 }
 
+func TestS3CompatibleStateStoreRejectsUnsafeLocations(t *testing.T) {
+	for _, location := range []string{
+		"https://bucket.example.invalid/rdev",
+		"s3://user@example-bucket/rdev",
+		"s3://example-bucket/rdev?access_key=secret",
+		"s3://example-bucket/rdev#secret",
+	} {
+		if _, err := NewS3CompatibleStateStore(location); err == nil {
+			t.Fatalf("expected unsafe S3-compatible location to fail for %q", location)
+		}
+	}
+}
+
+func TestS3CompatibleStateStoreRoundTripThroughAWSCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake aws shell fixture uses POSIX shell")
+	}
+	root := t.TempDir()
+	publicKey, privateKey := gatewaySnapshotKeyPair(t)
+	now := time.Date(2026, 7, 4, 22, 15, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "s3-compatible store round trip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewS3CompatibleStateStore("s3://rdev-state/rdev/gateway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.AWSPath = writeFakeAWSCLI(t, root)
+	store.Timeout = 2 * time.Second
+	snapshot, err := store.SaveFrom(gw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Tickets) != 1 || snapshot.Tickets[0].ID != ticket.ID {
+		t.Fatalf("unexpected saved snapshot: %#v", snapshot.Tickets)
+	}
+	restarted := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+	loaded, ok, err := store.LoadInto(restarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected s3-compatible state store load")
+	}
+	if len(loaded.Tickets) != 1 || loaded.Tickets[0].ID != ticket.ID {
+		t.Fatalf("unexpected loaded snapshot: %#v", loaded.Tickets)
+	}
+	transcript, err := os.ReadFile(filepath.Join(root, "aws-transcript.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(transcript); !strings.Contains(text, "put-object --bucket rdev-state --key rdev/gateway/snapshot-current.json") ||
+		!strings.Contains(text, "get-object --bucket rdev-state --key rdev/gateway/snapshot-current.json") {
+		t.Fatalf("fake aws transcript missing expected commands:\n%s", text)
+	}
+}
+
+func TestS3CompatibleStateStoreVerifyRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake aws shell fixture uses POSIX shell")
+	}
+	root := t.TempDir()
+	store, err := NewS3CompatibleStateStore("s3://rdev-state/rdev/gateway")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.AWSPath = writeFakeAWSCLI(t, root)
+	store.Timeout = 2 * time.Second
+	if err := store.VerifyRuntime(); err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := os.ReadFile(filepath.Join(root, "aws-transcript.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(transcript); !strings.Contains(text, "delete-object --bucket rdev-state --key rdev/gateway/verify-") ||
+		!strings.Contains(text, "get-object --bucket rdev-state --key rdev/gateway/verify-") {
+		t.Fatalf("expected verify AWS commands, got:\n%s", text)
+	}
+}
+
 func writeFakePSQL(t *testing.T, root string) string {
 	t.Helper()
 	script := filepath.Join(root, "fake-psql.sh")
@@ -249,6 +332,82 @@ if not match:
 with open(state, "w", encoding="utf-8") as handle:
     handle.write(match.group(1).strip())
 PY
+    ;;
+esac
+`
+	if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+func writeFakeAWSCLI(t *testing.T, root string) string {
+	t.Helper()
+	script := filepath.Join(root, "fake-aws.sh")
+	stateDir := filepath.Join(root, "aws-objects")
+	transcript := filepath.Join(root, "aws-transcript.txt")
+	content := `#!/bin/sh
+set -eu
+service="$1"
+operation="$2"
+shift 2
+bucket=""
+key=""
+body=""
+outfile=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --bucket)
+      bucket="$2"
+      shift 2
+      ;;
+    --key)
+      key="$2"
+      shift 2
+      ;;
+    --body)
+      body="$2"
+      shift 2
+      ;;
+    *)
+      if [ -z "$outfile" ]; then
+        outfile="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+printf '%s %s --bucket %s --key %s' "$service" "$operation" "$bucket" "$key" >> "` + transcript + `"
+if [ -n "$body" ]; then
+  printf ' --body %s' "$body" >> "` + transcript + `"
+fi
+if [ -n "$outfile" ]; then
+  printf ' %s' "$outfile" >> "` + transcript + `"
+fi
+printf '\n' >> "` + transcript + `"
+safe_key="$(printf '%s' "$bucket/$key" | tr '/:' '__')"
+object="` + stateDir + `/$safe_key"
+case "$operation" in
+  put-object)
+    mkdir -p "` + stateDir + `"
+    cp "$body" "$object"
+    printf '{"ETag":"fake"}\n'
+    ;;
+  get-object)
+    if [ ! -f "$object" ]; then
+      echo "NoSuchKey" >&2
+      exit 1
+    fi
+    cp "$object" "$outfile"
+    printf '{"ContentLength":1}\n'
+    ;;
+  delete-object)
+    rm -f "$object"
+    printf '{}\n'
+    ;;
+  *)
+    echo "unsupported fake aws operation: $operation" >&2
+    exit 2
     ;;
 esac
 `

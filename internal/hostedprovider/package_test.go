@@ -223,6 +223,43 @@ func TestBuildRedisHostedJWTProviderUsesBuiltInGatewayRuntime(t *testing.T) {
 	}
 }
 
+func TestBuildS3CompatibleHostedJWTProviderUsesBuiltInGatewayRuntime(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "provider")
+	pkg, err := Build(Options{
+		OutDir:          out,
+		Name:            "s3-hosted-jwt",
+		StorageProvider: "s3-compatible",
+		AuthProvider:    "hosted-ed25519-jwt",
+		GeneratedAt:     time.Date(2026, 7, 4, 22, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected package ok: %#v", pkg.Checks)
+	}
+	expectedArgs := "rdev gateway serve --storage-provider s3-compatible --storage-path ${RDEV_GATEWAY_STORAGE_PATH} --hosted-operator-auth ${RDEV_HOSTED_OPERATOR_AUTH_FILE}"
+	if strings.Join(pkg.GatewayArgs, " ") != expectedArgs {
+		t.Fatalf("expected built-in s3-compatible gateway args %q, got %#v", expectedArgs, pkg.GatewayArgs)
+	}
+	if slices.Contains(pkg.GatewayArgs, "operator-reviewed-hosted-gateway-launcher") {
+		t.Fatalf("s3-compatible hosted JWT package should not use placeholder launcher: %#v", pkg.GatewayArgs)
+	}
+	if pkg.Storage.Implementation != "built-in-aws-cli-runtime" ||
+		!strings.Contains(pkg.Storage.VerifyCommand, "rdev gateway storage verify --provider s3-compatible") {
+		t.Fatalf("expected built-in S3-compatible runtime descriptor, got %#v", pkg.Storage)
+	}
+	envNames := map[string]bool{}
+	for _, env := range pkg.Environment {
+		envNames[env.Name] = true
+	}
+	for _, expected := range []string{"RDEV_GATEWAY_STORAGE_PATH", "RDEV_S3_ENDPOINT_SECRET_REF", "RDEV_S3_BUCKET_SECRET_REF", "RDEV_HOSTED_OPERATOR_AUTH_FILE"} {
+		if !envNames[expected] {
+			t.Fatalf("missing env %q in %#v", expected, pkg.Environment)
+		}
+	}
+}
+
 func TestVerifyHostedProviderPackageDetectsTamperedFile(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "provider")
 	_, err := Build(Options{

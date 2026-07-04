@@ -59,6 +59,11 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   Redis stream append/probe events, inline-credential rejection for Redis URLs,
   runtime probe verification, and hosted provider package gateway args for
   `redis-stream` + `hosted-ed25519-jwt`.
+- Built-in S3-compatible gateway state-store runtime through
+  `--storage-provider s3-compatible`, `aws s3api` snapshot object put/get,
+  runtime probe verification, unsafe location rejection for credentials,
+  query strings, and fragments, and hosted provider package gateway args for
+  `s3-compatible` + `hosted-ed25519-jwt`.
 - Hosted provider package generation and verification through
   `rdev.hosted-provider-package.v1`, `rdev hosted-provider package`,
   `rdev.hosted-provider-package-verification.v1`, and

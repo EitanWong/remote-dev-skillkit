@@ -2202,6 +2202,65 @@ func TestHostedProviderRedisHostedJWTUsesBuiltInGatewayRuntime(t *testing.T) {
 	}
 }
 
+func TestHostedProviderS3CompatibleHostedJWTUsesBuiltInGatewayRuntime(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "provider")
+	var packageStdout bytes.Buffer
+	app := NewApp(&packageStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"hosted-provider", "package",
+		"--out", out,
+		"--storage-provider", "s3-compatible",
+		"--auth-provider", "hosted-ed25519-jwt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output := packageStdout.String()
+	if !strings.Contains(output, `"storage_provider": "s3-compatible"`) ||
+		!strings.Contains(output, `"auth_provider": "hosted-ed25519-jwt"`) ||
+		!strings.Contains(output, `"s3-compatible"`) ||
+		strings.Contains(output, "operator-reviewed-hosted-gateway-launcher") {
+		t.Fatalf("unexpected s3-compatible hosted provider package output: %s", output)
+	}
+	var manifest struct {
+		GatewayArgs []string `json:"gateway_args"`
+	}
+	content, err := os.ReadFile(filepath.Join(out, "hosted-provider.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(manifest.GatewayArgs, " ")
+	if !strings.Contains(joined, "gateway serve --storage-provider s3-compatible") ||
+		!strings.Contains(joined, "--hosted-operator-auth") {
+		t.Fatalf("expected built-in s3-compatible gateway args, got %#v", manifest.GatewayArgs)
+	}
+
+	var verifyStdout bytes.Buffer
+	app = NewApp(&verifyStdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"hosted-provider", "verify", "--package", out}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(verifyStdout.String(), `"ok": true`) ||
+		!strings.Contains(verifyStdout.String(), `"storage_provider": "s3-compatible"`) {
+		t.Fatalf("unexpected verify output: %s", verifyStdout.String())
+	}
+}
+
+func TestGatewayStorageVerifyS3CompatibleRejectsUnsafeLocation(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"gateway", "storage", "verify",
+		"--provider", "s3-compatible",
+		"--path", "s3://example-bucket/rdev?secret=inline",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must not contain credentials") {
+		t.Fatalf("expected unsafe S3-compatible location rejection, got %v output=%s", err, stdout.String())
+	}
+}
+
 func TestRelayAdapterPackageAndVerify(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "relay")
 	var packageStdout bytes.Buffer

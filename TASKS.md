@@ -107,6 +107,7 @@
 - [x] Add hosted storage/auth foundation with gateway state-store provider boundary, file-backed provider verification, hosted EdDSA JWT operator auth, and combined local/hosted role authorization.
 - [x] Add built-in Postgres gateway state-store runtime through `--storage-provider postgres`, `psql`/libpq SQL bootstrap, JSONB snapshot upsert/load, runtime probe verification, inline-password rejection, hosted provider package gateway args, and release-smoke coverage.
 - [x] Add built-in Redis stream gateway state-store runtime through `--storage-provider redis-stream`, `redis-cli` snapshot key load/save, stream append/probe events, runtime verification, inline-credential rejection, hosted provider package gateway args, and release-smoke coverage.
+- [x] Add built-in S3-compatible gateway state-store runtime through `--storage-provider s3-compatible`, `aws s3api` snapshot object put/get/delete probes, unsafe location rejection, hosted provider package gateway args, and release-smoke coverage.
 - [x] Add hosted provider package generation and verification with `rdev.hosted-provider-package.v1`, `rdev.hosted-provider-package-verification.v1`, `rdev hosted-provider package`, `rdev hosted-provider verify`, provider runbook/env template output, no-private-surface checks, and release-smoke coverage.
 - [x] Add provider-specific hosted runtime contracts with `rdev.hosted-provider-runtime-contract.v1`, `runtime-contract.json`, `HOSTED_PROVIDER_RUNTIME.md`, Postgres/S3-compatible/Redis/OIDC-JWKS/SAML environment and evidence requirements, CLI runtime status output, no-private-surface checks, and release-smoke coverage.
 - [x] Add first standard relay adapter package generation and verification for Chisel/frpc with `rdev.relay-adapter-package.v1`, `rdev.relay-adapter-package-verification.v1`, `rdev relay-adapter package`, `rdev relay-adapter verify`, MCP tools `rdev.relay_adapter.package` / `rdev.relay_adapter.verify`, runner `RDEV_RELAY_*` metadata, safe helper argv/install-action checks, no-private-surface checks, and release-smoke coverage.
@@ -314,7 +315,7 @@
 - [ ] Add RustDesk/MeshCentral adapter.
 - [ ] Add Coder workspace adapter.
 - [ ] Add DevPod/devcontainer workspace adapter.
-- [ ] Implement remaining durable hosted provider runtime integrations beyond the built-in Postgres and Redis stream state-store paths, provider-specific runtime contracts, and runtime acceptance evidence packager, including deployed Postgres/Redis backup or replay/restore/retention/failure-mode evidence plus S3-compatible/OIDC/SAML gateway operation evidence.
+- [ ] Implement remaining durable hosted provider runtime integrations beyond the built-in Postgres, Redis stream, and S3-compatible state-store paths, provider-specific runtime contracts, and runtime acceptance evidence packager, including deployed Postgres/Redis/S3 backup or replay/restore/retention/failure-mode evidence plus OIDC/SAML gateway operation evidence.
 - [ ] Complete production Adapter SDK integration for future adapters beyond built-in hostrunner runtime fixture capture.
 
 ## Final End-State Gates
