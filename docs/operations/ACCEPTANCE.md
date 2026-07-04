@@ -15,17 +15,23 @@ audit, and revocation.
 Hosted provider packages write `runtime-evidence-plan.json`. Relay and
 connectivity adapter packages write `acceptance-evidence-plan.json`. Before a
 real deployed-provider or restrictive-network acceptance run, scaffold the
-evidence directory from that plan:
+evidence directory from the package directory so Agents do not hand-pick
+internal plan paths:
 
 ```bash
 rdev acceptance scaffold-evidence \
-  --plan hosted-provider/runtime-evidence-plan.json \
+  --hosted-provider-package hosted-provider \
   --out .rdev/acceptance/hosted-provider-runtime-evidence
 
 rdev acceptance scaffold-evidence \
-  --plan relay-adapter/acceptance-evidence-plan.json \
+  --relay-adapter-package relay-adapter \
   --out .rdev/acceptance/relay-adapter-evidence
 ```
+
+The lower-level `--plan <runtime-evidence-plan.json |
+acceptance-evidence-plan.json>` input remains available for reviewed operator
+overrides. Fresh Agents should prefer `--hosted-provider-package` or
+`--relay-adapter-package`.
 
 The command writes:
 
@@ -225,9 +231,11 @@ runs remain required before claiming production-grade connectivity.
 ## Connection Entry Runner Evidence
 
 When collecting real relay, mesh, VPN, or SSH acceptance evidence, generate the
-runner result from the standard runner instead of writing JSON by hand. If the
-connectivity adapter package includes `acceptance-evidence-plan.json`, read it
-first and use its standard file names and package/verify commands.
+runner result from the standard runner instead of writing JSON by hand. Start
+from `rdev acceptance scaffold-evidence --relay-adapter-package <package>` so
+the package decides the standard file names and package/verify commands. Read
+`acceptance-evidence-plan.json` directly only for a reviewed override or
+debugging session.
 
 ```bash
 rdev connection-entry run \

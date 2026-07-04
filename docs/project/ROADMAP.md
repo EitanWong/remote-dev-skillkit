@@ -124,11 +124,13 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Acceptance evidence scaffolding through
   `rdev.acceptance-evidence-scaffold.v1`,
   `rdev acceptance scaffold-evidence`, and MCP tool
-  `rdev.acceptance.scaffold_evidence`, turning hosted-provider
-  `runtime-evidence-plan.json` and relay/connectivity
-  `acceptance-evidence-plan.json` into standard evidence collection
-  directories, `AGENT_CHECKLIST.md`, resolved package/verify commands, and
-  non-deceptive placeholder behavior before real acceptance runs.
+  `rdev.acceptance.scaffold_evidence`, turning hosted-provider packages,
+  relay/connectivity adapter packages, or reviewed evidence-plan JSON files
+  into standard evidence collection directories, `AGENT_CHECKLIST.md`,
+  resolved package/verify commands, and non-deceptive placeholder behavior
+  before real acceptance runs. Fresh Agents should pass
+  `--hosted-provider-package` or `--relay-adapter-package` instead of
+  hand-picking internal plan paths.
 - Acceptance evidence readiness checks through
   `rdev.acceptance-evidence-status.v1`,
   `rdev acceptance evidence-status`, and MCP tool

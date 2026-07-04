@@ -71,6 +71,13 @@ transcript file names or package commands after GitHub Release assets exist.
   together, writes `release-evidence-index.json` plus `checksums.txt`, records
   package manifest hashes without copying source-path-heavy package manifests,
   and fails closed until all three release-blocking evidence tracks verify.
+- Extended `rdev acceptance scaffold-evidence` and MCP tool
+  `rdev.acceptance.scaffold_evidence` with package-level inputs:
+  `--hosted-provider-package <dir|hosted-provider.json>` and
+  `--relay-adapter-package <dir|relay-adapter.json>`. Fresh Agents can now
+  scaffold hosted-provider and relay/connectivity evidence from the package
+  directory directly, while `--plan` remains available for reviewed operator
+  overrides.
 
 ### Remaining Gates
 

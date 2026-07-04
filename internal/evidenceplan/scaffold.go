@@ -14,12 +14,14 @@ const ScaffoldSchemaVersion = "rdev.acceptance-evidence-scaffold.v1"
 const StatusSchemaVersion = "rdev.acceptance-evidence-status.v1"
 
 type Options struct {
-	PlanPath           string
-	OutDir             string
-	PackageDir         string
-	CreatePlaceholders bool
-	Force              bool
-	GeneratedAt        time.Time
+	PlanPath                  string
+	HostedProviderPackagePath string
+	RelayAdapterPackagePath   string
+	OutDir                    string
+	PackageDir                string
+	CreatePlaceholders        bool
+	Force                     bool
+	GeneratedAt               time.Time
 }
 
 type StatusOptions struct {
@@ -141,11 +143,12 @@ type rawPlanFile struct {
 }
 
 func Build(opts Options) (Scaffold, error) {
-	if strings.TrimSpace(opts.PlanPath) == "" {
-		return Scaffold{}, fmt.Errorf("plan is required")
-	}
 	if strings.TrimSpace(opts.OutDir) == "" {
 		return Scaffold{}, fmt.Errorf("out is required")
+	}
+	opts, err := resolvePlanInput(opts)
+	if err != nil {
+		return Scaffold{}, err
 	}
 	planPath, err := filepath.Abs(opts.PlanPath)
 	if err != nil {
@@ -260,6 +263,63 @@ func Build(opts Options) (Scaffold, error) {
 		return Scaffold{}, err
 	}
 	return scaffold, nil
+}
+
+func resolvePlanInput(opts Options) (Options, error) {
+	hasPlan := strings.TrimSpace(opts.PlanPath) != ""
+	hasHostedPackage := strings.TrimSpace(opts.HostedProviderPackagePath) != ""
+	hasRelayPackage := strings.TrimSpace(opts.RelayAdapterPackagePath) != ""
+	inputCount := 0
+	for _, present := range []bool{hasPlan, hasHostedPackage, hasRelayPackage} {
+		if present {
+			inputCount++
+		}
+	}
+	if inputCount == 0 {
+		return Options{}, fmt.Errorf("plan, hosted provider package, or relay adapter package is required")
+	}
+	if inputCount > 1 {
+		return Options{}, fmt.Errorf("provide only one of plan, hosted provider package, or relay adapter package")
+	}
+	if hasPlan {
+		return opts, nil
+	}
+	var packagePath string
+	var planName string
+	var label string
+	if hasHostedPackage {
+		packagePath = opts.HostedProviderPackagePath
+		planName = "runtime-evidence-plan.json"
+		label = "hosted provider package"
+	} else {
+		packagePath = opts.RelayAdapterPackagePath
+		planName = "acceptance-evidence-plan.json"
+		label = "relay adapter package"
+	}
+	dir, err := resolvePackageDir(packagePath, label)
+	if err != nil {
+		return Options{}, err
+	}
+	opts.PlanPath = filepath.Join(dir, planName)
+	if strings.TrimSpace(opts.PackageDir) == "" {
+		opts.PackageDir = dir
+	}
+	return opts, nil
+}
+
+func resolvePackageDir(path, label string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("%s is required: %w", label, err)
+	}
+	if info.IsDir() {
+		return abs, nil
+	}
+	return filepath.Dir(abs), nil
 }
 
 func StatusForScaffold(opts StatusOptions) (Status, error) {

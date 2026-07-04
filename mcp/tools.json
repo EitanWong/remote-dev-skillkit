@@ -498,7 +498,7 @@
     },
     {
       "name": "rdev.acceptance.scaffold_evidence",
-      "description": "Create a standard evidence collection directory from runtime-evidence-plan.json or acceptance-evidence-plan.json. Agents use this before real hosted-provider or relay/mesh/VPN/SSH acceptance so file names, package commands, verify commands, checklist, and report paths come from rdev instead of model-authored scripts.",
+      "description": "Create a standard evidence collection directory from a hosted provider package, relay adapter package, runtime-evidence-plan.json, or acceptance-evidence-plan.json. Agents use this before real hosted-provider or relay/mesh/VPN/SSH acceptance so file names, package commands, verify commands, checklist, and report paths come from rdev instead of model-authored scripts or hand-picked plan paths.",
       "safety": "Writes local scaffold files only. Does not create fake acceptance, execute helpers, start gateways, mutate network/cloud resources, or make production claims. Placeholder evidence is opt-in and must be replaced before packaging.",
       "inputSchema": {
         "additionalProperties": false,
@@ -508,6 +508,10 @@
           },
           "force": {
             "type": "boolean"
+          },
+          "hosted_provider_package": {
+            "minLength": 1,
+            "type": "string"
           },
           "out_dir": {
             "minLength": 1,
@@ -520,10 +524,13 @@
           "plan": {
             "minLength": 1,
             "type": "string"
+          },
+          "relay_adapter_package": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
-          "plan",
           "out_dir"
         ],
         "type": "object"

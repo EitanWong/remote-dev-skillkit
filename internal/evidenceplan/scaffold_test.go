@@ -26,9 +26,9 @@ func TestBuildHostedProviderRuntimeScaffold(t *testing.T) {
 
 	out := filepath.Join(root, "scaffold")
 	scaffold, err := Build(Options{
-		PlanPath:    filepath.Join(providerDir, "runtime-evidence-plan.json"),
-		OutDir:      out,
-		GeneratedAt: fixedTime(),
+		HostedProviderPackagePath: providerDir,
+		OutDir:                    out,
+		GeneratedAt:               fixedTime(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -64,10 +64,10 @@ func TestBuildRelayAdapterScaffoldWithPlaceholders(t *testing.T) {
 
 	out := filepath.Join(root, "scaffold")
 	scaffold, err := Build(Options{
-		PlanPath:           filepath.Join(relayDir, "acceptance-evidence-plan.json"),
-		OutDir:             out,
-		CreatePlaceholders: true,
-		GeneratedAt:        fixedTime(),
+		RelayAdapterPackagePath: filepath.Join(relayDir, "relay-adapter.json"),
+		OutDir:                  out,
+		CreatePlaceholders:      true,
+		GeneratedAt:             fixedTime(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +94,25 @@ func TestBuildRelayAdapterScaffoldWithPlaceholders(t *testing.T) {
 	}
 	if !report.CreatePlaceholders || len(report.RecommendedActions) == 0 {
 		t.Fatalf("expected placeholder warning in report: %#v", report)
+	}
+}
+
+func TestBuildScaffoldRequiresExactlyOnePlanInput(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "scaffold")
+	_, err := Build(Options{OutDir: out, GeneratedAt: fixedTime()})
+	if err == nil || !strings.Contains(err.Error(), "plan, hosted provider package, or relay adapter package is required") {
+		t.Fatalf("expected missing input error, got %v", err)
+	}
+
+	_, err = Build(Options{
+		PlanPath:                  filepath.Join(root, "runtime-evidence-plan.json"),
+		HostedProviderPackagePath: filepath.Join(root, "hosted-provider"),
+		OutDir:                    out,
+		GeneratedAt:               fixedTime(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "provide only one") {
+		t.Fatalf("expected mutually exclusive input error, got %v", err)
 	}
 }
 

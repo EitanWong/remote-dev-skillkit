@@ -463,12 +463,14 @@ func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
 
 func (s Server) scaffoldAcceptanceEvidence(args map[string]any) (any, error) {
 	return evidenceplan.Build(evidenceplan.Options{
-		PlanPath:           requiredString(args, "plan"),
-		OutDir:             requiredString(args, "out_dir"),
-		PackageDir:         stringArg(args, "package_dir", ""),
-		CreatePlaceholders: boolArg(args, "create_placeholders", false),
-		Force:              boolArg(args, "force", false),
-		GeneratedAt:        time.Now().UTC(),
+		PlanPath:                  stringArg(args, "plan", ""),
+		HostedProviderPackagePath: stringArg(args, "hosted_provider_package", ""),
+		RelayAdapterPackagePath:   stringArg(args, "relay_adapter_package", ""),
+		OutDir:                    requiredString(args, "out_dir"),
+		PackageDir:                stringArg(args, "package_dir", ""),
+		CreatePlaceholders:        boolArg(args, "create_placeholders", false),
+		Force:                     boolArg(args, "force", false),
+		GeneratedAt:               time.Now().UTC(),
 	})
 }
 

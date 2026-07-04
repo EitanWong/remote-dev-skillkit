@@ -2505,7 +2505,7 @@ func TestAcceptanceScaffoldEvidenceForHostedProviderAndRelayPlans(t *testing.T) 
 	app = NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "scaffold-evidence",
-		"--plan", filepath.Join(providerOut, "runtime-evidence-plan.json"),
+		"--hosted-provider-package", providerOut,
 		"--out", hostedScaffold,
 	}); err != nil {
 		t.Fatal(err)
@@ -2576,7 +2576,7 @@ func TestAcceptanceScaffoldEvidenceForHostedProviderAndRelayPlans(t *testing.T) 
 	app = NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "scaffold-evidence",
-		"--plan", filepath.Join(relayOut, "acceptance-evidence-plan.json"),
+		"--relay-adapter-package", relayOut,
 		"--out", relayScaffold,
 		"--create-placeholders",
 	}); err != nil {

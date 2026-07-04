@@ -1453,20 +1453,24 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		fs := flag.NewFlagSet("acceptance scaffold-evidence", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
 		plan := fs.String("plan", "", "runtime-evidence-plan.json or acceptance-evidence-plan.json")
+		hostedPackage := fs.String("hosted-provider-package", "", "hosted provider package directory or hosted-provider.json; resolves runtime-evidence-plan.json")
+		relayPackage := fs.String("relay-adapter-package", "", "relay adapter package directory or relay-adapter.json; resolves acceptance-evidence-plan.json")
 		out := fs.String("out", "", "empty output directory for the evidence collection scaffold")
-		packageDir := fs.String("package-dir", "", "optional package directory; defaults to the plan's parent directory")
+		packageDir := fs.String("package-dir", "", "optional package directory; defaults to the selected package directory or plan parent")
 		createPlaceholders := fs.Bool("create-placeholders", false, "write obvious placeholder evidence files; replace them before packaging")
 		force := fs.Bool("force", false, "replace an existing output directory")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.acceptanceScaffoldEvidence(evidenceplan.Options{
-			PlanPath:           *plan,
-			OutDir:             *out,
-			PackageDir:         *packageDir,
-			CreatePlaceholders: *createPlaceholders,
-			Force:              *force,
-			GeneratedAt:        time.Now(),
+			PlanPath:                  *plan,
+			HostedProviderPackagePath: *hostedPackage,
+			RelayAdapterPackagePath:   *relayPackage,
+			OutDir:                    *out,
+			PackageDir:                *packageDir,
+			CreatePlaceholders:        *createPlaceholders,
+			Force:                     *force,
+			GeneratedAt:               time.Now(),
 		})
 	case "evidence-status":
 		fs := flag.NewFlagSet("acceptance evidence-status", flag.ContinueOnError)
@@ -8377,8 +8381,8 @@ Usage:
   rdev acceptance verify-relay-adapter-package --package relay-evidence/package.json
   rdev acceptance verify-hosted-provider-runtime-package --package hosted-runtime-evidence/package.json
   rdev acceptance verify-post-release-download-package --package post-release-download-evidence/package.json
-  rdev acceptance scaffold-evidence --plan hosted-provider/runtime-evidence-plan.json --out hosted-runtime-evidence-input
-  rdev acceptance scaffold-evidence --plan relay-adapter/acceptance-evidence-plan.json --out relay-evidence-input
+  rdev acceptance scaffold-evidence --hosted-provider-package hosted-provider --out hosted-runtime-evidence-input
+  rdev acceptance scaffold-evidence --relay-adapter-package relay-adapter --out relay-evidence-input
   rdev acceptance evidence-status --scaffold hosted-runtime-evidence-input
   rdev acceptance scaffold-post-release-download --plan post-release-install/post-release-install-plan.json --plan-verification post-release-verification.json --out post-release-download-evidence-input
   rdev acceptance post-release-evidence-status --scaffold post-release-download-evidence-input

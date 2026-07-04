@@ -702,9 +702,9 @@ func TestServerToolCallScaffoldAcceptanceEvidence(t *testing.T) {
 	}
 	outDir := filepath.Join(root, "scaffold")
 	input := mcpRequestLine(t, "rdev.acceptance.scaffold_evidence", map[string]any{
-		"plan":                filepath.Join(relayDir, "acceptance-evidence-plan.json"),
-		"out_dir":             outDir,
-		"create_placeholders": true,
+		"relay_adapter_package": filepath.Join(relayDir, "relay-adapter.json"),
+		"out_dir":               outDir,
+		"create_placeholders":   true,
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
