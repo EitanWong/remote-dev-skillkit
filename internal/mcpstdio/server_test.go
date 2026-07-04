@@ -726,6 +726,22 @@ func TestServerToolCallScaffoldAcceptanceEvidence(t *testing.T) {
 	if content, err := os.ReadFile(filepath.Join(outDir, "runner-result.json")); err != nil || !strings.Contains(string(content), `"placeholder": true`) {
 		t.Fatalf("expected placeholder runner result, err=%v content=%s", err, string(content))
 	}
+
+	statusInput := mcpRequestLine(t, "rdev.acceptance.evidence_status", map[string]any{
+		"scaffold": outDir,
+	})
+	out.Reset()
+	if err := server.Serve(context.Background(), strings.NewReader(statusInput), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines = responseLines(t, out.String())
+	result = lines[0]["result"].(map[string]any)
+	structured = result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.acceptance-evidence-status.v1" ||
+		structured["ready_for_packaging"] != false ||
+		structured["placeholder_count"].(float64) == 0 {
+		t.Fatalf("unexpected evidence status payload: %#v", structured)
+	}
 }
 
 func TestServerToolCallConnectionEntryPlanWritesPackagePlan(t *testing.T) {

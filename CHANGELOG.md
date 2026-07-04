@@ -24,6 +24,11 @@ verify command through `rdev` instead of inventing local scripts or file names.
 - Added MCP tool `rdev.acceptance.scaffold_evidence` so fresh Agents can
   scaffold hosted-provider or relay/mesh/VPN/SSH acceptance evidence through a
   standard tool call before collecting real transcripts.
+- Added `rdev.acceptance-evidence-status.v1` through
+  `rdev acceptance evidence-status --scaffold <dir|scaffold-report.json>` and
+  MCP tool `rdev.acceptance.evidence_status`. Agents can now read a scaffold
+  and get a fail-closed readiness report showing missing, empty, and
+  placeholder evidence files before attempting `rdev acceptance package-*`.
 - Kept scaffold generation non-deceptive by default: it does not create
   evidence placeholder files unless `--create-placeholders` is explicitly
   passed, and every scaffold reports `ready_for_packaging=false` until real
@@ -33,8 +38,9 @@ verify command through `rdev` instead of inventing local scripts or file names.
   placeholder files cannot be archived as release evidence.
 - Extended release smoke and tests to generate hosted-provider and relay
   evidence scaffolds, verify schema/command contracts, ensure default hosted
-  scaffolds do not create fake evidence files, and prove placeholder packages
-  are rejected.
+  scaffolds do not create fake evidence files, prove placeholder packages are
+  rejected, and prove evidence status stays non-ready until required files are
+  real, non-empty, and not placeholders.
 
 ### Remaining Gates
 

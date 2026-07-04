@@ -2504,6 +2504,41 @@ func TestAcceptanceScaffoldEvidenceForHostedProviderAndRelayPlans(t *testing.T) 
 	if _, err := os.Stat(filepath.Join(hostedScaffold, "gateway-startup.txt")); !os.IsNotExist(err) {
 		t.Fatalf("default hosted scaffold must not create placeholders, err=%v", err)
 	}
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"acceptance", "evidence-status",
+		"--scaffold", hostedScaffold,
+	})
+	if err == nil {
+		t.Fatalf("missing hosted evidence status should fail")
+	}
+	if !strings.Contains(stdout.String(), `"schema": "rdev.acceptance-evidence-status.v1"`) ||
+		!strings.Contains(stdout.String(), `"ready_for_packaging": false`) ||
+		!strings.Contains(stdout.String(), `"missing_count": 9`) {
+		t.Fatalf("unexpected missing hosted status output: %s", stdout.String())
+	}
+	writeFile(t, filepath.Join(hostedScaffold, "gateway-startup.txt"), "gateway started\n")
+	writeFile(t, filepath.Join(hostedScaffold, "storage-verification.json"), `{"ok":true}`)
+	writeFile(t, filepath.Join(hostedScaffold, "auth-verification.json"), `{"ok":true}`)
+	writeFile(t, filepath.Join(hostedScaffold, "backup-evidence.txt"), "backup complete\n")
+	writeFile(t, filepath.Join(hostedScaffold, "restore-evidence.txt"), "restore complete\n")
+	writeFile(t, filepath.Join(hostedScaffold, "retention-evidence.txt"), "retention reviewed\n")
+	writeFile(t, filepath.Join(hostedScaffold, "role-mapping-evidence.json"), `{"probes":[{"authorized":true},{"authorized":false}]}`)
+	writeFile(t, filepath.Join(hostedScaffold, "failure-mode-evidence.json"), `{"ok":true}`)
+	writeFile(t, filepath.Join(hostedScaffold, "audit.jsonl"), `{"event":"hosted_acceptance"}`)
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "evidence-status",
+		"--scaffold", hostedScaffold,
+	}); err != nil {
+		t.Fatalf("real hosted evidence status should pass: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"ready_for_packaging": true`) ||
+		!strings.Contains(stdout.String(), `"required_ready": 9`) {
+		t.Fatalf("unexpected ready hosted status output: %s", stdout.String())
+	}
 
 	relayOut := filepath.Join(root, "relay-adapter")
 	stdout.Reset()
@@ -2544,6 +2579,19 @@ func TestAcceptanceScaffoldEvidenceForHostedProviderAndRelayPlans(t *testing.T) 
 	}
 	if !strings.Contains(string(content), `"placeholder": true`) {
 		t.Fatalf("expected placeholder runner result, got %s", string(content))
+	}
+	stdout.Reset()
+	app = NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"acceptance", "evidence-status",
+		"--scaffold", relayScaffold,
+	})
+	if err == nil {
+		t.Fatalf("placeholder relay evidence status should fail")
+	}
+	if !strings.Contains(stdout.String(), `"placeholder_count": 6`) ||
+		!strings.Contains(stdout.String(), `"ready_for_packaging": false`) {
+		t.Fatalf("unexpected placeholder relay status output: %s", stdout.String())
 	}
 }
 
@@ -9633,6 +9681,13 @@ func writePEMFile(t *testing.T, path, blockType string, der []byte) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, content.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -97,6 +97,65 @@ func TestBuildRelayAdapterScaffoldWithPlaceholders(t *testing.T) {
 	}
 }
 
+func TestStatusForScaffoldReportsMissingPlaceholderAndReadyEvidence(t *testing.T) {
+	root := t.TempDir()
+	relayDir := filepath.Join(root, "relay-adapter")
+	if _, err := relayadapter.Build(relayadapter.Options{
+		OutDir:      relayDir,
+		AdapterKind: "chisel",
+		GeneratedAt: fixedTime(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(root, "scaffold")
+	if _, err := Build(Options{
+		PlanPath:           filepath.Join(relayDir, "acceptance-evidence-plan.json"),
+		OutDir:             out,
+		CreatePlaceholders: true,
+		GeneratedAt:        fixedTime(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := StatusForScaffold(StatusOptions{
+		ScaffoldPath: out,
+		GeneratedAt:  fixedTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ReadyForPackaging || status.PlaceholderCount == 0 || status.RequiredReady != 0 {
+		t.Fatalf("placeholder scaffold must not be ready: %#v", status)
+	}
+
+	realFiles := map[string]string{
+		"runner-result.json":     `{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-frp-or-chisel-relay"}`,
+		"helper-transcript.txt":  "helper started and exited cleanly\n",
+		"gateway-status.json":    `{"ok":true}`,
+		"host-status.json":       `{"ok":true}`,
+		"connection-status.json": `{"connected":true}`,
+		"audit.jsonl":            `{"event":"relay_acceptance"}`,
+	}
+	for name, content := range realFiles {
+		if err := os.WriteFile(filepath.Join(out, name), []byte(content+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	status, err = StatusForScaffold(StatusOptions{
+		ScaffoldPath: filepath.Join(out, "scaffold-report.json"),
+		GeneratedAt:  fixedTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.ReadyForPackaging || !status.OK || status.RequiredReady != status.RequiredTotal ||
+		status.PlaceholderCount != 0 || status.MissingCount != 0 || status.EmptyCount != 0 {
+		t.Fatalf("real evidence should be ready: %#v", status)
+	}
+}
+
 func fixedTime() time.Time {
 	return time.Date(2026, 7, 4, 1, 2, 3, 0, time.UTC)
 }

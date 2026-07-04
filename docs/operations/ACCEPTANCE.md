@@ -35,6 +35,23 @@ The command writes:
 | `scaffold-report.json` | `rdev.acceptance-evidence-scaffold.v1` report with plan kind, evidence files, commands, checks, and next actions |
 | copied plan JSON | The original machine-readable evidence plan archived next to the scaffold |
 
+After a real run starts filling the scaffold, check readiness before packaging:
+
+```bash
+rdev acceptance evidence-status \
+  --scaffold .rdev/acceptance/hosted-provider-runtime-evidence
+
+rdev acceptance evidence-status \
+  --scaffold .rdev/acceptance/relay-adapter-evidence
+```
+
+The status command emits `rdev.acceptance-evidence-status.v1` and exits
+nonzero until every required evidence file exists, is non-empty, and is not a
+scaffold placeholder. Agents should use MCP tool
+`rdev.acceptance.evidence_status` when available so they can report exactly
+which evidence files are still missing or placeholder-backed before attempting
+`rdev acceptance package-*`.
+
 By default the scaffold does not create placeholder evidence files. Use
 `--create-placeholders` only when an Agent or operator explicitly wants empty
 slots to fill during a real run. Placeholder files are marked as placeholders

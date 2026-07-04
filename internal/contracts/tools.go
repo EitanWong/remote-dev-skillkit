@@ -163,6 +163,14 @@ func Tools() []Tool {
 			}, []string{"plan", "out_dir"}),
 		},
 		{
+			Name:        "rdev.acceptance.evidence_status",
+			Description: "Read a standard acceptance evidence scaffold and report whether required hosted-provider or relay/mesh/VPN/SSH evidence files are present, non-empty, and not scaffold placeholders before packaging.",
+			Safety:      "Read-only status check. Does not create evidence, execute helpers, start gateways, package evidence, mutate network/cloud resources, or make production claims.",
+			InputSchema: object(map[string]any{
+				"scaffold": stringField(),
+			}, []string{"scaffold"}),
+		},
+		{
 			Name:        "rdev.relay_adapter.package",
 			Description: "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supports Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard packages. The package emits reviewed RDEV_RELAY_*, RDEV_SSH_*, RDEV_MESH_*, or RDEV_VPN_* gateway/helper/install metadata plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, mesh, VPN, or polling scripts.",
 			Safety:      "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",

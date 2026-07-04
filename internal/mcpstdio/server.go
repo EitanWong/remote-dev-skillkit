@@ -144,6 +144,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.connectionEntryPlan(params.Arguments)
 	case "rdev.acceptance.scaffold_evidence":
 		data, err = s.scaffoldAcceptanceEvidence(params.Arguments)
+	case "rdev.acceptance.evidence_status":
+		data, err = s.acceptanceEvidenceStatus(params.Arguments)
 	case "rdev.relay_adapter.package":
 		data, err = s.relayAdapterPackage(params.Arguments)
 	case "rdev.relay_adapter.verify":
@@ -460,6 +462,13 @@ func (s Server) scaffoldAcceptanceEvidence(args map[string]any) (any, error) {
 		CreatePlaceholders: boolArg(args, "create_placeholders", false),
 		Force:              boolArg(args, "force", false),
 		GeneratedAt:        time.Now().UTC(),
+	})
+}
+
+func (s Server) acceptanceEvidenceStatus(args map[string]any) (any, error) {
+	return evidenceplan.StatusForScaffold(evidenceplan.StatusOptions{
+		ScaffoldPath: requiredString(args, "scaffold"),
+		GeneratedAt:  time.Now().UTC(),
 	})
 }
 

@@ -124,6 +124,12 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `acceptance-evidence-plan.json` into standard evidence collection
   directories, `AGENT_CHECKLIST.md`, resolved package/verify commands, and
   non-deceptive placeholder behavior before real acceptance runs.
+- Acceptance evidence readiness checks through
+  `rdev.acceptance-evidence-status.v1`,
+  `rdev acceptance evidence-status`, and MCP tool
+  `rdev.acceptance.evidence_status`, so Agents can fail closed on missing,
+  empty, or placeholder scaffold evidence before calling the matching
+  `rdev acceptance package-*` command.
 - Hosted provider runtime acceptance packaging and verification through
   `rdev.acceptance-package.hosted-provider-runtime.v1`,
   `rdev acceptance package-hosted-provider-runtime`,

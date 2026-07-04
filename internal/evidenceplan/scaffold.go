@@ -11,6 +11,7 @@ import (
 )
 
 const ScaffoldSchemaVersion = "rdev.acceptance-evidence-scaffold.v1"
+const StatusSchemaVersion = "rdev.acceptance-evidence-status.v1"
 
 type Options struct {
 	PlanPath           string
@@ -19,6 +20,11 @@ type Options struct {
 	CreatePlaceholders bool
 	Force              bool
 	GeneratedAt        time.Time
+}
+
+type StatusOptions struct {
+	ScaffoldPath string
+	GeneratedAt  time.Time
 }
 
 type Scaffold struct {
@@ -44,6 +50,29 @@ type Scaffold struct {
 	RecommendedActions []string         `json:"recommended_actions,omitempty"`
 }
 
+type Status struct {
+	SchemaVersion      string           `json:"schema_version"`
+	GeneratedAt        time.Time        `json:"generated_at"`
+	OK                 bool             `json:"ok"`
+	ReadyForPackaging  bool             `json:"ready_for_packaging"`
+	ScaffoldPath       string           `json:"scaffold_path"`
+	ReportPath         string           `json:"report_path"`
+	PlanPath           string           `json:"plan_path"`
+	PlanSchema         string           `json:"plan_schema"`
+	PlanKind           string           `json:"plan_kind"`
+	OutDir             string           `json:"out_dir"`
+	PackageDir         string           `json:"package_dir,omitempty"`
+	RequiredReady      int              `json:"required_ready"`
+	RequiredTotal      int              `json:"required_total"`
+	PlaceholderCount   int              `json:"placeholder_count"`
+	MissingCount       int              `json:"missing_count"`
+	EmptyCount         int              `json:"empty_count"`
+	EvidenceFiles      []StatusFile     `json:"evidence_files"`
+	Commands           ScaffoldCommands `json:"commands"`
+	Checks             []ScaffoldCheck  `json:"checks"`
+	RecommendedActions []string         `json:"recommended_actions,omitempty"`
+}
+
 type ScaffoldFile struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
@@ -53,6 +82,20 @@ type ScaffoldFile struct {
 	Description string `json:"description"`
 	Exists      bool   `json:"exists"`
 	Placeholder bool   `json:"placeholder"`
+}
+
+type StatusFile struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Kind        string `json:"kind"`
+	Required    bool   `json:"required"`
+	Flag        string `json:"flag"`
+	Description string `json:"description"`
+	Exists      bool   `json:"exists"`
+	Placeholder bool   `json:"placeholder"`
+	Empty       bool   `json:"empty"`
+	SizeBytes   int64  `json:"size_bytes"`
+	Ready       bool   `json:"ready"`
 }
 
 type ScaffoldCommands struct {
@@ -219,6 +262,98 @@ func Build(opts Options) (Scaffold, error) {
 	return scaffold, nil
 }
 
+func StatusForScaffold(opts StatusOptions) (Status, error) {
+	if strings.TrimSpace(opts.ScaffoldPath) == "" {
+		return Status{}, fmt.Errorf("scaffold is required")
+	}
+	scaffoldPath, err := filepath.Abs(opts.ScaffoldPath)
+	if err != nil {
+		return Status{}, err
+	}
+	reportPath := scaffoldPath
+	if info, err := os.Stat(scaffoldPath); err == nil && info.IsDir() {
+		reportPath = filepath.Join(scaffoldPath, "scaffold-report.json")
+	}
+	content, err := os.ReadFile(reportPath)
+	if err != nil {
+		return Status{}, err
+	}
+	var scaffold Scaffold
+	if err := json.Unmarshal(content, &scaffold); err != nil {
+		return Status{}, err
+	}
+	now := opts.GeneratedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	status := Status{
+		SchemaVersion: StatusSchemaVersion,
+		GeneratedAt:   now.UTC(),
+		OK:            true,
+		ScaffoldPath:  scaffoldPath,
+		ReportPath:    reportPath,
+		PlanPath:      scaffold.PlanPath,
+		PlanSchema:    scaffold.PlanSchema,
+		PlanKind:      scaffold.PlanKind,
+		OutDir:        scaffold.OutDir,
+		PackageDir:    scaffold.PackageDir,
+		Commands:      scaffold.Commands,
+		RequiredTotal: countRequired(scaffold.EvidenceFiles),
+		RecommendedActions: []string{
+			"Collect or replace every required evidence file before packaging.",
+			"Run the package command only when ready_for_packaging is true.",
+			"Run the matching verify command and require ok=true before making any production claim.",
+		},
+	}
+	addCheck := func(name string, passed bool, detail string) {
+		status.Checks = append(status.Checks, ScaffoldCheck{Name: name, Passed: passed, Detail: detail})
+		if !passed {
+			status.OK = false
+		}
+	}
+	addCheck("scaffold_schema", scaffold.SchemaVersion == ScaffoldSchemaVersion, scaffold.SchemaVersion)
+	addCheck("scaffold_ok", scaffold.OK, fmt.Sprintf("%t", scaffold.OK))
+	addCheck("evidence_files_declared", len(scaffold.EvidenceFiles) > 0, fmt.Sprintf("%d", len(scaffold.EvidenceFiles)))
+	addCheck("package_command_declared", len(scaffold.Commands.Package) > 0, strings.Join(scaffold.Commands.Package, " "))
+	addCheck("verify_command_declared", len(scaffold.Commands.Verify) > 0, strings.Join(scaffold.Commands.Verify, " "))
+	for _, file := range scaffold.EvidenceFiles {
+		entry := statusForFile(file)
+		if file.Required {
+			if entry.Exists && entry.Ready {
+				status.RequiredReady++
+			}
+			if !entry.Exists {
+				status.MissingCount++
+			}
+			if entry.Empty {
+				status.EmptyCount++
+			}
+			if entry.Placeholder {
+				status.PlaceholderCount++
+			}
+			addCheck("required_evidence_ready:"+file.Name, entry.Ready, entry.Path)
+		} else if entry.Placeholder {
+			status.PlaceholderCount++
+		}
+		status.EvidenceFiles = append(status.EvidenceFiles, entry)
+	}
+	status.ReadyForPackaging = status.OK &&
+		status.RequiredTotal > 0 &&
+		status.RequiredReady == status.RequiredTotal &&
+		status.PlaceholderCount == 0 &&
+		status.MissingCount == 0 &&
+		status.EmptyCount == 0
+	addCheck("ready_for_packaging", status.ReadyForPackaging, fmt.Sprintf("%d/%d required ready", status.RequiredReady, status.RequiredTotal))
+	if status.ReadyForPackaging {
+		status.RecommendedActions = []string{
+			"Run the package command from this report.",
+			"Run the matching verify command and require ok=true before making any production claim.",
+		}
+	}
+	sort.Slice(status.EvidenceFiles, func(i, j int) bool { return status.EvidenceFiles[i].Path < status.EvidenceFiles[j].Path })
+	return status, nil
+}
+
 func planKind(schema string) (string, error) {
 	switch schema {
 	case "rdev.hosted-provider-runtime-evidence-plan.v1":
@@ -259,6 +394,63 @@ func safeRelativePath(path string) bool {
 	}
 	clean := filepath.Clean(filepath.FromSlash(path))
 	return clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator)) && !filepath.IsAbs(clean) && filepath.VolumeName(clean) == ""
+}
+
+func countRequired(files []ScaffoldFile) int {
+	count := 0
+	for _, file := range files {
+		if file.Required {
+			count++
+		}
+	}
+	return count
+}
+
+func statusForFile(file ScaffoldFile) StatusFile {
+	entry := StatusFile{
+		Name:        file.Name,
+		Path:        file.Path,
+		Kind:        file.Kind,
+		Required:    file.Required,
+		Flag:        file.Flag,
+		Description: file.Description,
+	}
+	info, err := os.Stat(file.Path)
+	if err != nil || info.IsDir() {
+		return entry
+	}
+	entry.Exists = true
+	entry.SizeBytes = info.Size()
+	entry.Empty = info.Size() == 0
+	content, err := os.ReadFile(file.Path)
+	if err == nil {
+		entry.Placeholder = evidenceContentIsPlaceholder(content)
+	}
+	entry.Ready = entry.Exists && !entry.Empty && !entry.Placeholder
+	return entry
+}
+
+func evidenceContentIsPlaceholder(content []byte) bool {
+	lower := strings.ToLower(string(content))
+	if strings.Contains(lower, "placeholder only - replace with real redacted evidence before packaging") ||
+		strings.Contains(lower, `"replace_before_packaging": true`) ||
+		strings.Contains(lower, `"replace_before_packaging":true`) {
+		return true
+	}
+	var value any
+	if err := json.Unmarshal(content, &value); err != nil {
+		return false
+	}
+	return jsonHasBoolField(value, "placeholder", true) && jsonHasBoolField(value, "replace_before_packaging", true)
+}
+
+func jsonHasBoolField(value any, name string, expected bool) bool {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	actual, ok := object[name].(bool)
+	return ok && actual == expected
 }
 
 func writePlaceholder(outDir string, file rawPlanFile) error {

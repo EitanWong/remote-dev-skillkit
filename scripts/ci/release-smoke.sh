@@ -119,6 +119,12 @@ go run ./cmd/rdev acceptance scaffold-evidence \
 	--plan "$external_hosted_provider_dir/runtime-evidence-plan.json" \
 	--out "$hosted_evidence_scaffold_dir" \
 	> "$work_dir/hosted-provider-evidence-scaffold.json"
+if go run ./cmd/rdev acceptance evidence-status \
+	--scaffold "$hosted_evidence_scaffold_dir" \
+	> "$work_dir/hosted-provider-evidence-status-missing.json" 2> "$work_dir/hosted-provider-evidence-status-missing.err"; then
+	echo "missing hosted evidence status unexpectedly succeeded" >&2
+	exit 1
+fi
 hosted_placeholder_scaffold_dir="$work_dir/hosted-provider-placeholder-scaffold"
 go run ./cmd/rdev acceptance scaffold-evidence \
 	--plan "$hosted_provider_dir/runtime-evidence-plan.json" \
@@ -153,6 +159,23 @@ printf '%s\n' 'retention policy reviewed for release smoke' > "$hosted_runtime_i
 printf '%s\n' '{"probes":[{"role":"operator","authorized":true},{"role":"viewer","authorized":false}]}' > "$hosted_runtime_input/role-mapping-evidence.json"
 printf '%s\n' '{"ok":true,"failure_mode_tested":true,"mode":"invalid auth rejected"}' > "$hosted_runtime_input/failure-mode-evidence.json"
 printf '%s\n' 'gateway_start' 'storage_verify' 'auth_verify' 'role_probe' 'failure_probe' 'cleanup' > "$hosted_runtime_input/audit.txt"
+hosted_ready_scaffold_dir="$work_dir/hosted-provider-ready-scaffold"
+go run ./cmd/rdev acceptance scaffold-evidence \
+	--plan "$hosted_provider_dir/runtime-evidence-plan.json" \
+	--out "$hosted_ready_scaffold_dir" \
+	> "$work_dir/hosted-provider-ready-scaffold.json"
+cp "$hosted_runtime_input/gateway-startup.txt" "$hosted_ready_scaffold_dir/gateway-startup.txt"
+cp "$hosted_runtime_input/storage-verification.json" "$hosted_ready_scaffold_dir/storage-verification.json"
+cp "$hosted_runtime_input/auth-verification.json" "$hosted_ready_scaffold_dir/auth-verification.json"
+cp "$hosted_runtime_input/backup-evidence.txt" "$hosted_ready_scaffold_dir/backup-evidence.txt"
+cp "$hosted_runtime_input/restore-evidence.txt" "$hosted_ready_scaffold_dir/restore-evidence.txt"
+cp "$hosted_runtime_input/retention-evidence.txt" "$hosted_ready_scaffold_dir/retention-evidence.txt"
+cp "$hosted_runtime_input/role-mapping-evidence.json" "$hosted_ready_scaffold_dir/role-mapping-evidence.json"
+cp "$hosted_runtime_input/failure-mode-evidence.json" "$hosted_ready_scaffold_dir/failure-mode-evidence.json"
+cp "$hosted_runtime_input/audit.txt" "$hosted_ready_scaffold_dir/audit.jsonl"
+go run ./cmd/rdev acceptance evidence-status \
+	--scaffold "$hosted_ready_scaffold_dir" \
+	> "$work_dir/hosted-provider-evidence-status-ready.json"
 hosted_runtime_dir="$work_dir/hosted-runtime-acceptance"
 go run ./cmd/rdev acceptance package-hosted-provider-runtime \
 	--hosted-provider-package "$hosted_provider_dir" \
@@ -186,6 +209,12 @@ go run ./cmd/rdev acceptance scaffold-evidence \
 	--out "$relay_evidence_scaffold_dir" \
 	--create-placeholders \
 	> "$work_dir/relay-adapter-evidence-scaffold.json"
+if go run ./cmd/rdev acceptance evidence-status \
+	--scaffold "$relay_evidence_scaffold_dir" \
+	> "$work_dir/relay-adapter-evidence-status-placeholder.json" 2> "$work_dir/relay-adapter-evidence-status-placeholder.err"; then
+	echo "placeholder relay evidence status unexpectedly succeeded" >&2
+	exit 1
+fi
 if go run ./cmd/rdev acceptance package-relay-adapter \
 	--relay-package "$relay_adapter_dir" \
 	--out "$work_dir/relay-placeholder-package" \
@@ -568,6 +597,8 @@ saml_hosted_provider_manifest = json.loads((root / "hosted-provider-s3-saml" / "
 saml_hosted_runtime_contract = json.loads((root / "hosted-provider-s3-saml" / "runtime-contract.json").read_text())
 saml_hosted_runtime_evidence_plan = json.loads((root / "hosted-provider-s3-saml" / "runtime-evidence-plan.json").read_text())
 hosted_evidence_scaffold = json.loads((root / "hosted-provider-evidence-scaffold.json").read_text())
+hosted_evidence_status_missing = json.loads((root / "hosted-provider-evidence-status-missing.json").read_text())
+hosted_evidence_status_ready = json.loads((root / "hosted-provider-evidence-status-ready.json").read_text())
 hosted_placeholder_package = json.loads((root / "hosted-placeholder-package.json").read_text())
 hosted_provider_runtime_package = json.loads((root / "hosted-provider-runtime-acceptance-package.json").read_text())
 hosted_provider_runtime_verification = json.loads((root / "hosted-provider-runtime-acceptance-verification.json").read_text())
@@ -575,6 +606,7 @@ relay_adapter_package = json.loads((root / "relay-adapter-package.json").read_te
 relay_adapter_verification = json.loads((root / "relay-adapter-verification.json").read_text())
 relay_adapter_evidence_plan = json.loads((root / "relay-adapter" / "acceptance-evidence-plan.json").read_text())
 relay_evidence_scaffold = json.loads((root / "relay-adapter-evidence-scaffold.json").read_text())
+relay_evidence_status_placeholder = json.loads((root / "relay-adapter-evidence-status-placeholder.json").read_text())
 relay_placeholder_package = json.loads((root / "relay-placeholder-package.json").read_text())
 connectivity_adapter_packages = {
     adapter: json.loads((root / f"connectivity-adapter-{adapter}-package.json").read_text())
@@ -770,6 +802,13 @@ assert "package-hosted-provider-runtime" in hosted_evidence_scaffold["commands"]
 assert pathlib.Path(hosted_evidence_scaffold["checklist"]).is_file(), hosted_evidence_scaffold
 assert pathlib.Path(hosted_evidence_scaffold["report"]).is_file(), hosted_evidence_scaffold
 assert not (root / "hosted-provider-evidence-scaffold" / "gateway-startup.txt").exists(), hosted_evidence_scaffold
+assert hosted_evidence_status_missing["schema"] == "rdev.acceptance-evidence-status.v1", hosted_evidence_status_missing
+assert hosted_evidence_status_missing["ready_for_packaging"] is False, hosted_evidence_status_missing
+assert hosted_evidence_status_missing["missing_count"] >= 9, hosted_evidence_status_missing
+assert hosted_evidence_status_ready["schema"] == "rdev.acceptance-evidence-status.v1", hosted_evidence_status_ready
+assert hosted_evidence_status_ready["ready_for_packaging"] is True, hosted_evidence_status_ready
+assert hosted_evidence_status_ready["required_ready"] == hosted_evidence_status_ready["required_total"], hosted_evidence_status_ready
+assert hosted_evidence_status_ready["placeholder_count"] == 0, hosted_evidence_status_ready
 assert hosted_placeholder_package["ok"] is False, hosted_placeholder_package
 hosted_placeholder_failures = {check["name"] for check in hosted_placeholder_package["checks"] if check["passed"] is False}
 assert "backup-evidence_copied" in hosted_placeholder_failures, hosted_placeholder_package
@@ -818,6 +857,9 @@ assert "package-relay-adapter" in relay_evidence_scaffold["commands"]["package"]
 assert pathlib.Path(relay_evidence_scaffold["checklist"]).is_file(), relay_evidence_scaffold
 assert pathlib.Path(relay_evidence_scaffold["report"]).is_file(), relay_evidence_scaffold
 assert '"placeholder": true' in (root / "relay-adapter-evidence-scaffold" / "runner-result.json").read_text(), relay_evidence_scaffold
+assert relay_evidence_status_placeholder["schema"] == "rdev.acceptance-evidence-status.v1", relay_evidence_status_placeholder
+assert relay_evidence_status_placeholder["ready_for_packaging"] is False, relay_evidence_status_placeholder
+assert relay_evidence_status_placeholder["placeholder_count"] >= 6, relay_evidence_status_placeholder
 assert relay_placeholder_package["ok"] is False, relay_placeholder_package
 relay_placeholder_failures = {check["name"] for check in relay_placeholder_package["checks"] if check["passed"] is False}
 assert "runner-result_copied" in relay_placeholder_failures, relay_placeholder_package
@@ -998,12 +1040,16 @@ print(json.dumps({
     "saml_hosted_provider_runtime_gateway_args": True,
     "saml_hosted_provider_runtime_contract_schema": saml_hosted_runtime_contract["schema_version"],
     "hosted_provider_runtime_evidence_plan_schema": external_hosted_runtime_evidence_plan["schema_version"],
+    "hosted_provider_evidence_status_schema": hosted_evidence_status_ready["schema"],
+    "hosted_provider_evidence_status_ready": hosted_evidence_status_ready["ready_for_packaging"],
     "hosted_provider_placeholder_rejected": True,
     "hosted_provider_runtime_acceptance_package_schema": hosted_provider_runtime_package["schema"],
     "hosted_provider_runtime_acceptance_verification_schema": hosted_provider_runtime_verification["schema"],
     "relay_adapter_package_schema": relay_adapter_package["schema"],
     "relay_adapter_package_verification_schema": relay_adapter_verification["schema"],
     "relay_adapter_acceptance_evidence_plan_schema": relay_adapter_evidence_plan["schema_version"],
+    "relay_adapter_evidence_status_schema": relay_evidence_status_placeholder["schema"],
+    "relay_adapter_placeholder_status_rejected": True,
     "relay_adapter_placeholder_rejected": True,
     "connectivity_adapter_package_kinds": sorted(package["adapter_kind"] for package in connectivity_adapter_packages.values()),
     "relay_adapter_acceptance_package_schema": relay_adapter_acceptance_package["schema"],

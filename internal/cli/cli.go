@@ -1468,6 +1468,17 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			Force:              *force,
 			GeneratedAt:        time.Now(),
 		})
+	case "evidence-status":
+		fs := flag.NewFlagSet("acceptance evidence-status", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		scaffold := fs.String("scaffold", "", "scaffold directory or scaffold-report.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.acceptanceEvidenceStatus(evidenceplan.StatusOptions{
+			ScaffoldPath: *scaffold,
+			GeneratedAt:  time.Now(),
+		})
 	case "package-windows-temporary":
 		fs := flag.NewFlagSet("acceptance package-windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -2023,6 +2034,42 @@ func (a App) acceptanceScaffoldEvidence(opts evidenceplan.Options) error {
 	}
 	if !scaffold.OK {
 		return fmt.Errorf("acceptance evidence scaffold failed")
+	}
+	return nil
+}
+
+func (a App) acceptanceEvidenceStatus(opts evidenceplan.StatusOptions) error {
+	status, err := evidenceplan.StatusForScaffold(opts)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  status.OK,
+		"schema":              status.SchemaVersion,
+		"ready_for_packaging": status.ReadyForPackaging,
+		"scaffold":            status.ScaffoldPath,
+		"report":              status.ReportPath,
+		"plan_schema":         status.PlanSchema,
+		"plan_kind":           status.PlanKind,
+		"out":                 status.OutDir,
+		"package_dir":         status.PackageDir,
+		"required_ready":      status.RequiredReady,
+		"required_total":      status.RequiredTotal,
+		"placeholder_count":   status.PlaceholderCount,
+		"missing_count":       status.MissingCount,
+		"empty_count":         status.EmptyCount,
+		"evidence_files":      status.EvidenceFiles,
+		"commands":            status.Commands,
+		"checks":              status.Checks,
+		"recommended_actions": status.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !status.ReadyForPackaging {
+		return fmt.Errorf("acceptance evidence is not ready for packaging")
 	}
 	return nil
 }
@@ -8153,6 +8200,7 @@ Usage:
   rdev acceptance verify-post-release-download-package --package post-release-download-evidence/package.json
   rdev acceptance scaffold-evidence --plan hosted-provider/runtime-evidence-plan.json --out hosted-runtime-evidence-input
   rdev acceptance scaffold-evidence --plan relay-adapter/acceptance-evidence-plan.json --out relay-evidence-input
+  rdev acceptance evidence-status --scaffold hosted-runtime-evidence-input
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt

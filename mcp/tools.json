@@ -530,6 +530,24 @@
       }
     },
     {
+      "name": "rdev.acceptance.evidence_status",
+      "description": "Read a standard acceptance evidence scaffold and report whether required hosted-provider or relay/mesh/VPN/SSH evidence files are present, non-empty, and not scaffold placeholders before packaging.",
+      "safety": "Read-only status check. Does not create evidence, execute helpers, start gateways, package evidence, mutate network/cloud resources, or make production claims.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "scaffold": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "scaffold"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.relay_adapter.package",
       "description": "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supports Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard packages. The package emits reviewed RDEV_RELAY_*, RDEV_SSH_*, RDEV_MESH_*, or RDEV_VPN_* gateway/helper/install metadata plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, mesh, VPN, or polling scripts.",
       "safety": "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",
