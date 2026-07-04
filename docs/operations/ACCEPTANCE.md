@@ -41,7 +41,10 @@ slots to fill during a real run. Placeholder files are marked as placeholders
 and must be replaced with real redacted evidence before running any package
 command. The scaffold always reports `ready_for_packaging=false`; production
 claims require the later `rdev acceptance package-*` command and matching
-`rdev acceptance verify-*` command to pass with `ok=true`.
+`rdev acceptance verify-*` command to pass with `ok=true`. Hosted-provider
+runtime and relay/connectivity acceptance packagers reject scaffold placeholder
+files; verification also fails if placeholder markers appear in archived
+`evidence/` files.
 
 Agents should prefer MCP tool `rdev.acceptance.scaffold_evidence` when
 available, then collect the listed files instead of writing custom PowerShell,

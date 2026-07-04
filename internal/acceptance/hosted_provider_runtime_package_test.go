@@ -158,6 +158,54 @@ func TestVerifyHostedProviderRuntimeRejectsMissingDurabilityEvidence(t *testing.
 	}
 }
 
+func TestHostedProviderRuntimeRejectsScaffoldPlaceholderEvidence(t *testing.T) {
+	root := t.TempDir()
+	providerDir := filepath.Join(root, "hosted-provider")
+	if _, err := hostedprovider.Build(hostedprovider.Options{
+		OutDir:          providerDir,
+		StorageProvider: "file",
+		AuthProvider:    "hosted-ed25519-jwt",
+		GeneratedAt:     time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeHostedProviderRuntimeEvidenceForTest(t, root, "file", "hosted-ed25519-jwt")
+	if err := os.WriteFile(evidence.backupEvidence, []byte("PLACEHOLDER ONLY - replace with real redacted evidence before packaging.\nEvidence: backup-evidence\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := PackageHostedProviderRuntimeEvidence(HostedProviderRuntimePackageOptions{
+		HostedProviderPackagePath: providerDir,
+		OutDir:                    filepath.Join(root, "package"),
+		GatewayStartupPath:        evidence.gatewayStartup,
+		StorageVerificationPath:   evidence.storageVerification,
+		AuthVerificationPath:      evidence.authVerification,
+		BackupEvidencePath:        evidence.backupEvidence,
+		RestoreEvidencePath:       evidence.restoreEvidence,
+		RetentionEvidencePath:     evidence.retentionEvidence,
+		RoleMappingEvidencePath:   evidence.roleMappingEvidence,
+		FailureModeEvidencePath:   evidence.failureModeEvidence,
+		AuditPath:                 evidence.audit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatal("expected package to fail with scaffold placeholder evidence")
+	}
+	failures := failedHostedRuntimeAcceptanceChecks(pkg.Checks)
+	if !strings.Contains(failures, "backup-evidence_copied") ||
+		!strings.Contains(failures, "backup_evidence_present") {
+		t.Fatalf("expected placeholder copy and presence failures, got %s", failures)
+	}
+	verification, err := VerifyHostedProviderRuntimeAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected verification to fail with scaffold placeholder evidence")
+	}
+}
+
 type hostedProviderRuntimeEvidenceForTest struct {
 	gatewayStartup      string
 	storageVerification string

@@ -246,6 +246,9 @@ func copyPackageFile(root, bundlePath, kind, source string, redactor *shelladapt
 	if err != nil {
 		return WindowsTemporaryPackageFile{}, err
 	}
+	if acceptanceEvidencePath(filepath.ToSlash(bundlePath)) && evidenceContentIsPlaceholder(content) {
+		return WindowsTemporaryPackageFile{}, fmt.Errorf("evidence placeholder must be replaced before packaging: %s", source)
+	}
 	if redactor != nil {
 		content = []byte(redactor.Redact(string(content)))
 	}

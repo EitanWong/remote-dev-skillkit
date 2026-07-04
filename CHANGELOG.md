@@ -28,9 +28,13 @@ verify command through `rdev` instead of inventing local scripts or file names.
   evidence placeholder files unless `--create-placeholders` is explicitly
   passed, and every scaffold reports `ready_for_packaging=false` until real
   evidence replaces placeholders and the matching acceptance package verifies.
+- Added fail-closed placeholder detection to hosted-provider runtime and
+  relay/connectivity acceptance packaging and verification, so scaffold
+  placeholder files cannot be archived as release evidence.
 - Extended release smoke and tests to generate hosted-provider and relay
-  evidence scaffolds, verify schema/command contracts, and ensure default
-  hosted scaffolds do not create fake evidence files.
+  evidence scaffolds, verify schema/command contracts, ensure default hosted
+  scaffolds do not create fake evidence files, and prove placeholder packages
+  are rejected.
 
 ### Remaining Gates
 

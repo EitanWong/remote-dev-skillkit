@@ -355,6 +355,9 @@ func verifyAcceptancePackageFiles(root string, files []AcceptancePackageFile) []
 				add("file_sha256_matches", item.ActualSHA256 == file.SHA256, file.SHA256)
 				add("file_size_matches", item.ActualSize == file.SizeBytes, fmt.Sprintf("%d", file.SizeBytes))
 				add("file_has_no_private_surface", relayAcceptanceNoPrivateSurface(content), file.Path)
+				if acceptanceEvidencePath(file.Path) {
+					add("file_not_placeholder", !evidenceContentIsPlaceholder(content), file.Path)
+				}
 			}
 		}
 		checks = append(checks, item)

@@ -158,6 +158,50 @@ func TestVerifyRelayAdapterEvidenceRejectsUnknownConnectivityPath(t *testing.T) 
 	}
 }
 
+func TestRelayAdapterEvidenceRejectsScaffoldPlaceholderEvidence(t *testing.T) {
+	root := t.TempDir()
+	relayDir := filepath.Join(root, "relay")
+	if _, err := relayadapter.Build(relayadapter.Options{
+		OutDir:      relayDir,
+		AdapterKind: "wireguard",
+		GeneratedAt: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeRelayAdapterEvidenceForTest(t, root, "existing-wireguard-vpn")
+	if err := os.WriteFile(evidence.runnerResult, []byte("{\n  \"placeholder\": true,\n  \"replace_before_packaging\": true,\n  \"evidence_name\": \"runner-result\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := PackageRelayAdapterEvidence(RelayAdapterPackageOptions{
+		RelayAdapterPackagePath: relayDir,
+		OutDir:                  filepath.Join(root, "package"),
+		RunnerResultPath:        evidence.runnerResult,
+		HelperTranscriptPath:    evidence.helperTranscript,
+		GatewayStatusPath:       evidence.gatewayStatus,
+		HostStatusPath:          evidence.hostStatus,
+		ConnectionStatusPath:    evidence.connectionStatus,
+		AuditPath:               evidence.audit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatal("expected package to fail with scaffold placeholder evidence")
+	}
+	failures := failedRelayAcceptanceChecks(pkg.Checks)
+	if !strings.Contains(failures, "runner-result_copied") ||
+		!strings.Contains(failures, "runner_result_present") {
+		t.Fatalf("expected placeholder copy and runner result failures, got %s", failures)
+	}
+	verification, err := VerifyRelayAdapterAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected verification to fail with scaffold placeholder evidence")
+	}
+}
+
 type relayAdapterEvidenceForTest struct {
 	runnerResult     string
 	helperTranscript string
