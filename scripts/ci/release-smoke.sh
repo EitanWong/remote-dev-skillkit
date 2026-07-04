@@ -409,11 +409,8 @@ if go run ./cmd/rdev acceptance post-release-evidence-status \
   exit 1
 fi
 if go run ./cmd/rdev acceptance package-post-release-download \
-  --plan "$post_release_scaffold_dir/post-release-install-plan.json" \
-  --plan-verification "$post_release_scaffold_dir/post-release-install-verification.json" \
+  --scaffold "$post_release_scaffold_dir" \
   --out "$work_dir/post-release-download-placeholder-acceptance" \
-  --evidence-dir "$post_release_scaffold_dir/platform-download-evidence" \
-  --skillkit-evidence-dir "$post_release_scaffold_dir/skillkit-download-evidence" \
   > "$work_dir/post-release-download-placeholder-package.json" 2> "$work_dir/post-release-download-placeholder-package.err"; then
   echo "placeholder post-release evidence package unexpectedly succeeded" >&2
   exit 1
@@ -443,11 +440,8 @@ go run ./cmd/rdev acceptance post-release-evidence-status \
   > "$work_dir/post-release-download-status-ready.json"
 post_release_download_package_dir="$work_dir/post-release-download-acceptance"
 go run ./cmd/rdev acceptance package-post-release-download \
-  --plan "$post_release_scaffold_dir/post-release-install-plan.json" \
-  --plan-verification "$post_release_scaffold_dir/post-release-install-verification.json" \
+  --scaffold "$post_release_scaffold_dir" \
   --out "$post_release_download_package_dir" \
-  --evidence-dir "$post_release_scaffold_dir/platform-download-evidence" \
-  --skillkit-evidence-dir "$post_release_scaffold_dir/skillkit-download-evidence" \
   > "$work_dir/post-release-download-acceptance-package.json"
 go run ./cmd/rdev acceptance verify-post-release-download-package \
   --package "$post_release_download_package_dir" \
@@ -930,6 +924,7 @@ assert post_release_verification["external_mutation"] is False, post_release_ver
 assert post_release_download_scaffold["schema"] == "rdev.post-release-download-evidence-scaffold.v1", post_release_download_scaffold
 assert post_release_download_scaffold["ready_for_packaging"] is False, post_release_download_scaffold
 assert post_release_download_scaffold["skillkit_included"] is True, post_release_download_scaffold
+assert "--scaffold" in post_release_download_scaffold["commands"]["package"], post_release_download_scaffold
 assert post_release_download_status_placeholder["schema"] == "rdev.post-release-download-evidence-status.v1", post_release_download_status_placeholder
 assert post_release_download_status_placeholder["ready_for_packaging"] is False, post_release_download_status_placeholder
 assert post_release_download_status_placeholder["placeholder_count"] >= 8, post_release_download_status_placeholder
@@ -1093,6 +1088,7 @@ print(json.dumps({
     "post_release_download_scaffold_schema": post_release_download_scaffold["schema"],
     "post_release_download_status_schema": post_release_download_status_ready["schema"],
     "post_release_download_status_ready": post_release_download_status_ready["ready_for_packaging"],
+    "post_release_download_package_from_scaffold": True,
     "enrollment_lifecycle_smoke": True,
     "enrollment_revocation_baseline_smoke": True,
     "enrollment_host_revocation_refresh_smoke": True,

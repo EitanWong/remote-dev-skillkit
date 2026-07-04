@@ -123,6 +123,20 @@ post-release install verification evidence path. The readiness command is the
 recommended early check, but it is not the only guard; the package and verify
 commands must still fail closed if placeholder evidence reaches them.
 
+When readiness reports `ready_for_packaging=true`, package the scaffold
+directly:
+
+```bash
+rdev acceptance package-post-release-download \
+  --scaffold .rdev/acceptance/post-release-download-evidence \
+  --out .rdev/acceptance/post-release-download-package
+```
+
+Keep the lower-level `--plan`, `--plan-verification`, `--evidence-dir`, and
+`--skillkit-evidence-dir` flags for reviewed operator overrides only. Fresh
+Agents should use the scaffold-level command so they do not assemble evidence
+paths by hand.
+
 ## Fresh-Agent Support-Session Contract Gate
 
 Run:

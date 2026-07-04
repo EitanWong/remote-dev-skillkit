@@ -32,9 +32,10 @@ transcript file names or package commands after GitHub Release assets exist.
   PowerShell, or file-layout code.
 - Extended release smoke and tests to prove placeholder post-release download
   evidence is not ready, filled scaffold evidence reports
-  `ready_for_packaging=true`, and the existing
-  `rdev acceptance package-post-release-download` path can consume the
-  scaffold's copied plan and evidence directories.
+  `ready_for_packaging=true`, and
+  `rdev acceptance package-post-release-download --scaffold <dir>` consumes the
+  scaffold's copied plan plus standard platform/Skillkit evidence directories
+  without requiring Agents to pass individual evidence path flags.
 - Hardened post-release download evidence packaging and verification so
   scaffold placeholders under platform, Skillkit, and post-release
   verification evidence paths are rejected even if an Agent skips the

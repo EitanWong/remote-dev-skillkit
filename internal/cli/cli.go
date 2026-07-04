@@ -1664,6 +1664,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 	case "package-post-release-download":
 		fs := flag.NewFlagSet("acceptance package-post-release-download", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
+		scaffold := fs.String("scaffold", "", "post-release evidence scaffold directory or scaffold-report.json")
 		plan := fs.String("plan", "", "post-release-install-plan.json from scripts/github/plan-post-release-install.sh")
 		planVerification := fs.String("plan-verification", "", "rdev.post-release-install-verification.v1 output from verify-post-release-install-plan.sh")
 		out := fs.String("out", "", "empty output directory for packaged post-release download evidence")
@@ -1674,6 +1675,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptancePackagePostReleaseDownload(acceptance.PostReleaseDownloadPackageOptions{
+			ScaffoldPath:         *scaffold,
 			PlanPath:             *plan,
 			PlanVerificationPath: *planVerification,
 			OutDir:               *out,
@@ -8340,7 +8342,7 @@ Usage:
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --evidence-dir relay-evidence-input
   rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --evidence-dir hosted-runtime-evidence-input
-  rdev acceptance package-post-release-download --plan post-release-install/post-release-install-plan.json --plan-verification post-release-verification.json --out post-release-download-evidence --evidence-dir platform-download-evidence --skillkit-evidence-dir skillkit-download-evidence
+  rdev acceptance package-post-release-download --scaffold post-release-download-evidence-input --out post-release-download-evidence
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json
   rdev release verify --artifact ./rdev-host.exe --manifest ./rdev-host.exe.rdev-release.json --root-public-key release-root:...
   rdev release create-bundle --dir dist --artifacts rdev,rdev-host.exe,rdev-verify.exe --key .rdev/keys/release-root.json

@@ -9055,15 +9055,33 @@ func TestAcceptancePackageHostedProviderRuntime(t *testing.T) {
 func TestAcceptancePackagePostReleaseDownload(t *testing.T) {
 	root := t.TempDir()
 	fixture := writePostReleaseDownloadEvidenceForCLITest(t, root)
-	var stdout bytes.Buffer
-	app := NewApp(&stdout, &bytes.Buffer{})
+	scaffoldDir := filepath.Join(root, "post-release-download-scaffold")
+	var scaffoldStdout bytes.Buffer
+	app := NewApp(&scaffoldStdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
-		"acceptance", "package-post-release-download",
+		"acceptance", "scaffold-post-release-download",
 		"--plan", fixture.plan,
 		"--plan-verification", fixture.planVerification,
+		"--out", scaffoldDir,
+		"--create-placeholders",
+	}); err != nil {
+		t.Fatalf("expected scaffold command to pass: %v\n%s", err, scaffoldStdout.String())
+	}
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "linux-amd64-transcript.txt"), filepath.Join(scaffoldDir, "platform-download-evidence", "linux-amd64-transcript.txt"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "linux-amd64-candidate-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "linux-amd64-candidate-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "linux-amd64-bundle-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "linux-amd64-bundle-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "windows-amd64-transcript.txt"), filepath.Join(scaffoldDir, "platform-download-evidence", "windows-amd64-transcript.txt"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "windows-amd64-candidate-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "windows-amd64-candidate-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.evidenceDir, "windows-amd64-bundle-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "windows-amd64-bundle-verify.json"))
+	copyFileForCLITest(t, filepath.Join(fixture.skillkitDir, "skillkit-transcript.txt"), filepath.Join(scaffoldDir, "skillkit-download-evidence", "skillkit-transcript.txt"))
+	copyFileForCLITest(t, filepath.Join(fixture.skillkitDir, "skillkit-verify.json"), filepath.Join(scaffoldDir, "skillkit-download-evidence", "skillkit-verify.json"))
+
+	var stdout bytes.Buffer
+	app = NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "package-post-release-download",
+		"--scaffold", scaffoldDir,
 		"--out", filepath.Join(root, "post-release-download-evidence"),
-		"--evidence-dir", fixture.evidenceDir,
-		"--skillkit-evidence-dir", fixture.skillkitDir,
 	}); err != nil {
 		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
 	}
@@ -9125,6 +9143,7 @@ func TestAcceptanceScaffoldPostReleaseDownload(t *testing.T) {
 		`"skillkit_included": true`,
 		`"platform_evidence_dir"`,
 		`"package-post-release-download"`,
+		`"--scaffold"`,
 	} {
 		if !strings.Contains(stdout.String(), expected) {
 			t.Fatalf("expected %q in scaffold output: %s", expected, stdout.String())

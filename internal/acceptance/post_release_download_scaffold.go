@@ -193,15 +193,10 @@ func ScaffoldPostReleaseDownloadEvidence(opts PostReleaseDownloadScaffoldOptions
 	scaffold.Commands = PostReleaseCommands{
 		Package: []string{
 			"rdev", "acceptance", "package-post-release-download",
-			"--plan", scaffold.PlanCopyPath,
-			"--plan-verification", scaffold.PlanVerificationCopy,
+			"--scaffold", outDir,
 			"--out", filepath.Join(outDir, "package"),
-			"--evidence-dir", platformDir,
 		},
 		Verify: []string{"rdev", "acceptance", "verify-post-release-download-package", "--package", filepath.Join(outDir, "package", "package.json")},
-	}
-	if scaffold.SkillkitIncluded {
-		scaffold.Commands.Package = append(scaffold.Commands.Package, "--skillkit-evidence-dir", skillkitDir)
 	}
 	scaffold.RecommendedActions = []string{
 		"Run the generated post-release verification scripts after GitHub Release assets exist.",

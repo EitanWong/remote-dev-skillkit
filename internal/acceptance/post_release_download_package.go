@@ -16,6 +16,7 @@ const PostReleaseDownloadPackageSchemaVersion = "rdev.acceptance-package.post-re
 const PostReleaseDownloadVerificationSchemaVersion = "rdev.acceptance-verification.post-release-download-package.v1"
 
 type PostReleaseDownloadPackageOptions struct {
+	ScaffoldPath         string
 	PlanPath             string
 	PlanVerificationPath string
 	OutDir               string
@@ -98,6 +99,11 @@ func (v PostReleaseDownloadAcceptanceVerification) OK() bool {
 }
 
 func PackagePostReleaseDownloadEvidence(opts PostReleaseDownloadPackageOptions) (PostReleaseDownloadAcceptancePackage, error) {
+	var err error
+	opts, err = resolvePostReleaseDownloadScaffold(opts)
+	if err != nil {
+		return PostReleaseDownloadAcceptancePackage{}, err
+	}
 	if strings.TrimSpace(opts.PlanPath) == "" {
 		return PostReleaseDownloadAcceptancePackage{}, fmt.Errorf("post-release install plan is required")
 	}
@@ -209,6 +215,46 @@ func PackagePostReleaseDownloadEvidence(opts PostReleaseDownloadPackageOptions) 
 		return PostReleaseDownloadAcceptancePackage{}, err
 	}
 	return pkg, nil
+}
+
+func resolvePostReleaseDownloadScaffold(opts PostReleaseDownloadPackageOptions) (PostReleaseDownloadPackageOptions, error) {
+	if strings.TrimSpace(opts.ScaffoldPath) == "" {
+		return opts, nil
+	}
+	path, err := filepath.Abs(opts.ScaffoldPath)
+	if err != nil {
+		return PostReleaseDownloadPackageOptions{}, err
+	}
+	reportPath := path
+	if info, err := os.Stat(path); err != nil {
+		return PostReleaseDownloadPackageOptions{}, err
+	} else if info.IsDir() {
+		reportPath = filepath.Join(path, "scaffold-report.json")
+	}
+	content, err := os.ReadFile(reportPath)
+	if err != nil {
+		return PostReleaseDownloadPackageOptions{}, err
+	}
+	var scaffold PostReleaseDownloadEvidenceScaffold
+	if err := json.Unmarshal(content, &scaffold); err != nil {
+		return PostReleaseDownloadPackageOptions{}, err
+	}
+	if scaffold.SchemaVersion != PostReleaseDownloadScaffoldSchemaVersion {
+		return PostReleaseDownloadPackageOptions{}, fmt.Errorf("unsupported post-release scaffold schema %q", scaffold.SchemaVersion)
+	}
+	fill := func(current, value string) string {
+		if strings.TrimSpace(current) != "" {
+			return current
+		}
+		return value
+	}
+	opts.PlanPath = fill(opts.PlanPath, scaffold.PlanCopyPath)
+	opts.PlanVerificationPath = fill(opts.PlanVerificationPath, scaffold.PlanVerificationCopy)
+	opts.EvidenceDir = fill(opts.EvidenceDir, scaffold.PlatformEvidenceDir)
+	if scaffold.SkillkitIncluded {
+		opts.SkillkitEvidenceDir = fill(opts.SkillkitEvidenceDir, scaffold.SkillkitEvidenceDir)
+	}
+	return opts, nil
 }
 
 func VerifyPostReleaseDownloadAcceptancePackage(packagePath string) (PostReleaseDownloadAcceptanceVerification, error) {

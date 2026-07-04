@@ -50,6 +50,59 @@ func TestPackageAndVerifyPostReleaseDownloadEvidence(t *testing.T) {
 	}
 }
 
+func TestPackagePostReleaseDownloadEvidenceFromScaffold(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64", "windows/amd64"}, true)
+	scaffoldDir := filepath.Join(root, "post-release-scaffold")
+	scaffold, err := ScaffoldPostReleaseDownloadEvidence(PostReleaseDownloadScaffoldOptions{
+		PlanPath:             fixture.plan,
+		PlanVerificationPath: fixture.planVerification,
+		OutDir:               scaffoldDir,
+		CreatePlaceholders:   true,
+		Now:                  time.Date(2026, 7, 5, 1, 2, 3, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(scaffold.Commands.Package, " "), "--scaffold") {
+		t.Fatalf("expected scaffold-level package command, got %#v", scaffold.Commands.Package)
+	}
+	copyEvidenceFile(t, filepath.Join(fixture.evidenceDir, "linux-amd64-transcript.txt"), filepath.Join(scaffoldDir, "platform-download-evidence", "linux-amd64-transcript.txt"))
+	copyEvidenceFile(t, filepath.Join(fixture.evidenceDir, "linux-amd64-candidate-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "linux-amd64-candidate-verify.json"))
+	copyEvidenceFile(t, filepath.Join(fixture.evidenceDir, "linux-amd64-bundle-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "linux-amd64-bundle-verify.json"))
+	copyEvidenceFile(t, filepath.Join(fixture.evidenceDir, "windows-amd64-transcript.txt"), filepath.Join(scaffoldDir, "platform-download-evidence", "windows-amd64-transcript.txt"))
+	copyEvidenceFile(t, filepath.Join(fixture.evidenceDir, "windows-amd64-candidate-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "windows-amd64-candidate-verify.json"))
+	copyEvidenceFile(t, filepath.Join(fixture.evidenceDir, "windows-amd64-bundle-verify.json"), filepath.Join(scaffoldDir, "platform-download-evidence", "windows-amd64-bundle-verify.json"))
+	copyEvidenceFile(t, filepath.Join(fixture.skillkitDir, "skillkit-transcript.txt"), filepath.Join(scaffoldDir, "skillkit-download-evidence", "skillkit-transcript.txt"))
+	copyEvidenceFile(t, filepath.Join(fixture.skillkitDir, "skillkit-verify.json"), filepath.Join(scaffoldDir, "skillkit-download-evidence", "skillkit-verify.json"))
+
+	pkg, err := PackagePostReleaseDownloadEvidence(PostReleaseDownloadPackageOptions{
+		ScaffoldPath: scaffoldDir,
+		OutDir:       filepath.Join(root, "package"),
+		Now:          time.Date(2026, 7, 5, 2, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected scaffold package ok, got %#v", pkg)
+	}
+	archived := map[string]bool{}
+	for _, file := range pkg.Files {
+		archived[file.Path] = true
+	}
+	if !archived["post-release/post-release-install-plan.json"] || !archived["post-release/post-release-install-verification.json"] {
+		t.Fatalf("expected scaffold package to archive copied plan files, got %#v", archived)
+	}
+	verification, err := VerifyPostReleaseDownloadAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected scaffold package verification ok: %#v", verification.Checks)
+	}
+}
+
 func TestVerifyPostReleaseDownloadEvidenceRejectsMissingPlatformBundleVerify(t *testing.T) {
 	root := t.TempDir()
 	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64"}, false)

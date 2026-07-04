@@ -93,7 +93,7 @@
   - `<target-slug>-bundle-verify.json`, produced by `rdev-verify --bundle` and containing `ok=true`;
   - `skillkit-transcript.txt` and `skillkit-verify.json` when Skillkit is in the post-release plan.
 - [ ] Run `rdev acceptance post-release-evidence-status --scaffold <post-release-scaffold>` and require `ready_for_packaging=true`.
-- [ ] Package those transcripts with `rdev acceptance package-post-release-download --plan <post-release-install-plan.json> --plan-verification <post-release-install-verification.json> --out <evidence-out> --evidence-dir <platform-evidence-dir> --skillkit-evidence-dir <skillkit-evidence-dir>`.
+- [ ] Package those transcripts with `rdev acceptance package-post-release-download --scaffold <post-release-scaffold> --out <evidence-out>`.
 - [ ] Verify the package with `rdev acceptance verify-post-release-download-package --package <evidence-out>/package.json` before claiming public download acceptance.
 - [ ] Install on a clean Windows VM.
 - [ ] Install on macOS.
