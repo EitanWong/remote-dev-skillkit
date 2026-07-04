@@ -218,12 +218,7 @@ fi
 if go run ./cmd/rdev acceptance package-relay-adapter \
 	--relay-package "$relay_adapter_dir" \
 	--out "$work_dir/relay-placeholder-package" \
-	--runner-result "$relay_evidence_scaffold_dir/runner-result.json" \
-	--helper-transcript "$relay_evidence_scaffold_dir/helper-transcript.txt" \
-	--gateway-status "$relay_evidence_scaffold_dir/gateway-status.json" \
-	--host-status "$relay_evidence_scaffold_dir/host-status.json" \
-	--connection-status "$relay_evidence_scaffold_dir/connection-status.json" \
-	--audit "$relay_evidence_scaffold_dir/audit.jsonl" \
+	--evidence-dir "$relay_evidence_scaffold_dir" \
 	> "$work_dir/relay-placeholder-package.json" 2> "$work_dir/relay-placeholder-package.err"; then
 	echo "placeholder relay evidence package unexpectedly succeeded" >&2
 	exit 1
@@ -341,12 +336,7 @@ relay_acceptance_dir="$work_dir/relay-acceptance"
 go run ./cmd/rdev acceptance package-relay-adapter \
 	--relay-package "$relay_adapter_dir" \
 	--out "$relay_acceptance_dir" \
-	--runner-result "$relay_acceptance_input/runner-result.json" \
-	--helper-transcript "$relay_acceptance_input/helper-transcript.txt" \
-	--gateway-status "$relay_acceptance_input/gateway-status.json" \
-	--host-status "$relay_acceptance_input/host-status.json" \
-	--connection-status "$relay_acceptance_input/connection-status.json" \
-	--audit "$relay_acceptance_input/audit.jsonl" \
+	--evidence-dir "$relay_acceptance_input" \
 	> "$work_dir/relay-adapter-acceptance-package.json"
 go run ./cmd/rdev acceptance verify-relay-adapter-package \
 	--package "$relay_acceptance_dir" \
@@ -881,6 +871,7 @@ assert relay_adapter_evidence_plan["schema_version"] == "rdev.relay-adapter-acce
 assert "--evidence-dir" in relay_adapter_evidence_plan["dry_run_command"], relay_adapter_evidence_plan
 assert "--evidence-dir" in relay_adapter_evidence_plan["run_command"], relay_adapter_evidence_plan
 assert "package-relay-adapter" in relay_adapter_evidence_plan["package_command"], relay_adapter_evidence_plan
+assert "--evidence-dir" in relay_adapter_evidence_plan["package_command"], relay_adapter_evidence_plan
 assert {item["path"] for item in relay_adapter_evidence_plan["evidence_files"]} >= {"runner-result.json", "helper-transcript.txt", "connection-status.json", "audit.jsonl"}, relay_adapter_evidence_plan
 assert relay_evidence_scaffold["schema"] == "rdev.acceptance-evidence-scaffold.v1", relay_evidence_scaffold
 assert relay_evidence_scaffold["ok"] is True, relay_evidence_scaffold
@@ -1108,6 +1099,7 @@ print(json.dumps({
     "relay_adapter_acceptance_verification_schema": relay_adapter_acceptance_verification["schema"],
     "relay_adapter_helper_transcript_from_runner": True,
     "relay_adapter_status_audit_from_runner": True,
+    "relay_adapter_package_from_evidence_dir": True,
     "post_release_download_acceptance_package_schema": post_release_download_package["schema"],
     "post_release_download_acceptance_verification_schema": post_release_download_verification["schema"],
     "post_release_download_placeholder_package_rejected": True,

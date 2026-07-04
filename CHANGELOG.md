@@ -52,6 +52,11 @@ transcript file names or package commands after GitHub Release assets exist.
   `evidence-report.json` as one standard evidence directory. Relay/connectivity
   evidence plans now use `--evidence-dir .`, and release smoke packages the
   runner-generated status and audit files instead of hand-written fixtures.
+- Added `rdev acceptance package-relay-adapter --evidence-dir <dir>`. Relay
+  acceptance packaging now consumes the runner-generated evidence directory
+  directly, archives `audit.jsonl` under the same standard name, and keeps
+  evidence-plan package commands directory-level so Agents do not pass six
+  individual evidence file flags.
 
 ### Remaining Gates
 

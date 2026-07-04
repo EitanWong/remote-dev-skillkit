@@ -8944,12 +8944,7 @@ func TestAcceptancePackageRelayAdapter(t *testing.T) {
 		"acceptance", "package-relay-adapter",
 		"--relay-package", relayOut,
 		"--out", filepath.Join(root, "relay-evidence"),
-		"--runner-result", evidence.runnerResult,
-		"--helper-transcript", evidence.helperTranscript,
-		"--gateway-status", evidence.gatewayStatus,
-		"--host-status", evidence.hostStatus,
-		"--connection-status", evidence.connectionStatus,
-		"--audit", evidence.audit,
+		"--evidence-dir", evidence.dir,
 	}); err != nil {
 		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
 	}
@@ -8977,6 +8972,13 @@ func TestAcceptancePackageRelayAdapter(t *testing.T) {
 	}
 	if payload.RedactionRuleCounts["github_token"] != 1 {
 		t.Fatalf("expected github token redaction, got %#v", payload.RedactionRuleCounts)
+	}
+	var packagedPaths []string
+	for _, file := range payload.Files {
+		packagedPaths = append(packagedPaths, file.Path)
+	}
+	if !slices.Contains(packagedPaths, "evidence/audit.jsonl") {
+		t.Fatalf("expected evidence-dir package files, got %#v", packagedPaths)
 	}
 
 	var verifyStdout bytes.Buffer
@@ -9179,12 +9181,14 @@ func timeNowForTest() time.Time {
 }
 
 type relayAdapterEvidenceForCLITest struct {
+	dir              string
 	runnerResult     string
 	helperTranscript string
 	gatewayStatus    string
 	hostStatus       string
 	connectionStatus string
 	audit            string
+	evidenceReport   string
 }
 
 func writeRelayAdapterEvidenceForCLITest(t *testing.T, root string) relayAdapterEvidenceForCLITest {
@@ -9195,20 +9199,24 @@ func writeRelayAdapterEvidenceForCLITest(t *testing.T, root string) relayAdapter
 	gatewayStatus := filepath.Join(evidenceRoot, "gateway-status.json")
 	hostStatus := filepath.Join(evidenceRoot, "host-status.json")
 	connectionStatus := filepath.Join(evidenceRoot, "connection-status.json")
-	audit := filepath.Join(evidenceRoot, "audit.txt")
+	audit := filepath.Join(evidenceRoot, "audit.jsonl")
+	evidenceReport := filepath.Join(evidenceRoot, "evidence-report.json")
 	writeFileForCLITest(t, runnerResult, `{"schema_version":"rdev.connection-entry.runner-result.v1","selected_path":"existing-wireguard-vpn","helper_started":true}`+"\n")
 	writeFileForCLITest(t, helperTranscript, "started reviewed relay helper\ntoken ghp_abcdefghijklmnopqrstuvwx\n")
 	writeFileForCLITest(t, gatewayStatus, `{"ok":true,"status":"healthy"}`+"\n")
 	writeFileForCLITest(t, hostStatus, `{"ok":true,"host_status":"active"}`+"\n")
 	writeFileForCLITest(t, connectionStatus, `{"ok":true,"connected":true}`+"\n")
-	writeFileForCLITest(t, audit, "helper_start\nhost_registered\ncleanup\n")
+	writeFileForCLITest(t, audit, `{"event":"helper_start"}`+"\n"+`{"event":"host_registered"}`+"\n"+`{"event":"cleanup"}`+"\n")
+	writeFileForCLITest(t, evidenceReport, `{"schema_version":"rdev.connection-entry.runner-evidence.v1","connected":true}`+"\n")
 	return relayAdapterEvidenceForCLITest{
+		dir:              evidenceRoot,
 		runnerResult:     runnerResult,
 		helperTranscript: helperTranscript,
 		gatewayStatus:    gatewayStatus,
 		hostStatus:       hostStatus,
 		connectionStatus: connectionStatus,
 		audit:            audit,
+		evidenceReport:   evidenceReport,
 	}
 }
 

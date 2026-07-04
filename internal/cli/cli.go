@@ -1604,6 +1604,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		relayPackage := fs.String("relay-package", "", "verified relay adapter package directory or relay-adapter.json")
 		out := fs.String("out", "", "empty output directory for packaged relay adapter evidence")
+		evidenceDir := fs.String("evidence-dir", "", "directory written by rdev connection-entry run --evidence-dir")
 		runnerResult := fs.String("runner-result", "", "Connection Entry runner result JSON selecting a standard connectivity adapter path")
 		helperTranscript := fs.String("helper-transcript", "", "helper start transcript or supervisor evidence")
 		gatewayStatus := fs.String("gateway-status", "", "gateway health/status JSON or transcript")
@@ -1617,6 +1618,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		return a.acceptancePackageRelayAdapter(acceptance.RelayAdapterPackageOptions{
 			RelayAdapterPackagePath: *relayPackage,
 			OutDir:                  *out,
+			EvidenceDirPath:         *evidenceDir,
 			RunnerResultPath:        *runnerResult,
 			HelperTranscriptPath:    *helperTranscript,
 			GatewayStatusPath:       *gatewayStatus,
@@ -8334,7 +8336,7 @@ Usage:
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --job-evidence-dir job-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
-  rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --runner-result runner-result.json --helper-transcript helper.txt --gateway-status gateway-status.json --host-status host-status.json --connection-status connection-status.json --audit audit.jsonl
+  rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --evidence-dir relay-evidence-input
   rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --gateway-startup gateway-startup.txt --storage-verification storage.json --auth-verification auth.json --backup-evidence backup.txt --restore-evidence restore.txt --retention-evidence retention.txt --role-mapping-evidence roles.json --failure-mode-evidence failure.json --audit audit.jsonl
   rdev acceptance package-post-release-download --plan post-release-install/post-release-install-plan.json --plan-verification post-release-verification.json --out post-release-download-evidence --evidence-dir platform-download-evidence --skillkit-evidence-dir skillkit-download-evidence
   rdev release sign --artifact ./rdev-host.exe --key .rdev/keys/release-root.json

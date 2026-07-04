@@ -37,12 +37,7 @@ func TestPackageAndVerifyRelayAdapterEvidence(t *testing.T) {
 			pkg, err := PackageRelayAdapterEvidence(RelayAdapterPackageOptions{
 				RelayAdapterPackagePath: relayDir,
 				OutDir:                  filepath.Join(root, "package"),
-				RunnerResultPath:        evidence.runnerResult,
-				HelperTranscriptPath:    evidence.helperTranscript,
-				GatewayStatusPath:       evidence.gatewayStatus,
-				HostStatusPath:          evidence.hostStatus,
-				ConnectionStatusPath:    evidence.connectionStatus,
-				AuditPath:               evidence.audit,
+				EvidenceDirPath:         evidence.dir,
 				Now:                     time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC),
 			})
 			if err != nil {
@@ -59,6 +54,9 @@ func TestPackageAndVerifyRelayAdapterEvidence(t *testing.T) {
 			}
 			if pkg.RedactionRuleCounts["github_token"] != 1 {
 				t.Fatalf("expected github token redaction, got %#v", pkg.RedactionRuleCounts)
+			}
+			if !relayPackageHasPath(pkg.Files, "evidence/audit.jsonl") {
+				t.Fatalf("expected evidence-dir files in package: %#v", pkg.Files)
 			}
 
 			verification, err := VerifyRelayAdapterAcceptancePackage(pkg.OutDir)
@@ -203,6 +201,7 @@ func TestRelayAdapterEvidenceRejectsScaffoldPlaceholderEvidence(t *testing.T) {
 }
 
 type relayAdapterEvidenceForTest struct {
+	dir              string
 	runnerResult     string
 	helperTranscript string
 	gatewayStatus    string
@@ -238,6 +237,7 @@ func writeRelayAdapterEvidenceForTest(t *testing.T, root, selectedPath string) r
 		return path
 	}
 	return relayAdapterEvidenceForTest{
+		dir: dir,
 		runnerResult: write("runner-result.json", map[string]any{
 			"schema_version":       "rdev.connection-entry.runner-result.v1",
 			"selected_path":        selectedPath,
@@ -248,8 +248,17 @@ func writeRelayAdapterEvidenceForTest(t *testing.T, root, selectedPath string) r
 		gatewayStatus:    write("gateway-status.json", map[string]any{"ok": true, "status": "healthy"}),
 		hostStatus:       write("host-status.json", map[string]any{"ok": true, "host_status": "active"}),
 		connectionStatus: write("connection-status.json", map[string]any{"ok": true, "connected": true}),
-		audit:            write("audit.txt", "helper_start\nhost_registered\ncleanup\n"),
+		audit:            write("audit.jsonl", `{"event":"helper_start"}`+"\n"+`{"event":"host_registered"}`+"\n"+`{"event":"cleanup"}`+"\n"),
 	}
+}
+
+func relayPackageHasPath(files []AcceptancePackageFile, path string) bool {
+	for _, file := range files {
+		if file.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 func failedRelayAcceptanceChecks(checks []Check) string {

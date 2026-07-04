@@ -111,6 +111,10 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   (`existing-frp-or-chisel-relay`, `existing-ssh-tunnel`,
   `existing-headscale-tailscale-mesh`, or `existing-wireguard-vpn`) and
   `connected=true`.
+- Directory-level relay evidence packaging through
+  `rdev acceptance package-relay-adapter --evidence-dir`, so Agents package the
+  runner-generated evidence directory instead of passing six individual status
+  and audit file flags.
 - Relay/connectivity adapter acceptance evidence plans through
   `rdev.relay-adapter-acceptance-evidence-plan.v1` and
   `acceptance-evidence-plan.json`, giving Agents standard runner result,

@@ -473,9 +473,7 @@ func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEviden
 		"rdev", "acceptance", "package-relay-adapter",
 		"--relay-package", "<relay-adapter-package-dir>",
 		"--out", "<relay-adapter-evidence-out>",
-	}
-	for _, file := range files {
-		packageCommand = append(packageCommand, file.Flag, file.Path)
+		"--evidence-dir", ".",
 	}
 	return AcceptanceEvidencePlan{
 		SchemaVersion:    AcceptanceEvidencePlanSchemaVersion,
@@ -490,8 +488,8 @@ func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEviden
 		PackageCommand:   packageCommand,
 		VerifyCommand:    []string{"rdev", "acceptance", "verify-relay-adapter-package", "--package", "<relay-adapter-evidence-out>/package.json"},
 		AgentRules: []string{
-			"Use rdev connection-entry run --evidence-dir . to create runner-result.json, helper-transcript.txt, gateway-status.json, host-status.json, connection-status.json, and audit.jsonl; do not hand-write runner evidence.",
-			"Use the file names and package command from this plan when collecting real restrictive-network evidence.",
+			"Use rdev connection-entry run --evidence-dir . to create runner-result.json, helper-transcript.txt, gateway-status.json, host-status.json, connection-status.json, audit.jsonl, and evidence-report.json; do not hand-write runner evidence.",
+			"Use rdev acceptance package-relay-adapter --evidence-dir . from this plan when packaging real restrictive-network evidence.",
 			"Redact helper endpoints, credentials, private IPs, local paths, usernames, and hostnames before sharing evidence outside the operator account.",
 			"If endpoint, credential, identity, route, privilege, or persistence is unclear, ask one short question instead of guessing.",
 		},

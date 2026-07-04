@@ -186,8 +186,18 @@ rdev connection-entry run \
 The runner writes the standard acceptance files in that directory:
 `runner-result.json`, `helper-transcript.txt`, `gateway-status.json`,
 `host-status.json`, `connection-status.json`, `audit.jsonl`, and
-`evidence-report.json`. Use those files as the matching inputs for
-`rdev acceptance package-relay-adapter`. The result uses schema
+`evidence-report.json`. Package the shareable evidence through the same
+directory-level contract:
+
+```bash
+rdev acceptance package-relay-adapter \
+  --relay-package relay-adapter \
+  --out .rdev/acceptance/relay-adapter-package \
+  --evidence-dir .rdev/acceptance/relay-adapter-evidence
+```
+
+The package archives the shareable standard evidence files and does not require
+Agents to pass six individual file flags. The result uses schema
 `rdev.connection-entry.runner-result.v1` and records the selected path, gateway
 override, helper-start status, transport, host-serve argv, probe results, and
 manual-action requirements. The helper transcript, status files, and audit JSONL

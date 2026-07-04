@@ -28,6 +28,7 @@ var standardConnectivityAdapterPaths = []string{
 type RelayAdapterPackageOptions struct {
 	RelayAdapterPackagePath string
 	OutDir                  string
+	EvidenceDirPath         string
 	RunnerResultPath        string
 	HelperTranscriptPath    string
 	GatewayStatusPath       string
@@ -114,6 +115,11 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 	if strings.TrimSpace(opts.OutDir) == "" {
 		return RelayAdapterAcceptancePackage{}, fmt.Errorf("output directory is required")
 	}
+	var err error
+	opts, err = resolveRelayEvidenceDir(opts)
+	if err != nil {
+		return RelayAdapterAcceptancePackage{}, err
+	}
 	outDir, err := filepath.Abs(opts.OutDir)
 	if err != nil {
 		return RelayAdapterAcceptancePackage{}, err
@@ -185,7 +191,7 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 	files = append(files, copyOptionalEvidence(outDir, "evidence/gateway-status.json", "gateway-status", opts.GatewayStatusPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/host-status.json", "host-status", opts.HostStatusPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/connection-status.json", "connection-status", opts.ConnectionStatusPath, redactor, add)...)
-	files = append(files, copyOptionalEvidence(outDir, "evidence/audit.txt", "audit", opts.AuditPath, redactor, add)...)
+	files = append(files, copyOptionalEvidence(outDir, "evidence/audit.jsonl", "audit", opts.AuditPath, redactor, add)...)
 	files = append(files, copyNotesEvidence(outDir, opts.NotesPath, redactor, add)...)
 
 	selectedPath := runnerResultSelectedConnectivityPath(outDir, "evidence/runner-result.json")
@@ -228,6 +234,34 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 		return RelayAdapterAcceptancePackage{}, err
 	}
 	return pkg, nil
+}
+
+func resolveRelayEvidenceDir(opts RelayAdapterPackageOptions) (RelayAdapterPackageOptions, error) {
+	if strings.TrimSpace(opts.EvidenceDirPath) == "" {
+		return opts, nil
+	}
+	dir, err := filepath.Abs(opts.EvidenceDirPath)
+	if err != nil {
+		return RelayAdapterPackageOptions{}, err
+	}
+	if info, err := os.Stat(dir); err != nil {
+		return RelayAdapterPackageOptions{}, err
+	} else if !info.IsDir() {
+		return RelayAdapterPackageOptions{}, fmt.Errorf("relay evidence path is not a directory: %s", dir)
+	}
+	fill := func(current, name string) string {
+		if strings.TrimSpace(current) != "" {
+			return current
+		}
+		return filepath.Join(dir, name)
+	}
+	opts.RunnerResultPath = fill(opts.RunnerResultPath, "runner-result.json")
+	opts.HelperTranscriptPath = fill(opts.HelperTranscriptPath, "helper-transcript.txt")
+	opts.GatewayStatusPath = fill(opts.GatewayStatusPath, "gateway-status.json")
+	opts.HostStatusPath = fill(opts.HostStatusPath, "host-status.json")
+	opts.ConnectionStatusPath = fill(opts.ConnectionStatusPath, "connection-status.json")
+	opts.AuditPath = fill(opts.AuditPath, "audit.jsonl")
+	return opts, nil
 }
 
 func VerifyRelayAdapterAcceptancePackage(packagePath string) (RelayAdapterAcceptanceVerification, error) {
