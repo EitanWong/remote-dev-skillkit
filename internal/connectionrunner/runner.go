@@ -1186,6 +1186,9 @@ func dependencyInstallAction(path ConnectionPath, mode model.HostMode) (Dependen
 	if err := json.Unmarshal([]byte(raw), &action); err != nil {
 		return DependencyInstallAction{}, "", true, fmt.Errorf("%s must be a JSON dependency install action: %w", envName, err)
 	}
+	if action.SchemaVersion != "rdev.connection-entry.dependency-install-action.v1" {
+		return DependencyInstallAction{}, "", true, fmt.Errorf("%s must use schema rdev.connection-entry.dependency-install-action.v1", envName)
+	}
 	action.Tool = executableBaseName(action.Tool)
 	if action.Tool == "" {
 		return DependencyInstallAction{}, "", true, fmt.Errorf("%s must include a non-empty tool", envName)
@@ -1224,7 +1227,103 @@ func dependencyInstallAction(path ConnectionPath, mode model.HostMode) (Dependen
 	if strings.TrimSpace(action.ExpectedSHA256) != "" && !isHexSHA256(action.ExpectedSHA256) {
 		return DependencyInstallAction{}, "", true, fmt.Errorf("%s expected_sha256 must be a hex SHA-256 value", envName)
 	}
+	if err := validateStandardDependencyInstallArgv(action, envName); err != nil {
+		return DependencyInstallAction{}, "", true, err
+	}
 	return action, action.Tool, true, nil
+}
+
+func validateStandardDependencyInstallArgv(action DependencyInstallAction, envName string) error {
+	if len(action.Argv) == 0 {
+		return fmt.Errorf("%s must include a non-empty argv array", envName)
+	}
+	if executableBaseName(action.Argv[0]) != "rdev" {
+		return fmt.Errorf("%s must execute rdev deps install, got %q", envName, action.Argv[0])
+	}
+	if len(action.Argv) < 3 || action.Argv[1] != "deps" || action.Argv[2] != "install" {
+		return fmt.Errorf("%s must execute rdev deps install", envName)
+	}
+	flags, positionals, err := parseDependencyInstallFlags(action.Argv[3:])
+	if err != nil {
+		return fmt.Errorf("%s %w", envName, err)
+	}
+	if len(positionals) > 1 {
+		return fmt.Errorf("%s must not pass more than one positional tool to rdev deps install", envName)
+	}
+	tool := firstNonEmpty(flags["tool"], firstString(positionals))
+	if executableBaseName(tool) != executableBaseName(action.Tool) {
+		return fmt.Errorf("%s argv --tool must match action tool %q", envName, action.Tool)
+	}
+	scope := firstNonEmpty(flags["scope"], "user")
+	if scope != action.Scope {
+		return fmt.Errorf("%s argv --scope must match action scope %q", envName, action.Scope)
+	}
+	if strings.TrimSpace(flags["url"]) == "" {
+		return fmt.Errorf("%s argv must include --url for reviewed helper download", envName)
+	}
+	if flags["expected-sha256"] != action.ExpectedSHA256 {
+		return fmt.Errorf("%s argv --expected-sha256 must match action expected_sha256", envName)
+	}
+	if flags["execute"] != "true" {
+		return fmt.Errorf("%s argv must include --execute so rdev performs the reviewed install, not a plan-only command", envName)
+	}
+	return nil
+}
+
+func parseDependencyInstallFlags(args []string) (map[string]string, []string, error) {
+	flags := map[string]string{}
+	var positionals []string
+	valueFlags := map[string]bool{
+		"tool":            true,
+		"scope":           true,
+		"version":         true,
+		"platform":        true,
+		"url":             true,
+		"expected-sha256": true,
+		"install-dir":     true,
+	}
+	boolFlags := map[string]bool{"execute": true}
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if arg == "" {
+			continue
+		}
+		if !strings.HasPrefix(arg, "--") {
+			positionals = append(positionals, arg)
+			continue
+		}
+		nameValue := strings.TrimPrefix(arg, "--")
+		name, value, hasInlineValue := strings.Cut(nameValue, "=")
+		if boolFlags[name] {
+			if hasInlineValue && value != "true" {
+				return nil, nil, fmt.Errorf("--%s must be a boolean execute flag", name)
+			}
+			flags[name] = "true"
+			continue
+		}
+		if !valueFlags[name] {
+			return nil, nil, fmt.Errorf("uses unsupported rdev deps install flag --%s", name)
+		}
+		if !hasInlineValue {
+			i++
+			if i >= len(args) {
+				return nil, nil, fmt.Errorf("--%s requires a value", name)
+			}
+			value = strings.TrimSpace(args[i])
+		}
+		if value == "" {
+			return nil, nil, fmt.Errorf("--%s requires a non-empty value", name)
+		}
+		flags[name] = value
+	}
+	return flags, positionals, nil
+}
+
+func firstString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func runDependencyInstallAction(action DependencyInstallAction) (DependencyInstallResult, error) {

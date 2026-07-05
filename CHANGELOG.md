@@ -90,6 +90,14 @@ transcript file names or package commands after GitHub Release assets exist.
   post-release install directory without hand-picking the plan and verification
   JSON files; explicit `--plan` / `--plan-verification` remains available for
   reviewed overrides.
+- Hardened Connection Entry helper dependency repair so
+  `RDEV_*_INSTALL_ACTION_JSON` must use schema
+  `rdev.connection-entry.dependency-install-action.v1` and a standard
+  `rdev deps install --tool ... --scope ... --url ... --expected-sha256 ...
+  --execute` argv whose tool, scope, and SHA-256 match the reviewed action.
+  The runner now rejects arbitrary install commands, plan-only installs, hash
+  mismatches, unsupported flags, and shell/PowerShell command-string wrappers
+  before helper startup.
 
 ### Remaining Gates
 

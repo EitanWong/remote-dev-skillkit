@@ -472,7 +472,7 @@ func TestRunRejectsHelperStartForWrongTool(t *testing.T) {
 func TestRunInstallsMissingHelperDependencyBeforeHostServe(t *testing.T) {
 	t.Setenv("RDEV_RELAY_GATEWAY_URL", "http://127.0.0.1:8787")
 	t.Setenv("RDEV_RELAY_START_ARGV_JSON", `["chisel","client","relay.example.invalid","R:8787:127.0.0.1:8787"]`)
-	t.Setenv("RDEV_RELAY_INSTALL_ACTION_JSON", `{"schema_version":"rdev.connection-entry.dependency-install-action.v1","tool":"chisel","scope":"user","argv":["rdev","deps","install","chisel","--scope","user"],"reason":"relay helper for Connection Entry"}`)
+	t.Setenv("RDEV_RELAY_INSTALL_ACTION_JSON", `{"schema_version":"rdev.connection-entry.dependency-install-action.v1","tool":"chisel","scope":"user","argv":["rdev","deps","install","--tool","chisel","--scope","user","--url","https://downloads.example.invalid/chisel.tar.gz","--expected-sha256","0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","--execute"],"expected_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","reason":"relay helper for Connection Entry"}`)
 	out := filepath.Join(t.TempDir(), "runner")
 	pkg, err := Build(Options{
 		Invite:       testInvite(t),
@@ -547,7 +547,7 @@ func TestRunInstallsMissingHelperDependencyBeforeHostServe(t *testing.T) {
 func TestRunRejectsUnsafeDependencyInstallAction(t *testing.T) {
 	t.Setenv("RDEV_RELAY_GATEWAY_URL", "http://127.0.0.1:8787")
 	t.Setenv("RDEV_RELAY_START_ARGV_JSON", `["chisel","client","relay.example.invalid","R:8787:127.0.0.1:8787"]`)
-	t.Setenv("RDEV_RELAY_INSTALL_ACTION_JSON", `{"tool":"chisel","scope":"user","argv":["powershell","-ExecutionPolicy","Bypass","-Command","Install-Chisel"]}`)
+	t.Setenv("RDEV_RELAY_INSTALL_ACTION_JSON", `{"schema_version":"rdev.connection-entry.dependency-install-action.v1","tool":"chisel","scope":"user","argv":["powershell","-ExecutionPolicy","Bypass","-Command","Install-Chisel"]}`)
 	out := filepath.Join(t.TempDir(), "runner")
 	pkg, err := Build(Options{
 		Invite:       testInvite(t),
@@ -572,6 +572,67 @@ func TestRunRejectsUnsafeDependencyInstallAction(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "ExecutionPolicy Bypass") {
 		t.Fatalf("expected unsafe install action rejection, got %v", err)
+	}
+}
+
+func TestRunRejectsNonStandardDependencyInstallAction(t *testing.T) {
+	tests := []struct {
+		name    string
+		action  string
+		wantErr string
+	}{
+		{
+			name:    "missing schema",
+			action:  `{"tool":"chisel","scope":"user","argv":["rdev","deps","install","--tool","chisel","--scope","user","--url","https://downloads.example.invalid/chisel.tar.gz","--expected-sha256","0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","--execute"],"expected_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`,
+			wantErr: "must use schema",
+		},
+		{
+			name:    "wrong command",
+			action:  `{"schema_version":"rdev.connection-entry.dependency-install-action.v1","tool":"chisel","scope":"user","argv":["curl","https://downloads.example.invalid/chisel"],"expected_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`,
+			wantErr: "must execute rdev deps install",
+		},
+		{
+			name:    "plan only",
+			action:  `{"schema_version":"rdev.connection-entry.dependency-install-action.v1","tool":"chisel","scope":"user","argv":["rdev","deps","install","--tool","chisel","--scope","user","--url","https://downloads.example.invalid/chisel.tar.gz","--expected-sha256","0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],"expected_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`,
+			wantErr: "must include --execute",
+		},
+		{
+			name:    "hash mismatch",
+			action:  `{"schema_version":"rdev.connection-entry.dependency-install-action.v1","tool":"chisel","scope":"user","argv":["rdev","deps","install","--tool","chisel","--scope","user","--url","https://downloads.example.invalid/chisel.tar.gz","--expected-sha256","ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","--execute"],"expected_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`,
+			wantErr: "must match action expected_sha256",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RDEV_RELAY_GATEWAY_URL", "http://127.0.0.1:8787")
+			t.Setenv("RDEV_RELAY_START_ARGV_JSON", `["chisel","client","relay.example.invalid","R:8787:127.0.0.1:8787"]`)
+			t.Setenv("RDEV_RELAY_INSTALL_ACTION_JSON", tc.action)
+			out := filepath.Join(t.TempDir(), "runner")
+			pkg, err := Build(Options{
+				Invite:       testInvite(t),
+				OutDir:       out,
+				TargetOS:     "linux",
+				TargetArch:   "amd64",
+				SessionMode:  string(model.HostModeAttendedTemporary),
+				WritePackage: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = Run(RunOptions{
+				ManifestPath: pkg.ManifestPath,
+				DryRun:       true,
+				HTTPProbe: func(rawURL string, timeout time.Duration) error {
+					return errors.New("blocked")
+				},
+				LookPath: func(name string) (string, error) {
+					return "", errors.New("not found")
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected %q rejection, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 
