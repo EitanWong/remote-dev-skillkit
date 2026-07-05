@@ -23,11 +23,19 @@ addresses failures found during attended Windows remote-connection testing.
 - Added Cloudflare Quick Tunnel as a detected connectivity helper and exposed
   `RDEV_CLOUDFLARED_GATEWAY_URL` plus runbook hints when only loopback/LAN
   gateway candidates are available.
+- Added `rdev support-session connect --start --public-tunnel auto|always|off`.
+  Auto mode starts a Cloudflare Quick Tunnel when no stable gateway candidate is
+  configured, uses the resulting public URL as the session gateway, and exports
+  `RDEV_CLOUDFLARED_GATEWAY_URL` for MCP tool calls.
 - Added prebuilt support-session asset fallback copying from
   `work/rdev-support-session/bin/` when Go cross-compilation is unavailable or
   fails, preventing Windows helper asset 404s on hosts without Go.
 - Synchronized MCP tool metadata in both `mcp/tools.json` and the exported
   `dist/remote-dev-skillkit/mcp/tools.json`.
+- Rewrote `skills/safe-remote-support/SKILL.md` around the one-command
+  handoff contract, public-tunnel-first connectivity, automatic `rdev`
+  recovery, and the rule that Cloudflare-backed MCP calls must carry the
+  effective `gateway_url`.
 
 ## 0.1.31-dev
 

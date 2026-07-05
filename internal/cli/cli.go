@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -2627,6 +2628,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for generated local commands")
 		start := fs.Bool("start", false, "when no reachable gateway is configured, start the standard visible foreground gateway in this process")
+		publicTunnel := fs.String("public-tunnel", "auto", "cloudflared quick-tunnel mode: auto (start if no stable gateway), always (always start), off (never start)")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file when --start is used")
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file when --start is used")
 		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file when --start is used")
@@ -2647,6 +2649,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			OperatorTokenFile:   *operatorTokenFile,
 			RdevCommand:         *rdevCommand,
 			Start:               *start,
+			PublicTunnel:        *publicTunnel,
 			ReadyFile:           *readyFile,
 			StatusFile:          *statusFile,
 			HandoffTextFile:     *handoffTextFile,
@@ -2830,6 +2833,9 @@ type supportSessionStartOptions struct {
 	StatusFile          string
 	HandoffTextFile     string
 	ConnectedReportFile string
+	// PublicTunnel: "auto" starts cloudflared if no stable gateway is
+	// configured; "always" starts it unconditionally; "" or "off" disables.
+	PublicTunnel string
 }
 
 type supportSessionConnectOptions struct {
@@ -2849,6 +2855,11 @@ type supportSessionConnectOptions struct {
 	StatusFile          string
 	HandoffTextFile     string
 	ConnectedReportFile string
+	// PublicTunnel controls whether a Cloudflare Quick Tunnel is started
+	// automatically to provide a public-internet gateway URL.
+	// Values: "" or "off" = disabled; "auto" = start if no stable gateway
+	// URL is already configured; "always" = always start regardless.
+	PublicTunnel string
 }
 
 type supportSessionPrepareOptions struct {
@@ -2898,6 +2909,7 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 			StatusFile:          opts.StatusFile,
 			HandoffTextFile:     opts.HandoffTextFile,
 			ConnectedReportFile: opts.ConnectedReportFile,
+			PublicTunnel:        opts.PublicTunnel,
 		})
 	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
@@ -2934,6 +2946,60 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	return writeJSON(a.Stdout, supportsession.BuildConnectFromCreated(created))
 }
 
+// startCloudflaredQuickTunnel starts `cloudflared tunnel --url localURL` in
+// the background and waits up to 20 seconds for it to print a public HTTPS
+// tunnel URL.  The returned cancel function should be called when the session
+// ends to clean up the cloudflared process.
+//
+// On success, it returns (tunnelURL, cancel, nil).
+// On failure it returns ("", noop, err).
+func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (string, context.CancelFunc, error) {
+	cfPath, err := exec.LookPath("cloudflared")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("cloudflared not found in PATH: %w", err)
+	}
+	tunnelCtx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(tunnelCtx, cfPath, "tunnel", "--url", localURL)
+	// cloudflared prints the tunnel URL to stderr
+	pr, pw := io.Pipe()
+	cmd.Stderr = io.MultiWriter(pw, stderr)
+	if err := cmd.Start(); err != nil {
+		cancel()
+		_ = pw.Close()
+		return "", func() {}, fmt.Errorf("cloudflared start failed: %w", err)
+	}
+	// Scan stderr for the tunnel URL (looks like https://*.trycloudflare.com)
+	urlCh := make(chan string, 1)
+	go func() {
+		defer pw.Close()
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if idx := strings.Index(line, "https://"); idx >= 0 {
+				rest := line[idx:]
+				end := strings.IndexAny(rest, " \t\n\r|")
+				if end < 0 {
+					end = len(rest)
+				}
+				candidate := strings.TrimRight(rest[:end], "/")
+				if strings.Contains(candidate, ".trycloudflare.com") {
+					select {
+					case urlCh <- candidate:
+					default:
+					}
+				}
+			}
+		}
+	}()
+	select {
+	case tunnelURL := <-urlCh:
+		return tunnelURL, cancel, nil
+	case <-time.After(20 * time.Second):
+		cancel()
+		return "", func() {}, fmt.Errorf("cloudflared did not print a tunnel URL within 20s")
+	}
+}
+
 func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOptions) error {
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
 		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
@@ -2943,6 +3009,37 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		addr = "0.0.0.0:8787"
 	}
 	gatewayURL, _ := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
+
+	// --public-tunnel: start cloudflared quick-tunnel if needed.
+	// "auto"   → start only when no stable (hosted/relay/mesh/vpn/ssh/cloudflared) gateway is configured
+	// "always" → always start, override gatewayURL with the tunnel URL
+	// ""/"off" → skip
+	publicTunnelMode := strings.ToLower(strings.TrimSpace(opts.PublicTunnel))
+	if publicTunnelMode == "auto" || publicTunnelMode == "always" {
+		needsTunnel := publicTunnelMode == "always"
+		if !needsTunnel {
+			// Inspect candidates: if none are "stable" (public/configured), we need a tunnel.
+			_, candidates := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
+			summary := supportsession.GatewayCandidateSummary(candidates)
+			if hasStable, _ := summary["has_stable_configured_fallback"].(bool); !hasStable {
+				needsTunnel = true
+			}
+		}
+		if needsTunnel {
+			localListenURL := "http://127.0.0.1:" + extractPort(addr, "8787")
+			_, _ = fmt.Fprintf(a.Stderr, "[rdev] starting cloudflared quick-tunnel for %s ...\n", localListenURL)
+			tunnelURL, tunnelCancel, tunnelErr := startCloudflaredQuickTunnel(ctx, a.Stderr, localListenURL)
+			if tunnelErr != nil {
+				_, _ = fmt.Fprintf(a.Stderr, "[rdev] cloudflared quick-tunnel failed: %v; falling back to LAN gateway\n", tunnelErr)
+			} else {
+				_, _ = fmt.Fprintf(a.Stderr, "[rdev] cloudflared quick-tunnel active: %s\n", tunnelURL)
+				defer tunnelCancel()
+				gatewayURL = tunnelURL
+				// Also export for MCP tools that check RDEV_CLOUDFLARED_GATEWAY_URL
+				_ = os.Setenv("RDEV_CLOUDFLARED_GATEWAY_URL", tunnelURL)
+			}
+		}
+	}
 	workDir := strings.TrimSpace(opts.WorkDir)
 	if workDir == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -9762,6 +9859,15 @@ func writeJSON(out io.Writer, value any) error {
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(value)
+}
+
+// extractPort parses the port from an addr like "0.0.0.0:8787" or
+// "[::]:8787".  Returns fallback when no port can be parsed.
+func extractPort(addr, fallback string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil && port != "" {
+		return port
+	}
+	return fallback
 }
 
 func writeJSONFile0600(path string, value any) error {

@@ -1147,6 +1147,13 @@ func freshAgentFailurePrevention() map[string]any {
 	}
 }
 
+// GatewayCandidateSummary returns a summary map for the given candidates,
+// suitable for the agent connection runbook and for callers (e.g. CLI)
+// that need to decide whether to start a cloudflared quick-tunnel.
+func GatewayCandidateSummary(candidates []GatewayURLCandidate) map[string]any {
+	return gatewayCandidateRunbookSummary(candidates)
+}
+
 func gatewayCandidateRunbookSummary(candidates []GatewayURLCandidate) map[string]any {
 	kinds := []string{}
 	hasStable := false
