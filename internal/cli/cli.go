@@ -3419,10 +3419,19 @@ func (a App) mcp(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
 	case "serve":
-		// When any RDEV_*_GATEWAY_URL is configured, proxy host/job/artifact/audit
-		// MCP tool calls to that running gateway so that hosts registered through a
-		// foreground support-session process are visible to the MCP tools.
-		remoteURL, _ := supportsession.ConfiguredGatewayURLCandidate()
+		fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "proxy host/job/artifact/audit MCP tool calls to this gateway URL; "+
+			"overrides RDEV_*_GATEWAY_URL environment variables. "+
+			"Per-call gateway_url arguments in tool inputs still take highest precedence.")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		// Resolve effective remote gateway URL: explicit flag > env vars.
+		remoteURL := strings.TrimRight(strings.TrimSpace(*gatewayURL), "/")
+		if remoteURL == "" {
+			remoteURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+		}
 		var server mcpstdio.Server
 		if remoteURL != "" {
 			server = mcpstdio.NewServerWithRemoteGateway(gateway.NewMemoryGateway(), remoteURL)
@@ -3454,7 +3463,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
 		longPollTimeout := fs.Duration("long-poll-timeout", 25*time.Second, "long-poll wait duration when --transport=long-poll")
 		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
-		approvalTimeout := fs.Duration("approval-timeout", 30*time.Second, "maximum time to wait for host approval when --once=false")
+		approvalTimeout := fs.Duration("approval-timeout", 120*time.Second, "maximum time to wait for host approval when --once=false; increase for attended temporary sessions over slow/remote networks")
 		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
 		gatewayCA := fs.String("gateway-ca", "", "optional PEM CA bundle for the gateway HTTPS certificate")
 		gatewayClientCert := fs.String("gateway-client-cert", "", "optional PEM client certificate for gateway mTLS")

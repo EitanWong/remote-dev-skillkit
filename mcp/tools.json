@@ -772,6 +772,10 @@
               "offline"
             ],
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "type": "object"
@@ -787,6 +791,10 @@
           "host_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -816,6 +824,10 @@
           "ticket_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -840,6 +852,10 @@
           "reason": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -876,6 +892,10 @@
           },
           "policy": {
             "type": "object"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -897,6 +917,10 @@
           "job_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -919,6 +943,10 @@
           "reason": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -953,6 +981,10 @@
           "reason": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -974,6 +1006,10 @@
           "job_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -992,6 +1028,10 @@
           "artifact_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [
@@ -1033,6 +1073,10 @@
           "target_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "gateway_url": {
+            "type": "string",
+            "description": "Optional gateway base URL to proxy this call to (e.g. https://xxx.trycloudflare.com). Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call. Use this when the MCP server was started before the support session was created."
           }
         },
         "required": [

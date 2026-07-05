@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	neturl "net/url"
 	"os"
@@ -572,33 +573,51 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			if err := os.MkdirAll(filepath.Dir(asset.Path), 0o700); err != nil {
 				report["build_status"] = "failed"
 				report["error"] = err.Error()
-				assetReports = append(assetReports, report)
-				continue
-			}
-			cmd := exec.CommandContext(ctx, goPath, "build", "-o", asset.Path, "./cmd/rdev")
-			cmd.Dir = repoRoot
-			cmd.Env = append(os.Environ(), "GOOS="+asset.GOOS, "GOARCH="+asset.GOARCH, "CGO_ENABLED=0")
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				report["build_status"] = "failed"
-				report["error"] = err.Error()
-				if len(output) > 0 {
-					report["build_output_tail"] = tailString(string(output), 800)
+				// do not continue; fall through to prebuilt fallback below
+			} else {
+				cmd := exec.CommandContext(ctx, goPath, "build", "-o", asset.Path, "./cmd/rdev")
+				cmd.Dir = repoRoot
+				cmd.Env = append(os.Environ(), "GOOS="+asset.GOOS, "GOARCH="+asset.GOARCH, "CGO_ENABLED=0")
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					report["build_status"] = "failed"
+					report["error"] = err.Error()
+					if len(output) > 0 {
+						report["build_output_tail"] = tailString(string(output), 800)
+					}
+					// do not continue; fall through to prebuilt fallback below
+				} else {
+					sum, err := fileSHA256Hex(asset.Path)
+					if err != nil {
+						report["build_status"] = "failed"
+						report["error"] = err.Error()
+						// fall through to prebuilt fallback
+					} else {
+						report["present"] = true
+						report["build_status"] = "built"
+						report["sha256"] = sum
+						assetReady = true
+					}
 				}
-				assetReports = append(assetReports, report)
-				continue
 			}
-			sum, err := fileSHA256Hex(asset.Path)
-			if err != nil {
-				report["build_status"] = "failed"
-				report["error"] = err.Error()
-				assetReports = append(assetReports, report)
-				continue
+		}
+		// Fallback: if Go build wasn't run or failed, check for a pre-built
+		// binary shipped in the repository's work/rdev-support-session/bin/.
+		// This lets `rdev support-session prepare` succeed even without a Go
+		// toolchain installed on the operator machine.
+		if !assetReady {
+			prebuiltPath := filepath.Join(repoRoot, "work", "rdev-support-session", "bin", asset.Name)
+			if fileExists(prebuiltPath) {
+				if err := copyFile(prebuiltPath, asset.Path); err == nil {
+					sum, sumErr := fileSHA256Hex(asset.Path)
+					if sumErr == nil {
+						report["present"] = true
+						report["build_status"] = "copied-from-prebuilt"
+						report["sha256"] = sum
+						assetReady = true
+					}
+				}
 			}
-			report["present"] = true
-			report["build_status"] = "built"
-			report["sha256"] = sum
-			assetReady = true
 		}
 		if !assetReady {
 			allAssetsReady = false
@@ -833,7 +852,7 @@ func gatewayCandidatePreflightReport(order int, candidate GatewayURLCandidate) m
 
 func isStableGatewayCandidateKind(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "hosted", "relay", "mesh", "vpn", "ssh":
+	case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared":
 		return true
 	default:
 		return false
@@ -940,8 +959,10 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 		},
 		"on_timeout_or_failure": []string{
 			"read connection_recovery and gateway_candidate_preflight from the returned payload",
+			"check gateway_candidate_summary.needs_public_tunnel: if true, start a cloudflared quick-tunnel first — run `cloudflared tunnel --url http://127.0.0.1:<gateway-port>`, capture the printed https://*.trycloudflare.com URL, then rerun with --gateway-url <that-url>",
+			"if cloudflared is not installed, download it from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ or set RDEV_CLOUDFLARED_GATEWAY_URL to the active tunnel URL",
 			"rerun rdev.support_session.prepare or rdev support-session prepare --build-assets",
-			"create a fresh Connection Entry with configured hosted/relay/mesh/VPN/SSH fallback when LAN-only paths are insufficient",
+			"create a fresh Connection Entry with configured hosted/relay/mesh/VPN/SSH/cloudflared fallback when LAN-only paths are insufficient",
 			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
 		},
 		"human_surface_rule": "target-side humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback",
@@ -1131,6 +1152,7 @@ func gatewayCandidateRunbookSummary(candidates []GatewayURLCandidate) map[string
 	hasStable := false
 	hasLAN := false
 	hasSameMachineOnly := len(candidates) == 0
+	cloudflaredInPATH := cloudflaredAvailable()
 	for _, candidate := range candidates {
 		kind := strings.TrimSpace(candidate.Kind)
 		if kind == "" {
@@ -1149,14 +1171,31 @@ func gatewayCandidateRunbookSummary(candidates []GatewayURLCandidate) map[string
 			hasSameMachineOnly = false
 		}
 	}
-	return map[string]any{
+	// needsPublicTunnel is true when the only reachable candidates are LAN or
+	// loopback — both of which fail for a target on a different network.
+	needsPublicTunnel := !hasStable && (hasLAN || hasSameMachineOnly)
+	publicTunnelHint := ""
+	if needsPublicTunnel {
+		if cloudflaredInPATH {
+			publicTunnelHint = "cloudflared is in PATH: run `cloudflared tunnel --url http://127.0.0.1:<gateway-port>` before creating the session, capture the printed https://*.trycloudflare.com URL, and pass it as --gateway-url; OR set RDEV_CLOUDFLARED_GATEWAY_URL=<url>"
+		} else {
+			publicTunnelHint = "no stable public gateway configured; install cloudflared (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) then run `cloudflared tunnel --url http://127.0.0.1:<gateway-port>` and pass the printed URL as --gateway-url"
+		}
+	}
+	summary := map[string]any{
 		"candidate_count":                 len(candidates),
 		"candidate_kinds":                 dedupeStrings(kinds),
 		"has_lan_candidate":               hasLAN,
 		"has_stable_configured_fallback":  hasStable,
 		"has_only_same_machine_candidate": hasSameMachineOnly,
+		"needs_public_tunnel":             needsPublicTunnel,
+		"cloudflared_in_path":             cloudflaredInPATH,
 		"rule":                            "if stable fallback is false, do not promise durable connectivity beyond the current direct/LAN path",
 	}
+	if publicTunnelHint != "" {
+		summary["public_tunnel_hint"] = publicTunnelHint
+	}
+	return summary
 }
 
 func standardRecoveryActions(actions []string) []string {
@@ -1315,6 +1354,7 @@ func gatewayEnvCandidatesFromEnv() []GatewayEnvCandidate {
 		{EnvVar: "RDEV_MESH_GATEWAY_URL", Kind: "mesh", Scope: "configured-mesh", Reason: "configured mesh gateway URL"},
 		{EnvVar: "RDEV_VPN_GATEWAY_URL", Kind: "vpn", Scope: "configured-vpn", Reason: "configured VPN gateway URL"},
 		{EnvVar: "RDEV_SSH_GATEWAY_URL", Kind: "ssh", Scope: "configured-ssh-tunnel", Reason: "configured SSH tunnel gateway URL"},
+		{EnvVar: "RDEV_CLOUDFLARED_GATEWAY_URL", Kind: "cloudflared", Scope: "public-cloudflared-quick-tunnel", Reason: "active Cloudflare Quick Tunnel URL"},
 	}
 	out := make([]GatewayEnvCandidate, 0, len(definitions))
 	for _, definition := range definitions {
@@ -1546,6 +1586,20 @@ func stringFromMap(values map[string]any, key string) string {
 
 func connectivityHelperDefinitions() []connectivityHelperDefinition {
 	return []connectivityHelperDefinition{
+		// cloudflared quick-tunnel: free, zero-config, no account needed.
+		// Detected automatically by probing PATH for the binary.
+		// Start: cloudflared tunnel --url http://127.0.0.1:<gateway-port>
+		// Capture the printed https://*.trycloudflare.com URL and pass it as
+		// --gateway-url when creating the support session.
+		{
+			ID:               "cloudflared-quick-tunnel",
+			Kind:             "cloudflared",
+			GatewayEnv:       "RDEV_CLOUDFLARED_GATEWAY_URL",
+			StartArgvEnv:     "RDEV_CLOUDFLARED_START_ARGV_JSON",
+			InstallActionEnv: "RDEV_CLOUDFLARED_INSTALL_ACTION_JSON",
+			AllowedTools:     []string{"cloudflared"},
+			ApprovalRequired: []string{"download/install if not already present"},
+		},
 		{
 			ID:               "existing-ssh-tunnel",
 			Kind:             "ssh",
@@ -1697,6 +1751,14 @@ func executableBaseName(value string) string {
 	parts := strings.Split(normalized, "/")
 	base := strings.TrimSpace(parts[len(parts)-1])
 	return strings.TrimSuffix(strings.ToLower(base), ".exe")
+}
+
+// cloudflaredAvailable returns true when the cloudflared binary is findable
+// in the system PATH (or on Windows, also in common install locations).
+// It intentionally avoids running cloudflared so there are no side effects.
+func cloudflaredAvailable() bool {
+	_, err := exec.LookPath("cloudflared")
+	return err == nil
 }
 
 func helperToolAllowed(tool string, allowed []string) bool {
@@ -3001,6 +3063,26 @@ func findRepoRoot(start string) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+// copyFile copies src to dst, creating parent directories as needed.
+// It sets the executable bit on non-Windows platforms.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func fileSHA256Hex(path string) (string, error) {

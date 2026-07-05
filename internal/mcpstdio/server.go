@@ -118,8 +118,25 @@ func (s Server) remoteClient() *http.Client {
 	return http.DefaultClient
 }
 
-func (s Server) proxyGET(path string) (any, error) {
-	resp, err := s.remoteClient().Get(s.RemoteGateway + path)
+// effectiveGatewayURL returns the gateway base URL to use for a given tool
+// call.  The lookup order is:
+//  1. "gateway_url" key in the per-call args (lets the agent override on
+//     every call without restarting the MCP server).
+//  2. s.RemoteGateway set at server construction time (from --gateway-url
+//     flag or RDEV_*_GATEWAY_URL environment variables).
+//
+// Returns "" when no gateway is configured; callers should fall back to the
+// local in-memory gateway.
+func (s Server) effectiveGatewayURL(args map[string]any) string {
+	if v := stringArg(args, "gateway_url", ""); v != "" {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return s.RemoteGateway
+}
+
+// proxyGETTo sends a GET to baseURL+path and decodes the response.
+func (s Server) proxyGETTo(baseURL, path string) (any, error) {
+	resp, err := s.remoteClient().Get(baseURL + path)
 	if err != nil {
 		return nil, fmt.Errorf("remote gateway GET %s: %w", path, err)
 	}
@@ -127,19 +144,30 @@ func (s Server) proxyGET(path string) (any, error) {
 	return s.decodeRemoteResponse(resp)
 }
 
-func (s Server) proxyPOST(path string, payload any) (any, error) {
+// proxyPOSTTo sends a POST to baseURL+path and decodes the response.
+func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := s.remoteClient().Post(
-		s.RemoteGateway+path, "application/json", bytes.NewReader(data),
+		baseURL+path, "application/json", bytes.NewReader(data),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("remote gateway POST %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	return s.decodeRemoteResponse(resp)
+}
+
+// proxyGET is a convenience wrapper using s.RemoteGateway as the base URL.
+func (s Server) proxyGET(path string) (any, error) {
+	return s.proxyGETTo(s.RemoteGateway, path)
+}
+
+// proxyPOST is a convenience wrapper using s.RemoteGateway as the base URL.
+func (s Server) proxyPOST(path string, payload any) (any, error) {
+	return s.proxyPOSTTo(s.RemoteGateway, path, payload)
 }
 
 func (s Server) decodeRemoteResponse(resp *http.Response) (any, error) {
@@ -682,21 +710,21 @@ func (s Server) revokeTicket(args map[string]any) (any, error) {
 }
 
 func (s Server) listHosts(args map[string]any) (any, error) {
-	if s.RemoteGateway != "" {
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
 		status := stringArg(args, "status", "")
 		path := "/v1/hosts"
 		if status != "" {
 			path += "?status=" + url.QueryEscape(status)
 		}
-		return s.proxyGET(path)
+		return s.proxyGETTo(gwURL, path)
 	}
 	return map[string]any{"hosts": s.Gateway.Hosts(stringArg(args, "status", ""))}, nil
 }
 
 func (s Server) hostCapabilities(args map[string]any) (any, error) {
 	hostID := requiredString(args, "host_id")
-	if s.RemoteGateway != "" {
-		return s.proxyGET("/v1/hosts/" + url.PathEscape(hostID))
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyGETTo(gwURL, "/v1/hosts/"+url.PathEscape(hostID))
 	}
 	host, err := s.Gateway.Host(hostID)
 	if err != nil {
@@ -712,8 +740,8 @@ func (s Server) hostCapabilities(args map[string]any) (any, error) {
 func (s Server) approveHost(args map[string]any) (any, error) {
 	hostID := requiredString(args, "host_id")
 	caps := stringSliceArg(args, "capabilities")
-	if s.RemoteGateway != "" {
-		return s.proxyPOST("/v1/hosts/"+url.PathEscape(hostID)+"/approve", map[string]any{
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/hosts/"+url.PathEscape(hostID)+"/approve", map[string]any{
 			"capabilities": caps,
 		})
 	}
@@ -723,8 +751,8 @@ func (s Server) approveHost(args map[string]any) (any, error) {
 func (s Server) revokeHost(args map[string]any) (any, error) {
 	hostID := requiredString(args, "host_id")
 	reason := stringArg(args, "reason", "")
-	if s.RemoteGateway != "" {
-		return s.proxyPOST("/v1/hosts/"+url.PathEscape(hostID)+"/revoke", map[string]any{
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/hosts/"+url.PathEscape(hostID)+"/revoke", map[string]any{
 			"reason": reason,
 		})
 	}
@@ -732,8 +760,8 @@ func (s Server) revokeHost(args map[string]any) (any, error) {
 }
 
 func (s Server) createJob(args map[string]any) (any, error) {
-	if s.RemoteGateway != "" {
-		return s.proxyPOST("/v1/jobs", map[string]any{
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/jobs", map[string]any{
 			"host_id": requiredString(args, "host_id"),
 			"adapter": requiredString(args, "adapter"),
 			"intent":  requiredString(args, "intent"),
@@ -750,8 +778,8 @@ func (s Server) createJob(args map[string]any) (any, error) {
 
 func (s Server) jobStatus(args map[string]any) (any, error) {
 	jobID := requiredString(args, "job_id")
-	if s.RemoteGateway != "" {
-		return s.proxyGET("/v1/jobs/" + url.PathEscape(jobID))
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyGETTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID))
 	}
 	return s.Gateway.Job(jobID)
 }
@@ -759,8 +787,8 @@ func (s Server) jobStatus(args map[string]any) (any, error) {
 func (s Server) cancelJob(args map[string]any) (any, error) {
 	jobID := requiredString(args, "job_id")
 	reason := stringArg(args, "reason", "")
-	if s.RemoteGateway != "" {
-		return s.proxyPOST("/v1/jobs/"+url.PathEscape(jobID)+"/cancel", map[string]any{
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID)+"/cancel", map[string]any{
 			"reason": reason,
 		})
 	}
@@ -769,8 +797,8 @@ func (s Server) cancelJob(args map[string]any) (any, error) {
 
 func (s Server) approveJob(args map[string]any) (any, error) {
 	jobID := requiredString(args, "job_id")
-	if s.RemoteGateway != "" {
-		return s.proxyPOST("/v1/jobs/"+url.PathEscape(jobID)+"/approve", map[string]any{
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID)+"/approve", map[string]any{
 			"approval_id": requiredString(args, "approval_id"),
 			"decision":    requiredString(args, "decision"),
 			"reason":      stringArg(args, "reason", ""),
@@ -786,16 +814,16 @@ func (s Server) approveJob(args map[string]any) (any, error) {
 
 func (s Server) listArtifacts(args map[string]any) (any, error) {
 	jobID := requiredString(args, "job_id")
-	if s.RemoteGateway != "" {
-		return s.proxyGET("/v1/jobs/" + url.PathEscape(jobID) + "/artifacts")
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyGETTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID)+"/artifacts")
 	}
 	return map[string]any{"artifacts": s.Gateway.Artifacts(jobID)}, nil
 }
 
 func (s Server) readArtifact(args map[string]any) (any, error) {
 	artifactID := requiredString(args, "artifact_id")
-	if s.RemoteGateway != "" {
-		return s.proxyGET("/v1/artifacts/" + url.PathEscape(artifactID))
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyGETTo(gwURL, "/v1/artifacts/"+url.PathEscape(artifactID))
 	}
 	return s.Gateway.Artifact(artifactID)
 }
@@ -803,12 +831,12 @@ func (s Server) readArtifact(args map[string]any) (any, error) {
 func (s Server) queryAudit(args map[string]any) (any, error) {
 	targetID := stringArg(args, "target_id", "")
 	limit := intArg(args, "limit", 100)
-	if s.RemoteGateway != "" {
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
 		path := fmt.Sprintf("/v1/audit?limit=%d", limit)
 		if targetID != "" {
 			path += "&target_id=" + url.QueryEscape(targetID)
 		}
-		return s.proxyGET(path)
+		return s.proxyGETTo(gwURL, path)
 	}
 	events := s.Gateway.AuditEvents()
 	filtered := make([]model.AuditEvent, 0, len(events))

@@ -29,7 +29,18 @@ param(
 
   [string]$TrustPin = "",
 
-  [string]$HostName = $env:COMPUTERNAME
+  [string]$HostName = $env:COMPUTERNAME,
+
+  # How long (seconds) to wait for operator approval before giving up.
+  # Raise this if the agent needs more time to review and approve the host.
+  [int]$ApprovalTimeoutSeconds = 300,
+
+  # Maximum number of times to re-register after an approval timeout or
+  # unexpected exit.  Set to 0 to disable the retry loop.
+  [int]$MaxRetries = 5,
+
+  # Seconds to wait between retry attempts.
+  [int]$RetryDelaySeconds = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -186,6 +197,7 @@ if ($ReleaseBundleUrl -ne "") {
   Write-Host "Release bundle: $ReleaseBundleUrl"
 }
 Write-Host "Mode:    attended temporary foreground"
+Write-Host "ApprovalTimeout: ${ApprovalTimeoutSeconds}s (retries: $MaxRetries)"
 Write-Host ""
 Write-Host "This script does not install a Windows Service and does not create hidden persistence."
 Write-Host "Close this window to stop the foreground host process."
@@ -223,7 +235,13 @@ if ($ReleaseBundleUrl -ne "") {
 }
 
 Write-Step "Starting foreground temporary host"
-$hostArgs = @("host", "serve", "--mode", "temporary", "--name", $HostName)
+$hostArgs = @(
+  "host", "serve",
+  "--mode", "temporary",
+  "--name", $HostName,
+  "--once=false",
+  "--approval-timeout", "${ApprovalTimeoutSeconds}s"
+)
 if ($ManifestUrl -ne "") {
   $hostArgs += @("--manifest-url", $ManifestUrl)
 } else {
@@ -235,8 +253,18 @@ if ($ManifestRootPublicKey -ne "") {
 if ($TrustPin -ne "") {
   $hostArgs += @("--trust-pin", $TrustPin)
 }
-& $hostExe @hostArgs
 
-$exitCode = $LASTEXITCODE
-Write-Step "rdev-host exited with code $exitCode"
+# Retry loop: re-register if host exits due to approval timeout or transient error.
+$attempt = 0
+do {
+  if ($attempt -gt 0) {
+    Write-Step "Retrying host registration (attempt $($attempt + 1) of $($MaxRetries + 1)) after ${RetryDelaySeconds}s..."
+    Start-Sleep -Seconds $RetryDelaySeconds
+  }
+  & $hostExe @hostArgs
+  $exitCode = $LASTEXITCODE
+  $attempt++
+  Write-Step "rdev-host exited with code $exitCode"
+} while ($exitCode -ne 0 -and $attempt -le $MaxRetries)
+
 exit $exitCode

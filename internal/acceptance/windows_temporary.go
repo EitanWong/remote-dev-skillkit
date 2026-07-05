@@ -32,8 +32,14 @@ type WindowsTemporaryOptions struct {
 	VerifierExpectedSHA256         string
 	TrustPin                       string
 	HostName                       string
-	Force                          bool
-	Now                            time.Time
+	// ApprovalTimeoutSeconds is passed to rdev-host's --approval-timeout flag.
+	// Zero means use the bootstrap script default (300s).
+	ApprovalTimeoutSeconds int
+	// MaxRetries is the number of re-registration attempts after an unexpected
+	// host exit.  Zero means use the bootstrap script default (5).
+	MaxRetries int
+	Force      bool
+	Now        time.Time
 }
 
 type WindowsTemporaryPlan struct {
@@ -172,6 +178,8 @@ type windowsTemporaryResolvedOptions struct {
 	VerifierExpectedSHA256         string
 	TrustPin                       string
 	HostName                       string
+	ApprovalTimeoutSeconds         int
+	MaxRetries                     int
 }
 
 func resolveWindowsTemporaryOptions(outDir string, opts WindowsTemporaryOptions) (windowsTemporaryResolvedOptions, error) {
@@ -219,6 +227,8 @@ func resolveWindowsTemporaryOptions(outDir string, opts WindowsTemporaryOptions)
 		VerifierExpectedSHA256:         strings.ToLower(strings.TrimSpace(opts.VerifierExpectedSHA256)),
 		TrustPin:                       strings.TrimSpace(opts.TrustPin),
 		HostName:                       strings.TrimSpace(opts.HostName),
+		ApprovalTimeoutSeconds:         opts.ApprovalTimeoutSeconds,
+		MaxRetries:                     opts.MaxRetries,
 	}, nil
 }
 
@@ -362,6 +372,12 @@ func windowsTemporaryLauncher(opts windowsTemporaryResolvedOptions) string {
 	appendPowerShellArg(&builder, "VerifierExpectedSha256", opts.VerifierExpectedSHA256)
 	appendPowerShellArg(&builder, "TrustPin", opts.TrustPin)
 	appendPowerShellArg(&builder, "HostName", opts.HostName)
+	if opts.ApprovalTimeoutSeconds > 0 {
+		appendPowerShellIntArg(&builder, "ApprovalTimeoutSeconds", opts.ApprovalTimeoutSeconds)
+	}
+	if opts.MaxRetries > 0 {
+		appendPowerShellIntArg(&builder, "MaxRetries", opts.MaxRetries)
+	}
 	builder.WriteString("\n")
 	return builder.String()
 }
@@ -374,6 +390,16 @@ func appendPowerShellArg(builder *strings.Builder, name string, value string) {
 	builder.WriteString(name)
 	builder.WriteByte(' ')
 	builder.WriteString(powershellQuote(value))
+}
+
+func appendPowerShellIntArg(builder *strings.Builder, name string, value int) {
+	if value == 0 {
+		return
+	}
+	builder.WriteString(" `\n  -")
+	builder.WriteString(name)
+	builder.WriteByte(' ')
+	builder.WriteString(fmt.Sprintf("%d", value))
 }
 
 func powershellQuote(value string) string {

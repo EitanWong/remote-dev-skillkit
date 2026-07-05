@@ -4,6 +4,31 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.32-dev
+
+Current phase: real Windows Connection Entry recovery hardening. This slice
+addresses failures found during attended Windows remote-connection testing.
+
+### Fixed
+
+- Updated the Windows temporary bootstrap to run `rdev host serve` with
+  `--once=false` and a longer approval timeout, so the foreground host remains
+  alive to wait for approval and poll jobs instead of exiting immediately after
+  registration.
+- Added retry parameters to the Windows temporary bootstrap and wired
+  `ApprovalTimeoutSeconds` / `MaxRetries` through the acceptance plan launcher.
+- Added `rdev mcp serve --gateway-url` and per-call `gateway_url` MCP tool
+  overrides for host/job/approval/artifact/audit tools, allowing Agents to
+  target a newly created gateway without restarting MCP.
+- Added Cloudflare Quick Tunnel as a detected connectivity helper and exposed
+  `RDEV_CLOUDFLARED_GATEWAY_URL` plus runbook hints when only loopback/LAN
+  gateway candidates are available.
+- Added prebuilt support-session asset fallback copying from
+  `work/rdev-support-session/bin/` when Go cross-compilation is unavailable or
+  fails, preventing Windows helper asset 404s on hosts without Go.
+- Synchronized MCP tool metadata in both `mcp/tools.json` and the exported
+  `dist/remote-dev-skillkit/mcp/tools.json`.
+
 ## 0.1.31-dev
 
 Current phase: fresh-Agent and hosted-gateway reliability hardening. This slice
