@@ -345,7 +345,7 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
 		t.Fatalf("expected connected status event in status file, got %#v", statusPayload)
 	}
-	if !strings.Contains(out.String(), `"event":"connected"`) {
+	if !waitForBufferContains(&out, `"event":"connected"`, 3*time.Second) {
 		t.Fatalf("expected connected stderr event, got %s", out.String())
 	}
 	report, err := os.ReadFile(connectedReportFile)
@@ -381,6 +381,17 @@ func waitForStatusFileEvent(t *testing.T, path, event string) supportSessionStat
 	}
 	t.Fatalf("timed out waiting for status file event %q at %s; last=%s", event, path, last)
 	return supportSessionStatusFileEvent{}
+}
+
+func waitForBufferContains(buf *bytes.Buffer, needle string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(buf.String(), needle) {
+			return true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return strings.Contains(buf.String(), needle)
 }
 
 func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
