@@ -640,7 +640,7 @@ func runtimeContract(storageProvider, authProvider string) RuntimeContract {
 			{Name: "restore-evidence", Kind: "transcript", Required: true, Description: "Restore drill evidence proving state can be recovered into a clean gateway runtime."},
 			{Name: "retention-evidence", Kind: "transcript", Required: true, Description: "Retention policy evidence covering audit/state retention and deletion expectations."},
 			{Name: "role-mapping-evidence", Kind: "json", Required: true, Description: "Authorization probes with at least one allowed and one denied decision."},
-			{Name: "failure-mode-evidence", Kind: "json", Required: true, Description: "Failure-mode probes for unavailable storage/auth or rejected credentials."},
+			{Name: "failure-mode-evidence", Kind: "json", Required: true, Description: "Failure-mode probes with failure_mode_tested=true plus a negative result such as rejected=true, denied=true, unavailable=true, accepted=false, or authorized=false."},
 			{Name: "audit", Kind: "transcript", Required: true, Description: "Redacted audit transcript covering startup, storage/auth probes, role probes, failure probes, and cleanup."},
 		},
 		OperatorApprovalRequired: []string{

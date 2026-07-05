@@ -2546,7 +2546,7 @@ func TestAcceptanceScaffoldEvidenceForHostedProviderAndRelayPlans(t *testing.T) 
 	writeFile(t, filepath.Join(hostedScaffold, "restore-evidence.txt"), "restore complete\n")
 	writeFile(t, filepath.Join(hostedScaffold, "retention-evidence.txt"), "retention reviewed\n")
 	writeFile(t, filepath.Join(hostedScaffold, "role-mapping-evidence.json"), `{"probes":[{"authorized":true},{"authorized":false}]}`)
-	writeFile(t, filepath.Join(hostedScaffold, "failure-mode-evidence.json"), `{"ok":true}`)
+	writeFile(t, filepath.Join(hostedScaffold, "failure-mode-evidence.json"), `{"ok":true,"failure_mode_tested":true,"rejected":true}`)
 	writeFile(t, filepath.Join(hostedScaffold, "audit.jsonl"), `{"event":"hosted_acceptance"}`)
 	stdout.Reset()
 	app = NewApp(&stdout, &bytes.Buffer{})
@@ -9404,7 +9404,7 @@ func writeHostedProviderRuntimeEvidenceForCLITest(t *testing.T, root string) hos
 	writeFileForCLITest(t, restoreEvidence, "restored snapshot and verified audit chain\n")
 	writeFileForCLITest(t, retentionEvidence, "retention policy reviewed for release smoke\n")
 	writeFileForCLITest(t, roleMappingEvidence, `{"probes":[{"role":"operator","authorized":true},{"role":"viewer","authorized":false}]}`+"\n")
-	writeFileForCLITest(t, failureModeEvidence, `{"ok":true,"failure_mode_tested":true,"mode":"invalid auth rejected"}`+"\n")
+	writeFileForCLITest(t, failureModeEvidence, `{"ok":true,"failure_mode_tested":true,"rejected":true,"mode":"invalid auth rejected"}`+"\n")
 	writeFileForCLITest(t, audit, `{"event":"gateway_start"}`+"\n"+`{"event":"storage_verify"}`+"\n"+`{"event":"auth_verify"}`+"\n"+`{"event":"role_probe"}`+"\n"+`{"event":"failure_probe"}`+"\n"+`{"event":"cleanup"}`+"\n")
 	return hostedProviderRuntimeEvidenceForCLITest{
 		dir:                 evidenceRoot,

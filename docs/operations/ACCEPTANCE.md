@@ -84,6 +84,10 @@ evidence directory, including `gateway-startup.txt`,
 `storage-verification.json`, `auth-verification.json`,
 `backup-evidence.txt`, `restore-evidence.txt`, `retention-evidence.txt`,
 `role-mapping-evidence.json`, `failure-mode-evidence.json`, and `audit.jsonl`.
+`failure-mode-evidence.json` must prove a negative probe, not just a generic
+success marker: include `failure_mode_tested=true` plus a field such as
+`rejected=true`, `denied=true`, `unavailable=true`, `accepted=false`, or
+`authorized=false`.
 Agents should not pass those as separate file flags unless a reviewed operator
 override is needed.
 

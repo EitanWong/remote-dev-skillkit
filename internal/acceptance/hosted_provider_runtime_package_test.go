@@ -201,6 +201,45 @@ func TestHostedProviderRuntimeRejectsScaffoldPlaceholderEvidence(t *testing.T) {
 	}
 }
 
+func TestHostedProviderRuntimeRejectsWeakFailureModeEvidence(t *testing.T) {
+	root := t.TempDir()
+	providerDir := filepath.Join(root, "hosted-provider")
+	if _, err := hostedprovider.Build(hostedprovider.Options{
+		OutDir:          providerDir,
+		StorageProvider: "postgres",
+		AuthProvider:    "oidc-jwks",
+		GeneratedAt:     time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeHostedProviderRuntimeEvidenceForTest(t, root, "postgres", "oidc-jwks")
+	if err := os.WriteFile(evidence.failureModeEvidence, []byte(`{"ok":true,"failure_mode_tested":true}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := PackageHostedProviderRuntimeEvidence(HostedProviderRuntimePackageOptions{
+		HostedProviderPackagePath: providerDir,
+		OutDir:                    filepath.Join(root, "package"),
+		EvidenceDirPath:           evidence.dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatal("expected package to fail without explicit rejected, denied, unavailable, or accepted=false failure probe")
+	}
+	failures := failedHostedRuntimeAcceptanceChecks(pkg.Checks)
+	if !strings.Contains(failures, "failure_mode_probe_passed") {
+		t.Fatalf("expected failure_mode_probe_passed failure, got %s", failures)
+	}
+	verification, err := VerifyHostedProviderRuntimeAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected verification to fail weak failure-mode evidence")
+	}
+}
+
 type hostedProviderRuntimeEvidenceForTest struct {
 	dir                 string
 	gatewayStartup      string
@@ -253,7 +292,7 @@ func writeHostedProviderRuntimeEvidenceForTest(t *testing.T, root, storageProvid
 				{"role": "viewer", "authorized": false},
 			},
 		}),
-		failureModeEvidence: write("failure-mode-evidence.json", map[string]any{"ok": true, "failure_mode_tested": true, "mode": "invalid auth rejected"}),
+		failureModeEvidence: write("failure-mode-evidence.json", map[string]any{"ok": true, "failure_mode_tested": true, "rejected": true, "mode": "invalid auth rejected"}),
 		dir:                 dir,
 		audit:               write("audit.jsonl", `{"event":"gateway_start"}`+"\n"+`{"event":"storage_verify"}`+"\n"+`{"event":"auth_verify"}`+"\n"+`{"event":"role_probe"}`+"\n"+`{"event":"failure_probe"}`+"\n"+`{"event":"cleanup"}`+"\n"),
 	}

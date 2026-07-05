@@ -149,7 +149,7 @@ printf '%s\n' 'snapshot copied to reviewed backup location' > "$hosted_runtime_i
 printf '%s\n' 'restored snapshot and verified audit chain' > "$hosted_runtime_input/restore-evidence.txt"
 printf '%s\n' 'retention policy reviewed for release smoke' > "$hosted_runtime_input/retention-evidence.txt"
 printf '%s\n' '{"probes":[{"role":"operator","authorized":true},{"role":"viewer","authorized":false}]}' > "$hosted_runtime_input/role-mapping-evidence.json"
-printf '%s\n' '{"ok":true,"failure_mode_tested":true,"mode":"invalid auth rejected"}' > "$hosted_runtime_input/failure-mode-evidence.json"
+printf '%s\n' '{"ok":true,"failure_mode_tested":true,"rejected":true,"mode":"invalid auth rejected"}' > "$hosted_runtime_input/failure-mode-evidence.json"
 printf '%s\n' '{"event":"gateway_start"}' '{"event":"storage_verify"}' '{"event":"auth_verify"}' '{"event":"role_probe"}' '{"event":"failure_probe"}' '{"event":"cleanup"}' > "$hosted_runtime_input/audit.jsonl"
 hosted_ready_scaffold_dir="$work_dir/hosted-provider-ready-scaffold"
 go run ./cmd/rdev acceptance scaffold-evidence \

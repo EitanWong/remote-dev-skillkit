@@ -386,9 +386,46 @@ func failureModeEvidencePassed(root, path string) bool {
 	var value any
 	if err := json.Unmarshal(content, &value); err != nil {
 		compact := strings.ToLower(strings.Join(strings.Fields(string(content)), ""))
-		return strings.Contains(compact, `"failure_mode_tested":true`) || strings.Contains(compact, `"ok":true`)
+		return strings.Contains(compact, `"failure_mode_tested":true`) && failureModeTextHasNegativeProbe(compact)
 	}
-	return jsonHasBoolField(value, "failure_mode_tested", true) || jsonHasOKTrue(value)
+	return jsonHasBoolField(value, "failure_mode_tested", true) && jsonHasFailureModeNegativeProbe(value)
+}
+
+func jsonHasFailureModeNegativeProbe(value any) bool {
+	for _, probe := range []struct {
+		key      string
+		expected bool
+	}{
+		{"rejected", true},
+		{"denied", true},
+		{"unavailable", true},
+		{"outage", true},
+		{"accepted", false},
+		{"authorized", false},
+		{"ok", false},
+	} {
+		if jsonHasBoolField(value, probe.key, probe.expected) {
+			return true
+		}
+	}
+	return false
+}
+
+func failureModeTextHasNegativeProbe(compact string) bool {
+	for _, marker := range []string{
+		`"rejected":true`,
+		`"denied":true`,
+		`"unavailable":true`,
+		`"outage":true`,
+		`"accepted":false`,
+		`"authorized":false`,
+		`"ok":false`,
+	} {
+		if strings.Contains(compact, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func hostedProviderFilesHaveNoPrivateSurface(root string, files []AcceptancePackageFile) bool {

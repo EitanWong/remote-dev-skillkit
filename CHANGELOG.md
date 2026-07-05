@@ -98,6 +98,12 @@ transcript file names or package commands after GitHub Release assets exist.
   The runner now rejects arbitrary install commands, plan-only installs, hash
   mismatches, unsupported flags, and shell/PowerShell command-string wrappers
   before helper startup.
+- Hardened hosted provider runtime evidence verification so
+  `failure-mode-evidence.json` must include `failure_mode_tested=true` plus a
+  clear negative probe such as `rejected=true`, `denied=true`,
+  `unavailable=true`, `accepted=false`, or `authorized=false`; a generic
+  `ok=true` file is no longer enough to satisfy hosted auth/storage failure
+  evidence.
 
 ### Remaining Gates
 
