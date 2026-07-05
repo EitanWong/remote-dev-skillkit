@@ -429,5 +429,5 @@ Tool calls return:
 
 - In-memory only.
 - Persistent host sessions require a gateway with configured storage.
-- Job envelopes are signed with an in-memory development Ed25519 key; production key storage is not implemented yet.
+- Job envelopes are signed with a development Ed25519 key when no signing key is configured. The stdio server is not itself a gateway storage authority or production key authority — use `--signing-key`, a configured storage provider, or a trust bundle for production deployments.
 - Real host networking is provided by the gateway HTTP/WSS surfaces; this stdio server is the local MCP control surface.

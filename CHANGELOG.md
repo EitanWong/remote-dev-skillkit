@@ -4,6 +4,70 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.30-dev
+
+Current phase: production protocol foundations and adapter surface layer. Added
+authenticated managed-host enrollment protocol model, TPM/MDM protectedstore
+stub backends, Adapter SDK policy/workspace helpers for third-party adapters,
+and package/verifier surfaces for RustDesk/MeshCentral, Coder, and DevPod.
+Cleaned up two stale doc strings that described missing capabilities as still
+absent.
+
+### Added
+
+- Added `internal/managedhost` with production managed-host enrollment protocol
+  model: `EnrollmentRequest`/`EnrollmentResponse` (operator bearer-token auth,
+  Ed25519 identity proof, anti-replay nonce), `TrustFetchRequest` (host-signed
+  authenticated trust-bundle fetch), and `ReEnrollmentRequest` (prior-key
+  continuity proof for near-expiry certificate rotation). All three flows use
+  schema-versioned, canonically signed payloads and are tested against tampered
+  inputs and role-check failures.
+- Added `tpm:` prefix backend for `internal/protectedstore`: `TPMStore`,
+  `tpmBackend` interface, `tpm_linux.go` (file-backed stub with inline
+  documentation for replacing with tpm2-tss/go-tpm sealing), and
+  `tpm_unsupported.go` (returns error on non-Linux). `IsRef`/`ParseRef`/`Open`
+  extended.
+- Added `mdm:` prefix backend for `internal/protectedstore`: `MDMStore`,
+  `mdmBackend` interface, `mdm_darwin.go` (file-backed stub with inline
+  documentation for replacing with `CFPreferencesCopyValue` MDM managed
+  preferences), and `mdm_unsupported.go` (returns error on non-Darwin). Both
+  backends have `SetTPMBackendForTest`/`SetMDMBackendForTest` helpers following
+  the existing pattern.
+- Added `pkg/adapterkit/policy.go` with `PolicyPlan`
+  (`rdev.adapter-policy-plan.v1`), `NewPolicyPlan`, `PolicyPlanContract`,
+  `PolicyPlanReport`, and `VerifyPolicyPlanJSON`. Third-party adapters can now
+  declare `ExternalConsequences`, `RequiredApprovals`, and
+  `WorkspaceBoundaries` in the plan phase and get a machine-verifiable
+  conformance report.
+- Added `pkg/adapterkit/workspace.go` with `WorkspaceSession`
+  (`rdev.adapter-workspace-session.v1`), `PrepareWorkspaceSession` (validates
+  root existence, resolves symlinks, enforces write-boundary containment),
+  `MarkCleaned`, `WorkspaceSessionContract`, and `VerifyWorkspaceSessionJSON`.
+- Added `internal/rustdeskadapter` with RustDesk/MeshCentral remote-desktop
+  adapter **package/verifier surface**: `Build`, `Verify`,
+  `AcceptanceEvidencePlan`, variant support (`rustdesk`/`meshcentral`),
+  approval boundaries, and evidence plan requiring session teardown proof.
+- Added `internal/coderadapter` with Coder workspace adapter **package/verifier
+  surface**: `Build`, `Verify`, `AcceptanceEvidencePlan`, `runner.env.example`
+  with `RDEV_CODER_URL`/`TOKEN`/`WORKSPACE`, and evidence plan requiring
+  workspace stop proof.
+- Added `internal/devpodadapter` with DevPod/devcontainer workspace adapter
+  **package/verifier surface**: `Build`, `Verify`, `AcceptanceEvidencePlan`,
+  `runner.env.example` with `RDEV_DEVPOD_PROVIDER`/`WORKSPACE`/`SOURCE`, and
+  evidence plan requiring workspace stop proof. Supports Docker, Kubernetes,
+  and cloud providers.
+
+### Changed
+
+- `docs/operations/MCP_STDIO.md` — removed stale claim "production key storage
+  is not implemented yet"; updated to accurately state that the stdio server is
+  not itself a gateway storage authority and that `--signing-key`, a storage
+  provider, or a trust bundle should be used for production deployments.
+- `internal/cli/cli.go` — removed `"note": "local preview only; gateway
+  persistence is not implemented yet"` field from `rdev ticket create` JSON
+  output. The official support-session and gateway flows supersede this
+  command.
+
 ## 0.1.29-dev
 
 Current phase: formal release package evidence is being made as Agent-native as

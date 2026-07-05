@@ -4881,7 +4881,6 @@ func (a App) ticketCreate(mode model.HostMode, ttlSeconds int, reason, capList s
 	payload := map[string]any{
 		"ticket":  ticket,
 		"joinUrl": exampleJoinURL(ticket.Code),
-		"note":    "local preview only; gateway persistence is not implemented yet",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")

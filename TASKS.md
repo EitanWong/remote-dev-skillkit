@@ -317,7 +317,9 @@
 ## Later
 
 - [x] Add production WSS/mTLS host transport beyond the dev gateway TLS/mTLS client/listener path.
+- [x] Add production managed host enrollment protocol model: authenticated EnrollmentRequest/Response with operator bearer token, signed TrustFetchRequest, and ReEnrollmentRequest with prior-key continuity proof (`internal/managedhost`).
 - [ ] Add authenticated production managed host trust lifecycle beyond dev endpoints and local protected stores.
+- [x] Add TPM and MDM stub backends for protectedstore: `tpm:` prefix (Linux file-backed stub, documented for tpm2-tss replacement) and `mdm:` prefix (macOS file-backed stub, documented for CFPreferencesCopyValue replacement).
 - [ ] Add hardware-backed or fleet-managed protected host identity/trust storage beyond Keychain, DPAPI, libsecret, keyctl, and local files.
 - [x] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
@@ -332,10 +334,11 @@
 - [ ] Generalize runtime cooperative cancellation across future Adapter SDK implementations.
 - [x] Add Claude Code adapter.
 - [x] Add Tailscale/headscale adapter package/verifier surface.
-- [ ] Add RustDesk/MeshCentral adapter.
-- [ ] Add Coder workspace adapter.
-- [ ] Add DevPod/devcontainer workspace adapter.
+- [x] Add RustDesk/MeshCentral adapter package/verifier surface.
+- [x] Add Coder workspace adapter package/verifier surface.
+- [x] Add DevPod/devcontainer workspace adapter package/verifier surface.
 - [ ] Implement remaining durable hosted provider runtime integrations beyond the built-in Postgres, Redis stream, S3-compatible state-store, OIDC/JWKS auth, and SAML auth paths, provider-specific runtime contracts, and runtime acceptance evidence packager, including deployed Postgres/Redis/S3 backup or replay/restore/retention/failure-mode evidence plus deployed OIDC/JWKS and SAML identity-provider evidence.
+- [x] Add Adapter SDK policy planning and workspace session helpers for third-party adapters: `adapterkit.PolicyPlan`, `adapterkit.PrepareWorkspaceSession`, and conformance verifiers (`pkg/adapterkit/policy.go`, `pkg/adapterkit/workspace.go`).
 - [ ] Complete production Adapter SDK integration for future adapters beyond built-in hostrunner runtime fixture capture.
 
 ## Final End-State Gates

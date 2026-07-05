@@ -209,6 +209,100 @@ func TestKeyctlStoreUsesBackend(t *testing.T) {
 	}
 }
 
+func TestTPMStoreUsesBackend(t *testing.T) {
+	backend := &memoryTPMBackend{items: map[string][]byte{}}
+	restore := SetTPMBackendForTest(backend)
+	defer restore()
+
+	store, err := Open("tpm:remote-dev-skillkit/fleet-host-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.Load(); err != nil || ok {
+		t.Fatalf("expected empty tpm store, ok=%v err=%v", ok, err)
+	}
+	content := []byte("tpm-sealed key material")
+	if err := store.Save(content); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !bytes.Equal(loaded, content) {
+		t.Fatalf("unexpected tpm loaded content ok=%v content=%q", ok, loaded)
+	}
+}
+
+func TestParseTPMRef(t *testing.T) {
+	ref, err := ParseRef("tpm:remote-dev-skillkit/fleet-host-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Backend != "tpm" || ref.Service != "remote-dev-skillkit" || ref.Account != "fleet-host-key" {
+		t.Fatalf("unexpected ref: %#v", ref)
+	}
+}
+
+func TestParseTPMRefRejectsMissingAccount(t *testing.T) {
+	if _, err := ParseRef("tpm:remote-dev-skillkit"); err == nil {
+		t.Fatal("expected missing account to fail")
+	}
+}
+
+func TestIsRefRecognisesTPMPrefix(t *testing.T) {
+	if !IsRef("tpm:svc/acct") {
+		t.Fatal("IsRef should recognise tpm: prefix")
+	}
+}
+
+func TestMDMStoreUsesBackend(t *testing.T) {
+	backend := &memoryMDMBackend{items: map[string][]byte{}}
+	restore := SetMDMBackendForTest(backend)
+	defer restore()
+
+	store, err := Open("mdm:remote-dev-skillkit/fleet-mdm-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.Load(); err != nil || ok {
+		t.Fatalf("expected empty mdm store, ok=%v err=%v", ok, err)
+	}
+	content := []byte("mdm-managed fleet identity")
+	if err := store.Save(content); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || !bytes.Equal(loaded, content) {
+		t.Fatalf("unexpected mdm loaded content ok=%v content=%q", ok, loaded)
+	}
+}
+
+func TestParseMDMRef(t *testing.T) {
+	ref, err := ParseRef("mdm:remote-dev-skillkit/fleet-mdm-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Backend != "mdm" || ref.Service != "remote-dev-skillkit" || ref.Account != "fleet-mdm-key" {
+		t.Fatalf("unexpected ref: %#v", ref)
+	}
+}
+
+func TestParseMDMRefRejectsMissingAccount(t *testing.T) {
+	if _, err := ParseRef("mdm:remote-dev-skillkit"); err == nil {
+		t.Fatal("expected missing account to fail")
+	}
+}
+
+func TestIsRefRecognisesMDMPrefix(t *testing.T) {
+	if !IsRef("mdm:svc/acct") {
+		t.Fatal("IsRef should recognise mdm: prefix")
+	}
+}
+
 type memoryKeychainBackend struct {
 	items map[string][]byte
 }
@@ -273,6 +367,40 @@ func (b *memoryKeyctlBackend) Load(service, account string) ([]byte, bool, error
 }
 
 func (b *memoryKeyctlBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type memoryTPMBackend struct {
+	items map[string][]byte
+}
+
+func (b *memoryTPMBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *memoryTPMBackend) Save(service, account string, content []byte) error {
+	b.items[service+"/"+account] = append([]byte(nil), content...)
+	return nil
+}
+
+type memoryMDMBackend struct {
+	items map[string][]byte
+}
+
+func (b *memoryMDMBackend) Load(service, account string) ([]byte, bool, error) {
+	content, ok := b.items[service+"/"+account]
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), content...), true, nil
+}
+
+func (b *memoryMDMBackend) Save(service, account string, content []byte) error {
 	b.items[service+"/"+account] = append([]byte(nil), content...)
 	return nil
 }
