@@ -3880,7 +3880,7 @@ func TestHostServeSendsOperatorTokenWhenFetchingEnrollmentRevocations(t *testing
 			if err != nil {
 				t.Fatalf("registration should verify: %v", err)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"host": host})
+			_ = json.NewEncoder(w).Encode(map[string]any{"host": host, "host_secret": "test-host-secret"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -5152,7 +5152,7 @@ func TestHostServePollsAndCompletesDevJob(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5213,7 +5213,7 @@ func TestHostServeWSSCompletesDevJob(t *testing.T) {
 		GatewayURL: server.URL,
 		Transport:  "wss",
 		MaxJobs:    1,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5291,7 +5291,7 @@ func TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, client, host.ID, "")
+	}, client, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5367,7 +5367,7 @@ func TestHostServeWSSCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
 		GatewayCACertPath:     material.CACert,
 		GatewayClientCertPath: material.ClientCert,
 		GatewayClientKeyPath:  material.ClientKey,
-	}, client, host.ID, "")
+	}, client, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5424,7 +5424,7 @@ func TestHostServeCapturesRuntimeFixtureArtifact(t *testing.T) {
 		PollInterval:          1,
 		MaxJobs:               1,
 		CaptureRuntimeFixture: true,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5482,7 +5482,7 @@ func TestHostServeLongPollWaitsAndCompletesDevJob(t *testing.T) {
 			Transport:       "long-poll",
 			LongPollTimeout: time.Second,
 			MaxJobs:         1,
-		}, nil, host.ID, "")
+		}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 		if err != nil {
 			done <- err
 			return
@@ -5561,7 +5561,7 @@ func TestHostServeAutoFallsBackToLongPoll(t *testing.T) {
 		Transport:       "auto",
 		LongPollTimeout: 100 * time.Millisecond,
 		MaxJobs:         1,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5626,7 +5626,7 @@ func TestHostServeAutoSwitchesSignedManifestGatewayCandidateAfterFailure(t *test
 			{URL: "http://127.0.0.1:1", Kind: "lan-private", Scope: "stale-lan", Recommended: true},
 			{URL: server.URL, Kind: "relay", Scope: "configured-relay"},
 		},
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5700,7 +5700,7 @@ func main() {
 			GatewayURL:   server.URL,
 			PollInterval: 50 * time.Millisecond,
 			MaxJobs:      1,
-		}, nil, host.ID, "")
+		}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 		done <- struct {
 			processed int
 			err       error
@@ -5769,7 +5769,7 @@ func TestHostServeRejectsTrustPinMismatch(t *testing.T) {
 		PollInterval: 1,
 		MaxJobs:      1,
 		TrustPin:     "sha256:0000",
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err == nil {
 		t.Fatal("expected trust pin mismatch")
 	}
@@ -6285,7 +6285,7 @@ func TestHostServeReportsFailedDevJob(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err == nil {
 		t.Fatal("expected host runner failure")
 	}
@@ -6348,7 +6348,7 @@ func TestHostServeReportsHostDenialArtifact(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err == nil {
 		t.Fatal("expected host runner denial")
 	}
@@ -6427,7 +6427,7 @@ func TestHostServeReportsWorkspaceLockedArtifact(t *testing.T) {
 		PollInterval:       1,
 		MaxJobs:            1,
 		WorkspaceLockStore: lockStore,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err == nil {
 		t.Fatal("expected workspace lock denial")
 	}
@@ -6491,7 +6491,7 @@ func TestHostServeReportsApprovalRequiredArtifact(t *testing.T) {
 		GatewayURL:   server.URL,
 		PollInterval: 1,
 		MaxJobs:      1,
-	}, nil, host.ID, "")
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
 	if err == nil {
 		t.Fatal("expected approval requirement")
 	}
@@ -9966,6 +9966,15 @@ func waitForJobStatus(t *testing.T, gw *gateway.MemoryGateway, jobID string, sta
 		t.Fatal(err)
 	}
 	t.Fatalf("timed out waiting for job %s status %s, got %s", jobID, status, job.Status)
+}
+
+func issueHostSecretForCLITest(t *testing.T, gw *gateway.MemoryGateway, hostID string) string {
+	t.Helper()
+	secret, err := gw.GenerateHostSecret(hostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return secret
 }
 
 func anyStrings(values []any) []string {

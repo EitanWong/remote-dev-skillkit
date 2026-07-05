@@ -41,7 +41,8 @@ func main() {
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d", result.ExitCode)
 	}
-	if !strings.Contains(result.Stdout, "-NoProfile|-NonInteractive|-Command|Write-Output") {
+	if !strings.Contains(result.Stdout, "-NoProfile|-NonInteractive|-Command|[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;") ||
+		!strings.Contains(result.Stdout, `Write-Output "hello"`) {
 		t.Fatalf("expected PowerShell argv evidence, got %q", result.Stdout)
 	}
 	var artifact ResultArtifact

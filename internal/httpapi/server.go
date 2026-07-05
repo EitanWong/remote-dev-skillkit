@@ -21,6 +21,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
+	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 )
@@ -105,6 +106,12 @@ func (s Server) hostWebSocket(w http.ResponseWriter, r *http.Request) {
 	hostID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/ws/hosts/"), "/")
 	if hostID == "" {
 		writeError(w, http.StatusNotFound, "unknown websocket host endpoint")
+		return
+	}
+	// Validate host secret before upgrading — the secret may be passed as the
+	// "host_secret" query param since WebSocket upgrade headers are limited.
+	if !s.Gateway.ValidateHostSecret(hostID, extractBearerToken(r)) {
+		writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret> or ?host_secret=<token>")
 		return
 	}
 	conn, err := wsproto.Upgrade(w, r)
@@ -973,20 +980,44 @@ func (s Server) registerHost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Generate a per-host secret that the host process must present on all
+	// subsequent host-side requests (jobs/next, heartbeat, complete, fail).
+	secret, err := s.Gateway.GenerateHostSecret(host.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "generate host secret: "+err.Error())
+		return
+	}
 	if !s.persistState(w) {
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"host": host})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"host":        host,
+		"host_secret": secret,
+	})
 }
 
 func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "operator role is required")
-		return
-	}
 	hostID, action, ok := splitHostAction(r.URL.Path)
 	if !ok {
 		writeError(w, http.StatusNotFound, "unknown host endpoint")
+		return
+	}
+	// heartbeat is host-authenticated (not operator-authenticated)
+	if action == "heartbeat" {
+		secret := extractBearerToken(r)
+		if err := s.Gateway.HeartbeatHost(hostID, secret); err != nil {
+			if strings.Contains(err.Error(), "policy denied") {
+				writeError(w, http.StatusUnauthorized, "host authentication required: provide host_secret as Bearer token")
+				return
+			}
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "host_id": hostID})
+		return
+	}
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "operator role is required")
 		return
 	}
 	switch action {
@@ -1054,6 +1085,12 @@ func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case resource == "jobs" && action == "next":
+		// Validate host secret: prevents unauthenticated callers from claiming
+		// jobs and impersonating the registered host process.
+		if !s.Gateway.ValidateHostSecret(hostID, extractBearerToken(r)) {
+			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
+			return
+		}
 		wait, err := parseLongPollWait(r)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -1129,6 +1166,24 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+	// Policy pre-check: validate before persisting the job so that policy
+	// explain and job creation are consistent — a job that policy.ExplainShellJob
+	// would deny is rejected at the gateway level instead of being left queued
+	// forever waiting for a host that will never execute it.
+	adapter := strings.ToLower(strings.TrimSpace(req.Adapter))
+	if adapter == "shell" || adapter == "powershell" {
+		if host, hostErr := s.Gateway.Host(req.HostID); hostErr == nil {
+			explanation := policy.ExplainShellJob(host.Mode, req.Policy)
+			if !explanation.Allowed {
+				summary := strings.Join(explanation.Denials, "; ")
+				if summary == "" {
+					summary = "policy denied"
+				}
+				writeError(w, http.StatusUnprocessableEntity, "policy_violation: "+summary)
+				return
+			}
+		}
 	}
 	job, err := s.Gateway.CreateJob(req.HostID, req.Adapter, req.Intent, req.Policy)
 	if err != nil {
@@ -1244,6 +1299,10 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "host_id is required")
 			return
 		}
+		if !s.Gateway.ValidateHostSecret(req.HostID, extractBearerToken(r)) {
+			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
+			return
+		}
 		job, artifact, err := s.Gateway.CompleteJobForHost(req.HostID, jobID, req.ArtifactContent)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -1265,6 +1324,10 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.HostID == "" {
 			writeError(w, http.StatusBadRequest, "host_id is required")
+			return
+		}
+		if !s.Gateway.ValidateHostSecret(req.HostID, extractBearerToken(r)) {
+			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
 			return
 		}
 		job, artifact, err := s.Gateway.FailJobForHostWithArtifact(req.HostID, jobID, req.Reason, req.ArtifactContent)
@@ -1291,6 +1354,10 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.HostID == "" {
 			writeError(w, http.StatusBadRequest, "host_id is required")
+			return
+		}
+		if !s.Gateway.ValidateHostSecret(req.HostID, extractBearerToken(r)) {
+			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
 			return
 		}
 		job, artifact, err := s.Gateway.AppendJobArtifactForHost(req.HostID, jobID, req.ArtifactContent)
@@ -1523,6 +1590,16 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{"error": message})
+}
+
+// extractBearerToken returns the token from "Authorization: Bearer <token>"
+// or from the "host_secret" query parameter (useful for WebSocket upgrades
+// which cannot easily set request headers).
+func extractBearerToken(r *http.Request) string {
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+	}
+	return r.URL.Query().Get("host_secret")
 }
 
 func requestBaseURL(r *http.Request) string {

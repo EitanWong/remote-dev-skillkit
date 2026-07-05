@@ -1010,7 +1010,7 @@ func TestRevokeHostCancelsQueuedJobs(t *testing.T) {
 	handler := server.Handler()
 	host := registerAndApproveHost(t, handler)
 
-	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
 	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
 	jobRec := httptest.NewRecorder()
 	handler.ServeHTTP(jobRec, jobReq)
@@ -1057,9 +1057,9 @@ func TestRevokeHostCancelsQueuedJobs(t *testing.T) {
 func TestJobCreateClaimAndComplete(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
+	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
 
-	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
 	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
 	jobRec := httptest.NewRecorder()
 	handler.ServeHTTP(jobRec, jobReq)
@@ -1077,6 +1077,7 @@ func TestJobCreateClaimAndComplete(t *testing.T) {
 	}
 
 	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	nextRec := httptest.NewRecorder()
 	handler.ServeHTTP(nextRec, nextReq)
 	if nextRec.Code != http.StatusOK {
@@ -1093,6 +1094,7 @@ func TestJobCreateClaimAndComplete(t *testing.T) {
 	}
 
 	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"done"}`))
+	completeReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	completeRec := httptest.NewRecorder()
 	handler.ServeHTTP(completeRec, completeReq)
 	if completeRec.Code != http.StatusOK {
@@ -1152,9 +1154,9 @@ func TestServerStateSnapshotPersistsGatewayMutations(t *testing.T) {
 	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
 	server := NewServerWithState(gw, statePath)
 	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
+	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
 
-	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"persistent demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "persistent demo"))
 	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
 	jobRec := httptest.NewRecorder()
 	handler.ServeHTTP(jobRec, jobReq)
@@ -1169,6 +1171,7 @@ func TestServerStateSnapshotPersistsGatewayMutations(t *testing.T) {
 	}
 
 	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	nextRec := httptest.NewRecorder()
 	handler.ServeHTTP(nextRec, nextReq)
 	if nextRec.Code != http.StatusOK {
@@ -1176,6 +1179,7 @@ func TestServerStateSnapshotPersistsGatewayMutations(t *testing.T) {
 	}
 
 	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"durable result"}`))
+	completeReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	completeRec := httptest.NewRecorder()
 	handler.ServeHTTP(completeRec, completeReq)
 	if completeRec.Code != http.StatusOK {
@@ -1225,7 +1229,7 @@ func TestServerStateStorePersistsGatewayMutations(t *testing.T) {
 	handler := NewServerWithStateStore(gw, store).Handler()
 	host := registerAndApproveHost(t, handler)
 
-	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"stored demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "stored demo"))
 	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
 	jobRec := httptest.NewRecorder()
 	handler.ServeHTTP(jobRec, jobReq)
@@ -1250,7 +1254,7 @@ func TestHostJobsNextLongPollWaitsForJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
 	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
+	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
 	httpServer := httptest.NewServer(handler)
 	defer httpServer.Close()
 	result := make(chan struct {
@@ -1259,7 +1263,16 @@ func TestHostJobsNextLongPollWaitsForJob(t *testing.T) {
 	}, 1)
 
 	go func() {
-		resp, err := http.Get(httpServer.URL + "/v1/hosts/" + host.ID + "/jobs/next?wait_ms=1000")
+		req, err := http.NewRequest(http.MethodGet, httpServer.URL+"/v1/hosts/"+host.ID+"/jobs/next?wait_ms=1000", nil)
+		if err != nil {
+			result <- struct {
+				job model.Job
+				err error
+			}{err: err}
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+hostSecret)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			result <- struct {
 				job model.Job
@@ -1295,6 +1308,8 @@ func TestHostJobsNextLongPollWaitsForJob(t *testing.T) {
 	created, err := gw.CreateJob(host.ID, "shell", "long-poll demo", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"echo", "demo"},
+		"allow_commands": []string{"echo"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1319,9 +1334,10 @@ func TestHostJobsNextLongPollTimeoutReturnsNoJob(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
 	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
+	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next?wait_ms=1", nil)
+	req.Header.Set("Authorization", "Bearer "+hostSecret)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1335,9 +1351,9 @@ func TestHostJobsNextLongPollTimeoutReturnsNoJob(t *testing.T) {
 func TestJobEvidenceBundleEndpointExportsBundleFromJobID(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
+	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
 
-	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
 	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
 	jobRec := httptest.NewRecorder()
 	handler.ServeHTTP(jobRec, jobReq)
@@ -1351,12 +1367,14 @@ func TestJobEvidenceBundleEndpointExportsBundleFromJobID(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	nextRec := httptest.NewRecorder()
 	handler.ServeHTTP(nextRec, nextReq)
 	if nextRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
 	}
 	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"done"}`))
+	completeReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	completeRec := httptest.NewRecorder()
 	handler.ServeHTTP(completeRec, completeReq)
 	if completeRec.Code != http.StatusOK {
@@ -1400,9 +1418,9 @@ func TestJobEvidenceBundleEndpointExportsBundleFromJobID(t *testing.T) {
 func TestJobFail(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
+	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
 
-	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"]}}`)
+	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
 	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
 	jobRec := httptest.NewRecorder()
 	handler.ServeHTTP(jobRec, jobReq)
@@ -1416,6 +1434,7 @@ func TestJobFail(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
+	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	nextRec := httptest.NewRecorder()
 	handler.ServeHTTP(nextRec, nextReq)
 	if nextRec.Code != http.StatusOK {
@@ -1423,6 +1442,7 @@ func TestJobFail(t *testing.T) {
 	}
 
 	failReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/fail", bytes.NewBufferString(`{"host_id":"`+host.ID+`","reason":"signature rejected","artifact_content":"failure evidence"}`))
+	failReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	failRec := httptest.NewRecorder()
 	handler.ServeHTTP(failRec, failReq)
 	if failRec.Code != http.StatusOK {
@@ -1450,7 +1470,7 @@ func TestJobCanceledArtifact(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
 	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
+	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
 
 	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"codex","intent":"local demo","policy":{"workspace_root":".","capabilities":["codex.run","git.diff"]}}`)
 	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
@@ -1470,6 +1490,7 @@ func TestJobCanceledArtifact(t *testing.T) {
 	}
 
 	artifactReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/artifact", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"cancellation evidence"}`))
+	artifactReq.Header.Set("Authorization", "Bearer "+hostSecret)
 	artifactRec := httptest.NewRecorder()
 	handler.ServeHTTP(artifactRec, artifactReq)
 	if artifactRec.Code != http.StatusOK {
@@ -1513,6 +1534,12 @@ func createTicket(t *testing.T, handler http.Handler) model.Ticket {
 
 func registerAndApproveHost(t *testing.T, handler http.Handler) model.Host {
 	t.Helper()
+	host, _ := registerAndApproveHostWithSecret(t, handler)
+	return host
+}
+
+func registerAndApproveHostWithSecret(t *testing.T, handler http.Handler) (model.Host, string) {
+	t.Helper()
 	ticket := createTicket(t, handler)
 	registerBody := bytes.NewBufferString(`{"ticket_code":"` + ticket.Code + `","name":"win-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
 	registerReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", registerBody)
@@ -1522,10 +1549,14 @@ func registerAndApproveHost(t *testing.T, handler http.Handler) model.Host {
 		t.Fatalf("expected 201, got %d: %s", registerRec.Code, registerRec.Body.String())
 	}
 	var registerPayload struct {
-		Host model.Host `json:"host"`
+		Host       model.Host `json:"host"`
+		HostSecret string     `json:"host_secret"`
 	}
 	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
 		t.Fatal(err)
+	}
+	if registerPayload.HostSecret == "" {
+		t.Fatalf("expected host_secret in registration response: %s", registerRec.Body.String())
 	}
 	approveReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/"+registerPayload.Host.ID+"/approve", bytes.NewBufferString(`{"capabilities":["shell.user","fs.read"]}`))
 	approveRec := httptest.NewRecorder()
@@ -1539,7 +1570,11 @@ func registerAndApproveHost(t *testing.T, handler http.Handler) model.Host {
 	if err := json.Unmarshal(approveRec.Body.Bytes(), &approvePayload); err != nil {
 		t.Fatal(err)
 	}
-	return approvePayload.Host
+	return approvePayload.Host, registerPayload.HostSecret
+}
+
+func shellJobCreateJSON(hostID, intent string) string {
+	return `{"host_id":"` + hostID + `","adapter":"shell","intent":"` + intent + `","policy":{"workspace_root":".","capabilities":["shell.user"],"argv":["echo","demo"],"allow_commands":["echo"]}}`
 }
 
 func httpTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {

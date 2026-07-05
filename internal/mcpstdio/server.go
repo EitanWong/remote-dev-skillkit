@@ -2,11 +2,13 @@ package mcpstdio
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -30,10 +32,134 @@ const protocolVersion = "2025-11-25"
 
 type Server struct {
 	Gateway *gateway.MemoryGateway
+	// RemoteGateway, when non-empty, causes host/job/artifact/audit MCP tool
+	// calls to be proxied to a running hosted gateway over HTTP rather than
+	// operating on the local in-memory gateway.  This lets `rdev mcp serve`
+	// see hosts and jobs that were registered through a foreground support-session
+	// process or a separately-started `rdev gateway serve`.
+	//
+	// Set automatically from RDEV_HOSTED_GATEWAY_URL (or any RDEV_*_GATEWAY_URL)
+	// by the CLI when those environment variables are present.
+	RemoteGateway string
+	httpClient    *http.Client
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
 	return Server{Gateway: gw}
+}
+
+// NewServerWithRemoteGateway returns a Server that proxies host/job/artifact/audit
+// operations to remoteURL while using the local gw for ticket creation and trust ops.
+// The HTTP client uses a retrying transport so that transient TLS EOF errors
+// from Cloudflare Quick Tunnels or similar reverse proxies are handled silently.
+func NewServerWithRemoteGateway(gw *gateway.MemoryGateway, remoteURL string) Server {
+	return Server{
+		Gateway:       gw,
+		RemoteGateway: strings.TrimRight(strings.TrimSpace(remoteURL), "/"),
+		httpClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: retryingMCPTransport{Base: http.DefaultTransport, MaxRetries: 3},
+		},
+	}
+}
+
+// retryingMCPTransport wraps http.DefaultTransport and retries GET/HEAD
+// requests on transient connection-level errors (EOF, TLS truncation) that
+// commonly occur behind Cloudflare Quick Tunnels and similar reverse proxies.
+type retryingMCPTransport struct {
+	Base       http.RoundTripper
+	MaxRetries int
+}
+
+func (r retryingMCPTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := r.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	maxRetries := r.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		return base.RoundTrip(req)
+	}
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			case <-time.After(time.Duration(attempt*attempt) * 100 * time.Millisecond):
+			}
+		}
+		resp, err := base.RoundTrip(req)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		msg := strings.ToLower(err.Error())
+		isTransient := strings.Contains(msg, "eof") ||
+			strings.Contains(msg, "connection reset") ||
+			strings.Contains(msg, "broken pipe") ||
+			strings.Contains(msg, "use of closed network connection")
+		if !isTransient {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+// --- remote-gateway proxy helpers ---
+
+func (s Server) remoteClient() *http.Client {
+	if s.httpClient != nil {
+		return s.httpClient
+	}
+	return http.DefaultClient
+}
+
+func (s Server) proxyGET(path string) (any, error) {
+	resp, err := s.remoteClient().Get(s.RemoteGateway + path)
+	if err != nil {
+		return nil, fmt.Errorf("remote gateway GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	return s.decodeRemoteResponse(resp)
+}
+
+func (s Server) proxyPOST(path string, payload any) (any, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.remoteClient().Post(
+		s.RemoteGateway+path, "application/json", bytes.NewReader(data),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("remote gateway POST %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	return s.decodeRemoteResponse(resp)
+}
+
+func (s Server) decodeRemoteResponse(resp *http.Response) (any, error) {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20)) // 8 MiB cap
+	if err != nil {
+		return nil, fmt.Errorf("read remote gateway response: %w", err)
+	}
+	var result any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode remote gateway response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		if m, ok := result.(map[string]any); ok {
+			if errMsg, ok := m["error"].(string); ok && errMsg != "" {
+				return nil, fmt.Errorf("%s", errMsg)
+			}
+		}
+		return nil, fmt.Errorf("remote gateway returned HTTP %d", resp.StatusCode)
+	}
+	return result, nil
 }
 
 type request struct {
@@ -556,11 +682,23 @@ func (s Server) revokeTicket(args map[string]any) (any, error) {
 }
 
 func (s Server) listHosts(args map[string]any) (any, error) {
+	if s.RemoteGateway != "" {
+		status := stringArg(args, "status", "")
+		path := "/v1/hosts"
+		if status != "" {
+			path += "?status=" + url.QueryEscape(status)
+		}
+		return s.proxyGET(path)
+	}
 	return map[string]any{"hosts": s.Gateway.Hosts(stringArg(args, "status", ""))}, nil
 }
 
 func (s Server) hostCapabilities(args map[string]any) (any, error) {
-	host, err := s.Gateway.Host(requiredString(args, "host_id"))
+	hostID := requiredString(args, "host_id")
+	if s.RemoteGateway != "" {
+		return s.proxyGET("/v1/hosts/" + url.PathEscape(hostID))
+	}
+	host, err := s.Gateway.Host(hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -572,14 +710,36 @@ func (s Server) hostCapabilities(args map[string]any) (any, error) {
 }
 
 func (s Server) approveHost(args map[string]any) (any, error) {
-	return s.Gateway.ApproveHost(requiredString(args, "host_id"), stringSliceArg(args, "capabilities"))
+	hostID := requiredString(args, "host_id")
+	caps := stringSliceArg(args, "capabilities")
+	if s.RemoteGateway != "" {
+		return s.proxyPOST("/v1/hosts/"+url.PathEscape(hostID)+"/approve", map[string]any{
+			"capabilities": caps,
+		})
+	}
+	return s.Gateway.ApproveHost(hostID, caps)
 }
 
 func (s Server) revokeHost(args map[string]any) (any, error) {
-	return s.Gateway.RevokeHost(requiredString(args, "host_id"), stringArg(args, "reason", ""))
+	hostID := requiredString(args, "host_id")
+	reason := stringArg(args, "reason", "")
+	if s.RemoteGateway != "" {
+		return s.proxyPOST("/v1/hosts/"+url.PathEscape(hostID)+"/revoke", map[string]any{
+			"reason": reason,
+		})
+	}
+	return s.Gateway.RevokeHost(hostID, reason)
 }
 
 func (s Server) createJob(args map[string]any) (any, error) {
+	if s.RemoteGateway != "" {
+		return s.proxyPOST("/v1/jobs", map[string]any{
+			"host_id": requiredString(args, "host_id"),
+			"adapter": requiredString(args, "adapter"),
+			"intent":  requiredString(args, "intent"),
+			"policy":  objectArg(args, "policy"),
+		})
+	}
 	return s.Gateway.CreateJob(
 		requiredString(args, "host_id"),
 		requiredString(args, "adapter"),
@@ -589,16 +749,35 @@ func (s Server) createJob(args map[string]any) (any, error) {
 }
 
 func (s Server) jobStatus(args map[string]any) (any, error) {
-	return s.Gateway.Job(requiredString(args, "job_id"))
+	jobID := requiredString(args, "job_id")
+	if s.RemoteGateway != "" {
+		return s.proxyGET("/v1/jobs/" + url.PathEscape(jobID))
+	}
+	return s.Gateway.Job(jobID)
 }
 
 func (s Server) cancelJob(args map[string]any) (any, error) {
-	return s.Gateway.CancelJob(requiredString(args, "job_id"), stringArg(args, "reason", ""))
+	jobID := requiredString(args, "job_id")
+	reason := stringArg(args, "reason", "")
+	if s.RemoteGateway != "" {
+		return s.proxyPOST("/v1/jobs/"+url.PathEscape(jobID)+"/cancel", map[string]any{
+			"reason": reason,
+		})
+	}
+	return s.Gateway.CancelJob(jobID, reason)
 }
 
 func (s Server) approveJob(args map[string]any) (any, error) {
+	jobID := requiredString(args, "job_id")
+	if s.RemoteGateway != "" {
+		return s.proxyPOST("/v1/jobs/"+url.PathEscape(jobID)+"/approve", map[string]any{
+			"approval_id": requiredString(args, "approval_id"),
+			"decision":    requiredString(args, "decision"),
+			"reason":      stringArg(args, "reason", ""),
+		})
+	}
 	return s.Gateway.ApproveJob(
-		requiredString(args, "job_id"),
+		jobID,
 		requiredString(args, "approval_id"),
 		requiredString(args, "decision"),
 		stringArg(args, "reason", ""),
@@ -606,16 +785,31 @@ func (s Server) approveJob(args map[string]any) (any, error) {
 }
 
 func (s Server) listArtifacts(args map[string]any) (any, error) {
-	return map[string]any{"artifacts": s.Gateway.Artifacts(requiredString(args, "job_id"))}, nil
+	jobID := requiredString(args, "job_id")
+	if s.RemoteGateway != "" {
+		return s.proxyGET("/v1/jobs/" + url.PathEscape(jobID) + "/artifacts")
+	}
+	return map[string]any{"artifacts": s.Gateway.Artifacts(jobID)}, nil
 }
 
 func (s Server) readArtifact(args map[string]any) (any, error) {
-	return s.Gateway.Artifact(requiredString(args, "artifact_id"))
+	artifactID := requiredString(args, "artifact_id")
+	if s.RemoteGateway != "" {
+		return s.proxyGET("/v1/artifacts/" + url.PathEscape(artifactID))
+	}
+	return s.Gateway.Artifact(artifactID)
 }
 
 func (s Server) queryAudit(args map[string]any) (any, error) {
 	targetID := stringArg(args, "target_id", "")
 	limit := intArg(args, "limit", 100)
+	if s.RemoteGateway != "" {
+		path := fmt.Sprintf("/v1/audit?limit=%d", limit)
+		if targetID != "" {
+			path += "&target_id=" + url.QueryEscape(targetID)
+		}
+		return s.proxyGET(path)
+	}
 	events := s.Gateway.AuditEvents()
 	filtered := make([]model.AuditEvent, 0, len(events))
 	for _, event := range events {

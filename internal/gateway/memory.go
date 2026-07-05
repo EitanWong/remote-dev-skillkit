@@ -3,6 +3,7 @@ package gateway
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -28,6 +29,8 @@ type MemoryGateway struct {
 	tickets            map[string]model.Ticket
 	codeIndex          map[string]string
 	hosts              map[string]model.Host
+	hostSecrets        map[string]string // per-host auth tokens, never serialised to API
+	hostHeartbeats     map[string]time.Time
 	jobs               map[string]model.Job
 	artifacts          map[string][]model.Artifact
 	audit              []model.AuditEvent
@@ -93,6 +96,8 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 		tickets:            map[string]model.Ticket{},
 		codeIndex:          map[string]string{},
 		hosts:              map[string]model.Host{},
+		hostSecrets:        map[string]string{},
+		hostHeartbeats:     map[string]time.Time{},
 		jobs:               map[string]model.Job{},
 		artifacts:          map[string][]model.Artifact{},
 		signingID:          signingID,
@@ -486,6 +491,69 @@ func (g *MemoryGateway) Host(hostID string) (model.Host, error) {
 		return model.Host{}, fmt.Errorf("%w: host", ErrNotFound)
 	}
 	return host, nil
+}
+
+// GenerateHostSecret creates a random 32-byte hex secret for a host and stores
+// it internally. The secret is returned once at registration and must be
+// presented by the host process on all subsequent host-side requests
+// (e.g. /jobs/next, heartbeat, job complete/fail).
+func (g *MemoryGateway) GenerateHostSecret(hostID string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if _, ok := g.hosts[hostID]; !ok {
+		return "", fmt.Errorf("%w: host", ErrNotFound)
+	}
+	secret, err := generateSecret()
+	if err != nil {
+		return "", err
+	}
+	g.hostSecrets[hostID] = secret
+	return secret, nil
+}
+
+// ValidateHostSecret returns true when secret is non-empty and matches the
+// stored secret for hostID.
+func (g *MemoryGateway) ValidateHostSecret(hostID, secret string) bool {
+	if secret == "" {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	stored, ok := g.hostSecrets[hostID]
+	return ok && stored == secret
+}
+
+// HeartbeatHost records the current time as the host's last heartbeat.
+// Returns ErrNotFound when hostID is unknown and ErrPolicyDenied when the
+// host is not active.
+func (g *MemoryGateway) HeartbeatHost(hostID, secret string) error {
+	if !g.ValidateHostSecret(hostID, secret) {
+		return fmt.Errorf("%w: invalid host secret", ErrPolicyDenied)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status != model.HostStatusActive {
+		return fmt.Errorf("%w: host must be active to send heartbeat", ErrInvalidState)
+	}
+	g.hostHeartbeats[hostID] = g.now().UTC()
+	return nil
+}
+
+// HostIsLive returns true when the host has sent a heartbeat within the last
+// maxAge duration.  Used by Hosts() to report stale hosts accurately.
+func (g *MemoryGateway) HostIsLive(hostID string, maxAge time.Duration) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	t, ok := g.hostHeartbeats[hostID]
+	if !ok {
+		return false
+	}
+	return g.now().UTC().Sub(t) <= maxAge
 }
 
 func (g *MemoryGateway) CreateJob(hostID, adapter, intent string, jobPolicy map[string]any) (model.Job, error) {
@@ -1010,6 +1078,15 @@ func reasonOrDefault(reason, fallback string) string {
 		return fallback
 	}
 	return reason
+}
+
+// generateSecret returns a cryptographically-random 32-byte hex string.
+func generateSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func jobEnvelopeSpec(jobPolicy map[string]any, host model.Host, signingID string) model.JobEnvelopeSpec {

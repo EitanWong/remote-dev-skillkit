@@ -3419,7 +3419,16 @@ func (a App) mcp(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
 	case "serve":
-		server := mcpstdio.NewServer(gateway.NewMemoryGateway())
+		// When any RDEV_*_GATEWAY_URL is configured, proxy host/job/artifact/audit
+		// MCP tool calls to that running gateway so that hosts registered through a
+		// foreground support-session process are visible to the MCP tools.
+		remoteURL, _ := supportsession.ConfiguredGatewayURLCandidate()
+		var server mcpstdio.Server
+		if remoteURL != "" {
+			server = mcpstdio.NewServerWithRemoteGateway(gateway.NewMemoryGateway(), remoteURL)
+		} else {
+			server = mcpstdio.NewServer(gateway.NewMemoryGateway())
+		}
 		return server.Serve(context.Background(), os.Stdin, a.Stdout)
 	default:
 		return fmt.Errorf("unknown mcp subcommand %q", args[0])
@@ -3852,7 +3861,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		}
 		registration.EnrollmentCertificate = &certificate
 	}
-	host, err := registerHost(ctx, gatewayClient, opts.GatewayURL, registration)
+	host, hostSecret, err := registerHost(ctx, gatewayClient, opts.GatewayURL, registration)
 	if err != nil {
 		return err
 	}
@@ -3910,7 +3919,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	if _, err := waitForHostActive(ctx, gatewayClient, opts.GatewayURL, host.ID, opts.ApprovalTimeout, opts.PollInterval); err != nil {
 		return err
 	}
-	processed, err := a.runHostJobs(ctx, opts, gatewayClient, host.ID, identity.Fingerprint())
+	processed, err := a.runHostJobs(ctx, opts, gatewayClient, host.ID, identity.Fingerprint(), hostSecret)
 	if err != nil {
 		return err
 	}
@@ -3953,12 +3962,17 @@ func gatewayHTTPClient(opts hostServeOptions) (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	var base http.RoundTripper
 	if tlsConfig == nil {
-		return http.DefaultClient, nil
+		base = http.DefaultTransport
+	} else {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConfig
+		base = transport
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = tlsConfig
-	return &http.Client{Transport: transport}, nil
+	return &http.Client{
+		Transport: retryingRoundTripper{Base: base, MaxRetries: 3},
+	}, nil
 }
 
 func gatewayTLSClientConfig(opts hostServeOptions) (*tls.Config, error) {
@@ -8457,54 +8471,134 @@ func doGatewayRequest(client *http.Client, req *http.Request) (*http.Response, e
 	return client.Do(req)
 }
 
-func registerHost(ctx context.Context, client *http.Client, gatewayURL string, registration model.HostRegistration) (model.Host, error) {
+// retryingRoundTripper wraps an http.RoundTripper and automatically retries
+// idempotent requests (GET, HEAD) on transient connection-level errors.
+// Cloudflare Quick Tunnels and similar reverse-proxy layers occasionally close
+// keepalive connections with a TLS EOF / "unexpected EOF" before the response
+// is fully delivered; a single retry is usually enough to succeed.
+type retryingRoundTripper struct {
+	Base       http.RoundTripper
+	MaxRetries int
+}
+
+func (r retryingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := r.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	maxRetries := r.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	// Only retry safe/idempotent methods — never blindly re-POST.
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		return base.RoundTrip(req)
+	}
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			case <-time.After(time.Duration(attempt*attempt) * 100 * time.Millisecond):
+			}
+		}
+		resp, err := base.RoundTrip(req)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if !isRetryableNetErr(err) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+// isRetryableNetErr returns true for transient low-level transport errors that
+// are safe to retry (EOF, connection-reset, broken-pipe).
+func isRetryableNetErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "use of closed network connection")
+}
+
+// A missing heartbeat for > 90 s causes the gateway to mark the host stale.
+func sendHeartbeat(ctx context.Context, client *http.Client, gatewayURL, hostID, hostSecret string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(gatewayURL, "/")+"/v1/hosts/"+url.PathEscape(hostID)+"/heartbeat",
+		nil)
+	if err != nil {
+		return err
+	}
+	if hostSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+hostSecret)
+	}
+	resp, err := doGatewayRequest(client, req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+func registerHost(ctx context.Context, client *http.Client, gatewayURL string, registration model.HostRegistration) (model.Host, string, error) {
 	body, err := json.Marshal(registration)
 	if err != nil {
-		return model.Host{}, err
+		return model.Host{}, "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/hosts/register", bytes.NewReader(body))
 	if err != nil {
-		return model.Host{}, err
+		return model.Host{}, "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return model.Host{}, err
+		return model.Host{}, "", err
 	}
 	defer resp.Body.Close()
 	var payload struct {
-		Host  model.Host `json:"host"`
-		Error string     `json:"error"`
+		Host       model.Host `json:"host"`
+		HostSecret string     `json:"host_secret"`
+		Error      string     `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return model.Host{}, err
+		return model.Host{}, "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if payload.Error == "" {
 			payload.Error = resp.Status
 		}
-		return model.Host{}, fmt.Errorf("register host failed: %s", payload.Error)
+		return model.Host{}, "", fmt.Errorf("register host failed: %s", payload.Error)
 	}
-	return payload.Host, nil
+	if strings.TrimSpace(payload.HostSecret) == "" {
+		return model.Host{}, "", fmt.Errorf("register host failed: missing host_secret")
+	}
+	return payload.Host, payload.HostSecret, nil
 }
 
-func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
-	return a.runHostJobs(ctx, opts, client, hostID, identityFingerprint)
+func (a App) pollAndRunDevJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
+	return a.runHostJobs(ctx, opts, client, hostID, identityFingerprint, hostSecret)
 }
 
-func (a App) runHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+func (a App) runHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
 	switch strings.TrimSpace(opts.Transport) {
 	case "auto":
-		return a.runAutoHostJobs(ctx, opts, client, hostID, identityFingerprint)
+		return a.runAutoHostJobs(ctx, opts, client, hostID, identityFingerprint, hostSecret)
 	case "wss":
-		return a.runWSSHostJobs(ctx, opts, client, hostID, identityFingerprint)
+		return a.runWSSHostJobs(ctx, opts, client, hostID, identityFingerprint, hostSecret)
 	default:
-		return a.runPollingHostJobs(ctx, opts, client, hostID, identityFingerprint)
+		return a.runPollingHostJobs(ctx, opts, client, hostID, identityFingerprint, hostSecret)
 	}
 }
 
-func (a App) runAutoHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
-	processed, err := a.runAutoHostJobsOnce(ctx, opts, client, hostID, identityFingerprint)
+func (a App) runAutoHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
+	processed, err := a.runAutoHostJobsOnce(ctx, opts, client, hostID, identityFingerprint, hostSecret)
 	if err == nil || processed > 0 || ctx.Err() != nil || len(opts.ManifestGatewayCandidates) == 0 {
 		return processed, err
 	}
@@ -8515,7 +8609,7 @@ func (a App) runAutoHostJobs(ctx context.Context, opts hostServeOptions, client 
 		}
 		next := opts
 		next.GatewayURL = gatewayURL
-		fallbackProcessed, fallbackErr := a.runAutoHostJobsOnce(ctx, next, client, hostID, identityFingerprint)
+		fallbackProcessed, fallbackErr := a.runAutoHostJobsOnce(ctx, next, client, hostID, identityFingerprint, hostSecret)
 		if fallbackErr == nil || fallbackProcessed > 0 || ctx.Err() != nil {
 			return fallbackProcessed, fallbackErr
 		}
@@ -8524,22 +8618,22 @@ func (a App) runAutoHostJobs(ctx context.Context, opts hostServeOptions, client 
 	return processed, err
 }
 
-func (a App) runAutoHostJobsOnce(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+func (a App) runAutoHostJobsOnce(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
 	wssOpts := opts
 	wssOpts.Transport = "wss"
-	processed, err := a.runWSSHostJobs(ctx, wssOpts, client, hostID, identityFingerprint)
+	processed, err := a.runWSSHostJobs(ctx, wssOpts, client, hostID, identityFingerprint, hostSecret)
 	if err == nil || processed > 0 || ctx.Err() != nil {
 		return processed, err
 	}
 	longPollOpts := opts
 	longPollOpts.Transport = "long-poll"
-	longPollProcessed, longPollErr := a.runPollingHostJobs(ctx, longPollOpts, client, hostID, identityFingerprint)
+	longPollProcessed, longPollErr := a.runPollingHostJobs(ctx, longPollOpts, client, hostID, identityFingerprint, hostSecret)
 	if longPollErr == nil || longPollProcessed > 0 || ctx.Err() != nil {
 		return longPollProcessed, longPollErr
 	}
 	pollOpts := opts
 	pollOpts.Transport = "poll"
-	pollProcessed, pollErr := a.runPollingHostJobs(ctx, pollOpts, client, hostID, identityFingerprint)
+	pollProcessed, pollErr := a.runPollingHostJobs(ctx, pollOpts, client, hostID, identityFingerprint, hostSecret)
 	if pollErr != nil {
 		return pollProcessed, fmt.Errorf("auto transport failed: wss: %v; long-poll: %v; poll: %w", err, longPollErr, pollErr)
 	}
@@ -8561,7 +8655,7 @@ func manifestGatewayFallbackURLs(candidates []model.JoinManifestGatewayCandidate
 	return out
 }
 
-func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
 	maxJobs := opts.MaxJobs
 	if maxJobs <= 0 {
 		maxJobs = 1
@@ -8595,6 +8689,25 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 	trust.WorkspaceLockStore = opts.WorkspaceLockStore
 	trust.CaptureRuntimeFixture = opts.CaptureRuntimeFixture
 	processed := 0
+	// Heartbeat goroutine — keeps the gateway's host liveness record fresh.
+	// Gateway marks a host stale after ~90 s of silence; we ping every 30 s.
+	const heartbeatInterval = 30 * time.Second
+	if hostSecret != "" {
+		heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+		defer stopHeartbeat()
+		go func() {
+			ticker := time.NewTicker(heartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatCtx.Done():
+					return
+				case <-ticker.C:
+					_ = sendHeartbeat(heartbeatCtx, client, opts.GatewayURL, hostID, hostSecret)
+				}
+			}
+		}()
+	}
 	for processed < maxJobs {
 		wait := time.Duration(0)
 		if transport == "long-poll" {
@@ -8606,7 +8719,7 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 				return processed, err
 			}
 		}
-		job, found, err := fetchNextJob(ctx, client, opts.GatewayURL, hostID, wait)
+		job, found, err := fetchNextJob(ctx, client, opts.GatewayURL, hostID, hostSecret, wait)
 		if err != nil {
 			return processed, err
 		}
@@ -8641,12 +8754,12 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 		if err != nil {
 			if canceledByGateway.Load() {
 				if result.ArtifactContent != "" {
-					if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); appendErr != nil {
+					if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, hostSecret, job.ID, result.ArtifactContent); appendErr != nil {
 						return processed, appendErr
 					}
 				}
 				if result.RuntimeFixtureContent != "" {
-					if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
+					if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, hostSecret, job.ID, result.RuntimeFixtureContent); appendErr != nil {
 						return processed, appendErr
 					}
 				}
@@ -8656,21 +8769,21 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 			if ctx.Err() != nil {
 				return processed, ctx.Err()
 			}
-			if _, failErr := failJob(ctx, client, opts.GatewayURL, hostID, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
+			if _, failErr := failJob(ctx, client, opts.GatewayURL, hostID, hostSecret, job.ID, err.Error(), result.ArtifactContent); failErr != nil {
 				return processed, fmt.Errorf("%v; additionally failed to report job failure: %w", err, failErr)
 			}
 			if result.RuntimeFixtureContent != "" {
-				if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); appendErr != nil {
+				if _, appendErr := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, hostSecret, job.ID, result.RuntimeFixtureContent); appendErr != nil {
 					return processed, fmt.Errorf("%v; additionally failed to append runtime fixture: %w", err, appendErr)
 				}
 			}
 			return processed, err
 		}
-		if _, err := completeJob(ctx, client, opts.GatewayURL, hostID, job.ID, result.ArtifactContent); err != nil {
+		if _, err := completeJob(ctx, client, opts.GatewayURL, hostID, hostSecret, job.ID, result.ArtifactContent); err != nil {
 			return processed, err
 		}
 		if result.RuntimeFixtureContent != "" {
-			if _, err := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, job.ID, result.RuntimeFixtureContent); err != nil {
+			if _, err := appendJobArtifact(ctx, client, opts.GatewayURL, hostID, hostSecret, job.ID, result.RuntimeFixtureContent); err != nil {
 				return processed, err
 			}
 		}
@@ -8679,7 +8792,7 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 	return processed, nil
 }
 
-func (a App) runWSSHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint string) (int, error) {
+func (a App) runWSSHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
 	maxJobs := opts.MaxJobs
 	if maxJobs <= 0 {
 		maxJobs = 1
@@ -8695,6 +8808,9 @@ func (a App) runWSSHostJobs(ctx context.Context, opts hostServeOptions, client *
 	wsURL, err := wsproto.HTTPToWebSocketURL(opts.GatewayURL, "/v1/ws/hosts/"+url.PathEscape(hostID))
 	if err != nil {
 		return 0, err
+	}
+	if strings.TrimSpace(hostSecret) != "" {
+		wsURL += "?host_secret=" + url.QueryEscape(hostSecret)
 	}
 	tlsConfig, err := gatewayTLSClientConfig(opts)
 	if err != nil {
@@ -9251,7 +9367,7 @@ func fetchTrustBundle(ctx context.Context, client *http.Client, gatewayURL, trus
 	return payload.Trust, nil
 }
 
-func fetchNextJob(ctx context.Context, client *http.Client, gatewayURL, hostID string, wait time.Duration) (model.Job, bool, error) {
+func fetchNextJob(ctx context.Context, client *http.Client, gatewayURL, hostID, hostSecret string, wait time.Duration) (model.Job, bool, error) {
 	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/hosts/" + url.PathEscape(hostID) + "/jobs/next"
 	if wait > 0 {
 		waitMS := wait.Milliseconds()
@@ -9265,6 +9381,9 @@ func fetchNextJob(ctx context.Context, client *http.Client, gatewayURL, hostID s
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return model.Job{}, false, err
+	}
+	if hostSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+hostSecret)
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
@@ -9447,7 +9566,7 @@ func fetchAuditEvents(ctx context.Context, gatewayURL string) ([]model.AuditEven
 	return payload.Events, nil
 }
 
-func completeJob(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
+func completeJob(ctx context.Context, client *http.Client, gatewayURL, hostID, hostSecret, jobID, artifactContent string) (model.Job, error) {
 	body, err := json.Marshal(map[string]string{
 		"host_id":          hostID,
 		"artifact_content": artifactContent,
@@ -9460,6 +9579,9 @@ func completeJob(ctx context.Context, client *http.Client, gatewayURL, hostID, j
 		return model.Job{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if hostSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+hostSecret)
+	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, err
@@ -9481,7 +9603,7 @@ func completeJob(ctx context.Context, client *http.Client, gatewayURL, hostID, j
 	return payload.Job, nil
 }
 
-func failJob(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID, reason, artifactContent string) (model.Job, error) {
+func failJob(ctx context.Context, client *http.Client, gatewayURL, hostID, hostSecret, jobID, reason, artifactContent string) (model.Job, error) {
 	body, err := json.Marshal(map[string]string{
 		"host_id":          hostID,
 		"reason":           reason,
@@ -9495,6 +9617,9 @@ func failJob(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID
 		return model.Job{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if hostSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+hostSecret)
+	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, err
@@ -9516,7 +9641,7 @@ func failJob(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID
 	return payload.Job, nil
 }
 
-func appendJobArtifact(ctx context.Context, client *http.Client, gatewayURL, hostID, jobID, artifactContent string) (model.Job, error) {
+func appendJobArtifact(ctx context.Context, client *http.Client, gatewayURL, hostID, hostSecret, jobID, artifactContent string) (model.Job, error) {
 	body, err := json.Marshal(map[string]string{
 		"host_id":          hostID,
 		"artifact_content": artifactContent,
@@ -9529,6 +9654,9 @@ func appendJobArtifact(ctx context.Context, client *http.Client, gatewayURL, hos
 		return model.Job{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if hostSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+hostSecret)
+	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return model.Job{}, err

@@ -4,6 +4,30 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.31-dev
+
+Current phase: fresh-Agent and hosted-gateway reliability hardening. This slice
+fixes MCP gateway visibility, host-side authentication, Windows output
+encoding, and retry behavior for tunnel-backed gateways.
+
+### Fixed
+
+- Made `rdev mcp serve` proxy host, job, approval, artifact, and audit tool
+  calls to a configured gateway URL (`RDEV_HOSTED_GATEWAY_URL` or another
+  `RDEV_*_GATEWAY_URL`) instead of reading an empty local in-memory gateway.
+- Added per-host `host_secret` issuance on registration and required it for
+  host-side job claim, heartbeat, and WSS upgrade requests. Host registration
+  now fails closed client-side when a gateway response omits the secret.
+- Added host heartbeat endpoint/client pings so gateways can track host
+  liveness during polling sessions.
+- Added gateway-side shell/PowerShell policy preflight for job creation so
+  invalid jobs are rejected with `422 policy_violation` before they become
+  queued ghost jobs.
+- Forced UTF-8 output handling for Windows `cmd.exe /c` and PowerShell adapter
+  runs to avoid localized output corruption in artifacts.
+- Added retrying HTTP transports for idempotent gateway GET/HEAD requests in
+  CLI host clients and MCP remote gateway proxy clients.
+
 ## 0.1.30-dev
 
 Current phase: production protocol foundations and adapter surface layer. Added

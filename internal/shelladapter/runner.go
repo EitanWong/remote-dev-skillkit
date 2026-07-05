@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -92,7 +93,10 @@ func ExecuteContext(ctx context.Context, spec Spec) (Result, error) {
 
 	started := time.Now().UTC()
 	limiter := newOutputLimiter(maxOutputBytes)
-	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
+	// On Windows, force UTF-8 output so that localised strings (e.g. the output
+	// of `ver`) are captured correctly instead of appearing as garbled bytes.
+	argv := windowsForceUTF8Argv(spec.Argv)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workspaceRoot
 	cmd.Stdout = limiter.stdoutWriter()
 	cmd.Stderr = limiter.stderrWriter()
@@ -138,6 +142,40 @@ func (r Result) ArtifactContent() string {
 	return string(content)
 }
 
+// windowsForceUTF8Argv rewrites a cmd.exe invocation on Windows so that
+// `chcp 65001 >nul 2>&1 & ` is prepended to the user command string.
+// This sets the console code page to UTF-8 before any output is produced,
+// which prevents localised strings (e.g. `ver` on Chinese Windows) from
+// being captured as garbled bytes in the artifact.
+//
+// Only applies when:
+//   - runtime.GOOS == "windows"
+//   - argv[0] is "cmd" or "cmd.exe"
+//   - argv contains a /c or /C flag followed by a command string
+//
+// For PowerShell adapters the encoding is handled separately via
+// [Console]::OutputEncoding in the powershelladapter package.
+func windowsForceUTF8Argv(argv []string) []string {
+	if runtime.GOOS != "windows" || len(argv) < 3 {
+		return argv
+	}
+	exe := strings.ToLower(strings.TrimSuffix(filepath.Base(argv[0]), ".exe"))
+	if exe != "cmd" {
+		return argv
+	}
+	for i := 1; i < len(argv); i++ {
+		if strings.EqualFold(argv[i], "/c") && i+1 < len(argv) {
+			result := make([]string, len(argv))
+			copy(result, argv)
+			// Prepend chcp 65001 redirect so it does not pollute stdout/stderr,
+			// then chain the original command with &.
+			result[i+1] = "chcp 65001 >nul 2>&1 & " + result[i+1]
+			return result
+		}
+	}
+	return argv
+}
+
 func (r Result) Artifact() ResultArtifact {
 	redactor := newRedactor()
 	argv := make([]string, 0, len(r.Argv))
@@ -170,6 +208,14 @@ func canonicalWorkspace(root string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", fmt.Errorf("workspace root is required")
 	}
+	// On Windows, a relative path like "." resolves to the process CWD, which
+	// may be a protected system directory (e.g. C:\Windows\System32) when rdev
+	// was started by a service or a non-interactive session.  Substitute a safe
+	// default before calling filepath.Abs so that subsequent write-scope checks
+	// are anchored to a location the user can actually write to.
+	if runtime.GOOS == "windows" {
+		root = safeWindowsWorkspaceRoot(root)
+	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return "", fmt.Errorf("resolve workspace root: %w", err)
@@ -186,6 +232,41 @@ func canonicalWorkspace(root string) (string, error) {
 		return "", fmt.Errorf("workspace root must be a directory")
 	}
 	return canonical, nil
+}
+
+// safeWindowsWorkspaceRoot returns a safe workspace root on Windows.
+// If the given root (after Abs resolution) would land in a protected system
+// directory, it substitutes %USERPROFILE% (or %TEMP% as a fallback) so that
+// file operations are not anchored inside System32 or similar locations.
+func safeWindowsWorkspaceRoot(root string) string {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		abs = root
+	}
+	lower := strings.ToLower(abs)
+	// Build the list of protected prefixes from well-known Windows env vars.
+	// Empty values are skipped (they're absent in some minimal environments).
+	candidates := []string{
+		os.Getenv("WINDIR"),
+		os.Getenv("SystemRoot"),
+		filepath.Join(os.Getenv("SystemDrive"), "Windows"),
+		filepath.Join(os.Getenv("SystemDrive"), "Program Files"),
+		filepath.Join(os.Getenv("SystemDrive"), "Program Files (x86)"),
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if strings.HasPrefix(lower, strings.ToLower(candidate)) {
+			// Use the user's home directory as a safe fallback.
+			if home := os.Getenv("USERPROFILE"); home != "" {
+				return home
+			}
+			return os.TempDir()
+		}
+	}
+	// Root does not look like a system directory; return as-is.
+	return root
 }
 
 func verifyWriteScope(root string, scopes []string) error {

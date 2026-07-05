@@ -76,7 +76,12 @@ func ExecuteContext(ctx context.Context, spec Spec) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	argv := []string{powershellCommand, "-NoProfile", "-NonInteractive", "-Command", command}
+	// Prepend a UTF-8 console encoding directive so that localised strings
+	// (e.g. Chinese Windows `ver` output) are captured without garbling.
+	// $OutputEncoding sets the encoding for pipeline bytes; ConsoleEncoding
+	// sets it for native stdout/stderr captured by rdev.
+	const utf8Prefix = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; "
+	argv := []string{powershellCommand, "-NoProfile", "-NonInteractive", "-Command", utf8Prefix + command}
 	execution, err := shelladapter.ExecuteContext(ctx, shelladapter.Spec{
 		WorkspaceRoot:      spec.WorkspaceRoot,
 		WriteScope:         spec.WriteScope,
