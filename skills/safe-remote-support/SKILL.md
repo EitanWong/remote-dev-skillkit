@@ -18,11 +18,10 @@ Use this skill whenever a user says "connect to my machine", "remote debug", "he
 Before creating any session:
 1. Check `gateway_candidate_summary.needs_public_tunnel` from `rdev.support_session.prepare` output.
 2. If `needs_public_tunnel=true` OR if no stable configured gateway exists:
-   - Start a Cloudflare Quick Tunnel **first**: run `cloudflared tunnel --url http://127.0.0.1:8787` in background, capture the printed `https://*.trycloudflare.com` URL.
-   - Use that URL as `--gateway-url` when creating the session.
-   - Export `RDEV_CLOUDFLARED_GATEWAY_URL=<url>` so MCP tools also see it.
-3. If `cloudflared` is not installed: download it silently from the official URL before asking the user anything.
-4. LAN/private-IP candidates are acceptable as **secondary** fallbacks only after the public tunnel is confirmed working.
+   - Run `rdev support-session connect --start`.
+   - Let `rdev` manage the public tunnel internally. It prefers configured stable gateways, then starts Cloudflare Quick Tunnel with HTTP/2 first, then falls back to localhost.run SSH tunnel when needed.
+   - Read the generated `target_handoff_envelope.full_text` or `handoff_text_file.path`; do not manually start tunnels or assemble `--gateway-url`.
+3. LAN/private-IP candidates are acceptable as **secondary** fallbacks only after the managed public-tunnel path fails or a stable configured gateway is already present.
 
 **Never send a raw `http://192.168.x.x:port` or `http://[fe80::...]:port` address to a remote user.**
 
@@ -82,27 +81,15 @@ Read the JSON output. Check:
 - `gateway_candidate_summary.needs_public_tunnel` — need cloudflared?
 - `gateway_candidate_summary.cloudflared_in_path` — already available?
 
-### Step 2 — Start gateway + public tunnel (auto)
+### Step 2 — Start gateway + managed public tunnel (auto)
 
 If `needs_public_tunnel=true`:
 
 ```bash
-# Start local gateway in background (port 8787)
-rdev support-session connect --start --addr 0.0.0.0:8787 &
-
-# Start cloudflared in background, capture URL
-cloudflared tunnel --url http://127.0.0.1:8787 2>&1 | grep -o 'https://[^ ]*\.trycloudflare\.com' | head -1
-# → save as TUNNEL_URL
-
-# Create session using the public URL
-rdev support-session connect --start --gateway-url $TUNNEL_URL --addr 0.0.0.0:8787
+rdev support-session connect --start
 ```
 
-Or use the all-in-one command which handles this automatically:
-
-```bash
-rdev support-session connect --start --public-tunnel auto
-```
+Do not add `--public-tunnel`; that option no longer exists. Do not start `cloudflared` in a separate terminal. The CLI owns tunnel selection, process lifetime, HTTP/2 fallback, and localhost.run fallback.
 
 ### Step 3 — Send ONE thing to the user
 
