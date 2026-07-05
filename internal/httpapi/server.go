@@ -805,6 +805,11 @@ if ! command -v rdev >/dev/null 2>&1; then
   mkdir -p "${TMPDIR:-/tmp}/rdev-connection-entry"
   out="${TMPDIR:-/tmp}/rdev-connection-entry/rdev"
   echo "Downloading verified rdev helper ${asset}..."
+  http_status="$(curl -fsS -o /dev/null -w "%%{http_code}" %s"/${asset}" 2>/dev/null || true)"
+  if [ "$http_status" != "200" ]; then
+    echo "rdev helper binary not available at gateway (HTTP $http_status) — the gateway may still be starting. Wait a moment and retry." >&2
+    exit 127
+  fi
   curl -fsSL %s"/${asset}" -o "$out"
   expected="$(curl -fsSL %s"/${asset}.sha256")"
   actual="$(shasum -a 256 "$out" | awk '{print $1}')"
@@ -819,8 +824,33 @@ else
   rdev_cmd="$(command -v rdev)"
 fi
 echo "Starting visible Remote Dev Skillkit host session..."
-exec "$rdev_cmd" host serve --manifest-url %s%s --transport auto --once=false
-`, assetBase, assetBase, shellQuote(manifestURL), rootArg)
+# On macOS, run caffeinate in the background to prevent display/system sleep
+# while the rdev session is active. Kill it when the runner exits.
+rdev_caffeinate_pid=""
+if command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -si &
+  rdev_caffeinate_pid=$!
+  echo "[rdev] Sleep prevention enabled via caffeinate (pid $rdev_caffeinate_pid)"
+fi
+rdev_max_retries=5
+rdev_retry_delay=5
+rdev_attempt=0
+while true; do
+  "$rdev_cmd" host serve --manifest-url %s%s --transport auto --once=false
+  rdev_exit=$?
+  rdev_attempt=$((rdev_attempt + 1))
+  echo "[rdev] host process exited with code $rdev_exit"
+  if [ $rdev_exit -eq 0 ] || [ $rdev_attempt -gt $rdev_max_retries ]; then
+    break
+  fi
+  echo "[rdev] Retrying (attempt $rdev_attempt of $rdev_max_retries) after ${rdev_retry_delay}s..."
+  sleep $rdev_retry_delay
+done
+if [ -n "$rdev_caffeinate_pid" ]; then
+  kill "$rdev_caffeinate_pid" 2>/dev/null || true
+fi
+exit $rdev_exit
+`, assetBase, assetBase, assetBase, shellQuote(manifestURL), rootArg)
 }
 
 func (s Server) writePowerShellBootstrap(w http.ResponseWriter, r *http.Request, manifestURL, manifestRootPublicKey string) {
@@ -844,8 +874,13 @@ if ($rdevCmd) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   $rdevPath = Join-Path $dir "rdev.exe"
   Write-Host "Downloading verified rdev helper $asset..."
-  Invoke-WebRequest -Uri ('%s/' + $asset) -OutFile $rdevPath
-  $expected = (Invoke-WebRequest -Uri ('%s/' + $asset + '.sha256')).Content.Trim()
+  try {
+    Invoke-WebRequest -Uri ('%s/' + $asset) -OutFile $rdevPath -UseBasicParsing -ErrorAction Stop
+  } catch {
+    $errMsg = $_.Exception.Message
+    throw ("Failed to download rdev helper from gateway. The asset binary may not be configured yet — ensure the gateway has finished starting, then run the command again. Detail: " + $errMsg)
+  }
+  $expected = (Invoke-WebRequest -Uri ('%s/' + $asset + '.sha256') -UseBasicParsing).Content.Trim()
   $actual = (Get-FileHash -Algorithm SHA256 -Path $rdevPath).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) {
     Remove-Item -Force $rdevPath -ErrorAction SilentlyContinue
@@ -853,7 +888,39 @@ if ($rdevCmd) {
   }
 }
 Write-Host "Starting visible Remote Dev Skillkit host session..."
-& $rdevPath host serve --manifest-url '%s'%s --transport auto --once=false
+# Prevent Windows from sleeping or locking the screen while rdev is running.
+# SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) keeps the CPU
+# awake so the runner can continue to poll for and execute jobs.
+try {
+  Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class RdevSleepPrevention {
+  [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);
+  public const uint ES_CONTINUOUS      = 0x80000000u;
+  public const uint ES_SYSTEM_REQUIRED = 0x00000001u;
+}
+'@ -ErrorAction SilentlyContinue
+  [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS -bor [RdevSleepPrevention]::ES_SYSTEM_REQUIRED)
+  Write-Host "[rdev] Sleep prevention enabled (SetThreadExecutionState)"
+} catch {
+  Write-Host "[rdev] Sleep prevention unavailable — keep this window active to avoid disconnection"
+}
+$rdevMaxRetries = 5
+$rdevRetryDelaySec = 5
+$rdevAttempt = 0
+do {
+  if ($rdevAttempt -gt 0) {
+    Write-Host ("[rdev] Retrying host registration (attempt $($rdevAttempt + 1) of $($rdevMaxRetries + 1)) after ${rdevRetryDelaySec}s...")
+    Start-Sleep -Seconds $rdevRetryDelaySec
+  }
+  & $rdevPath host serve --manifest-url '%s'%s --transport auto --once=false
+  $rdevExitCode = $LASTEXITCODE
+  $rdevAttempt++
+  Write-Host "[rdev] host process exited with code $rdevExitCode"
+} while ($rdevExitCode -ne 0 -and $rdevAttempt -le $rdevMaxRetries)
+# Restore normal sleep policy before exiting.
+try { [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS) } catch { }
+exit $rdevExitCode
 `, assetBase, assetBase, powerShellSingleQuoteValue(manifestURL), rootArg)
 }
 
@@ -961,11 +1028,17 @@ func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hosts := s.Gateway.HostsForTicketCode(ticketCode, "")
-	status := supportsession.BuildStatus(supportsession.StatusOptions{
+	opts := supportsession.StatusOptions{
 		TicketCode: ticketCode,
 		Hosts:      hosts,
 		Locale:     r.URL.Query().Get("locale"),
-	})
+	}
+	// Attach ticket expiry when the ticket is found so the status response
+	// includes ticket_expires_at and ticket_expires_in_seconds.
+	if ticket, ok := s.Gateway.TicketForCode(ticketCode); ok {
+		opts.Ticket = &ticket
+	}
+	status := supportsession.BuildStatus(opts)
 	writeJSON(w, http.StatusOK, status)
 }
 

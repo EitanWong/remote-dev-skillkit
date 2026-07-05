@@ -493,6 +493,24 @@ func (g *MemoryGateway) Host(hostID string) (model.Host, error) {
 	return host, nil
 }
 
+// TicketForCode looks up a ticket by its join code. Returns (ticket, true) when
+// found regardless of ticket status, or (zero, false) when the code is unknown.
+func (g *MemoryGateway) TicketForCode(ticketCode string) (model.Ticket, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ticketCode = strings.TrimSpace(ticketCode)
+	if ticketCode == "" {
+		return model.Ticket{}, false
+	}
+	ticketID, ok := g.codeIndex[ticketCode]
+	if !ok {
+		return model.Ticket{}, false
+	}
+	ticket, ok := g.tickets[ticketID]
+	return ticket, ok
+}
+
 // GenerateHostSecret creates a random 32-byte hex secret for a host and stores
 // it internally. The secret is returned once at registration and must be
 // presented by the host process on all subsequent host-side requests

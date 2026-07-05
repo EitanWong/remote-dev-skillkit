@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
@@ -347,6 +348,9 @@ type StatusOptions struct {
 	TicketCode string
 	Hosts      []model.Host
 	Locale     string
+	// Ticket, when non-nil, adds ticket expiry information to the status
+	// response so agents and users can see how much time remains.
+	Ticket *model.Ticket
 }
 
 type CreatedOptions struct {
@@ -2724,7 +2728,7 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	} else if len(revoked) > 0 {
 		status = "revoked"
 	}
-	return map[string]any{
+	out := map[string]any{
 		"schema_version": StatusSchemaVersion,
 		"ok":             connected || len(pending) > 0 || waiting,
 		"ticket_code":    ticketCode,
@@ -2761,6 +2765,19 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			"total":   len(hosts),
 		},
 	}
+	// Attach ticket expiry when the caller provides the ticket so agents and
+	// users can see how much time remains without having to infer it.
+	if opts.Ticket != nil {
+		now := time.Now().UTC()
+		remainingSec := int(opts.Ticket.ExpiresAt.Sub(now).Seconds())
+		if remainingSec < 0 {
+			remainingSec = 0
+		}
+		out["ticket_expires_at"] = opts.Ticket.ExpiresAt.UTC().Format(time.RFC3339)
+		out["ticket_expires_in_seconds"] = remainingSec
+		out["ticket_status"] = string(opts.Ticket.Status)
+	}
+	return out
 }
 
 type ConnectedNextStepsOptions struct {

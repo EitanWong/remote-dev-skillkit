@@ -63,6 +63,47 @@ If `rdev` is not found in PATH:
 
 When a session uses a remote gateway (Cloudflare URL), pass `"gateway_url": "<cloudflare-url>"` as an argument to every call to `rdev.hosts.*`, `rdev.jobs.*`, `rdev.artifacts.*`, `rdev.audit.query`. The MCP server may be running a local in-memory gateway; per-call `gateway_url` overrides it.
 
+### Rule 6 — Find executables with `command -v`, not `find`
+
+Do NOT use `find` to locate executables. Use:
+- `command -v rdev` or `which rdev` (shell)
+- Known install paths: `~/go/bin/rdev`, `./work/rdev-support-session/bin/rdev-<os>-<arch>`
+- `Get-Command rdev -ErrorAction SilentlyContinue` (PowerShell)
+
+`find` scans the entire filesystem and hangs on cache directories. It is never appropriate for locating a known executable.
+
+### Rule 7 — Discover CLI parameters before using them
+
+Before calling any `rdev` subcommand with unfamiliar flags:
+1. Run `rdev <subcommand> --help` and read the output.
+2. Only use flags that appear in the `--help` output.
+3. Never invent flag names (e.g. `--public-tunnel` does not exist; the CLI manages tunnels internally via `connect --start`).
+
+### Rule 8 — MCP tool prerequisites must be satisfied before calling
+
+Before calling any MCP tool that requires a running gateway:
+1. Verify the local gateway is running: `curl -fsS http://127.0.0.1:8787/healthz`
+2. If it returns an error, start the gateway first with `rdev support-session connect --start`.
+3. Never call `rdev.support_session.create` or `rdev.hosts.*` when no gateway URL is available — the call will fail with a missing-parameter error.
+
+### Rule 9 — Send `target_handoff_envelope.full_text`, not a bare URL
+
+When the session is ready, deliver exactly `target_handoff_envelope.full_text` (or `handoff_text_file.path` content) to the target-side human. This already contains the PowerShell command in `irm 'URL' | iex` form. Do NOT:
+- Send a bare `https://...trycloudflare.com/join/XXXX` link alone (the user may not know to run it)
+- Extract the URL and reconstruct a custom command
+- Use `powershell -EncodedCommand` — Base64 blobs are truncated by chat interfaces
+
+### Rule 10 — Status polling has a 3-minute deadline; then diagnose
+
+After sending the handoff:
+1. Poll with `rdev.support_session.status wait=true` or watch `status_file.path`.
+2. **After 3 minutes without `connected=true`**, stop polling and switch to diagnosis mode:
+   - Was a public-tunnel URL sent, or a LAN IP?
+   - Is the gateway still running? (`curl http://127.0.0.1:8787/healthz`)
+   - Did the target machine go to sleep or lock?
+   - Is the Cloudflare tunnel still alive? (check process)
+3. Present the user with specific, actionable next steps — not another "still waiting" message.
+
 ---
 
 ## Workflow (5 steps, no branching for the user)
