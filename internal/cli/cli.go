@@ -1486,6 +1486,7 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 	case "scaffold-post-release-download":
 		fs := flag.NewFlagSet("acceptance scaffold-post-release-download", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
+		postReleaseInstallDir := fs.String("post-release-install-dir", "", "directory containing post-release-install-plan.json and post-release-install-verification.json")
 		plan := fs.String("plan", "", "post-release-install-plan.json from scripts/github/plan-post-release-install.sh")
 		planVerification := fs.String("plan-verification", "", "rdev.post-release-install-verification.v1 output from verify-post-release-install-plan.sh")
 		out := fs.String("out", "", "empty output directory for post-release download evidence scaffold")
@@ -1495,12 +1496,13 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.acceptanceScaffoldPostReleaseDownload(acceptance.PostReleaseDownloadScaffoldOptions{
-			PlanPath:             *plan,
-			PlanVerificationPath: *planVerification,
-			OutDir:               *out,
-			CreatePlaceholders:   *createPlaceholders,
-			Force:                *force,
-			Now:                  time.Now(),
+			PostReleaseInstallDir: *postReleaseInstallDir,
+			PlanPath:              *plan,
+			PlanVerificationPath:  *planVerification,
+			OutDir:                *out,
+			CreatePlaceholders:    *createPlaceholders,
+			Force:                 *force,
+			Now:                   time.Now(),
 		})
 	case "post-release-evidence-status":
 		fs := flag.NewFlagSet("acceptance post-release-evidence-status", flag.ContinueOnError)
@@ -8384,7 +8386,7 @@ Usage:
   rdev acceptance scaffold-evidence --hosted-provider-package hosted-provider --out hosted-runtime-evidence-input
   rdev acceptance scaffold-evidence --relay-adapter-package relay-adapter --out relay-evidence-input
   rdev acceptance evidence-status --scaffold hosted-runtime-evidence-input
-  rdev acceptance scaffold-post-release-download --plan post-release-install/post-release-install-plan.json --plan-verification post-release-verification.json --out post-release-download-evidence-input
+  rdev acceptance scaffold-post-release-download --post-release-install-dir post-release-install --out post-release-download-evidence-input
   rdev acceptance post-release-evidence-status --scaffold post-release-download-evidence-input
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --approval-probes-dir approval-probes

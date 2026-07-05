@@ -87,7 +87,7 @@
 - [ ] Create GitHub release.
 - [ ] Verify release downloads.
 - [ ] Run generated post-release verification scripts for macOS, Linux, Windows, and Skillkit where applicable.
-- [ ] Scaffold public download evidence with `rdev acceptance scaffold-post-release-download --plan <post-release-install-plan.json> --plan-verification <post-release-install-verification.json> --out <post-release-scaffold>`.
+- [ ] Scaffold public download evidence with `rdev acceptance scaffold-post-release-download --post-release-install-dir <post-release-install-dir> --out <post-release-scaffold>`. Use explicit `--plan` / `--plan-verification` only for reviewed overrides.
 - [ ] Store real post-release evidence in a directory using these names before packaging:
   - `<target-slug>-transcript.txt`, for example `linux-amd64-transcript.txt`;
   - `<target-slug>-candidate-verify.json`, produced by `rdev release verify-candidate` and containing `ok=true`;

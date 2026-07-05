@@ -3,6 +3,7 @@ package acceptance
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,11 +13,10 @@ func TestScaffoldAndStatusPostReleaseDownloadEvidence(t *testing.T) {
 	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64", "windows/amd64"}, true)
 	out := filepath.Join(root, "post-release-scaffold")
 	scaffold, err := ScaffoldPostReleaseDownloadEvidence(PostReleaseDownloadScaffoldOptions{
-		PlanPath:             fixture.plan,
-		PlanVerificationPath: fixture.planVerification,
-		OutDir:               out,
-		CreatePlaceholders:   true,
-		Now:                  time.Date(2026, 7, 5, 1, 2, 3, 0, time.UTC),
+		PostReleaseInstallDir: filepath.Dir(fixture.plan),
+		OutDir:                out,
+		CreatePlaceholders:    true,
+		Now:                   time.Date(2026, 7, 5, 1, 2, 3, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +56,28 @@ func TestScaffoldAndStatusPostReleaseDownloadEvidence(t *testing.T) {
 	}
 	if !status.ReadyForPackaging || !status.OK || status.RequiredReady != status.RequiredTotal || status.PlaceholderCount != 0 {
 		t.Fatalf("real evidence should be ready: %#v", status)
+	}
+}
+
+func TestScaffoldPostReleaseDownloadInputValidation(t *testing.T) {
+	root := t.TempDir()
+	fixture := writePostReleaseDownloadFixture(t, root, []string{"linux/amd64"}, false)
+	_, err := ScaffoldPostReleaseDownloadEvidence(PostReleaseDownloadScaffoldOptions{
+		OutDir: filepath.Join(root, "missing-input"),
+		Now:    time.Date(2026, 7, 5, 1, 2, 3, 0, time.UTC),
+	})
+	if err == nil || !strings.Contains(err.Error(), "post-release install dir or explicit plan and plan verification is required") {
+		t.Fatalf("expected missing input error, got %v", err)
+	}
+
+	_, err = ScaffoldPostReleaseDownloadEvidence(PostReleaseDownloadScaffoldOptions{
+		PostReleaseInstallDir: filepath.Dir(fixture.plan),
+		PlanPath:              fixture.plan,
+		OutDir:                filepath.Join(root, "multiple-inputs"),
+		Now:                   time.Date(2026, 7, 5, 1, 2, 3, 0, time.UTC),
+	})
+	if err == nil || !strings.Contains(err.Error(), "provide either post-release install dir") {
+		t.Fatalf("expected mutually exclusive input error, got %v", err)
 	}
 }
 

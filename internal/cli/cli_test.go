@@ -9060,8 +9060,7 @@ func TestAcceptancePackagePostReleaseDownload(t *testing.T) {
 	app := NewApp(&scaffoldStdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "scaffold-post-release-download",
-		"--plan", fixture.plan,
-		"--plan-verification", fixture.planVerification,
+		"--post-release-install-dir", filepath.Dir(fixture.plan),
 		"--out", scaffoldDir,
 		"--create-placeholders",
 	}); err != nil {
@@ -9179,8 +9178,7 @@ func TestAcceptanceScaffoldPostReleaseDownload(t *testing.T) {
 	app := NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "scaffold-post-release-download",
-		"--plan", fixture.plan,
-		"--plan-verification", fixture.planVerification,
+		"--post-release-install-dir", filepath.Dir(fixture.plan),
 		"--out", out,
 		"--create-placeholders",
 	}); err != nil {
@@ -9299,8 +9297,7 @@ func writePostReleasePackageForCLIIndexTest(t *testing.T, root string) string {
 	app := NewApp(&scaffoldStdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "scaffold-post-release-download",
-		"--plan", fixture.plan,
-		"--plan-verification", fixture.planVerification,
+		"--post-release-install-dir", filepath.Dir(fixture.plan),
 		"--out", scaffoldDir,
 		"--create-placeholders",
 	}); err != nil {

@@ -14,12 +14,13 @@ const PostReleaseDownloadScaffoldSchemaVersion = "rdev.post-release-download-evi
 const PostReleaseDownloadStatusSchemaVersion = "rdev.post-release-download-evidence-status.v1"
 
 type PostReleaseDownloadScaffoldOptions struct {
-	PlanPath             string
-	PlanVerificationPath string
-	OutDir               string
-	CreatePlaceholders   bool
-	Force                bool
-	Now                  time.Time
+	PostReleaseInstallDir string
+	PlanPath              string
+	PlanVerificationPath  string
+	OutDir                string
+	CreatePlaceholders    bool
+	Force                 bool
+	Now                   time.Time
 }
 
 type PostReleaseDownloadStatusOptions struct {
@@ -90,15 +91,14 @@ type PostReleaseCommands struct {
 }
 
 func ScaffoldPostReleaseDownloadEvidence(opts PostReleaseDownloadScaffoldOptions) (PostReleaseDownloadEvidenceScaffold, error) {
-	if strings.TrimSpace(opts.PlanPath) == "" {
-		return PostReleaseDownloadEvidenceScaffold{}, fmt.Errorf("post-release install plan is required")
-	}
-	if strings.TrimSpace(opts.PlanVerificationPath) == "" {
-		return PostReleaseDownloadEvidenceScaffold{}, fmt.Errorf("post-release install plan verification is required")
-	}
 	if strings.TrimSpace(opts.OutDir) == "" {
 		return PostReleaseDownloadEvidenceScaffold{}, fmt.Errorf("output directory is required")
 	}
+	resolved, err := resolvePostReleaseScaffoldInput(opts)
+	if err != nil {
+		return PostReleaseDownloadEvidenceScaffold{}, err
+	}
+	opts = resolved
 	outDir, err := filepath.Abs(opts.OutDir)
 	if err != nil {
 		return PostReleaseDownloadEvidenceScaffold{}, err
@@ -215,6 +215,41 @@ func ScaffoldPostReleaseDownloadEvidence(opts PostReleaseDownloadScaffoldOptions
 		return PostReleaseDownloadEvidenceScaffold{}, err
 	}
 	return scaffold, nil
+}
+
+func resolvePostReleaseScaffoldInput(opts PostReleaseDownloadScaffoldOptions) (PostReleaseDownloadScaffoldOptions, error) {
+	hasDir := strings.TrimSpace(opts.PostReleaseInstallDir) != ""
+	hasPlan := strings.TrimSpace(opts.PlanPath) != ""
+	hasVerification := strings.TrimSpace(opts.PlanVerificationPath) != ""
+	if hasDir && (hasPlan || hasVerification) {
+		return PostReleaseDownloadScaffoldOptions{}, fmt.Errorf("provide either post-release install dir or explicit plan and plan verification, not both")
+	}
+	if hasDir {
+		dir, err := filepath.Abs(opts.PostReleaseInstallDir)
+		if err != nil {
+			return PostReleaseDownloadScaffoldOptions{}, err
+		}
+		info, err := os.Stat(dir)
+		if err != nil {
+			return PostReleaseDownloadScaffoldOptions{}, fmt.Errorf("post-release install dir is required: %w", err)
+		}
+		if !info.IsDir() {
+			return PostReleaseDownloadScaffoldOptions{}, fmt.Errorf("post-release install dir must be a directory: %s", dir)
+		}
+		opts.PlanPath = filepath.Join(dir, "post-release-install-plan.json")
+		opts.PlanVerificationPath = filepath.Join(dir, "post-release-install-verification.json")
+		return opts, nil
+	}
+	if !hasPlan && !hasVerification {
+		return PostReleaseDownloadScaffoldOptions{}, fmt.Errorf("post-release install dir or explicit plan and plan verification is required")
+	}
+	if !hasPlan {
+		return PostReleaseDownloadScaffoldOptions{}, fmt.Errorf("post-release install plan is required")
+	}
+	if !hasVerification {
+		return PostReleaseDownloadScaffoldOptions{}, fmt.Errorf("post-release install plan verification is required")
+	}
+	return opts, nil
 }
 
 func StatusPostReleaseDownloadEvidence(opts PostReleaseDownloadStatusOptions) (PostReleaseDownloadEvidenceStatus, error) {

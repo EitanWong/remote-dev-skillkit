@@ -201,8 +201,9 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `rdev acceptance post-release-evidence-status`, and MCP tools
   `rdev.acceptance.scaffold_post_release_download` /
   `rdev.acceptance.post_release_evidence_status`, so Agents collect public
-  download evidence with stable file names and fail closed on missing, empty,
-  or placeholder evidence before packaging with
+  download evidence from a standard post-release install directory with stable
+  file names and fail closed on missing, empty, or placeholder evidence before
+  packaging with
   `rdev acceptance package-post-release-download --scaffold <dir>`.
 - Combined release evidence indexing through
   `rdev.acceptance-release-evidence-index.v1`,

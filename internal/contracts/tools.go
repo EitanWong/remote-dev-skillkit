@@ -174,15 +174,16 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.acceptance.scaffold_post_release_download",
-			Description: "Create a standard evidence collection directory from a verified post-release install plan so Agents collect public GitHub Release download transcripts, candidate verification, bundle verification, and Skillkit evidence with stable file names before packaging.",
+			Description: "Create a standard evidence collection directory from a verified post-release install directory or explicit post-release install plan files so Agents collect public GitHub Release download transcripts, candidate verification, bundle verification, and Skillkit evidence with stable file names before packaging.",
 			Safety:      "Writes local scaffold files only. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims. Placeholder evidence is opt-in and must be replaced before packaging.",
 			InputSchema: object(map[string]any{
-				"plan":                stringField(),
-				"plan_verification":   stringField(),
-				"out_dir":             stringField(),
-				"create_placeholders": boolField(),
-				"force":               boolField(),
-			}, []string{"plan", "plan_verification", "out_dir"}),
+				"post_release_install_dir": stringField(),
+				"plan":                     stringField(),
+				"plan_verification":        stringField(),
+				"out_dir":                  stringField(),
+				"create_placeholders":      boolField(),
+				"force":                    boolField(),
+			}, []string{"out_dir"}),
 		},
 		{
 			Name:        "rdev.acceptance.post_release_evidence_status",

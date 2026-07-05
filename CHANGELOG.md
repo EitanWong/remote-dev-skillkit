@@ -83,6 +83,13 @@ transcript file names or package commands after GitHub Release assets exist.
   `rdev acceptance scaffold-evidence --hosted-provider-package` /
   `--relay-adapter-package` commands. Package verifiers now check that the
   generated evidence plans preserve those scaffold-first rules.
+- Extended `rdev acceptance scaffold-post-release-download` and MCP tool
+  `rdev.acceptance.scaffold_post_release_download` with
+  `--post-release-install-dir <dir>` / `post_release_install_dir`. Fresh
+  Agents can now scaffold public download evidence from the standard
+  post-release install directory without hand-picking the plan and verification
+  JSON files; explicit `--plan` / `--plan-verification` remains available for
+  reviewed overrides.
 
 ### Remaining Gates
 

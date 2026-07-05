@@ -98,8 +98,7 @@ download evidence directory before GitHub Release download verification:
 
 ```bash
 rdev acceptance scaffold-post-release-download \
-  --plan post-release-install/post-release-install-plan.json \
-  --plan-verification post-release-verification.json \
+  --post-release-install-dir post-release-install \
   --out .rdev/acceptance/post-release-download-evidence
 ```
 
@@ -108,6 +107,10 @@ The command writes `rdev.post-release-download-evidence-scaffold.v1`,
 directories, Skillkit evidence directories when required, and the exact
 `rdev acceptance package-post-release-download` / verify commands. Use
 `--create-placeholders` only to create obvious local collection slots.
+The lower-level `--plan <post-release-install-plan.json>` and
+`--plan-verification <post-release-install-verification.json>` inputs remain
+available for reviewed operator overrides. Fresh Agents should prefer
+`--post-release-install-dir`.
 
 Before packaging, check readiness:
 

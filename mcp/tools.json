@@ -556,7 +556,7 @@
     },
     {
       "name": "rdev.acceptance.scaffold_post_release_download",
-      "description": "Create a standard evidence collection directory from a verified post-release install plan so Agents collect public GitHub Release download transcripts, candidate verification, bundle verification, and Skillkit evidence with stable file names before packaging.",
+      "description": "Create a standard evidence collection directory from a verified post-release install directory or explicit post-release install plan files so Agents collect public GitHub Release download transcripts, candidate verification, bundle verification, and Skillkit evidence with stable file names before packaging.",
       "safety": "Writes local scaffold files only. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims. Placeholder evidence is opt-in and must be replaced before packaging.",
       "inputSchema": {
         "additionalProperties": false,
@@ -578,11 +578,13 @@
           "plan_verification": {
             "minLength": 1,
             "type": "string"
+          },
+          "post_release_install_dir": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
-          "plan",
-          "plan_verification",
           "out_dir"
         ],
         "type": "object"

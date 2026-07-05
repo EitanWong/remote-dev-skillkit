@@ -483,12 +483,13 @@ func (s Server) acceptanceEvidenceStatus(args map[string]any) (any, error) {
 
 func (s Server) scaffoldPostReleaseDownloadEvidence(args map[string]any) (any, error) {
 	return acceptance.ScaffoldPostReleaseDownloadEvidence(acceptance.PostReleaseDownloadScaffoldOptions{
-		PlanPath:             requiredString(args, "plan"),
-		PlanVerificationPath: requiredString(args, "plan_verification"),
-		OutDir:               requiredString(args, "out_dir"),
-		CreatePlaceholders:   boolArg(args, "create_placeholders", false),
-		Force:                boolArg(args, "force", false),
-		Now:                  time.Now().UTC(),
+		PostReleaseInstallDir: stringArg(args, "post_release_install_dir", ""),
+		PlanPath:              stringArg(args, "plan", ""),
+		PlanVerificationPath:  stringArg(args, "plan_verification", ""),
+		OutDir:                requiredString(args, "out_dir"),
+		CreatePlaceholders:    boolArg(args, "create_placeholders", false),
+		Force:                 boolArg(args, "force", false),
+		Now:                   time.Now().UTC(),
 	})
 }
 

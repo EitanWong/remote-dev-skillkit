@@ -763,10 +763,9 @@ func TestServerToolCallScaffoldPostReleaseDownloadEvidence(t *testing.T) {
 	}
 	outDir := filepath.Join(root, "scaffold")
 	input := mcpRequestLine(t, "rdev.acceptance.scaffold_post_release_download", map[string]any{
-		"plan":                plan,
-		"plan_verification":   planVerification,
-		"out_dir":             outDir,
-		"create_placeholders": true,
+		"post_release_install_dir": root,
+		"out_dir":                  outDir,
+		"create_placeholders":      true,
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
