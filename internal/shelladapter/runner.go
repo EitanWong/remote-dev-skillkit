@@ -98,6 +98,10 @@ func ExecuteContext(ctx context.Context, spec Spec) (Result, error) {
 	argv := windowsForceUTF8Argv(spec.Argv)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workspaceRoot
+	// Explicitly close stdin so the subprocess cannot block waiting for terminal
+	// input. Without this, some shells (notably PowerShell on Windows) may stall
+	// indefinitely when the underlying pty or pipe is left open.
+	cmd.Stdin = nil // nil → os.DevNull in exec.Cmd; explicit for clarity
 	cmd.Stdout = limiter.stdoutWriter()
 	cmd.Stderr = limiter.stderrWriter()
 	err = cmd.Run()

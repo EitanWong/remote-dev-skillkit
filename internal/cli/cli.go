@@ -131,6 +131,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.acceptance(ctx, args[1:])
 	case "adapter":
 		return a.adapter(args[1:])
+	case "job":
+		return a.job(ctx, args[1:])
 	case "help", "-h", "--help":
 		a.printUsage()
 		return nil
@@ -2628,7 +2630,6 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for generated local commands")
 		start := fs.Bool("start", false, "when no reachable gateway is configured, start the standard visible foreground gateway in this process")
-		publicTunnel := fs.String("public-tunnel", "auto", "cloudflared quick-tunnel mode: auto (start if no stable gateway), always (always start), off (never start)")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file when --start is used")
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file when --start is used")
 		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file when --start is used")
@@ -2649,7 +2650,6 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			OperatorTokenFile:   *operatorTokenFile,
 			RdevCommand:         *rdevCommand,
 			Start:               *start,
-			PublicTunnel:        *publicTunnel,
 			ReadyFile:           *readyFile,
 			StatusFile:          *statusFile,
 			HandoffTextFile:     *handoffTextFile,
@@ -2833,9 +2833,6 @@ type supportSessionStartOptions struct {
 	StatusFile          string
 	HandoffTextFile     string
 	ConnectedReportFile string
-	// PublicTunnel: "auto" starts cloudflared if no stable gateway is
-	// configured; "always" starts it unconditionally; "" or "off" disables.
-	PublicTunnel string
 }
 
 type supportSessionConnectOptions struct {
@@ -2855,11 +2852,6 @@ type supportSessionConnectOptions struct {
 	StatusFile          string
 	HandoffTextFile     string
 	ConnectedReportFile string
-	// PublicTunnel controls whether a Cloudflare Quick Tunnel is started
-	// automatically to provide a public-internet gateway URL.
-	// Values: "" or "off" = disabled; "auto" = start if no stable gateway
-	// URL is already configured; "always" = always start regardless.
-	PublicTunnel string
 }
 
 type supportSessionPrepareOptions struct {
@@ -2909,7 +2901,6 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 			StatusFile:          opts.StatusFile,
 			HandoffTextFile:     opts.HandoffTextFile,
 			ConnectedReportFile: opts.ConnectedReportFile,
-			PublicTunnel:        opts.PublicTunnel,
 		})
 	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
@@ -2946,28 +2937,148 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	return writeJSON(a.Stdout, supportsession.BuildConnectFromCreated(created))
 }
 
-// startCloudflaredQuickTunnel starts `cloudflared tunnel --url localURL` in
-// the background and waits up to 20 seconds for it to print a public HTTPS
-// tunnel URL.  The returned cancel function should be called when the session
-// ends to clean up the cloudflared process.
+// startBestAvailableTunnel tries public tunnel providers in order until one
+// succeeds. The order is:
 //
-// On success, it returns (tunnelURL, cancel, nil).
+//  1. cloudflared quick-tunnel (most reliable, zero-auth)
+//  2. localhost.run via SSH (fallback, needs only openssh client)
+//
+// If none succeed it logs a warning and returns ("", noop) — the caller
+// falls back to LAN-only connectivity.
+func startBestAvailableTunnel(ctx context.Context, stderr io.Writer, localListenURL, localPort string) (string, context.CancelFunc) {
+	// --- Provider 1: cloudflared ---
+	_, _ = fmt.Fprintf(stderr, "[rdev] trying cloudflared quick-tunnel for %s ...\n", localListenURL)
+	tunnelURL, cancel, err := startCloudflaredQuickTunnel(ctx, stderr, localListenURL)
+	if err == nil {
+		_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared quick-tunnel active: %s\n", tunnelURL)
+		return tunnelURL, cancel
+	}
+	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared failed: %v\n", err)
+
+	// --- Provider 2: localhost.run (SSH reverse tunnel) ---
+	_, _ = fmt.Fprintf(stderr, "[rdev] trying localhost.run SSH tunnel for port %s ...\n", localPort)
+	tunnelURL, cancel, err = startLocalhostRunTunnel(ctx, stderr, localPort)
+	if err == nil {
+		_, _ = fmt.Fprintf(stderr, "[rdev] localhost.run tunnel active: %s\n", tunnelURL)
+		return tunnelURL, cancel
+	}
+	_, _ = fmt.Fprintf(stderr, "[rdev] localhost.run failed: %v\n", err)
+
+	_, _ = fmt.Fprintf(stderr, "[rdev] all public tunnel providers failed; falling back to LAN gateway\n")
+	return "", func() {}
+}
+
+// startLocalhostRunTunnel creates a public HTTPS tunnel through localhost.run
+// using only an OpenSSH client (available on macOS, Linux, and Windows 10+).
+// It runs: ssh -o StrictHostKeyChecking=no -R 80:localhost:PORT nokey@localhost.run
+// and scans stdout/stderr for the assigned https://*.localhost.run URL.
+func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort string) (string, context.CancelFunc, error) {
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("ssh not found in PATH: %w", err)
+	}
+	tunnelCtx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(tunnelCtx, sshPath,
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=3",
+		"-o", "ExitOnForwardFailure=yes",
+		"-R", "80:localhost:"+localPort,
+		"nokey@localhost.run",
+	)
+	pr, pw := io.Pipe()
+	combined := io.MultiWriter(pw, stderr)
+	cmd.Stdout = combined
+	cmd.Stderr = combined
+	if err := cmd.Start(); err != nil {
+		cancel()
+		_ = pw.Close()
+		return "", func() {}, fmt.Errorf("localhost.run ssh start failed: %w", err)
+	}
+	urlCh := make(chan string, 1)
+	go func() {
+		defer pw.Close()
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if idx := strings.Index(line, "https://"); idx >= 0 {
+				rest := line[idx:]
+				end := strings.IndexAny(rest, " \t\n\r")
+				if end < 0 {
+					end = len(rest)
+				}
+				candidate := strings.TrimRight(rest[:end], "/")
+				if strings.Contains(candidate, ".localhost.run") || strings.Contains(candidate, ".lhr.life") {
+					select {
+					case urlCh <- candidate:
+					default:
+					}
+				}
+			}
+		}
+	}()
+	select {
+	case tunnelURL := <-urlCh:
+		return tunnelURL, cancel, nil
+	case <-time.After(20 * time.Second):
+		cancel()
+		_ = pr.Close()
+		return "", func() {}, fmt.Errorf("localhost.run did not print a tunnel URL within 20s")
+	}
+}
+
+// in the background and waits up to 30 seconds for it to print a public HTTPS tunnel URL.
+//
+// It always uses --protocol http2 first because many networks (particularly those behind
+// corporate firewalls or in China) block UDP/QUIC. If http2 fails to produce a URL within
+// the timeout the function returns an error; the caller can retry or fall back to another
+// tunnel provider.
+//
+// The returned cancel function must be called when the session ends to clean up the
+// cloudflared process.
+//
+// On success it returns (tunnelURL, cancel, nil).
 // On failure it returns ("", noop, err).
 func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (string, context.CancelFunc, error) {
 	cfPath, err := exec.LookPath("cloudflared")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("cloudflared not found in PATH: %w", err)
 	}
+
+	// Attempt 1: force HTTP/2 (TCP-based, works in networks that block QUIC/UDP).
+	tunnelURL, cancel, err := startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "http2", 25*time.Second)
+	if err == nil {
+		return tunnelURL, cancel, nil
+	}
+	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared http2 attempt failed (%v); retrying without protocol flag\n", err)
+
+	// Attempt 2: let cloudflared choose the protocol (QUIC, then http2 fallback).
+	// Some older cloudflared versions do not accept --protocol http2, so this
+	// second attempt keeps backward compatibility.
+	return startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "", 20*time.Second)
+}
+
+// startCloudflaredWithProtocol is the inner helper that launches a single cloudflared
+// process with an optional --protocol flag and scans its stderr for a trycloudflare.com URL.
+func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.Writer, localURL, protocol string, timeout time.Duration) (string, context.CancelFunc, error) {
 	tunnelCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(tunnelCtx, cfPath, "tunnel", "--url", localURL)
+
+	args := []string{"tunnel"}
+	if protocol != "" {
+		args = append(args, "--protocol", protocol)
+	}
+	args = append(args, "--url", localURL)
+
+	cmd := exec.CommandContext(tunnelCtx, cfPath, args...)
 	// cloudflared prints the tunnel URL to stderr
 	pr, pw := io.Pipe()
 	cmd.Stderr = io.MultiWriter(pw, stderr)
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = pw.Close()
-		return "", func() {}, fmt.Errorf("cloudflared start failed: %w", err)
+		return "", func() {}, fmt.Errorf("cloudflared start failed (protocol=%q): %w", protocol, err)
 	}
+
 	// Scan stderr for the tunnel URL (looks like https://*.trycloudflare.com)
 	urlCh := make(chan string, 1)
 	go func() {
@@ -2991,12 +3102,14 @@ func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL
 			}
 		}
 	}()
+
 	select {
 	case tunnelURL := <-urlCh:
 		return tunnelURL, cancel, nil
-	case <-time.After(20 * time.Second):
+	case <-time.After(timeout):
 		cancel()
-		return "", func() {}, fmt.Errorf("cloudflared did not print a tunnel URL within 20s")
+		_ = pr.Close()
+		return "", func() {}, fmt.Errorf("cloudflared (protocol=%q) did not print a tunnel URL within %v", protocol, timeout)
 	}
 }
 
@@ -3008,36 +3121,25 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if addr == "" {
 		addr = "0.0.0.0:8787"
 	}
-	gatewayURL, _ := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
+	gatewayURL, candidates := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
+	if stableGatewayURL := firstStableGatewayURL(candidates); stableGatewayURL != "" {
+		gatewayURL = stableGatewayURL
+	}
 
-	// --public-tunnel: start cloudflared quick-tunnel if needed.
-	// "auto"   → start only when no stable (hosted/relay/mesh/vpn/ssh/cloudflared) gateway is configured
-	// "always" → always start, override gatewayURL with the tunnel URL
-	// ""/"off" → skip
-	publicTunnelMode := strings.ToLower(strings.TrimSpace(opts.PublicTunnel))
-	if publicTunnelMode == "auto" || publicTunnelMode == "always" {
-		needsTunnel := publicTunnelMode == "always"
-		if !needsTunnel {
-			// Inspect candidates: if none are "stable" (public/configured), we need a tunnel.
-			_, candidates := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
-			summary := supportsession.GatewayCandidateSummary(candidates)
-			if hasStable, _ := summary["has_stable_configured_fallback"].(bool); !hasStable {
-				needsTunnel = true
-			}
-		}
-		if needsTunnel {
-			localListenURL := "http://127.0.0.1:" + extractPort(addr, "8787")
-			_, _ = fmt.Fprintf(a.Stderr, "[rdev] starting cloudflared quick-tunnel for %s ...\n", localListenURL)
-			tunnelURL, tunnelCancel, tunnelErr := startCloudflaredQuickTunnel(ctx, a.Stderr, localListenURL)
-			if tunnelErr != nil {
-				_, _ = fmt.Fprintf(a.Stderr, "[rdev] cloudflared quick-tunnel failed: %v; falling back to LAN gateway\n", tunnelErr)
-			} else {
-				_, _ = fmt.Fprintf(a.Stderr, "[rdev] cloudflared quick-tunnel active: %s\n", tunnelURL)
-				defer tunnelCancel()
-				gatewayURL = tunnelURL
-				// Also export for MCP tools that check RDEV_CLOUDFLARED_GATEWAY_URL
-				_ = os.Setenv("RDEV_CLOUDFLARED_GATEWAY_URL", tunnelURL)
-			}
+	// Start a public tunnel when no stable (hosted/relay/mesh/vpn/ssh) gateway
+	// is already configured. The tunnel providers are tried in order: cloudflared
+	// (HTTP/2 first, then QUIC) → localhost.run SSH. LAN-only fallback applies
+	// only when all providers fail.
+	summary := supportsession.GatewayCandidateSummary(candidates)
+	needsPublicTunnel, _ := summary["needs_public_tunnel"].(bool)
+	if needsPublicTunnel {
+		localPort := extractPort(addr, "8787")
+		localListenURL := "http://127.0.0.1:" + localPort
+		tunnelURL, tunnelCancel := startBestAvailableTunnel(ctx, a.Stderr, localListenURL, localPort)
+		if tunnelURL != "" {
+			defer tunnelCancel()
+			gatewayURL = tunnelURL
+			_ = os.Setenv("RDEV_CLOUDFLARED_GATEWAY_URL", tunnelURL)
 		}
 	}
 	workDir := strings.TrimSpace(opts.WorkDir)
@@ -5566,6 +5668,231 @@ func (a App) gatewayStorageVerify(provider, path string) error {
 		return fmt.Errorf("gateway storage verification failed")
 	}
 	return nil
+}
+
+// job provides operator-side access to jobs through the gateway HTTP API so
+// that the Agent can check, wait for, and cancel jobs without having to drop
+// down to raw curl calls against the HTTP API.
+//
+// Sub-commands:
+//
+//	rdev job list   --gateway-url <url> [--host-id <id>]
+//	rdev job get    --gateway-url <url> --job-id <id>
+//	rdev job wait   --gateway-url <url> --job-id <id> [--timeout-seconds <n>]
+//	rdev job cancel --gateway-url <url> --job-id <id> [--reason <text>]
+func (a App) job(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		_, _ = fmt.Fprintln(a.Stderr, "usage: rdev job <list|get|wait|cancel> [flags]")
+		return fmt.Errorf("missing job subcommand")
+	}
+	switch args[0] {
+	case "list":
+		fs := flag.NewFlagSet("job list", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+		hostID := fs.String("host-id", "", "filter by host ID (optional)")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *gatewayURL == "" {
+			return fmt.Errorf("--gateway-url is required")
+		}
+		return a.jobList(ctx, *gatewayURL, *hostID, *operatorTokenFile)
+
+	case "get":
+		fs := flag.NewFlagSet("job get", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+		jobID := fs.String("job-id", "", "job ID (required)")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *gatewayURL == "" {
+			return fmt.Errorf("--gateway-url is required")
+		}
+		if *jobID == "" {
+			return fmt.Errorf("--job-id is required")
+		}
+		return a.jobGet(ctx, *gatewayURL, *jobID, *operatorTokenFile)
+
+	case "wait":
+		fs := flag.NewFlagSet("job wait", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+		jobID := fs.String("job-id", "", "job ID (required)")
+		timeoutSeconds := fs.Int("timeout-seconds", 120, "max seconds to wait for job completion")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *gatewayURL == "" {
+			return fmt.Errorf("--gateway-url is required")
+		}
+		if *jobID == "" {
+			return fmt.Errorf("--job-id is required")
+		}
+		return a.jobWait(ctx, *gatewayURL, *jobID, *timeoutSeconds, *operatorTokenFile)
+
+	case "cancel":
+		fs := flag.NewFlagSet("job cancel", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+		jobID := fs.String("job-id", "", "job ID (required)")
+		reason := fs.String("reason", "canceled by operator via CLI", "cancellation reason")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *gatewayURL == "" {
+			return fmt.Errorf("--gateway-url is required")
+		}
+		if *jobID == "" {
+			return fmt.Errorf("--job-id is required")
+		}
+		return a.jobCancel(ctx, *gatewayURL, *jobID, *reason, *operatorTokenFile)
+
+	default:
+		return fmt.Errorf("unknown job subcommand %q; available: list, get, wait, cancel", args[0])
+	}
+}
+
+func (a App) jobList(ctx context.Context, gatewayURL, hostID, operatorTokenFile string) error {
+	u := strings.TrimRight(gatewayURL, "/") + "/v1/jobs"
+	if hostID != "" {
+		u += "?host_id=" + url.QueryEscape(hostID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	if tok := loadOperatorToken(operatorTokenFile); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", u, err)
+	}
+	defer resp.Body.Close()
+	return writeHTTPResponseJSON(a.Stdout, resp)
+}
+
+func (a App) jobGet(ctx context.Context, gatewayURL, jobID, operatorTokenFile string) error {
+	u := strings.TrimRight(gatewayURL, "/") + "/v1/jobs/" + url.PathEscape(jobID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	if tok := loadOperatorToken(operatorTokenFile); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", u, err)
+	}
+	defer resp.Body.Close()
+	return writeHTTPResponseJSON(a.Stdout, resp)
+}
+
+// jobWait polls GET /v1/jobs/:id every 2 seconds until the job reaches a
+// terminal state (completed, failed, canceled) or the timeout expires.
+func (a App) jobWait(ctx context.Context, gatewayURL, jobID string, timeoutSeconds int, operatorTokenFile string) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+	tok := loadOperatorToken(operatorTokenFile)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	u := strings.TrimRight(gatewayURL, "/") + "/v1/jobs/" + url.PathEscape(jobID)
+	for {
+		job, err := fetchJobJSON(ctx, u, tok)
+		if err != nil {
+			return fmt.Errorf("polling job: %w", err)
+		}
+		status, _ := job["status"].(string)
+		switch status {
+		case "completed", "failed", "canceled":
+			return writeJSON(a.Stdout, job)
+		}
+		_, _ = fmt.Fprintf(a.Stderr, "[rdev] job %s status=%s; waiting...\n", jobID, status)
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return fmt.Errorf("job %s did not reach a terminal state within %ds (last status: %s)", jobID, timeoutSeconds, status)
+		}
+	}
+}
+
+func (a App) jobCancel(ctx context.Context, gatewayURL, jobID, reason, operatorTokenFile string) error {
+	u := strings.TrimRight(gatewayURL, "/") + "/v1/jobs/" + url.PathEscape(jobID) + "/cancel"
+	body, _ := json.Marshal(map[string]any{"reason": reason})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tok := loadOperatorToken(operatorTokenFile); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", u, err)
+	}
+	defer resp.Body.Close()
+	return writeHTTPResponseJSON(a.Stdout, resp)
+}
+
+// fetchJobJSON calls GET on the job URL and returns the parsed JSON object.
+func fetchJobJSON(ctx context.Context, jobURL, bearerToken string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jobURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return payload, fmt.Errorf("HTTP %d from gateway", resp.StatusCode)
+	}
+	return payload, nil
+}
+
+// writeHTTPResponseJSON forwards a gateway API response body to w as
+// pretty-printed JSON, returning an error if the status is ≥ 400.
+func writeHTTPResponseJSON(w io.Writer, resp *http.Response) error {
+	var payload any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return fmt.Errorf("decoding response body: %w", err)
+	}
+	out, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshalling response: %w", err)
+	}
+	_, _ = fmt.Fprintf(w, "%s\n", out)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("gateway returned HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// loadOperatorToken reads a bearer token from a file, or falls back to the
+// RDEV_OPERATOR_TOKEN environment variable. Returns "" if neither is set.
+func loadOperatorToken(tokenFile string) string {
+	if tokenFile != "" {
+		if data, err := os.ReadFile(tokenFile); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return strings.TrimSpace(os.Getenv("RDEV_OPERATOR_TOKEN"))
 }
 
 func (a App) audit(args []string) error {
@@ -8452,6 +8779,10 @@ Usage:
   rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session plan --addr 0.0.0.0:8787 --target auto --locale auto
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
+  rdev job list --gateway-url http://127.0.0.1:8787
+  rdev job get --gateway-url http://127.0.0.1:8787 --job-id job_...
+  rdev job wait --gateway-url http://127.0.0.1:8787 --job-id job_... --timeout-seconds 120
+  rdev job cancel --gateway-url http://127.0.0.1:8787 --job-id job_... --reason "stuck job"
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
   rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party
   rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --dry-run --evidence-dir relay-evidence
@@ -9868,6 +10199,18 @@ func extractPort(addr, fallback string) string {
 		return port
 	}
 	return fallback
+}
+
+func firstStableGatewayURL(candidates []supportsession.GatewayURLCandidate) string {
+	for _, candidate := range candidates {
+		switch strings.TrimSpace(candidate.Kind) {
+		case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared":
+			if url := strings.TrimRight(strings.TrimSpace(candidate.URL), "/"); url != "" {
+				return url
+			}
+		}
+	}
+	return ""
 }
 
 func writeJSONFile0600(path string, value any) error {

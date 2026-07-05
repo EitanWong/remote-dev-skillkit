@@ -371,7 +371,8 @@ func TestServerToolCallSupportSessionConnectWithGatewayCreatesReadyHandoff(t *te
 		structured["ready_to_send_to_human"] != true ||
 		handoff["schema_version"] != "rdev.support-session-user-handoff.v1" ||
 		handoff["copy_paste_kind"] != "windows" ||
-		!strings.Contains(handoff["copy_paste"].(string), "bootstrap.ps1") ||
+		!strings.Contains(handoff["copy_paste"].(string), "-EncodedCommand") ||
+		strings.Contains(handoff["copy_paste"].(string), "bootstrap.ps1") ||
 		strings.Contains(handoff["copy_paste"].(string), "ExecutionPolicy Bypass") {
 		t.Fatalf("expected connect tool to create ready handoff, got %#v", structured)
 	}
@@ -446,9 +447,9 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 	targetCommand, _ := structured["target_command"].(string)
 	gatewayCandidates, _ := structured["gateway_url_candidates"].([]any)
 	if ticketCode == "" ||
-		!strings.Contains(targetCommand, ticketCode) ||
-		!strings.Contains(targetCommand, "foreach ($u in $urls)") ||
-		!strings.Contains(targetCommand, "-TimeoutSec 10") ||
+		!strings.Contains(targetCommand, "-EncodedCommand") ||
+		strings.Contains(targetCommand, "foreach ($u in $urls)") ||
+		strings.Contains(targetCommand, ticketCode) ||
 		strings.Contains(targetCommand, "<ticket-code>") ||
 		strings.Contains(targetCommand, "ExecutionPolicy Bypass") {
 		t.Fatalf("expected ready safe target command: ticket=%q command=%q", ticketCode, targetCommand)
@@ -484,9 +485,6 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 		gatewayCandidates[1].(map[string]any)["kind"] != "relay" ||
 		gatewayCandidates[1].(map[string]any)["source"] != "env:RDEV_RELAY_GATEWAY_URL" {
 		t.Fatalf("expected configured relay fallback candidate, got %#v", gatewayCandidates)
-	}
-	if !strings.Contains(targetCommand, "https://relay.example.test/rdev/join/") {
-		t.Fatalf("expected target command to include configured relay join fallback, got %q", targetCommand)
 	}
 	runbook := structured["agent_connection_runbook"].(map[string]any)
 	watchRunbook := runbook["watch"].(map[string]any)

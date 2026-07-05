@@ -342,17 +342,20 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 
 	if created["schema_version"] != CreatedSchemaVersion ||
 		created["target_command"] == "" ||
-		!strings.Contains(created["target_command"].(string), "ABCD-1234") ||
 		strings.Contains(created["target_command"].(string), "<ticket-code>") ||
 		strings.Contains(created["target_command"].(string), "ExecutionPolicy Bypass") {
 		t.Fatalf("expected ready Windows command without unsafe placeholders: %#v", created)
 	}
-	if !strings.Contains(created["target_command"].(string), "foreach ($u in $urls)") ||
-		!strings.Contains(created["target_command"].(string), "198.51.100.10") ||
-		!strings.Contains(created["target_command"].(string), "gateway_url_candidates=") ||
-		!strings.Contains(created["target_command"].(string), "-TimeoutSec 10") ||
+	if !strings.Contains(created["target_command"].(string), "-EncodedCommand") ||
+		strings.Contains(created["target_command"].(string), "foreach ($u in $urls)") ||
+		strings.Contains(created["target_command"].(string), "198.51.100.10") ||
 		!strings.Contains(created["target_commands"].(map[string]string)["macos_linux"], "for u in") {
 		t.Fatalf("expected target command to try ordered gateway candidates: %#v", created["target_commands"])
+	}
+	if macLinux := created["target_commands"].(map[string]string)["macos_linux"]; !strings.Contains(macLinux, "198.51.100.10") ||
+		!strings.Contains(macLinux, "gateway_url_candidates=") ||
+		!strings.Contains(macLinux, "--max-time 10") {
+		t.Fatalf("expected macOS/Linux command to keep ordered gateway candidate fallback: %s", macLinux)
 	}
 	handoff := created["user_handoff"].(map[string]any)
 	if handoff["schema_version"] != UserHandoffSchemaVersion ||

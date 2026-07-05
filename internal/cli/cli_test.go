@@ -786,11 +786,9 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.GatewayURLCandidates[1].Source != "env:RDEV_RELAY_GATEWAY_URL" {
 		t.Fatalf("expected configured relay fallback candidate, got %#v", payload.GatewayURLCandidates)
 	}
-	if !strings.Contains(payload.TargetCommand, payload.TicketCode) ||
-		!strings.Contains(payload.TargetCommand, "bootstrap.ps1") ||
-		!strings.Contains(payload.TargetCommand, "foreach ($u in $urls)") ||
-		!strings.Contains(payload.TargetCommand, "https://relay.example.test/rdev/join/") ||
-		!strings.Contains(payload.TargetCommand, "-TimeoutSec 10") ||
+	if !strings.Contains(payload.TargetCommand, "-EncodedCommand") ||
+		strings.Contains(payload.TargetCommand, "foreach ($u in $urls)") ||
+		strings.Contains(payload.TargetCommand, "https://relay.example.test/rdev/join/") ||
 		strings.Contains(payload.TargetCommand, "<ticket-code>") ||
 		strings.Contains(payload.TargetCommand, "ExecutionPolicy Bypass") {
 		t.Fatalf("target command should be ready and safe: %s", payload.TargetCommand)

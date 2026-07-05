@@ -935,6 +935,20 @@ func (g *MemoryGateway) Job(jobID string) (model.Job, error) {
 	return job, nil
 }
 
+func (g *MemoryGateway) Jobs() []model.Job {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	jobs := make([]model.Job, 0, len(g.jobs))
+	for _, job := range g.jobs {
+		jobs = append(jobs, job)
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
+	})
+	return jobs
+}
+
 func (g *MemoryGateway) CancelJob(jobID, reason string) (model.Job, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

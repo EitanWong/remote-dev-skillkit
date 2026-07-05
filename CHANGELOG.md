@@ -4,6 +4,38 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.33-dev
+
+Current phase: real support-session usability hardening from fresh-Agent
+Windows testing. This slice removes fragile multi-step tunnel handling and adds
+operator-side CLI parity for jobs.
+
+### Fixed
+
+- Removed the separate `--public-tunnel` knob from the support-session
+  connect/start flow. `rdev support-session connect --start` now decides
+  automatically: prefer configured stable gateway candidates, otherwise start a
+  managed public tunnel before falling back to LAN-only connectivity.
+- Made Cloudflare Quick Tunnel startup force HTTP/2 first to avoid QUIC/UDP EOF
+  failures on restrictive networks, then retry without the protocol flag for
+  older `cloudflared` builds.
+- Added localhost.run SSH reverse tunnel fallback when Cloudflare Quick Tunnel
+  cannot start or cannot produce a public URL.
+- Hardened generated Windows bootstrap commands: single-URL handoffs now use
+  the simple `irm '<url>' -UseBasicParsing | iex` form, while multi-URL retry
+  scripts use PowerShell `-EncodedCommand` to avoid variable expansion and
+  quoting failures in existing PowerShell sessions.
+- Closed shell job stdin explicitly so shell/PowerShell jobs cannot hang waiting
+  for interactive input through an inherited pipe.
+- Added operator-side `rdev job list|get|wait|cancel` CLI commands plus gateway
+  `GET /v1/jobs` and `POST /v1/jobs/<id>/cancel`, so Agents can inspect, wait
+  for, and cancel jobs through the CLI instead of dropping to raw HTTP or
+  MCP-only workflows.
+- Updated support-session runbooks to forbid manual tunnel process management,
+  manual `--gateway-url` handoff assembly, and unnecessary multi-step setup
+  flows when the standard `rdev support-session connect --start` path can manage
+  the gateway and tunnel lifecycle.
+
 ## 0.1.32-dev
 
 Current phase: real Windows Connection Entry recovery hardening. This slice

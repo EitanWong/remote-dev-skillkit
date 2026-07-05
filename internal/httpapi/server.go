@@ -1157,6 +1157,10 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "operator role is required")
 		return
 	}
+	if r.Method == http.MethodGet {
+		s.listJobs(w, r)
+		return
+	}
 	var req struct {
 		HostID  string         `json:"host_id"`
 		Adapter string         `json:"adapter"`
@@ -1194,6 +1198,25 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"job": job})
+}
+
+func (s Server) listJobs(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "auditor role is required")
+		return
+	}
+	hostID := strings.TrimSpace(r.URL.Query().Get("host_id"))
+	jobs := s.Gateway.Jobs()
+	if hostID != "" {
+		filtered := jobs[:0]
+		for _, job := range jobs {
+			if job.HostID == hostID {
+				filtered = append(filtered, job)
+			}
+		}
+		jobs = filtered
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
 func (s Server) getJob(w http.ResponseWriter, r *http.Request) {
@@ -1369,6 +1392,31 @@ func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
+	case "cancel":
+		// Operator-side job cancellation. The agent calls this when a job is stuck
+		// or should no longer run. The gateway marks the job as canceled and the
+		// host will see its status transition to "canceled" on the next poll/push.
+		if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+			writeError(w, http.StatusForbidden, "operator role is required")
+			return
+		}
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		// Reason is optional; ignore decode errors so an empty body also works.
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Reason == "" {
+			req.Reason = "canceled by operator"
+		}
+		job, err := s.Gateway.CancelJob(jobID, req.Reason)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if !s.persistState(w) {
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"job": job})
 	default:
 		writeError(w, http.StatusNotFound, "unknown job action")
 	}

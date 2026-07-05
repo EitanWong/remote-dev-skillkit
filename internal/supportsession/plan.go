@@ -3,6 +3,8 @@ package supportsession
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
@@ -1120,6 +1123,9 @@ func freshAgentFailurePrevention() map[string]any {
 			"background or ad hoc gateway process management can disappear before the target joins and leaves the Agent without a ready/status file",
 			"hand-written Windows PowerShell or shell bootstrap code causes model-dependent behavior and can weaken the security contract",
 			"asking humans to choose ticket, root key, gateway URL, transport, release root, checksum, or platform command creates avoidable multi-turn setup failures",
+			"running cloudflared tunnel as a separate background terminal then passing its URL via --gateway-url with --public-tunnel off creates an untracked tunnel process that disappears silently; use rdev support-session connect --start which manages cloudflared internally with automatic HTTP/2 protocol selection and provider fallback",
+			"using powershell -NoProfile -Command \"$var=...\" style commands with variables causes expansion failures when pasted into an existing PowerShell session; the generated irm 'url' | iex form avoids this entirely",
+			"sending a multi-step sequence (prepare, then create cloudflared, then connect separately) instead of a single rdev support-session connect --start command adds unnecessary round-trips and failure surfaces",
 		},
 		"required_standard_path": []string{
 			"start ordinary connect-this-computer requests with rdev.support_session.connect or rdev support-session connect",
@@ -1127,17 +1133,21 @@ func freshAgentFailurePrevention() map[string]any {
 			"send handoff_text_file.path when present; otherwise send only target_handoff_envelope.full_text to the human",
 			"watch foreground_feedback, status_file.path, connected_report_file.path, connection_supervision, or rdev.support_session.status wait=true",
 			"report connected_report_file.path when present; otherwise report connected_next_steps.user_report immediately when connected=true",
+			"when cloudflared QUIC fails, rdev support-session connect --start automatically retries with --protocol http2 and then falls back to localhost.run SSH tunnel; do not manually restart cloudflared",
 		},
 		"standard_recovery": []string{
 			"if rdev is missing, recover from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
 			"if helper assets are missing, run rdev support-session connect --start or rdev support-session prepare --build-assets from a valid checkout",
 			"if a LAN-only path times out or will not survive network changes, configure a standard hosted/relay/mesh/VPN/SSH gateway candidate and create a fresh Connection Entry",
 			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
+			"if the target reports a PowerShell variable error on the bootstrap command, they are running from an existing PowerShell session; tell them to use: irm 'URL' -UseBasicParsing | iex (the join page always shows this simpler form)",
 		},
 		"forbidden_agent_generated_workarounds": []string{
 			"manual ticket/root/gateway/transport/checksum substitution for humans",
 			"PowerShell or shell bootstrap/download scripts written by the Agent",
 			"nohup/background gateway lifecycle glue written by the Agent",
+			"manually starting cloudflared tunnel in a background terminal and passing --gateway-url separately",
+			"using --public-tunnel off after starting cloudflared manually",
 			"custom relay, mesh, SSH, VPN, or polling scripts outside standard rdev tools",
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
@@ -1962,6 +1972,21 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
+// powershellBase64Encode encodes a PowerShell script string for use with
+// `powershell -EncodedCommand`. PowerShell requires the script be encoded as
+// UTF-16LE then base64-encoded. Using -EncodedCommand avoids all shell quoting
+// issues because the encoded form contains no characters special to cmd.exe or
+// an outer PowerShell session.
+func powershellBase64Encode(script string) string {
+	// Convert UTF-8 string to UTF-16LE code units
+	utf16Codes := utf16.Encode([]rune(script))
+	buf := make([]byte, len(utf16Codes)*2)
+	for i, u := range utf16Codes {
+		binary.LittleEndian.PutUint16(buf[i*2:], u)
+	}
+	return base64.StdEncoding.EncodeToString(buf)
+}
+
 func BuildCreated(opts CreatedOptions) map[string]any {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	joinURL := strings.TrimSpace(opts.JoinURL)
@@ -2362,9 +2387,37 @@ func bootstrapRequirements(target string) map[string]any {
 	return requirements
 }
 
+// windowsBootstrapCommand generates a PowerShell bootstrap command for the target machine.
+//
+// When there is only a single URL it uses the minimal "irm 'url' | iex" form — no
+// PowerShell variables, no loops — which is safe to paste into both an existing PowerShell
+// session AND cmd.exe because there is nothing for the outer shell to expand.
+//
+// When there are multiple URLs (several gateway candidates) it uses a loop that tries each in
+// order. In that case the whole script is encoded as Base64 so that neither cmd.exe nor an
+// outer PowerShell session can expand or corrupt the inner variables.
 func windowsBootstrapCommand(joinURLs []string, runtimeCandidates []GatewayURLCandidate) string {
 	urls := quotedPowerShellArrayValues(joinURLs, "/bootstrap.ps1", runtimeCandidates)
-	return "powershell -NoProfile -Command \"$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $urls=@(" + strings.Join(urls, ",") + "); foreach ($u in $urls) { try { irm $u -UseBasicParsing -TimeoutSec " + strconv.Itoa(targetHTTPMaxTimeSeconds) + " | iex; exit 0 } catch { Write-Host ('rdev Connection Entry failed: ' + $u) } }; throw 'No reachable rdev Connection Entry URL'\""
+	if len(urls) == 0 {
+		return ""
+	}
+
+	// Single-URL fast path: irm 'url' -UseBasicParsing | iex
+	// Works identically whether the user is at cmd.exe OR an existing PowerShell prompt.
+	if len(urls) == 1 {
+		// urls[0] is already a single-quoted PS value like 'https://...'
+		return "powershell -NoProfile -Command \"irm " + urls[0] + " -UseBasicParsing | iex\""
+	}
+
+	// Multi-URL path: encode the retry loop as Base64 to avoid any outer-shell variable
+	// expansion issues when the command is pasted into an existing PowerShell session.
+	inner := "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; " +
+		"$urls=@(" + strings.Join(urls, ",") + "); " +
+		"foreach ($u in $urls) { try { irm $u -UseBasicParsing -TimeoutSec " + strconv.Itoa(targetHTTPMaxTimeSeconds) + " | iex; exit 0 } catch { Write-Host ('rdev Connection Entry failed: ' + $u) } }; " +
+		"throw 'No reachable rdev Connection Entry URL'"
+	// UTF-16LE is required by powershell -EncodedCommand
+	encoded := powershellBase64Encode(inner)
+	return "powershell -NoProfile -EncodedCommand " + encoded
 }
 
 func macLinuxBootstrapCommand(joinURLs []string, runtimeCandidates []GatewayURLCandidate) string {
@@ -2879,6 +2932,10 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 			"rdev support-session start",
 			"rdev.connection_entry.plan",
 			"rdev connection-entry run --dry-run",
+			"rdev job list --gateway-url <url>",
+			"rdev job get --gateway-url <url> --job-id <id>",
+			"rdev job wait --gateway-url <url> --job-id <id> --timeout-seconds <n>",
+			"rdev job cancel --gateway-url <url> --job-id <id> --reason <text>",
 		},
 		"forbidden": []string{
 			"Agent-authored PowerShell or shell relay scripts",
