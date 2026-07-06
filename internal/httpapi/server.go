@@ -824,13 +824,22 @@ else
   rdev_cmd="$(command -v rdev)"
 fi
 echo "Starting visible Remote Dev Skillkit host session..."
-# On macOS, run caffeinate in the background to prevent display/system sleep
-# while the rdev session is active. Kill it when the runner exits.
+# Prevent idle/display/system sleep while the rdev session is active when the
+# platform exposes a standard inhibitor. This does not bypass lock-screen
+# policy or enterprise security controls. Kill the inhibitor when the runner
+# exits.
 rdev_caffeinate_pid=""
-if command -v caffeinate >/dev/null 2>&1; then
-  caffeinate -si &
+rdev_inhibit_pid=""
+if [ "$os" = "darwin" ] && command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -dimsu &
   rdev_caffeinate_pid=$!
   echo "[rdev] Sleep prevention enabled via caffeinate (pid $rdev_caffeinate_pid)"
+elif [ "$os" = "linux" ] && command -v systemd-inhibit >/dev/null 2>&1; then
+  systemd-inhibit --what=sleep:idle --why="Remote Dev Skillkit host session is active" --mode=block sleep infinity &
+  rdev_inhibit_pid=$!
+  echo "[rdev] Sleep prevention enabled via systemd-inhibit (pid $rdev_inhibit_pid)"
+else
+  echo "[rdev] Sleep prevention unavailable — keep this visible session active to avoid disconnection"
 fi
 rdev_max_retries=5
 rdev_retry_delay=5
@@ -848,6 +857,9 @@ while true; do
 done
 if [ -n "$rdev_caffeinate_pid" ]; then
   kill "$rdev_caffeinate_pid" 2>/dev/null || true
+fi
+if [ -n "$rdev_inhibit_pid" ]; then
+  kill "$rdev_inhibit_pid" 2>/dev/null || true
 fi
 exit $rdev_exit
 `, assetBase, assetBase, assetBase, shellQuote(manifestURL), rootArg)
@@ -888,9 +900,10 @@ if ($rdevCmd) {
   }
 }
 Write-Host "Starting visible Remote Dev Skillkit host session..."
-# Prevent Windows from sleeping or locking the screen while rdev is running.
-# SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) keeps the CPU
-# awake so the runner can continue to poll for and execute jobs.
+# Prevent Windows idle sleep/display sleep while rdev is running. This does not
+# bypass lock-screen policy or enterprise security controls.
+# SetThreadExecutionState keeps the session awake so the runner can continue to
+# poll for and execute jobs.
 try {
   Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
@@ -898,9 +911,10 @@ public static class RdevSleepPrevention {
   [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);
   public const uint ES_CONTINUOUS      = 0x80000000u;
   public const uint ES_SYSTEM_REQUIRED = 0x00000001u;
+  public const uint ES_DISPLAY_REQUIRED = 0x00000002u;
 }
 '@ -ErrorAction SilentlyContinue
-  [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS -bor [RdevSleepPrevention]::ES_SYSTEM_REQUIRED)
+  [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS -bor [RdevSleepPrevention]::ES_SYSTEM_REQUIRED -bor [RdevSleepPrevention]::ES_DISPLAY_REQUIRED)
   Write-Host "[rdev] Sleep prevention enabled (SetThreadExecutionState)"
 } catch {
   Write-Host "[rdev] Sleep prevention unavailable — keep this window active to avoid disconnection"

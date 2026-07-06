@@ -65,8 +65,8 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "推荐入口", "Agent 包目录", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false", "--max-jobs 0", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false", "--max-jobs 0", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.accept != "" {

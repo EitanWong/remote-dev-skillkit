@@ -125,6 +125,22 @@ After sending the handoff:
    - Is the Cloudflare tunnel still alive? (check process)
 3. Present the user with specific, actionable next steps — not another "still waiting" message.
 
+### Rule 12 — Host sessions keep awake, but never bypass lock policy
+
+Temporary host sessions use built-in best-effort keep-awake protection while
+`rdev host serve` is active:
+
+- macOS: `caffeinate -dimsu`
+- Linux: `systemd-inhibit --what=sleep:idle`
+- Windows: `SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED|ES_DISPLAY_REQUIRED)`
+- CLI runtime: `rdev host serve --keep-awake=true` by default
+
+This prevents idle sleep/display sleep where the OS allows it. It does **not**
+bypass lock-screen policy, enterprise device controls, user authentication, or
+screen-unlock requirements. If a host becomes `stale`, treat sleep/lock/network
+loss as likely causes and use the standard recovery/status flow instead of
+asking the user to edit bootstrap scripts.
+
 ---
 
 ## Workflow (5 steps, no branching for the user)
@@ -273,6 +289,7 @@ Never add `service.manage`, `credential.change`, or `gui.control` without explic
 - Hidden installation or persistence
 - ExecutionPolicy Bypass
 - UAC or sudo bypass without approval gate
+- Bypassing lock-screen, screen-unlock, MDM, or enterprise security policy
 - Storing secrets, tokens, private keys, or raw transcripts in memory
 - Running `rdev support-session connect --start` in a background terminal (`&`, `nohup`, etc.)
 - Calling any `rdev.*` MCP tool without passing `"gateway_url": "<active-gateway-url>"`

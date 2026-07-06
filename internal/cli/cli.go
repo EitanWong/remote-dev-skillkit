@@ -38,6 +38,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidenceplan"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostawake"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostedprovider"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
@@ -4085,6 +4086,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		approvalStore := fs.String("approval-store", "", "optional local host approval token consumption store path")
 		workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
 		captureRuntimeFixture := fs.Bool("capture-runtime-fixture", false, "append an adapter runtime fixture artifact for completed, failed, or canceled jobs")
+		keepAwake := fs.Bool("keep-awake", true, "best-effort prevention of idle sleep/display sleep while host serve is running; does not bypass OS lock-screen policy")
 		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 		releaseBundle := fs.String("release-bundle", "", "optional signed release bundle index to verify before host registration")
 		releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle, formatted key_id:base64url_public_key")
@@ -4122,6 +4124,7 @@ func (a App) host(ctx context.Context, args []string) error {
 			ApprovalStorePath:           *approvalStore,
 			WorkspaceLockStore:          *workspaceLockStore,
 			CaptureRuntimeFixture:       *captureRuntimeFixture,
+			KeepAwake:                   *keepAwake,
 			ManifestRootPublicKey:       *manifestRootPublicKey,
 			ReleaseBundlePath:           *releaseBundle,
 			ReleaseRootPublicKey:        *releaseRootPublicKey,
@@ -4262,6 +4265,7 @@ type hostServeOptions struct {
 	ApprovalStorePath           string
 	WorkspaceLockStore          string
 	CaptureRuntimeFixture       bool
+	KeepAwake                   bool
 	ManifestRootPublicKey       string
 	ReleaseBundlePath           string
 	ReleaseRootPublicKey        string
@@ -4527,6 +4531,17 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 	enc.SetIndent("", "  ")
 	if opts.Once {
 		return enc.Encode(payload)
+	}
+	keepAwake := hostawake.Disabled()
+	if opts.KeepAwake {
+		keepAwake = hostawake.Acquire(ctx)
+	}
+	defer func() { _ = keepAwake.Close() }()
+	payload["keep_awake"] = keepAwake
+	if keepAwake.Enabled {
+		_, _ = fmt.Fprintf(a.Stderr, "[rdev] keep-awake enabled via %s (%s)\n", keepAwake.Method, keepAwake.Detail)
+	} else {
+		_, _ = fmt.Fprintf(a.Stderr, "[rdev] keep-awake not active: %s\n", keepAwake.Detail)
 	}
 	if _, err := waitForHostActive(ctx, gatewayClient, opts.GatewayURL, host.ID, opts.ApprovalTimeout, opts.PollInterval); err != nil {
 		return err

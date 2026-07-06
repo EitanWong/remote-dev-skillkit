@@ -4,6 +4,33 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.35-dev
+
+Current phase: keep visible host sessions connected during longer AI-native
+remote work. This slice adds best-effort sleep/display-sleep prevention while a
+foreground host runner is active, without bypassing lock-screen or enterprise
+security policy.
+
+### Added
+
+- Added `internal/hostawake`, a runtime keep-awake lease used by `rdev host
+  serve` when `--once=false`. The lease is enabled by default through
+  `--keep-awake=true` and can be disabled with `--keep-awake=false`.
+- Added platform keep-awake implementations: macOS `caffeinate -dimsu`, Linux
+  `systemd-inhibit --what=sleep:idle`, and Windows
+  `SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED|ES_DISPLAY_REQUIRED)`.
+- Added keep-awake status to the host registration payload so Agents can see
+  whether sleep prevention is active or unavailable on the target.
+
+### Changed
+
+- Updated generated shell and PowerShell bootstrap scripts to keep the visible
+  host session awake while the runner is active, then release the inhibitor
+  before exit.
+- Updated `safe-remote-support` guidance to diagnose stale hosts as possible
+  sleep/lock/network loss and to state clearly that Remote Dev Skillkit never
+  bypasses lock-screen, unlock, MDM, or enterprise policy.
+
 ## 0.1.34-dev
 
 Current phase: AI-native remote support reliability hardening from real
