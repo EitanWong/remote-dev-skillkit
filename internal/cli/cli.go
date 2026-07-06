@@ -3079,7 +3079,10 @@ func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.
 		return "", func() {}, fmt.Errorf("cloudflared start failed (protocol=%q): %w", protocol, err)
 	}
 
-	// Scan stderr for the tunnel URL (looks like https://*.trycloudflare.com)
+	// Scan stderr for the tunnel URL (looks like https://*.trycloudflare.com).
+	// Candidates must pass URL parsing to prevent garbled error lines from being
+	// accepted as tunnel addresses (cloudflared occasionally writes error text on
+	// the same line as a partial URL when the tunnel fails to establish).
 	urlCh := make(chan string, 1)
 	go func() {
 		defer pw.Close()
@@ -3093,11 +3096,23 @@ func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.
 					end = len(rest)
 				}
 				candidate := strings.TrimRight(rest[:end], "/")
-				if strings.Contains(candidate, ".trycloudflare.com") {
-					select {
-					case urlCh <- candidate:
-					default:
-					}
+				if !strings.Contains(candidate, ".trycloudflare.com") {
+					continue
+				}
+				// Strict validation: must parse as a URL with https scheme and
+				// a non-empty host that does not contain whitespace or error
+				// keywords that indicate cloudflared wrote a diagnostic line
+				// rather than an actual tunnel address.
+				u, err := url.Parse(candidate)
+				if err != nil || u.Scheme != "https" || u.Host == "" {
+					continue
+				}
+				if strings.ContainsAny(u.Host, " \t\n\r") {
+					continue
+				}
+				select {
+				case urlCh <- candidate:
+				default:
 				}
 			}
 		}
@@ -3121,6 +3136,10 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if addr == "" {
 		addr = "0.0.0.0:8787"
 	}
+	// Automatically find a free port when the preferred address is already bound.
+	// This avoids cryptic "bind: address already in use" errors when multiple
+	// support sessions are started on the same machine (e.g. concurrent agent runs).
+	addr = findFreeAddr(addr)
 	gatewayURL, candidates := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
 	if stableGatewayURL := firstStableGatewayURL(candidates); stableGatewayURL != "" {
 		gatewayURL = stableGatewayURL
@@ -3196,6 +3215,51 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		return err
 	}
 	gatewayCandidates, _ := prepared["gateway_url_candidates"].([]supportsession.GatewayURLCandidate)
+
+	// Pre-check: verify that platform helper binaries were actually built into
+	// workDir/bin before the gateway starts serving /assets/* routes.
+	//
+	// This catches the common mistake of running `prepare --build-assets` with
+	// one --work-dir and then `connect --start` with a different --work-dir,
+	// which leaves the gateway unable to serve the helper and causes a 404 on
+	// the target side.
+	if assetReport, ok := prepared["asset_report"].(map[string]any); ok {
+		allReady, _ := assetReport["all_ready"].(bool)
+		if !allReady {
+			// Identify which platform binary is missing so the error message is
+			// actionable rather than generic.
+			binDir := filepath.Join(workDir, "bin")
+			type platformCheck struct {
+				name string
+				path string
+			}
+			checks := []platformCheck{
+				{"windows-amd64", filepath.Join(binDir, "rdev-windows-amd64.exe")},
+				{"darwin-arm64", filepath.Join(binDir, "rdev-darwin-arm64")},
+				{"darwin-amd64", filepath.Join(binDir, "rdev-darwin-amd64")},
+				{"linux-amd64", filepath.Join(binDir, "rdev-linux-amd64")},
+				{"linux-arm64", filepath.Join(binDir, "rdev-linux-arm64")},
+			}
+			var missing []string
+			for _, c := range checks {
+				if _, statErr := os.Stat(c.path); os.IsNotExist(statErr) {
+					missing = append(missing, c.name)
+				}
+			}
+			if len(missing) > 0 {
+				_, _ = fmt.Fprintf(a.Stderr,
+					"[rdev] WARNING: helper binaries missing for platforms %v in %s\n"+
+						"       The gateway will return 404 for /assets/* on these platforms.\n"+
+						"       Run: rdev support-session connect --start --repo-root <checkout> --work-dir %s\n"+
+						"       (ensure --work-dir is the same for build and serve)\n",
+					missing, binDir, workDir)
+				// Warn but do not abort: LAN/managed hosts that bring their own
+				// rdev binary still work; only targets that need the gateway asset
+				// download will be affected.
+			}
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
 		return err
 	}
@@ -5796,7 +5860,11 @@ func (a App) jobGet(ctx context.Context, gatewayURL, jobID, operatorTokenFile st
 }
 
 // jobWait polls GET /v1/jobs/:id every 2 seconds until the job reaches a
-// terminal state (completed, failed, canceled) or the timeout expires.
+// terminal state (succeeded, completed, failed, canceled) or the timeout expires.
+//
+// Note: the model layer uses "succeeded" as the success terminal state.
+// "completed" is retained here for backward compatibility with older gateway
+// versions that may still emit that value.
 func (a App) jobWait(ctx context.Context, gatewayURL, jobID string, timeoutSeconds int, operatorTokenFile string) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
@@ -5809,16 +5877,16 @@ func (a App) jobWait(ctx context.Context, gatewayURL, jobID string, timeoutSecon
 		if err != nil {
 			return fmt.Errorf("polling job: %w", err)
 		}
-		status, _ := job["status"].(string)
-		switch status {
-		case "completed", "failed", "canceled":
+		jobStatus, _ := job["status"].(string)
+		switch jobStatus {
+		case "succeeded", "completed", "failed", "canceled":
 			return writeJSON(a.Stdout, job)
 		}
-		_, _ = fmt.Fprintf(a.Stderr, "[rdev] job %s status=%s; waiting...\n", jobID, status)
+		_, _ = fmt.Fprintf(a.Stderr, "[rdev] job %s status=%s; waiting...\n", jobID, jobStatus)
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			return fmt.Errorf("job %s did not reach a terminal state within %ds (last status: %s)", jobID, timeoutSeconds, status)
+			return fmt.Errorf("job %s did not reach a terminal state within %ds (last status: %s)", jobID, timeoutSeconds, jobStatus)
 		}
 	}
 }
@@ -6679,6 +6747,34 @@ func listenAndServeGatewayContext(ctx context.Context, addr string, handler http
 		}
 		return err
 	}
+}
+
+// findFreeAddr returns the first TCP address in [preferred, preferred+20) that
+// is not already bound. If preferred is available it is returned unchanged.
+// If no free address is found within the search range, preferred is returned
+// and the caller will receive a bind error from the OS when it tries to listen.
+//
+// Only the port is incremented; the host part is preserved as-is so that
+// interface binding (0.0.0.0, 127.0.0.1, etc.) is respected.
+func findFreeAddr(preferred string) string {
+	host, portStr, err := net.SplitHostPort(preferred)
+	if err != nil {
+		// Not a host:port – return unchanged and let the caller handle it.
+		return preferred
+	}
+	basePort, err := strconv.Atoi(portStr)
+	if err != nil {
+		return preferred
+	}
+	for delta := 0; delta < 20; delta++ {
+		candidate := net.JoinHostPort(host, strconv.Itoa(basePort+delta))
+		ln, err := net.Listen("tcp", candidate)
+		if err == nil {
+			ln.Close()
+			return candidate
+		}
+	}
+	return preferred
 }
 
 func gatewayStateStore(opts gatewayServeOptions) (gateway.StateStore, error) {

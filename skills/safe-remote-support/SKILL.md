@@ -248,3 +248,70 @@ Never add `service.manage`, `credential.change`, or `gui.control` without explic
 - ExecutionPolicy Bypass
 - UAC or sudo bypass without approval gate
 - Storing secrets, tokens, private keys, or raw transcripts in memory
+
+---
+
+## Stage Gates — Pass ALL before advancing
+
+Before sending the handoff to the user, verify **every** gate in order. Do not proceed until each check is green.
+
+| Gate | Check | Fail action |
+|------|-------|-------------|
+| G1 — Port free | `findFreeAddr` resolves to an unbound address | Use auto-detected free port |
+| G2 — Gateway healthy | `curl -fsS <gatewayURL>/healthz` returns HTTP 2xx/404 | Wait up to 15 s, then restart |
+| G3 — Tunnel URL valid | The URL contains `.trycloudflare.com` and parses as HTTPS | Re-request tunnel; try localhost.run fallback |
+| G4 — Assets ready | `asset_report.all_ready=true` for target platform | Run `connect --start --repo-root <checkout>` with same `--work-dir` |
+| G5 — Handoff text present | `handoff_text_file` is non-empty and URL is reachable | Do not give user a dead link |
+
+Only after all gates pass: send `target_handoff_envelope.full_text` to the user.
+
+---
+
+## Shell Scripting Safety Rules (if you must write a script)
+
+These rules apply only when the built-in `rdev` CLI and MCP tools cannot accomplish the task directly.
+
+**Variable naming**
+
+- Never name a variable `status` in a shell script — it is a **read-only built-in** in zsh and will cause `read-only variable: status` at runtime.
+- Use `job_state`, `host_state`, `rdev_state`, or any other non-conflicting name.
+
+```bash
+# WRONG — crashes in zsh
+status=$(curl ...)
+
+# CORRECT
+job_state=$(curl ...)
+```
+
+**Job terminal states**
+
+The gateway model uses `"succeeded"` (not `"completed"`) as the success terminal state. Always include all five terminal values in your polling exit condition:
+
+```bash
+case "$job_state" in
+  succeeded|completed|failed|canceled) break ;;
+esac
+```
+
+**CLI subcommand verification**
+
+Before invoking any `rdev` subcommand, verify it exists by checking `rdev --help` output. The following subcommands **do not exist** and will return errors:
+
+- `rdev hosts capabilities` → use `rdev.hosts.capabilities` MCP tool or `GET /v1/hosts`
+- `rdev job list` → use `rdev.jobs.list` MCP tool or `GET /v1/jobs`
+
+Always prefer MCP tool calls over CLI for gateway interactions.
+
+**MCP gateway alignment**
+
+The installed MCP server (`rdev-mcp`) connects to a statically configured gateway (typically `http://127.0.0.1:8787`). When a support session runs on a different port or uses a Cloudflare URL, the MCP tools will query the wrong gateway and return empty results.
+
+Fix: pass `"gateway_url": "<active-gateway-url>"` explicitly on every MCP call:
+
+```
+rdev.jobs.create(gateway_url="http://127.0.0.1:9901", ...)
+rdev.hosts.capabilities(gateway_url="http://127.0.0.1:9901", ...)
+```
+
+Or set `RDEV_CLOUDFLARED_GATEWAY_URL=<url>` before starting the MCP server.

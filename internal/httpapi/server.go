@@ -836,7 +836,7 @@ rdev_max_retries=5
 rdev_retry_delay=5
 rdev_attempt=0
 while true; do
-  "$rdev_cmd" host serve --manifest-url %s%s --transport auto --once=false
+  "$rdev_cmd" host serve --manifest-url %s%s --transport auto --once=false --max-jobs 0
   rdev_exit=$?
   rdev_attempt=$((rdev_attempt + 1))
   echo "[rdev] host process exited with code $rdev_exit"
@@ -913,7 +913,7 @@ do {
     Write-Host ("[rdev] Retrying host registration (attempt $($rdevAttempt + 1) of $($rdevMaxRetries + 1)) after ${rdevRetryDelaySec}s...")
     Start-Sleep -Seconds $rdevRetryDelaySec
   }
-  & $rdevPath host serve --manifest-url '%s'%s --transport auto --once=false
+  & $rdevPath host serve --manifest-url '%s'%s --transport auto --once=false --max-jobs 0
   $rdevExitCode = $LASTEXITCODE
   $rdevAttempt++
   Write-Host "[rdev] host process exited with code $rdevExitCode"
