@@ -359,7 +359,7 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 	}
 	if ticket.Metadata["auto_approve"] == "attended-temporary" &&
 		ticket.Mode == model.HostModeAttendedTemporary &&
-		!g.ticketHasHostLocked(ticket.ID) {
+		!g.ticketHasActiveRecentHostLocked(ticket.ID, 90*time.Second) {
 		now := g.now().UTC()
 		host.Status = model.HostStatusActive
 		host.ApprovedAt = &now
@@ -377,6 +377,27 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 func (g *MemoryGateway) ticketHasHostLocked(ticketID string) bool {
 	for _, host := range g.hosts {
 		if host.TicketID == ticketID {
+			return true
+		}
+	}
+	return false
+}
+
+// ticketHasActiveRecentHostLocked returns true when there is at least one host
+// associated with ticketID whose status is Active AND whose LastSeenAt is within
+// the given staleness window.
+//
+// This is used by the auto-approve gate so that a bootstrap re-registration can
+// receive automatic approval once the previous host process has gone silent
+// (i.e., it exited, crashed, or lost its network path). The staleness window
+// should match the gateway's heartbeat timeout — hosts that stop sending
+// heartbeats will have a stale LastSeenAt, signalling that re-approval is safe.
+func (g *MemoryGateway) ticketHasActiveRecentHostLocked(ticketID string, window time.Duration) bool {
+	cutoff := g.now().Add(-window)
+	for _, host := range g.hosts {
+		if host.TicketID == ticketID &&
+			host.Status == model.HostStatusActive &&
+			host.LastSeenAt.After(cutoff) {
 			return true
 		}
 	}

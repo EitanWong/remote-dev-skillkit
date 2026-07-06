@@ -59,11 +59,32 @@ If `rdev` is not found in PATH:
 3. Try `go install ./cmd/rdev` if a checkout exists.
 4. Never stop and ask the user to install rdev.
 
-### Rule 5 — MCP tools must target the active gateway
+### Rule 5 — Gateway process MUST run in foreground
 
-When a session uses a remote gateway (Cloudflare URL), pass `"gateway_url": "<cloudflare-url>"` as an argument to every call to `rdev.hosts.*`, `rdev.jobs.*`, `rdev.artifacts.*`, `rdev.audit.query`. The MCP server may be running a local in-memory gateway; per-call `gateway_url` overrides it.
+`rdev support-session connect --start` is a **foreground process**. It manages the public tunnel, serves helper assets, and holds session state in memory. If it exits, the tunnel drops and the target machine loses connectivity.
 
-### Rule 6 — Find executables with `command -v`, not `find`
+Never run it with `&`, `nohup`, or in a background terminal. Keep it alive for the whole session.
+
+If the gateway process unexpectedly exits:
+1. Re-run `rdev support-session connect --start` with the same `--work-dir`.
+2. Wait for the previous host heartbeat to go stale (up to 90 seconds).
+3. Let the target machine re-register and receive automatic approval.
+4. Resume from the generated `target_handoff_envelope.full_text` / `handoff_text_file.path`.
+
+### Rule 6 — MCP tools must target the active gateway
+
+The MCP server (`rdev mcp serve`) can maintain its own separate in-memory gateway. It may not see hosts or jobs created by `rdev support-session connect --start`.
+
+Pass `"gateway_url": "<active-gateway-url>"` explicitly on **every** `rdev.hosts.*`, `rdev.jobs.*`, `rdev.artifacts.*`, and `rdev.audit.query` call:
+
+```
+rdev.jobs.create(gateway_url="http://127.0.0.1:8787", host_id="hst_...", ...)
+rdev.hosts.capabilities(gateway_url="https://<tunnel>.trycloudflare.com", host_id="hst_...")
+```
+
+Omitting `gateway_url` can hit the wrong empty gateway and produce misleading "not found" or empty-list results.
+
+### Rule 7 — Find executables with `command -v`, not `find`
 
 Do NOT use `find` to locate executables. Use:
 - `command -v rdev` or `which rdev` (shell)
@@ -72,28 +93,28 @@ Do NOT use `find` to locate executables. Use:
 
 `find` scans the entire filesystem and hangs on cache directories. It is never appropriate for locating a known executable.
 
-### Rule 7 — Discover CLI parameters before using them
+### Rule 8 — Discover CLI parameters before using them
 
 Before calling any `rdev` subcommand with unfamiliar flags:
 1. Run `rdev <subcommand> --help` and read the output.
 2. Only use flags that appear in the `--help` output.
 3. Never invent flag names (e.g. `--public-tunnel` does not exist; the CLI manages tunnels internally via `connect --start`).
 
-### Rule 8 — MCP tool prerequisites must be satisfied before calling
+### Rule 9 — MCP tool prerequisites must be satisfied before calling
 
 Before calling any MCP tool that requires a running gateway:
 1. Verify the local gateway is running: `curl -fsS http://127.0.0.1:8787/healthz`
 2. If it returns an error, start the gateway first with `rdev support-session connect --start`.
 3. Never call `rdev.support_session.create` or `rdev.hosts.*` when no gateway URL is available — the call will fail with a missing-parameter error.
 
-### Rule 9 — Send `target_handoff_envelope.full_text`, not a bare URL
+### Rule 10 — Send `target_handoff_envelope.full_text`, not a bare URL
 
 When the session is ready, deliver exactly `target_handoff_envelope.full_text` (or `handoff_text_file.path` content) to the target-side human. This already contains the PowerShell command in `irm 'URL' | iex` form. Do NOT:
 - Send a bare `https://...trycloudflare.com/join/XXXX` link alone (the user may not know to run it)
 - Extract the URL and reconstruct a custom command
 - Use `powershell -EncodedCommand` — Base64 blobs are truncated by chat interfaces
 
-### Rule 10 — Status polling has a 3-minute deadline; then diagnose
+### Rule 11 — Status polling has a 3-minute deadline; then diagnose
 
 After sending the handoff:
 1. Poll with `rdev.support_session.status wait=true` or watch `status_file.path`.
@@ -122,7 +143,7 @@ Read the JSON output. Check:
 - `gateway_candidate_summary.needs_public_tunnel` — need cloudflared?
 - `gateway_candidate_summary.cloudflared_in_path` — already available?
 
-### Step 2 — Start gateway + managed public tunnel (auto)
+### Step 2 — Start gateway + managed public tunnel (foreground, auto)
 
 If `needs_public_tunnel=true`:
 
@@ -130,7 +151,7 @@ If `needs_public_tunnel=true`:
 rdev support-session connect --start
 ```
 
-Do not add `--public-tunnel`; that option no longer exists. Do not start `cloudflared` in a separate terminal. The CLI owns tunnel selection, process lifetime, HTTP/2 fallback, and localhost.run fallback.
+Do not add `--public-tunnel`; that option no longer exists. Do not start `cloudflared` in a separate terminal. Do not run this command with `&`, `nohup`, or any background terminal. The CLI owns tunnel selection, process lifetime, HTTP/2 fallback, localhost.run fallback, helper assets, and in-memory session state. Keep this foreground process alive for the whole session.
 
 ### Step 3 — Send ONE thing to the user
 
@@ -248,6 +269,9 @@ Never add `service.manage`, `credential.change`, or `gui.control` without explic
 - ExecutionPolicy Bypass
 - UAC or sudo bypass without approval gate
 - Storing secrets, tokens, private keys, or raw transcripts in memory
+- Running `rdev support-session connect --start` in a background terminal (`&`, `nohup`, etc.)
+- Calling any `rdev.*` MCP tool without passing `"gateway_url": "<active-gateway-url>"`
+- Assuming plural CLI commands such as `rdev hosts` or `rdev jobs` are valid; use `rdev host` / `rdev job` or MCP tools
 
 ---
 

@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -137,6 +138,24 @@ func (a App) Run(ctx context.Context, args []string) error {
 		a.printUsage()
 		return nil
 	default:
+		// Provide a "did you mean?" hint for common near-misses so that agents
+		// and users get actionable feedback instead of a bare "unknown command".
+		suggestions := map[string]string{
+			"hosts":            "host",
+			"jobs":             "job",
+			"tickets":          "ticket",
+			"invites":          "invite",
+			"policies":         "policy",
+			"gateways":         "gateway",
+			"connections":      "connection-entry",
+			"connection_entry": "connection-entry",
+			"support_session":  "support-session",
+			"mcp-serve":        "mcp serve",
+			"host-serve":       "host serve",
+		}
+		if hint, ok := suggestions[args[0]]; ok {
+			return fmt.Errorf("unknown command %q — did you mean: rdev %s", args[0], hint)
+		}
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
@@ -3725,7 +3744,7 @@ func (a App) host(ctx context.Context, args []string) error {
 		transport := fs.String("transport", "poll", "host job transport: auto, poll, long-poll, or wss")
 		pollInterval := fs.Duration("poll-interval", time.Second, "job polling interval when --once=false")
 		longPollTimeout := fs.Duration("long-poll-timeout", 25*time.Second, "long-poll wait duration when --transport=long-poll")
-		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false")
+		maxJobs := fs.Int("max-jobs", 1, "maximum jobs to process when --once=false; 0 = unlimited (process jobs until context is cancelled)")
 		approvalTimeout := fs.Duration("approval-timeout", 120*time.Second, "maximum time to wait for host approval when --once=false; increase for attended temporary sessions over slow/remote networks")
 		trustPin := fs.String("trust-pin", "", "optional gateway signing public key pin, formatted sha256:<hex>")
 		gatewayCA := fs.String("gateway-ca", "", "optional PEM CA bundle for the gateway HTTPS certificate")
@@ -9189,8 +9208,12 @@ func manifestGatewayFallbackURLs(candidates []model.JoinManifestGatewayCandidate
 }
 
 func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
+	// maxJobs == 0 means unlimited; negative values fall back to 1.
 	maxJobs := opts.MaxJobs
-	if maxJobs <= 0 {
+	switch {
+	case maxJobs == 0:
+		maxJobs = math.MaxInt
+	case maxJobs < 0:
 		maxJobs = 1
 	}
 	interval := opts.PollInterval
@@ -9326,8 +9349,12 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 }
 
 func (a App) runWSSHostJobs(ctx context.Context, opts hostServeOptions, client *http.Client, hostID, identityFingerprint, hostSecret string) (int, error) {
+	// maxJobs == 0 means unlimited; negative values fall back to 1.
 	maxJobs := opts.MaxJobs
-	if maxJobs <= 0 {
+	switch {
+	case maxJobs == 0:
+		maxJobs = math.MaxInt
+	case maxJobs < 0:
 		maxJobs = 1
 	}
 	trust, err := fetchHostTrust(ctx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
