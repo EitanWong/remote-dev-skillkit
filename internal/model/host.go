@@ -17,6 +17,7 @@ type HostStatus string
 const (
 	HostStatusPending HostStatus = "pending"
 	HostStatusActive  HostStatus = "active"
+	HostStatusStale   HostStatus = "stale"
 	HostStatusRevoked HostStatus = "revoked"
 )
 

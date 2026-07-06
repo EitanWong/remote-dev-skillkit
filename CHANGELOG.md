@@ -4,6 +4,44 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.34-dev
+
+Current phase: AI-native remote support reliability hardening from real
+fresh-Agent support-session transcripts. This slice removes more places where
+Agents had to guess CLI, MCP, HTTP, Windows command, or liveness behavior.
+
+### Added
+
+- Added projected `stale` host status for active hosts whose heartbeat is older
+  than the gateway liveness window. Support-session status responses now expose
+  `stale_hosts` and no longer report `connected=true` for hosts that are not
+  job-ready.
+- Added operator-side `rdev job create` with `--policy-json` and
+  `--policy-file`, so Agents can create scoped jobs through a first-class CLI
+  command instead of hand-writing raw HTTP `curl` requests.
+- Added `rdev support-session audit-capabilities`, a built-in OS-aware audit
+  runner for `shell.user`, `fs.read`, `fs.write.scoped`, and `process.inspect`
+  that creates bounded jobs, waits for terminal status, and summarizes
+  artifacts.
+
+### Fixed
+
+- Host heartbeats now refresh the host's `last_seen_at`, making host lists,
+  support-session status, and debugging output reflect actual runner activity.
+- `CreateJob` and `NextJobForHost` now reject stale hosts before new work is
+  queued or claimed, preventing Agents from sending jobs to a runner that has
+  stopped polling.
+- Attended temporary auto-approval now supersedes matching stale host
+  registrations for the same ticket and machine identity/name, revoking the old
+  host and canceling its queued/running jobs so Agents do not accidentally pick
+  an obsolete host.
+- Polling and WSS host runners now report failed/denied/approval-required jobs
+  as failed job records and keep serving subsequent work instead of terminating
+  the entire host process after one bad job.
+- Updated `safe-remote-support` guidance to treat `stale` as not job-ready, use
+  `rdev support-session audit-capabilities` for capability testing, and prefer
+  first-class `rdev job` CLI commands over raw HTTP or Agent-authored scripts.
+
 ## 0.1.33-dev
 
 Current phase: real support-session usability hardening from fresh-Agent

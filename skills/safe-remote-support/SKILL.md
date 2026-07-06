@@ -172,20 +172,25 @@ rdev support-session status --ticket-code <TICKET> --wait --gateway-url <TUNNEL_
 
 Or use MCP: `rdev.support_session.status` with `wait=true` and `gateway_url: "<TUNNEL_URL>"`.
 
-When `connected=true`, immediately tell the user: "✅ Connected to `<hostname>`."
+When `connected=true`, immediately tell the user: "Connected to `<hostname>`."
+If the status is `stale`, do **not** create jobs. Report that the target runner
+was seen previously but is no longer job-ready, then use the generated recovery
+instructions instead of manually building new bootstrap scripts.
 
 ### Step 5 — Run capability tests then report
 
-After connection, run this sequence automatically (no user prompts):
+After connection, run the built-in audit first (no user prompts):
 
 ```
-rdev.hosts.capabilities  → check approved capabilities
-rdev.jobs.create         → shell.user: systeminfo / hostname / whoami
-rdev.jobs.create         → fs.read: dir C:\ or ls /
-rdev.jobs.create         → process.inspect: tasklist or ps aux
-rdev.jobs.create         → fs.write.scoped: create a test file, verify, delete
+rdev support-session audit-capabilities --gateway-url <ACTIVE_GATEWAY_URL> --host-id <HOST_ID>
 ```
 
+This command owns the OS-specific probe commands, short timeouts, scoped write
+test, job waiting, and artifact collection. Do not write ad-hoc `curl` loops or
+custom Windows/Unix capability scripts unless this built-in command is missing.
+
+For subsequent scoped work, use `rdev job create`, `rdev job wait`, `rdev job
+get`, `rdev job list`, and `rdev job cancel` before considering MCP or raw HTTP.
 Then revoke the session and produce the Audit Report.
 
 ---
@@ -323,9 +328,12 @@ esac
 Before invoking any `rdev` subcommand, verify it exists by checking `rdev --help` output. The following subcommands **do not exist** and will return errors:
 
 - `rdev hosts capabilities` → use `rdev.hosts.capabilities` MCP tool or `GET /v1/hosts`
-- `rdev job list` → use `rdev.jobs.list` MCP tool or `GET /v1/jobs`
 
-Always prefer MCP tool calls over CLI for gateway interactions.
+Prefer first-class CLI commands for gateway interactions when they exist:
+`rdev support-session audit-capabilities`, `rdev job create`, `rdev job list`,
+`rdev job get`, `rdev job wait`, and `rdev job cancel`. Use MCP tools when the
+current task needs MCP-only surfaces such as host capability inspection, and use
+raw HTTP only as a last-resort diagnostic path.
 
 **MCP gateway alignment**
 

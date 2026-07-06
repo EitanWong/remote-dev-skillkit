@@ -2833,6 +2833,22 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return writeJSON(a.Stdout, status)
+	case "audit-capabilities":
+		fs := flag.NewFlagSet("support-session audit-capabilities", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway URL that owns the connected support session")
+		hostID := fs.String("host-id", "", "active host ID to audit")
+		timeout := fs.Duration("timeout", 90*time.Second, "maximum duration for the audit")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.supportSessionAuditCapabilities(ctx, supportSessionAuditCapabilitiesOptions{
+			GatewayURL:        *gatewayURL,
+			HostID:            *hostID,
+			Timeout:           *timeout,
+			OperatorTokenFile: *operatorTokenFile,
+		})
 	default:
 		return fmt.Errorf("unknown support-session subcommand %q", args[0])
 	}
@@ -3684,6 +3700,311 @@ func fetchSupportSessionStatus(ctx context.Context, client *http.Client, opts su
 		return nil, fmt.Errorf("support-session status failed: %s", resp.Status)
 	}
 	return payload, nil
+}
+
+type supportSessionAuditCapabilitiesOptions struct {
+	GatewayURL        string
+	HostID            string
+	Timeout           time.Duration
+	OperatorTokenFile string
+}
+
+type supportSessionAuditProbe struct {
+	Name        string
+	Capability  string
+	Adapter     string
+	Intent      string
+	Policy      map[string]any
+	FailureIsOK bool
+}
+
+func (a App) supportSessionAuditCapabilities(ctx context.Context, opts supportSessionAuditCapabilitiesOptions) error {
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		return fmt.Errorf("support-session audit-capabilities requires --gateway-url or a configured RDEV_*_GATEWAY_URL")
+	}
+	if strings.TrimSpace(opts.HostID) == "" {
+		return fmt.Errorf("--host-id is required")
+	}
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	token := loadOperatorToken(opts.OperatorTokenFile)
+	host, err := fetchHostJSON(ctx, gatewayURL, opts.HostID, token)
+	if err != nil {
+		return err
+	}
+	hostOS, _ := host["os"].(string)
+	probes := auditCapabilityProbes(hostOS)
+	results := make([]map[string]any, 0, len(probes))
+	ok := true
+	for _, probe := range probes {
+		created, err := createJobJSON(ctx, gatewayURL, opts.HostID, probe.Adapter, probe.Intent, probe.Policy, token)
+		if err != nil {
+			ok = false
+			results = append(results, map[string]any{
+				"name":       probe.Name,
+				"capability": probe.Capability,
+				"status":     "create_failed",
+				"ok":         false,
+				"error":      err.Error(),
+			})
+			continue
+		}
+		jobID := stringFromNestedMap(created, "job", "id")
+		if jobID == "" {
+			ok = false
+			results = append(results, map[string]any{
+				"name":       probe.Name,
+				"capability": probe.Capability,
+				"status":     "create_failed",
+				"ok":         false,
+				"error":      "gateway response missing job.id",
+			})
+			continue
+		}
+		job, waitErr := waitJobJSON(ctx, gatewayURL, jobID, token, 500*time.Millisecond)
+		jobStatus := stringFromMap(job, "status")
+		if waitErr != nil {
+			ok = false
+			results = append(results, map[string]any{
+				"name":       probe.Name,
+				"capability": probe.Capability,
+				"job_id":     jobID,
+				"status":     "wait_failed",
+				"ok":         false,
+				"error":      waitErr.Error(),
+			})
+			continue
+		}
+		passed := jobStatus == string(model.JobStatusSucceeded)
+		if probe.FailureIsOK && (jobStatus == string(model.JobStatusFailed) || jobStatus == string(model.JobStatusCanceled)) {
+			passed = true
+		}
+		if !passed {
+			ok = false
+		}
+		artifactSummary := ""
+		if artifacts, artifactErr := fetchJobArtifactsJSON(ctx, gatewayURL, jobID, token); artifactErr == nil {
+			artifactSummary = summarizeFirstArtifact(artifacts)
+		}
+		results = append(results, map[string]any{
+			"name":             probe.Name,
+			"capability":       probe.Capability,
+			"job_id":           jobID,
+			"job_status":       jobStatus,
+			"ok":               passed,
+			"expected_failure": probe.FailureIsOK,
+			"artifact_summary": artifactSummary,
+		})
+	}
+	report := map[string]any{
+		"schema_version": "rdev.support-session-capability-audit.v1",
+		"ok":             ok,
+		"gateway_url":    gatewayURL,
+		"host":           host,
+		"results":        results,
+		"next_action":    "Use rdev job create/wait/artifacts for scoped work only after this audit is ok.",
+	}
+	if err := writeJSON(a.Stdout, report); err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("support-session capability audit failed")
+	}
+	return nil
+}
+
+func auditCapabilityProbes(hostOS string) []supportSessionAuditProbe {
+	if strings.EqualFold(hostOS, "windows") {
+		return []supportSessionAuditProbe{
+			{Name: "identity", Capability: "shell.user", Adapter: "shell", Intent: "capability audit identity", Policy: shellAuditPolicy([]string{"shell.user"}, []string{"cmd", "/c", "hostname && whoami && cd"}, []string{"cmd"})},
+			{Name: "fs_read", Capability: "fs.read", Adapter: "shell", Intent: "capability audit scoped read", Policy: shellAuditPolicy([]string{"shell.user", "fs.read"}, []string{"cmd", "/c", "dir /b ."}, []string{"cmd"})},
+			{Name: "fs_write_scoped", Capability: "fs.write.scoped", Adapter: "shell", Intent: "capability audit scoped write", Policy: shellAuditPolicyWithWriteScope([]string{"shell.user", "fs.write.scoped"}, []string{"cmd", "/c", "echo rdev-audit> rdev_capability_audit.txt && type rdev_capability_audit.txt && del rdev_capability_audit.txt && if not exist rdev_capability_audit.txt echo deleted"}, []string{"cmd"}, []string{"."})},
+			{Name: "process_inspect", Capability: "process.inspect", Adapter: "shell", Intent: "capability audit process inspect", Policy: shellAuditPolicy([]string{"shell.user", "process.inspect"}, []string{"cmd", "/c", "tasklist /fi \"imagename eq cmd.exe\""}, []string{"cmd"})},
+		}
+	}
+	return []supportSessionAuditProbe{
+		{Name: "identity", Capability: "shell.user", Adapter: "shell", Intent: "capability audit identity", Policy: shellAuditPolicy([]string{"shell.user"}, []string{"sh", "-c", "hostname && whoami && pwd"}, []string{"sh"})},
+		{Name: "fs_read", Capability: "fs.read", Adapter: "shell", Intent: "capability audit scoped read", Policy: shellAuditPolicy([]string{"shell.user", "fs.read"}, []string{"sh", "-c", "ls -la . | head -40"}, []string{"sh"})},
+		{Name: "fs_write_scoped", Capability: "fs.write.scoped", Adapter: "shell", Intent: "capability audit scoped write", Policy: shellAuditPolicyWithWriteScope([]string{"shell.user", "fs.write.scoped"}, []string{"sh", "-c", "printf rdev-audit > rdev_capability_audit.txt && cat rdev_capability_audit.txt && rm rdev_capability_audit.txt && test ! -e rdev_capability_audit.txt && echo deleted"}, []string{"sh"}, []string{"."})},
+		{Name: "process_inspect", Capability: "process.inspect", Adapter: "shell", Intent: "capability audit process inspect", Policy: shellAuditPolicy([]string{"shell.user", "process.inspect"}, []string{"sh", "-c", "ps -o pid,comm= -p $$"}, []string{"sh"})},
+	}
+}
+
+func shellAuditPolicy(capabilities, argv, allowCommands []string) map[string]any {
+	return shellAuditPolicyWithWriteScope(capabilities, argv, allowCommands, nil)
+}
+
+func shellAuditPolicyWithWriteScope(capabilities, argv, allowCommands, writeScope []string) map[string]any {
+	policy := map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         capabilities,
+		"argv":                 argv,
+		"allow_commands":       allowCommands,
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	}
+	if len(writeScope) > 0 {
+		policy["write_scope"] = writeScope
+	}
+	return policy
+}
+
+func fetchHostJSON(ctx context.Context, gatewayURL, hostID, bearerToken string) (map[string]any, error) {
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/hosts/" + url.PathEscape(hostID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := doGatewayRequest(http.DefaultClient, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("fetch host failed: %s", responseErrorMessage(payload, resp.Status))
+	}
+	host, _ := payload["host"].(map[string]any)
+	if host == nil {
+		return nil, fmt.Errorf("fetch host failed: response missing host")
+	}
+	return host, nil
+}
+
+func createJobJSON(ctx context.Context, gatewayURL, hostID, adapter, intent string, policy map[string]any, bearerToken string) (map[string]any, error) {
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/jobs"
+	body, err := json.Marshal(map[string]any{"host_id": hostID, "adapter": adapter, "intent": intent, "policy": policy})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := doGatewayRequest(http.DefaultClient, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return payload, fmt.Errorf("create job failed: %s", responseErrorMessage(payload, resp.Status))
+	}
+	return payload, nil
+}
+
+func waitJobJSON(ctx context.Context, gatewayURL, jobID, bearerToken string, interval time.Duration) (map[string]any, error) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/jobs/" + url.PathEscape(jobID)
+	for {
+		payload, err := fetchJobJSON(ctx, endpoint, bearerToken)
+		if err != nil {
+			return payload, err
+		}
+		job := nestedMapOrSelf(payload, "job")
+		status := stringFromMap(job, "status")
+		switch status {
+		case "succeeded", "completed", "failed", "canceled":
+			return job, nil
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return payload, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func fetchJobArtifactsJSON(ctx context.Context, gatewayURL, jobID, bearerToken string) (map[string]any, error) {
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/jobs/" + url.PathEscape(jobID) + "/artifacts"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := doGatewayRequest(http.DefaultClient, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return payload, fmt.Errorf("fetch job artifacts failed: %s", responseErrorMessage(payload, resp.Status))
+	}
+	return payload, nil
+}
+
+func responseErrorMessage(payload map[string]any, fallback string) string {
+	if msg, _ := payload["error"].(string); msg != "" {
+		return msg
+	}
+	return fallback
+}
+
+func stringFromNestedMap(payload map[string]any, objectKey, fieldKey string) string {
+	object, _ := payload[objectKey].(map[string]any)
+	if object == nil {
+		return ""
+	}
+	return stringFromMap(object, fieldKey)
+}
+
+func nestedMapOrSelf(payload map[string]any, objectKey string) map[string]any {
+	object, _ := payload[objectKey].(map[string]any)
+	if object != nil {
+		return object
+	}
+	return payload
+}
+
+func stringFromMap(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
+func summarizeFirstArtifact(payload map[string]any) string {
+	values, _ := payload["artifacts"].([]any)
+	if len(values) == 0 {
+		return ""
+	}
+	first, _ := values[0].(map[string]any)
+	content, _ := first["content"].(string)
+	content = strings.TrimSpace(content)
+	if len(content) > 300 {
+		content = content[:300] + "..."
+	}
+	return content
 }
 
 func (a App) mcp(args []string) error {
@@ -5759,16 +6080,45 @@ func (a App) gatewayStorageVerify(provider, path string) error {
 //
 // Sub-commands:
 //
+//	rdev job create --gateway-url <url> --host-id <id> --adapter <name> --intent <text> (--policy-json <json>|--policy-file <path>)
 //	rdev job list   --gateway-url <url> [--host-id <id>]
 //	rdev job get    --gateway-url <url> --job-id <id>
 //	rdev job wait   --gateway-url <url> --job-id <id> [--timeout-seconds <n>]
 //	rdev job cancel --gateway-url <url> --job-id <id> [--reason <text>]
 func (a App) job(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(a.Stderr, "usage: rdev job <list|get|wait|cancel> [flags]")
+		_, _ = fmt.Fprintln(a.Stderr, "usage: rdev job <create|list|get|wait|cancel> [flags]")
 		return fmt.Errorf("missing job subcommand")
 	}
 	switch args[0] {
+	case "create":
+		fs := flag.NewFlagSet("job create", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+		hostID := fs.String("host-id", "", "target host ID (required)")
+		adapter := fs.String("adapter", "shell", "job adapter, for example shell or powershell")
+		intent := fs.String("intent", "", "short human-readable job intent (required)")
+		policyJSON := fs.String("policy-json", "", "inline JSON policy object")
+		policyFile := fs.String("policy-file", "", "path to JSON policy object")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *gatewayURL == "" {
+			return fmt.Errorf("--gateway-url is required")
+		}
+		if *hostID == "" {
+			return fmt.Errorf("--host-id is required")
+		}
+		if strings.TrimSpace(*intent) == "" {
+			return fmt.Errorf("--intent is required")
+		}
+		policy, err := readJobPolicy(*policyJSON, *policyFile)
+		if err != nil {
+			return err
+		}
+		return a.jobCreate(ctx, *gatewayURL, *hostID, *adapter, *intent, policy, *operatorTokenFile)
+
 	case "list":
 		fs := flag.NewFlagSet("job list", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -5837,8 +6187,62 @@ func (a App) job(ctx context.Context, args []string) error {
 		return a.jobCancel(ctx, *gatewayURL, *jobID, *reason, *operatorTokenFile)
 
 	default:
-		return fmt.Errorf("unknown job subcommand %q; available: list, get, wait, cancel", args[0])
+		return fmt.Errorf("unknown job subcommand %q; available: create, list, get, wait, cancel", args[0])
 	}
+}
+
+func readJobPolicy(policyJSON, policyFile string) (map[string]any, error) {
+	if strings.TrimSpace(policyJSON) != "" && strings.TrimSpace(policyFile) != "" {
+		return nil, fmt.Errorf("use only one of --policy-json or --policy-file")
+	}
+	var data []byte
+	switch {
+	case strings.TrimSpace(policyJSON) != "":
+		data = []byte(policyJSON)
+	case strings.TrimSpace(policyFile) != "":
+		content, err := os.ReadFile(policyFile)
+		if err != nil {
+			return nil, fmt.Errorf("read --policy-file: %w", err)
+		}
+		data = content
+	default:
+		return nil, fmt.Errorf("--policy-json or --policy-file is required")
+	}
+	var policy map[string]any
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return nil, fmt.Errorf("decode job policy JSON: %w", err)
+	}
+	if policy == nil {
+		policy = map[string]any{}
+	}
+	return policy, nil
+}
+
+func (a App) jobCreate(ctx context.Context, gatewayURL, hostID, adapter, intent string, policy map[string]any, operatorTokenFile string) error {
+	u := strings.TrimRight(gatewayURL, "/") + "/v1/jobs"
+	body, err := json.Marshal(map[string]any{
+		"host_id": hostID,
+		"adapter": adapter,
+		"intent":  intent,
+		"policy":  policy,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal job create request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tok := loadOperatorToken(operatorTokenFile); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", u, err)
+	}
+	defer resp.Body.Close()
+	return writeHTTPResponseJSON(a.Stdout, resp)
 }
 
 func (a App) jobList(ctx context.Context, gatewayURL, hostID, operatorTokenFile string) error {
@@ -9333,7 +9737,8 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 					return processed, fmt.Errorf("%v; additionally failed to append runtime fixture: %w", err, appendErr)
 				}
 			}
-			return processed, err
+			processed++
+			continue
 		}
 		if _, err := completeJob(ctx, client, opts.GatewayURL, hostID, hostSecret, job.ID, result.ArtifactContent); err != nil {
 			return processed, err
@@ -9427,9 +9832,6 @@ func (a App) runWSSHostJobs(ctx context.Context, opts hostServeOptions, client *
 				return processed, err
 			}
 			processed++
-			if err != nil {
-				return processed, err
-			}
 		default:
 			return processed, fmt.Errorf("unsupported websocket message type %q", msg.Type)
 		}

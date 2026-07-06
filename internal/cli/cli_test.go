@@ -5241,6 +5241,124 @@ func TestHostServeWSSCompletesDevJob(t *testing.T) {
 	}
 }
 
+func TestHostServePollingContinuesAfterFailedJob(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedJob, err := gw.CreateJob(host.ID, "shell", "denied first job", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"rdev-command-that-should-not-run"},
+		"allow_commands": []string{"different-command"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	successJob, err := gw.CreateJob(host.ID, "shell", "second job still runs", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+
+	processed, err := app.pollAndRunDevJobs(context.Background(), hostServeOptions{
+		GatewayURL:   server.URL,
+		PollInterval: time.Millisecond,
+		MaxJobs:      2,
+	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 2 {
+		t.Fatalf("expected 2 processed jobs, got %d", processed)
+	}
+	failed, err := gw.Job(failedJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != model.JobStatusFailed {
+		t.Fatalf("expected first job failed, got %s", failed.Status)
+	}
+	succeeded, err := gw.Job(successJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if succeeded.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected second job succeeded, got %s", succeeded.Status)
+	}
+}
+
+func TestJobCreateCLIUsesGatewayAPI(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"job", "create",
+		"--gateway-url", server.URL,
+		"--host-id", host.ID,
+		"--adapter", "shell",
+		"--intent", "cli create test",
+		"--policy-json", `{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Job model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Job.ID == "" || payload.Job.HostID != host.ID || payload.Job.Status != model.JobStatusQueued {
+		t.Fatalf("unexpected job create payload: %#v", payload.Job)
+	}
+}
+
 func TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -6295,11 +6413,11 @@ func TestHostServeReportsFailedDevJob(t *testing.T) {
 		PollInterval: 1,
 		MaxJobs:      1,
 	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
-	if err == nil {
-		t.Fatal("expected host runner failure")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if processed != 0 {
-		t.Fatalf("expected 0 processed jobs, got %d", processed)
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
 	}
 	failed, err := gw.Job(job.ID)
 	if err != nil {
@@ -6358,11 +6476,11 @@ func TestHostServeReportsHostDenialArtifact(t *testing.T) {
 		PollInterval: 1,
 		MaxJobs:      1,
 	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
-	if err == nil {
-		t.Fatal("expected host runner denial")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if processed != 0 {
-		t.Fatalf("expected 0 processed jobs, got %d", processed)
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
 	}
 	failed, err := gw.Job(job.ID)
 	if err != nil {
@@ -6437,11 +6555,11 @@ func TestHostServeReportsWorkspaceLockedArtifact(t *testing.T) {
 		MaxJobs:            1,
 		WorkspaceLockStore: lockStore,
 	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
-	if err == nil {
-		t.Fatal("expected workspace lock denial")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if processed != 0 {
-		t.Fatalf("expected 0 processed jobs, got %d", processed)
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
 	}
 	failed, err := gw.Job(job.ID)
 	if err != nil {
@@ -6501,11 +6619,11 @@ func TestHostServeReportsApprovalRequiredArtifact(t *testing.T) {
 		PollInterval: 1,
 		MaxJobs:      1,
 	}, nil, host.ID, "", issueHostSecretForCLITest(t, gw, host.ID))
-	if err == nil {
-		t.Fatal("expected approval requirement")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if processed != 0 {
-		t.Fatalf("expected 0 processed jobs, got %d", processed)
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
 	}
 	failed, err := gw.Job(job.ID)
 	if err != nil {

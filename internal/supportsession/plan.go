@@ -2716,15 +2716,18 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	}
 	hosts := append([]model.Host(nil), opts.Hosts...)
 	active := hostsByStatus(hosts, model.HostStatusActive)
+	stale := hostsByStatus(hosts, model.HostStatusStale)
 	pending := hostsByStatus(hosts, model.HostStatusPending)
 	revoked := hostsByStatus(hosts, model.HostStatusRevoked)
 	connected := len(active) > 0
-	waiting := !connected && len(pending) == 0
+	waiting := !connected && len(pending) == 0 && len(stale) == 0
 	status := "waiting"
 	if connected {
 		status = "connected"
 	} else if len(pending) > 0 {
 		status = "pending-approval"
+	} else if len(stale) > 0 {
+		status = "stale"
 	} else if len(revoked) > 0 {
 		status = "revoked"
 	}
@@ -2756,10 +2759,12 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			TimedOut:   false,
 		}),
 		"active_hosts":  active,
+		"stale_hosts":   stale,
 		"pending_hosts": pending,
 		"revoked_hosts": revoked,
 		"host_count": map[string]int{
 			"active":  len(active),
+			"stale":   len(stale),
 			"pending": len(pending),
 			"revoked": len(revoked),
 			"total":   len(hosts),
@@ -2806,8 +2811,8 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	if connected {
 		actions = []string{
 			"send user_report to the user before creating jobs",
-			"inspect host capabilities with rdev.hosts.capabilities",
-			"create the smallest scoped job only after the user's task intent is clear",
+			"run rdev support-session audit-capabilities against this host before ad-hoc work",
+			"use rdev job create/wait/get/artifacts for the smallest scoped job only after the user's task intent is clear",
 			"export or review evidence before declaring the remote work complete",
 		}
 	} else {
@@ -2855,7 +2860,11 @@ func connectedNextCLICommands(hostID string) [][]string {
 	if strings.TrimSpace(hostID) == "" {
 		return nil
 	}
-	return [][]string{{"rdev", "hosts", "capabilities", "--host-id", hostID}}
+	return [][]string{
+		{"rdev", "support-session", "audit-capabilities", "--gateway-url", "<active-gateway-url>", "--host-id", hostID},
+		{"rdev", "job", "create", "--gateway-url", "<active-gateway-url>", "--host-id", hostID, "--adapter", "shell", "--intent", "<task-intent>", "--policy-file", "<reviewed-policy.json>"},
+		{"rdev", "job", "wait", "--gateway-url", "<active-gateway-url>", "--job-id", "<job-id>", "--timeout-seconds", "120"},
+	}
 }
 
 type ConnectionRecoveryOptions struct {

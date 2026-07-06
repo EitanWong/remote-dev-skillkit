@@ -22,6 +22,8 @@ var (
 	ErrTicketExpired = errors.New("ticket expired")
 )
 
+const hostHeartbeatStaleAfter = 90 * time.Second
+
 type MemoryGateway struct {
 	mu                 sync.Mutex
 	now                func() time.Time
@@ -361,6 +363,7 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 		ticket.Mode == model.HostModeAttendedTemporary &&
 		!g.ticketHasActiveRecentHostLocked(ticket.ID, 90*time.Second) {
 		now := g.now().UTC()
+		g.supersedeMatchingHostsLocked(ticket.ID, registration, now)
 		host.Status = model.HostStatusActive
 		host.ApprovedAt = &now
 		host.LastSeenAt = now
@@ -402,6 +405,32 @@ func (g *MemoryGateway) ticketHasActiveRecentHostLocked(ticketID string, window 
 		}
 	}
 	return false
+}
+
+func (g *MemoryGateway) supersedeMatchingHostsLocked(ticketID string, registration model.HostRegistration, now time.Time) {
+	for _, host := range g.hosts {
+		if host.TicketID != ticketID || host.Status == model.HostStatusRevoked {
+			continue
+		}
+		if !sameHostRegistration(host, registration) {
+			continue
+		}
+		host.Status = model.HostStatusRevoked
+		host.LastSeenAt = now
+		g.hosts[host.ID] = host
+		g.appendAuditLocked("operator", "host.supersede", host.ID, "superseded by newer matching attended-temporary host registration")
+		g.cancelJobsForHostLocked(host.ID, now, "canceled because host was superseded by a newer registration")
+	}
+}
+
+func sameHostRegistration(host model.Host, registration model.HostRegistration) bool {
+	if strings.TrimSpace(host.IdentityFingerprint) != "" &&
+		strings.TrimSpace(registration.IdentityFingerprint) != "" {
+		return host.IdentityFingerprint == registration.IdentityFingerprint
+	}
+	return strings.EqualFold(strings.TrimSpace(host.Name), strings.TrimSpace(registration.Name)) &&
+		strings.EqualFold(strings.TrimSpace(host.OS), strings.TrimSpace(registration.OS)) &&
+		strings.EqualFold(strings.TrimSpace(host.Arch), strings.TrimSpace(registration.Arch))
 }
 
 func (g *MemoryGateway) RevokeTicket(ticketID, reason string) (model.Ticket, error) {
@@ -470,6 +499,7 @@ func (g *MemoryGateway) Hosts(status string) []model.Host {
 
 	hosts := make([]model.Host, 0, len(g.hosts))
 	for _, host := range g.hosts {
+		host = g.hostWithLivenessLocked(host)
 		if status == "" || string(host.Status) == status {
 			hosts = append(hosts, host)
 		}
@@ -493,6 +523,7 @@ func (g *MemoryGateway) HostsForTicketCode(ticketCode, status string) []model.Ho
 		if ticketID != "" && host.TicketID != ticketID {
 			continue
 		}
+		host = g.hostWithLivenessLocked(host)
 		if status == "" || string(host.Status) == status {
 			hosts = append(hosts, host)
 		}
@@ -511,7 +542,7 @@ func (g *MemoryGateway) Host(hostID string) (model.Host, error) {
 	if !ok {
 		return model.Host{}, fmt.Errorf("%w: host", ErrNotFound)
 	}
-	return host, nil
+	return g.hostWithLivenessLocked(host), nil
 }
 
 // TicketForCode looks up a ticket by its join code. Returns (ticket, true) when
@@ -579,7 +610,10 @@ func (g *MemoryGateway) HeartbeatHost(hostID, secret string) error {
 	if host.Status != model.HostStatusActive {
 		return fmt.Errorf("%w: host must be active to send heartbeat", ErrInvalidState)
 	}
-	g.hostHeartbeats[hostID] = g.now().UTC()
+	now := g.now().UTC()
+	host.LastSeenAt = now
+	g.hosts[hostID] = host
+	g.hostHeartbeats[hostID] = now
 	return nil
 }
 
@@ -590,9 +624,34 @@ func (g *MemoryGateway) HostIsLive(hostID string, maxAge time.Duration) bool {
 	defer g.mu.Unlock()
 	t, ok := g.hostHeartbeats[hostID]
 	if !ok {
-		return false
+		host, hostOK := g.hosts[hostID]
+		if !hostOK || host.Status != model.HostStatusActive {
+			return false
+		}
+		t = host.LastSeenAt
 	}
 	return g.now().UTC().Sub(t) <= maxAge
+}
+
+func (g *MemoryGateway) hostWithLivenessLocked(host model.Host) model.Host {
+	if g.hostIsStaleLocked(host) {
+		host.Status = model.HostStatusStale
+	}
+	return host
+}
+
+func (g *MemoryGateway) hostIsStaleLocked(host model.Host) bool {
+	if host.Status != model.HostStatusActive {
+		return false
+	}
+	lastSeen := host.LastSeenAt
+	if heartbeat, ok := g.hostHeartbeats[host.ID]; ok && heartbeat.After(lastSeen) {
+		lastSeen = heartbeat
+	}
+	if lastSeen.IsZero() {
+		return true
+	}
+	return g.now().UTC().Sub(lastSeen) > hostHeartbeatStaleAfter
 }
 
 func (g *MemoryGateway) CreateJob(hostID, adapter, intent string, jobPolicy map[string]any) (model.Job, error) {
@@ -615,6 +674,9 @@ func (g *MemoryGateway) CreateJob(hostID, adapter, intent string, jobPolicy map[
 	}
 	if !g.now().Before(ticket.ExpiresAt) {
 		return model.Job{}, ErrTicketExpired
+	}
+	if g.hostIsStaleLocked(host) {
+		return model.Job{}, fmt.Errorf("%w: host heartbeat is stale", ErrInvalidState)
 	}
 	if adapter == "" || intent == "" {
 		return model.Job{}, fmt.Errorf("%w: adapter and intent are required", ErrPolicyDenied)
@@ -934,6 +996,9 @@ func (g *MemoryGateway) NextJobForHost(hostID string) (model.Job, bool, error) {
 	}
 	if host.Status != model.HostStatusActive {
 		return model.Job{}, false, fmt.Errorf("%w: host must be active", ErrInvalidState)
+	}
+	if g.hostIsStaleLocked(host) {
+		return model.Job{}, false, fmt.Errorf("%w: host heartbeat is stale", ErrInvalidState)
 	}
 	jobs := make([]model.Job, 0, len(g.jobs))
 	for _, job := range g.jobs {

@@ -808,6 +808,116 @@ func TestMemoryGatewayRevokeTicketPreventsRegistration(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayProjectsStaleHostsAndRejectsNewJobs(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+
+	secret, err := gw.GenerateHostSecret(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(30 * time.Second)
+	if err := gw.HeartbeatHost(host.ID, secret); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := gw.Host(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Status != model.HostStatusActive {
+		t.Fatalf("expected fresh host active, got %s", fresh.Status)
+	}
+	if _, err := gw.CreateJob(host.ID, "shell", "fresh", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	}); err != nil {
+		t.Fatalf("expected fresh host to accept jobs: %v", err)
+	}
+
+	now = now.Add(91 * time.Second)
+	stale, err := gw.Host(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Status != model.HostStatusStale {
+		t.Fatalf("expected stale host projection, got %s", stale.Status)
+	}
+	if hosts := gw.Hosts(string(model.HostStatusActive)); len(hosts) != 0 {
+		t.Fatalf("expected active filter to hide stale hosts, got %#v", hosts)
+	}
+	if hosts := gw.Hosts(string(model.HostStatusStale)); len(hosts) != 1 || hosts[0].ID != host.ID {
+		t.Fatalf("expected stale filter to return host, got %#v", hosts)
+	}
+	if _, err := gw.CreateJob(host.ID, "shell", "stale", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	}); err == nil || !strings.Contains(err.Error(), "heartbeat is stale") {
+		t.Fatalf("expected stale host create job rejection, got %v", err)
+	}
+	if _, ok, err := gw.NextJobForHost(host.ID); err == nil || ok || !strings.Contains(err.Error(), "heartbeat is stale") {
+		t.Fatalf("expected stale host next job rejection, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestMemoryGatewayAutoApproveSupersedesMatchingStaleHost(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "repair", map[string]string{
+		"auto_approve": "attended-temporary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "win-support-target",
+		OS:         "windows",
+		Arch:       "amd64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Status != model.HostStatusActive {
+		t.Fatalf("expected first host auto-approved, got %s", first.Status)
+	}
+	queued, err := gw.CreateJob(first.ID, "shell", "queued on old host", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now = now.Add(91 * time.Second)
+	second, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "win-support-target",
+		OS:         "windows",
+		Arch:       "amd64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Status != model.HostStatusActive {
+		t.Fatalf("expected stale matching re-registration to auto-approve, got %s", second.Status)
+	}
+	old, err := gw.Host(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Status != model.HostStatusRevoked {
+		t.Fatalf("expected old host superseded/revoked, got %s", old.Status)
+	}
+	oldJob, err := gw.Job(queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldJob.Status != model.JobStatusCanceled {
+		t.Fatalf("expected queued job on superseded host canceled, got %s", oldJob.Status)
+	}
+}
+
 func TestMemoryGatewayWritesAuditSink(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
