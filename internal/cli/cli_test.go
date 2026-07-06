@@ -323,7 +323,8 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 	var out bytes.Buffer
 	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
 	connectedReportFile := filepath.Join(t.TempDir(), "connected-report.txt")
-	go watchForegroundSupportSession(ctx, &out, statusFile, connectedReportFile, gw, ticket.Code, "en")
+	gatewayURL := "http://127.0.0.1:9876"
+	go watchForegroundSupportSession(ctx, &out, statusFile, connectedReportFile, gw, ticket.Code, "en", gatewayURL)
 
 	waitForStatusFileEvent(t, statusFile, "waiting")
 	if _, err := gw.RegisterHost(model.HostRegistration{
@@ -338,9 +339,12 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 	statusPayload := waitForStatusFileEvent(t, statusFile, "connected")
 	status := statusPayload.Status
 	connectedNext := status["connected_next_steps"].(map[string]any)
+	mcpNextCalls := connectedNext["mcp_next_calls"].([]any)
+	mcpNextArgs := mcpNextCalls[0].(map[string]any)["arguments"].(map[string]any)
 	if statusPayload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
 		status["schema_version"] != "rdev.support-session-status.v1" ||
 		status["connected"] != true ||
+		mcpNextArgs["gateway_url"] != gatewayURL ||
 		!strings.Contains(connectedNext["user_report"].(string), "Connection established") ||
 		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
 		t.Fatalf("expected connected status event in status file, got %#v", statusPayload)
@@ -882,7 +886,9 @@ func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
 	if payload.SchemaVersion != "rdev.support-session-created.v1" ||
 		payload.GatewayURL != server.URL ||
 		payload.TicketCode == "" ||
-		payload.TargetCommand != server.URL+"/join/"+payload.TicketCode {
+		!strings.Contains(payload.TargetCommand, "Windows PowerShell") ||
+		!strings.Contains(payload.TargetCommand, "macOS/Linux terminal") ||
+		!strings.Contains(payload.TargetCommand, server.URL+"/join/"+payload.TicketCode) {
 		t.Fatalf("expected configured gateway create payload, got %#v", payload)
 	}
 	if len(payload.GatewayURLCandidates) == 0 ||
@@ -5437,6 +5443,215 @@ func TestJobCreateCLIUsesGatewayAPI(t *testing.T) {
 	}
 	if payload.Job.ID == "" || payload.Job.HostID != host.ID || payload.Job.Status != model.JobStatusQueued {
 		t.Fatalf("unexpected job create payload: %#v", payload.Job)
+	}
+}
+
+func TestJobWaitCLIReadsNestedGatewayJobPayload(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "wait test", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteJob(job.ID, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"job", "wait",
+		"--gateway-url", server.URL,
+		"--job-id", job.ID,
+		"--timeout-seconds", "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload model.Job
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid wait output: %v\n%s", err, stdout.String())
+	}
+	if payload.ID != job.ID || payload.Status != model.JobStatusSucceeded {
+		t.Fatalf("expected completed nested job output, got %#v", payload)
+	}
+}
+
+func TestJobArtifactsCLIUsesGatewayAPI(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "test-host",
+		OS:           "darwin",
+		Arch:         "arm64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "artifact test", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"go", "env", "GOOS"},
+		"allow_commands": []string{"go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteJob(job.ID, "artifact-output"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"job", "artifacts",
+		"--gateway-url", server.URL,
+		"--job-id", job.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Artifacts []model.Artifact `json:"artifacts"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid artifacts output: %v\n%s", err, stdout.String())
+	}
+	if len(payload.Artifacts) != 1 || !strings.Contains(payload.Artifacts[0].Content, "artifact-output") {
+		t.Fatalf("expected artifact output, got %#v", payload.Artifacts)
+	}
+}
+
+func TestJobPolicyTemplateCLIOutputsSafeWindowsProcessProbe(t *testing.T) {
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"job", "policy-template",
+		"--capability", "process.inspect",
+		"--target-os", "windows",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SchemaVersion string         `json:"schema_version"`
+		Capability    string         `json:"capability"`
+		Adapter       string         `json:"adapter"`
+		Policy        map[string]any `json:"policy"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid policy template output: %v\n%s", err, stdout.String())
+	}
+	argv := payload.Policy["argv"].([]any)
+	allowCommands := payload.Policy["allow_commands"].([]any)
+	if payload.SchemaVersion != "rdev.job-policy-template.v1" ||
+		payload.Capability != "process.inspect" ||
+		payload.Adapter != "shell" ||
+		len(argv) != 1 ||
+		argv[0] != "tasklist" ||
+		len(allowCommands) != 1 ||
+		allowCommands[0] != "tasklist" {
+		t.Fatalf("expected simple Windows tasklist template, got %s", stdout.String())
+	}
+}
+
+func TestSupportSessionReportSummarizesJobsAndArtifacts(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "report-host",
+		OS:           "windows",
+		Arch:         "amd64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "basic identity probe", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"cmd", "/c", "hostname"},
+		"allow_commands": []string{"cmd"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteJob(job.ID, "REPORT-HOST"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"support-session", "report",
+		"--gateway-url", server.URL,
+		"--host-id", host.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SchemaVersion string           `json:"schema_version"`
+		HumanReport   string           `json:"human_report"`
+		Jobs          []map[string]any `json:"jobs"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support-session report output: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-report.v1" ||
+		len(payload.Jobs) != 1 ||
+		!strings.Contains(payload.HumanReport, "report-host") ||
+		!strings.Contains(payload.HumanReport, "REPORT-HOST") {
+		t.Fatalf("expected support-session report with artifact evidence, got %s", stdout.String())
 	}
 }
 

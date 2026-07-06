@@ -181,9 +181,10 @@ revocation.
   `user_handoff.message` only for older payloads. Do not rewrite the command or
   ask the human to assemble values.
 - When `target_handoff_envelope.target` or `user_handoff.target` is `auto`,
-  follow the returned `auto_target_rule`: send the join URL first, and use the
-  returned Windows or macOS/Linux command only if the human asks for a terminal
-  command or cannot open the page.
+  follow the returned `auto_target_rule`: send the multi-platform
+  `target_handoff_envelope.full_text` verbatim. It already includes Windows
+  PowerShell, macOS/Linux terminal, and browser fallback sections. Do not
+  extract the join URL into a separate first message.
 - Read `target_bootstrap_requirements` and, for CLI-created sessions,
   `target_bootstrap_readiness` before sending a platform terminal command from
   an existing gateway. If readiness is false, recover with

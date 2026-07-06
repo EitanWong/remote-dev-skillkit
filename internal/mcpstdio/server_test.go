@@ -531,7 +531,9 @@ func TestServerToolCallSupportSessionCreateUsesConfiguredGateway(t *testing.T) {
 	if structured["schema_version"] != "rdev.support-session-created.v1" ||
 		structured["gateway_url"] != "https://hosted.example.test/rdev" ||
 		ticketCode == "" ||
-		structured["target_command"] != "https://hosted.example.test/rdev/join/"+ticketCode {
+		!strings.Contains(structured["target_command"].(string), "Windows PowerShell") ||
+		!strings.Contains(structured["target_command"].(string), "macOS/Linux terminal") ||
+		!strings.Contains(structured["target_command"].(string), "https://hosted.example.test/rdev/join/"+ticketCode) {
 		t.Fatalf("expected configured gateway create payload, got %#v", structured)
 	}
 	gatewayCandidates := structured["gateway_url_candidates"].([]any)
@@ -587,6 +589,107 @@ func TestServerToolCallSupportSessionStatus(t *testing.T) {
 		len(calls) != 1 ||
 		calls[0].(map[string]any)["tool"] != "rdev.hosts.capabilities" {
 		t.Fatalf("expected connected next-step contract, got %#v", next)
+	}
+}
+
+func TestServerToolCallSupportSessionStatusUsesGatewayURL(t *testing.T) {
+	hit := false
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		if r.URL.Path != "/v1/support-session/status" ||
+			r.URL.Query().Get("ticket_code") != "REMOTE-1234" {
+			t.Fatalf("unexpected remote status request: %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"schema_version":"rdev.support-session-status.v1","ticket_code":"REMOTE-1234","status":"connected","connected":true,"connected_next_steps":{"schema_version":"rdev.support-session-connected-next-steps.v1","connected":true,"user_report":"remote connected"}}` + "\n"))
+	}))
+	defer remote.Close()
+
+	input := mcpRequestLine(t, "rdev.support_session.status", map[string]any{
+		"gateway_url":     remote.URL,
+		"ticket_code":     "REMOTE-1234",
+		"locale":          "en",
+		"wait":            true,
+		"timeout_seconds": 2,
+		"interval_millis": 100,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if !hit ||
+		structured["ticket_code"] != "REMOTE-1234" ||
+		structured["connected"] != true {
+		t.Fatalf("expected remote status response, hit=%v structured=%#v", hit, structured)
+	}
+}
+
+func TestServerToolCallSupportSessionReport(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/hosts/hst_remote":
+			_, _ = w.Write([]byte(`{"host":{"id":"hst_remote","name":"win-dev","os":"windows","arch":"amd64","status":"active"}}` + "\n"))
+		case "/v1/jobs":
+			if r.URL.Query().Get("host_id") != "hst_remote" {
+				t.Fatalf("expected host job filter, got %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"jobs":[{"id":"job_1","host_id":"hst_remote","status":"succeeded","adapter":"shell","intent":"identity probe"}]}` + "\n"))
+		case "/v1/jobs/job_1/artifacts":
+			_, _ = w.Write([]byte(`{"artifacts":[{"id":"art_1","job_id":"job_1","content":"hostname ok"}]}` + "\n"))
+		default:
+			t.Fatalf("unexpected report request: %s", r.URL.String())
+		}
+	}))
+	defer remote.Close()
+
+	input := mcpRequestLine(t, "rdev.support_session.report", map[string]any{
+		"gateway_url": remote.URL,
+		"host_id":     "hst_remote",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	jobs := structured["jobs"].([]any)
+	if structured["schema_version"] != "rdev.support-session-report.v1" ||
+		structured["host_id"] != "hst_remote" ||
+		len(jobs) != 1 ||
+		!strings.Contains(structured["human_report"].(string), "identity probe") {
+		t.Fatalf("expected support session report, got %#v", structured)
+	}
+}
+
+func TestServerToolCallJobPolicyTemplate(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.jobs.policy_template", map[string]any{
+		"capability": "process.inspect",
+		"target_os":  "windows",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	policy := structured["policy"].(map[string]any)
+	argv := policy["argv"].([]any)
+	if structured["schema_version"] != "rdev.job-policy-template.v1" ||
+		structured["adapter"] != "shell" ||
+		argv[0] != "tasklist" {
+		t.Fatalf("expected Windows process policy template, got %#v", structured)
 	}
 }
 

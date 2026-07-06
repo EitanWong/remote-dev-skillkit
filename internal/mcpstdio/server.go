@@ -19,6 +19,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidenceplan"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/jobtemplate"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
@@ -295,6 +296,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.supportSessionPlan(params.Arguments)
 	case "rdev.support_session.status":
 		data, err = s.supportSessionStatus(params.Arguments)
+	case "rdev.support_session.report":
+		data, err = s.supportSessionReport(params.Arguments)
 	case "rdev.connection_entry.plan":
 		data, err = s.connectionEntryPlan(params.Arguments)
 	case "rdev.acceptance.scaffold_evidence":
@@ -325,6 +328,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.revokeHost(params.Arguments)
 	case "rdev.jobs.create":
 		data, err = s.createJob(params.Arguments)
+	case "rdev.jobs.policy_template":
+		data, err = s.jobPolicyTemplate(params.Arguments)
 	case "rdev.jobs.status":
 		data, err = s.jobStatus(params.Arguments)
 	case "rdev.jobs.cancel":
@@ -559,12 +564,16 @@ func (s Server) supportSessionStatus(args map[string]any) (any, error) {
 	if intervalMillis < 100 || intervalMillis > 60000 {
 		return nil, fmt.Errorf("interval_millis must be between 100 and 60000")
 	}
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.remoteSupportSessionStatus(args, gwURL, ticketCode, wait, timeoutSeconds, intervalMillis)
+	}
 	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
 	for {
 		status := supportsession.BuildStatus(supportsession.StatusOptions{
 			TicketCode: ticketCode,
 			Hosts:      s.Gateway.HostsForTicketCode(ticketCode, ""),
 			Locale:     stringArg(args, "locale", "auto"),
+			GatewayURL: s.effectiveGatewayURL(args),
 		})
 		if !wait || status["connected"] == true || status["status"] == "pending-approval" {
 			return status, nil
@@ -584,6 +593,117 @@ func (s Server) supportSessionStatus(args map[string]any) (any, error) {
 		}
 		time.Sleep(time.Duration(intervalMillis) * time.Millisecond)
 	}
+}
+
+func (s Server) remoteSupportSessionStatus(args map[string]any, gwURL, ticketCode string, wait bool, timeoutSeconds, intervalMillis int) (any, error) {
+	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
+	for {
+		path := "/v1/support-session/status?ticket_code=" + url.QueryEscape(ticketCode)
+		if locale := stringArg(args, "locale", ""); locale != "" {
+			path += "&locale=" + url.QueryEscape(locale)
+		}
+		payload, err := s.proxyGETTo(gwURL, path)
+		if err != nil {
+			return nil, err
+		}
+		status, _ := payload.(map[string]any)
+		if status == nil {
+			return nil, fmt.Errorf("remote gateway status response was not an object")
+		}
+		if !wait || status["connected"] == true || status["status"] == "pending-approval" {
+			return status, nil
+		}
+		if timeoutSeconds > 0 && time.Now().After(deadline) {
+			status["ok"] = false
+			status["timed_out"] = true
+			status["next_action"] = "Keep waiting, or check gateway reachability, network path, and target command output."
+			statusText, _ := status["status"].(string)
+			status["connection_recovery"] = supportsession.BuildConnectionRecovery(supportsession.ConnectionRecoveryOptions{
+				Status:     statusText,
+				TicketCode: ticketCode,
+				Locale:     stringArg(args, "locale", "auto"),
+				TimedOut:   true,
+			})
+			return status, nil
+		}
+		time.Sleep(time.Duration(intervalMillis) * time.Millisecond)
+	}
+}
+
+func (s Server) supportSessionReport(args map[string]any) (any, error) {
+	gatewayURL := s.effectiveGatewayURL(args)
+	hostID := requiredString(args, "host_id")
+	var host map[string]any
+	var jobs []map[string]any
+	if gatewayURL != "" {
+		hostPayload, err := s.proxyGETTo(gatewayURL, "/v1/hosts/"+url.PathEscape(hostID))
+		if err != nil {
+			return nil, err
+		}
+		host = nestedMapOrSelfAny(hostPayload, "host")
+		jobsPayload, err := s.proxyGETTo(gatewayURL, "/v1/jobs?host_id="+url.QueryEscape(hostID))
+		if err != nil {
+			return nil, err
+		}
+		jobs = mapSliceFromAny(nestedAny(jobsPayload, "jobs"))
+	} else {
+		hostModel, err := s.Gateway.Host(hostID)
+		if err != nil {
+			return nil, err
+		}
+		host = structToMap(hostModel)
+		for _, job := range s.Gateway.Jobs() {
+			if job.HostID == hostID {
+				jobs = append(jobs, structToMap(job))
+			}
+		}
+	}
+	jobReports := make([]map[string]any, 0, len(jobs))
+	for _, job := range jobs {
+		jobID := stringMapValue(job, "id")
+		artifactSummary := ""
+		artifactCount := 0
+		if jobID != "" {
+			artifacts := map[string]any{}
+			if gatewayURL != "" {
+				if payload, err := s.proxyGETTo(gatewayURL, "/v1/jobs/"+url.PathEscape(jobID)+"/artifacts"); err == nil {
+					if m, ok := payload.(map[string]any); ok {
+						artifacts = m
+					}
+				}
+			} else {
+				values := s.Gateway.Artifacts(jobID)
+				raw := make([]any, 0, len(values))
+				for _, artifact := range values {
+					raw = append(raw, structToMap(artifact))
+				}
+				artifacts["artifacts"] = raw
+			}
+			if values, _ := artifacts["artifacts"].([]any); values != nil {
+				artifactCount = len(values)
+			}
+			artifactSummary = summarizeFirstArtifactMap(artifacts)
+		}
+		jobReports = append(jobReports, map[string]any{
+			"job_id":           jobID,
+			"status":           stringMapValue(job, "status"),
+			"adapter":          stringMapValue(job, "adapter"),
+			"intent":           stringMapValue(job, "intent"),
+			"artifact_count":   artifactCount,
+			"artifact_summary": artifactSummary,
+		})
+	}
+	report := map[string]any{
+		"schema_version": "rdev.support-session-report.v1",
+		"ok":             true,
+		"gateway_url":    gatewayURL,
+		"host_id":        hostID,
+		"host":           host,
+		"jobs":           jobReports,
+		"human_report":   supportSessionHumanReportMap(host, jobReports),
+		"next_action":    "Use this report instead of hand-written curl summaries; revoke the temporary session when remote work is complete.",
+	}
+	return report, nil
 }
 
 func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
@@ -774,6 +894,13 @@ func (s Server) createJob(args map[string]any) (any, error) {
 		requiredString(args, "intent"),
 		objectArg(args, "policy"),
 	)
+}
+
+func (s Server) jobPolicyTemplate(args map[string]any) (any, error) {
+	return jobtemplate.PolicyTemplate(
+		stringArg(args, "capability", "shell.user"),
+		stringArg(args, "target_os", "auto"),
+	), nil
 }
 
 func (s Server) jobStatus(args map[string]any) (any, error) {
@@ -1135,6 +1262,118 @@ func toolResult(data any) (map[string]any, error) {
 		},
 		"structuredContent": data,
 	}, nil
+}
+
+func nestedAny(value any, key string) any {
+	object, _ := value.(map[string]any)
+	if object == nil {
+		return nil
+	}
+	return object[key]
+}
+
+func nestedMapOrSelfAny(value any, objectKey string) map[string]any {
+	object, _ := value.(map[string]any)
+	if object == nil {
+		return map[string]any{}
+	}
+	nested, _ := object[objectKey].(map[string]any)
+	if nested != nil {
+		return nested
+	}
+	return object
+}
+
+func mapSliceFromAny(value any) []map[string]any {
+	raw, _ := value.([]any)
+	if raw == nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func structToMap(value any) map[string]any {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func stringMapValue(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
+func summarizeFirstArtifactMap(payload map[string]any) string {
+	values, _ := payload["artifacts"].([]any)
+	if len(values) == 0 {
+		return ""
+	}
+	first, _ := values[0].(map[string]any)
+	content, _ := first["content"].(string)
+	content = strings.TrimSpace(content)
+	if len(content) > 300 {
+		content = content[:300] + "..."
+	}
+	return content
+}
+
+func supportSessionHumanReportMap(host map[string]any, jobs []map[string]any) string {
+	var b strings.Builder
+	hostName := firstReportFieldMap(host, "name", "hostname", "id")
+	hostOS := firstReportFieldMap(host, "os")
+	hostArch := firstReportFieldMap(host, "arch")
+	if hostName == "" {
+		hostName = "unknown-host"
+	}
+	_, _ = fmt.Fprintf(&b, "Remote Dev Skillkit support-session report\n")
+	_, _ = fmt.Fprintf(&b, "- Host: %s", hostName)
+	if hostOS != "" || hostArch != "" {
+		_, _ = fmt.Fprintf(&b, " (%s %s)", hostOS, hostArch)
+	}
+	_, _ = fmt.Fprintf(&b, "\n- Jobs reviewed: %d\n", len(jobs))
+	for _, job := range jobs {
+		_, _ = fmt.Fprintf(&b, "- %s: %s", job["job_id"], job["status"])
+		if intent, _ := job["intent"].(string); intent != "" {
+			_, _ = fmt.Fprintf(&b, " - %s", intent)
+		}
+		if summary, _ := job["artifact_summary"].(string); summary != "" {
+			_, _ = fmt.Fprintf(&b, " | evidence: %s", oneLine(summary))
+		}
+		_, _ = fmt.Fprint(&b, "\n")
+	}
+	_, _ = fmt.Fprint(&b, "- Cleanup: revoke or close the temporary session when finished.")
+	return b.String()
+}
+
+func firstReportFieldMap(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := stringMapValue(payload, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func oneLine(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > 240 {
+		return value[:240] + "..."
+	}
+	return value
 }
 
 func requiredString(args map[string]any, key string) string {

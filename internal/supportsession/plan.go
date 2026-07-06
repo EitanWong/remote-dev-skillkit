@@ -348,6 +348,7 @@ type StatusOptions struct {
 	TicketCode string
 	Hosts      []model.Host
 	Locale     string
+	GatewayURL string
 	// Ticket, when non-nil, adds ticket expiry information to the status
 	// response so agents and users can see how much time remains.
 	Ticket *model.Ticket
@@ -952,6 +953,10 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 		"cli_command": []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", opts.Locale},
 		"rule":        "use returned watcher fields when present; do not write a polling loop",
 	}
+	if gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"); gatewayURL != "" {
+		watch["mcp_arguments"].(map[string]any)["gateway_url"] = gatewayURL
+		watch["cli_command"] = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait", "--locale", opts.Locale}
+	}
 	if ticketCode == "" {
 		watch["mcp_arguments"] = map[string]any{"wait": true}
 		watch["cli_command"] = []string{rdevCommand, "support-session", "status", "--ticket-code", "<ticket-code>", "--wait"}
@@ -1029,6 +1034,7 @@ type freshAgentConnectContractOptions struct {
 	Phase               string
 	Ready               bool
 	TicketCode          string
+	GatewayURL          string
 	RdevCommand         string
 	UserHandoffPresent  bool
 	AutoApprove         bool
@@ -1087,13 +1093,19 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 	}
 	if ticketCode != "" {
 		contract["ticket_code"] = ticketCode
-		contract["status_cli"] = []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait"}
+		statusCLI := []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait"}
+		statusArgs := map[string]any{
+			"ticket_code": ticketCode,
+			"wait":        true,
+		}
+		if gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"); gatewayURL != "" {
+			statusCLI = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait"}
+			statusArgs["gateway_url"] = gatewayURL
+		}
+		contract["status_cli"] = statusCLI
 		contract["status_mcp"] = map[string]any{
-			"tool": "rdev.support_session.status",
-			"arguments": map[string]any{
-				"ticket_code": ticketCode,
-				"wait":        true,
-			},
+			"tool":      "rdev.support_session.status",
+			"arguments": statusArgs,
 		}
 	}
 	if strings.TrimSpace(opts.ReadyFile) != "" {
@@ -2054,8 +2066,8 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"macos_linux": macLinuxCommand,
 		"join_url":    joinURL,
 	}
-	recommended := joinURL
-	recommendedSurface := "join_url"
+	recommended := autoTargetCopyPaste(joinURL, targetCommands)
+	recommendedSurface := "multi_platform"
 	switch target {
 	case "windows":
 		recommended = windowsCommand
@@ -2099,7 +2111,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"target_handoff_envelope":                targetHandoffEnvelope(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
 		"connection_attempt_policy":              attemptPolicy,
 		"connection_continuity_policy":           continuityPolicy,
-		"connection_supervision":                 connectionSupervision(opts.Ticket.Code, locale, rdevCommand, attemptPolicy, continuityPolicy),
+		"connection_supervision":                 connectionSupervision(opts.Ticket.Code, locale, rdevCommand, gatewayURL, attemptPolicy, continuityPolicy),
 		"gateway_candidate_preflight":            gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
 		"connectivity_helper_preflight":          helperPreflight,
 		"connection_entry_runner_recommendation": runnerRecommendation,
@@ -2107,6 +2119,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 			Phase:              "created",
 			Ready:              true,
 			TicketCode:         opts.Ticket.Code,
+			GatewayURL:         gatewayURL,
 			RdevCommand:        rdevCommand,
 			UserHandoffPresent: true,
 			AutoApprove:        opts.AutoApprove,
@@ -2143,6 +2156,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 					"ticket_code": opts.Ticket.Code,
 					"locale":      locale,
 					"wait":        true,
+					"gateway_url": gatewayURL,
 				},
 			},
 		},
@@ -2218,7 +2232,23 @@ func autoTargetHandoffRule(target string) string {
 	if target != "auto" {
 		return "target platform is selected; send copy_paste verbatim"
 	}
-	return "target platform is unknown; send the join_url copy_paste first because the join page selects OS-specific visible commands, and use windows_command or macos_linux_command only if the human asks for a terminal command or cannot open the page"
+	return "target platform is unknown; send the multi-platform full_text verbatim so the target-side human can choose Windows PowerShell, macOS/Linux terminal, or browser fallback without receiving a bare URL"
+}
+
+func autoTargetCopyPaste(joinURL string, targetCommands map[string]string) string {
+	parts := []string{
+		"Choose the matching option on the target computer and keep the window open while I connect.",
+	}
+	if windows := strings.TrimSpace(targetCommands["windows"]); windows != "" {
+		parts = append(parts, "Windows PowerShell:\n"+windows)
+	}
+	if macLinux := strings.TrimSpace(targetCommands["macos_linux"]); macLinux != "" {
+		parts = append(parts, "macOS/Linux terminal:\n"+macLinux)
+	}
+	if joinURL = strings.TrimSpace(joinURL); joinURL != "" {
+		parts = append(parts, "Browser fallback:\n"+joinURL)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func normalizeCreatedGatewayCandidates(gatewayURL string, candidates []GatewayURLCandidate) []GatewayURLCandidate {
@@ -2339,7 +2369,7 @@ func connectionContinuityPolicy(candidates []GatewayURLCandidate) map[string]any
 	}
 }
 
-func connectionSupervision(ticketCode, locale, rdevCommand string, attemptPolicy, continuityPolicy map[string]any) map[string]any {
+func connectionSupervision(ticketCode, locale, rdevCommand, gatewayURL string, attemptPolicy, continuityPolicy map[string]any) map[string]any {
 	ticketCode = strings.TrimSpace(ticketCode)
 	locale = strings.TrimSpace(locale)
 	if locale == "" {
@@ -2349,6 +2379,7 @@ func connectionSupervision(ticketCode, locale, rdevCommand string, attemptPolicy
 	if rdevCommand == "" {
 		rdevCommand = "rdev"
 	}
+	gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/")
 	stableAfterLANChange, _ := continuityPolicy["stable_after_lan_change"].(bool)
 	assessment, _ := continuityPolicy["assessment"].(string)
 	candidateOrder, _ := attemptPolicy["candidate_order"]
@@ -2357,28 +2388,38 @@ func connectionSupervision(ticketCode, locale, rdevCommand string, attemptPolicy
 	if upgradeRecommended {
 		upgradeReason = "current Connection Entry has no configured stable fallback beyond direct/LAN/explicit candidates"
 	}
+	mcpWatchArgs := map[string]any{
+		"ticket_code": ticketCode,
+		"locale":      locale,
+		"wait":        true,
+	}
+	cliWatchCommand := []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale}
+	statusRecoveryArgs := map[string]any{"ticket_code": ticketCode, "locale": locale, "wait": true}
+	statusRecoveryCommand := []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale}
+	if gatewayURL != "" {
+		mcpWatchArgs["gateway_url"] = gatewayURL
+		cliWatchCommand = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait", "--locale", locale}
+		statusRecoveryArgs["gateway_url"] = gatewayURL
+		statusRecoveryCommand = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait", "--locale", locale}
+	}
 	return map[string]any{
 		"schema_version": ConnectionSupervisionSchemaVersion,
 		"intent":         "agent-side-watch-report-and-standard-upgrade-contract",
 		"ticket_code":    ticketCode,
 		"locale":         locale,
 		"mcp_watch_call": map[string]any{
-			"tool": "rdev.support_session.status",
-			"arguments": map[string]any{
-				"ticket_code": ticketCode,
-				"locale":      locale,
-				"wait":        true,
-			},
+			"tool":      "rdev.support_session.status",
+			"arguments": mcpWatchArgs,
 		},
-		"cli_watch_command":     []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale},
+		"cli_watch_command":     cliWatchCommand,
 		"connected_report_rule": "when status.connected=true, immediately send connected_next_steps.user_report to the user before creating jobs",
 		"pending_approval_rule": "if status=pending-approval, approve only the expected host or wait for scoped attended-temporary auto-approval; do not ask the target human for ticket/root/gateway/transport",
 		"timeout_recovery_tools": []map[string]any{
-			{"tool": "rdev.support_session.status", "arguments": map[string]any{"ticket_code": ticketCode, "locale": locale, "wait": true}},
+			{"tool": "rdev.support_session.status", "arguments": statusRecoveryArgs},
 			{"tool": "rdev.support_session.prepare", "arguments": map[string]any{"target": "auto", "build_assets": true}},
 		},
 		"timeout_recovery_commands": [][]string{
-			{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale},
+			statusRecoveryCommand,
 			{rdevCommand, "support-session", "prepare", "--target", "auto", "--build-assets"},
 		},
 		"candidate_order":                candidateOrder,
@@ -2412,7 +2453,7 @@ func bootstrapRequirements(target string) map[string]any {
 		requirements["verification"] = []string{"GET /assets/<helper>.sha256 must return 200", "GET /assets/<helper> must return 200"}
 	default:
 		requirements["required_assets"] = []string{"matching Windows/macOS/Linux rdev helper", "matching .sha256"}
-		requirements["verification"] = []string{"send join_url first, or verify platform assets before sending a platform terminal command"}
+		requirements["verification"] = []string{"send target_handoff_envelope.full_text verbatim; it includes Windows/macOS/Linux commands plus browser fallback", "verify platform assets before sending a platform-specific terminal command from an existing gateway"}
 	}
 	return requirements
 }
@@ -2693,40 +2734,64 @@ func localizedUserHandoffMessage(locale, surface string) string {
 	if surface == "join_url" {
 		copyHint = "Open this on the target computer and keep the page or terminal open while I connect."
 	}
+	if surface == "multi_platform" {
+		copyHint = "Choose the matching option on the target computer and keep the page or terminal open while I connect."
+	}
 	switch locale {
 	case "zh-CN", "zh":
 		if surface == "join_url" {
 			return "请在目标电脑上打开下面这个连接。打开后保持页面或终端窗口不要关闭，我会自动等待连接并在连上后告诉你。"
+		}
+		if surface == "multi_platform" {
+			return "请在目标电脑上选择匹配系统的选项执行。执行后保持页面或终端窗口不要关闭，我会自动等待连接并在连上后告诉你。"
 		}
 		return "请在目标电脑上运行下面这条命令。运行后保持窗口不要关闭，我会自动等待连接并在连上后告诉你。"
 	case "ja":
 		if surface == "join_url" {
 			return "対象コンピューターで次のリンクを開いてください。接続中はページまたはターミナルを開いたままにしてください。接続後に報告します。"
 		}
+		if surface == "multi_platform" {
+			return "対象コンピューターで OS に合う選択肢を実行してください。接続中はページまたはターミナルを開いたままにしてください。接続後に報告します。"
+		}
 		return "対象コンピューターで次のコマンドを実行してください。接続中はウィンドウを開いたままにしてください。接続後に報告します。"
 	case "ko":
 		if surface == "join_url" {
 			return "대상 컴퓨터에서 아래 링크를 열어 주세요. 연결되는 동안 페이지나 터미널을 닫지 마세요. 연결되면 알려 드립니다."
+		}
+		if surface == "multi_platform" {
+			return "대상 컴퓨터에서 운영체제에 맞는 옵션을 실행해 주세요. 연결되는 동안 페이지나 터미널을 닫지 마세요. 연결되면 알려 드립니다."
 		}
 		return "대상 컴퓨터에서 아래 명령을 실행해 주세요. 연결되는 동안 창을 닫지 마세요. 연결되면 알려 드립니다."
 	case "es":
 		if surface == "join_url" {
 			return "Abre este enlace en el equipo de destino y deja la pagina o terminal abierta mientras conecto. Avisare cuando este conectado."
 		}
+		if surface == "multi_platform" {
+			return "En el equipo de destino, elige la opcion que coincida con el sistema y deja la pagina o terminal abierta mientras conecto. Avisare cuando este conectado."
+		}
 		return "Ejecuta este comando en el equipo de destino y deja la ventana abierta mientras conecto. Avisare cuando este conectado."
 	case "fr":
 		if surface == "join_url" {
 			return "Ouvre ce lien sur l'ordinateur cible et garde la page ou le terminal ouvert pendant la connexion. Je te dirai quand c'est connecte."
+		}
+		if surface == "multi_platform" {
+			return "Sur l'ordinateur cible, choisis l'option correspondant au systeme et garde la page ou le terminal ouvert pendant la connexion. Je te dirai quand c'est connecte."
 		}
 		return "Execute cette commande sur l'ordinateur cible et garde la fenetre ouverte pendant la connexion. Je te dirai quand c'est connecte."
 	case "de":
 		if surface == "join_url" {
 			return "Offne diesen Link auf dem Zielcomputer und lasse die Seite oder das Terminal wahrend der Verbindung offen. Ich melde mich, sobald es verbunden ist."
 		}
+		if surface == "multi_platform" {
+			return "Wahle auf dem Zielcomputer die passende Option fur das Betriebssystem und lasse Seite oder Terminal wahrend der Verbindung offen. Ich melde mich, sobald es verbunden ist."
+		}
 		return "Fuhre diesen Befehl auf dem Zielcomputer aus und lasse das Fenster wahrend der Verbindung offen. Ich melde mich, sobald es verbunden ist."
 	case "pt-BR":
 		if surface == "join_url" {
 			return "Abra este link no computador de destino e mantenha a pagina ou o terminal aberto enquanto eu conecto. Avisarei quando estiver conectado."
+		}
+		if surface == "multi_platform" {
+			return "No computador de destino, escolha a opcao correspondente ao sistema e mantenha a pagina ou o terminal aberto enquanto eu conecto. Avisarei quando estiver conectado."
 		}
 		return "Execute este comando no computador de destino e mantenha a janela aberta enquanto eu conecto. Avisarei quando estiver conectado."
 	default:
@@ -2767,9 +2832,10 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		"feedback":       localizedStatusFeedback(status, locale),
 		"next_action":    localizedStatusNextAction(status, locale),
 		"connected_next_steps": BuildConnectedNextSteps(ConnectedNextStepsOptions{
-			Status: status,
-			Hosts:  active,
-			Locale: locale,
+			Status:     status,
+			Hosts:      active,
+			Locale:     locale,
+			GatewayURL: opts.GatewayURL,
 		}),
 		"connection_recovery": BuildConnectionRecovery(ConnectionRecoveryOptions{
 			Status:     status,
@@ -2812,9 +2878,10 @@ func BuildStatus(opts StatusOptions) map[string]any {
 }
 
 type ConnectedNextStepsOptions struct {
-	Status string
-	Hosts  []model.Host
-	Locale string
+	Status     string
+	Hosts      []model.Host
+	Locale     string
+	GatewayURL string
 }
 
 func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
@@ -2847,7 +2914,7 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	var mcpNextCalls any
 	var cliNextCommands any
 	if connected {
-		mcpNextCalls = connectedNextMCPCalls(hostID)
+		mcpNextCalls = connectedNextMCPCalls(hostID, opts.GatewayURL)
 		cliNextCommands = connectedNextCLICommands(hostID)
 	}
 	return map[string]any{
@@ -2868,16 +2935,20 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	}
 }
 
-func connectedNextMCPCalls(hostID string) []map[string]any {
+func connectedNextMCPCalls(hostID, gatewayURL string) []map[string]any {
 	if strings.TrimSpace(hostID) == "" {
 		return nil
 	}
+	args := map[string]any{
+		"host_id": hostID,
+	}
+	if gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/"); gatewayURL != "" {
+		args["gateway_url"] = gatewayURL
+	}
 	return []map[string]any{
 		{
-			"tool": "rdev.hosts.capabilities",
-			"arguments": map[string]any{
-				"host_id": hostID,
-			},
+			"tool":      "rdev.hosts.capabilities",
+			"arguments": args,
 		},
 	}
 }

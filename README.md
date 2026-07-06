@@ -180,9 +180,10 @@ work is processed. The same payload includes
 `target_handoff_envelope.full_text`, which is the exact human-facing text and
 command/link the Agent should send. `user_handoff` remains for compatibility.
 When the target OS is unknown, `target_handoff_envelope.auto_target_rule` and
-`user_handoff.auto_target_rule` tell the Agent to send the join URL first and
-use the returned platform command only when the human asks for a terminal
-command or cannot open the page.
+`user_handoff.auto_target_rule` tell the Agent to send the multi-platform
+`full_text` verbatim, with Windows PowerShell, macOS/Linux terminal, and browser
+fallback sections already included. The join URL is a compatibility/browser
+fallback field, not a separate first message for the Agent to extract.
 When the handoff/readiness output shows `rdev`, gateway state, or target helper
 assets are unclear, the Agent
 should call `rdev.support_session.prepare` or run

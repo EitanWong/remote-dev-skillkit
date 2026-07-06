@@ -8,6 +8,7 @@ type Tool struct {
 }
 
 func Tools() []Tool {
+	gatewayURL := gatewayURLField()
 	return []Tool{
 		{
 			Name:        "rdev.support_session.connect",
@@ -109,7 +110,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.support_session.status",
-			Description: "Read or wait on standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, timed out, or is still waiting.",
+			Description: "Read or wait on standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, timed out, or is still waiting. Pass gateway_url when watching a foreground, tunneled, hosted, relay, mesh, VPN, or SSH gateway that is not the MCP server's local in-memory gateway.",
 			Safety:      "Read-only status check; does not approve hosts or execute jobs.",
 			InputSchema: object(map[string]any{
 				"ticket_code":     stringField(),
@@ -117,7 +118,18 @@ func Tools() []Tool {
 				"wait":            boolField(),
 				"timeout_seconds": integer(0, 3600),
 				"interval_millis": integer(100, 60000),
+				"gateway_url":     gatewayURL,
 			}, []string{"ticket_code"}),
+		},
+		{
+			Name:        "rdev.support_session.report",
+			Description: "Summarize a connected support-session host, its jobs, artifact counts, and first evidence snippets so Agents can produce final status without hand-written curl or raw HTTP summaries. Pass gateway_url for non-local foreground/tunneled/hosted gateways.",
+			Safety:      "Read-only report generation; may expose sensitive job output snippets already available to the operator.",
+			InputSchema: object(map[string]any{
+				"gateway_url": gatewayURL,
+				"host_id":     stringField(),
+				"locale":      stringField(),
+			}, []string{"host_id"}),
 		},
 		{
 			Name:        "rdev.connection_entry.plan",
@@ -248,7 +260,8 @@ func Tools() []Tool {
 			Description: "List enrolled or pending hosts visible to the operator.",
 			Safety:      "Read-only.",
 			InputSchema: object(map[string]any{
-				"status": enum("pending", "active", "revoked", "offline"),
+				"status":      enum("pending", "active", "revoked", "offline"),
+				"gateway_url": gatewayURL,
 			}, nil),
 		},
 		{
@@ -256,7 +269,8 @@ func Tools() []Tool {
 			Description: "Inspect detected and approved capabilities for one host.",
 			Safety:      "Read-only.",
 			InputSchema: object(map[string]any{
-				"host_id": stringField(),
+				"host_id":     stringField(),
+				"gateway_url": gatewayURL,
 			}, []string{"host_id"}),
 		},
 		{
@@ -267,6 +281,7 @@ func Tools() []Tool {
 				"host_id":      stringField(),
 				"ticket_id":    stringField(),
 				"capabilities": stringArray(),
+				"gateway_url":  gatewayURL,
 			}, []string{"host_id", "ticket_id", "capabilities"}),
 		},
 		{
@@ -274,8 +289,9 @@ func Tools() []Tool {
 			Description: "Revoke host access and disconnect active sessions.",
 			Safety:      "Revocation only.",
 			InputSchema: object(map[string]any{
-				"host_id": stringField(),
-				"reason":  stringField(),
+				"host_id":     stringField(),
+				"reason":      stringField(),
+				"gateway_url": gatewayURL,
 			}, []string{"host_id", "reason"}),
 		},
 		{
@@ -283,18 +299,29 @@ func Tools() []Tool {
 			Description: "Create a signed, policy-bound remote job for an approved host.",
 			Safety:      "May execute on host after policy checks.",
 			InputSchema: object(map[string]any{
-				"host_id": stringField(),
-				"adapter": enum("shell", "powershell", "acpx", "codex", "claude-code"),
-				"intent":  stringField(),
-				"policy":  map[string]any{"type": "object"},
+				"host_id":     stringField(),
+				"adapter":     enum("shell", "powershell", "acpx", "codex", "claude-code"),
+				"intent":      stringField(),
+				"policy":      map[string]any{"type": "object"},
+				"gateway_url": gatewayURL,
 			}, []string{"host_id", "adapter", "intent", "policy"}),
+		},
+		{
+			Name:        "rdev.jobs.policy_template",
+			Description: "Return a ready safe starter policy for common shell support-session probes so Agents do not search source code or hand-roll policy JSON before rdev.jobs.create.",
+			Safety:      "Read-only template generation. Does not create or execute a job.",
+			InputSchema: object(map[string]any{
+				"capability": enum("shell.user", "fs.read", "fs.write.scoped", "process.inspect", "tool.availability"),
+				"target_os":  enum("auto", "windows", "macos", "darwin", "linux"),
+			}, nil),
 		},
 		{
 			Name:        "rdev.jobs.status",
 			Description: "Read status and latest events for a remote job.",
 			Safety:      "Read-only.",
 			InputSchema: object(map[string]any{
-				"job_id": stringField(),
+				"job_id":      stringField(),
+				"gateway_url": gatewayURL,
 			}, []string{"job_id"}),
 		},
 		{
@@ -302,8 +329,9 @@ func Tools() []Tool {
 			Description: "Request cooperative cancellation of a running job.",
 			Safety:      "Cancellation only.",
 			InputSchema: object(map[string]any{
-				"job_id": stringField(),
-				"reason": stringField(),
+				"job_id":      stringField(),
+				"reason":      stringField(),
+				"gateway_url": gatewayURL,
 			}, []string{"job_id", "reason"}),
 		},
 		{
@@ -315,6 +343,7 @@ func Tools() []Tool {
 				"approval_id": stringField(),
 				"decision":    enum("approved", "denied"),
 				"reason":      stringField(),
+				"gateway_url": gatewayURL,
 			}, []string{"job_id", "approval_id", "decision", "reason"}),
 		},
 		{
@@ -322,7 +351,8 @@ func Tools() []Tool {
 			Description: "List artifacts produced by a job.",
 			Safety:      "Read-only metadata.",
 			InputSchema: object(map[string]any{
-				"job_id": stringField(),
+				"job_id":      stringField(),
+				"gateway_url": gatewayURL,
 			}, []string{"job_id"}),
 		},
 		{
@@ -331,6 +361,7 @@ func Tools() []Tool {
 			Safety:      "Read-only; may expose sensitive job output.",
 			InputSchema: object(map[string]any{
 				"artifact_id": stringField(),
+				"gateway_url": gatewayURL,
 			}, []string{"artifact_id"}),
 		},
 		{
@@ -346,8 +377,9 @@ func Tools() []Tool {
 			Description: "Query redacted audit events for tickets, hosts, and jobs.",
 			Safety:      "Read-only audit access.",
 			InputSchema: object(map[string]any{
-				"target_id": stringField(),
-				"limit":     integer(1, 500),
+				"target_id":   stringField(),
+				"limit":       integer(1, 500),
+				"gateway_url": gatewayURL,
 			}, []string{"target_id"}),
 		},
 		{
@@ -497,6 +529,14 @@ func integer(minimum, maximum int) map[string]any {
 
 func boolField() map[string]any {
 	return map[string]any{"type": "boolean"}
+}
+
+func gatewayURLField() map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"minLength":   1,
+		"description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+	}
 }
 
 func enum(values ...string) map[string]any {

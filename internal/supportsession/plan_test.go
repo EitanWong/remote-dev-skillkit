@@ -530,18 +530,20 @@ func TestConnectionContinuityPolicyReportsConfiguredStableFallback(t *testing.T)
 		!strings.Contains(stableKinds, "relay") {
 		t.Fatalf("expected stable relay continuity policy, got %#v", policy)
 	}
-	supervision := connectionSupervision("ABCD-1234", "en", "rdev", map[string]any{
+	supervision := connectionSupervision("ABCD-1234", "en", "rdev", "https://relay.example.test/rdev", map[string]any{
 		"candidate_order": []map[string]any{{"join_url": "https://relay.example.test/join/ABCD-1234", "kind": "relay"}},
 	}, policy)
+	watchArgs := supervision["mcp_watch_call"].(map[string]any)["arguments"].(map[string]any)
 	if supervision["schema_version"] != ConnectionSupervisionSchemaVersion ||
 		supervision["stable_after_lan_change"] != true ||
 		supervision["upgrade_recommended"] != false ||
+		watchArgs["gateway_url"] != "https://relay.example.test/rdev" ||
 		!strings.Contains(supervision["upgrade_reason"].(string), "already configured") {
 		t.Fatalf("expected supervision to recognize stable fallback, got %#v", supervision)
 	}
 }
 
-func TestBuildCreatedAutoTargetReturnsJoinURLHandoffWithCommandFallbacks(t *testing.T) {
+func TestBuildCreatedAutoTargetReturnsMultiPlatformHandoffWithCommandFallbacks(t *testing.T) {
 	created := BuildCreated(CreatedOptions{
 		GatewayURL:            "http://192.0.2.10:8787",
 		ManifestRootPublicKey: "manifest-root:abc",
@@ -551,17 +553,28 @@ func TestBuildCreatedAutoTargetReturnsJoinURLHandoffWithCommandFallbacks(t *test
 		AutoApprove:           true,
 	})
 
-	if created["recommended_surface"] != "join_url" ||
-		created["target_command"] != "http://192.0.2.10:8787/join/ABCD-1234" {
-		t.Fatalf("expected auto target to recommend join URL, got %#v", created)
+	if created["recommended_surface"] != "multi_platform" ||
+		created["target_command"] == "http://192.0.2.10:8787/join/ABCD-1234" {
+		t.Fatalf("expected auto target to recommend multi-platform handoff, got %#v", created)
 	}
 	handoff := created["user_handoff"].(map[string]any)
-	if handoff["copy_paste_kind"] != "join_url" ||
-		handoff["copy_paste"] != created["join_url"] ||
+	copyPaste, _ := handoff["copy_paste"].(string)
+	if handoff["copy_paste_kind"] != "multi_platform" ||
+		!strings.Contains(copyPaste, "Windows PowerShell") ||
+		!strings.Contains(copyPaste, "macOS/Linux terminal") ||
+		!strings.Contains(copyPaste, "Browser fallback") ||
+		!strings.Contains(copyPaste, "bootstrap.ps1") ||
+		!strings.Contains(copyPaste, "bootstrap.sh") ||
 		!strings.Contains(handoff["auto_target_rule"].(string), "target platform is unknown") ||
 		!strings.Contains(handoff["windows_command"].(string), "bootstrap.ps1") ||
 		!strings.Contains(handoff["macos_linux_command"].(string), "bootstrap.sh") {
-		t.Fatalf("expected auto target handoff with command fallbacks, got %#v", handoff)
+		t.Fatalf("expected auto target handoff with executable command fallbacks, got %#v", handoff)
+	}
+	envelope := created["target_handoff_envelope"].(map[string]any)
+	if !strings.Contains(envelope["full_text"].(string), "Windows PowerShell") ||
+		!strings.Contains(envelope["full_text"].(string), "macOS/Linux terminal") ||
+		envelope["copy_paste"] == created["join_url"] {
+		t.Fatalf("expected envelope to avoid bare join URL, got %#v", envelope)
 	}
 }
 

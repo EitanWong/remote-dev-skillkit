@@ -101,8 +101,9 @@ LAN-only or times out. It also includes `target_handoff_envelope` with
 `full_text`, `copy_paste`, platform fallbacks, and `auto_target_rule`; Agents
 should forward `full_text` to the human verbatim and use `user_handoff` only
 for compatibility. When the target is `auto`, Agents should follow the returned
-`auto_target_rule`: send the join URL first, then use the returned platform
-command only when a terminal command is needed. The payload also
+`auto_target_rule`: send the multi-platform `full_text` verbatim. It already
+includes Windows PowerShell, macOS/Linux terminal, and browser fallback
+sections; do not extract the join URL into a separate first message. The payload also
 includes `target_bootstrap_requirements`; CLI-created sessions can include
 `target_bootstrap_readiness` after probing gateway `/assets` endpoints. If an
 existing gateway cannot serve the verified helper assets for the selected

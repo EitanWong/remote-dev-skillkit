@@ -1064,6 +1064,7 @@ func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
 		TicketCode: ticketCode,
 		Hosts:      hosts,
 		Locale:     r.URL.Query().Get("locale"),
+		GatewayURL: requestBaseURL(r),
 	}
 	// Attach ticket expiry when the ticket is found so the status response
 	// includes ticket_expires_at and ticket_expires_in_seconds.

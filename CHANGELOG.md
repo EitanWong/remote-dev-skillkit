@@ -4,6 +4,89 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.38-dev
+
+Current phase: MCP/CLI contract convergence for ordinary fresh Agents. This
+slice closes the gap where installed MCP metadata, live MCP handlers, CLI
+watchers, and public docs could point at different gateways or describe
+different target handoff behavior.
+
+### Added
+
+- Added shared `internal/jobtemplate` policy templates so
+  `rdev job policy-template` and MCP `rdev.jobs.policy_template` return the
+  same starter policy for common scoped probes.
+- Added MCP `rdev.support_session.report`, matching the CLI
+  `rdev support-session report` path, so Agents can summarize connected hosts,
+  jobs, artifact counts, and first evidence snippets without hand-written
+  `curl`.
+- Added a contract test that compares static `mcp/tools.json` with
+  `contracts.Tools()`, making stale MCP metadata a CI-visible failure.
+
+### Changed
+
+- Regenerated `mcp/tools.json` from the live `rdev mcp tools` contract so
+  `gateway_url`, `rdev.support_session.report`, and
+  `rdev.jobs.policy_template` are visible to installed Agent runtimes.
+- Updated support-session status/supervision/runbook contracts to carry
+  `gateway_url` through MCP and CLI watch calls, avoiding accidental reads from
+  an empty local in-memory gateway.
+- Updated README, MCP docs, Agent bootstrap prompt, remote-vibe-coding skill,
+  safe-remote-support skill, and architecture wording to send
+  `target_handoff_envelope.full_text` verbatim for `target=auto` instead of a
+  bare join URL first.
+- Clarified that Agents must not write their own PowerShell
+  `-EncodedCommand`/Base64 bootstrap blobs, while reviewed `rdev`-generated
+  fallback commands inside `target_handoff_envelope.full_text` may be forwarded
+  unchanged.
+
+### Fixed
+
+- Fixed MCP `rdev.support_session.status` so per-call `gateway_url` proxies to
+  the active foreground/tunneled/hosted gateway instead of checking only the MCP
+  server's local memory gateway.
+
+## 0.1.37-dev
+
+Current phase: fresh-Agent usability hardening from another real attended
+Windows support-session transcript. This slice moves more operator work from
+Agent improvisation into first-class CLI/tool contracts so ordinary Agents do
+not need to search source code, hand-write `curl`, or send bare invite links.
+
+### Added
+
+- Added `rdev job artifacts`, a first-class CLI reader for
+  `/v1/jobs/<id>/artifacts`, so Agents can retrieve evidence without guessing
+  raw HTTP routes.
+- Added `rdev job policy-template --capability ... --target-os ...` for common
+  safe probes (`shell.user`, `fs.read`, `fs.write.scoped`, `process.inspect`,
+  and `tool.availability`). The command returns a ready policy object for
+  `rdev job create`.
+- Added `rdev support-session report`, a read-only session summarizer that
+  fetches the host, jobs, artifact summaries, and a human-readable report for
+  completed capability tests or scoped remote work.
+
+### Changed
+
+- `target=auto` support-session handoff now emits a multi-platform handoff
+  containing Windows PowerShell, macOS/Linux terminal, and browser fallback
+  sections instead of making `target_handoff_envelope.full_text` a bare join
+  URL.
+- `rdev support-session start` now accepts `--repo-root`, and
+  `support-session connect --start --repo-root ...` preserves that checkout
+  through the start path when building helper assets for a new work directory.
+- Updated `safe-remote-support` guidance to prefer `job artifacts`,
+  `job policy-template`, and `support-session report` before MCP or raw HTTP
+  fallback paths.
+
+### Fixed
+
+- Fixed `rdev job wait` to read both raw job payloads and gateway responses of
+  the form `{"job": {...}}`, preventing false timeouts after jobs have already
+  reached `succeeded`.
+- Simplified the Windows `process.inspect` audit probe to run `tasklist`
+  directly, avoiding fragile nested quoting in `cmd /c tasklist /fi ...`.
+
 ## 0.1.36-dev
 
 Current phase: real attended Windows support-session recovery hardening. This

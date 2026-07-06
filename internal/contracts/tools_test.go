@@ -1,6 +1,12 @@
 package contracts
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+)
 
 func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 	seen := map[string]bool{}
@@ -41,6 +47,12 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 	if !seen["rdev.support_session.handoff"] {
 		t.Fatal("expected support session handoff tool")
 	}
+	if !seen["rdev.support_session.report"] {
+		t.Fatal("expected support session report tool")
+	}
+	if !seen["rdev.jobs.policy_template"] {
+		t.Fatal("expected job policy template tool")
+	}
 	if !seen["rdev.update.check"] || !seen["rdev.update.plan"] {
 		t.Fatal("expected update check and plan tools")
 	}
@@ -61,6 +73,67 @@ func TestSupportSessionConnectIsFirstTool(t *testing.T) {
 	}
 }
 
+func TestGatewayBackedToolsExposeGatewayURL(t *testing.T) {
+	want := []string{
+		"rdev.support_session.status",
+		"rdev.support_session.report",
+		"rdev.hosts.list",
+		"rdev.hosts.capabilities",
+		"rdev.hosts.approve",
+		"rdev.hosts.revoke",
+		"rdev.jobs.create",
+		"rdev.jobs.status",
+		"rdev.jobs.cancel",
+		"rdev.jobs.approve",
+		"rdev.artifacts.list",
+		"rdev.artifacts.read",
+		"rdev.audit.query",
+	}
+	for _, name := range want {
+		tool := findTool(name)
+		if tool == nil {
+			t.Fatalf("missing tool %s", name)
+		}
+		properties, _ := tool.InputSchema["properties"].(map[string]any)
+		if _, ok := properties["gateway_url"]; !ok {
+			t.Fatalf("tool %s must expose gateway_url in live MCP schema: %#v", name, properties)
+		}
+	}
+}
+
+func TestStaticMCPToolsJSONMatchesLiveContract(t *testing.T) {
+	staticPath := filepath.Join("..", "..", "mcp", "tools.json")
+	data, err := os.ReadFile(staticPath)
+	if err != nil {
+		t.Fatalf("read static MCP tools contract: %v", err)
+	}
+	var staticPayload struct {
+		Tools []Tool `json:"tools"`
+	}
+	if err := json.Unmarshal(data, &staticPayload); err != nil {
+		t.Fatalf("parse static MCP tools contract: %v", err)
+	}
+	if len(staticPayload.Tools) == 0 {
+		t.Fatal("static MCP tools contract must contain tools")
+	}
+	livePayload := struct {
+		Tools []Tool `json:"tools"`
+	}{Tools: Tools()}
+	liveData, err := json.Marshal(livePayload)
+	if err != nil {
+		t.Fatalf("marshal live MCP tools contract: %v", err)
+	}
+	var normalizedLive struct {
+		Tools []Tool `json:"tools"`
+	}
+	if err := json.Unmarshal(liveData, &normalizedLive); err != nil {
+		t.Fatalf("normalize live MCP tools contract: %v", err)
+	}
+	if !reflect.DeepEqual(staticPayload.Tools, normalizedLive.Tools) {
+		t.Fatalf("mcp/tools.json is stale; regenerate it with `rdev mcp tools`")
+	}
+}
+
 func TestJobsCreateAdapterEnumIncludesClaudeCode(t *testing.T) {
 	for _, tool := range Tools() {
 		if tool.Name != "rdev.jobs.create" {
@@ -78,6 +151,15 @@ func TestJobsCreateAdapterEnumIncludesClaudeCode(t *testing.T) {
 		return
 	}
 	t.Fatal("missing rdev.jobs.create tool")
+}
+
+func findTool(name string) *Tool {
+	for _, tool := range Tools() {
+		if tool.Name == name {
+			return &tool
+		}
+	}
+	return nil
 }
 
 func containsEnum(values []any, want string) bool {

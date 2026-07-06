@@ -1323,7 +1323,7 @@ Best for third-party machines:
 
 ```text
 an agent creates ticket
-  -> an operator sends join URL or command
+  -> an operator sends the generated target_handoff_envelope.full_text
   -> remote user runs visible bootstrap
   -> host connects outbound
   -> the operator approves scoped capability set

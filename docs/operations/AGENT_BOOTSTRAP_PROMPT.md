@@ -214,9 +214,11 @@ Steps:
     target machine; it is already the complete localized plain-text handoff.
     Use `user_handoff.message` plus `user_handoff.copy_paste` only for older
     payloads. When `target_handoff_envelope.target` or `user_handoff.target` is
-    `auto`, follow the returned `auto_target_rule`: send the join URL first,
-    and use the returned platform command only if I ask for a terminal command
-    or cannot open the page. Also read `target_bootstrap_requirements` and, for CLI
+    `auto`, follow the returned `auto_target_rule`: send the multi-platform
+    `target_handoff_envelope.full_text` verbatim. It already includes Windows
+    PowerShell, macOS/Linux terminal, and browser fallback sections; do not
+    extract the join URL into a separate first message. Also read
+    `target_bootstrap_requirements` and, for CLI
     create calls, `target_bootstrap_readiness`. If an existing gateway cannot
     serve the verified helper assets for the selected platform, use the
     standard `rdev support-session connect --start` or

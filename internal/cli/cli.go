@@ -46,6 +46,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
+	"github.com/EitanWong/remote-dev-skillkit/internal/jobtemplate"
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
@@ -2729,6 +2730,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 	case "start":
 		fs := flag.NewFlagSet("support-session start", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
+		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
 		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
 		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to the best local candidate for --addr")
 		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
@@ -2746,6 +2748,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
+			RepoRoot:            *repoRoot,
 			Addr:                *addr,
 			GatewayURL:          *gatewayURL,
 			WorkDir:             *workDir,
@@ -2854,6 +2857,22 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			Locale:            *locale,
 			OperatorTokenFile: *operatorTokenFile,
 		})
+	case "report":
+		fs := flag.NewFlagSet("support-session report", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway URL that owns the connected support session")
+		hostID := fs.String("host-id", "", "active host ID to report on")
+		locale := fs.String("locale", "auto", "report language hint, for example auto, en, or zh-CN")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.supportSessionReport(ctx, supportSessionReportOptions{
+			GatewayURL:        *gatewayURL,
+			HostID:            *hostID,
+			Locale:            *locale,
+			OperatorTokenFile: *operatorTokenFile,
+		})
 	case "audit-capabilities":
 		fs := flag.NewFlagSet("support-session audit-capabilities", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -2880,6 +2899,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 }
 
 type supportSessionStartOptions struct {
+	RepoRoot            string
 	Addr                string
 	GatewayURL          string
 	WorkDir             string
@@ -2948,6 +2968,7 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	}
 	if opts.Start {
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
+			RepoRoot:            opts.RepoRoot,
 			Addr:                opts.Addr,
 			GatewayURL:          opts.GatewayURL,
 			WorkDir:             opts.WorkDir,
@@ -3263,8 +3284,12 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if absConnectedReportFile, err := filepath.Abs(connectedReportFile); err == nil {
 		connectedReportFile = absConnectedReportFile
 	}
+	repoRoot := strings.TrimSpace(opts.RepoRoot)
+	if repoRoot == "" {
+		repoRoot = "."
+	}
 	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
-		RepoRoot:    findSupportSessionRepoRoot("."),
+		RepoRoot:    findSupportSessionRepoRoot(repoRoot),
 		WorkDir:     workDir,
 		Addr:        addr,
 		GatewayURL:  gatewayURL,
@@ -3412,11 +3437,11 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session status file writing to %s\n", statusFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session connected report will be written to %s\n", connectedReportFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
-	go watchForegroundSupportSession(ctx, a.Stderr, statusFile, connectedReportFile, gw, ticket.Code, opts.Locale)
+	go watchForegroundSupportSession(ctx, a.Stderr, statusFile, connectedReportFile, gw, ticket.Code, opts.Locale, gatewayURL)
 	return listenAndServeGatewayContext(ctx, addr, server.Handler(), nil)
 }
 
-func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFile, connectedReportFile string, gw *gateway.MemoryGateway, ticketCode, locale string) {
+func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFile, connectedReportFile string, gw *gateway.MemoryGateway, ticketCode, locale, gatewayURL string) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	seenPending := false
@@ -3424,6 +3449,7 @@ func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFil
 		TicketCode: ticketCode,
 		Hosts:      gw.HostsForTicketCode(ticketCode, ""),
 		Locale:     locale,
+		GatewayURL: gatewayURL,
 	}))
 	for {
 		select {
@@ -3434,6 +3460,7 @@ func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFil
 				TicketCode: ticketCode,
 				Hosts:      gw.HostsForTicketCode(ticketCode, ""),
 				Locale:     locale,
+				GatewayURL: gatewayURL,
 			})
 			if status["connected"] == true {
 				_ = writeSupportSessionConnectedReportFile0600(connectedReportFile, status)
@@ -3645,6 +3672,13 @@ type supportSessionStatusOptions struct {
 type supportSessionRecoverOptions struct {
 	GatewayURL        string
 	TicketCode        string
+	Locale            string
+	OperatorTokenFile string
+}
+
+type supportSessionReportOptions struct {
+	GatewayURL        string
+	HostID            string
 	Locale            string
 	OperatorTokenFile string
 }
@@ -3867,6 +3901,110 @@ func fetchGatewayJobsForHost(ctx context.Context, gatewayURL, hostID, bearerToke
 	return mapSlice(payload["jobs"]), nil
 }
 
+func (a App) supportSessionReport(ctx context.Context, opts supportSessionReportOptions) error {
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		return fmt.Errorf("support-session report requires --gateway-url or a configured RDEV_*_GATEWAY_URL")
+	}
+	hostID := strings.TrimSpace(opts.HostID)
+	if hostID == "" {
+		return fmt.Errorf("support-session report requires --host-id")
+	}
+	token := loadOperatorToken(opts.OperatorTokenFile)
+	hostPayload, err := fetchHostJSON(ctx, gatewayURL, hostID, token)
+	if err != nil {
+		return err
+	}
+	host := nestedMapOrSelf(hostPayload, "host")
+	jobs, err := fetchGatewayJobsForHost(ctx, gatewayURL, hostID, token)
+	if err != nil {
+		return err
+	}
+	jobReports := make([]map[string]any, 0, len(jobs))
+	for _, job := range jobs {
+		jobID := stringFromMap(job, "id")
+		artifactSummary := ""
+		artifactCount := 0
+		if jobID != "" {
+			if artifactsPayload, artifactErr := fetchJobArtifactsJSON(ctx, gatewayURL, jobID, token); artifactErr == nil {
+				if artifacts, _ := artifactsPayload["artifacts"].([]any); artifacts != nil {
+					artifactCount = len(artifacts)
+				}
+				artifactSummary = summarizeFirstArtifact(artifactsPayload)
+			}
+		}
+		jobReports = append(jobReports, map[string]any{
+			"job_id":           jobID,
+			"status":           stringFromMap(job, "status"),
+			"adapter":          stringFromMap(job, "adapter"),
+			"intent":           stringFromMap(job, "intent"),
+			"artifact_count":   artifactCount,
+			"artifact_summary": artifactSummary,
+		})
+	}
+	report := map[string]any{
+		"schema_version": "rdev.support-session-report.v1",
+		"ok":             true,
+		"gateway_url":    gatewayURL,
+		"host_id":        hostID,
+		"host":           host,
+		"jobs":           jobReports,
+		"human_report":   supportSessionHumanReport(host, jobReports),
+		"next_action":    "Use this report instead of hand-written curl summaries; revoke the temporary session when remote work is complete.",
+	}
+	return writeJSON(a.Stdout, report)
+}
+
+func supportSessionHumanReport(host map[string]any, jobs []map[string]any) string {
+	var b strings.Builder
+	hostName := firstReportField(host, "name", "hostname", "id")
+	hostOS := firstReportField(host, "os")
+	hostArch := firstReportField(host, "arch")
+	if hostName == "" {
+		hostName = "unknown-host"
+	}
+	_, _ = fmt.Fprintf(&b, "Remote Dev Skillkit support-session report\n")
+	_, _ = fmt.Fprintf(&b, "- Host: %s", hostName)
+	if hostOS != "" || hostArch != "" {
+		_, _ = fmt.Fprintf(&b, " (%s %s)", hostOS, hostArch)
+	}
+	_, _ = fmt.Fprintf(&b, "\n- Jobs reviewed: %d\n", len(jobs))
+	for _, job := range jobs {
+		_, _ = fmt.Fprintf(&b, "- %s: %s", job["job_id"], job["status"])
+		if intent, _ := job["intent"].(string); intent != "" {
+			_, _ = fmt.Fprintf(&b, " - %s", intent)
+		}
+		if summary, _ := job["artifact_summary"].(string); summary != "" {
+			_, _ = fmt.Fprintf(&b, " | evidence: %s", oneLine(summary))
+		}
+		_, _ = fmt.Fprint(&b, "\n")
+	}
+	_, _ = fmt.Fprint(&b, "- Cleanup: revoke or close the temporary session when finished.")
+	return b.String()
+}
+
+func firstReportField(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := stringFromMap(payload, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func oneLine(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > 240 {
+		return value[:240] + "..."
+	}
+	return value
+}
+
 func postGatewayJSON(ctx context.Context, endpoint string, body any, bearerToken string) (map[string]any, int, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -4023,7 +4161,7 @@ func auditCapabilityProbes(hostOS string) []supportSessionAuditProbe {
 			{Name: "identity", Capability: "shell.user", Adapter: "shell", Intent: "capability audit identity", Policy: shellAuditPolicy([]string{"shell.user"}, []string{"cmd", "/c", "hostname && whoami && cd"}, []string{"cmd"})},
 			{Name: "fs_read", Capability: "fs.read", Adapter: "shell", Intent: "capability audit scoped read", Policy: shellAuditPolicy([]string{"shell.user", "fs.read"}, []string{"cmd", "/c", "dir /b ."}, []string{"cmd"})},
 			{Name: "fs_write_scoped", Capability: "fs.write.scoped", Adapter: "shell", Intent: "capability audit scoped write", Policy: shellAuditPolicyWithWriteScope([]string{"shell.user", "fs.write.scoped"}, []string{"cmd", "/c", "echo rdev-audit> rdev_capability_audit.txt && type rdev_capability_audit.txt && del rdev_capability_audit.txt && if not exist rdev_capability_audit.txt echo deleted"}, []string{"cmd"}, []string{"."})},
-			{Name: "process_inspect", Capability: "process.inspect", Adapter: "shell", Intent: "capability audit process inspect", Policy: shellAuditPolicy([]string{"shell.user", "process.inspect"}, []string{"cmd", "/c", "tasklist /fi \"imagename eq cmd.exe\""}, []string{"cmd"})},
+			{Name: "process_inspect", Capability: "process.inspect", Adapter: "shell", Intent: "capability audit process inspect", Policy: shellAuditPolicy([]string{"shell.user", "process.inspect"}, []string{"tasklist"}, []string{"tasklist"})},
 		}
 	}
 	return []supportSessionAuditProbe{
@@ -6294,10 +6432,12 @@ func (a App) gatewayStorageVerify(provider, path string) error {
 //	rdev job list   --gateway-url <url> [--host-id <id>]
 //	rdev job get    --gateway-url <url> --job-id <id>
 //	rdev job wait   --gateway-url <url> --job-id <id> [--timeout-seconds <n>]
+//	rdev job artifacts --gateway-url <url> --job-id <id>
+//	rdev job policy-template --capability <name> [--target-os <os>]
 //	rdev job cancel --gateway-url <url> --job-id <id> [--reason <text>]
 func (a App) job(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(a.Stderr, "usage: rdev job <create|list|get|wait|cancel> [flags]")
+		_, _ = fmt.Fprintln(a.Stderr, "usage: rdev job <create|list|get|wait|artifacts|policy-template|cancel> [flags]")
 		return fmt.Errorf("missing job subcommand")
 	}
 	switch args[0] {
@@ -6385,6 +6525,33 @@ func (a App) job(ctx context.Context, args []string) error {
 		}
 		return a.jobWait(ctx, *gatewayURL, *jobID, *timeoutSeconds, *operatorTokenFile)
 
+	case "artifacts":
+		fs := flag.NewFlagSet("job artifacts", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+		jobID := fs.String("job-id", "", "job ID (required)")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *gatewayURL == "" {
+			return fmt.Errorf("--gateway-url is required")
+		}
+		if *jobID == "" {
+			return fmt.Errorf("--job-id is required")
+		}
+		return a.jobArtifacts(ctx, *gatewayURL, *jobID, *operatorTokenFile)
+
+	case "policy-template":
+		fs := flag.NewFlagSet("job policy-template", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		capability := fs.String("capability", "shell.user", "template capability: shell.user, fs.read, fs.write.scoped, process.inspect, tool.availability")
+		targetOS := fs.String("target-os", "auto", "target OS hint: auto, windows, macos, linux")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return writeJSON(a.Stdout, jobtemplate.PolicyTemplate(*capability, *targetOS))
+
 	case "cancel":
 		fs := flag.NewFlagSet("job cancel", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -6404,7 +6571,7 @@ func (a App) job(ctx context.Context, args []string) error {
 		return a.jobCancel(ctx, *gatewayURL, *jobID, *reason, *operatorTokenFile)
 
 	default:
-		return fmt.Errorf("unknown job subcommand %q; available: create, list, get, wait, cancel", args[0])
+		return fmt.Errorf("unknown job subcommand %q; available: create, list, get, wait, artifacts, policy-template, cancel", args[0])
 	}
 }
 
@@ -6513,10 +6680,11 @@ func (a App) jobWait(ctx context.Context, gatewayURL, jobID string, timeoutSecon
 	defer ticker.Stop()
 	u := strings.TrimRight(gatewayURL, "/") + "/v1/jobs/" + url.PathEscape(jobID)
 	for {
-		job, err := fetchJobJSON(ctx, u, tok)
+		payload, err := fetchJobJSON(ctx, u, tok)
 		if err != nil {
 			return fmt.Errorf("polling job: %w", err)
 		}
+		job := nestedMapOrSelf(payload, "job")
 		jobStatus, _ := job["status"].(string)
 		switch jobStatus {
 		case "succeeded", "completed", "failed", "canceled":
@@ -6529,6 +6697,23 @@ func (a App) jobWait(ctx context.Context, gatewayURL, jobID string, timeoutSecon
 			return fmt.Errorf("job %s did not reach a terminal state within %ds (last status: %s)", jobID, timeoutSeconds, jobStatus)
 		}
 	}
+}
+
+func (a App) jobArtifacts(ctx context.Context, gatewayURL, jobID, operatorTokenFile string) error {
+	u := strings.TrimRight(gatewayURL, "/") + "/v1/jobs/" + url.PathEscape(jobID) + "/artifacts"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	if tok := loadOperatorToken(operatorTokenFile); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", u, err)
+	}
+	defer resp.Body.Close()
+	return writeHTTPResponseJSON(a.Stdout, resp)
 }
 
 func (a App) jobCancel(ctx context.Context, gatewayURL, jobID, reason, operatorTokenFile string) error {
@@ -9515,9 +9700,12 @@ Usage:
   rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto
   rdev support-session plan --addr 0.0.0.0:8787 --target auto --locale auto
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
+  rdev support-session report --gateway-url http://127.0.0.1:8787 --host-id hst_...
   rdev job list --gateway-url http://127.0.0.1:8787
   rdev job get --gateway-url http://127.0.0.1:8787 --job-id job_...
   rdev job wait --gateway-url http://127.0.0.1:8787 --job-id job_... --timeout-seconds 120
+  rdev job artifacts --gateway-url http://127.0.0.1:8787 --job-id job_...
+  rdev job policy-template --capability process.inspect --target-os windows
   rdev job cancel --gateway-url http://127.0.0.1:8787 --job-id job_... --reason "stuck job"
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
   rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party

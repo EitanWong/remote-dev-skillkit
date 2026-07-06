@@ -113,10 +113,13 @@ Before calling any MCP tool that requires a running gateway:
 
 ### Rule 10 — Send `target_handoff_envelope.full_text`, not a bare URL
 
-When the session is ready, deliver exactly `target_handoff_envelope.full_text` (or `handoff_text_file.path` content) to the target-side human. This already contains the PowerShell command in `irm 'URL' | iex` form. Do NOT:
+When the session is ready, deliver exactly `target_handoff_envelope.full_text` (or `handoff_text_file.path` content) to the target-side human. For `target=auto`, this is a multi-platform handoff with Windows PowerShell, macOS/Linux terminal, and browser fallback sections. Do NOT:
 - Send a bare `https://...trycloudflare.com/join/XXXX` link alone (the user may not know to run it)
 - Extract the URL and reconstruct a custom command
-- Use `powershell -EncodedCommand` — Base64 blobs are truncated by chat interfaces
+- Write your own `powershell -EncodedCommand` or Base64 bootstrap blob. If
+  `rdev` itself returns an encoded Windows fallback inside
+  `target_handoff_envelope.full_text`, forward the entire `full_text` verbatim
+  and do not edit it.
 
 ### Rule 11 — Status polling has a 3-minute deadline; then diagnose
 
@@ -176,11 +179,12 @@ Do not add `--public-tunnel`; that option no longer exists. Do not start `cloudf
 ### Step 3 — Send ONE thing to the user
 
 Read `handoff_text_file.path` (or `target_handoff_envelope.full_text` from the JSON output).
-Forward it verbatim. It will look like:
+Forward it verbatim. For unknown targets it will look like:
 
 > **Connect to the remote support session:**
-> Open this link on the target machine: `https://<tunnel>.trycloudflare.com/join/<TICKET>/...`
-> Or run in PowerShell: `irm 'https://...' | iex`
+> Windows PowerShell: `irm 'https://...' | iex`
+> macOS/Linux terminal: `curl -fsSL 'https://...' | sh`
+> Browser fallback: `https://<tunnel>.trycloudflare.com/join/<TICKET>/...`
 
 Nothing more. No explanation of tickets, no network configuration.
 
@@ -219,7 +223,17 @@ test, job waiting, and artifact collection. Do not write ad-hoc `curl` loops or
 custom Windows/Unix capability scripts unless this built-in command is missing.
 
 For subsequent scoped work, use `rdev job create`, `rdev job wait`, `rdev job
-get`, `rdev job list`, and `rdev job cancel` before considering MCP or raw HTTP.
+get`, `rdev job artifacts`, `rdev job list`, and `rdev job cancel` before
+considering MCP or raw HTTP. If you need a safe policy JSON, run
+`rdev job policy-template --capability <capability> --target-os <os>` and pass
+the returned `policy` object to `rdev job create`.
+
+For the final summary, prefer:
+
+```bash
+rdev support-session report --gateway-url <ACTIVE_GATEWAY_URL> --host-id <HOST_ID>
+```
+
 Then revoke the session and produce the Audit Report.
 
 ---
@@ -365,9 +379,11 @@ Before invoking any `rdev` subcommand, verify it exists by checking `rdev --help
 
 Prefer first-class CLI commands for gateway interactions when they exist:
 `rdev support-session audit-capabilities`, `rdev job create`, `rdev job list`,
-`rdev job get`, `rdev job wait`, and `rdev job cancel`. Use MCP tools when the
-current task needs MCP-only surfaces such as host capability inspection, and use
-raw HTTP only as a last-resort diagnostic path.
+`rdev job get`, `rdev job wait`, `rdev job artifacts`,
+`rdev job policy-template`, `rdev support-session report`, and
+`rdev job cancel`. Use MCP tools when the current task needs MCP-only surfaces
+such as host capability inspection, and use raw HTTP only as a last-resort
+diagnostic path.
 
 **MCP gateway alignment**
 
