@@ -5,9 +5,9 @@ max-control discovery, or long-running owned workstations.
 
 ## Connectivity
 
-- Prefer `--transport auto` for unknown or restrictive networks. It attempts
-  WSS, then HTTPS long-poll, then short polling, all as outbound target-host
-  connections.
+- Prefer the generated attended support bootstrap's HTTPS long-poll transport
+  for one-off visible sessions. Use `--transport auto` only for managed or
+  explicit advanced runner paths where WSS fallback has been validated.
 - If the host does not appear, check proxy requirements, TLS interception,
   blocked outbound 443, DNS failure, captive portals, VPN requirements, and
   configured relay/mesh/SSH paths before asking the human.

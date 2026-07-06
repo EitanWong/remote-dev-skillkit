@@ -94,6 +94,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/hosts/", s.hostSubresource)
 	mux.HandleFunc("GET /v1/ws/hosts/", s.hostWebSocket)
 	mux.HandleFunc("POST /v1/hosts/", s.hostAction)
+	mux.HandleFunc("GET /v1/jobs", s.listJobs)
 	mux.HandleFunc("POST /v1/jobs", s.createJob)
 	mux.HandleFunc("GET /v1/jobs/", s.getJob)
 	mux.HandleFunc("POST /v1/jobs/", s.jobAction)
@@ -108,9 +109,10 @@ func (s Server) hostWebSocket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown websocket host endpoint")
 		return
 	}
+	hostSecret := extractBearerToken(r)
 	// Validate host secret before upgrading — the secret may be passed as the
 	// "host_secret" query param since WebSocket upgrade headers are limited.
-	if !s.Gateway.ValidateHostSecret(hostID, extractBearerToken(r)) {
+	if !s.Gateway.ValidateHostSecret(hostID, hostSecret) {
 		writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret> or ?host_secret=<token>")
 		return
 	}
@@ -120,7 +122,15 @@ func (s Server) hostWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
+		_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+		return
+	}
 	for {
+		if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
+			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+			return
+		}
 		job, ok, err := s.nextJobForHost(r.Context(), hostID, 60*time.Second)
 		if err != nil {
 			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
@@ -141,8 +151,16 @@ func (s Server) hostWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	responseLoop:
 		for {
+			if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
+				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+				return
+			}
 			var msg wsproto.Message
 			if err := conn.ReadJSON(&msg); err != nil {
+				return
+			}
+			if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
+				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
 				return
 			}
 			if msg.HostID == "" {
@@ -623,7 +641,7 @@ func joinCopy(locale string) joinPageCopy {
 			PackageCatalogHeading: "Agent 包目录",
 			NextHeading:           "接下来会发生什么",
 			StepCheck:             `启动脚本会检查 <code>rdev</code>。`,
-			StepStart:             `它会用 <code>--transport auto</code> 启动一个可见的协助式主机会话。`,
+			StepStart:             `它会用 <code>--transport long-poll</code> 启动一个可见、稳定的协助式主机会话。`,
 			StepAgent:             "Agent 会等待主机上线，在策略需要时完成批准，然后运行受限的修复任务。",
 		})
 	case "es":
@@ -633,7 +651,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "Ejecuta un comando en el equipo que necesita ayuda. La conexion es visible, solo saliente, revocable y limitada a este ticket.",
 			NextHeading: "Que pasa despues",
 			StepCheck:   `El bootstrap comprueba <code>rdev</code>.`,
-			StepStart:   `Inicia una sesion visible con <code>--transport auto</code>.`,
+			StepStart:   `Inicia una sesion visible y estable con <code>--transport long-poll</code>.`,
 			StepAgent:   "El Agent espera el host, lo aprueba si la politica lo requiere y ejecuta trabajos de reparacion limitados.",
 		})
 	case "fr":
@@ -643,7 +661,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "Executez une commande sur l'ordinateur a aider. La connexion est visible, sortante uniquement, revocable et limitee a ce ticket.",
 			NextHeading: "Et ensuite",
 			StepCheck:   `Le bootstrap verifie <code>rdev</code>.`,
-			StepStart:   `Il demarre une session visible avec <code>--transport auto</code>.`,
+			StepStart:   `Il demarre une session visible et stable avec <code>--transport long-poll</code>.`,
 			StepAgent:   "L'Agent attend le host, l'approuve si la politique l'exige, puis execute des reparations limitees.",
 		})
 	case "de":
@@ -653,7 +671,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "Fuhre einen Befehl auf dem Computer aus, der Hilfe braucht. Die Verbindung ist sichtbar, nur ausgehend, widerrufbar und auf dieses Ticket begrenzt.",
 			NextHeading: "Was als Nachstes passiert",
 			StepCheck:   `Der Bootstrap pruft <code>rdev</code>.`,
-			StepStart:   `Er startet eine sichtbare Sitzung mit <code>--transport auto</code>.`,
+			StepStart:   `Er startet eine sichtbare, stabile Sitzung mit <code>--transport long-poll</code>.`,
 			StepAgent:   "Der Agent wartet auf den Host, genehmigt ihn falls erforderlich und startet begrenzte Reparaturjobs.",
 		})
 	case "ja":
@@ -663,7 +681,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "サポートが必要なコンピューターで 1 つのコマンドを実行します。接続は可視、アウトバウンドのみ、取り消し可能で、このサポートチケットに限定されます。",
 			NextHeading: "次に行われること",
 			StepCheck:   `bootstrap は <code>rdev</code> を確認します。`,
-			StepStart:   `<code>--transport auto</code> で可視のホストセッションを開始します。`,
+			StepStart:   `<code>--transport long-poll</code> で可視で安定したホストセッションを開始します。`,
 			StepAgent:   "Agent はホストを待ち、ポリシーが必要とする場合に承認し、限定された修復ジョブを実行します。",
 		})
 	case "ko":
@@ -673,7 +691,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "도움이 필요한 컴퓨터에서 명령 하나를 실행합니다. 연결은 보이는 방식이며, 아웃바운드 전용이고, 철회 가능하며, 이 지원 티켓 범위로 제한됩니다.",
 			NextHeading: "다음 단계",
 			StepCheck:   `bootstrap 이 <code>rdev</code> 를 확인합니다.`,
-			StepStart:   `<code>--transport auto</code> 로 보이는 호스트 세션을 시작합니다.`,
+			StepStart:   `<code>--transport long-poll</code> 로 보이고 안정적인 호스트 세션을 시작합니다.`,
 			StepAgent:   "Agent 는 호스트를 기다리고, 정책상 필요하면 승인한 뒤 제한된 복구 작업을 실행합니다.",
 		})
 	case "pt-BR":
@@ -683,7 +701,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "Execute um comando no computador que precisa de ajuda. A conexao e visivel, somente de saida, revogavel e limitada a este ticket.",
 			NextHeading: "O que acontece depois",
 			StepCheck:   `O bootstrap verifica <code>rdev</code>.`,
-			StepStart:   `Ele inicia uma sessao visivel com <code>--transport auto</code>.`,
+			StepStart:   `Ele inicia uma sessao visivel e estavel com <code>--transport long-poll</code>.`,
 			StepAgent:   "O Agent aguarda o host, aprova quando a politica exige e executa tarefas de reparo limitadas.",
 		})
 	case "hi":
@@ -693,7 +711,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "जिस कंप्यूटर को मदद चाहिए उस पर एक कमांड चलाएं। कनेक्शन दिखने वाला, केवल outbound, revoke करने योग्य, और इस support ticket तक सीमित है।",
 			NextHeading: "आगे क्या होगा",
 			StepCheck:   `bootstrap <code>rdev</code> जांचता है।`,
-			StepStart:   `यह <code>--transport auto</code> के साथ visible host session शुरू करता है।`,
+			StepStart:   `यह <code>--transport long-poll</code> के साथ visible और stable host session शुरू करता है।`,
 			StepAgent:   "Agent host का इंतजार करता है, policy की जरूरत पर approve करता है, और scoped repair jobs चलाता है।",
 		})
 	case "ar":
@@ -703,7 +721,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "شغّل أمرا واحدا على الكمبيوتر الذي يحتاج إلى مساعدة. الاتصال ظاهر، صادر فقط، قابل للإلغاء، ومحدود بتذكرة الدعم هذه.",
 			NextHeading: "ماذا يحدث بعد ذلك",
 			StepCheck:   `يتحقق bootstrap من <code>rdev</code>.`,
-			StepStart:   `يبدأ جلسة host مرئية باستخدام <code>--transport auto</code>.`,
+			StepStart:   `يبدأ جلسة host مرئية ومستقرة باستخدام <code>--transport long-poll</code>.`,
 			StepAgent:   "ينتظر Agent ظهور host، ويوافق عليه عند الحاجة حسب السياسة، ثم يشغل مهام إصلاح محددة النطاق.",
 		})
 	case "ru":
@@ -713,7 +731,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "Выполните одну команду на компьютере, которому нужна помощь. Подключение видимое, только исходящее, отзывное и ограничено этим тикетом.",
 			NextHeading: "Что будет дальше",
 			StepCheck:   `bootstrap проверит <code>rdev</code>.`,
-			StepStart:   `Он запустит видимую сессию host с <code>--transport auto</code>.`,
+			StepStart:   `Он запустит видимую и стабильную сессию host с <code>--transport long-poll</code>.`,
 			StepAgent:   "Agent дождется host, выполнит approval при необходимости и запустит ограниченные repair jobs.",
 		})
 	default:
@@ -723,7 +741,7 @@ func joinCopy(locale string) joinPageCopy {
 			Note:        "Run one command on the computer that needs help. The connection is visible, outbound-only, revocable, and scoped to this support ticket.",
 			NextHeading: "What Happens Next",
 			StepCheck:   `The bootstrap checks for <code>rdev</code>.`,
-			StepStart:   `It starts a visible attended host session with <code>--transport auto</code>.`,
+			StepStart:   `It starts a visible, stable attended host session with <code>--transport long-poll</code>.`,
 			StepAgent:   "The Agent waits for the host, approves it when policy requires, and runs scoped repair jobs.",
 		})
 	}
@@ -845,7 +863,7 @@ rdev_max_retries=5
 rdev_retry_delay=5
 rdev_attempt=0
 while true; do
-  "$rdev_cmd" host serve --manifest-url %s%s --transport auto --once=false --max-jobs 0
+  "$rdev_cmd" host serve --manifest-url %s%s --transport long-poll --once=false --max-jobs 0
   rdev_exit=$?
   rdev_attempt=$((rdev_attempt + 1))
   echo "[rdev] host process exited with code $rdev_exit"
@@ -927,7 +945,7 @@ do {
     Write-Host ("[rdev] Retrying host registration (attempt $($rdevAttempt + 1) of $($rdevMaxRetries + 1)) after ${rdevRetryDelaySec}s...")
     Start-Sleep -Seconds $rdevRetryDelaySec
   }
-  & $rdevPath host serve --manifest-url '%s'%s --transport auto --once=false --max-jobs 0
+  & $rdevPath host serve --manifest-url '%s'%s --transport long-poll --once=false --max-jobs 0
   $rdevExitCode = $LASTEXITCODE
   $rdevAttempt++
   Write-Host "[rdev] host process exited with code $rdevExitCode"

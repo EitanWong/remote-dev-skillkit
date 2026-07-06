@@ -4,6 +4,48 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.36-dev
+
+Current phase: real attended Windows support-session recovery hardening. This
+slice fixes stale host storms, helper asset mismatch, and Agent missteps found
+in a fresh remote-connection transcript.
+
+### Added
+
+- Added `rdev support-session recover`, an operator-side cleanup command that
+  reads the active support-session status, revokes stale hosts for the ticket,
+  cancels their queued/running jobs, and returns a structured recovery report
+  instead of making Agents ask users to paste manifest roots or delete helper
+  binaries.
+- Added timeout aliases across support-session and job commands:
+  `support-session status --timeout-seconds`, `support-session
+  audit-capabilities --timeout-seconds`, and `job wait --timeout`.
+
+### Changed
+
+- Generated attended `/join/.../bootstrap.sh` and `bootstrap.ps1` now start
+  visible temporary hosts with `--transport long-poll` for the default
+  one-command support path. WSS remains available, but the ordinary handoff uses
+  the more stable HTTPS long-poll path.
+- `support-session connect --start` now fails closed when helper assets are not
+  ready, instead of printing a target handoff that may later 404 on
+  `/assets/*`.
+- Helper assets are rebuilt from the current checkout during `--build-assets`
+  even when an older helper file already exists, reducing gateway/helper
+  version skew.
+- Support-session ready/status/handoff files are written atomically so Agents
+  do not read half-written JSON.
+
+### Fixed
+
+- WSS host connections now refresh host liveness before stale checks and host
+  WSS clients also send heartbeat pings, preventing active WebSocket sessions
+  from being marked `stale` after the gateway heartbeat window.
+- Registered `GET /v1/jobs` in the HTTP router so CLI/MCP job listing and
+  recovery flows hit the documented endpoint.
+- Updated `safe-remote-support` guidance to use `support-session recover`, avoid
+  bare `join_url` handoffs, and stop manual helper-binary replacement.
+
 ## 0.1.35-dev
 
 Current phase: keep visible host sessions connected during longer AI-native

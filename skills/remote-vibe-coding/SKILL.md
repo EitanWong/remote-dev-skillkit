@@ -147,10 +147,10 @@ revocation.
   tries ordered gateway URL candidates on the target machine with the returned
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
   Agent-authored PowerShell, shell, relay, ticket substitution, approval
-  polling, or bootstrap scripts. After registration, `rdev host serve
-  --transport auto` also reuses signed join-manifest gateway candidates and can
-  switch to another reachable candidate if the current gateway fails before
-  jobs are processed.
+  polling, or bootstrap scripts. Ordinary attended handoffs now use
+  `--transport long-poll` for stable HTTPS-only connectivity; reserve
+  `--transport auto` for managed or explicit advanced runner paths where WSS
+  fallback has been validated.
 - Read returned `agent_connection_runbook` before choosing lower-level
   support-session tools. It tells the Agent when to run `cli_start_now_command`,
   when to send the handoff, how to wait, when to report connected, and how to
@@ -322,9 +322,11 @@ revocation.
    mode with no persistence by default. If ownership or persistence approval is
    unclear, ask one short question before creating a managed entry. Prefer a
    signed self-contained connection entry package with the target-platform
-   `rdev` binary, release bundle, manifest URL, pinned manifest root, visible
-   launcher, and `--transport auto` before asking a human to install
-   prerequisites or copy flags. Use `connection_entry.package_catalog` and
+   `rdev` binary, release bundle, manifest URL, pinned manifest root, and
+   visible launcher before asking a human to install prerequisites or copy
+   flags. For attended temporary support, prefer the generated long-poll
+   bootstrap; reserve `--transport auto` for managed or explicit advanced
+   runner paths with validated WSS fallback. Use `connection_entry.package_catalog` and
    manifest `package_catalog` as the OS/architecture selection source; package
    status `planned-release-asset-required` means use the visible fallback script
    and report missing release inputs to the operator. Use the materialized

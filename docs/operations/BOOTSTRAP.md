@@ -213,9 +213,11 @@ target side it can be dry-run with:
 rdev connection-entry run --runner-manifest connection-entry-runner.json --dry-run
 ```
 
-Without `--dry-run`, it probes direct gateway reachability first, lets
-`rdev host serve --transport auto` handle WSS, HTTPS long-poll, and short-poll
-fallback, then considers already configured helper paths. Helper paths are
+Without `--dry-run`, it probes direct gateway reachability first and uses the
+standard attended support transport selected by the generated entry surface:
+ordinary `/join/.../bootstrap.*` uses HTTPS long-poll for stability, while
+managed or explicit advanced runners may use `--transport auto` after WSS has
+been validated for the deployment. Helper paths are
 selected only when both the tool and an explicit gateway override are present,
 for example `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
 `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL`. The runner may reuse existing
@@ -298,7 +300,7 @@ the platform helper from `/assets`, verify its SHA-256 through the matching
 `.sha256` endpoint, and then run a visible attended host session:
 
 ```bash
-rdev host serve --manifest-url <manifest-url> --transport auto --once=false
+rdev host serve --manifest-url <manifest-url> --transport long-poll --once=false
 ```
 
 This is the one-link connection entry path for support and debugging. It is an attended
@@ -316,11 +318,13 @@ For new target-host connections, agents should prefer the invite's
 is the no-prerequisite path when release assets are published: one
 platform-specific bundle with `rdev`/`rdev-host`, signed release-bundle
 evidence, the join manifest URL, the pinned manifest root, visible stop/revoke
-instructions, and `--transport auto` fallback. If package assets are not
+instructions, and the selected attended/managed transport. If package assets are not
 published or release inputs are missing, the Agent should use the catalog's
 visible `/bootstrap.sh` or `/bootstrap.ps1` fallback rather than asking the
-target-side human to assemble raw values. It should probe WSS, HTTPS long-poll,
-short-poll, LAN/private gateway reachability, and already configured
+target-side human to assemble raw values. It should prefer the generated
+attended bootstrap's HTTPS long-poll path unless an explicit managed/advanced
+entry validates WSS/auto fallback. It should probe HTTPS long-poll, short-poll,
+LAN/private gateway reachability, and already configured
 proxy/relay/mesh/SSH paths before asking the human for more network details.
 Elevation is allowed only through normal UAC/sudo/system prompts for a signed
 job that needs it, and the approval must be recorded as evidence.

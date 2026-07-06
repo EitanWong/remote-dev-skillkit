@@ -37,6 +37,10 @@ Do not ask them to:
 
 Everything is already embedded in the handoff. If it is not, fix the session setup rather than asking the user.
 
+Do not send `join_url` alone. If `ready_to_send_to_human=false` or
+`asset_report.all_ready=false`, stop and fix the session setup before sending
+anything to the target-side human.
+
 ### Adaptive Configuration Contract
 
 Before acting, probe the available `rdev` CLI/MCP surface, gateway state, network reachability, tunnel/mesh helpers, workspace path, target OS/shell, permissions, and connection modes. If any required value is unclear after read-only probes, ask one short question instead of inventing ticket codes, gateway URLs, root keys, checksums, workspace paths, adapter choices, tunnel commands, or approval policy.
@@ -193,6 +197,15 @@ If the status is `stale`, do **not** create jobs. Report that the target runner
 was seen previously but is no longer job-ready, then use the generated recovery
 instructions instead of manually building new bootstrap scripts.
 
+If multiple stale hosts appear for the same ticket, run:
+
+```
+rdev support-session recover --gateway-url <ACTIVE_GATEWAY_URL> --ticket-code <TICKET>
+```
+
+Do not ask the user to delete cached helper binaries, paste manifest roots, or
+switch transports manually unless the recover command is unavailable.
+
 ### Step 5 — Run capability tests then report
 
 After connection, run the built-in audit first (no user prompts):
@@ -218,8 +231,9 @@ If the target does not appear within 2 minutes:
 1. Check `gateway_candidate_summary` — was a public tunnel URL sent?
 2. If LAN URL was sent by mistake: restart with cloudflared URL, give user new command.
 3. If tunnel dropped: restart cloudflared, get new URL, give user new command.
-4. **Do not write custom PowerShell/bash polling scripts.**
-5. Use `rdev.support_session.status` or `connection_recovery` returned fields.
+4. If stale hosts or queued jobs accumulated: run `rdev support-session recover`.
+5. **Do not write custom PowerShell/bash polling scripts.**
+6. Use `rdev.support_session.status` or `connection_recovery` returned fields.
 
 ---
 
@@ -294,6 +308,9 @@ Never add `service.manage`, `credential.change`, or `gui.control` without explic
 - Running `rdev support-session connect --start` in a background terminal (`&`, `nohup`, etc.)
 - Calling any `rdev.*` MCP tool without passing `"gateway_url": "<active-gateway-url>"`
 - Assuming plural CLI commands such as `rdev hosts` or `rdev jobs` are valid; use `rdev host` / `rdev job` or MCP tools
+- Manually deleting or replacing target helper binaries instead of using
+  `support-session connect --start`, `prepare --build-assets`, or
+  `support-session recover`
 
 ---
 

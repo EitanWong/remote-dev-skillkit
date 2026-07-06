@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,6 +21,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
+	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 )
 
 func TestCreateTicketAndAudit(t *testing.T) {
@@ -65,8 +67,8 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "推荐入口", "Agent 包目录", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false", "--max-jobs 0", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false", "--max-jobs 0", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.accept != "" {
@@ -115,6 +117,48 @@ func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "fake rdev binary") {
 		t.Fatalf("expected configured binary, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHostWebSocketRefreshesHeartbeatBeforeClaimingJob(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	handler := NewServer(gw).Handler()
+	host, secret := registerAndApproveHostWithSecret(t, handler)
+	job, err := gw.CreateJob(host.ID, "shell", "wss heartbeat regression", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []any{"shell.user"},
+		"argv":           []any{"echo", "demo"},
+		"allow_commands": []any{
+			"echo",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute)
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	wsURL, err := wsproto.HTTPToWebSocketURL(server.URL, "/v1/ws/hosts/"+url.PathEscape(host.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := wsproto.Dial(context.Background(), wsURL+"?host_secret="+url.QueryEscape(secret), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	var msg wsproto.Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatal(err)
+	}
+	if msg.Type == wsproto.MessageError {
+		t.Fatalf("websocket should refresh heartbeat before stale check, got error: %s", msg.Error)
+	}
+	if msg.Type != wsproto.MessageJob || msg.JobID != job.ID {
+		t.Fatalf("expected queued job over websocket, got %#v", msg)
 	}
 }
 

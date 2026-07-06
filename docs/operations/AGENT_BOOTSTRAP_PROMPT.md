@@ -180,10 +180,11 @@ Steps:
     and status watcher in one payload. The target command already tries ordered
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
-    PowerShell, shell, relay, or approval-polling fallback. After registration,
-    `rdev host serve --transport auto` reuses signed join-manifest gateway
-    candidates and can switch to another reachable candidate if the current
-    gateway fails before jobs are processed. Read
+    PowerShell, shell, relay, or approval-polling fallback. Ordinary attended
+    `/join/.../bootstrap.*` handoffs use `rdev host serve --transport
+    long-poll` for stable HTTPS-only connectivity. Use `--transport auto` only
+    for managed or explicit advanced runner paths where WSS fallback has been
+    validated. Read
     `agent_connection_runbook` first; it is the machine-readable order of
     operations for connecting, waiting, reporting, and recovering without
     custom scripts. Read

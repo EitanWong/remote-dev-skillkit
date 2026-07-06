@@ -2818,9 +2818,13 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		locale := fs.String("locale", "auto", "feedback language, for example auto, en, or zh-CN")
 		wait := fs.Bool("wait", false, "wait until a host connects or approval is pending")
 		timeout := fs.Duration("timeout", 2*time.Minute, "maximum wait duration when --wait is set")
+		timeoutSeconds := fs.Int("timeout-seconds", 0, "alias for --timeout, in whole seconds")
 		interval := fs.Duration("interval", time.Second, "poll interval when --wait is set")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
+		}
+		if *timeoutSeconds > 0 {
+			*timeout = time.Duration(*timeoutSeconds) * time.Second
 		}
 		status, err := supportSessionStatus(ctx, http.DefaultClient, supportSessionStatusOptions{
 			GatewayURL: *gatewayURL,
@@ -2834,15 +2838,35 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return writeJSON(a.Stdout, status)
+	case "recover":
+		fs := flag.NewFlagSet("support-session recover", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		gatewayURL := fs.String("gateway-url", "", "gateway URL that created the Connection Entry")
+		ticketCode := fs.String("ticket-code", "", "Connection Entry ticket code to recover")
+		locale := fs.String("locale", "auto", "feedback language, for example auto, en, or zh-CN")
+		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return a.supportSessionRecover(ctx, supportSessionRecoverOptions{
+			GatewayURL:        *gatewayURL,
+			TicketCode:        *ticketCode,
+			Locale:            *locale,
+			OperatorTokenFile: *operatorTokenFile,
+		})
 	case "audit-capabilities":
 		fs := flag.NewFlagSet("support-session audit-capabilities", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
 		gatewayURL := fs.String("gateway-url", "", "gateway URL that owns the connected support session")
 		hostID := fs.String("host-id", "", "active host ID to audit")
 		timeout := fs.Duration("timeout", 90*time.Second, "maximum duration for the audit")
+		timeoutSeconds := fs.Int("timeout-seconds", 0, "alias for --timeout, in whole seconds")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
+		}
+		if *timeoutSeconds > 0 {
+			*timeout = time.Duration(*timeoutSeconds) * time.Second
 		}
 		return a.supportSessionAuditCapabilities(ctx, supportSessionAuditCapabilitiesOptions{
 			GatewayURL:        *gatewayURL,
@@ -3258,7 +3282,8 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	// This catches the common mistake of running `prepare --build-assets` with
 	// one --work-dir and then `connect --start` with a different --work-dir,
 	// which leaves the gateway unable to serve the helper and causes a 404 on
-	// the target side.
+	// the target side. Fail closed: the one-command target handoff must never be
+	// generated until target-side self-repair assets are ready.
 	if assetReport, ok := prepared["asset_report"].(map[string]any); ok {
 		allReady, _ := assetReport["all_ready"].(bool)
 		if !allReady {
@@ -3282,17 +3307,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 					missing = append(missing, c.name)
 				}
 			}
-			if len(missing) > 0 {
-				_, _ = fmt.Fprintf(a.Stderr,
-					"[rdev] WARNING: helper binaries missing for platforms %v in %s\n"+
-						"       The gateway will return 404 for /assets/* on these platforms.\n"+
-						"       Run: rdev support-session connect --start --repo-root <checkout> --work-dir %s\n"+
-						"       (ensure --work-dir is the same for build and serve)\n",
-					missing, binDir, workDir)
-				// Warn but do not abort: LAN/managed hosts that bring their own
-				// rdev binary still work; only targets that need the gateway asset
-				// download will be affected.
-			}
+			return fmt.Errorf("support-session connect cannot generate a target handoff until helper assets are ready; missing platform helpers %v in %s; rerun from a valid checkout with Go available or pass --repo-root <checkout> --work-dir %s", missing, binDir, workDir)
 		}
 	}
 
@@ -3627,6 +3642,13 @@ type supportSessionStatusOptions struct {
 	Interval   time.Duration
 }
 
+type supportSessionRecoverOptions struct {
+	GatewayURL        string
+	TicketCode        string
+	Locale            string
+	OperatorTokenFile string
+}
+
 func supportSessionStatus(ctx context.Context, client *http.Client, opts supportSessionStatusOptions) (map[string]any, error) {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
@@ -3701,6 +3723,179 @@ func fetchSupportSessionStatus(ctx context.Context, client *http.Client, opts su
 		return nil, fmt.Errorf("support-session status failed: %s", resp.Status)
 	}
 	return payload, nil
+}
+
+func (a App) supportSessionRecover(ctx context.Context, opts supportSessionRecoverOptions) error {
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	if gatewayURL == "" {
+		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	if gatewayURL == "" {
+		return fmt.Errorf("support-session recover requires --gateway-url or a configured RDEV_*_GATEWAY_URL")
+	}
+	if strings.TrimSpace(opts.TicketCode) == "" {
+		return fmt.Errorf("support-session recover requires --ticket-code")
+	}
+	token := loadOperatorToken(opts.OperatorTokenFile)
+	status, err := supportSessionStatus(ctx, http.DefaultClient, supportSessionStatusOptions{
+		GatewayURL: gatewayURL,
+		TicketCode: opts.TicketCode,
+		Locale:     opts.Locale,
+	})
+	if err != nil {
+		return err
+	}
+	staleHosts := mapSlice(status["stale_hosts"])
+	recoveredHosts := []map[string]any{}
+	canceledJobs := []map[string]any{}
+	errorsOut := []string{}
+	for _, host := range staleHosts {
+		hostID, _ := host["id"].(string)
+		if strings.TrimSpace(hostID) == "" {
+			continue
+		}
+		jobs, err := fetchGatewayJobsForHost(ctx, gatewayURL, hostID, token)
+		if err != nil {
+			errorsOut = append(errorsOut, fmt.Sprintf("list jobs for %s: %v", hostID, err))
+		} else {
+			for _, job := range jobs {
+				jobID, _ := job["id"].(string)
+				jobStatus, _ := job["status"].(string)
+				if jobID == "" || !recoverableJobStatus(jobStatus) {
+					continue
+				}
+				if _, _, err := postGatewayJSON(ctx, gatewayURL+"/v1/jobs/"+url.PathEscape(jobID)+"/cancel", map[string]any{
+					"reason": "support-session recover canceled job for stale host " + hostID,
+				}, token); err != nil {
+					errorsOut = append(errorsOut, fmt.Sprintf("cancel job %s: %v", jobID, err))
+					continue
+				}
+				canceledJobs = append(canceledJobs, map[string]any{
+					"id":              jobID,
+					"previous_status": jobStatus,
+					"host_id":         hostID,
+				})
+			}
+		}
+		if _, _, err := postGatewayJSON(ctx, gatewayURL+"/v1/hosts/"+url.PathEscape(hostID)+"/revoke", map[string]any{
+			"reason": "support-session recover revoked stale host",
+		}, token); err != nil {
+			errorsOut = append(errorsOut, fmt.Sprintf("revoke host %s: %v", hostID, err))
+			continue
+		}
+		recoveredHosts = append(recoveredHosts, map[string]any{
+			"id":              hostID,
+			"previous_status": host["status"],
+			"name":            host["name"],
+			"os":              host["os"],
+			"arch":            host["arch"],
+		})
+	}
+	statusAfter, statusErr := supportSessionStatus(ctx, http.DefaultClient, supportSessionStatusOptions{
+		GatewayURL: gatewayURL,
+		TicketCode: opts.TicketCode,
+		Locale:     opts.Locale,
+	})
+	if statusErr != nil {
+		errorsOut = append(errorsOut, "status after recovery: "+statusErr.Error())
+	}
+	payload := map[string]any{
+		"schema_version":      "rdev.support-session-recovery.v1",
+		"ok":                  len(errorsOut) == 0,
+		"gateway_url":         gatewayURL,
+		"ticket_code":         opts.TicketCode,
+		"stale_hosts_seen":    len(staleHosts),
+		"hosts_revoked":       recoveredHosts,
+		"jobs_canceled":       canceledJobs,
+		"errors":              errorsOut,
+		"status_before":       status,
+		"status_after":        statusAfter,
+		"agent_next_step":     "If status_after.connected is false, resend the existing target_handoff_envelope.full_text when the ticket is still active, or create a fresh support-session with rdev support-session connect --start.",
+		"human_surface_rule":  "Do not ask the target human to assemble manifest, root key, gateway URL, transport, or ticket values.",
+		"standard_next_tools": []string{"rdev support-session status --wait", "rdev support-session connect --start"},
+	}
+	return writeJSON(a.Stdout, payload)
+}
+
+func mapSlice(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func recoverableJobStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "queued", "running":
+		return true
+	default:
+		return false
+	}
+}
+
+func fetchGatewayJobsForHost(ctx context.Context, gatewayURL, hostID, bearerToken string) ([]map[string]any, error) {
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/jobs?host_id=" + url.QueryEscape(hostID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(bearerToken) != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := doGatewayRequest(http.DefaultClient, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if message, _ := payload["error"].(string); message != "" {
+			return nil, errors.New(message)
+		}
+		return nil, errors.New(resp.Status)
+	}
+	return mapSlice(payload["jobs"]), nil
+}
+
+func postGatewayJSON(ctx context.Context, endpoint string, body any, bearerToken string) (map[string]any, int, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(bearerToken) != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	resp, err := doGatewayRequest(http.DefaultClient, req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if message, _ := payload["error"].(string); message != "" {
+			return payload, resp.StatusCode, errors.New(message)
+		}
+		return payload, resp.StatusCode, errors.New(resp.Status)
+	}
+	return payload, resp.StatusCode, nil
 }
 
 type supportSessionAuditCapabilitiesOptions struct {
@@ -6171,9 +6366,16 @@ func (a App) job(ctx context.Context, args []string) error {
 		gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
 		jobID := fs.String("job-id", "", "job ID (required)")
 		timeoutSeconds := fs.Int("timeout-seconds", 120, "max seconds to wait for job completion")
+		timeout := fs.Duration("timeout", 0, "alias for --timeout-seconds, as a Go duration such as 90s or 2m")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
+		}
+		if *timeout > 0 {
+			*timeoutSeconds = int(timeout.Round(time.Second) / time.Second)
+			if *timeoutSeconds <= 0 {
+				*timeoutSeconds = 1
+			}
 		}
 		if *gatewayURL == "" {
 			return fmt.Errorf("--gateway-url is required")
@@ -9501,21 +9703,45 @@ func isRetryableNetErr(err error) bool {
 
 // A missing heartbeat for > 90 s causes the gateway to mark the host stale.
 func sendHeartbeat(ctx context.Context, client *http.Client, gatewayURL, hostID, hostSecret string) error {
+	if strings.TrimSpace(hostSecret) == "" {
+		return nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(gatewayURL, "/")+"/v1/hosts/"+url.PathEscape(hostID)+"/heartbeat",
 		nil)
 	if err != nil {
 		return err
 	}
-	if hostSecret != "" {
-		req.Header.Set("Authorization", "Bearer "+hostSecret)
-	}
+	req.Header.Set("Authorization", "Bearer "+hostSecret)
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
 		return err
 	}
 	_ = resp.Body.Close()
 	return nil
+}
+
+func startHostHeartbeat(ctx context.Context, client *http.Client, gatewayURL, hostID, hostSecret string) func() {
+	if strings.TrimSpace(hostSecret) == "" {
+		return func() {}
+	}
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	_ = sendHeartbeat(heartbeatCtx, client, gatewayURL, hostID, hostSecret)
+	go func() {
+		// Gateway marks a host stale after ~90 s of silence; ping every 30 s
+		// and send one immediately before long waits through the call sites.
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				_ = sendHeartbeat(heartbeatCtx, client, gatewayURL, hostID, hostSecret)
+			}
+		}
+	}()
+	return stopHeartbeat
 }
 
 func registerHost(ctx context.Context, client *http.Client, gatewayURL string, registration model.HostRegistration) (model.Host, string, error) {
@@ -9664,25 +9890,8 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 	trust.WorkspaceLockStore = opts.WorkspaceLockStore
 	trust.CaptureRuntimeFixture = opts.CaptureRuntimeFixture
 	processed := 0
-	// Heartbeat goroutine — keeps the gateway's host liveness record fresh.
-	// Gateway marks a host stale after ~90 s of silence; we ping every 30 s.
-	const heartbeatInterval = 30 * time.Second
-	if hostSecret != "" {
-		heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
-		defer stopHeartbeat()
-		go func() {
-			ticker := time.NewTicker(heartbeatInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-heartbeatCtx.Done():
-					return
-				case <-ticker.C:
-					_ = sendHeartbeat(heartbeatCtx, client, opts.GatewayURL, hostID, hostSecret)
-				}
-			}
-		}()
-	}
+	stopHeartbeat := startHostHeartbeat(ctx, client, opts.GatewayURL, hostID, hostSecret)
+	defer stopHeartbeat()
 	for processed < maxJobs {
 		wait := time.Duration(0)
 		if transport == "long-poll" {
@@ -9694,6 +9903,7 @@ func (a App) runPollingHostJobs(ctx context.Context, opts hostServeOptions, clie
 				return processed, err
 			}
 		}
+		_ = sendHeartbeat(ctx, client, opts.GatewayURL, hostID, hostSecret)
 		job, found, err := fetchNextJob(ctx, client, opts.GatewayURL, hostID, hostSecret, wait)
 		if err != nil {
 			return processed, err
@@ -9801,6 +10011,8 @@ func (a App) runWSSHostJobs(ctx context.Context, opts hostServeOptions, client *
 		return 0, err
 	}
 	defer conn.Close()
+	stopHeartbeat := startHostHeartbeat(ctx, client, opts.GatewayURL, hostID, hostSecret)
+	defer stopHeartbeat()
 	processed := 0
 	for processed < maxJobs {
 		var msg wsproto.Message
@@ -10765,10 +10977,7 @@ func writeJSONFile0600(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
+	return atomicWriteFile0600(path, data)
 }
 
 func writeTextFile0600(path, text string) error {
@@ -10781,9 +10990,40 @@ func writeTextFile0600(path, text string) error {
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
-	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+	return atomicWriteFile0600(path, []byte(text))
+}
+
+func atomicWriteFile0600(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
 	return os.Chmod(path, 0o600)
 }
 

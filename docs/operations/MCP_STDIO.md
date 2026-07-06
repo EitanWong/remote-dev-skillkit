@@ -77,9 +77,10 @@ bounded per-candidate timeout/retry behavior before failing. The payload also
 includes `connection_attempt_policy`, so Agents can explain the behavior without
 writing replacement PowerShell, shell, relay, approval polling, or bootstrap
 code. It also includes `fresh_agent_connect_contract`; read it before writing
-any setup or recovery code. After registration, `rdev host serve --transport auto` keeps the signed
-join-manifest gateway candidates and can switch to another reachable candidate
-if the current gateway fails before jobs are processed. It also includes
+any setup or recovery code. The ordinary attended bootstrap uses
+`rdev host serve --transport long-poll` for stable HTTPS-only connectivity;
+managed or explicit advanced runners may still use `--transport auto` when WSS
+fallback has been validated for that deployment. It also includes
 `connectivity_helper_preflight`, a read-only contract that reports configured
 SSH, relay, mesh, and VPN helper gateway URLs, start argv JSON, install action
 JSON, allow-listed tools, approval boundaries, and validation errors such as
@@ -225,9 +226,9 @@ It creates a ticket and returns a manifest URL, `host_command`,
 `connectivity_checks`, `human_next_actions`, and `agent_next_actions`. Agents
 should call this before asking a human to connect a new target host. The command
 still requires consent on the target machine; it does not execute remotely by
-itself. The default transport is `auto`, which tries WSS first and falls back to
-HTTPS long-poll and then short polling when restrictive networks block
-WebSocket upgrades or long-held requests.
+itself. For attended temporary support, the visible bootstrap default is HTTPS
+long-poll. `auto` remains available for managed or explicit advanced entries
+where WSS fallback has been validated for the deployment.
 
 When `auto_approve=true`, `rdev.invites.create` creates ticket metadata that can
 auto-activate the first host only for an attended-temporary Connection Entry.

@@ -1375,7 +1375,7 @@ func TestSupportSessionStatusWaitTimeoutIncludesRecovery(t *testing.T) {
 		"--gateway-url", server.URL,
 		"--ticket-code", ticket.Code,
 		"--wait",
-		"--timeout", "1ms",
+		"--timeout-seconds", "1",
 		"--interval", "1ms",
 	}); err != nil {
 		t.Fatal(err)
@@ -1398,6 +1398,87 @@ func TestSupportSessionStatusWaitTimeoutIncludesRecovery(t *testing.T) {
 		!strings.Contains(strings.Join(anyStrings(actions), "\n"), "connection-entry failure") ||
 		!strings.Contains(strings.Join(anyStrings(forbidden), "\n"), "Agent-authored PowerShell") {
 		t.Fatalf("expected wait timeout recovery contract, got %#v", payload)
+	}
+}
+
+func TestSupportSessionRecoverRevokesStaleHostsAndCancelsJobs(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "visible support")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "win-stale",
+		OS:           "windows",
+		Arch:         "amd64",
+		Capabilities: []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, []string{"shell.user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "queued stale cleanup", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []any{"shell.user"},
+		"argv":           []any{"echo", "demo"},
+		"allow_commands": []any{
+			"echo",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute)
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"support-session", "recover",
+		"--gateway-url", server.URL,
+		"--ticket-code", ticket.Code,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		SchemaVersion    string           `json:"schema_version"`
+		OK               bool             `json:"ok"`
+		StaleHostsSeen   int              `json:"stale_hosts_seen"`
+		HostsRevoked     []map[string]any `json:"hosts_revoked"`
+		JobsCanceled     []map[string]any `json:"jobs_canceled"`
+		HumanSurfaceRule string           `json:"human_surface_rule"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid recovery JSON: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-recovery.v1" ||
+		!payload.OK ||
+		payload.StaleHostsSeen != 1 ||
+		len(payload.HostsRevoked) != 1 ||
+		len(payload.JobsCanceled) != 1 ||
+		!strings.Contains(payload.HumanSurfaceRule, "Do not ask") {
+		t.Fatalf("unexpected recovery payload: %#v", payload)
+	}
+	recoveredHost, err := gw.Host(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recoveredHost.Status != model.HostStatusRevoked {
+		t.Fatalf("expected host revoked, got %s", recoveredHost.Status)
+	}
+	recoveredJob, err := gw.Job(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recoveredJob.Status != model.JobStatusCanceled {
+		t.Fatalf("expected job canceled, got %s", recoveredJob.Status)
 	}
 }
 
