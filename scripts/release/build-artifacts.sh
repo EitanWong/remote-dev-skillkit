@@ -112,7 +112,7 @@ for target in "${target_list[@]}"; do
     echo "building $command for $goos/$goarch cgo=$cgo_enabled -> $artifact" >&2
     CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" go build \
       -trimpath \
-      -ldflags "-s -w -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version" \
+      -ldflags "-s -w -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at" \
       -o "$artifact" "$package"
     sha="$(shasum -a 256 "$artifact" | awk '{print $1}')"
     size="$(wc -c < "$artifact" | tr -d ' ')"

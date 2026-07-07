@@ -59,9 +59,12 @@ revocation.
   `rdev support-session prepare --build-assets` from a checkout. Follow its
   `standard_recovery`, `asset_report`, and `connection_readiness` fields
   instead of writing custom PowerShell, approval polling, ticket substitution,
-  relay, or bootstrap glue. Use the recommended `gateway_url_candidates` item
-  plus the returned `agent_connection_runbook` and
-  `gateway_candidate_preflight` decision table for target-side commands. Read
+  relay, or bootstrap glue. Treat `gateway_url_candidates` as diagnostic and
+  signed-runtime metadata for `rdev`-generated handoffs, not as values to splice
+  into Agent-written target commands. Use the returned
+  `agent_connection_runbook` and `gateway_candidate_preflight` decision table
+  to choose the standard `connect --start`, configured gateway, or recovery
+  path. Read
   `connectivity_helper_preflight` before asking network questions or writing
   tunnel commands; it reports configured SSH/relay/mesh/VPN helper gateway
   URLs, start argv JSON, install action JSON, allow-listed tools, and
@@ -84,7 +87,8 @@ revocation.
   operator-provided, and configured hosted/relay/mesh/VPN/SSH candidates with
   standard next actions. Never send a remote target a wildcard listen address
   such as `0.0.0.0`, and treat loopback as same-machine only.
-  Configured `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
+  Configured `RDEV_HOSTED_GATEWAY_URL`,
+  `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`, `RDEV_RELAY_GATEWAY_URL`,
   `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, and
   `RDEV_SSH_GATEWAY_URL` values are tool metadata: `rdev` appends them to
   ordered gateway candidates after direct/LAN paths and before loopback so the
@@ -95,6 +99,12 @@ revocation.
   first configured `RDEV_*_GATEWAY_URL` when no explicit gateway URL was
   supplied; do not ask the human to choose a gateway URL when the runtime has
   one configured.
+  Do not persist `https://*.trycloudflare.com` Quick Tunnel URLs as durable
+  configuration. They are fallback URLs for the current foreground session. For
+  repeated sessions, configure `RDEV_HOSTED_GATEWAY_URL` on a cloud/VPS host
+  with its own public domain/IP, or configure
+  `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` plus a reviewed named-tunnel token,
+  token file, tunnel name, or start argv.
 - Read `agent_connection_runbook.fresh_agent_failure_prevention` before writing
   any setup code. It captures known bad fresh-Agent failure patterns such as
   manual `gateway serve` plus `invite create`, missing helper assets that make
@@ -243,9 +253,10 @@ revocation.
    `rdev.support_session.prepare` or run `rdev support-session prepare` to
    verify one-command support-session readiness. If helper assets are missing
    and a checkout plus Go are available, use `--build-assets`; use the returned
-   `gateway_url_candidates` recommendation for target-side commands; do not
-   write custom PowerShell, ticket substitution, approval polling, or relay
-   glue. Read `connectivity_helper_preflight` for configured
+   `gateway_url_candidates` only as diagnostic metadata carried by
+   `rdev`-generated handoffs; do not write custom PowerShell, ticket
+   substitution, approval polling, target commands, or relay glue. Read
+   `connectivity_helper_preflight` for configured
    `RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` metadata before
    asking about tunnels or helpers. If configured `RDEV_*_GATEWAY_URL` fallback values are present, keep
    them inside the returned candidate list and target command instead of

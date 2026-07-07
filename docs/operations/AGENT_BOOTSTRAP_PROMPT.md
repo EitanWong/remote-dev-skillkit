@@ -30,8 +30,10 @@ Rules:
   executing the remaining steps.
 - Probe before acting. Do not guess paths, framework names, gateway URLs, or MCP
   config locations.
-- For a personal computer Agent install, default to local MCP stdio with
-  `rdev mcp serve`. A hosted gateway URL is optional, not required.
+- For a personal computer Agent install, default to local MCP stdio. Prefer the
+  `mcp_command` field returned by `rdev skillkit install`; it may be
+  `rdev mcp serve` or an absolute `rdev` path when Go installed the binary
+  outside `PATH`. A hosted gateway URL is optional, not required.
 - If `rdev` is not found in PATH, do not stop at "rdev is not installed".
   Recover in this order: use an already running/local rdev executable when
   known, build from the checked-out repository with `go install ./cmd/rdev`, use
@@ -81,10 +83,10 @@ Steps:
    - `rdev mcp tools`
 6. Create and verify a portable Skillkit bundle from the checked-out repository.
    For local Agent installs, omit `--gateway-url`; local MCP stdio with
-   `rdev mcp serve` is enough to connect this Agent to the Skillkit tools. If I
-   have provided a hosted gateway URL, include it as bundle metadata. Treat
-   `https://api.example.com/v1` only as an optional hosted-gateway placeholder,
-   never as a required value.
+   the install report's `mcp_command` is enough to connect this Agent to the
+   Skillkit tools. If I have provided a hosted gateway URL, include it as bundle
+   metadata. Treat `https://api.example.com/v1` only as an optional
+   hosted-gateway placeholder, never as a required value.
 7. Generate and verify an install plan for all mainstream frameworks:
    `codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent`.
 8. Determine the correct skill/instruction target directory for this current
@@ -96,9 +98,10 @@ Steps:
 10. If the dry-run is safe and there are no overwrite conflicts, run the same
    install with `--execute`. If there are conflicts, ask before using any force
    option.
-11. Configure this agent's MCP client to run `rdev mcp serve`, or produce the
-   exact MCP config snippet and file path if the framework requires manual
-   review. Do not silently overwrite existing MCP config.
+11. Configure this agent's MCP client to run the install report's
+   `mcp_command`, or produce the exact MCP config snippet and file path if the
+   framework requires manual review. Do not silently overwrite existing MCP
+   config.
 12. Run `rdev update check --repo EitanWong/remote-dev-skillkit` and
     `rdev update plan --repo EitanWong/remote-dev-skillkit` to see whether a
     newer GitHub Release is available. Treat update output as review-only
@@ -144,13 +147,16 @@ Steps:
     operator explicitly asks for reviewed package materialization, approved
     managed owned-host planning, or a high-level support-session recovery
     payload names that path.
-    Use its
-    recommended `gateway_url_candidates` entry for target-side commands instead
-    of asking me to choose a gateway URL; never hand a remote target `0.0.0.0`
-    or loopback unless the target is the same machine. If this runtime has
-    `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
-    `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
-    `RDEV_SSH_GATEWAY_URL` configured, treat them as Agent/tool metadata:
+    Treat `gateway_url_candidates` as diagnostic and signed-runtime metadata for
+    `rdev`-generated handoffs; never turn LAN, loopback, or diagnostic
+    candidates into your own target-side command, and never ask me to choose a
+    gateway URL when the standard `connect --start` or configured gateway path
+    can decide it. Never hand a remote target `0.0.0.0` or loopback unless the
+    target is the same machine. If this runtime has
+    `RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
+    `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
+    `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` configured, treat them
+    as Agent/tool metadata:
     `rdev` appends them to `gateway_url_candidates` after direct/LAN candidates
     and before loopback so the target command can fail over without custom
     relay or tunnel code. `rdev.support_session.connect`,
@@ -232,7 +238,7 @@ Steps:
     `rdev.support-session-started.v1` with top-level
     `target_handoff_envelope`, `user_handoff`,
     `target_command`, `join_url`, `connection_supervision`, status watcher,
-    asset report, recommended gateway URL candidates, and connection readiness
+    asset report, runtime gateway URL candidates, and connection readiness
     plus `agent_connection_runbook` and `gateway_candidate_preflight` before listening. It keeps the full created session under `session` for
     compatibility, but fresh Agents should send only the top-level
     `target_handoff_envelope.full_text`, then use top-level
@@ -319,6 +325,17 @@ Steps:
       Tailscale-compatible control plane is appropriate, or WireGuard for a
       direct VPN. Probe whether these are already installed before suggesting
       installation.
+    - Treat `https://*.trycloudflare.com` Quick Tunnel URLs as current-session
+      fallback URLs only. Do not save them as durable gateway configuration. If
+      this Agent runs on a cloud/VPS machine with its own public domain or IP,
+      recommend configuring
+      `RDEV_HOSTED_GATEWAY_URL=https://your-domain-or-public-gateway` after the
+      first working connection. If Cloudflare should provide a reusable address,
+      recommend a Cloudflare Named Tunnel with
+      `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL=https://rdev.example.com` plus a
+      reviewed tunnel token, token file, tunnel name, or start argv. Still use
+      `rdev support-session connect --start` first when no stable URL is
+      configured so the user can connect immediately.
     - If no open/free option is viable, ask before using paid hosted relay,
       cloud tunnel, DNS, firewall, service, or persistent network changes.
 14. Verify the installed skill folders exist, verify `.remote-dev-skillkit/mcp/tools.json`

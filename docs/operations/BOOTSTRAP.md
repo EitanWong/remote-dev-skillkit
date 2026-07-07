@@ -26,11 +26,15 @@ before asking for paths or choosing connection mode.
 For company or third-party machines, the only required first question is
 authorization: confirm that policy and the device owner allow a visible
 temporary Remote Dev Skillkit support session. After confirmation, agents should
-default to attended-temporary mode, create and materialize a Connection Entry,
-and let the join page, package catalog, and target-side probes detect
-Windows/macOS/Linux. They should not ask humans to assemble ticket codes,
-manifest roots, gateway URLs, transports, release roots, checksums, or helper
-commands.
+default to attended-temporary mode and start with `rdev.support_session.connect`
+or `rdev support-session connect`. That high-level entry either returns the
+ready `target_handoff_envelope.full_text`, or returns the visible foreground
+`rdev support-session connect --start` command that creates the gateway, helper
+assets, handoff text file, status file, and connection supervision together.
+Agents should materialize a Connection Entry only when a reviewed package,
+managed owned-host plan, or high-level recovery payload explicitly names that
+path. They should not ask humans to assemble ticket codes, manifest roots,
+gateway URLs, transports, release roots, checksums, or helper commands.
 
 ## Temporary Windows Flow
 
@@ -161,8 +165,18 @@ narrower names such as customer link or connector package plan in public
 contracts: the same handoff covers owned managed workstations, third-party
 temporary repair, LAN, hosted, relay, mesh, SSH, and VPN-assisted paths.
 
-Agents should create target-side connection entries with `rdev.invites.create`
-or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
+For ordinary "connect this computer" requests, Agents should start with
+`rdev.support_session.connect` through MCP or `rdev support-session connect`
+through the CLI. That high-level path either returns the ready
+`target_handoff_envelope.full_text` to forward to the human, or the visible
+foreground `rdev support-session connect --start` command that creates the
+gateway, verified helper assets, ready files, status files, auto-approval
+metadata, and recovery guidance together.
+
+Low-level invite creation is reserved for explicit package materialization,
+approved managed owned-host planning, or a support-session recovery payload
+that names that path. In those cases, use `rdev.invites.create` or
+`rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
 `connection_entry`:
 
 - `entry_url`: the page to open on the target machine;
@@ -175,9 +189,9 @@ or `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
   appears;
 - `revocation_instructions`: how to stop the session and revoke access.
 
-After invite creation, agents must call `rdev.connection_entry.plan` through
-MCP or `rdev connection-entry plan` through the CLI before giving target-side
-instructions. That materializes the invite into
+After explicit invite creation, agents must call `rdev.connection_entry.plan`
+through MCP or `rdev connection-entry plan` through the CLI before giving
+target-side instructions. That materializes the invite into
 `rdev.connection-entry.materialization-plan.v1`, including:
 
 - the selected ownership/session-mode decision;

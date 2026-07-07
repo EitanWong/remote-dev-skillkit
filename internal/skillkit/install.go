@@ -1,6 +1,9 @@
 package skillkit
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,6 +15,21 @@ import (
 )
 
 const InstallReportSchemaVersion = "rdev.skillkit-install-report.v1"
+const InstallManifestSchemaVersion = "rdev.skillkit-install-manifest.v1"
+
+type InstalledSkillFile struct {
+	Name         string `json:"name"`
+	RelativePath string `json:"relative_path"`
+	SHA256       string `json:"sha256"`
+	SizeBytes    int    `json:"size_bytes"`
+}
+
+type InstalledReferenceFile struct {
+	Name         string `json:"name"`
+	RelativePath string `json:"relative_path"`
+	SHA256       string `json:"sha256"`
+	SizeBytes    int    `json:"size_bytes"`
+}
 
 type InstallOptions struct {
 	BundleDir   string
@@ -39,6 +57,8 @@ type InstallReport struct {
 	Actions              []InstallAction     `json:"actions"`
 	InstalledSkills      []string            `json:"installed_skills,omitempty"`
 	ReferenceFiles       []string            `json:"reference_files,omitempty"`
+	InstallManifest      string              `json:"install_manifest,omitempty"`
+	MCPCommand           string              `json:"mcp_command,omitempty"`
 	RecommendedNextSteps []string            `json:"recommended_next_steps,omitempty"`
 	RecommendedActions   []string            `json:"recommended_actions,omitempty"`
 }
@@ -129,6 +149,8 @@ func Install(opts InstallOptions) (InstallReport, error) {
 	add("existing_skill_conflicts", len(conflicts) == 0 || opts.Force, strings.Join(conflicts, ","))
 
 	report.Actions = plannedInstallActions(bundleDir, targetDir, spec, skills)
+	report.InstallManifest = filepath.Join(targetDir, ".remote-dev-skillkit", "install.json")
+	report.MCPCommand = RecommendedRdevCommand() + " mcp serve"
 	if !report.OK() {
 		report.RecommendedActions = failedInstallActions()
 		return report, nil
@@ -137,7 +159,7 @@ func Install(opts InstallOptions) (InstallReport, error) {
 		report.RecommendedNextSteps = []string{
 			"Review the dry-run actions.",
 			"Re-run with --execute to copy the verified Skillkit into the target skill directory.",
-			"Configure the agent MCP client to execute: rdev mcp serve.",
+			"Configure the agent MCP client to execute: " + report.MCPCommand + ".",
 		}
 		return report, nil
 	}
@@ -152,11 +174,12 @@ func Install(opts InstallOptions) (InstallReport, error) {
 	}
 	report.InstalledSkills = append([]string(nil), skills...)
 	report.ReferenceFiles = []string{
+		report.InstallManifest,
 		filepath.Join(targetDir, ".remote-dev-skillkit", "mcp", "tools.json"),
 		filepath.Join(targetDir, ".remote-dev-skillkit", "frameworks", filepath.Base(spec.DocPath)),
 	}
 	report.RecommendedNextSteps = []string{
-		"Configure the agent MCP client to execute: rdev mcp serve.",
+		"Configure the agent MCP client to execute: " + report.MCPCommand + ".",
 		"Ask the agent to use host-triage before remote-vibe-coding or safe-remote-support.",
 	}
 	return report, nil
@@ -297,6 +320,11 @@ func plannedInstallActions(bundleDir, targetDir string, spec frameworkInstallSpe
 			Destination: filepath.Join(targetDir, ".remote-dev-skillkit", "frameworks", filepath.Base(spec.DocPath)),
 			Executed:    false,
 		},
+		InstallAction{
+			Type:        "write_install_manifest",
+			Destination: filepath.Join(targetDir, ".remote-dev-skillkit", "install.json"),
+			Executed:    false,
+		},
 	)
 	return actions
 }
@@ -336,7 +364,86 @@ func executeInstall(bundleDir, targetDir string, spec frameworkInstallSpec, skil
 	if err := copyFileContents(filepath.Join(bundleDir, "mcp", "tools.json"), filepath.Join(refDir, "mcp", "tools.json")); err != nil {
 		return err
 	}
-	return copyFileContents(filepath.Join(bundleDir, filepath.FromSlash(spec.DocPath)), filepath.Join(refDir, "frameworks", filepath.Base(spec.DocPath)))
+	if err := copyFileContents(filepath.Join(bundleDir, filepath.FromSlash(spec.DocPath)), filepath.Join(refDir, "frameworks", filepath.Base(spec.DocPath))); err != nil {
+		return err
+	}
+	return writeInstallManifest(refDir, bundleDir, targetDir, spec, skills)
+}
+
+func writeInstallManifest(refDir, bundleDir, targetDir string, spec frameworkInstallSpec, skills []string) error {
+	skillFiles, err := installedSkillFiles(targetDir, skills)
+	if err != nil {
+		return err
+	}
+	referenceFiles, err := installedReferenceFiles(refDir, spec)
+	if err != nil {
+		return err
+	}
+	manifest := map[string]any{
+		"schema_version":  InstallManifestSchemaVersion,
+		"installed_at":    time.Now().UTC().Format(time.RFC3339),
+		"bundle_dir":      bundleDir,
+		"target_dir":      targetDir,
+		"framework":       spec.Name,
+		"display_name":    spec.DisplayName,
+		"skills":          append([]string(nil), skills...),
+		"skill_files":     skillFiles,
+		"reference_files": referenceFiles,
+		"mcp_tools_json":  filepath.Join(refDir, "mcp", "tools.json"),
+		"framework_doc":   filepath.Join(refDir, "frameworks", filepath.Base(spec.DocPath)),
+	}
+	content, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	return os.WriteFile(filepath.Join(refDir, "install.json"), content, 0o600)
+}
+
+func installedSkillFiles(targetDir string, skills []string) ([]InstalledSkillFile, error) {
+	out := make([]InstalledSkillFile, 0, len(skills))
+	for _, skill := range skills {
+		rel := filepath.ToSlash(filepath.Join(skill, "SKILL.md"))
+		path := filepath.Join(targetDir, filepath.FromSlash(rel))
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(content)
+		out = append(out, InstalledSkillFile{
+			Name:         skill,
+			RelativePath: rel,
+			SHA256:       "sha256:" + hex.EncodeToString(sum[:]),
+			SizeBytes:    len(content),
+		})
+	}
+	return out, nil
+}
+
+func installedReferenceFiles(refDir string, spec frameworkInstallSpec) ([]InstalledReferenceFile, error) {
+	refs := []struct {
+		name string
+		rel  string
+	}{
+		{name: "mcp-tools", rel: "mcp/tools.json"},
+		{name: "framework-doc", rel: filepath.ToSlash(filepath.Join("frameworks", filepath.Base(spec.DocPath)))},
+	}
+	out := make([]InstalledReferenceFile, 0, len(refs))
+	for _, ref := range refs {
+		path := filepath.Join(refDir, filepath.FromSlash(ref.rel))
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		sum := sha256.Sum256(content)
+		out = append(out, InstalledReferenceFile{
+			Name:         ref.name,
+			RelativePath: ref.rel,
+			SHA256:       "sha256:" + hex.EncodeToString(sum[:]),
+			SizeBytes:    len(content),
+		})
+	}
+	return out, nil
 }
 
 func copyDir(src, dst string) error {

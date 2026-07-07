@@ -42,9 +42,10 @@ endpoint, credential, key, private IP, local path, or secret.
 `rdev.support_session.connect` returns `rdev.support-session-connect.v1` in
 `structuredContent`. Fresh Agents should call it first when a human says
 "connect a computer" or similar. If `gateway_url` is present, or if
-`RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
-`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
-configured, it creates the attended-temporary support session and returns
+`RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
+`RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
+`RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is configured, it creates
+the attended-temporary support session and returns
 `ready_to_send_to_human=true` with `target_handoff_envelope.full_text`, the
 complete plain-text message/link/command Agents can forward verbatim. The older
 `user_handoff.message` and `user_handoff.copy_paste` fields remain for
@@ -121,8 +122,11 @@ hashes, `agent_connection_runbook`, `gateway_candidate_preflight`,
 `connectivity_helper_preflight`, `connection_readiness`,
 `missing_inputs`, and standard recovery actions. Agents should read
 `agent_connection_runbook` first, read `gateway_candidate_preflight` before
-asking humans or writing probes, then use the `recommended=true` item from `gateway_url_candidates` for target-side
-commands and should not ask humans to assemble gateway URLs. Wildcard listen
+asking humans or writing probes, then treat `gateway_url_candidates` as
+diagnostic and signed-runtime metadata for `rdev`-generated handoffs. Agents
+should not turn LAN, loopback, or diagnostic candidates into hand-written
+target-side commands and should not ask humans to assemble gateway URLs.
+Wildcard listen
 addresses such as `0.0.0.0` are never a
 target URL; loopback candidates are same-machine only. If
 `agent_connection_runbook.fresh_agent_failure_prevention` is present, read it
@@ -131,9 +135,10 @@ as manual gateway/invite/bootstrap glue, missing helper assets that produce
 `rdev is required`, background gateway workarounds, custom approval polling,
 and Agent-written PowerShell/shell setup.
 If
-`RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
-`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
-configured, support-session tools append those hosted/relay/mesh/VPN/SSH
+`RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
+`RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
+`RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is configured,
+support-session tools append those hosted/cloudflared/relay/mesh/VPN/SSH
 candidates after direct/LAN candidates and before loopback, so Agents can hand
 over one target command instead of writing custom tunnel fallback scripts. By
 default it is read-only. `connectivity_helper_preflight` also reports matching
@@ -141,6 +146,14 @@ default it is read-only. `connectivity_helper_preflight` also reports matching
 executing it. With `build_assets=true`, it builds local helper binaries from the
 checked-out source so target bootstraps can download verified helpers when the
 target machine does not already have `rdev`.
+
+Do not treat `https://*.trycloudflare.com` Quick Tunnel URLs as durable
+configuration. They are fallback URLs for the current foreground session. When
+the Agent runs on a cloud/VPS machine with its own reachable DNS/IP, prefer
+`RDEV_HOSTED_GATEWAY_URL`. When Cloudflare should provide a reusable address,
+configure `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` plus a reviewed named-tunnel
+token, token file, tunnel name, or start argv; `connect --start` can then reuse
+that address and only fall back to Quick Tunnel if needed.
 
 When no suitable gateway is running yet, Agents should run
 `rdev support-session connect --start` as a visible foreground CLI process. It starts the
@@ -151,7 +164,7 @@ watcher at the top level, keeps the full `rdev.support-session-created.v1`
 under `session` for compatibility, includes `asset_report` and
 `connection_readiness`, includes `agent_connection_runbook`, includes
 `gateway_candidate_preflight`, includes the
-same recommended gateway URL candidates, and emits target commands that try
+same runtime gateway URL candidates, and emits `rdev`-generated target commands that try
 those ordered candidates before failing. The embedded
 `connection_attempt_policy` is the only place Agents should read target-side
 timeout/retry behavior from.
@@ -194,7 +207,7 @@ steps when they need review/debug access to the underlying gateway argv. The
 plan returns:
 
 - build commands for a local `rdev` plus Windows/macOS/Linux helper binaries;
-- recommended gateway URL candidates derived from the listen address and local
+- runtime gateway URL candidates derived from the listen address and local
   private interfaces, with explicit gateway overrides preserved;
 - a gateway start argv with state, signing keys, audit log, and verified helper
   asset flags;
@@ -218,18 +231,21 @@ tool returns localized `feedback` and `next_action` strings so the Agent does
 not need to invent status wording.
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
-It creates a ticket and returns a manifest URL, `host_command`,
+Fresh Agents should not use it as the first step for ordinary "connect this
+computer" requests; start with `rdev.support_session.connect` instead.
+`invites.create` is for explicit package materialization, approved managed
+owned-host planning, or recovery flows that name the lower-level path. It
+creates a ticket and returns a manifest URL, `host_command`,
 `transport_plan`, `connection_plan`, `connection_entry`,
 `connection_entry.package_catalog`, `connection_entry_plan`,
 `host_context_plan`, `agent_provisioning_plan`,
 `agent_collaboration_plan`, `localization_plan`,
 `managed_development_plan`, `fallback_commands`, `authority_profile`,
-`connectivity_checks`, `human_next_actions`, and `agent_next_actions`. Agents
-should call this before asking a human to connect a new target host. The command
-still requires consent on the target machine; it does not execute remotely by
-itself. For attended temporary support, the visible bootstrap default is HTTPS
-long-poll. `auto` remains available for managed or explicit advanced entries
-where WSS fallback has been validated for the deployment.
+`connectivity_checks`, `human_next_actions`, and `agent_next_actions`. The
+command still requires consent on the target machine; it does not execute
+remotely by itself. For attended temporary support, the visible bootstrap
+default is HTTPS long-poll. `auto` remains available for managed or explicit
+advanced entries where WSS fallback has been validated for the deployment.
 
 When `auto_approve=true`, `rdev.invites.create` creates ticket metadata that can
 auto-activate the first host only for an attended-temporary Connection Entry.
@@ -241,8 +257,9 @@ approval bypass and is rejected for managed or break-glass tickets.
 `interval_millis`. Agents should use the MCP wait mode or the CLI
 `rdev support-session status --wait` instead of writing their own polling loop.
 CLI status can omit `--gateway-url` when `RDEV_HOSTED_GATEWAY_URL`,
-`RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or
-`RDEV_SSH_GATEWAY_URL` is configured, so Agents do not need to remember or ask
+`RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`, `RDEV_RELAY_GATEWAY_URL`,
+`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
+configured, so Agents do not need to remember or ask
 for the gateway URL just to watch a known ticket. Created-session payloads
 include `watch_connection_status_configured_gateway.command`; use it when a
 configured gateway exists, otherwise use `watch_connection_status`.

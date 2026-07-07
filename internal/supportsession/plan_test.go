@@ -3,9 +3,11 @@ package supportsession
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,6 +126,44 @@ func TestConfiguredGatewayURLCandidateReadsRuntimeFallback(t *testing.T) {
 	}
 }
 
+func TestConfiguredGatewayURLCandidateReadsCloudflaredNamedTunnel(t *testing.T) {
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
+	gatewayURL, candidates := ConfiguredGatewayURLCandidate()
+
+	if gatewayURL != "https://rdev.example.test" {
+		t.Fatalf("expected named Cloudflare tunnel URL, got %q with candidates %#v", gatewayURL, candidates)
+	}
+	if len(candidates) != 1 ||
+		candidates[0].Kind != "cloudflared-named" ||
+		candidates[0].Scope != "configured-cloudflared-named-tunnel" ||
+		candidates[0].Source != "env:RDEV_CLOUDFLARED_NAMED_TUNNEL_URL" ||
+		!candidates[0].Recommended {
+		t.Fatalf("expected configured named Cloudflare candidate metadata, got %#v", candidates)
+	}
+}
+
+func TestGatewayCandidateSummaryExplainsEphemeralQuickTunnelAndStableOptions(t *testing.T) {
+	summary := gatewayCandidateRunbookSummary([]GatewayURLCandidate{
+		{
+			URL:    "http://192.168.50.10:8787",
+			Kind:   "lan-private",
+			Scope:  "LAN/VPN/routed-private-network",
+			Source: "local-interface",
+		},
+	})
+
+	if summary["needs_public_tunnel"] != true ||
+		summary["quick_tunnel_ephemeral"] != true {
+		t.Fatalf("expected LAN-only summary to require public tunnel and mark quick tunnel ephemeral, got %#v", summary)
+	}
+	advice := summary["stable_gateway_advice"].(map[string]any)
+	if !strings.Contains(advice["cloud_or_vps"].(string), "RDEV_HOSTED_GATEWAY_URL") ||
+		!strings.Contains(advice["cloudflare_named_tunnel"].(string), "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL") ||
+		!strings.Contains(advice["do_not_persist_quick_tunnel"].(string), "trycloudflare.com") {
+		t.Fatalf("expected stable gateway advice for hosted and named Cloudflare paths, got %#v", advice)
+	}
+}
+
 func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "support")
 	plan := BuildPlan(context.Background(), Options{
@@ -203,10 +243,15 @@ func TestBuildHandoffRoutesMissingGatewayToForegroundStart(t *testing.T) {
 	})
 
 	startCommand := strings.Join(anyStrings(handoff["foreground_start_command"].([]string)), "\x00")
+	startNowCommand := strings.Join(anyStrings(handoff["cli_start_now_command"].([]string)), "\x00")
+	prepareCommand := strings.Join(anyStrings(handoff["prepare_command"].([]string)), "\x00")
 	if handoff["schema_version"] != HandoffSchemaVersion ||
 		handoff["selected_path"] != "start-foreground-gateway" ||
 		handoff["mcp_next_tool"] != "" ||
 		!strings.Contains(startCommand, "support-session\x00start") ||
+		strings.Contains(startCommand, "--gateway-url") ||
+		strings.Contains(startNowCommand, "--gateway-url") ||
+		strings.Contains(prepareCommand, "--gateway-url") ||
 		!strings.Contains(handoff["agent_rule"].(string), "do not choose support-session plan") {
 		t.Fatalf("expected foreground start handoff route, got %#v", handoff)
 	}
@@ -225,7 +270,8 @@ func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 		handoff["selected_path"] != "create-with-reachable-gateway" ||
 		handoff["mcp_next_tool"] != "rdev.support_session.create" ||
 		handoff["gateway_url"] != "https://hosted.example.test/rdev" ||
-		args["gateway_url"] != "https://hosted.example.test/rdev" {
+		args["gateway_url"] != "https://hosted.example.test/rdev" ||
+		!slices.Contains(handoff["cli_start_now_command"].([]string), "https://hosted.example.test/rdev") {
 		t.Fatalf("expected configured gateway create route, got %#v", handoff)
 	}
 }
@@ -245,6 +291,8 @@ func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 		connect["selected_path"] != "start-foreground-gateway" ||
 		connect["ready_to_send_to_human"] != false ||
 		!strings.Contains(startNowCommand, "support-session\x00connect\x00--start") ||
+		strings.Contains(startNowCommand, "--gateway-url") ||
+		strings.Contains(startCommand, "--gateway-url") ||
 		!strings.Contains(startCommand, "support-session\x00start") ||
 		!strings.Contains(connect["agent_next_step"].(string), "cli_start_now_command") ||
 		!strings.Contains(connect["agent_next_step"].(string), "ready_file.path") ||
@@ -346,11 +394,16 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		strings.Contains(created["target_command"].(string), "ExecutionPolicy Bypass") {
 		t.Fatalf("expected ready Windows command without unsafe placeholders: %#v", created)
 	}
-	if !strings.Contains(created["target_command"].(string), "-EncodedCommand") ||
+	if !strings.Contains(created["target_command"].(string), "powershell -NoProfile -Command") ||
+		!strings.Contains(created["target_command"].(string), "bootstrap.ps1") ||
+		!strings.Contains(created["target_command"].(string), "-UseBasicParsing") ||
+		!strings.Contains(created["target_command"].(string), "gateway_url_candidates=") ||
+		strings.Contains(created["target_command"].(string), "-EncodedCommand") ||
 		strings.Contains(created["target_command"].(string), "foreach ($u in $urls)") ||
-		strings.Contains(created["target_command"].(string), "198.51.100.10") ||
+		strings.Contains(created["target_command"].(string), "$urls has been generated by rdev") ||
+		strings.Contains(created["target_command"].(string), "ProgressPrference") ||
 		!strings.Contains(created["target_commands"].(map[string]string)["macos_linux"], "for u in") {
-		t.Fatalf("expected target command to try ordered gateway candidates: %#v", created["target_commands"])
+		t.Fatalf("expected readable Windows command plus structured gateway candidates: %#v", created["target_commands"])
 	}
 	if macLinux := created["target_commands"].(map[string]string)["macos_linux"]; !strings.Contains(macLinux, "198.51.100.10") ||
 		!strings.Contains(macLinux, "gateway_url_candidates=") ||
@@ -540,6 +593,38 @@ func TestConnectionContinuityPolicyReportsConfiguredStableFallback(t *testing.T)
 		watchArgs["gateway_url"] != "https://relay.example.test/rdev" ||
 		!strings.Contains(supervision["upgrade_reason"].(string), "already configured") {
 		t.Fatalf("expected supervision to recognize stable fallback, got %#v", supervision)
+	}
+}
+
+func TestBuildCreatedKeepsTargetInvitePortableWhenAgentRdevCommandIsAbsolute(t *testing.T) {
+	agentRdev := "/Users/example/go/bin/rdev"
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "http://192.0.2.10:8787",
+		ManifestRootPublicKey: "manifest-root:abc",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "windows",
+		Locale:                "en",
+		RdevCommand:           agentRdev,
+		AutoApprove:           true,
+	})
+
+	supervision := created["connection_supervision"].(map[string]any)
+	watchCommand := supervision["cli_watch_command"].([]string)
+	if len(watchCommand) == 0 || watchCommand[0] != agentRdev {
+		t.Fatalf("expected Agent-side watcher to use stable local rdev command, got %#v", watchCommand)
+	}
+	runner := created["connection_entry_runner_recommendation"].(map[string]any)
+	inviteJSON := runner["invite_json"].(string)
+	if strings.Contains(inviteJSON, "/Users/example") {
+		t.Fatalf("target-side invite JSON must not leak Agent-local rdev path: %s", inviteJSON)
+	}
+	var invite map[string]any
+	if err := json.Unmarshal([]byte(inviteJSON), &invite); err != nil {
+		t.Fatalf("expected valid invite JSON: %v", err)
+	}
+	hostCommand, _ := invite["host_command"].(string)
+	if !strings.HasPrefix(hostCommand, "rdev host serve ") {
+		t.Fatalf("expected portable target-side host command, got %q", hostCommand)
 	}
 }
 
@@ -796,6 +881,26 @@ func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
 	}
 }
 
+func TestPrepareDoesNotPromoteAutoLANToExplicitGatewayCommand(t *testing.T) {
+	prepare, err := Prepare(context.Background(), PrepareOptions{
+		Addr:   "0.0.0.0:8787",
+		Target: "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"command_to_connect_start", "command_to_start", "command_to_prepare_all"} {
+		command := prepare[key].([]string)
+		if slices.Contains(command, "--gateway-url") {
+			t.Fatalf("%s should not pass auto LAN candidate as explicit gateway: %#v", key, command)
+		}
+	}
+	candidates := prepare["gateway_url_candidates"].([]GatewayURLCandidate)
+	if len(candidates) == 0 || candidates[0].Kind != "lan-private" {
+		t.Fatalf("expected LAN candidates to remain available for diagnostics, got %#v", candidates)
+	}
+}
+
 func TestPrepareReportsConnectivityHelperPreflight(t *testing.T) {
 	t.Setenv("RDEV_RELAY_GATEWAY_URL", "http://127.0.0.1:8787")
 	t.Setenv("RDEV_RELAY_START_ARGV_JSON", `["chisel","client","relay.example.invalid","R:8787:127.0.0.1:8787"]`)
@@ -837,6 +942,37 @@ func TestPrepareReportsConnectivityHelperPreflight(t *testing.T) {
 		install["tool"] != "chisel" ||
 		install["has_expected_sha256"] != true {
 		t.Fatalf("expected valid relay install action report, got %#v", install)
+	}
+}
+
+func TestPrepareReportsCloudflaredNamedTunnelPreflight(t *testing.T) {
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
+	t.Setenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN", "secret-token")
+	prepare, err := Prepare(context.Background(), PrepareOptions{
+		RepoRoot: ".",
+		Target:   "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight := prepare["connectivity_helper_preflight"].(map[string]any)
+	helpers := preflight["helpers"].([]map[string]any)
+	var named map[string]any
+	for _, helper := range helpers {
+		if helper["id"] == "cloudflared-named-tunnel" {
+			named = helper
+			break
+		}
+	}
+	if named == nil ||
+		named["status"] != "ready-to-use-after-approval-check" ||
+		named["gateway_configured"] != true ||
+		named["token_configured"] != true ||
+		named["gateway_url"] != "https://rdev.example.test" {
+		t.Fatalf("expected named Cloudflare tunnel preflight without exposing token value, got %#v", named)
+	}
+	if strings.Contains(fmt.Sprintf("%v", named), "secret-token") {
+		t.Fatalf("preflight must not expose token value: %#v", named)
 	}
 }
 

@@ -162,6 +162,47 @@ func TestHostWebSocketRefreshesHeartbeatBeforeClaimingJob(t *testing.T) {
 	}
 }
 
+func TestHostNextJobRefreshesHeartbeatBeforeClaimingJob(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	handler := NewServer(gw).Handler()
+	host, secret := registerAndApproveHostWithSecret(t, handler)
+	job, err := gw.CreateJob(host.ID, "shell", "long-poll heartbeat regression", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []any{"shell.user"},
+		"argv":           []any{"echo", "demo"},
+		"allow_commands": []any{"echo"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+url.PathEscape(host.ID)+"/jobs/next", nil)
+	req.Header.Set("Authorization", "Bearer "+secret)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected authenticated claim to refresh heartbeat, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Job *model.Job `json:"job"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid claim response: %v\n%s", err, rec.Body.String())
+	}
+	if payload.Job == nil || payload.Job.ID != job.ID {
+		t.Fatalf("expected job %s, got %#v", job.ID, payload.Job)
+	}
+	fresh, err := gw.Host(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Status != model.HostStatusActive {
+		t.Fatalf("expected host to remain active after authenticated claim, got %s", fresh.Status)
+	}
+}
+
 func TestOperatorAuthProtectsControlPlaneMutations(t *testing.T) {
 	auth, err := operatorauth.New([]operatorauth.Principal{
 		{ID: "operator", Roles: []string{operatorauth.RoleOperator}, TokenHash: operatorauth.HashToken("operator-token")},

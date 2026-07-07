@@ -83,7 +83,7 @@ func PlanInstall(opts InstallPlanOptions) (InstallPlan, error) {
 		return InstallPlan{}, fmt.Errorf("out is required")
 	}
 	if strings.TrimSpace(opts.RdevCommand) == "" {
-		opts.RdevCommand = "rdev"
+		opts.RdevCommand = RecommendedRdevCommand()
 	}
 	if opts.GeneratedAt.IsZero() {
 		opts.GeneratedAt = time.Now()
@@ -259,6 +259,7 @@ func VerifyInstallPlan(planPath string, generatedAt time.Time) (InstallPlanVerif
 	add("install_scripts_present", installScriptsPresent(planDir, plan.Frameworks) == "", installScriptsPresent(planDir, plan.Frameworks))
 	add("install_scripts_no_forbidden_mutation", installScriptsForbiddenMutation(planDir, plan.Frameworks) == "", installScriptsForbiddenMutation(planDir, plan.Frameworks))
 	add("install_scripts_verify_bundle_first", installScriptsRequireBundleVerify(planDir, plan.Frameworks) == "", installScriptsRequireBundleVerify(planDir, plan.Frameworks))
+	add("install_scripts_use_standard_installer", installScriptsUseStandardInstaller(planDir, plan.Frameworks) == "", installScriptsUseStandardInstaller(planDir, plan.Frameworks))
 	add("install_scripts_keep_adaptive_contract", installScriptsKeepAdaptiveContract(planDir, plan.Frameworks) == "", installScriptsKeepAdaptiveContract(planDir, plan.Frameworks))
 	add("install_commands_keep_adaptive_contract", installCommandsKeepAdaptiveContract(planDir) == "", installCommandsKeepAdaptiveContract(planDir))
 	if !report.OK() {
@@ -435,6 +436,8 @@ func shellInstallScript(bundleDir, rdevCommand string, spec frameworkInstallSpec
 	if spec.ShellDefault == "" {
 		targetLine = `TARGET_DIR="${` + spec.TargetEnv + `:-}"`
 	}
+	forceFlag := ``
+	ifLine := `if [ "${RDEV_SKILLKIT_FORCE:-0}" = "1" ]; then FORCE_FLAG="--force"; fi`
 	return strings.Join([]string{
 		"#!/usr/bin/env bash",
 		"set -euo pipefail",
@@ -448,20 +451,11 @@ func shellInstallScript(bundleDir, rdevCommand string, spec frameworkInstallSpec
 		`printf '%s\n' "If direct reachability is blocked, prefer existing or open-source/free tunnel/mesh options such as frp, Chisel, headscale, or WireGuard before paid relays."`,
 		`printf '%s\n' "If gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, tunnel/mesh approval, or approval policy is unclear, ask instead of inventing a value."`,
 		`printf '%s\n' "Examples such as https://api.example.com/v1, /Users/example, /home/example, and C:\Users\Alice are placeholders."`,
-		`mkdir -p "$TARGET_DIR"`,
-		`for skill in ` + strings.Join(shellQuotedValues(skills), " ") + `; do`,
-		`  if [ -e "$TARGET_DIR/$skill" ] && [ "${RDEV_SKILLKIT_FORCE:-0}" != "1" ]; then`,
-		`    echo "Refusing to overwrite $TARGET_DIR/$skill. Set RDEV_SKILLKIT_FORCE=1 after review." >&2`,
-		`    exit 1`,
-		`  fi`,
-		`  mkdir -p "$TARGET_DIR/$skill"`,
-		`  cp -R "$BUNDLE_DIR/skills/$skill/." "$TARGET_DIR/$skill/"`,
-		`done`,
-		`REF_DIR="$TARGET_DIR/.remote-dev-skillkit"`,
-		`mkdir -p "$REF_DIR/mcp" "$REF_DIR/frameworks"`,
-		`cp "$BUNDLE_DIR/mcp/tools.json" "$REF_DIR/mcp/tools.json"`,
-		`cp "$BUNDLE_DIR/` + spec.DocPath + `" "$REF_DIR/frameworks/` + filepath.Base(spec.DocPath) + `"`,
+		`FORCE_FLAG=` + forceFlag,
+		ifLine,
+		`"$RDEV_BIN" skillkit install --bundle "$BUNDLE_DIR" --framework ` + shellQuote(spec.Name) + ` --target "$TARGET_DIR" --execute $FORCE_FLAG`,
 		`printf '%s\n' "Installed Remote Dev Skillkit skills for ` + spec.DisplayName + ` into $TARGET_DIR"`,
+		`printf '%s\n' "Install manifest: $TARGET_DIR/.remote-dev-skillkit/install.json"`,
 		`printf '%s\n' "Configure MCP stdio command: $RDEV_BIN mcp serve"`,
 		"",
 	}, "\n")
@@ -484,20 +478,11 @@ func powerShellInstallScript(bundleDir, rdevCommand string, spec frameworkInstal
 		`Write-Output "If direct reachability is blocked, prefer existing or open-source/free tunnel/mesh options such as frp, Chisel, headscale, or WireGuard before paid relays."`,
 		`Write-Output "If gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, tunnel/mesh approval, or approval policy is unclear, ask instead of inventing a value."`,
 		`Write-Output "Examples such as https://api.example.com/v1, /Users/example, /home/example, and C:\Users\Alice are placeholders."`,
-		`New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null`,
-		`$Skills = @(` + strings.Join(powerShellQuotedValues(skills), ", ") + `)`,
-		`foreach ($Skill in $Skills) {`,
-		`  $Target = Join-Path $TargetDir $Skill`,
-		`  if ((Test-Path $Target) -and ($env:RDEV_SKILLKIT_FORCE -ne '1')) { throw "Refusing to overwrite $Target. Set RDEV_SKILLKIT_FORCE=1 after review." }`,
-		`  New-Item -ItemType Directory -Force -Path $Target | Out-Null`,
-		`  Copy-Item -Path (Join-Path $BundleDir "skills/$Skill/*") -Destination $Target -Recurse -Force`,
-		`}`,
-		`$RefDir = Join-Path $TargetDir '.remote-dev-skillkit'`,
-		`New-Item -ItemType Directory -Force -Path (Join-Path $RefDir 'mcp') | Out-Null`,
-		`New-Item -ItemType Directory -Force -Path (Join-Path $RefDir 'frameworks') | Out-Null`,
-		`Copy-Item -Path (Join-Path $BundleDir 'mcp/tools.json') -Destination (Join-Path $RefDir 'mcp/tools.json') -Force`,
-		`Copy-Item -Path (Join-Path $BundleDir ` + powerShellQuote(spec.DocPath) + `) -Destination (Join-Path $RefDir 'frameworks/` + filepath.Base(spec.DocPath) + `') -Force`,
+		`$InstallArgs = @('skillkit', 'install', '--bundle', $BundleDir, '--framework', ` + powerShellQuote(spec.Name) + `, '--target', $TargetDir, '--execute')`,
+		`if ($env:RDEV_SKILLKIT_FORCE -eq '1') { $InstallArgs += '--force' }`,
+		`& $RdevBin @InstallArgs`,
 		`Write-Output "Installed Remote Dev Skillkit skills for ` + spec.DisplayName + ` into $TargetDir"`,
+		`Write-Output "Install manifest: $(Join-Path $TargetDir '.remote-dev-skillkit/install.json')"`,
 		`Write-Output "Configure MCP stdio command: $RdevBin mcp serve"`,
 		"",
 	}, "\n")
@@ -560,7 +545,8 @@ func installCommandsDoc(bundleDir, rdevCommand string, plans []FrameworkInstallP
 	lines = append(lines,
 		"## Safety",
 		"",
-		"- Generated scripts run `rdev skillkit verify` before copying.",
+		"- Generated scripts run `rdev skillkit verify` before installing.",
+		"- Generated scripts call `rdev skillkit install --execute`, so copied skills, reference files, and `.remote-dev-skillkit/install.json` come from the same standard installer.",
 		"- Existing skill directories are not overwritten unless `RDEV_SKILLKIT_FORCE=1` is set.",
 		"- MCP configuration is not silently modified; configure the runtime to run `"+rdevCommand+" mcp serve`.",
 		"",
@@ -651,6 +637,32 @@ func installScriptsRequireBundleVerify(planDir string, plans []FrameworkInstallP
 			}
 			if !strings.Contains(string(content), "skillkit verify --bundle") {
 				failures = append(failures, script)
+			}
+		}
+	}
+	sort.Strings(failures)
+	return strings.Join(failures, ",")
+}
+
+func installScriptsUseStandardInstaller(planDir string, plans []FrameworkInstallPlan) string {
+	var failures []string
+	for _, plan := range plans {
+		shellContent, shellErr := os.ReadFile(filepath.Join(planDir, filepath.FromSlash(plan.ShellScript)))
+		if shellErr == nil {
+			text := string(shellContent)
+			if !strings.Contains(text, "skillkit install --bundle") ||
+				!strings.Contains(text, "--execute") ||
+				!strings.Contains(text, ".remote-dev-skillkit/install.json") {
+				failures = append(failures, plan.ShellScript)
+			}
+		}
+		powerShellContent, powerShellErr := os.ReadFile(filepath.Join(planDir, filepath.FromSlash(plan.PowerShellScript)))
+		if powerShellErr == nil {
+			text := string(powerShellContent)
+			if !strings.Contains(text, "'skillkit', 'install'") ||
+				!strings.Contains(text, "'--execute'") ||
+				!strings.Contains(text, ".remote-dev-skillkit/install.json") {
+				failures = append(failures, plan.PowerShellScript)
 			}
 		}
 	}

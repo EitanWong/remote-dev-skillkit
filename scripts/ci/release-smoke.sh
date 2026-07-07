@@ -998,6 +998,7 @@ assert skillkit_install_execute["local_mutation"] is True, skillkit_install_exec
 assert skillkit_install_execute["external_mutation"] is False, skillkit_install_execute
 install_target = pathlib.Path(skillkit_install_execute["target"])
 assert (install_target / "remote-vibe-coding" / "SKILL.md").is_file(), skillkit_install_execute
+assert (install_target / ".remote-dev-skillkit" / "install.json").is_file(), skillkit_install_execute
 assert (install_target / ".remote-dev-skillkit" / "mcp" / "tools.json").is_file(), skillkit_install_execute
 assert update_plan["schema_version"] == "rdev.update-plan.v1", update_plan
 assert update_plan["update_available"] is True, update_plan

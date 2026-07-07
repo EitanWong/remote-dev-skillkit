@@ -293,8 +293,11 @@ rdev host serve \
 
 For the same host path over local mTLS, switch the gateway URL to `https://127.0.0.1:<port>` and add `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`.
 
-Agents should normally create an invite first. This asks the gateway for a
-ticket and returns a universal `connection_entry`, `connection_entry_plan`,
+For ordinary "connect this computer" work, Agents should start with
+`rdev.support_session.connect` or `rdev support-session connect`, not the
+low-level dev gateway flow below. In an explicit reviewed dev-gateway workflow,
+create an invite after the gateway is already running. This asks the gateway for
+a ticket and returns a universal `connection_entry`, `connection_entry_plan`,
 machine-readable fallback commands, and the MCP next actions:
 
 ```bash

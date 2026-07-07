@@ -131,7 +131,7 @@ func (s Server) hostWebSocket(w http.ResponseWriter, r *http.Request) {
 			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
 			return
 		}
-		job, ok, err := s.nextJobForHost(r.Context(), hostID, 60*time.Second)
+		job, ok, err := s.nextJobForAuthenticatedHost(r.Context(), hostID, hostSecret, 60*time.Second)
 		if err != nil {
 			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
 			return
@@ -505,7 +505,7 @@ func joinManifestGatewayCandidatesFromRequest(r *http.Request, fallbackGatewayUR
 func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestURL string) {
 	joinBase := strings.TrimRight(requestBaseURL(r), "/") + "/join/" + code
 	shellCommand := "curl -fsSL " + shellQuote(joinBase+"/bootstrap.sh") + " | sh"
-	powerShellCommand := "powershell -NoProfile -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' | iex\""
+	powerShellCommand := "powershell -NoProfile -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' -UseBasicParsing | iex\""
 	packageCatalog := model.NewConnectionEntryPackageCatalog(joinBase)
 	packageCatalogJSON, _ := json.Marshal(packageCatalog)
 	packageCatalogScript := strings.ReplaceAll(string(packageCatalogJSON), "</", "<\\/")
@@ -1202,7 +1202,7 @@ func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		job, ok, err := s.nextJobForHost(r.Context(), hostID, wait)
+		job, ok, err := s.nextJobForAuthenticatedHost(r.Context(), hostID, extractBearerToken(r), wait)
 		if err != nil {
 			if err == context.Canceled {
 				return
@@ -1245,6 +1245,29 @@ func (s Server) nextJobForHost(ctx context.Context, hostID string, wait time.Dur
 	defer ticker.Stop()
 	for {
 		job, ok, err := s.Gateway.NextJobForHost(hostID)
+		if err != nil || ok {
+			return job, ok, err
+		}
+		select {
+		case <-ctx.Done():
+			return model.Job{}, false, ctx.Err()
+		case <-deadline.C:
+			return model.Job{}, false, nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s Server) nextJobForAuthenticatedHost(ctx context.Context, hostID, hostSecret string, wait time.Duration) (model.Job, bool, error) {
+	if wait <= 0 {
+		return s.Gateway.NextJobForAuthenticatedHost(hostID, hostSecret)
+	}
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		job, ok, err := s.Gateway.NextJobForAuthenticatedHost(hostID, hostSecret)
 		if err != nil || ok {
 			return job, ok, err
 		}

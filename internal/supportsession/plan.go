@@ -3,8 +3,6 @@ package supportsession
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
@@ -68,6 +65,7 @@ type Options struct {
 	TTLSeconds  int
 	AutoApprove bool
 	Locale      string
+	RdevCommand string
 }
 
 type PrepareOptions struct {
@@ -77,6 +75,7 @@ type PrepareOptions struct {
 	GatewayURL  string
 	Target      string
 	BuildAssets bool
+	RdevCommand string
 }
 
 type HandoffOptions struct {
@@ -162,6 +161,12 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		agentNextStep = "call rdev.support_session.create with mcp_next_arguments, then send the returned target_handoff_envelope.full_text"
 		mcpNextTool = "rdev.support_session.create"
 	}
+	// Only explicit or configured stable gateways are safe to thread into
+	// generated foreground-start commands. Opportunistic LAN/loopback candidates
+	// are diagnostic previews; passing them as --gateway-url would turn them into
+	// explicit operator-provided gateways and can suppress managed tunnel
+	// selection in connect --start.
+	startGatewayURL := resolvedCreateGatewayURL
 	createArgs := map[string]any{
 		"gateway_url":  resolvedCreateGatewayURL,
 		"target":       target,
@@ -183,8 +188,8 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	if workDir != "" {
 		startCommand = append(startCommand, "--work-dir", workDir)
 	}
-	if gatewayURL != "" {
-		startCommand = append(startCommand, "--gateway-url", gatewayURL)
+	if startGatewayURL != "" {
+		startCommand = append(startCommand, "--gateway-url", startGatewayURL)
 	}
 	if opts.AutoApprove {
 		startCommand = append(startCommand, "--auto-approve")
@@ -204,8 +209,8 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	if workDir != "" {
 		connectStartCommand = append(connectStartCommand, "--work-dir", workDir)
 	}
-	if gatewayURL != "" {
-		connectStartCommand = append(connectStartCommand, "--gateway-url", gatewayURL)
+	if startGatewayURL != "" {
+		connectStartCommand = append(connectStartCommand, "--gateway-url", startGatewayURL)
 	}
 	if opts.AutoApprove {
 		connectStartCommand = append(connectStartCommand, "--auto-approve")
@@ -222,16 +227,9 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		"mcp_next_arguments":       createArgs,
 		"cli_start_now_command":    connectStartCommand,
 		"foreground_start_command": startCommand,
-		"prepare_command": []string{
-			rdevCommand, "support-session", "prepare",
-			"--build-assets",
-			"--repo-root", repoRoot,
-			"--addr", addr,
-			"--gateway-url", gatewayURL,
-			"--target", target,
-		},
-		"status_watch_rule": "after sending the returned user_handoff to the human, call rdev.support_session.status with wait=true; when connected=true, proactively report the connection is established",
-		"recovery_rule":     "if create/start/status fails or times out, read connection_recovery or rerun rdev.support_session.prepare; do not write custom recovery scripts",
+		"prepare_command":          supportSessionPrepareCommand(rdevCommand, repoRoot, addr, startGatewayURL, target),
+		"status_watch_rule":        "after sending the returned user_handoff to the human, call rdev.support_session.status with wait=true; when connected=true, proactively report the connection is established",
+		"recovery_rule":            "if create/start/status fails or times out, read connection_recovery or rerun rdev.support_session.prepare; do not write custom recovery scripts",
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
 			Phase:        selectedPath,
 			Status:       "not-created",
@@ -302,6 +300,35 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	payload["agent_next_step"] = "run cli_start_now_command in a visible terminal; it starts the gateway, builds verified helper assets, prints the target command, writes ready_file.path and status_file.path, and waits for the target; then send only the started payload's target_handoff_envelope.full_text and wait for connected=true"
 	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned cli_start_now_command first and then send the started payload's top-level target_handoff_envelope.full_text"
 	return payload
+}
+
+func supportSessionPrepareCommand(rdevCommand, repoRoot, addr, gatewayURL, target string) []string {
+	command := []string{
+		rdevCommand, "support-session", "prepare",
+		"--build-assets",
+		"--repo-root", repoRoot,
+		"--addr", addr,
+	}
+	if gatewayURL := strings.TrimRight(strings.TrimSpace(gatewayURL), "/"); gatewayURL != "" {
+		command = append(command, "--gateway-url", gatewayURL)
+	}
+	return append(command, "--target", target)
+}
+
+func supportSessionConnectStartCommand(rdevCommand, addr, gatewayURL, target string) []string {
+	command := []string{rdevCommand, "support-session", "connect", "--start", "--addr", addr}
+	if gatewayURL := strings.TrimRight(strings.TrimSpace(gatewayURL), "/"); gatewayURL != "" {
+		command = append(command, "--gateway-url", gatewayURL)
+	}
+	return append(command, "--target", target)
+}
+
+func supportSessionStartCommand(rdevCommand, addr, gatewayURL, target string) []string {
+	command := []string{rdevCommand, "support-session", "start", "--addr", addr}
+	if gatewayURL := strings.TrimRight(strings.TrimSpace(gatewayURL), "/"); gatewayURL != "" {
+		command = append(command, "--gateway-url", gatewayURL)
+	}
+	return append(command, "--target", target)
 }
 
 func BuildConnectFromCreated(created map[string]any) map[string]any {
@@ -664,6 +691,10 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		rdevPath = currentExecutable
 	}
 	target := normalizeTarget(opts.Target)
+	rdevCommand := strings.TrimSpace(opts.RdevCommand)
+	if rdevCommand == "" {
+		rdevCommand = "rdev"
+	}
 	helperPreflight := connectivityHelperPreflight()
 	connectionReadiness := map[string]any{
 		"ready":                         localRdevUsable || allAssetsReady,
@@ -679,7 +710,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			Target:      target,
 			GatewayURL:  gatewayURL,
 			Candidates:  gatewayCandidates,
-			RdevCommand: "rdev",
+			RdevCommand: rdevCommand,
 		}),
 		"target":                        target,
 		"human_gets_one_command":        true,
@@ -726,7 +757,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			Target:      target,
 			GatewayURL:  gatewayURL,
 			Candidates:  gatewayCandidates,
-			RdevCommand: "rdev",
+			RdevCommand: rdevCommand,
 		}),
 		"connection_readiness":     connectionReadiness,
 		"missing_inputs":           missingInputs,
@@ -734,9 +765,9 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"target_handoff_policy":    "give the target-side human only target_handoff_envelope.full_text when present; use generated target_command or join_url only as compatibility fallback fields",
 		"forbidden":                []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
 		"recommended_next_step":    recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
-		"command_to_connect_start": []string{"rdev", "support-session", "connect", "--start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
-		"command_to_start":         []string{"rdev", "support-session", "start", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
-		"command_to_prepare_all":   []string{"rdev", "support-session", "prepare", "--build-assets", "--addr", addr, "--gateway-url", gatewayURL, "--target", target},
+		"command_to_connect_start": supportSessionConnectStartCommand(rdevCommand, addr, opts.GatewayURL, target),
+		"command_to_start":         supportSessionStartCommand(rdevCommand, addr, opts.GatewayURL, target),
+		"command_to_prepare_all":   supportSessionPrepareCommand(rdevCommand, repoRoot, addr, opts.GatewayURL, target),
 	}, nil
 }
 
@@ -886,7 +917,7 @@ func gatewayCandidatePreflightReport(order int, candidate GatewayURLCandidate) m
 
 func isStableGatewayCandidateKind(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared":
+	case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared", "cloudflared-named":
 		return true
 	default:
 		return false
@@ -997,8 +1028,8 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 		},
 		"on_timeout_or_failure": []string{
 			"read connection_recovery and gateway_candidate_preflight from the returned payload",
-			"check gateway_candidate_summary.needs_public_tunnel: if true, start a cloudflared quick-tunnel first — run `cloudflared tunnel --url http://127.0.0.1:<gateway-port>`, capture the printed https://*.trycloudflare.com URL, then rerun with --gateway-url <that-url>",
-			"if cloudflared is not installed, download it from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ or set RDEV_CLOUDFLARED_GATEWAY_URL to the active tunnel URL",
+			"check gateway_candidate_summary.needs_public_tunnel: if true, run the standard foreground `rdev support-session connect --start` flow; rdev owns cloudflared/localhost.run selection and tunnel lifetime",
+			"if tunnel helpers are missing or blocked, report the standard manual_action_required output instead of writing cloudflared, SSH, or relay scripts",
 			"rerun rdev.support_session.prepare or rdev support-session prepare --build-assets",
 			"create a fresh Connection Entry with configured hosted/relay/mesh/VPN/SSH/cloudflared fallback when LAN-only paths are insufficient",
 			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
@@ -1200,8 +1231,8 @@ func freshAgentFailurePrevention() map[string]any {
 }
 
 // GatewayCandidateSummary returns a summary map for the given candidates,
-// suitable for the agent connection runbook and for callers (e.g. CLI)
-// that need to decide whether to start a cloudflared quick-tunnel.
+// suitable for the agent connection runbook and for callers that need to
+// decide whether to use the managed foreground public-tunnel path.
 func GatewayCandidateSummary(candidates []GatewayURLCandidate) map[string]any {
 	return gatewayCandidateRunbookSummary(candidates)
 }
@@ -1236,9 +1267,9 @@ func gatewayCandidateRunbookSummary(candidates []GatewayURLCandidate) map[string
 	publicTunnelHint := ""
 	if needsPublicTunnel {
 		if cloudflaredInPATH {
-			publicTunnelHint = "cloudflared is in PATH: run `cloudflared tunnel --url http://127.0.0.1:<gateway-port>` before creating the session, capture the printed https://*.trycloudflare.com URL, and pass it as --gateway-url; OR set RDEV_CLOUDFLARED_GATEWAY_URL=<url>"
+			publicTunnelHint = "cloudflared is in PATH; use `rdev support-session connect --start` and let rdev start/manage the public tunnel, validate the URL, and keep the foreground gateway alive; Quick Tunnel is an ephemeral fallback, so configure a stable gateway URL or named tunnel for repeated sessions"
 		} else {
-			publicTunnelHint = "no stable public gateway configured; install cloudflared (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) then run `cloudflared tunnel --url http://127.0.0.1:<gateway-port>` and pass the printed URL as --gateway-url"
+			publicTunnelHint = "no stable public gateway configured; use `rdev support-session connect --start` so rdev can try configured helpers and report manual_action_required if no public tunnel provider is available; configure RDEV_HOSTED_GATEWAY_URL or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL for repeated sessions"
 		}
 	}
 	summary := map[string]any{
@@ -1250,6 +1281,14 @@ func gatewayCandidateRunbookSummary(candidates []GatewayURLCandidate) map[string
 		"needs_public_tunnel":             needsPublicTunnel,
 		"cloudflared_in_path":             cloudflaredInPATH,
 		"rule":                            "if stable fallback is false, do not promise durable connectivity beyond the current direct/LAN path",
+		"quick_tunnel_ephemeral":          needsPublicTunnel && !hasStable,
+		"stable_gateway_advice": map[string]any{
+			"preferred_for_repeated_sessions": true,
+			"default_fallback":                "use rdev support-session connect --start first so Quick Tunnel can establish a working session when no stable gateway is configured",
+			"cloud_or_vps":                    "if this Agent runs on a cloud server or a machine with a public DNS/IP, configure RDEV_HOSTED_GATEWAY_URL=https://your-domain-or-public-gateway",
+			"cloudflare_named_tunnel":         "for a reusable Cloudflare address, configure RDEV_CLOUDFLARED_NAMED_TUNNEL_URL=https://your-subdomain.example.com plus a reviewed named-tunnel start command or token",
+			"do_not_persist_quick_tunnel":     "do not treat https://*.trycloudflare.com Quick Tunnel URLs as durable; they are session fallback URLs",
+		},
 	}
 	if publicTunnelHint != "" {
 		summary["public_tunnel_hint"] = publicTunnelHint
@@ -1409,11 +1448,12 @@ func candidateFromURL(rawURL, kind, scope, source string, recommended bool, reas
 func gatewayEnvCandidatesFromEnv() []GatewayEnvCandidate {
 	definitions := []GatewayEnvCandidate{
 		{EnvVar: "RDEV_HOSTED_GATEWAY_URL", Kind: "hosted", Scope: "operator-provided-hosted-gateway", Reason: "configured hosted gateway URL"},
+		{EnvVar: "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", Kind: "cloudflared-named", Scope: "configured-cloudflared-named-tunnel", Reason: "configured reusable Cloudflare named tunnel URL"},
 		{EnvVar: "RDEV_RELAY_GATEWAY_URL", Kind: "relay", Scope: "configured-relay", Reason: "configured relay gateway URL"},
 		{EnvVar: "RDEV_MESH_GATEWAY_URL", Kind: "mesh", Scope: "configured-mesh", Reason: "configured mesh gateway URL"},
 		{EnvVar: "RDEV_VPN_GATEWAY_URL", Kind: "vpn", Scope: "configured-vpn", Reason: "configured VPN gateway URL"},
 		{EnvVar: "RDEV_SSH_GATEWAY_URL", Kind: "ssh", Scope: "configured-ssh-tunnel", Reason: "configured SSH tunnel gateway URL"},
-		{EnvVar: "RDEV_CLOUDFLARED_GATEWAY_URL", Kind: "cloudflared", Scope: "public-cloudflared-quick-tunnel", Reason: "active Cloudflare Quick Tunnel URL"},
+		{EnvVar: "RDEV_CLOUDFLARED_GATEWAY_URL", Kind: "cloudflared", Scope: "configured-cloudflared-gateway", Reason: "configured or active Cloudflare gateway URL"},
 	}
 	out := make([]GatewayEnvCandidate, 0, len(definitions))
 	for _, definition := range definitions {
@@ -1436,6 +1476,7 @@ func connectivityHelperPreflight() map[string]any {
 		gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv(definition.GatewayEnv)), "/")
 		startArgvRaw := strings.TrimSpace(os.Getenv(definition.StartArgvEnv))
 		installActionRaw := strings.TrimSpace(os.Getenv(definition.InstallActionEnv))
+		readyIncremented := false
 		report := map[string]any{
 			"id":                 definition.ID,
 			"kind":               definition.Kind,
@@ -1465,9 +1506,25 @@ func connectivityHelperPreflight() map[string]any {
 				if gatewayURL != "" {
 					report["status"] = "ready-to-use-after-approval-check"
 					readyCount++
+					readyIncremented = true
 				} else {
 					report["status"] = "start-argv-without-gateway"
 				}
+			}
+		}
+		if definition.ID == "cloudflared-named-tunnel" {
+			tokenFileConfigured := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE")) != ""
+			tokenConfigured := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN")) != ""
+			tunnelNameConfigured := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_TUNNEL_NAME")) != ""
+			report["token_file_configured"] = tokenFileConfigured
+			report["token_configured"] = tokenConfigured
+			report["tunnel_name_configured"] = tunnelNameConfigured
+			report["stable_url_env"] = "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"
+			report["quick_tunnel_ephemeral"] = false
+			if gatewayURL != "" && !readyIncremented && (tokenFileConfigured || tokenConfigured || tunnelNameConfigured) {
+				report["status"] = "ready-to-use-after-approval-check"
+				readyCount++
+				readyIncremented = true
 			}
 		}
 		if installActionRaw != "" {
@@ -1504,6 +1561,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 	if rdevCommand == "" {
 		rdevCommand = "rdev"
 	}
+	targetRdevCommand := "rdev"
 	transport := "auto"
 	invite, err := agentinvite.New(agentinvite.Options{
 		GatewayURL:            gatewayURL,
@@ -1516,7 +1574,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		AuthorityProfile:      "standard",
 		Once:                  false,
 		RequireHostApproval:   !opts.AutoApprove,
-		RdevCommand:           rdevCommand,
+		RdevCommand:           targetRdevCommand,
 	})
 	targetOS := connectionEntryRunnerTargetOS(target)
 	mcpPlanArguments := map[string]any{
@@ -1646,10 +1704,8 @@ func stringFromMap(values map[string]any, key string) string {
 func connectivityHelperDefinitions() []connectivityHelperDefinition {
 	return []connectivityHelperDefinition{
 		// cloudflared quick-tunnel: free, zero-config, no account needed.
-		// Detected automatically by probing PATH for the binary.
-		// Start: cloudflared tunnel --url http://127.0.0.1:<gateway-port>
-		// Capture the printed https://*.trycloudflare.com URL and pass it as
-		// --gateway-url when creating the support session.
+		// Detected automatically and started by the managed foreground
+		// support-session flow; Agents must not run it as ad hoc glue.
 		{
 			ID:               "cloudflared-quick-tunnel",
 			Kind:             "cloudflared",
@@ -1658,6 +1714,15 @@ func connectivityHelperDefinitions() []connectivityHelperDefinition {
 			InstallActionEnv: "RDEV_CLOUDFLARED_INSTALL_ACTION_JSON",
 			AllowedTools:     []string{"cloudflared"},
 			ApprovalRequired: []string{"download/install if not already present"},
+		},
+		{
+			ID:               "cloudflared-named-tunnel",
+			Kind:             "cloudflared-named",
+			GatewayEnv:       "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL",
+			StartArgvEnv:     "RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON",
+			InstallActionEnv: "RDEV_CLOUDFLARED_INSTALL_ACTION_JSON",
+			AllowedTools:     []string{"cloudflared"},
+			ApprovalRequired: []string{"Cloudflare account/zone setup", "DNS route or hostname mapping", "tunnel token or credentials custody"},
 		},
 		{
 			ID:               "existing-ssh-tunnel",
@@ -2014,21 +2079,6 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-// powershellBase64Encode encodes a PowerShell script string for use with
-// `powershell -EncodedCommand`. PowerShell requires the script be encoded as
-// UTF-16LE then base64-encoded. Using -EncodedCommand avoids all shell quoting
-// issues because the encoded form contains no characters special to cmd.exe or
-// an outer PowerShell session.
-func powershellBase64Encode(script string) string {
-	// Convert UTF-8 string to UTF-16LE code units
-	utf16Codes := utf16.Encode([]rune(script))
-	buf := make([]byte, len(utf16Codes)*2)
-	for i, u := range utf16Codes {
-		binary.LittleEndian.PutUint16(buf[i*2:], u)
-	}
-	return base64.StdEncoding.EncodeToString(buf)
-}
-
 func BuildCreated(opts CreatedOptions) map[string]any {
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	joinURL := strings.TrimSpace(opts.JoinURL)
@@ -2163,7 +2213,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"human_message": localizedCreatedMessage(locale),
 		"agent_flow": []string{
 			"give the target-side human only target_handoff_envelope.full_text when present; use target_command or join_url only as compatibility fallback fields",
-			"target_command already tries ordered gateway URL candidates with bounded per-candidate timeouts and retry policy; do not write your own fallback script",
+			"target_command is the human-safe primary command; signed join-manifest gateway candidates are embedded for rdev runtime failover after bootstrap; do not write your own fallback script",
 			"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
 			"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
 			"watch connection status with watch_connection_status or rdev.support_session.status",
@@ -2307,7 +2357,7 @@ func connectionAttemptPolicy(candidates []GatewayURLCandidate, joinURLs []string
 		"curl_max_time_sec":            targetHTTPMaxTimeSeconds,
 		"retries_per_candidate":        targetHTTPRetries,
 		"retry_delay_sec":              targetHTTPRetryDelaySeconds,
-		"target_handoff":               "single visible command; target-side command owns URL fallback, timeout, retry, download, verification, and host startup",
+		"target_handoff":               "single visible command; Windows uses the first human-safe bootstrap URL and passes signed gateway candidates to the rdev runtime; macOS/Linux keeps bounded candidate download fallback",
 		"agent_rule":                   "do not rewrite, wrap, or expand target_command; watch the returned status tool/command instead",
 	}
 }
@@ -2358,10 +2408,10 @@ func connectionContinuityPolicy(candidates []GatewayURLCandidate) map[string]any
 		"has_stable_configured_fallback": stableAfterLANChange,
 		"stable_after_lan_change":        stableAfterLANChange,
 		"assessment":                     assessment,
-		"target_command_behavior":        "the returned target command tries candidate URLs in order with bounded timeouts before failing",
+		"target_command_behavior":        "the returned target command is human-safe and includes signed gateway candidate metadata for rdev runtime failover after bootstrap",
 		"agent_watch_behavior":           "after handing over target_handoff_envelope.full_text, use rdev.support_session.status wait=true or the returned watcher command and proactively report connected=true",
 		"automatic_downgrade":            []string{"target command tries the next Connection Entry URL when direct or LAN bootstrap fails", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "after registration, host transport auto may switch to another signed join-manifest gateway candidate when the current gateway fails before jobs are processed", "status wait timeout returns connection_recovery instead of requiring custom polling"},
-		"automatic_upgrade":              []string{"when an RDEV_HOSTED_GATEWAY_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL becomes configured, create a fresh Connection Entry so future target commands include that stable path", "for operator-owned recurring machines, move from attended-temporary to a reviewed managed Connection Entry only after explicit persistence approval", "persist the best verified stable path in scoped runtime memory after evidence is reviewed"},
+		"automatic_upgrade":              []string{"when an RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL becomes configured, create a fresh Connection Entry so future target commands include that stable path", "for operator-owned recurring machines, move from attended-temporary to a reviewed managed Connection Entry only after explicit persistence approval", "persist the best verified stable path in scoped runtime memory after evidence is reviewed"},
 		"if_lan_or_loopback_fails":       []string{"run rdev.support_session.prepare or rdev support-session prepare --build-assets to refresh gateway_url_candidates", "prefer configured hosted/relay/mesh/VPN/SSH gateway URLs before asking the human for network details", "ask only when privileged network changes, credentials, paid/cloud resources, or managed persistence are required"},
 		"requires_operator_approval_for": []string{"opening ports, router/NAT/firewall/DNS/route changes", "installing tunnel, mesh, VPN, service, driver, or persistent helper components", "creating or editing SSH credentials/config", "using paid hosted relay or cloud resources", "turning a temporary third-party session into managed persistence"},
 		"forbidden":                      []string{"Agent-authored polling loops", "custom PowerShell or shell relay/bootstrap scripts", "asking humans to assemble ticket/root/gateway/transport/checksum values", "ExecutionPolicy Bypass", "hidden install or persistence"},
@@ -2427,7 +2477,7 @@ func connectionSupervision(ticketCode, locale, rdevCommand, gatewayURL string, a
 		"stable_after_lan_change":        stableAfterLANChange,
 		"upgrade_recommended":            upgradeRecommended,
 		"upgrade_reason":                 upgradeReason,
-		"standard_upgrade_paths":         []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence approval", "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
+		"standard_upgrade_paths":         []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence approval", "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
 		"automatic_downgrade_boundaries": []string{"target command owns ordered URL fallback and bounded timeouts", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "host runtime may reuse signed join-manifest gateway candidates after registration if the current gateway fails before processing jobs", "status timeout returns connection_recovery for standard recovery"},
 		"requires_operator_approval_for": continuityPolicy["requires_operator_approval_for"],
 		"agent_rule":                     "after sending target_handoff_envelope.full_text, use this supervision contract to wait, report connected=true, and choose standard upgrade/recovery tools; do not write polling, relay, bootstrap, or network mutation scripts",
@@ -2458,37 +2508,17 @@ func bootstrapRequirements(target string) map[string]any {
 	return requirements
 }
 
-// windowsBootstrapCommand generates a PowerShell bootstrap command for the target machine.
-//
-// When there is only a single URL it uses the minimal "irm 'url' | iex" form — no
-// PowerShell variables, no loops — which is safe to paste into both an existing PowerShell
-// session AND cmd.exe because there is nothing for the outer shell to expand.
-//
-// When there are multiple URLs (several gateway candidates) it uses a loop that tries each in
-// order. In that case the whole script is encoded as Base64 so that neither cmd.exe nor an
-// outer PowerShell session can expand or corrupt the inner variables.
+// windowsBootstrapCommand generates the human-facing Windows bootstrap command.
+// Keep this intentionally short and readable: real fresh-Agent tests showed
+// that long EncodedCommand/loop handoffs are easy for models to corrupt or
+// over-explain. The URL still carries signed runtime gateway candidates, so
+// rdev can fail over after the bootstrap script is fetched.
 func windowsBootstrapCommand(joinURLs []string, runtimeCandidates []GatewayURLCandidate) string {
 	urls := quotedPowerShellArrayValues(joinURLs, "/bootstrap.ps1", runtimeCandidates)
 	if len(urls) == 0 {
 		return ""
 	}
-
-	// Single-URL fast path: irm 'url' -UseBasicParsing | iex
-	// Works identically whether the user is at cmd.exe OR an existing PowerShell prompt.
-	if len(urls) == 1 {
-		// urls[0] is already a single-quoted PS value like 'https://...'
-		return "powershell -NoProfile -Command \"irm " + urls[0] + " -UseBasicParsing | iex\""
-	}
-
-	// Multi-URL path: encode the retry loop as Base64 to avoid any outer-shell variable
-	// expansion issues when the command is pasted into an existing PowerShell session.
-	inner := "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; " +
-		"$urls=@(" + strings.Join(urls, ",") + "); " +
-		"foreach ($u in $urls) { try { irm $u -UseBasicParsing -TimeoutSec " + strconv.Itoa(targetHTTPMaxTimeSeconds) + " | iex; exit 0 } catch { Write-Host ('rdev Connection Entry failed: ' + $u) } }; " +
-		"throw 'No reachable rdev Connection Entry URL'"
-	// UTF-16LE is required by powershell -EncodedCommand
-	encoded := powershellBase64Encode(inner)
-	return "powershell -NoProfile -EncodedCommand " + encoded
+	return "powershell -NoProfile -Command \"irm " + urls[0] + " -UseBasicParsing | iex\""
 }
 
 func macLinuxBootstrapCommand(joinURLs []string, runtimeCandidates []GatewayURLCandidate) string {
@@ -3007,7 +3037,7 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 			"keep using rdev.support_session.status with wait=true or rdev support-session status --wait",
 			"if the original target_handoff_envelope is still valid, resend target_handoff_envelope.full_text verbatim",
 			"if the target cannot reach the join URL or every gateway candidate times out, run rdev.support_session.prepare or rdev support-session prepare --build-assets, then create a fresh Connection Entry",
-			"use the returned gateway_url_candidates, connection_attempt_policy, runner_plan, or standard_recovery fields instead of writing ad hoc network scripts",
+			"use gateway_candidate_preflight, connection_attempt_policy, runner_plan, or standard_recovery fields to choose the next standard rdev path instead of writing ad hoc network scripts",
 		}
 		humanChecks = []string{
 			"keep the visible target-side command window open",

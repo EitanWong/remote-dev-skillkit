@@ -6,9 +6,11 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -55,6 +57,694 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+func TestTopLevelHelpLeadsWithSupportSessionConnect(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{"--help"}); err != nil {
+		t.Fatal(err)
+	}
+	got := stdout.String()
+	connectIndex := strings.Index(got, "rdev support-session connect --start")
+	if connectIndex < 0 {
+		t.Fatalf("top-level help must expose support-session connect --start, got stdout=%q stderr=%q", got, stderr.String())
+	}
+	for _, lowerLevel := range []string{
+		"rdev support-session start",
+		"rdev support-session create",
+		"rdev support-session plan",
+		"rdev invite create",
+		"rdev connection-entry plan",
+	} {
+		if index := strings.Index(got, lowerLevel); index >= 0 && index < connectIndex {
+			t.Fatalf("top-level help must lead fresh Agents to connect before %q, got stdout=%q", lowerLevel, got)
+		}
+	}
+	if !strings.Contains(got, "rdev support-session --help") {
+		t.Fatalf("top-level help should route advanced support-session discovery to group help, got stdout=%q", got)
+	}
+}
+
+func TestSupportSessionHelpIsAgentFriendly(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{"support-session", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); !strings.Contains(got, "rdev support-session connect --start") ||
+		!strings.Contains(got, "Do not add --public-tunnel") {
+		t.Fatalf("expected support-session help to guide fresh Agents, got stdout=%q stderr=%q", got, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := app.Run(context.Background(), []string{"support-session", "connect", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stderr.String(); !strings.Contains(got, "Usage of support-session connect") ||
+		!strings.Contains(got, "-start") {
+		t.Fatalf("expected connect flag help without failure, got stdout=%q stderr=%q", stdout.String(), got)
+	}
+}
+
+func TestCommandGroupHelpIsAgentFriendly(t *testing.T) {
+	groups := []string{
+		"acceptance",
+		"adapter",
+		"audit",
+		"bootstrap",
+		"connection-entry",
+		"demo",
+		"deps",
+		"enrollment",
+		"evidence",
+		"gateway",
+		"host",
+		"hosted-provider",
+		"invite",
+		"job",
+		"mcp",
+		"operator-auth",
+		"policy",
+		"release",
+		"relay-adapter",
+		"skillkit",
+		"ticket",
+		"trust",
+		"update",
+		"workspace",
+	}
+	for _, group := range groups {
+		t.Run(group, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := NewApp(&stdout, &stderr)
+
+			if err := app.Run(context.Background(), []string{group, "--help"}); err != nil {
+				t.Fatal(err)
+			}
+			got := stdout.String()
+			if !strings.Contains(got, "Usage:") ||
+				!strings.Contains(got, "Subcommands:") ||
+				!strings.Contains(got, "Use `rdev "+group+" <subcommand> --help`") {
+				t.Fatalf("expected command group help for %s, got stdout=%q stderr=%q", group, got, stderr.String())
+			}
+		})
+	}
+}
+
+func TestVersionJSONAndDoctorExposeRuntimeInfo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, envName := range []string{
+		"RDEV_CODEX_SKILLS_DIR",
+		"RDEV_CLAUDE_CODE_SKILLS_DIR",
+		"RDEV_HERMES_SKILLS_DIR",
+		"RDEV_OPENCLAW_SKILLS_DIR",
+		"RDEV_OPENCODE_SKILLS_DIR",
+		"RDEV_GENERIC_AGENT_SKILLS_DIR",
+	} {
+		t.Setenv(envName, "")
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{"version", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	var versionPayload struct {
+		SchemaVersion   string `json:"schema_version"`
+		Name            string `json:"name"`
+		Version         string `json:"version"`
+		Commit          string `json:"commit"`
+		CurrentExe      string `json:"current_executable"`
+		SourceRootValid bool   `json:"source_root_valid"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &versionPayload); err != nil {
+		t.Fatalf("invalid version JSON: %v\n%s", err, stdout.String())
+	}
+	if versionPayload.SchemaVersion != "rdev.runtime-info.v1" ||
+		versionPayload.Name != "rdev" ||
+		versionPayload.Version == "" ||
+		versionPayload.Commit == "" ||
+		versionPayload.CurrentExe == "" ||
+		!versionPayload.SourceRootValid {
+		t.Fatalf("expected runtime version info, got %#v", versionPayload)
+	}
+
+	stdout.Reset()
+	if err := app.Run(context.Background(), []string{"doctor"}); err != nil {
+		t.Fatal(err)
+	}
+	var doctorPayload struct {
+		SchemaVersion    string         `json:"schema_version"`
+		OK               bool           `json:"ok"`
+		Rdev             map[string]any `json:"rdev"`
+		HostCapabilities map[string]any `json:"host_capabilities"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doctorPayload); err != nil {
+		t.Fatalf("invalid doctor JSON: %v\n%s", err, stdout.String())
+	}
+	if doctorPayload.SchemaVersion != "rdev.doctor.v1" ||
+		!doctorPayload.OK ||
+		doctorPayload.Rdev["schema_version"] != "rdev.runtime-info.v1" ||
+		doctorPayload.HostCapabilities == nil {
+		t.Fatalf("expected doctor runtime and host capability info, got %#v", doctorPayload)
+	}
+}
+
+func TestDoctorFailsClosedOnUnhealthySkillkitInstall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root, target := writeRuntimeInfoSkillFixture(t, "old safe remote support\n")
+	t.Setenv("RDEV_SOURCE_ROOT", root)
+	refDir := filepath.Join(root, ".remote-dev-skillkit")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{
+		"schema_version": "rdev.skillkit-install-manifest.v1",
+		"bundle_dir":     filepath.Join(root, "dist", "remote-dev-skillkit"),
+		"target_dir":     target,
+		"framework":      "codex",
+		"installed_at":   "2026-07-07T00:00:00Z",
+	}
+	content, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "install.json"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, diagnostics, actions := runtimeInfoHealth(rdevRuntimeInfo(root))
+	if ok {
+		t.Fatalf("expected unhealthy Skillkit install to fail doctor health")
+	}
+	joinedDiagnostics := strings.Join(diagnostics, "\n")
+	joinedActions := strings.Join(actions, "\n")
+	if !strings.Contains(joinedDiagnostics, "stale=safe-remote-support") ||
+		!strings.Contains(joinedActions, "rdev skillkit install --execute") {
+		t.Fatalf("expected stale diagnostic and refresh action, diagnostics=%#v actions=%#v", diagnostics, actions)
+	}
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"doctor"}); err != nil {
+		t.Fatal(err)
+	}
+	var doctorPayload struct {
+		OK               bool     `json:"ok"`
+		Diagnostics      []string `json:"diagnostics"`
+		AgentNextActions []string `json:"agent_next_actions"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doctorPayload); err != nil {
+		t.Fatalf("invalid doctor JSON: %v\n%s", err, stdout.String())
+	}
+	if doctorPayload.OK ||
+		!strings.Contains(strings.Join(doctorPayload.Diagnostics, "\n"), "stale=safe-remote-support") ||
+		!strings.Contains(strings.Join(doctorPayload.AgentNextActions, "\n"), "rdev skillkit install --execute") {
+		t.Fatalf("expected doctor to fail closed on stale Skillkit install, got %s", stdout.String())
+	}
+}
+
+func TestDoctorFailsClosedOnLegacySkillkitInstallWithoutManifest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root, target := writeRuntimeInfoSkillFixture(t, "legacy installed safe-remote-support\n")
+	t.Setenv("RDEV_CODEX_SKILLS_DIR", target)
+
+	ok, diagnostics, actions := runtimeInfoHealth(rdevRuntimeInfo(root))
+	if ok {
+		t.Fatalf("expected legacy stale Skillkit install to fail doctor health")
+	}
+	joinedDiagnostics := strings.Join(diagnostics, "\n")
+	joinedActions := strings.Join(actions, "\n")
+	if !strings.Contains(joinedDiagnostics, "legacy codex") ||
+		!strings.Contains(joinedDiagnostics, "stale=safe-remote-support") ||
+		!strings.Contains(joinedActions, "rdev skillkit install --execute") {
+		t.Fatalf("expected legacy stale diagnostic and refresh action, diagnostics=%#v actions=%#v", diagnostics, actions)
+	}
+}
+
+func TestDoctorFailsClosedOnBrokenSkillkitInstallManifest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root, _ := writeRuntimeInfoSkillFixture(t, "source safe-remote-support\n")
+	refDir := filepath.Join(root, ".remote-dev-skillkit")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "install.json"), []byte("{broken-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, diagnostics, actions := runtimeInfoHealth(rdevRuntimeInfo(root))
+	if ok {
+		t.Fatalf("expected broken Skillkit install manifest to fail doctor health")
+	}
+	if !strings.Contains(strings.Join(diagnostics, "\n"), "manifest is unreadable") ||
+		!strings.Contains(strings.Join(actions, "\n"), "rdev skillkit install --execute") {
+		t.Fatalf("expected broken manifest diagnostic and refresh action, diagnostics=%#v actions=%#v", diagnostics, actions)
+	}
+}
+
+func TestDoctorFailsClosedOnUnverifiableSkillkitInstallManifest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root, _ := writeRuntimeInfoSkillFixture(t, "source safe-remote-support\n")
+	refDir := filepath.Join(root, ".remote-dev-skillkit")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{
+		"schema_version": "rdev.skillkit-install-manifest.v1",
+		"framework":      "codex",
+		"installed_at":   "2026-07-07T00:00:00Z",
+	}
+	content, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "install.json"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, diagnostics, actions := runtimeInfoHealth(rdevRuntimeInfo(root))
+	if ok {
+		t.Fatalf("expected unverifiable Skillkit install manifest to fail doctor health")
+	}
+	if !strings.Contains(strings.Join(diagnostics, "\n"), "manifest is not verifiable") ||
+		!strings.Contains(strings.Join(actions, "\n"), "rdev skillkit install --execute") {
+		t.Fatalf("expected unverifiable manifest diagnostic and refresh action, diagnostics=%#v actions=%#v", diagnostics, actions)
+	}
+}
+
+func writeRuntimeInfoSkillFixture(t *testing.T, safeRemoteInstalledContent string) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), "skills")
+	for _, skill := range []string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"} {
+		sourceDir := filepath.Join(root, "skills", skill)
+		targetDir := filepath.Join(target, skill)
+		if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "source " + skill + "\n"
+		installed := source
+		if skill == "safe-remote-support" {
+			installed = safeRemoteInstalledContent
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "SKILL.md"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(targetDir, "SKILL.md"), []byte(installed), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/rdev\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "cmd", "rdev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cmd", "rdev", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeInfoReferenceFixture(t, root, target, "codex")
+	return root, target
+}
+
+func writeRuntimeInfoReferenceFixture(t *testing.T, root, target, framework string) []any {
+	t.Helper()
+	if framework == "" {
+		framework = "codex"
+	}
+	bundle := filepath.Join(root, "dist", "remote-dev-skillkit")
+	paths := map[string]string{
+		filepath.Join(root, "mcp", "tools.json"):                                     "{\"tools\":[]}\n",
+		filepath.Join(bundle, "frameworks", framework+".md"):                         "# " + framework + "\n",
+		filepath.Join(target, ".remote-dev-skillkit", "mcp", "tools.json"):           "{\"tools\":[]}\n",
+		filepath.Join(target, ".remote-dev-skillkit", "frameworks", framework+".md"): "# " + framework + "\n",
+	}
+	for path, content := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	references := []any{}
+	for _, item := range []struct {
+		name string
+		rel  string
+	}{
+		{name: "mcp-tools", rel: "mcp/tools.json"},
+		{name: "framework-doc", rel: "frameworks/" + framework + ".md"},
+	} {
+		path := filepath.Join(target, ".remote-dev-skillkit", filepath.FromSlash(item.rel))
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(content)
+		references = append(references, map[string]any{
+			"name":          item.name,
+			"relative_path": item.rel,
+			"sha256":        "sha256:" + hex.EncodeToString(sum[:]),
+			"size_bytes":    len(content),
+		})
+	}
+	return references
+}
+
+func runtimeInfoSkillManifestFiles(t *testing.T, target string) []any {
+	t.Helper()
+	files := []any{}
+	for _, skill := range []string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"} {
+		path := filepath.Join(target, skill, "SKILL.md")
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(content)
+		files = append(files, map[string]any{
+			"name":          skill,
+			"relative_path": filepath.ToSlash(filepath.Join(skill, "SKILL.md")),
+			"sha256":        "sha256:" + hex.EncodeToString(sum[:]),
+			"size_bytes":    len(content),
+		})
+	}
+	return files
+}
+
+func runtimeInfoReferenceManifestFiles(t *testing.T, refDir, framework string) []any {
+	t.Helper()
+	if framework == "" {
+		framework = "codex"
+	}
+	files := []any{}
+	for _, item := range []struct {
+		name string
+		rel  string
+	}{
+		{name: "mcp-tools", rel: "mcp/tools.json"},
+		{name: "framework-doc", rel: "frameworks/" + framework + ".md"},
+	} {
+		path := filepath.Join(refDir, filepath.FromSlash(item.rel))
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(content)
+		files = append(files, map[string]any{
+			"name":          item.name,
+			"relative_path": item.rel,
+			"sha256":        "sha256:" + hex.EncodeToString(sum[:]),
+			"size_bytes":    len(content),
+		})
+	}
+	return files
+}
+
+func TestRuntimeInfoReportsStaleInstalledSkills(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), "skills")
+	for _, skill := range []string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"} {
+		sourceDir := filepath.Join(root, "skills", skill)
+		targetDir := filepath.Join(target, skill)
+		if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		source := "source " + skill + "\n"
+		installed := source
+		if skill == "safe-remote-support" {
+			installed = "old safe remote support\n"
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "SKILL.md"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(targetDir, "SKILL.md"), []byte(installed), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/rdev\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "cmd", "rdev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cmd", "rdev", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	referenceFiles := writeRuntimeInfoReferenceFixture(t, root, target, "codex")
+	refDir := filepath.Join(root, ".remote-dev-skillkit")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{
+		"schema_version":  "rdev.skillkit-install-manifest.v1",
+		"bundle_dir":      filepath.Join(root, "dist", "remote-dev-skillkit"),
+		"target_dir":      target,
+		"framework":       "codex",
+		"installed_at":    "2026-07-07T00:00:00Z",
+		"reference_files": referenceFiles,
+		"mcp_tools_json":  filepath.Join(target, ".remote-dev-skillkit", "mcp", "tools.json"),
+		"framework_doc":   filepath.Join(target, ".remote-dev-skillkit", "frameworks", "codex.md"),
+	}
+	content, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "install.json"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := rdevRuntimeInfo(root)
+	manifests := payload["install_manifests"].([]map[string]any)
+	if len(manifests) != 1 {
+		t.Fatalf("expected one install manifest, got %#v", manifests)
+	}
+	status := manifests[0]["skill_status"].(map[string]any)
+	stale := status["stale_skills"].([]string)
+	if status["schema_version"] != "rdev.skill-install-status.v1" ||
+		status["ok"] != false ||
+		!slices.Contains(stale, "safe-remote-support") {
+		t.Fatalf("expected stale safe-remote-support status, got %#v", status)
+	}
+}
+
+func TestRuntimeInfoDetectsLegacyInstalledSkillsWithoutManifest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), "skills")
+	for _, skill := range []string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"} {
+		sourceDir := filepath.Join(root, "skills", skill)
+		targetDir := filepath.Join(target, skill)
+		if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sourceDir, "SKILL.md"), []byte("source "+skill+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		installed := "source " + skill + "\n"
+		if skill == "safe-remote-support" {
+			installed = "legacy installed safe-remote-support\n"
+		}
+		if err := os.WriteFile(filepath.Join(targetDir, "SKILL.md"), []byte(installed), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/rdev\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "cmd", "rdev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cmd", "rdev", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RDEV_CODEX_SKILLS_DIR", target)
+
+	payload := rdevRuntimeInfo(root)
+	if payload["install_manifest_count"] != 0 {
+		t.Fatalf("expected no manifests for legacy install, got %#v", payload["install_manifests"])
+	}
+	targets := payload["detected_skill_install_targets"].([]map[string]any)
+	var detected map[string]any
+	for _, candidate := range targets {
+		if candidate["target_dir"] == target {
+			detected = candidate
+			break
+		}
+	}
+	if detected == nil {
+		t.Fatalf("expected detected legacy target %s, got %#v", target, targets)
+	}
+	status := detected["skill_status"].(map[string]any)
+	stale := status["stale_skills"].([]string)
+	if detected["install_manifest_found"] != false ||
+		status["schema_version"] != "rdev.skill-install-status.v1" ||
+		status["ok"] != false ||
+		!slices.Contains(stale, "safe-remote-support") {
+		t.Fatalf("expected stale legacy skill target, got %#v", detected)
+	}
+}
+
+func TestSkillInstallStatusUsesManifestIntegrityWithoutSourceRoot(t *testing.T) {
+	target := t.TempDir()
+	skillNames := []string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"}
+	var skillFiles []any
+	for _, skill := range skillNames {
+		dir := filepath.Join(target, skill)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := []byte("installed " + skill + "\n")
+		path := filepath.Join(dir, "SKILL.md")
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(content)
+		skillFiles = append(skillFiles, map[string]any{
+			"name":          skill,
+			"relative_path": filepath.ToSlash(filepath.Join(skill, "SKILL.md")),
+			"sha256":        "sha256:" + hex.EncodeToString(sum[:]),
+			"size_bytes":    len(content),
+		})
+	}
+	if err := os.WriteFile(filepath.Join(target, "safe-remote-support", "SKILL.md"), []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	status := skillInstallStatus("", map[string]any{
+		"target_dir":     target,
+		"skill_files":    skillFiles,
+		"schema_version": "rdev.skillkit-install-manifest.v1",
+	})
+	mismatches := status["manifest_mismatch_skills"].([]string)
+	if status["source_status_known"] != false ||
+		status["integrity_status_known"] != true ||
+		status["manifest_integrity_ok"] != false ||
+		status["ok"] != false ||
+		!slices.Contains(mismatches, "safe-remote-support") {
+		t.Fatalf("expected manifest integrity mismatch without source root, got %#v", status)
+	}
+}
+
+func TestDoctorFailsClosedOnStaleInstalledMCPToolsReference(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root, target := writeRuntimeInfoSkillFixture(t, "source safe-remote-support\n")
+	referenceFiles := writeRuntimeInfoReferenceFixture(t, root, target, "codex")
+	if err := os.WriteFile(filepath.Join(root, "mcp", "tools.json"), []byte("{\"tools\":[{\"name\":\"new\"}]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refDir := filepath.Join(root, ".remote-dev-skillkit")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{
+		"schema_version":  "rdev.skillkit-install-manifest.v1",
+		"bundle_dir":      filepath.Join(root, "dist", "remote-dev-skillkit"),
+		"target_dir":      target,
+		"framework":       "codex",
+		"installed_at":    "2026-07-07T00:00:00Z",
+		"skill_files":     runtimeInfoSkillManifestFiles(t, target),
+		"reference_files": referenceFiles,
+		"mcp_tools_json":  filepath.Join(target, ".remote-dev-skillkit", "mcp", "tools.json"),
+		"framework_doc":   filepath.Join(target, ".remote-dev-skillkit", "frameworks", "codex.md"),
+	}
+	content, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "install.json"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, diagnostics, actions := runtimeInfoHealth(rdevRuntimeInfo(root))
+	if ok {
+		t.Fatalf("expected stale installed MCP tools reference to fail doctor health")
+	}
+	joinedDiagnostics := strings.Join(diagnostics, "\n")
+	if !strings.Contains(joinedDiagnostics, "stale_references=mcp-tools") ||
+		!strings.Contains(strings.Join(actions, "\n"), "rdev skillkit install --execute") {
+		t.Fatalf("expected stale MCP tools reference diagnostic and refresh action, diagnostics=%#v actions=%#v", diagnostics, actions)
+	}
+}
+
+func TestSkillInstallStatusUsesReferenceManifestIntegrityWithoutSourceRoot(t *testing.T) {
+	target := t.TempDir()
+	skillNames := []string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"}
+	for _, skill := range skillNames {
+		dir := filepath.Join(target, skill)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("installed "+skill+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refDir := filepath.Join(target, ".remote-dev-skillkit")
+	if err := os.MkdirAll(filepath.Join(refDir, "mcp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(refDir, "frameworks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "mcp", "tools.json"), []byte("{\"tools\":[]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "frameworks", "codex.md"), []byte("# codex\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skillFiles := runtimeInfoSkillManifestFiles(t, target)
+	referenceFiles := runtimeInfoReferenceManifestFiles(t, refDir, "codex")
+	if err := os.WriteFile(filepath.Join(refDir, "mcp", "tools.json"), []byte("tampered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	status := skillInstallStatus("", map[string]any{
+		"target_dir":      target,
+		"skill_files":     skillFiles,
+		"reference_files": referenceFiles,
+		"schema_version":  "rdev.skillkit-install-manifest.v1",
+		"framework_doc":   filepath.Join(refDir, "frameworks", "codex.md"),
+	})
+	mismatches := status["manifest_mismatch_reference_files"].([]string)
+	if status["reference_integrity_status_known"] != true ||
+		status["reference_manifest_integrity_ok"] != false ||
+		status["ok"] != false ||
+		!slices.Contains(mismatches, "mcp-tools") {
+		t.Fatalf("expected reference manifest integrity mismatch without source root, got %#v", status)
+	}
+}
+
+func TestCommonSkillTargetCandidatesExpandHomePaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("RDEV_CODEX_SKILLS_DIR", "~/custom-codex-skills")
+
+	candidates := commonSkillTargetCandidates()
+	want := filepath.Join(home, "custom-codex-skills")
+	for _, candidate := range candidates {
+		if candidate.Framework == "codex" && candidate.Path == want {
+			return
+		}
+	}
+	t.Fatalf("expected expanded codex skill target %s, got %#v", want, candidates)
+}
+
 func TestMCPToolsOutputsJSON(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -78,6 +768,17 @@ func TestMCPToolsOutputsJSON(t *testing.T) {
 }
 
 func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	goBin := filepath.Join(home, "go", "bin")
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goBinRdev := filepath.Join(goBin, "rdev")
+	if err := os.WriteFile(goBinRdev, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := NewApp(&stdout, &stderr)
@@ -96,6 +797,7 @@ func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
 		Repo          string `json:"repo"`
 		Framework     string `json:"framework"`
 		RepoRootValid bool   `json:"repo_root_valid"`
+		GoBinRdev     string `json:"go_bin_rdev"`
 		LocalMCP      struct {
 			Mode       string   `json:"mode"`
 			Command    string   `json:"command"`
@@ -110,7 +812,10 @@ func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
 		RemoteDefaults struct {
 			Requested          bool     `json:"requested"`
 			DefaultUnknownMode string   `json:"default_unknown_owner"`
+			OwnedRecurringMode string   `json:"owned_recurring_mode"`
+			ThirdPartyMode     string   `json:"third_party_mode"`
 			FirstQuestion      string   `json:"first_human_question"`
+			AgentShouldDo      []string `json:"agent_should_continue_after_confirmation"`
 			SafeDefaults       []string `json:"safe_defaults"`
 		} `json:"remote_host_defaults"`
 		AskOnlyWhen      []string `json:"ask_only_when"`
@@ -126,29 +831,44 @@ func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
 	if !payload.RepoRootValid {
 		t.Fatalf("repo root should be valid for checkout bootstrap plan: %s", stdout.String())
 	}
-	if payload.LocalMCP.Mode != "stdio" || !slices.Contains(payload.LocalMCP.Args, "serve") || payload.LocalMCP.GatewayURL != "optional-for-local-agent-install" {
+	if payload.GoBinRdev != goBinRdev {
+		t.Fatalf("expected bootstrap plan to discover GOPATH/bin rdev fallback %s, got %q", goBinRdev, payload.GoBinRdev)
+	}
+	if payload.LocalMCP.Mode != "stdio" ||
+		payload.LocalMCP.Command != goBinRdev ||
+		!slices.Contains(payload.LocalMCP.Args, "serve") ||
+		payload.LocalMCP.GatewayURL != "optional-for-local-agent-install" {
 		t.Fatalf("local agent install should default to MCP stdio without hosted gateway: %#v", payload.LocalMCP)
 	}
 	var recoveryIDs []string
 	for _, action := range payload.RecoveryOrder {
 		recoveryIDs = append(recoveryIDs, action.ID)
 	}
-	for _, expected := range []string{"use-existing-rdev", "build-from-checkout", "run-from-checkout-with-go", "clone-then-build", "signed-release-download"} {
+	for _, expected := range []string{"use-existing-rdev", "use-go-bin-rdev", "build-from-checkout", "run-from-checkout-with-go", "clone-then-build", "signed-release-download"} {
 		if !slices.Contains(recoveryIDs, expected) {
 			t.Fatalf("missing recovery action %q in %#v", expected, recoveryIDs)
 		}
 	}
 	if !payload.RemoteDefaults.Requested ||
 		payload.RemoteDefaults.DefaultUnknownMode != string(model.HostModeAttendedTemporary) ||
+		payload.RemoteDefaults.ThirdPartyMode != string(model.HostModeAttendedTemporary) ||
+		payload.RemoteDefaults.OwnedRecurringMode != "managed-after-explicit-persistence-approval" ||
 		!strings.Contains(payload.RemoteDefaults.FirstQuestion, "company policy") ||
 		!slices.Contains(payload.RemoteDefaults.SafeDefaults, "no hidden persistence") {
 		t.Fatalf("remote defaults should collapse decisions into visible temporary support: %#v", payload.RemoteDefaults)
+	}
+	agentSteps := strings.Join(payload.RemoteDefaults.AgentShouldDo, "\n")
+	if !strings.Contains(agentSteps, "rdev.support_session.connect") ||
+		!strings.Contains(agentSteps, "target_handoff_envelope.full_text") ||
+		strings.Contains(agentSteps, "create an invite") ||
+		strings.Contains(agentSteps, "materialize a Connection Entry") {
+		t.Fatalf("remote defaults must guide fresh Agents to support-session connect before low-level invite/package flows: %#v", payload.RemoteDefaults.AgentShouldDo)
 	}
 	joinedAsk := strings.Join(payload.AskOnlyWhen, "\n")
 	joinedDontAsk := strings.Join(payload.DoNotAskFor, "\n")
 	joinedForbidden := strings.Join(payload.ForbiddenActions, "\n")
 	if !strings.Contains(joinedAsk, "company or owner authorization") ||
-		!strings.Contains(joinedDontAsk, "target OS before generating a Connection Entry") ||
+		!strings.Contains(joinedDontAsk, "target OS before starting the standard support-session connect flow") ||
 		!strings.Contains(joinedDontAsk, "ticket code, manifest root, gateway URL") ||
 		!strings.Contains(joinedForbidden, "ExecutionPolicy Bypass") {
 		t.Fatalf("bootstrap plan should define ask boundaries and forbidden actions:\nask=%s\ndont=%s\nforbidden=%s", joinedAsk, joinedDontAsk, joinedForbidden)
@@ -240,11 +960,73 @@ func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T)
 		payload.SelectedPath != "start-foreground-gateway" ||
 		payload.ReadyToSendHuman ||
 		!slices.Contains(payload.StartNowCommand, "--start") ||
+		slices.Contains(payload.StartNowCommand, "--gateway-url") ||
+		slices.Contains(payload.StartCommand, "--gateway-url") ||
 		!slices.Contains(payload.StartCommand, "start") ||
 		!strings.Contains(payload.AgentNextStep, "cli_start_now_command") ||
 		!strings.Contains(payload.AgentNextStep, "ready_file.path") ||
 		!strings.Contains(payload.AgentNextStep, "status_file.path") {
 		t.Fatalf("unexpected foreground connect payload: %#v", payload)
+	}
+}
+
+func TestManagedPublicTunnelRespectsExplicitGatewayURL(t *testing.T) {
+	if !shouldStartManagedPublicTunnel(true, "") {
+		t.Fatal("expected managed tunnel when public tunnel is needed and no explicit gateway was provided")
+	}
+	if shouldStartManagedPublicTunnel(true, "https://gateway.example.test") {
+		t.Fatal("explicit gateway URL must not be overwritten by managed public tunnel startup")
+	}
+	if shouldStartManagedPublicTunnel(false, "") {
+		t.Fatal("should not start managed tunnel when gateway candidates do not require it")
+	}
+}
+
+func TestConfiguredCloudflaredStableTunnelConfigUsesNamedURLAndRedactsToken(t *testing.T) {
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
+	t.Setenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN", "secret-token")
+
+	cfg, ok, err := configuredCloudflaredStableTunnelConfig("/usr/local/bin/cloudflared", "http://127.0.0.1:8787")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected configured stable cloudflared tunnel")
+	}
+	if cfg.GatewayURL != "https://rdev.example.test" ||
+		cfg.Mode != "token" ||
+		!slices.Contains(cfg.Argv, "--token") ||
+		!slices.Contains(cfg.Argv, "secret-token") ||
+		!slices.Contains(cfg.Argv, "--url") ||
+		!slices.Contains(cfg.Argv, "http://127.0.0.1:8787") {
+		t.Fatalf("unexpected stable cloudflared config: %#v", cfg)
+	}
+	if strings.Contains(strings.Join(cfg.Preview, " "), "secret-token") ||
+		!strings.Contains(strings.Join(cfg.Preview, " "), "<redacted>") {
+		t.Fatalf("preview must redact token: %#v", cfg.Preview)
+	}
+}
+
+func TestConfiguredCloudflaredStableTunnelConfigRejectsShellWrapper(t *testing.T) {
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON", `["sh","-c","cloudflared tunnel run"]`)
+
+	if _, ok, err := configuredCloudflaredStableTunnelConfig("/usr/local/bin/cloudflared", "http://127.0.0.1:8787"); !ok || err == nil {
+		t.Fatalf("expected configured unsafe cloudflared argv to be rejected, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestCloudflaredStableTunnelStartRequestedRequiresURLAndStartConfig(t *testing.T) {
+	if cloudflaredStableTunnelStartRequested() {
+		t.Fatal("empty environment should not request stable tunnel startup")
+	}
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
+	if cloudflaredStableTunnelStartRequested() {
+		t.Fatal("stable URL without start config should be treated as externally managed")
+	}
+	t.Setenv("RDEV_CLOUDFLARED_TUNNEL_NAME", "rdev")
+	if !cloudflaredStableTunnelStartRequested() {
+		t.Fatal("stable URL with tunnel name should request managed stable tunnel startup")
 	}
 }
 
@@ -540,6 +1322,42 @@ func TestSupportSessionHandoffSelectsForegroundStartWithoutGateway(t *testing.T)
 	}
 }
 
+func TestSupportSessionHandoffAutoDetectsStableRdevCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX executable bits for the fallback binary fixture")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	goBin := filepath.Join(home, "go", "bin")
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goBinRdev := filepath.Join(goBin, "rdev")
+	if err := os.WriteFile(goBinRdev, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{"support-session", "handoff", "--target", "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		CliStartNowCommand []string `json:"cli_start_now_command"`
+		PrepareCommand     []string `json:"prepare_command"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support session handoff JSON: %v\n%s", err, stdout.String())
+	}
+	if len(payload.CliStartNowCommand) == 0 || payload.CliStartNowCommand[0] != goBinRdev {
+		t.Fatalf("expected auto-detected stable rdev in cli_start_now_command, got %#v", payload.CliStartNowCommand)
+	}
+	if len(payload.PrepareCommand) == 0 || payload.PrepareCommand[0] != goBinRdev {
+		t.Fatalf("expected auto-detected stable rdev in prepare_command, got %#v", payload.PrepareCommand)
+	}
+}
+
 func TestSupportSessionHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
 	var stdout bytes.Buffer
@@ -790,9 +1608,14 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.GatewayURLCandidates[1].Source != "env:RDEV_RELAY_GATEWAY_URL" {
 		t.Fatalf("expected configured relay fallback candidate, got %#v", payload.GatewayURLCandidates)
 	}
-	if !strings.Contains(payload.TargetCommand, "-EncodedCommand") ||
+	if !strings.Contains(payload.TargetCommand, "powershell -NoProfile -Command") ||
+		!strings.Contains(payload.TargetCommand, "bootstrap.ps1") ||
+		!strings.Contains(payload.TargetCommand, "-UseBasicParsing") ||
+		!strings.Contains(payload.TargetCommand, "gateway_url_candidates=") ||
+		strings.Contains(payload.TargetCommand, "-EncodedCommand") ||
 		strings.Contains(payload.TargetCommand, "foreach ($u in $urls)") ||
-		strings.Contains(payload.TargetCommand, "https://relay.example.test/rdev/join/") ||
+		strings.Contains(payload.TargetCommand, "$urls has been generated by rdev") ||
+		strings.Contains(payload.TargetCommand, "ProgressPrference") ||
 		strings.Contains(payload.TargetCommand, "<ticket-code>") ||
 		strings.Contains(payload.TargetCommand, "ExecutionPolicy Bypass") {
 		t.Fatalf("target command should be ready and safe: %s", payload.TargetCommand)
@@ -918,6 +1741,7 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	statusFile := filepath.Join(workDir, "status", "support-session-status.json")
 	handoffTextFile := filepath.Join(workDir, "handoff", "target-handoff.txt")
 	connectedReportFile := filepath.Join(workDir, "status", "connected-report.txt")
+	rdevCommand := filepath.Join(t.TempDir(), "bin", "rdev")
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- app.Run(ctx, []string{
@@ -931,6 +1755,7 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			"--connected-report-file", connectedReportFile,
 			"--target", "windows",
 			"--locale", "zh-CN",
+			"--rdev-command", rdevCommand,
 		})
 	}()
 	waitForHTTP(t, gatewayURL+"/healthz")
@@ -962,6 +1787,11 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		ConnectionReadiness struct {
 			Ready                     bool `json:"ready"`
 			TargetBootstrapSelfRepair bool `json:"target_bootstrap_self_repair"`
+			AgentConnectionRunbook    struct {
+				StandardEntryTool struct {
+					CLICommand []string `json:"cli_command"`
+				} `json:"standard_entry_tool"`
+			} `json:"agent_connection_runbook"`
 		} `json:"connection_readiness"`
 		ConnectivityStrategy struct {
 			SchemaVersion  string   `json:"schema_version"`
@@ -973,9 +1803,12 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			AgentRule      string `json:"agent_rule"`
 		} `json:"gateway_candidate_preflight"`
 		AgentConnectionRunbook struct {
-			SchemaVersion string `json:"schema_version"`
-			Phase         string `json:"phase"`
-			Watch         struct {
+			SchemaVersion     string `json:"schema_version"`
+			Phase             string `json:"phase"`
+			StandardEntryTool struct {
+				CLICommand []string `json:"cli_command"`
+			} `json:"standard_entry_tool"`
+			Watch struct {
 				MCPTool string `json:"mcp_tool"`
 			} `json:"watch"`
 		} `json:"agent_connection_runbook"`
@@ -1043,6 +1876,10 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		t.Fatalf("expected started payload gateway preflight, got %#v", payload.GatewayCandidatePreflight)
 	}
 	if payload.AgentConnectionRunbook.SchemaVersion != "rdev.support-session-agent-runbook.v1" ||
+		len(payload.AgentConnectionRunbook.StandardEntryTool.CLICommand) == 0 ||
+		payload.AgentConnectionRunbook.StandardEntryTool.CLICommand[0] != rdevCommand ||
+		len(payload.ConnectionReadiness.AgentConnectionRunbook.StandardEntryTool.CLICommand) == 0 ||
+		payload.ConnectionReadiness.AgentConnectionRunbook.StandardEntryTool.CLICommand[0] != rdevCommand ||
 		payload.AgentConnectionRunbook.Watch.MCPTool != "rdev.support_session.status" {
 		t.Fatalf("expected started payload Agent runbook, got %#v", payload.AgentConnectionRunbook)
 	}
@@ -5655,6 +6492,81 @@ func TestSupportSessionReportSummarizesJobsAndArtifacts(t *testing.T) {
 	}
 }
 
+func TestSupportSessionReportTicketCodeSelectsSingleActiveHost(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, capabilities, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode:   ticket.Code,
+		Name:         "ticket-report-host",
+		OS:           "windows",
+		Arch:         "amd64",
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err = gw.ApproveHost(host.ID, capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "basic identity probe", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+		"argv":           []string{"cmd", "/c", "hostname"},
+		"allow_commands": []string{"cmd"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteJob(job.ID, "REPORT-HOST"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err = app.Run(context.Background(), []string{
+		"support-session", "report",
+		"--gateway-url", server.URL,
+		"--ticket-code", ticket.Code,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SchemaVersion            string           `json:"schema_version"`
+		OK                       bool             `json:"ok"`
+		TicketCode               string           `json:"ticket_code"`
+		HostID                   string           `json:"host_id"`
+		RecommendedJobHostID     string           `json:"recommended_job_host_id"`
+		RecommendedJobHostSource string           `json:"recommended_job_host_source"`
+		HumanReport              string           `json:"human_report"`
+		Jobs                     []map[string]any `json:"jobs"`
+		ActiveHosts              []map[string]any `json:"active_hosts"`
+		StaleHostRule            string           `json:"stale_host_rule"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid support-session report output: %v\n%s", err, stdout.String())
+	}
+	if payload.SchemaVersion != "rdev.support-session-report.v1" ||
+		!payload.OK ||
+		payload.TicketCode != ticket.Code ||
+		payload.HostID != host.ID ||
+		payload.RecommendedJobHostID != host.ID ||
+		payload.RecommendedJobHostSource != "ticket_single_active_host" ||
+		len(payload.ActiveHosts) != 1 ||
+		len(payload.Jobs) != 1 ||
+		!strings.Contains(payload.HumanReport, "REPORT-HOST") ||
+		!strings.Contains(payload.StaleHostRule, "Do not create jobs for stale_hosts") {
+		t.Fatalf("expected ticket-code report to select one active host, got %s", stdout.String())
+	}
+}
+
 func TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
@@ -7505,6 +8417,18 @@ func TestSkillkitPlanInstallAndVerifyInstallPlan(t *testing.T) {
 	if !strings.Contains(planStdout.String(), `"adaptive_configuration_schema": "rdev.adaptive-configuration-contract.v1"`) {
 		t.Fatalf("expected adaptive configuration plan output, got %s", planStdout.String())
 	}
+	codexShellScript := readCLIFile(t, filepath.Join(planDir, "install-codex.sh"))
+	if !strings.Contains(codexShellScript, "skillkit install --bundle") ||
+		!strings.Contains(codexShellScript, "--execute") ||
+		!strings.Contains(codexShellScript, ".remote-dev-skillkit/install.json") {
+		t.Fatalf("expected generated shell install script to use standard installer and manifest:\n%s", codexShellScript)
+	}
+	codexPowerShellScript := readCLIFile(t, filepath.Join(planDir, "install-codex.ps1"))
+	if !strings.Contains(codexPowerShellScript, "'skillkit', 'install'") ||
+		!strings.Contains(codexPowerShellScript, "'--execute'") ||
+		!strings.Contains(codexPowerShellScript, ".remote-dev-skillkit/install.json") {
+		t.Fatalf("expected generated PowerShell install script to use standard installer and manifest:\n%s", codexPowerShellScript)
+	}
 	for _, path := range []string{
 		"install-plan.json",
 		"INSTALL_COMMANDS.md",
@@ -7534,6 +8458,56 @@ func TestSkillkitPlanInstallAndVerifyInstallPlan(t *testing.T) {
 	}
 }
 
+func TestSkillkitPlanInstallAutoDetectsStableRdevCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX executable bits for the fallback binary fixture")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	goBin := filepath.Join(home, "go", "bin")
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goBinRdev := filepath.Join(goBin, "rdev")
+	if err := os.WriteFile(goBinRdev, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(t.TempDir(), "skillkit")
+	exportApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := exportApp.Run(context.Background(), []string{
+		"skillkit", "export",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	planDir := filepath.Join(t.TempDir(), "install-plan")
+	var planStdout bytes.Buffer
+	planApp := NewApp(&planStdout, &bytes.Buffer{})
+	if err := planApp.Run(context.Background(), []string{
+		"skillkit", "plan-install",
+		"--bundle", bundle,
+		"--out", planDir,
+		"--frameworks", "codex",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(planStdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid install plan output: %v\n%s", err, planStdout.String())
+	}
+	steps, _ := payload["recommended_steps"].([]any)
+	if !strings.Contains(strings.Join(anyStrings(steps), "\n"), goBinRdev+" mcp serve") {
+		t.Fatalf("expected auto-detected absolute rdev command in plan output, got %s", planStdout.String())
+	}
+	codexShellScript := readCLIFile(t, filepath.Join(planDir, "install-codex.sh"))
+	if !strings.Contains(codexShellScript, goBinRdev) {
+		t.Fatalf("expected generated install script to use auto-detected rdev command %s:\n%s", goBinRdev, codexShellScript)
+	}
+}
+
 func TestSkillkitInstallDryRunAndExecute(t *testing.T) {
 	bundle := filepath.Join(t.TempDir(), "skillkit")
 	exportApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
@@ -7558,8 +8532,17 @@ func TestSkillkitInstallDryRunAndExecute(t *testing.T) {
 	}
 	if !strings.Contains(dryRunStdout.String(), `"schema": "rdev.skillkit-install-report.v1"`) ||
 		!strings.Contains(dryRunStdout.String(), `"execute": false`) ||
-		!strings.Contains(dryRunStdout.String(), `"local_mutation": false`) {
+		!strings.Contains(dryRunStdout.String(), `"local_mutation": false`) ||
+		!strings.Contains(dryRunStdout.String(), `"install_manifest":`) ||
+		!strings.Contains(dryRunStdout.String(), `"type": "write_install_manifest"`) {
 		t.Fatalf("expected dry-run install report, got %s", dryRunStdout.String())
+	}
+	var dryRunPayload map[string]any
+	if err := json.Unmarshal(dryRunStdout.Bytes(), &dryRunPayload); err != nil {
+		t.Fatalf("invalid dry-run install report: %v\n%s", err, dryRunStdout.String())
+	}
+	if mcpCommand, _ := dryRunPayload["mcp_command"].(string); !strings.Contains(mcpCommand, " mcp serve") {
+		t.Fatalf("expected dry-run install report to include mcp_command, got %#v", dryRunPayload)
 	}
 	if _, err := os.Stat(filepath.Join(target, "remote-vibe-coding")); !os.IsNotExist(err) {
 		t.Fatalf("dry-run should not copy skills, stat err=%v", err)
@@ -7577,11 +8560,22 @@ func TestSkillkitInstallDryRunAndExecute(t *testing.T) {
 		t.Fatalf("expected execute install to pass: %v\n%s", err, executeStdout.String())
 	}
 	if !strings.Contains(executeStdout.String(), `"executed": true`) ||
-		!strings.Contains(executeStdout.String(), `"external_mutation": false`) {
+		!strings.Contains(executeStdout.String(), `"external_mutation": false`) ||
+		!strings.Contains(executeStdout.String(), `"install_manifest":`) {
 		t.Fatalf("expected executed install report, got %s", executeStdout.String())
+	}
+	var executePayload map[string]any
+	if err := json.Unmarshal(executeStdout.Bytes(), &executePayload); err != nil {
+		t.Fatalf("invalid executed install report: %v\n%s", err, executeStdout.String())
+	}
+	if mcpCommand, _ := executePayload["mcp_command"].(string); !strings.Contains(mcpCommand, " mcp serve") {
+		t.Fatalf("expected executed install report to include mcp_command, got %#v", executePayload)
 	}
 	if _, err := os.Stat(filepath.Join(target, "remote-vibe-coding", "SKILL.md")); err != nil {
 		t.Fatalf("expected installed skill: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, ".remote-dev-skillkit", "install.json")); err != nil {
+		t.Fatalf("expected install manifest: %v", err)
 	}
 }
 
@@ -10369,6 +11363,15 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func readCLIFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
 
 func waitForJobStatus(t *testing.T, gw *gateway.MemoryGateway, jobID string, status model.JobStatus, timeout time.Duration) {

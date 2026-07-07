@@ -12,24 +12,19 @@ Remote Dev Skillkit é uma camada de segurança para agentes de IA que precisam 
 
 ## Instalação rápida
 
-Se você já está no Codex, Claude Code, Hermes, OpenClaw/OpenCode ou outro agente MCP, copie isto para o agente:
+Se você já está no Codex, Claude Code, Hermes, OpenClaw/OpenCode ou outro agente MCP, envie este link ao agente e peça que leia o prompt completo antes de agir:
 
-```text
-Install Remote Dev Skillkit for this agent runtime.
+[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
 
-Repository: https://github.com/EitanWong/remote-dev-skillkit
-Full install prompt: https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
-
-Clone or update the repository, read the full install prompt, and follow it as the source of truth. If cloning is blocked, open the prompt link directly. Ask one short question only when a required value is unclear.
-```
-
-Prompt completo para copiar: [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md).
+Esse prompt é a fonte de verdade para clonar ou atualizar o repositório, detectar o runtime do agente, instalar o Skillkit, configurar MCP e fazer uma única pergunta curta quando um valor obrigatório não puder ser descoberto com segurança.
 
 ```bash
 go install ./cmd/rdev
 rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
+
+Se `rdev` não estiver no `PATH`, use o comando MCP absoluto mostrado por `rdev bootstrap agent-plan` ou pelo campo `mcp_command` do relatório de instalação.
 
 Exporte e verifique o bundle Skillkit:
 

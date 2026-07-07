@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -135,6 +137,29 @@ func TestExportRejectsUnscopedSkillDocs(t *testing.T) {
 	_, err := Export(ExportOptions{SourceRoot: sourceRoot, OutDir: filepath.Join(t.TempDir(), "bundle")})
 	if err == nil || !strings.Contains(err.Error(), "unsupported file in skill remote-vibe-coding") {
 		t.Fatalf("expected unsupported skill file error, got %v", err)
+	}
+}
+
+func TestRecommendedRdevCommandSkipsNonExecutableGoBinFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not use POSIX executable bits")
+	}
+	home := t.TempDir()
+	gobin := filepath.Join(home, "go-bin")
+	if err := os.MkdirAll(gobin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rdevPath := filepath.Join(gobin, "rdev")
+	if err := os.WriteFile(rdevPath, []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("GOBIN", gobin)
+	t.Setenv("GOPATH", "")
+	t.Setenv("PATH", t.TempDir())
+
+	if got := RecommendedRdevCommand(); got == rdevPath {
+		t.Fatalf("non-executable GOBIN rdev must not be recommended for MCP config: %s", got)
 	}
 }
 
@@ -399,6 +424,17 @@ func TestInstallDryRunDoesNotCopyFiles(t *testing.T) {
 }
 
 func TestInstallExecuteCopiesVerifiedBundle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	goBin := filepath.Join(home, "go", "bin")
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goBinRdev := filepath.Join(goBin, "rdev")
+	if err := os.WriteFile(goBinRdev, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	bundle := filepath.Join(t.TempDir(), "bundle")
 	if _, err := Export(ExportOptions{
 		SourceRoot: filepath.Join("..", ".."),
@@ -420,15 +456,56 @@ func TestInstallExecuteCopiesVerifiedBundle(t *testing.T) {
 	if !report.OK() || !report.Executed || !report.LocalMutation || report.ExternalMutation {
 		t.Fatalf("unexpected install report: %#v", report)
 	}
+	if report.MCPCommand != goBinRdev+" mcp serve" ||
+		!slices.Contains(report.RecommendedNextSteps, "Configure the agent MCP client to execute: "+goBinRdev+" mcp serve.") {
+		t.Fatalf("expected install report to recommend absolute MCP command outside PATH, got %#v", report)
+	}
 	for _, path := range []string{
 		"remote-vibe-coding/SKILL.md",
 		"safe-remote-support/SKILL.md",
+		".remote-dev-skillkit/install.json",
 		".remote-dev-skillkit/mcp/tools.json",
 		".remote-dev-skillkit/frameworks/codex.md",
 	} {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(path))); err != nil {
 			t.Fatalf("expected installed file %s: %v", path, err)
 		}
+	}
+	var installManifest struct {
+		SchemaVersion string `json:"schema_version"`
+		SkillFiles    []struct {
+			Name         string `json:"name"`
+			RelativePath string `json:"relative_path"`
+			SHA256       string `json:"sha256"`
+			SizeBytes    int    `json:"size_bytes"`
+		} `json:"skill_files"`
+		ReferenceFiles []struct {
+			Name         string `json:"name"`
+			RelativePath string `json:"relative_path"`
+			SHA256       string `json:"sha256"`
+			SizeBytes    int    `json:"size_bytes"`
+		} `json:"reference_files"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(target, ".remote-dev-skillkit", "install.json"))), &installManifest); err != nil {
+		t.Fatal(err)
+	}
+	if installManifest.SchemaVersion != InstallManifestSchemaVersion || len(installManifest.SkillFiles) != 4 || len(installManifest.ReferenceFiles) != 2 {
+		t.Fatalf("expected install manifest skill and reference file hashes, got %#v", installManifest)
+	}
+	for _, skill := range installManifest.SkillFiles {
+		if skill.Name == "" || skill.RelativePath == "" || !strings.HasPrefix(skill.SHA256, "sha256:") || skill.SizeBytes <= 0 {
+			t.Fatalf("invalid install manifest skill file entry: %#v", skill)
+		}
+	}
+	referenceNames := map[string]bool{}
+	for _, ref := range installManifest.ReferenceFiles {
+		referenceNames[ref.Name] = true
+		if ref.RelativePath == "" || !strings.HasPrefix(ref.SHA256, "sha256:") || ref.SizeBytes <= 0 {
+			t.Fatalf("invalid install manifest reference file entry: %#v", ref)
+		}
+	}
+	if !referenceNames["mcp-tools"] || !referenceNames["framework-doc"] {
+		t.Fatalf("expected manifest to hash MCP tools and framework doc, got %#v", installManifest.ReferenceFiles)
 	}
 }
 

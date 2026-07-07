@@ -1021,6 +1021,44 @@ func (g *MemoryGateway) NextJobForHost(hostID string) (model.Job, bool, error) {
 	return job, true, nil
 }
 
+func (g *MemoryGateway) NextJobForAuthenticatedHost(hostID, secret string) (model.Job, bool, error) {
+	if !g.ValidateHostSecret(hostID, secret) {
+		return model.Job{}, false, fmt.Errorf("%w: invalid host secret", ErrPolicyDenied)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	host, ok := g.hosts[hostID]
+	if !ok {
+		return model.Job{}, false, fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status != model.HostStatusActive {
+		return model.Job{}, false, fmt.Errorf("%w: host must be active", ErrInvalidState)
+	}
+	now := g.now().UTC()
+	host.LastSeenAt = now
+	g.hosts[hostID] = host
+	g.hostHeartbeats[hostID] = now
+	jobs := make([]model.Job, 0, len(g.jobs))
+	for _, job := range g.jobs {
+		if job.HostID == hostID && job.Status == model.JobStatusQueued {
+			jobs = append(jobs, job)
+		}
+	}
+	if len(jobs) == 0 {
+		return model.Job{}, false, nil
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
+	})
+	job := jobs[0]
+	job.Status = model.JobStatusRunning
+	job.StartedAt = &now
+	g.jobs[job.ID] = job
+	g.appendAuditLocked("host", "job.claim", job.ID, "host claimed queued job")
+	return job, true, nil
+}
+
 func appendedArtifactName(content string) string {
 	if strings.Contains(content, `"schema_version": "rdev.adapter-runtime-fixture.v1"`) || strings.Contains(content, `"schema_version":"rdev.adapter-runtime-fixture.v1"`) {
 		return "adapter-runtime-fixture.json"

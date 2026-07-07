@@ -23,6 +23,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
+	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
@@ -374,6 +375,7 @@ func (s Server) supportSessionHandoff(args map[string]any) (any, error) {
 	if ttl < 60 || ttl > 86400 {
 		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
 	}
+	rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
 	return supportsession.BuildHandoff(supportsession.HandoffOptions{
 		RepoRoot:    stringArg(args, "repo_root", "."),
 		WorkDir:     stringArg(args, "work_dir", ""),
@@ -384,7 +386,7 @@ func (s Server) supportSessionHandoff(args map[string]any) (any, error) {
 		TTLSeconds:  ttl,
 		AutoApprove: boolArg(args, "auto_approve", true),
 		Locale:      stringArg(args, "locale", "auto"),
-		RdevCommand: stringArg(args, "rdev_command", "rdev"),
+		RdevCommand: rdevCommand,
 	}), nil
 }
 
@@ -396,6 +398,7 @@ func (s Server) supportSessionPrepare(args map[string]any) (any, error) {
 		Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
 		Target:      stringArg(args, "target", "auto"),
 		BuildAssets: boolArg(args, "build_assets", false),
+		RdevCommand: agentRdevCommand(stringArg(args, "rdev_command", "")),
 	})
 }
 
@@ -409,6 +412,7 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
 	}
 	if gatewayURL == "" {
+		rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
 		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
 			RepoRoot:    stringArg(args, "repo_root", "."),
 			WorkDir:     stringArg(args, "work_dir", ""),
@@ -418,7 +422,7 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 			TTLSeconds:  ttl,
 			AutoApprove: boolArg(args, "auto_approve", true),
 			Locale:      stringArg(args, "locale", "auto"),
-			RdevCommand: stringArg(args, "rdev_command", "rdev"),
+			RdevCommand: rdevCommand,
 		})
 		return supportsession.BuildConnectFromHandoff(handoff), nil
 	}
@@ -534,7 +538,7 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 		Ticket:                ticket,
 		Target:                stringArg(args, "target", "auto"),
 		Locale:                stringArg(args, "locale", "auto"),
-		RdevCommand:           stringArg(args, "rdev_command", "rdev"),
+		RdevCommand:           agentRdevCommand(stringArg(args, "rdev_command", "")),
 		AutoApprove:           autoApprove,
 	}), nil
 }
@@ -550,6 +554,7 @@ func (s Server) supportSessionPlan(args map[string]any) (any, error) {
 		TTLSeconds:  intArg(args, "ttl_seconds", 7200),
 		AutoApprove: boolArg(args, "auto_approve", true),
 		Locale:      stringArg(args, "locale", "auto"),
+		RdevCommand: agentRdevCommand(stringArg(args, "rdev_command", "")),
 	}), nil
 }
 
@@ -632,7 +637,52 @@ func (s Server) remoteSupportSessionStatus(args map[string]any, gwURL, ticketCod
 
 func (s Server) supportSessionReport(args map[string]any) (any, error) {
 	gatewayURL := s.effectiveGatewayURL(args)
-	hostID := requiredString(args, "host_id")
+	hostID := strings.TrimSpace(stringArg(args, "host_id", ""))
+	ticketCode := strings.TrimSpace(stringArg(args, "ticket_code", ""))
+	var status map[string]any
+	if ticketCode != "" {
+		statusAny, err := s.supportSessionStatus(map[string]any{
+			"gateway_url":     gatewayURL,
+			"ticket_code":     ticketCode,
+			"locale":          stringArg(args, "locale", "auto"),
+			"wait":            false,
+			"timeout_seconds": float64(0),
+			"interval_millis": float64(1000),
+		})
+		if err != nil {
+			return nil, err
+		}
+		status = nestedMapOrSelfAny(statusAny, "")
+		activeHosts := mapSliceFromAny(status["active_hosts"])
+		if hostID == "" {
+			if len(activeHosts) == 1 {
+				hostID = stringMapValue(activeHosts[0], "id")
+			} else {
+				nextAction := "No active host is job-ready for this ticket. Wait with rdev.support_session.status or run rdev support-session recover if stale hosts are present."
+				if len(activeHosts) > 1 {
+					nextAction = "Multiple active hosts are registered for this ticket; choose the intended host explicitly with host_id before creating jobs."
+				}
+				return map[string]any{
+					"schema_version":          "rdev.support-session-report.v1",
+					"ok":                      false,
+					"gateway_url":             gatewayURL,
+					"ticket_code":             ticketCode,
+					"host_id":                 "",
+					"recommended_job_host_id": "",
+					"status":                  status,
+					"active_hosts":            status["active_hosts"],
+					"stale_hosts":             status["stale_hosts"],
+					"pending_hosts":           status["pending_hosts"],
+					"host_count":              status["host_count"],
+					"next_action":             nextAction,
+					"stale_host_rule":         "Do not create jobs for stale_hosts; stale means the runner is not job-ready.",
+				}, nil
+			}
+		}
+	}
+	if hostID == "" {
+		return nil, fmt.Errorf("support_session.report requires host_id or ticket_code")
+	}
 	var host map[string]any
 	var jobs []map[string]any
 	if gatewayURL != "" {
@@ -694,14 +744,26 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 		})
 	}
 	report := map[string]any{
-		"schema_version": "rdev.support-session-report.v1",
-		"ok":             true,
-		"gateway_url":    gatewayURL,
-		"host_id":        hostID,
-		"host":           host,
-		"jobs":           jobReports,
-		"human_report":   supportSessionHumanReportMap(host, jobReports),
-		"next_action":    "Use this report instead of hand-written curl summaries; revoke the temporary session when remote work is complete.",
+		"schema_version":              "rdev.support-session-report.v1",
+		"ok":                          true,
+		"gateway_url":                 gatewayURL,
+		"ticket_code":                 ticketCode,
+		"host_id":                     hostID,
+		"recommended_job_host_id":     hostID,
+		"recommended_job_host_source": "explicit_host_id",
+		"host":                        host,
+		"jobs":                        jobReports,
+		"human_report":                supportSessionHumanReportMap(host, jobReports),
+		"next_action":                 "Use this report instead of hand-written curl summaries; create jobs only for recommended_job_host_id and revoke the temporary session when remote work is complete.",
+		"stale_host_rule":             "Do not create jobs for stale_hosts; run rdev support-session recover if stale hosts or queued jobs accumulated.",
+	}
+	if status != nil {
+		report["status"] = status
+		report["active_hosts"] = status["active_hosts"]
+		report["stale_hosts"] = status["stale_hosts"]
+		report["pending_hosts"] = status["pending_hosts"]
+		report["host_count"] = status["host_count"]
+		report["recommended_job_host_source"] = "ticket_single_active_host"
 	}
 	return report, nil
 }
@@ -1285,17 +1347,36 @@ func nestedMapOrSelfAny(value any, objectKey string) map[string]any {
 }
 
 func mapSliceFromAny(value any) []map[string]any {
+	if typed, ok := value.([]map[string]any); ok {
+		return typed
+	}
 	raw, _ := value.([]any)
-	if raw == nil {
-		return nil
-	}
-	out := make([]map[string]any, 0, len(raw))
-	for _, item := range raw {
-		if m, ok := item.(map[string]any); ok {
-			out = append(out, m)
+	if raw != nil {
+		out := make([]map[string]any, 0, len(raw))
+		for _, item := range raw {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			} else if m := structToMap(item); len(m) > 0 {
+				out = append(out, m)
+			}
 		}
+		return out
 	}
-	return out
+	switch typed := value.(type) {
+	case []model.Host:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, structToMap(item))
+		}
+		return out
+	case []model.Job:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, structToMap(item))
+		}
+		return out
+	}
+	return nil
 }
 
 func structToMap(value any) map[string]any {
@@ -1393,6 +1474,13 @@ func stringArg(args map[string]any, key, fallback string) string {
 		return text
 	}
 	return fallback
+}
+
+func agentRdevCommand(command string) string {
+	if command = strings.TrimSpace(command); command != "" {
+		return command
+	}
+	return skillkit.RecommendedRdevCommand()
 }
 
 func intArg(args map[string]any, key string, fallback int) int {

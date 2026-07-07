@@ -67,19 +67,14 @@ and what proof comes back.
 ### Let Your Agent Install It
 
 Already inside Codex, Claude Code, Hermes, OpenClaw/OpenCode, or another
-MCP-capable agent? Copy this into the agent:
+MCP-capable agent? Send it this link and ask it to read the prompt before
+acting:
 
-```text
-Install Remote Dev Skillkit for this agent runtime.
+[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
 
-Repository: https://github.com/EitanWong/remote-dev-skillkit
-Full install prompt: https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
-
-Clone or update the repository, read the full install prompt, and follow it as the source of truth. If cloning is blocked, open the prompt link directly. Ask one short question only when a required value is unclear.
-```
-
-For the full copy-paste prompt, see
-[Agent Bootstrap Prompt](docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
+That prompt is the source of truth for cloning or updating the repo, probing the
+current runtime, installing the Skillkit, configuring MCP, and asking one short
+question only when a required value cannot be discovered safely.
 
 From a checkout:
 
@@ -89,8 +84,12 @@ rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
 
+If `rdev` is not on `PATH` after `go install`, use the absolute command shown
+by `rdev bootstrap agent-plan` or the Skillkit install report's `mcp_command`
+field, for example `~/go/bin/rdev mcp serve`.
+
 Export and verify a portable Skillkit bundle. A hosted gateway URL is optional;
-omit `--gateway-url` for local Agent installs that only need `rdev mcp serve`:
+omit `--gateway-url` for local Agent installs that only need local MCP stdio:
 
 ```bash
 rdev skillkit export --source-root . --out dist/remote-dev-skillkit
@@ -192,9 +191,11 @@ should call `rdev.support_session.prepare` or run
 one-command target readiness, `gateway_url_candidates`,
 `gateway_candidate_preflight`, `connectivity_helper_preflight`,
 `agent_connection_runbook`, and standard recovery actions. The Agent should
-use that preflight table and the recommended gateway candidate for target-side
-commands, then keep raw address selection out of human chat. If no gateway is
-running yet, the Agent should run `rdev support-session connect --start` in a
+use that preflight table to decide whether the standard foreground
+`connect --start` path or a configured hosted/relay/mesh/VPN/SSH gateway is
+ready, then send only `target_handoff_envelope.full_text`. It should not turn
+LAN, loopback, or diagnostic candidates into a hand-written target command. If
+no gateway is running yet, the Agent should run `rdev support-session connect --start` in a
 visible foreground terminal; that command auto-prepares verified helper assets when
 possible, starts the local gateway, and prints
 `rdev.support-session-started.v1` with top-level `target_handoff_envelope`,
@@ -226,7 +227,16 @@ nohup, ticket, root, gateway, transport, status polling, or approval glue.
 Operators may preconfigure hosted/relay/mesh/VPN/SSH gateway URLs with
 `RDEV_*_GATEWAY_URL`; support-session prepare/start/create will include those
 URLs in the ordered candidate list, while keeping ticket/root/transport details
-inside the structured payload. They may also preconfigure reviewed helper
+inside the structured payload. For repeated sessions, do not persist
+`https://*.trycloudflare.com` Quick Tunnel URLs as stable configuration; they
+are current-session fallback URLs. If the Agent runs on a VPS/cloud server with
+its own public domain or IP, configure
+`RDEV_HOSTED_GATEWAY_URL=https://your-domain-or-public-gateway`. If you use
+Cloudflare and want a reusable address, configure
+`RDEV_CLOUDFLARED_NAMED_TUNNEL_URL=https://rdev.example.com` plus a reviewed
+named-tunnel token, token file, tunnel name, or start argv so
+`connect --start` can reuse that address before falling back to Quick Tunnel.
+They may also preconfigure reviewed helper
 metadata with `RDEV_SSH_TUNNEL_START_ARGV_JSON`, `RDEV_RELAY_START_ARGV_JSON`,
 `RDEV_MESH_START_ARGV_JSON`, `RDEV_VPN_START_ARGV_JSON`, or matching
 `RDEV_*_INSTALL_ACTION_JSON`; support-session payloads report that state in
@@ -242,13 +252,9 @@ clean targets do not fail with "rdev is required" even if an Agent accidentally
 uses `gateway serve` plus `invite create`. Use `--rdev-assets-dir <dir>` or the
 platform-specific helper flags only for reviewed explicit asset locations.
 
-For lower-level package materialization, the Agent creates an invite and
-materializes it before asking anyone on the target side to do anything. The
-public name for this universal handoff is **Connection Entry**. It covers your
-own long-running workstation, someone else's temporary repair machine, LAN,
-hosted, relay, mesh, SSH, and VPN-assisted paths. Humans should not
-hand-assemble ticket codes, root keys, gateway URLs, transports, release roots,
-or checksums.
+For ordinary "connect this computer" work, use the high-level support-session
+entry. It keeps the Agent on the standard path and gives the human one complete
+handoff instead of ticket/root/gateway pieces:
 
 ```bash
 rdev support-session connect \
@@ -259,7 +265,28 @@ rdev support-session connect \
   --start \
   --target auto \
   --locale auto
+```
 
+Use status/report after the handoff is sent:
+
+```bash
+rdev support-session status \
+  --gateway-url http://<active-gateway-host>:8787 \
+  --ticket-code <ticket-code> \
+  --wait \
+  --locale auto
+
+# If RDEV_HOSTED_GATEWAY_URL / RDEV_CLOUDFLARED_NAMED_TUNNEL_URL / similar is configured:
+rdev support-session status \
+  --ticket-code <ticket-code> \
+  --wait \
+  --locale auto
+```
+
+Use prepare/create/plan only for review, debugging, or explicit lower-level
+workflows:
+
+```bash
 rdev support-session prepare \
   --target auto \
   --build-assets
@@ -278,24 +305,21 @@ rdev support-session plan \
   --gateway-url http://<reachable-gateway-host>:8787 \
   --target auto \
   --locale auto
-
-rdev support-session status \
-  --gateway-url http://<reachable-gateway-host>:8787 \
-  --ticket-code <ticket-code> \
-  --wait \
-  --locale auto
-
-# If RDEV_HOSTED_GATEWAY_URL / RDEV_RELAY_GATEWAY_URL / similar is configured:
-rdev support-session status \
-  --ticket-code <ticket-code> \
-  --wait \
-  --locale auto
 ```
 
-If there is no hosted gateway yet, the Agent should start with local MCP stdio,
-`rdev demo local`, or a local-dev/LAN gateway plan. It should only escalate to
-hosted, SSH, relay, mesh, VPN, firewall, DNS, cloud, paid, privileged, or
-persistent changes when probes show they are needed and the operator approves.
+For explicit package materialization, the Agent creates an invite and
+materializes it before asking anyone on the target side to do anything. The
+public name for this universal handoff is **Connection Entry**. It covers your
+own long-running workstation, someone else's temporary repair machine, LAN,
+hosted, relay, mesh, SSH, and VPN-assisted paths. Humans should not
+hand-assemble ticket codes, root keys, gateway URLs, transports, release roots,
+or checksums.
+
+If there is no hosted or configured gateway yet, the Agent should run
+`rdev support-session connect --start` in a visible foreground terminal. It
+should only escalate to hosted, SSH, relay, mesh, VPN, firewall, DNS, cloud,
+paid, privileged, or persistent changes when probes show they are needed and
+the operator approves.
 
 The JSON output includes `schema_version: rdev.agent-invite.v1`, a short-lived
 ticket, the manifest URL, the pinned manifest root, a machine-readable
@@ -413,9 +437,11 @@ first, falls back to HTTPS long-poll when WebSocket upgrades are blocked, and
 keeps short polling as the maximum-compatibility path for stubborn networks.
 No inbound port on the target machine is required.
 
-MCP-capable agents can call `rdev.invites.create` directly through
-`rdev mcp serve`; no private server addresses or local paths are baked into the
-project.
+MCP-capable agents should start ordinary "connect this computer" work with
+`rdev.support_session.connect` through `rdev mcp serve`. Lower-level
+`rdev.invites.create` remains available for reviewed package materialization,
+approved managed owned-host planning, or explicit recovery paths. No private
+server addresses or local paths are baked into the project.
 
 ## Connection Paths
 

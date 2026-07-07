@@ -12,24 +12,19 @@ Remote Dev Skillkit उन AI Agent के लिए safety layer है जि�
 
 ## Fast Install
 
-अगर आप पहले से Codex, Claude Code, Hermes, OpenClaw/OpenCode या किसी दूसरे MCP Agent में हैं, तो यह अपने Agent में paste करें:
+अगर आप पहले से Codex, Claude Code, Hermes, OpenClaw/OpenCode या किसी दूसरे MCP Agent में हैं, तो Agent को यह लिंक भेजें और कहें कि action लेने से पहले पूरा prompt पढ़े:
 
-```text
-Install Remote Dev Skillkit for this agent runtime.
+[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
 
-Repository: https://github.com/EitanWong/remote-dev-skillkit
-Full install prompt: https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
-
-Clone or update the repository, read the full install prompt, and follow it as the source of truth. If cloning is blocked, open the prompt link directly. Ask one short question only when a required value is unclear.
-```
-
-पूरा copy-paste Prompt: [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md).
+यही prompt installation का source of truth है: repo clone या update करना, current Agent runtime detect करना, Skillkit install करना, MCP configure करना, और कोई required value safely detect न हो पाए तो सिर्फ एक छोटा सवाल पूछना।
 
 ```bash
 go install ./cmd/rdev
 rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
+
+अगर `rdev` `PATH` में नहीं है, तो `rdev bootstrap agent-plan` या install report के `mcp_command` field में दिया गया absolute MCP command इस्तेमाल करें।
 
 Skillkit bundle export और verify करें:
 

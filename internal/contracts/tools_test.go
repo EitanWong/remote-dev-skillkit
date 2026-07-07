@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -98,6 +100,40 @@ func TestGatewayBackedToolsExposeGatewayURL(t *testing.T) {
 		if _, ok := properties["gateway_url"]; !ok {
 			t.Fatalf("tool %s must expose gateway_url in live MCP schema: %#v", name, properties)
 		}
+	}
+}
+
+func TestToolDescriptionsDoNotPromoteGatewayCandidateAssembly(t *testing.T) {
+	for _, tool := range Tools() {
+		forbidden := []string{
+			"recommended gateway_url_candidates entry",
+			"use the returned gateway_url_candidates",
+			"use gateway_url_candidates",
+			"turn gateway_url_candidates",
+		}
+		for _, text := range forbidden {
+			if strings.Contains(tool.Description, text) {
+				t.Fatalf("tool %s description promotes gateway candidate assembly with %q: %s", tool.Name, text, tool.Description)
+			}
+		}
+	}
+}
+
+func TestSupportSessionReportSchemaAcceptsTicketCodeOrHostID(t *testing.T) {
+	tool := findTool("rdev.support_session.report")
+	if tool == nil {
+		t.Fatal("missing rdev.support_session.report")
+	}
+	properties, _ := tool.InputSchema["properties"].(map[string]any)
+	if _, ok := properties["host_id"]; !ok {
+		t.Fatalf("report schema must keep host_id: %#v", properties)
+	}
+	if _, ok := properties["ticket_code"]; !ok {
+		t.Fatalf("report schema must expose ticket_code: %#v", properties)
+	}
+	required, _ := tool.InputSchema["required"].([]string)
+	if slices.Contains(required, "host_id") || slices.Contains(required, "ticket_code") {
+		t.Fatalf("report schema should allow either host_id or ticket_code, got required=%#v", required)
 	}
 }
 

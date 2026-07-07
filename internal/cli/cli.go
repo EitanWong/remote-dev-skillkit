@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -80,10 +82,13 @@ func (a App) Run(ctx context.Context, args []string) error {
 		a.printUsage()
 		return nil
 	}
+	if len(args) > 1 && isHelpArg(args[1]) && a.printCommandGroupUsage(args[0]) {
+		return nil
+	}
 
 	switch args[0] {
 	case "version":
-		return a.version()
+		return a.version(args[1:])
 	case "doctor":
 		return a.doctor(ctx)
 	case "bootstrap":
@@ -160,6 +165,10 @@ func (a App) Run(ctx context.Context, args []string) error {
 		}
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func isHelpArg(arg string) bool {
+	return arg == "help" || arg == "-h" || arg == "--help"
 }
 
 func (a App) update(ctx context.Context, args []string) error {
@@ -2426,15 +2435,623 @@ func (a App) acceptanceReleaseEvidenceIndex(opts acceptance.ReleaseEvidenceIndex
 	return nil
 }
 
-func (a App) version() error {
+func (a App) version(args []string) error {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	fs.SetOutput(a.Stderr)
+	jsonOut := fs.Bool("json", false, "print version and install metadata as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *jsonOut {
+		return writeJSON(a.Stdout, rdevRuntimeInfo("."))
+	}
 	_, err := fmt.Fprintf(a.Stdout, "%s %s\n", buildinfo.Name, buildinfo.Version)
 	return err
 }
 
 func (a App) doctor(ctx context.Context) error {
-	enc := json.NewEncoder(a.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(hostcap.Detect(ctx))
+	runtimeInfo := rdevRuntimeInfo(".")
+	ok, diagnostics, refreshActions := runtimeInfoHealth(runtimeInfo)
+	agentNextActions := []string{
+		"if rdev.version is old or commit/source_root is unknown, rebuild or update rdev before starting a support session",
+		"use rdev support-session connect --start for connect-this-computer workflows",
+	}
+	agentNextActions = append(agentNextActions, refreshActions...)
+	return writeJSON(a.Stdout, map[string]any{
+		"schema_version":     "rdev.doctor.v1",
+		"ok":                 ok,
+		"diagnostics":        diagnostics,
+		"rdev":               runtimeInfo,
+		"host_capabilities":  hostcap.Detect(ctx),
+		"agent_next_actions": agentNextActions,
+	})
+}
+
+func runtimeInfoHealth(runtimeInfo map[string]any) (bool, []string, []string) {
+	ok := true
+	diagnostics := []string{}
+	actions := []string{}
+	addSkillProblem := func(scope string, status map[string]any) {
+		if status == nil || status["ok"] != false {
+			return
+		}
+		ok = false
+		parts := []string{scope}
+		if stale := stringSliceFromAny(status["stale_skills"]); len(stale) > 0 {
+			parts = append(parts, "stale="+strings.Join(stale, ","))
+		}
+		if missing := stringSliceFromAny(status["missing_skills"]); len(missing) > 0 {
+			parts = append(parts, "missing="+strings.Join(missing, ","))
+		}
+		if mismatches := stringSliceFromAny(status["manifest_mismatch_skills"]); len(mismatches) > 0 {
+			parts = append(parts, "tampered_or_overwritten="+strings.Join(mismatches, ","))
+		}
+		if manifestMissing := stringSliceFromAny(status["manifest_missing_skills"]); len(manifestMissing) > 0 {
+			parts = append(parts, "manifest_missing="+strings.Join(manifestMissing, ","))
+		}
+		if staleRefs := stringSliceFromAny(status["stale_reference_files"]); len(staleRefs) > 0 {
+			parts = append(parts, "stale_references="+strings.Join(staleRefs, ","))
+		}
+		if missingRefs := stringSliceFromAny(status["missing_reference_files"]); len(missingRefs) > 0 {
+			parts = append(parts, "missing_references="+strings.Join(missingRefs, ","))
+		}
+		if refMismatches := stringSliceFromAny(status["manifest_mismatch_reference_files"]); len(refMismatches) > 0 {
+			parts = append(parts, "tampered_or_overwritten_references="+strings.Join(refMismatches, ","))
+		}
+		if refMissing := stringSliceFromAny(status["manifest_missing_reference_files"]); len(refMissing) > 0 {
+			parts = append(parts, "manifest_missing_references="+strings.Join(refMissing, ","))
+		}
+		if status["install_manifest_present"] == false {
+			parts = append(parts, "install_manifest=missing")
+		}
+		diagnostics = append(diagnostics, "skillkit install is not healthy: "+strings.Join(parts, " "))
+		actions = append(actions, "refresh the affected Skillkit install with `rdev skillkit install --execute`; if the target framework is unclear, run `rdev skillkit plan-install` first and ask one short question only if the target directory remains ambiguous")
+	}
+
+	for _, manifest := range mapSliceFromAny(runtimeInfo["install_manifests"]) {
+		scope := strings.TrimSpace(stringFromMap(manifest, "framework"))
+		targetDir := strings.TrimSpace(stringFromMap(manifest, "target_dir"))
+		manifestPath := strings.TrimSpace(stringFromMap(manifest, "path"))
+		if scope == "" {
+			scope = "manifest"
+		}
+		if targetDir != "" {
+			scope += " target=" + targetDir
+		}
+		if manifestPath != "" {
+			scope += " manifest=" + manifestPath
+		}
+		if manifestErr := strings.TrimSpace(stringFromMap(manifest, "error")); manifestErr != "" {
+			ok = false
+			diagnostics = append(diagnostics, "skillkit install manifest is unreadable: "+scope+" error="+manifestErr)
+			actions = append(actions, "refresh the affected Skillkit install with `rdev skillkit install --execute`; if the target framework is unclear, run `rdev skillkit plan-install` first and ask one short question only if the target directory remains ambiguous")
+			continue
+		}
+		status, _ := manifest["skill_status"].(map[string]any)
+		if manifestPath != "" && status == nil {
+			ok = false
+			diagnostics = append(diagnostics, "skillkit install manifest is not verifiable: "+scope+" missing target_dir or skill files")
+			actions = append(actions, "refresh the affected Skillkit install with `rdev skillkit install --execute`; if the target framework is unclear, run `rdev skillkit plan-install` first and ask one short question only if the target directory remains ambiguous")
+			continue
+		}
+		addSkillProblem(scope, status)
+	}
+	for _, target := range mapSliceFromAny(runtimeInfo["detected_skill_install_targets"]) {
+		scope := strings.TrimSpace(stringFromMap(target, "framework"))
+		targetDir := strings.TrimSpace(stringFromMap(target, "target_dir"))
+		if scope == "" {
+			scope = "legacy skill target"
+		} else {
+			scope = "legacy " + scope
+		}
+		if targetDir != "" {
+			scope += " target=" + targetDir
+		}
+		status, _ := target["skill_status"].(map[string]any)
+		addSkillProblem(scope, status)
+	}
+	return ok, dedupeStrings(diagnostics), dedupeStrings(actions)
+}
+
+func rdevRuntimeInfo(repoRootHint string) map[string]any {
+	currentExecutable, _ := os.Executable()
+	pathRdev, _ := exec.LookPath("rdev")
+	sourceRoot := strings.TrimSpace(buildinfo.SourceRoot)
+	sourceRootSource := "buildinfo"
+	if sourceRoot == "" || sourceRoot == "unknown" {
+		sourceRoot = ""
+		sourceRootSource = ""
+	}
+	if envSource := strings.TrimSpace(os.Getenv("RDEV_SOURCE_ROOT")); envSource != "" {
+		if found := findSupportSessionRepoRoot(envSource); found != "" {
+			sourceRoot = found
+			sourceRootSource = "env:RDEV_SOURCE_ROOT"
+		}
+	}
+	if sourceRoot == "" {
+		if found := findSupportSessionRepoRoot(repoRootHint); found != "" && supportSessionRepoRootValid(found) {
+			sourceRoot = found
+			sourceRootSource = "repo-root-hint"
+		}
+	}
+	if sourceRoot == "" {
+		if found := findSupportSessionRepoRoot("."); found != "" && supportSessionRepoRootValid(found) {
+			sourceRoot = found
+			sourceRootSource = "cwd"
+		}
+	}
+	if sourceRoot == "" && currentExecutable != "" {
+		if found := findSupportSessionRepoRoot(filepath.Dir(currentExecutable)); found != "" && supportSessionRepoRootValid(found) {
+			sourceRoot = found
+			sourceRootSource = "current-executable-parent"
+		}
+	}
+	manifestCandidates := installManifestCandidates(sourceRoot)
+	manifests := make([]map[string]any, 0, len(manifestCandidates))
+	for _, candidate := range manifestCandidates {
+		if manifest := readInstallManifestSummary(candidate); manifest != nil {
+			if status := skillInstallStatus(sourceRoot, manifest); status != nil {
+				manifest["skill_status"] = status
+			}
+			manifests = append(manifests, manifest)
+		}
+	}
+	detectedSkillTargets := detectedSkillInstallTargets(sourceRoot, manifests)
+	return map[string]any{
+		"schema_version":                 "rdev.runtime-info.v1",
+		"name":                           buildinfo.Name,
+		"version":                        buildinfo.Version,
+		"commit":                         buildinfo.Commit,
+		"build_time":                     buildinfo.BuildTime,
+		"build_source_root":              buildinfo.SourceRoot,
+		"source_root":                    sourceRoot,
+		"source_root_source":             sourceRootSource,
+		"source_root_valid":              supportSessionRepoRootValid(sourceRoot),
+		"current_executable":             currentExecutable,
+		"path_rdev":                      pathRdev,
+		"path_rdev_is_current":           pathRdev != "" && currentExecutable != "" && samePath(pathRdev, currentExecutable),
+		"install_manifests":              manifests,
+		"install_manifest_count":         len(manifests),
+		"detected_skill_install_targets": detectedSkillTargets,
+		"detected_skill_target_count":    len(detectedSkillTargets),
+	}
+}
+
+func supportSessionRepoRootValid(root string) bool {
+	root = strings.TrimSpace(root)
+	return root != "" && pathExists(filepath.Join(root, "go.mod")) && pathExists(filepath.Join(root, "cmd", "rdev", "main.go"))
+}
+
+func installManifestCandidates(sourceRoot string) []string {
+	candidates := []string{}
+	if strings.TrimSpace(sourceRoot) != "" {
+		candidates = append(candidates, filepath.Join(sourceRoot, ".remote-dev-skillkit", "install.json"))
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		candidates = append(candidates,
+			filepath.Join(home, ".remote-dev-skillkit", "install.json"),
+			filepath.Join(home, ".codex", "skills", ".remote-dev-skillkit", "install.json"),
+			filepath.Join(home, ".claude", "skills", ".remote-dev-skillkit", "install.json"),
+			filepath.Join(home, ".opencode", "skills", ".remote-dev-skillkit", "install.json"),
+		)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		for dir := wd; ; dir = filepath.Dir(dir) {
+			candidates = append(candidates, filepath.Join(dir, ".remote-dev-skillkit", "install.json"))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+	return dedupePaths(candidates)
+}
+
+func readInstallManifestSummary(path string) map[string]any {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return map[string]any{"path": path, "error": err.Error()}
+	}
+	return map[string]any{
+		"path":            path,
+		"schema_version":  stringFromMap(payload, "schema_version"),
+		"bundle_dir":      stringFromMap(payload, "bundle_dir"),
+		"target_dir":      stringFromMap(payload, "target_dir"),
+		"framework":       stringFromMap(payload, "framework"),
+		"installed_at":    stringFromMap(payload, "installed_at"),
+		"skill_files":     payload["skill_files"],
+		"reference_files": payload["reference_files"],
+		"mcp_tools_json":  stringFromMap(payload, "mcp_tools_json"),
+		"framework_doc":   stringFromMap(payload, "framework_doc"),
+	}
+}
+
+func detectedSkillInstallTargets(sourceRoot string, manifests []map[string]any) []map[string]any {
+	if strings.TrimSpace(sourceRoot) == "" {
+		return nil
+	}
+	manifestTargets := map[string]bool{}
+	for _, manifest := range manifests {
+		targetDir := strings.TrimSpace(stringFromMap(manifest, "target_dir"))
+		if targetDir != "" {
+			manifestTargets[targetDir] = true
+		}
+	}
+	out := []map[string]any{}
+	for _, candidate := range commonSkillTargetCandidates() {
+		if manifestTargets[candidate.Path] {
+			continue
+		}
+		status := skillInstallStatus(sourceRoot, map[string]any{"target_dir": candidate.Path})
+		if status == nil {
+			continue
+		}
+		skillCount, _ := status["skill_count"].(int)
+		missing, _ := status["missing_skills"].([]string)
+		if skillCount == 0 || len(missing) == skillCount {
+			continue
+		}
+		out = append(out, map[string]any{
+			"schema_version":         "rdev.detected-skill-install-target.v1",
+			"framework":              candidate.Framework,
+			"target_dir":             candidate.Path,
+			"install_manifest_found": false,
+			"skill_status":           status,
+			"next_action":            "Refresh this Skillkit install with rdev skillkit install --execute so future diagnostics can read .remote-dev-skillkit/install.json.",
+		})
+	}
+	return out
+}
+
+type skillTargetCandidate struct {
+	Framework string
+	Path      string
+}
+
+func commonSkillTargetCandidates() []skillTargetCandidate {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return nil
+	}
+	candidates := []skillTargetCandidate{
+		{Framework: "codex", Path: filepath.Join(home, ".codex", "skills")},
+		{Framework: "claude-code", Path: filepath.Join(home, ".claude", "skills")},
+		{Framework: "hermes", Path: filepath.Join(home, ".hermes", "skills")},
+		{Framework: "openclaw", Path: filepath.Join(home, ".openclaw", "skills")},
+	}
+	if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+		candidates = append(candidates, skillTargetCandidate{Framework: "opencode", Path: filepath.Join(appData, "opencode", "skills")})
+	} else {
+		candidates = append(candidates, skillTargetCandidate{Framework: "opencode", Path: filepath.Join(home, ".config", "opencode", "skills")})
+	}
+	envs := map[string]string{
+		"codex":             "RDEV_CODEX_SKILLS_DIR",
+		"claude-code":       "RDEV_CLAUDE_CODE_SKILLS_DIR",
+		"hermes":            "RDEV_HERMES_SKILLS_DIR",
+		"openclaw":          "RDEV_OPENCLAW_SKILLS_DIR",
+		"opencode":          "RDEV_OPENCODE_SKILLS_DIR",
+		"generic-mcp-agent": "RDEV_GENERIC_AGENT_SKILLS_DIR",
+	}
+	for framework, envName := range envs {
+		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+			candidates = append(candidates, skillTargetCandidate{Framework: framework, Path: value})
+		}
+	}
+	deduped := []skillTargetCandidate{}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		path := strings.TrimSpace(candidate.Path)
+		if expanded := expandHomePath(path); expanded != "" {
+			path = expanded
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		candidate.Path = path
+		deduped = append(deduped, candidate)
+	}
+	return deduped
+}
+
+func expandHomePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return path
+	}
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
+func skillInstallStatus(sourceRoot string, manifest map[string]any) map[string]any {
+	sourceRoot = strings.TrimSpace(sourceRoot)
+	targetDir := strings.TrimSpace(stringFromMap(manifest, "target_dir"))
+	if targetDir == "" {
+		return nil
+	}
+	installManifestPresent := stringFromMap(manifest, "schema_version") == "rdev.skillkit-install-manifest.v1"
+	skills := []string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"}
+	items := make([]map[string]any, 0, len(skills))
+	stale := []string{}
+	missing := []string{}
+	manifestMismatches := []string{}
+	manifestMissing := []string{}
+	manifestFiles := installManifestSkillFiles(manifest)
+	for _, skill := range skills {
+		sourceHash := ""
+		if sourceRoot != "" {
+			sourceHash = fileSHA256(filepath.Join(sourceRoot, "skills", skill, "SKILL.md"))
+		}
+		installedPath := filepath.Join(targetDir, skill, "SKILL.md")
+		installedHash := fileSHA256(installedPath)
+		manifestHash := manifestFiles[skill]
+		sourceUpToDate := sourceHash != "" && installedHash != "" && sourceHash == installedHash
+		manifestUpToDate := manifestHash != "" && installedHash != "" && manifestHash == "sha256:"+installedHash
+		item := map[string]any{
+			"name":                  skill,
+			"source_sha256":         sourceHash,
+			"installed_sha256":      installedHash,
+			"manifest_sha256":       manifestHash,
+			"installed_path":        installedPath,
+			"source_up_to_date":     sourceUpToDate,
+			"manifest_up_to_date":   manifestUpToDate,
+			"up_to_date":            sourceUpToDate,
+			"integrity_up_to_date":  manifestUpToDate,
+			"manifest_hash_present": manifestHash != "",
+		}
+		if installedHash == "" || (sourceRoot != "" && sourceHash == "") {
+			missing = append(missing, skill)
+		} else if sourceHash != "" && sourceHash != installedHash {
+			stale = append(stale, skill)
+		}
+		if len(manifestFiles) > 0 {
+			if manifestHash == "" {
+				manifestMissing = append(manifestMissing, skill)
+			} else if installedHash == "" || manifestHash != "sha256:"+installedHash {
+				manifestMismatches = append(manifestMismatches, skill)
+			}
+		}
+		items = append(items, item)
+	}
+	integrityKnown := len(manifestFiles) > 0
+	referenceItems, staleReferences, missingReferences, referenceManifestMismatches, referenceManifestMissing, referenceIntegrityKnown := skillReferenceInstallStatus(sourceRoot, targetDir, manifest)
+	ok := installManifestPresent &&
+		len(stale) == 0 &&
+		len(missing) == 0 &&
+		integrityKnown &&
+		len(manifestMismatches) == 0 &&
+		len(manifestMissing) == 0 &&
+		referenceIntegrityKnown &&
+		len(staleReferences) == 0 &&
+		len(missingReferences) == 0 &&
+		len(referenceManifestMismatches) == 0 &&
+		len(referenceManifestMissing) == 0
+	return map[string]any{
+		"schema_version":                    "rdev.skill-install-status.v1",
+		"ok":                                ok,
+		"install_manifest_present":          installManifestPresent,
+		"source_status_known":               sourceRoot != "",
+		"integrity_status_known":            integrityKnown,
+		"manifest_integrity_ok":             integrityKnown && len(manifestMismatches) == 0 && len(manifestMissing) == 0,
+		"reference_integrity_status_known":  referenceIntegrityKnown,
+		"reference_manifest_integrity_ok":   referenceIntegrityKnown && len(referenceManifestMismatches) == 0 && len(referenceManifestMissing) == 0,
+		"skill_count":                       len(skills),
+		"stale_skills":                      stale,
+		"missing_skills":                    missing,
+		"manifest_mismatch_skills":          manifestMismatches,
+		"manifest_missing_skills":           manifestMissing,
+		"stale_reference_files":             staleReferences,
+		"missing_reference_files":           missingReferences,
+		"manifest_mismatch_reference_files": referenceManifestMismatches,
+		"manifest_missing_reference_files":  referenceManifestMissing,
+		"skills":                            items,
+		"reference_files":                   referenceItems,
+	}
+}
+
+func skillReferenceInstallStatus(sourceRoot, targetDir string, manifest map[string]any) ([]map[string]any, []string, []string, []string, []string, bool) {
+	specs := installReferenceSpecs(sourceRoot, targetDir, manifest)
+	manifestFiles := installManifestReferenceFiles(manifest)
+	items := make([]map[string]any, 0, len(specs))
+	stale := []string{}
+	missing := []string{}
+	manifestMismatches := []string{}
+	manifestMissing := []string{}
+	for _, spec := range specs {
+		installedHash := fileSHA256(spec.InstalledPath)
+		sourceHash := ""
+		if spec.SourcePath != "" {
+			sourceHash = fileSHA256(spec.SourcePath)
+		}
+		manifestHash := manifestFiles[spec.Name]
+		sourceUpToDate := sourceHash != "" && installedHash != "" && sourceHash == installedHash
+		manifestUpToDate := manifestHash != "" && installedHash != "" && manifestHash == "sha256:"+installedHash
+		item := map[string]any{
+			"name":                  spec.Name,
+			"relative_path":         spec.RelativePath,
+			"installed_path":        spec.InstalledPath,
+			"source_path":           spec.SourcePath,
+			"source_sha256":         sourceHash,
+			"installed_sha256":      installedHash,
+			"manifest_sha256":       manifestHash,
+			"source_up_to_date":     sourceUpToDate,
+			"manifest_up_to_date":   manifestUpToDate,
+			"up_to_date":            sourceHash != "" && sourceUpToDate,
+			"integrity_up_to_date":  manifestUpToDate,
+			"manifest_hash_present": manifestHash != "",
+		}
+		if installedHash == "" {
+			missing = append(missing, spec.Name)
+		} else if sourceHash != "" && sourceHash != installedHash {
+			stale = append(stale, spec.Name)
+		}
+		if len(manifestFiles) > 0 {
+			if manifestHash == "" {
+				manifestMissing = append(manifestMissing, spec.Name)
+			} else if installedHash == "" || manifestHash != "sha256:"+installedHash {
+				manifestMismatches = append(manifestMismatches, spec.Name)
+			}
+		} else {
+			manifestMissing = append(manifestMissing, spec.Name)
+		}
+		items = append(items, item)
+	}
+	return items, stale, missing, manifestMismatches, manifestMissing, len(manifestFiles) > 0
+}
+
+type installReferenceSpec struct {
+	Name          string
+	RelativePath  string
+	InstalledPath string
+	SourcePath    string
+}
+
+func installReferenceSpecs(sourceRoot, targetDir string, manifest map[string]any) []installReferenceSpec {
+	refRoot := filepath.Join(targetDir, ".remote-dev-skillkit")
+	frameworkDoc := strings.TrimSpace(stringFromMap(manifest, "framework_doc"))
+	frameworkDocRel := ""
+	if frameworkDoc != "" {
+		frameworkDocRel = filepath.ToSlash(filepath.Join("frameworks", filepath.Base(frameworkDoc)))
+	}
+	if frameworkDocRel == "" {
+		frameworkDocRel = "frameworks/codex.md"
+	}
+	bundleDir := strings.TrimSpace(stringFromMap(manifest, "bundle_dir"))
+	specs := []installReferenceSpec{
+		{
+			Name:          "mcp-tools",
+			RelativePath:  "mcp/tools.json",
+			InstalledPath: filepath.Join(refRoot, "mcp", "tools.json"),
+		},
+		{
+			Name:          "framework-doc",
+			RelativePath:  frameworkDocRel,
+			InstalledPath: filepath.Join(refRoot, filepath.FromSlash(frameworkDocRel)),
+		},
+	}
+	if sourceRoot != "" {
+		specs[0].SourcePath = filepath.Join(sourceRoot, "mcp", "tools.json")
+	}
+	if bundleDir != "" {
+		specs[1].SourcePath = filepath.Join(bundleDir, filepath.FromSlash(frameworkDocRel))
+	}
+	return specs
+}
+
+func installManifestSkillFiles(manifest map[string]any) map[string]string {
+	out := map[string]string{}
+	raw, ok := manifest["skill_files"].([]any)
+	if !ok {
+		return out
+	}
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(stringFromMap(m, "name"))
+		hash := strings.TrimSpace(stringFromMap(m, "sha256"))
+		if name == "" || hash == "" {
+			continue
+		}
+		out[name] = hash
+	}
+	return out
+}
+
+func installManifestReferenceFiles(manifest map[string]any) map[string]string {
+	out := map[string]string{}
+	raw, ok := manifest["reference_files"].([]any)
+	if !ok {
+		return out
+	}
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := strings.TrimSpace(stringFromMap(m, "name"))
+		hash := strings.TrimSpace(stringFromMap(m, "sha256"))
+		if name == "" || hash == "" {
+			continue
+		}
+		out[name] = hash
+	}
+	return out
+}
+
+func fileSHA256(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
+func samePath(left, right string) bool {
+	if left == "" || right == "" {
+		return false
+	}
+	leftAbs, leftErr := filepath.Abs(left)
+	rightAbs, rightErr := filepath.Abs(right)
+	if leftErr == nil {
+		left = leftAbs
+	}
+	if rightErr == nil {
+		right = rightAbs
+	}
+	leftEval, leftErr := filepath.EvalSymlinks(left)
+	rightEval, rightErr := filepath.EvalSymlinks(right)
+	if leftErr == nil {
+		left = leftEval
+	}
+	if rightErr == nil {
+		right = rightEval
+	}
+	return left == right
+}
+
+func dedupePaths(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func dedupeStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func (a App) bootstrap(ctx context.Context, args []string) error {
@@ -2471,13 +3088,11 @@ func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, re
 	if strings.TrimSpace(framework) == "" {
 		framework = "unknown-probe-required"
 	}
-	if strings.TrimSpace(rdevPath) == "" && strings.TrimSpace(currentExecutable) != "" && strings.Contains(filepath.Base(currentExecutable), "rdev") {
-		rdevPath = currentExecutable
-	}
-	localMCPCommand := "rdev"
-	if strings.TrimSpace(rdevPath) != "" {
-		localMCPCommand = rdevPath
-	}
+	localMCPCommand := skillkit.RecommendedRdevCommand()
+	goBinRdev := skillkit.InstalledGoBinRdevForDiagnostics()
+	currentExecutableUsable := strings.TrimSpace(currentExecutable) != "" &&
+		strings.Contains(filepath.Base(currentExecutable), "rdev") &&
+		!strings.Contains(filepath.ToSlash(currentExecutable), "/go-build/")
 	recoveryActions := []map[string]any{
 		{
 			"id":      "use-existing-rdev",
@@ -2486,8 +3101,14 @@ func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, re
 			"notes":   []string{"Prefer an already installed rdev when it passes rdev doctor."},
 		},
 		{
+			"id":      "use-go-bin-rdev",
+			"status":  statusFromBool(strings.TrimSpace(goBinRdev) != ""),
+			"command": []string{goBinRdev, "doctor"},
+			"notes":   []string{"Use this when go install created rdev under GOBIN/GOPATH/bin but that directory is not on PATH.", "Configure MCP with the absolute binary path instead of a bare rdev command."},
+		},
+		{
 			"id":      "use-current-executable",
-			"status":  statusFromBool(strings.TrimSpace(currentExecutable) != "" && strings.Contains(filepath.Base(currentExecutable), "rdev")),
+			"status":  statusFromBool(currentExecutableUsable),
 			"command": []string{currentExecutable, "doctor"},
 			"notes":   []string{"When the agent is already running a local rdev binary outside PATH, use that absolute binary for MCP config."},
 		},
@@ -2525,7 +3146,7 @@ func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, re
 		"gateway or relay credentials are required and cannot be discovered from approved local config",
 	}
 	doNotAskFor := []string{
-		"target OS before generating a Connection Entry; let package catalog, join page, and target-side probes select it",
+		"target OS before starting the standard support-session connect flow; let package catalog, join page, and target-side probes select it when package materialization is needed",
 		"ticket code, manifest root, gateway URL, transport, release root, checksum, or helper argv assembly",
 		"temporary vs managed mode when ownership is clear; use attended-temporary for third-party/one-off and managed for owned recurring hosts",
 		"rdev path before trying PATH, current executable, checkout build, and safe clone/build recovery",
@@ -2537,11 +3158,11 @@ func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, re
 		"third_party_mode":      "attended-temporary",
 		"first_human_question":  "Please confirm that company policy and the device owner allow a visible temporary Remote Dev Skillkit support session on this machine.",
 		"agent_should_continue_after_confirmation": []string{
-			"create an invite",
-			"materialize a Connection Entry",
-			"give the target side only the selected link, visible launcher, visible script, or signed package",
-			"wait for pending host",
-			"ask operator to approve the expected machine with scoped capabilities",
+			"call rdev.support_session.connect or run rdev support-session connect",
+			"if no gateway is running, run the returned visible foreground rdev support-session connect --start command",
+			"send only handoff_text_file.path or target_handoff_envelope.full_text verbatim to the target side",
+			"wait through connection_supervision, foreground_feedback, status_file.path, or rdev.support_session.status",
+			"use connection_entry_runner_recommendation only for reviewed package materialization, managed owned-host planning, or restrictive-network recovery",
 		},
 		"safe_defaults": []string{
 			"visible foreground session",
@@ -2574,6 +3195,7 @@ func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, re
 		"rdev_path":                  rdevPath,
 		"current_executable":         currentExecutable,
 		"go_path":                    goPath,
+		"go_bin_rdev":                goBinRdev,
 		"git_path":                   gitPath,
 		"local_mcp": map[string]any{
 			"mode":        "stdio",
@@ -2623,6 +3245,13 @@ func statusFromBool(ok bool) string {
 	return "unavailable"
 }
 
+func agentRdevCommand(command string) string {
+	if command = strings.TrimSpace(command); command != "" {
+		return command
+	}
+	return skillkit.RecommendedRdevCommand()
+}
+
 func pathExists(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
@@ -2633,7 +3262,13 @@ func pathExists(path string) bool {
 
 func (a App) supportSession(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("missing support-session subcommand")
+		a.printSupportSessionUsage()
+		return nil
+	}
+	switch args[0] {
+	case "help", "-h", "--help":
+		a.printSupportSessionUsage()
+		return nil
 	}
 	switch args[0] {
 	case "connect":
@@ -2649,13 +3284,16 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
-		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for generated local commands")
+		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		start := fs.Bool("start", false, "when no reachable gateway is configured, start the standard visible foreground gateway in this process")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file when --start is used")
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file when --start is used")
 		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file when --start is used")
 		connectedReportFile := fs.String("connected-report-file", "", "write the exact connected user report text to this file when --start is used")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		return a.supportSessionConnect(ctx, supportSessionConnectOptions{
@@ -2688,8 +3326,11 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
 		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
-		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
+		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		if *ttl < 60 || *ttl > 86400 {
@@ -2705,7 +3346,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			TTLSeconds:  *ttl,
 			AutoApprove: *autoApprove,
 			Locale:      *locale,
-			RdevCommand: *rdevCommand,
+			RdevCommand: agentRdevCommand(*rdevCommand),
 		}))
 	case "prepare":
 		fs := flag.NewFlagSet("support-session prepare", flag.ContinueOnError)
@@ -2716,7 +3357,11 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to the best local candidate for --addr")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
 		buildAssets := fs.Bool("build-assets", false, "build missing platform rdev helper assets from the checkout")
+		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		return a.supportSessionPrepare(ctx, supportSessionPrepareOptions{
@@ -2726,6 +3371,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			GatewayURL:  *gatewayURL,
 			Target:      *target,
 			BuildAssets: *buildAssets,
+			RdevCommand: *rdevCommand,
 		})
 	case "start":
 		fs := flag.NewFlagSet("support-session start", flag.ContinueOnError)
@@ -2739,12 +3385,15 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
 		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
-		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
+		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file before serving; defaults to the session work dir")
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file before serving; defaults to the session work dir")
 		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file before serving; defaults to the session work dir")
 		connectedReportFile := fs.String("connected-report-file", "", "write the exact connected user report text to this file after the target connects; defaults to the session work dir")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
@@ -2773,8 +3422,11 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
-		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path for the local status watcher")
+		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		return a.supportSessionCreate(ctx, supportSessionCreateOptions{
@@ -2799,7 +3451,11 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
 		autoApprove := fs.Bool("auto-approve", true, "auto-approve the first attended-temporary host created by this standard session ticket")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
+		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		return writeJSON(a.Stdout, supportsession.BuildPlan(ctx, supportsession.Options{
@@ -2812,6 +3468,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			TTLSeconds:  *ttl,
 			AutoApprove: *autoApprove,
 			Locale:      *locale,
+			RdevCommand: agentRdevCommand(*rdevCommand),
 		}))
 	case "status":
 		fs := flag.NewFlagSet("support-session status", flag.ContinueOnError)
@@ -2824,6 +3481,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		timeoutSeconds := fs.Int("timeout-seconds", 0, "alias for --timeout, in whole seconds")
 		interval := fs.Duration("interval", time.Second, "poll interval when --wait is set")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		if *timeoutSeconds > 0 {
@@ -2849,6 +3509,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		locale := fs.String("locale", "auto", "feedback language, for example auto, en, or zh-CN")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		return a.supportSessionRecover(ctx, supportSessionRecoverOptions{
@@ -2862,14 +3525,19 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		gatewayURL := fs.String("gateway-url", "", "gateway URL that owns the connected support session")
 		hostID := fs.String("host-id", "", "active host ID to report on")
+		ticketCode := fs.String("ticket-code", "", "support-session ticket code; when set, rdev selects the single active host and includes stale-host diagnostics")
 		locale := fs.String("locale", "auto", "report language hint, for example auto, en, or zh-CN")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		return a.supportSessionReport(ctx, supportSessionReportOptions{
 			GatewayURL:        *gatewayURL,
 			HostID:            *hostID,
+			TicketCode:        *ticketCode,
 			Locale:            *locale,
 			OperatorTokenFile: *operatorTokenFile,
 		})
@@ -2882,6 +3550,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		timeoutSeconds := fs.Int("timeout-seconds", 0, "alias for --timeout, in whole seconds")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
 		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		if *timeoutSeconds > 0 {
@@ -2941,6 +3612,7 @@ type supportSessionPrepareOptions struct {
 	GatewayURL  string
 	Target      string
 	BuildAssets bool
+	RdevCommand string
 }
 
 type supportSessionCreateOptions struct {
@@ -2955,6 +3627,7 @@ type supportSessionCreateOptions struct {
 }
 
 func (a App) supportSessionPrepare(ctx context.Context, opts supportSessionPrepareOptions) error {
+	opts.RdevCommand = agentRdevCommand(opts.RdevCommand)
 	prepared, err := prepareSupportSessionEnvironment(ctx, opts)
 	if err != nil {
 		return err
@@ -2963,6 +3636,7 @@ func (a App) supportSessionPrepare(ctx context.Context, opts supportSessionPrepa
 }
 
 func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConnectOptions) error {
+	opts.RdevCommand = agentRdevCommand(opts.RdevCommand)
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
 		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
 	}
@@ -3018,10 +3692,10 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	return writeJSON(a.Stdout, supportsession.BuildConnectFromCreated(created))
 }
 
-// startBestAvailableTunnel tries public tunnel providers in order until one
-// succeeds. The order is:
+// startBestAvailableTunnel tries ephemeral public tunnel providers in order
+// until one succeeds. The order is:
 //
-//  1. cloudflared quick-tunnel (most reliable, zero-auth)
+//  1. cloudflared quick-tunnel (zero-auth, ephemeral fallback)
 //  2. localhost.run via SSH (fallback, needs only openssh client)
 //
 // If none succeed it logs a warning and returns ("", noop) — the caller
@@ -3047,6 +3721,192 @@ func startBestAvailableTunnel(ctx context.Context, stderr io.Writer, localListen
 
 	_, _ = fmt.Fprintf(stderr, "[rdev] all public tunnel providers failed; falling back to LAN gateway\n")
 	return "", func() {}
+}
+
+type cloudflaredStableTunnelConfig struct {
+	GatewayURL string
+	Argv       []string
+	Preview    []string
+	Source     string
+	Mode       string
+}
+
+func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflaredStableTunnelConfig, bool, error) {
+	gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL")), "/")
+	gatewaySource := "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"
+	if gatewayURL == "" {
+		gatewayURL = strings.TrimRight(strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_GATEWAY_URL")), "/")
+		gatewaySource = "RDEV_CLOUDFLARED_GATEWAY_URL"
+	}
+	if gatewayURL == "" {
+		return cloudflaredStableTunnelConfig{}, false, nil
+	}
+	rawArgv := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON"))
+	argvSource := "RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON"
+	if rawArgv == "" {
+		rawArgv = strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_START_ARGV_JSON"))
+		argvSource = "RDEV_CLOUDFLARED_START_ARGV_JSON"
+	}
+	if rawArgv != "" {
+		argv, err := parseCloudflaredStableStartArgv(rawArgv, argvSource, localURL)
+		if err != nil {
+			return cloudflaredStableTunnelConfig{}, true, err
+		}
+		return cloudflaredStableTunnelConfig{
+			GatewayURL: gatewayURL,
+			Argv:       argv,
+			Preview:    redactCloudflaredArgv(argv),
+			Source:     gatewaySource + "+" + argvSource,
+			Mode:       "configured-start-argv",
+		}, true, nil
+	}
+	tokenFile := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE"))
+	if tokenFile != "" {
+		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", "--token-file", tokenFile}
+		return cloudflaredStableTunnelConfig{
+			GatewayURL: gatewayURL,
+			Argv:       argv,
+			Preview:    redactCloudflaredArgv(argv),
+			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE",
+			Mode:       "token-file",
+		}, true, nil
+	}
+	token := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN"))
+	if token != "" {
+		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", "--token", token}
+		return cloudflaredStableTunnelConfig{
+			GatewayURL: gatewayURL,
+			Argv:       argv,
+			Preview:    redactCloudflaredArgv(argv),
+			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_TOKEN",
+			Mode:       "token",
+		}, true, nil
+	}
+	tunnelName := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_TUNNEL_NAME"))
+	if tunnelName != "" {
+		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", tunnelName}
+		return cloudflaredStableTunnelConfig{
+			GatewayURL: gatewayURL,
+			Argv:       argv,
+			Preview:    redactCloudflaredArgv(argv),
+			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_NAME",
+			Mode:       "named-tunnel",
+		}, true, nil
+	}
+	return cloudflaredStableTunnelConfig{}, false, nil
+}
+
+func cloudflaredStableTunnelStartRequested() bool {
+	hasURL := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL")) != "" ||
+		strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_GATEWAY_URL")) != ""
+	if !hasURL {
+		return false
+	}
+	for _, name := range []string{
+		"RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON",
+		"RDEV_CLOUDFLARED_START_ARGV_JSON",
+		"RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE",
+		"RDEV_CLOUDFLARED_TUNNEL_TOKEN",
+		"RDEV_CLOUDFLARED_TUNNEL_NAME",
+	} {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func parseCloudflaredStableStartArgv(raw, envName, localURL string) ([]string, error) {
+	var argv []string
+	if err := json.Unmarshal([]byte(raw), &argv); err != nil {
+		return nil, fmt.Errorf("%s must be a JSON argv array: %w", envName, err)
+	}
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("%s must contain at least one argv item", envName)
+	}
+	for i, arg := range argv {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			return nil, fmt.Errorf("%s arg %d is empty", envName, i)
+		}
+		if strings.ContainsAny(arg, "\x00\r\n") {
+			return nil, fmt.Errorf("%s arg %d contains an unsafe control character", envName, i)
+		}
+		argv[i] = expandCloudflaredStartArg(arg, localURL)
+	}
+	if base := strings.ToLower(filepath.Base(argv[0])); base != "cloudflared" && base != "cloudflared.exe" {
+		return nil, fmt.Errorf("%s must start with a cloudflared executable, got %q", envName, filepath.Base(argv[0]))
+	}
+	joined := strings.ToLower(strings.Join(argv, "\x00"))
+	for _, forbidden := range []string{"executionpolicy", "encodedcommand", "bypass", "powershell", "cmd.exe", "bash", " zsh", " sh ", "nohup"} {
+		if strings.Contains(joined, forbidden) {
+			return nil, fmt.Errorf("%s contains unsafe shell or policy token %q", envName, forbidden)
+		}
+	}
+	return argv, nil
+}
+
+func expandCloudflaredStartArg(arg, localURL string) string {
+	replacements := map[string]string{
+		"{local_url}":       localURL,
+		"{{local_url}}":     localURL,
+		"$RDEV_LOCAL_URL":   localURL,
+		"${RDEV_LOCAL_URL}": localURL,
+	}
+	for marker, value := range replacements {
+		arg = strings.ReplaceAll(arg, marker, value)
+	}
+	return arg
+}
+
+func redactCloudflaredArgv(argv []string) []string {
+	out := append([]string(nil), argv...)
+	for i, arg := range out {
+		switch arg {
+		case "--token", "--credentials-contents":
+			if i+1 < len(out) {
+				out[i+1] = "<redacted>"
+			}
+		}
+	}
+	return out
+}
+
+func startConfiguredCloudflaredStableTunnel(ctx context.Context, stderr io.Writer, cfg cloudflaredStableTunnelConfig) (string, context.CancelFunc, error) {
+	if len(cfg.Argv) == 0 {
+		return "", func() {}, fmt.Errorf("cloudflared stable tunnel argv is empty")
+	}
+	tunnelCtx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(tunnelCtx, cfg.Argv[0], cfg.Argv[1:]...)
+	cmd.Stdout = stderr
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return "", func() {}, fmt.Errorf("cloudflared stable tunnel start failed: %w", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	select {
+	case err := <-done:
+		cancel()
+		if err != nil {
+			return "", func() {}, fmt.Errorf("cloudflared stable tunnel exited during startup: %w", err)
+		}
+		return "", func() {}, fmt.Errorf("cloudflared stable tunnel exited during startup")
+	case <-time.After(3 * time.Second):
+		return cfg.GatewayURL, func() {
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+			}
+		}, nil
+	}
 }
 
 // startLocalhostRunTunnel creates a public HTTPS tunnel through localhost.run
@@ -3213,6 +4073,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if opts.TTLSeconds < 60 || opts.TTLSeconds > 86400 {
 		return fmt.Errorf("ttl-seconds must be between 60 and 86400")
 	}
+	opts.RdevCommand = agentRdevCommand(opts.RdevCommand)
 	addr := strings.TrimSpace(opts.Addr)
 	if addr == "" {
 		addr = "0.0.0.0:8787"
@@ -3221,20 +4082,51 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	// This avoids cryptic "bind: address already in use" errors when multiple
 	// support sessions are started on the same machine (e.g. concurrent agent runs).
 	addr = findFreeAddr(addr)
+	localPort := extractPort(addr, "8787")
+	localListenURL := "http://127.0.0.1:" + localPort
 	gatewayURL, candidates := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
 	if stableGatewayURL := firstStableGatewayURL(candidates); stableGatewayURL != "" {
 		gatewayURL = stableGatewayURL
 	}
 
-	// Start a public tunnel when no stable (hosted/relay/mesh/vpn/ssh) gateway
-	// is already configured. The tunnel providers are tried in order: cloudflared
-	// (HTTP/2 first, then QUIC) → localhost.run SSH. LAN-only fallback applies
-	// only when all providers fail.
+	stableTunnelStartFailed := false
+	if strings.TrimSpace(opts.GatewayURL) == "" {
+		cfPath, cfErr := exec.LookPath("cloudflared")
+		if cfErr != nil {
+			if cloudflaredStableTunnelStartRequested() {
+				stableTunnelStartFailed = true
+				_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel requested but cloudflared is not in PATH: %v\n", cfErr)
+			}
+		} else {
+			cfg, ok, err := configuredCloudflaredStableTunnelConfig(cfPath, localListenURL)
+			if err != nil {
+				stableTunnelStartFailed = true
+				_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel is invalid: %v\n", err)
+			} else if ok {
+				_, _ = fmt.Fprintf(a.Stderr, "[rdev] starting configured Cloudflare stable tunnel for %s with %s (%s)\n", cfg.GatewayURL, cfg.Mode, strings.Join(cfg.Preview, " "))
+				tunnelURL, tunnelCancel, err := startConfiguredCloudflaredStableTunnel(ctx, a.Stderr, cfg)
+				if err == nil {
+					defer tunnelCancel()
+					gatewayURL = tunnelURL
+					_ = os.Setenv("RDEV_CLOUDFLARED_GATEWAY_URL", tunnelURL)
+					_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel active: %s\n", tunnelURL)
+				} else {
+					stableTunnelStartFailed = true
+					_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel failed: %v\n", err)
+				}
+			}
+		}
+	}
+
+	// Start an ephemeral public tunnel when no stable
+	// (hosted/cloudflared/relay/mesh/vpn/ssh) gateway is already configured, or
+	// when the configured Cloudflare stable tunnel failed to start. The fallback
+	// providers are tried in order: cloudflared Quick Tunnel (HTTP/2 first, then
+	// provider default) → localhost.run SSH. LAN-only fallback applies only when
+	// all providers fail.
 	summary := supportsession.GatewayCandidateSummary(candidates)
 	needsPublicTunnel, _ := summary["needs_public_tunnel"].(bool)
-	if needsPublicTunnel {
-		localPort := extractPort(addr, "8787")
-		localListenURL := "http://127.0.0.1:" + localPort
+	if shouldStartManagedPublicTunnel(needsPublicTunnel || stableTunnelStartFailed, opts.GatewayURL) {
 		tunnelURL, tunnelCancel := startBestAvailableTunnel(ctx, a.Stderr, localListenURL, localPort)
 		if tunnelURL != "" {
 			defer tunnelCancel()
@@ -3288,13 +4180,15 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if repoRoot == "" {
 		repoRoot = "."
 	}
+	repoRoot = resolveSupportSessionRepoRoot(repoRoot)
 	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
-		RepoRoot:    findSupportSessionRepoRoot(repoRoot),
+		RepoRoot:    repoRoot,
 		WorkDir:     workDir,
 		Addr:        addr,
 		GatewayURL:  gatewayURL,
 		Target:      opts.Target,
 		BuildAssets: true,
+		RdevCommand: opts.RdevCommand,
 	})
 	if err != nil {
 		return err
@@ -3332,7 +4226,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 					missing = append(missing, c.name)
 				}
 			}
-			return fmt.Errorf("support-session connect cannot generate a target handoff until helper assets are ready; missing platform helpers %v in %s; rerun from a valid checkout with Go available or pass --repo-root <checkout> --work-dir %s", missing, binDir, workDir)
+			return fmt.Errorf("support-session connect cannot generate a target handoff until helper assets are ready; missing platform helpers %v in %s; rerun the standard recovery command: rdev support-session connect --start --repo-root %s --work-dir %s", missing, binDir, repoRoot, workDir)
 		}
 	}
 
@@ -3501,6 +4395,7 @@ func (a App) supportSessionCreate(ctx context.Context, opts supportSessionCreate
 }
 
 func createSupportSessionPayload(ctx context.Context, opts supportSessionCreateOptions) (map[string]any, error) {
+	opts.RdevCommand = agentRdevCommand(opts.RdevCommand)
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if gatewayURL == "" {
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
@@ -3622,6 +4517,8 @@ func normalizeSupportSessionTarget(target string) string {
 }
 
 func prepareSupportSessionEnvironment(ctx context.Context, opts supportSessionPrepareOptions) (map[string]any, error) {
+	opts.RepoRoot = resolveSupportSessionRepoRoot(opts.RepoRoot)
+	opts.RdevCommand = agentRdevCommand(opts.RdevCommand)
 	return supportsession.Prepare(ctx, supportsession.PrepareOptions{
 		RepoRoot:    opts.RepoRoot,
 		WorkDir:     opts.WorkDir,
@@ -3629,20 +4526,57 @@ func prepareSupportSessionEnvironment(ctx context.Context, opts supportSessionPr
 		GatewayURL:  opts.GatewayURL,
 		Target:      opts.Target,
 		BuildAssets: opts.BuildAssets,
+		RdevCommand: opts.RdevCommand,
 	})
 }
 
 func findSupportSessionRepoRoot(start string) string {
-	prepared, err := supportsession.Prepare(context.Background(), supportsession.PrepareOptions{
-		RepoRoot: start,
-	})
+	start = strings.TrimSpace(start)
+	if start == "" {
+		return ""
+	}
+	dir, err := filepath.Abs(start)
 	if err != nil {
-		return start
+		return ""
 	}
-	if repoRoot, _ := prepared["repo_root"].(string); repoRoot != "" {
-		return repoRoot
+	if info, statErr := os.Stat(dir); statErr == nil && !info.IsDir() {
+		dir = filepath.Dir(dir)
 	}
-	return start
+	for {
+		if supportSessionRepoRootValid(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+func resolveSupportSessionRepoRoot(hint string) string {
+	candidates := []string{
+		strings.TrimSpace(hint),
+		strings.TrimSpace(os.Getenv("RDEV_SOURCE_ROOT")),
+	}
+	if buildinfo.SourceRoot != "" && buildinfo.SourceRoot != "unknown" {
+		candidates = append(candidates, buildinfo.SourceRoot)
+	}
+	if currentExecutable, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Dir(currentExecutable))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, wd)
+	}
+	for _, candidate := range candidates {
+		if found := findSupportSessionRepoRoot(candidate); found != "" {
+			return found
+		}
+	}
+	if strings.TrimSpace(hint) != "" {
+		return hint
+	}
+	return "."
 }
 
 func cliPolicyCapabilitiesToStrings(caps []policy.Capability) []string {
@@ -3679,6 +4613,7 @@ type supportSessionRecoverOptions struct {
 type supportSessionReportOptions struct {
 	GatewayURL        string
 	HostID            string
+	TicketCode        string
 	Locale            string
 	OperatorTokenFile string
 }
@@ -3910,8 +4845,29 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		return fmt.Errorf("support-session report requires --gateway-url or a configured RDEV_*_GATEWAY_URL")
 	}
 	hostID := strings.TrimSpace(opts.HostID)
+	ticketCode := strings.TrimSpace(opts.TicketCode)
+	var status map[string]any
+	if ticketCode != "" {
+		var statusErr error
+		status, statusErr = supportSessionStatus(ctx, http.DefaultClient, supportSessionStatusOptions{
+			GatewayURL: gatewayURL,
+			TicketCode: ticketCode,
+			Locale:     opts.Locale,
+		})
+		if statusErr != nil {
+			return statusErr
+		}
+		activeHosts := mapSlice(status["active_hosts"])
+		if hostID == "" {
+			if len(activeHosts) == 1 {
+				hostID = stringFromMap(activeHosts[0], "id")
+			} else {
+				return writeJSON(a.Stdout, supportSessionTicketReportWithoutSelectedHost(gatewayURL, ticketCode, status, len(activeHosts)))
+			}
+		}
+	}
 	if hostID == "" {
-		return fmt.Errorf("support-session report requires --host-id")
+		return fmt.Errorf("support-session report requires --host-id or --ticket-code")
 	}
 	token := loadOperatorToken(opts.OperatorTokenFile)
 	hostPayload, err := fetchHostJSON(ctx, gatewayURL, hostID, token)
@@ -3946,16 +4902,51 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		})
 	}
 	report := map[string]any{
-		"schema_version": "rdev.support-session-report.v1",
-		"ok":             true,
-		"gateway_url":    gatewayURL,
-		"host_id":        hostID,
-		"host":           host,
-		"jobs":           jobReports,
-		"human_report":   supportSessionHumanReport(host, jobReports),
-		"next_action":    "Use this report instead of hand-written curl summaries; revoke the temporary session when remote work is complete.",
+		"schema_version":              "rdev.support-session-report.v1",
+		"ok":                          true,
+		"gateway_url":                 gatewayURL,
+		"ticket_code":                 ticketCode,
+		"host_id":                     hostID,
+		"recommended_job_host_id":     hostID,
+		"recommended_job_host_source": "explicit_host_id",
+		"host":                        host,
+		"jobs":                        jobReports,
+		"human_report":                supportSessionHumanReport(host, jobReports),
+		"next_action":                 "Use this report instead of hand-written curl summaries; create jobs only for recommended_job_host_id and revoke the temporary session when remote work is complete.",
+		"stale_host_rule":             "Do not create jobs for stale_hosts; run rdev support-session recover if stale hosts or queued jobs accumulated.",
+	}
+	if status != nil {
+		report["status"] = status
+		report["active_hosts"] = status["active_hosts"]
+		report["stale_hosts"] = status["stale_hosts"]
+		report["pending_hosts"] = status["pending_hosts"]
+		report["host_count"] = status["host_count"]
+		report["recommended_job_host_source"] = "ticket_single_active_host"
 	}
 	return writeJSON(a.Stdout, report)
+}
+
+func supportSessionTicketReportWithoutSelectedHost(gatewayURL, ticketCode string, status map[string]any, activeCount int) map[string]any {
+	ok := false
+	nextAction := "No active host is job-ready for this ticket. Wait with rdev support-session status --wait or run rdev support-session recover if stale hosts are present."
+	if activeCount > 1 {
+		nextAction = "Multiple active hosts are registered for this ticket; choose the intended host explicitly with --host-id before creating jobs."
+	}
+	return map[string]any{
+		"schema_version":          "rdev.support-session-report.v1",
+		"ok":                      ok,
+		"gateway_url":             gatewayURL,
+		"ticket_code":             ticketCode,
+		"host_id":                 "",
+		"recommended_job_host_id": "",
+		"status":                  status,
+		"active_hosts":            status["active_hosts"],
+		"stale_hosts":             status["stale_hosts"],
+		"pending_hosts":           status["pending_hosts"],
+		"host_count":              status["host_count"],
+		"next_action":             nextAction,
+		"stale_host_rule":         "Do not create jobs for stale_hosts; stale means the runner is not job-ready.",
+	}
 }
 
 func supportSessionHumanReport(host map[string]any, jobs []map[string]any) string {
@@ -4325,6 +5316,40 @@ func nestedMapOrSelf(payload map[string]any, objectKey string) map[string]any {
 func stringFromMap(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+func mapSliceFromAny(value any) []map[string]any {
+	if typed, ok := value.([]map[string]any); ok {
+		return typed
+	}
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if typed, ok := item.(map[string]any); ok {
+			out = append(out, typed)
+		}
+	}
+	return out
+}
+
+func stringSliceFromAny(value any) []string {
+	if typed, ok := value.([]string); ok {
+		return typed
+	}
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if typed, ok := item.(string); ok {
+			out = append(out, typed)
+		}
+	}
+	return out
 }
 
 func summarizeFirstArtifact(payload map[string]any) string {
@@ -6867,7 +7892,7 @@ func (a App) skillkit(args []string) error {
 		bundle := fs.String("bundle", "", "verified skillkit bundle directory")
 		out := fs.String("out", "", "empty output directory for install plan and scripts")
 		frameworks := fs.String("frameworks", "", "comma-separated frameworks: codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent")
-		rdevCommand := fs.String("rdev-command", "rdev", "rdev command to embed in generated scripts")
+		rdevCommand := fs.String("rdev-command", "", "rdev command to embed in generated scripts; default auto-detects a stable rdev binary")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -9577,6 +10602,8 @@ func (a App) skillkitInstall(bundleDir, framework, targetDir string, execute, fo
 		"checks":              report.Checks,
 		"actions":             report.Actions,
 		"installed_skills":    report.InstalledSkills,
+		"install_manifest":    report.InstallManifest,
+		"mcp_command":         report.MCPCommand,
 		"reference_files":     report.ReferenceFiles,
 		"recommended_steps":   report.RecommendedNextSteps,
 		"recommended_actions": report.RecommendedActions,
@@ -9673,6 +10700,11 @@ Usage:
   rdev version
   rdev doctor
   rdev bootstrap agent-plan --repo-root . --remote-requested
+  rdev support-session connect --start --target auto --locale auto
+  rdev support-session connect --target auto --reason "visible temporary remote support"
+  rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
+  rdev support-session report --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234
+  rdev support-session --help
   rdev ticket create --mode attended-temporary --ttl-seconds 7200
   rdev policy explain --mode attended-temporary --capability shell.user
   rdev policy explain-shell --policy-json '{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}'
@@ -9695,12 +10727,6 @@ Usage:
   rdev update plan --repo EitanWong/remote-dev-skillkit --platform darwin/arm64
   rdev deps install --tool chisel --scope user --platform linux/amd64 --url https://example.com/chisel.tar.gz --expected-sha256 <sha256>
   rdev deps install --tool tailscale --scope user --platform linux/amd64 --url https://example.com/tailscale.zip --expected-sha256 <sha256> --execute
-  rdev support-session handoff --target auto --locale auto
-  rdev support-session start --target auto --locale auto
-  rdev support-session create --gateway-url http://127.0.0.1:8787 --target auto --locale auto
-  rdev support-session plan --addr 0.0.0.0:8787 --target auto --locale auto
-  rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
-  rdev support-session report --gateway-url http://127.0.0.1:8787 --host-id hst_...
   rdev job list --gateway-url http://127.0.0.1:8787
   rdev job get --gateway-url http://127.0.0.1:8787 --job-id job_...
   rdev job wait --gateway-url http://127.0.0.1:8787 --job-id job_... --timeout-seconds 120
@@ -9742,7 +10768,6 @@ Usage:
   rdev trust verify --bundle .rdev/trust/trust-bundle-revoked.json --root-public-key trust-root:...
   rdev workspace lock --repo . --host-id hst_... --job-id job_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --job-id job_... --adapter codex
-  rdev support-session connect --target auto --reason "visible temporary remote support"
   rdev acceptance fresh-agent-support-session --out fresh-agent-support-session
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo . --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
@@ -9790,6 +10815,67 @@ Usage:
   rdev host service-control --platform windows --action start --label RemoteDevSkillkitHost
   rdev host uninstall-service --platform windows --label RemoteDevSkillkitHost
 `))
+}
+
+func (a App) printSupportSessionUsage() {
+	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev support-session - standard AI-native remote support entry
+
+Usage:
+  rdev support-session connect --start --target auto --locale auto
+  rdev support-session connect --gateway-url https://gateway.example.com --target auto --locale auto
+  rdev support-session prepare --target auto --build-assets
+  rdev support-session status --gateway-url <active-gateway-url> --ticket-code ABCD-1234 --wait
+  rdev support-session report --gateway-url <active-gateway-url> --ticket-code ABCD-1234
+  rdev support-session recover --gateway-url <active-gateway-url> --ticket-code ABCD-1234
+  rdev support-session audit-capabilities --gateway-url <active-gateway-url> --host-id hst_...
+
+Fresh-Agent path:
+  1. Run: rdev support-session connect --start
+  2. Read handoff_text_file.path or target_handoff_envelope.full_text.
+  3. Send that one complete handoff to the target-side human.
+  4. Wait with support-session status, then use report.recommended_job_host_id.
+
+Do not add --public-tunnel. Tunnel/provider selection is owned by connect --start.
+Use "<subcommand> --help" for flags.`))
+}
+
+func (a App) printCommandGroupUsage(command string) bool {
+	if command == "support-session" {
+		a.printSupportSessionUsage()
+		return true
+	}
+	subcommands := map[string]string{
+		"acceptance":       "fresh-agent-support-session, managed-mac, managed-mac-service, windows-temporary, windows-managed-service, linux-managed-service, verify, verify-windows-temporary, verify-managed-mac-service, verify-windows-managed-service, verify-linux-managed-service, verify-relay-adapter-package, verify-hosted-provider-runtime-package, verify-post-release-download-package, scaffold-evidence, evidence-status, scaffold-post-release-download, post-release-evidence-status, package-windows-temporary, package-managed-mac-service, package-linux-managed-service, package-relay-adapter, package-hosted-provider-runtime, package-post-release-download, release-evidence-index",
+		"adapter":          "scaffold, verify-result, verify-lifecycle, verify-cancellation, verify-runtime",
+		"audit":            "export, verify",
+		"bootstrap":        "agent-plan",
+		"connection-entry": "plan, run",
+		"demo":             "local",
+		"deps":             "install",
+		"enrollment":       "issue-certificate, sign-certificate, verify-certificate, renew-certificate, revoke-certificate, init-revocations, verify-revocations, fetch-revocations, lifecycle",
+		"evidence":         "export",
+		"gateway":          "serve, storage verify",
+		"host":             "serve, install-service, service-status, service-control, uninstall-service",
+		"hosted-provider":  "package, verify",
+		"invite":           "create",
+		"job":              "create, list, get, wait, artifacts, policy-template, cancel",
+		"mcp":              "tools, serve",
+		"operator-auth":    "init, verify, verify-hosted, verify-oidc-jwks, verify-saml",
+		"policy":           "explain, explain-shell",
+		"release":          "sign, verify, create-bundle, verify-bundle, prepare-candidate, verify-candidate",
+		"relay-adapter":    "package, verify",
+		"skillkit":         "export, verify, plan-install, verify-install-plan, install",
+		"ticket":           "create",
+		"trust":            "init, rotate, revoke, verify",
+		"update":           "check, plan",
+		"workspace":        "lock, status, unlock, prepare-worktree",
+	}
+	available, ok := subcommands[command]
+	if !ok {
+		return false
+	}
+	_, _ = fmt.Fprintf(a.Stdout, "rdev %s\n\nUsage:\n  rdev %s <subcommand> [flags]\n\nSubcommands:\n  %s\n\nUse `rdev %s <subcommand> --help` for flags.\n", command, command, available, command)
+	return true
 }
 
 func readJobJSON(path string) (model.Job, error) {
@@ -11141,10 +12227,14 @@ func extractPort(addr, fallback string) string {
 	return fallback
 }
 
+func shouldStartManagedPublicTunnel(needsPublicTunnel bool, explicitGatewayURL string) bool {
+	return needsPublicTunnel && strings.TrimSpace(explicitGatewayURL) == ""
+}
+
 func firstStableGatewayURL(candidates []supportsession.GatewayURLCandidate) string {
 	for _, candidate := range candidates {
 		switch strings.TrimSpace(candidate.Kind) {
-		case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared":
+		case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared", "cloudflared-named":
 			if url := strings.TrimRight(strings.TrimSpace(candidate.URL), "/"); url != "" {
 				return url
 			}
@@ -11273,6 +12363,9 @@ func connectionEntryChecksPassed(checks []connectionentry.Check) bool {
 func Main() {
 	app := NewApp(os.Stdout, os.Stderr)
 	if err := app.Run(context.Background(), os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
 		_, _ = fmt.Fprintf(os.Stderr, "rdev: %v\n", err)
 		os.Exit(1)
 	}

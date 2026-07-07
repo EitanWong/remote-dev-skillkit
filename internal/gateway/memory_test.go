@@ -860,6 +860,42 @@ func TestMemoryGatewayProjectsStaleHostsAndRejectsNewJobs(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayAuthenticatedClaimRefreshesStaleHeartbeat(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	secret, err := gw.GenerateHostSecret(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "shell", "claim after long wait", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute)
+	if _, ok, err := gw.NextJobForHost(host.ID); err == nil || ok || !strings.Contains(err.Error(), "heartbeat is stale") {
+		t.Fatalf("expected unauthenticated stale claim rejection, ok=%v err=%v", ok, err)
+	}
+
+	claimed, ok, err := gw.NextJobForAuthenticatedHost(host.ID, secret)
+	if err != nil || !ok {
+		t.Fatalf("expected authenticated claim to refresh heartbeat, ok=%v err=%v", ok, err)
+	}
+	if claimed.ID != job.ID {
+		t.Fatalf("expected job %s, got %s", job.ID, claimed.ID)
+	}
+	fresh, err := gw.Host(host.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Status != model.HostStatusActive {
+		t.Fatalf("expected authenticated claim to keep host active, got %s", fresh.Status)
+	}
+}
+
 func TestMemoryGatewayAutoApproveSupersedesMatchingStaleHost(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

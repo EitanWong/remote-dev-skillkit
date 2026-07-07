@@ -12,24 +12,19 @@ Remote Dev Skillkit ist eine Sicherheitsschicht für KI-Agenten, die auf echten 
 
 ## Schnellinstallation
 
-Wenn du bereits in Codex, Claude Code, Hermes, OpenClaw/OpenCode oder einem anderen MCP-Agenten bist, kopiere dies in deinen Agenten:
+Wenn du bereits in Codex, Claude Code, Hermes, OpenClaw/OpenCode oder einem anderen MCP-Agenten bist, gib dem Agenten diesen Link und bitte ihn, den Prompt vor dem Ausführen vollständig zu lesen:
 
-```text
-Install Remote Dev Skillkit for this agent runtime.
+[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
 
-Repository: https://github.com/EitanWong/remote-dev-skillkit
-Full install prompt: https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md
-
-Clone or update the repository, read the full install prompt, and follow it as the source of truth. If cloning is blocked, open the prompt link directly. Ask one short question only when a required value is unclear.
-```
-
-Vollständiger Copy-Paste-Prompt: [Agent Bootstrap Prompt](../operations/AGENT_BOOTSTRAP_PROMPT.md).
+Dieser Prompt ist die verbindliche Quelle für Clone oder Update des Repos, Erkennung der aktuellen Agent Runtime, Skillkit-Installation, MCP-Konfiguration und genau eine kurze Rückfrage, wenn ein erforderlicher Wert nicht sicher erkannt werden kann.
 
 ```bash
 go install ./cmd/rdev
 rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
+
+Wenn `rdev` nicht in `PATH` liegt, verwende den absoluten MCP-Befehl aus `rdev bootstrap agent-plan` oder aus dem Feld `mcp_command` im Installationsbericht.
 
 Skillkit-Bundle exportieren und prüfen:
 

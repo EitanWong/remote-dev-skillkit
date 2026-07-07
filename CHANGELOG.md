@@ -4,6 +4,162 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.39-dev
+
+Current phase: fresh-Agent remote-session hardening from real Codex support
+transcripts. This slice removes more model-dependent recovery work from the
+human/Agent conversation and moves it into stable CLI, MCP, and gateway
+contracts.
+
+### Added
+
+- Added `rdev version --json` and expanded `rdev doctor` with
+  `rdev.runtime-info.v1`, including executable path, PATH `rdev`, build
+  commit/time/source metadata, source-root discovery, and installed Skillkit
+  manifests.
+- Added `.remote-dev-skillkit/install.json` manifests during Skillkit install
+  so future Agents can discover framework, bundle, target, MCP, and tool paths
+  without searching private directories.
+- Added planned `install_manifest` and `write_install_manifest` action reporting
+  to Skillkit install dry-runs, so Agents can verify the diagnostic manifest
+  will exist before executing a local install.
+- Added per-skill `SKILL.md` SHA-256 entries to Skillkit install manifests and
+  surfaced manifest integrity status through `rdev version --json` / `doctor`,
+  allowing Agents to detect tampered or partially overwritten skill installs
+  even when the original source checkout is unavailable.
+- Added `rdev.skill-install-status.v1` to runtime info when a source checkout
+  and install manifest are both discoverable. It hashes installed core
+  `SKILL.md` files against the current checkout and reports stale/missing
+  skills so fresh Agent sessions know when to reinstall the Skillkit.
+- Added legacy installed-skill detection for common Codex, Claude Code, Hermes,
+  OpenClaw, OpenCode, and configured generic skill directories even when older
+  installs do not yet have `.remote-dev-skillkit/install.json`.
+- Added `--ticket-code` support to `rdev support-session report` and MCP
+  `rdev.support_session.report`. When exactly one active host exists for the
+  ticket, the report now selects it as `recommended_job_host_id` and includes
+  stale/pending host diagnostics.
+- Added regression coverage for ticket-code report selection, MCP report
+  selection, report schema flexibility, and authenticated host job claim after
+  an old heartbeat.
+- Added Agent-friendly command-group help for primary CLI groups, so
+  `rdev <group> --help` is a successful discovery path instead of an unknown
+  subcommand error.
+- Added stable Cloudflare Named Tunnel configuration surfaces for repeated
+  support sessions: `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` plus a reviewed token,
+  token file, tunnel name, or start argv can now be detected and used before
+  falling back to ephemeral Quick Tunnel URLs.
+
+### Changed
+
+- Windows support-session handoff generation now uses a short readable
+  `powershell -NoProfile -Command "irm '.../bootstrap.ps1' -UseBasicParsing | iex"`
+  command instead of Agent-fragile `-EncodedCommand`/Base64 handoffs. Signed
+  gateway candidates still travel through the bootstrap URL and join manifest.
+- `support-session connect --start` now resolves the source checkout through a
+  standard discovery order: explicit hint, `RDEV_SOURCE_ROOT`, build metadata,
+  current executable parent, and current working directory.
+- Updated `safe-remote-support` guidance so Agents use the ticket-level report
+  to obtain `recommended_job_host_id` before creating host-scoped work.
+- Updated `safe-remote-support` gateway checks to verify the active gateway URL
+  from the session payload or configured `RDEV_*_GATEWAY_URL`, instead of
+  assuming the default local `127.0.0.1:8787` gateway.
+- Updated generated `skillkit plan-install` scripts to call the standard
+  `rdev skillkit install --execute` path, so copied skills, reference files, and
+  install manifests are produced by one installer instead of duplicated script
+  copy logic.
+- Updated support-session guidance so Agent installs on a VPS/cloud server or
+  machines with their own public DNS/IP recommend `RDEV_HOSTED_GATEWAY_URL`,
+  while Cloudflare users can configure `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` for
+  stable reuse. `https://*.trycloudflare.com` Quick Tunnel URLs are now treated
+  as current-session fallback URLs, not durable configuration.
+
+### Fixed
+
+- Fixed host-side job claim stability by adding an authenticated gateway claim
+  path that validates `host_secret`, refreshes heartbeat, and claims queued work
+  atomically. HTTP polling, long-polling, and WSS now avoid rejecting a real
+  connected host just because its previous `last_seen_at` crossed the stale
+  window before claim.
+- Fixed support-session reporting paths that forced Agents to discover and pass
+  `host_id` manually even when the ticket had a single active job-ready host.
+- Fixed stale MCP/static metadata drift by keeping `mcp/tools.json` aligned
+  with the live `ticket_code` report schema.
+- Fixed runtime install-manifest discovery so `rdev doctor` also checks the
+  resolved source root's `.remote-dev-skillkit/install.json`, not only home and
+  current-working-directory candidates.
+- Fixed top-level CLI examples that still showed `support-session report`
+  using a raw `--host-id`; the first-contact path now demonstrates
+  `--ticket-code` so Agents use `recommended_job_host_id` before creating work.
+- Fixed support-session handoff and prepare commands so opportunistic LAN or
+  loopback gateway candidates stay diagnostic and are not promoted into
+  generated `--gateway-url` arguments, preserving managed tunnel selection in
+  `connect --start`.
+- Fixed `connect --start` tunnel selection so an explicit operator-provided
+  `--gateway-url` is respected and is not overwritten by automatic public
+  tunnel startup.
+- Fixed `rdev doctor` health aggregation so stale, missing, tampered,
+  unreadable, or unverifiable Skillkit installs make top-level `ok=false` and
+  return a concrete `rdev skillkit install --execute` refresh action instead of
+  giving fresh Agents a false green light.
+- Fixed README, MCP stdio docs, Agent bootstrap prompt, and
+  `remote-vibe-coding` skill wording that could still imply Agents should turn
+  `gateway_url_candidates` into hand-written target commands. The docs now
+  treat candidates as diagnostic/signed-runtime metadata and route Agents back
+  to `connect --start`, configured gateways, or `target_handoff_envelope.full_text`.
+- Fixed local Agent install recommendations for shells where `go install`
+  writes `rdev` to `GOBIN`/`GOPATH/bin` but that directory is not on `PATH`.
+  Bootstrap plans, Skillkit install plans, and Skillkit install reports now
+  prefer a stable absolute `rdev` binary path for MCP stdio config instead of
+  blindly telling Agents to configure bare `rdev mcp serve`.
+- Fixed MCP tool descriptions and support-session recovery actions that still
+  described gateway URL candidates as a recommended value source. Tool
+  metadata now treats candidates as diagnostic/preflight data and routes Agents
+  to `connect --start`, configured gateways, or Connection Entry recovery.
+- Fixed `GOBIN`/`GOPATH/bin` fallback detection so non-executable `rdev` files
+  are not recommended as long-lived MCP stdio commands on POSIX systems.
+- Fixed Skillkit install freshness diagnostics that only hashed `SKILL.md`
+  files. Install manifests now hash `.remote-dev-skillkit/mcp/tools.json` and
+  the framework reference doc, and `rdev doctor` fails closed when those
+  installed reference files are missing, overwritten, or stale.
+- Fixed the `rdev skillkit install` CLI JSON wrapper so it actually exposes the
+  install report's `mcp_command` field that README, install docs, and bootstrap
+  prompts tell Agents to use for local MCP stdio configuration.
+- Fixed `rdev skillkit plan-install` so omitting `--rdev-command` no longer
+  forces bare `rdev`; it now lets the Skillkit planner auto-detect the same
+  stable `rdev` binary used by install reports.
+- Fixed `rdev bootstrap agent-plan --remote-requested` remote-host defaults
+  that still told fresh Agents to create invites and materialize Connection
+  Entries after authorization. The planner now routes ordinary remote support
+  through `rdev.support_session.connect` / `rdev support-session connect`,
+  sends only `handoff_text_file.path` or `target_handoff_envelope.full_text`,
+  and reserves Connection Entry runner materialization for reviewed package,
+  managed owned-host, or restrictive-network recovery paths.
+- Fixed bootstrap/dev-gateway operation docs that could be read as
+  invite-first guidance for ordinary remote support. They now explicitly keep
+  low-level invite creation behind reviewed dev-gateway workflows and point
+  fresh Agents to the high-level support-session connect entry.
+- Fixed `support-session connect --start` so the foreground gateway's internal
+  prepare/readiness payload inherits the resolved `--rdev-command`. This keeps
+  nested Agent runbooks aligned with the stable local `rdev` path instead of
+  drifting back to bare `rdev` during recovery in fresh Agent environments.
+- Fixed README and multilingual quick-start install entries so they no longer
+  embed a short English Agent prompt that models can partially rewrite. The
+  homepage now routes Agents directly to the canonical Agent Bootstrap Prompt,
+  and the i18n audit checks that shared link instead of enforcing English
+  prompt text in every translation.
+- Fixed remaining Agent-facing docs that could still route ordinary target
+  connection work through low-level invite creation or describe
+  `gateway_url_candidates` as a recommended URL source. README, Bootstrap, MCP
+  stdio docs, and task tracking now separate the high-level
+  `rdev.support_session.connect` path from explicit package/materialization
+  workflows.
+- Fixed top-level `rdev --help` ordering so fresh Agents see
+  `rdev support-session connect --start` and `rdev support-session --help`
+  before lower-level support-session, invite, or Connection Entry materializer
+  examples. Added regression coverage for that ordering and split the README
+  command examples into ordinary connect, status/report, review/debug, and
+  explicit package materialization sections.
+
 ## 0.1.38-dev
 
 Current phase: MCP/CLI contract convergence for ordinary fresh Agents. This
