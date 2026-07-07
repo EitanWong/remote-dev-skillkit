@@ -807,9 +807,9 @@ func (s Server) writeShellBootstrap(w http.ResponseWriter, r *http.Request, mani
 	assetBase := shellQuote(strings.TrimRight(requestBaseURL(r), "/") + "/assets")
 	_, _ = fmt.Fprintf(w, `#!/bin/sh
 set -eu
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
 if ! command -v rdev >/dev/null 2>&1; then
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  arch="$(uname -m)"
   case "$arch" in
     x86_64|amd64) arch="amd64" ;;
     arm64|aarch64) arch="arm64" ;;
@@ -841,7 +841,19 @@ if ! command -v rdev >/dev/null 2>&1; then
 else
   rdev_cmd="$(command -v rdev)"
 fi
+rdev_identity_base="${XDG_STATE_HOME:-}"
+if [ -z "$rdev_identity_base" ]; then
+  if [ -n "${HOME:-}" ]; then
+    rdev_identity_base="$HOME/.local/state"
+  else
+    rdev_identity_base="${TMPDIR:-/tmp}"
+  fi
+fi
+rdev_identity_dir="$rdev_identity_base/remote-dev-skillkit"
+mkdir -p "$rdev_identity_dir"
+rdev_identity_store="$rdev_identity_dir/host-identity.json"
 echo "Starting visible Remote Dev Skillkit host session..."
+echo "[rdev] Persistent support identity: $rdev_identity_store"
 # Prevent idle/display/system sleep while the rdev session is active when the
 # platform exposes a standard inhibitor. This does not bypass lock-screen
 # policy or enterprise security controls. Kill the inhibitor when the runner
@@ -863,7 +875,7 @@ rdev_max_retries=5
 rdev_retry_delay=5
 rdev_attempt=0
 while true; do
-  "$rdev_cmd" host serve --manifest-url %s%s --transport long-poll --once=false --max-jobs 0
+  "$rdev_cmd" host serve --manifest-url %s%s --transport long-poll --once=false --max-jobs 0 --identity-store "$rdev_identity_store"
   rdev_exit=$?
   rdev_attempt=$((rdev_attempt + 1))
   echo "[rdev] host process exited with code $rdev_exit"
@@ -918,6 +930,12 @@ if ($rdevCmd) {
   }
 }
 Write-Host "Starting visible Remote Dev Skillkit host session..."
+$identityBase = [Environment]::GetFolderPath('LocalApplicationData')
+if ([string]::IsNullOrWhiteSpace($identityBase)) { $identityBase = $env:TEMP }
+$identityDir = Join-Path $identityBase "RemoteDevSkillkit"
+New-Item -ItemType Directory -Force -Path $identityDir | Out-Null
+$identityStore = Join-Path $identityDir "host-identity.json"
+Write-Host "[rdev] Persistent support identity: $identityStore"
 # Prevent Windows idle sleep/display sleep while rdev is running. This does not
 # bypass lock-screen policy or enterprise security controls.
 # SetThreadExecutionState keeps the session awake so the runner can continue to
@@ -945,7 +963,7 @@ do {
     Write-Host ("[rdev] Retrying host registration (attempt $($rdevAttempt + 1) of $($rdevMaxRetries + 1)) after ${rdevRetryDelaySec}s...")
     Start-Sleep -Seconds $rdevRetryDelaySec
   }
-  & $rdevPath host serve --manifest-url '%s'%s --transport long-poll --once=false --max-jobs 0
+  & $rdevPath host serve --manifest-url '%s'%s --transport long-poll --once=false --max-jobs 0 --identity-store $identityStore
   $rdevExitCode = $LASTEXITCODE
   $rdevAttempt++
   Write-Host "[rdev] host process exited with code $rdevExitCode"
@@ -1307,7 +1325,7 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 	adapter := strings.ToLower(strings.TrimSpace(req.Adapter))
 	if adapter == "shell" || adapter == "powershell" {
 		if host, hostErr := s.Gateway.Host(req.HostID); hostErr == nil {
-			explanation := policy.ExplainShellJob(host.Mode, req.Policy)
+			explanation := policy.ExplainAdapterJob(host.Mode, adapter, req.Policy)
 			if !explanation.Allowed {
 				summary := strings.Join(explanation.Denials, "; ")
 				if summary == "" {

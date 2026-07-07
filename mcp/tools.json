@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "rdev.support_session.connect",
-      "description": "Single high-level Agent entry for 'connect a computer'. Fresh Agents should call this before rdev.invites.create, rdev.connection_entry.plan, hand-written gateway setup, or package materialization. It returns target_handoff_envelope, the ready-to-forward human message with full_text and copy_paste, plus fresh_agent_connect_contract, the model-independent standard path that tells Agents how to recover missing rdev, what not to ask humans for, and which custom scripts are forbidden. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, target_handoff_envelope, agent_connection_runbook, gateway_candidate_preflight, connectivity_helper_preflight, connection_entry_runner_recommendation, connection_supervision, and status watcher in one payload. If no gateway is running, returns cli_start_now_command plus agent_connection_runbook for the standard visible foreground rdev support-session connect --start flow, instead of making the Agent choose lower-level handoff/create/start/status steps. The foreground start payload exposes handoff_text_file.path for the exact target-side plain-text handoff and connected_report_file.path for the exact success report, so Agents can avoid parsing long-running terminal JSON. The created target command and host runtime keep signed gateway candidates so target bootstrap and post-registration job transport can fail over inside rdev. Read agent_connection_runbook.fresh_agent_failure_prevention before writing setup code; it captures known failure patterns such as manual gateway/invite/bootstrap glue, missing helper assets that produce 'rdev is required', background gateway workarounds, approval polling, and Agent-written PowerShell/shell scripts. When durable or restrictive-network connectivity is needed, use connection_entry_runner_recommendation to materialize and dry-run the standard self-contained Connection Entry runner instead of writing tunnel code. Do not persist trycloudflare.com Quick Tunnel URLs as durable configuration; prefer RDEV_HOSTED_GATEWAY_URL on a cloud/VPS host or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL for reusable Cloudflare Named Tunnel addresses.",
+      "description": "Single high-level Agent entry for 'connect a computer'. Fresh Agents should call this before rdev.invites.create, rdev.connection_entry.plan, hand-written gateway setup, or package materialization. It returns target_handoff_envelope, the ready-to-forward human message with full_text and copy_paste, remote_control_entry, the DeviceID/session-password style support entry that Agents should use instead of exposing ticket internals, plus fresh_agent_connect_contract, the model-independent standard path that tells Agents how to recover missing rdev, what not to ask humans for, and which custom scripts are forbidden. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, target_handoff_envelope, remote_control_entry, agent_connection_runbook, gateway_candidate_preflight, connectivity_helper_preflight, connection_entry_runner_recommendation, connection_supervision, and status watcher in one payload. If no gateway is running, returns cli_start_now_command plus agent_connection_runbook for the standard visible foreground rdev support-session connect --start flow, instead of making the Agent choose lower-level handoff/create/start/status steps. The foreground start payload exposes handoff_text_file.path for the exact target-side plain-text handoff and connected_report_file.path for the exact success report, so Agents can avoid parsing long-running terminal JSON. The created target command and host runtime keep signed gateway candidates so target bootstrap and post-registration job transport can fail over inside rdev. Read agent_connection_runbook.fresh_agent_failure_prevention before writing setup code; it captures known failure patterns such as manual gateway/invite/bootstrap glue, missing helper assets that produce 'rdev is required', background gateway workarounds, approval polling, and Agent-written PowerShell/shell scripts. When durable or restrictive-network connectivity is needed, use connection_entry_runner_recommendation to materialize and dry-run the standard self-contained Connection Entry runner instead of writing tunnel code. Do not persist trycloudflare.com Quick Tunnel URLs as durable configuration; prefer RDEV_HOSTED_GATEWAY_URL on a cloud/VPS host or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL for reusable Cloudflare Named Tunnel addresses.",
       "safety": "Creates a scoped attended-temporary ticket only when a reachable/configured gateway is supplied; otherwise planning only. Does not execute on the target host, install hidden persistence, bypass policy, or mutate firewall/DNS/routes.",
       "inputSchema": {
         "additionalProperties": false,
@@ -244,7 +244,7 @@
     },
     {
       "name": "rdev.support_session.create",
-      "description": "Create an attended temporary support session through an already reachable gateway and return a ready target_handoff_envelope, user_handoff, target command, status watcher, fresh_agent_connect_contract, agent_connection_runbook, fresh_agent_failure_prevention, gateway_candidate_preflight, connectivity_helper_preflight, connection_entry_runner_recommendation, connection_supervision, and connection_continuity_policy. If gateway_url is omitted, the tool uses the first configured RDEV_*_GATEWAY_URL or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL fallback. Agents should forward target_handoff_envelope.full_text verbatim to the target-side human, then wait through connection_supervision/status surfaces. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured hosted/cloudflared/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. After registration, rdev host serve --transport auto can reuse signed join-manifest gateway candidates and switch to another reachable gateway when the current path fails before jobs are processed. Agents should follow fresh_agent_connect_contract and agent_connection_runbook first, read fresh_agent_failure_prevention before writing setup code, read gateway_candidate_preflight and connectivity_helper_preflight before asking humans or writing probes, read connection_entry_runner_recommendation before promising durable or restrictive-network connectivity, read connection_supervision to wait, report connected=true, and choose standard upgrade/recovery tools; read stable_after_lan_change before promising durable connectivity, prefer target_handoff_envelope.full_text for the human-facing response, and use rdev support-session connect --start when no gateway is running instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
+      "description": "Create an attended temporary support session through an already reachable gateway and return a ready target_handoff_envelope, remote_control_entry, user_handoff, target command, status watcher, fresh_agent_connect_contract, agent_connection_runbook, fresh_agent_failure_prevention, gateway_candidate_preflight, connectivity_helper_preflight, connection_entry_runner_recommendation, connection_supervision, and connection_continuity_policy. If gateway_url is omitted, the tool uses the first configured RDEV_*_GATEWAY_URL or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL fallback. Agents should forward target_handoff_envelope.full_text verbatim to the target-side human, then use remote_control_entry as the remote-control-style DeviceID/session-password status surface and wait through connection_supervision/status surfaces. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured hosted/cloudflared/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. After registration, rdev host serve --transport auto can reuse signed join-manifest gateway candidates and switch to another reachable gateway when the current path fails before jobs are processed. Agents should follow fresh_agent_connect_contract and agent_connection_runbook first, read fresh_agent_failure_prevention before writing setup code, read gateway_candidate_preflight and connectivity_helper_preflight before asking humans or writing probes, read connection_entry_runner_recommendation before promising durable or restrictive-network connectivity, read connection_supervision to wait, report connected=true, and choose standard upgrade/recovery tools; read stable_after_lan_change before promising durable connectivity, prefer target_handoff_envelope.full_text for the human-facing response, and use rdev support-session connect --start when no gateway is running instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
       "safety": "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
       "inputSchema": {
         "additionalProperties": false,
@@ -348,7 +348,7 @@
     },
     {
       "name": "rdev.support_session.status",
-      "description": "Read or wait on standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, timed out, or is still waiting. Pass gateway_url when watching a foreground, tunneled, hosted, relay, mesh, VPN, or SSH gateway that is not the MCP server's local in-memory gateway.",
+      "description": "Read or wait on standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, timed out, or is still waiting. Status includes remote_control_entry, a DeviceID/session-password style support entry that remains the Agent-facing connection handle. Pass gateway_url when watching a foreground, tunneled, hosted, relay, mesh, VPN, or SSH gateway that is not the MCP server's local in-memory gateway.",
       "safety": "Read-only status check; does not approve hosts or execute jobs.",
       "inputSchema": {
         "additionalProperties": false,
@@ -388,7 +388,7 @@
     },
     {
       "name": "rdev.support_session.report",
-      "description": "Summarize a support session by ticket_code or host_id, select the single active job-ready host when possible, list stale/pending hosts, jobs, artifact counts, and first evidence snippets so Agents can produce final status without hand-written curl or raw HTTP summaries. Pass gateway_url for non-local foreground/tunneled/hosted gateways.",
+      "description": "Summarize a support session by ticket_code or host_id, select the single active job-ready host when possible, list stale/pending hosts, jobs, artifact counts, first evidence snippets, remote_control_entry, and connection continuity so Agents can produce final status without hand-written curl or raw HTTP summaries. Pass gateway_url for non-local foreground/tunneled/hosted gateways. Reports must not make Agents disconnect automatically; the host stays connected until the operator explicitly asks to disconnect, revoke, or stop it.",
       "safety": "Read-only report generation; may expose sensitive job output snippets already available to the operator.",
       "inputSchema": {
         "additionalProperties": false,
@@ -409,6 +409,39 @@
           "ticket_code": {
             "minLength": 1,
             "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.support_session.smoke_test",
+      "description": "Run the standard Agent-native support-session smoke test against a connected host instead of hand-writing OS-specific job probes. The tool selects the single active host from ticket_code when possible, creates fixed scoped shell jobs for identity, fs.read, fs.write.scoped, and process.inspect, waits for terminal job states, summarizes artifacts, includes remote_control_entry and connection continuity, and tells Agents to keep the host connected unless the operator explicitly asks to disconnect.",
+      "safety": "Creates small scoped diagnostic jobs on an already connected host. Does not elevate, install software, change services, mutate firewall/DNS/routes, or disconnect the host.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ticket_code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "maximum": 3600,
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "type": "object"

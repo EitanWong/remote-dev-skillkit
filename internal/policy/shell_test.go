@@ -103,6 +103,41 @@ func TestExplainShellJobRequiresApprovalForNetwork(t *testing.T) {
 	}
 }
 
+func TestExplainPowerShellJobAllowsStandardWindowsProbe(t *testing.T) {
+	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "powershell", map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"powershell.user"},
+		"command":              "Write-Output $env:COMPUTERNAME; whoami; Get-Location",
+		"allow_commands":       []string{"powershell.exe", "powershell", "pwsh"},
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	})
+	if !explanation.Allowed || explanation.Adapter != "powershell" {
+		t.Fatalf("expected powershell job to be allowed: %#v", explanation)
+	}
+	if explanation.ApprovalRequired {
+		t.Fatalf("expected no approval requirement: %#v", explanation)
+	}
+}
+
+func TestExplainPowerShellJobRejectsMissingPowerShellCapability(t *testing.T) {
+	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "powershell", map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"shell.user"},
+		"command":              "Get-Location",
+		"allow_commands":       []string{"powershell.exe", "powershell", "pwsh"},
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+	})
+	if explanation.Allowed {
+		t.Fatal("expected missing powershell.user to be denied")
+	}
+	if !containsReason(explanation.Denials, "missing powershell.user") {
+		t.Fatalf("unexpected denials: %#v", explanation.Denials)
+	}
+}
+
 func containsReason(values []string, needle string) bool {
 	for _, value := range values {
 		if strings.Contains(value, needle) {

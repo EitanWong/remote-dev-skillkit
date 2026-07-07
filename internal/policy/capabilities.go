@@ -30,6 +30,7 @@ const (
 func TemporaryDefaults() []Capability {
 	return []Capability{
 		CapabilityShellUser,
+		CapabilityPowerShellUser,
 		CapabilityFSRead,
 		CapabilityFSWriteScoped,
 		CapabilityProcessInspect,

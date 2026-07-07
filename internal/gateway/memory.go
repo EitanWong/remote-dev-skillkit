@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -23,6 +24,8 @@ var (
 )
 
 const hostHeartbeatStaleAfter = 90 * time.Second
+
+const TicketMetadataGatewayCandidates = "gateway_url_candidates_json"
 
 type MemoryGateway struct {
 	mu                 sync.Mutex
@@ -792,6 +795,9 @@ func (g *MemoryGateway) JoinManifestWithGatewayCandidates(ticketCode, gatewayURL
 	if !g.now().Before(ticket.ExpiresAt) {
 		return model.JoinManifest{}, ErrTicketExpired
 	}
+	if len(candidates) == 0 {
+		candidates = gatewayCandidatesFromTicketMetadata(ticket.Metadata)
+	}
 	manifest, err := model.NewJoinManifest(ticket, model.JoinManifestSpec{
 		GatewayURL:        gatewayURL,
 		GatewayCandidates: candidates,
@@ -803,6 +809,29 @@ func (g *MemoryGateway) JoinManifestWithGatewayCandidates(ticketCode, gatewayURL
 		return model.JoinManifest{}, err
 	}
 	return manifest.Sign(g.manifestPrivateKey)
+}
+
+func gatewayCandidatesFromTicketMetadata(metadata map[string]string) []model.JoinManifestGatewayCandidate {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(metadata[TicketMetadataGatewayCandidates])
+	if raw == "" {
+		return nil
+	}
+	var candidates []model.JoinManifestGatewayCandidate
+	if err := json.Unmarshal([]byte(raw), &candidates); err != nil {
+		return nil
+	}
+	out := make([]model.JoinManifestGatewayCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate.URL = strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		if candidate.URL == "" {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, model.Artifact, error) {

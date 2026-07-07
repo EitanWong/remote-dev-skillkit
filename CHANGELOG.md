@@ -4,6 +4,49 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.40-dev
+
+Current phase: remote-control-style support entry hardening from real Agent
+support transcripts. This slice turns temporary support from a task-scoped
+ticket mental model into a stable Agent-facing Support Device Entry while
+preserving visible, attended, revocable target-side consent.
+
+### Added
+
+- Added `rdev.support-session-remote-control-entry.v1` to support-session
+  created/status/report/smoke-test payloads. Agents now receive a
+  DeviceID-style `support_device_id`, a ticket-scoped `session_passcode`, and
+  `explicit_disconnect_required=true` instead of treating ticket/root/gateway
+  internals as the user-facing connection handle.
+- Added visible host-side remote-control connector output from `rdev host
+  serve`, showing Device ID, Session Password, and the keep-open rule in the
+  target terminal.
+- Added target-local persistent identity stores to generated Windows and
+  macOS/Linux bootstrap scripts so the same target connector can derive a
+  stable host identity across restarts instead of becoming a random new device
+  every time the PowerShell or shell window is reopened.
+
+### Changed
+
+- Updated support-session connected reports, CLI report/smoke-test, MCP
+  report/smoke-test, README, multilingual README pages, and core remote
+  skills to describe Remote Dev Skillkit as an AI-native remote-control
+  connector: temporary customer support remains visible and attended, but the
+  Agent must not disconnect it after task completion unless the operator
+  explicitly asks.
+- Clarified the managed-service boundary: third-party temporary support stays
+  visible and non-service by default; operator-owned recurring machines should
+  use a reviewed managed-service upgrade only after explicit ownership and
+  persistence approval plus a stable gateway.
+
+### Fixed
+
+- Fixed generated macOS/Linux bootstrap scripts so already-installed `rdev`
+  paths still initialize OS/architecture variables before keep-awake and host
+  startup logic.
+- Added regression coverage for remote-control entry handoff/status/report
+  surfaces and for generated bootstrap scripts carrying `--identity-store`.
+
 ## 0.1.39-dev
 
 Current phase: fresh-Agent remote-session hardening from real Codex support

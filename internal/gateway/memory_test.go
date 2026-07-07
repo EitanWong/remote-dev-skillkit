@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -180,6 +181,35 @@ func TestMemoryGatewayCreatesSignedJoinManifest(t *testing.T) {
 	}
 	if manifest.TicketCode != ticket.Code {
 		t.Fatalf("expected ticket code %q, got %q", ticket.Code, manifest.TicketCode)
+	}
+	if err := manifest.Verify(now); err != nil {
+		t.Fatalf("expected manifest to verify: %v", err)
+	}
+}
+
+func TestMemoryGatewayJoinManifestUsesTicketMetadataGatewayCandidates(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	candidates := []model.JoinManifestGatewayCandidate{
+		{URL: "https://relay.example.test/rdev", Kind: "relay", Scope: "configured-relay", Recommended: true},
+		{URL: "http://192.0.2.10:8787", Kind: "lan-private", Scope: "diagnostic"},
+	}
+	content, err := json.Marshal(candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "repair", map[string]string{
+		TicketMetadataGatewayCandidates: string(content),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := gw.JoinManifest(ticket.Code, "https://relay.example.test/rdev", "https://relay.example.test/rdev/join/"+ticket.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.GatewayCandidates) < 2 || manifest.GatewayCandidates[0].Kind != "relay" {
+		t.Fatalf("expected ticket metadata gateway candidates in signed manifest, got %#v", manifest.GatewayCandidates)
 	}
 	if err := manifest.Verify(now); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)

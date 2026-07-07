@@ -47,6 +47,7 @@ const AgentConnectionRunbookSchemaVersion = "rdev.support-session-agent-runbook.
 const FreshAgentFailurePreventionSchemaVersion = "rdev.support-session-fresh-agent-failure-prevention.v1"
 const FreshAgentConnectContractSchemaVersion = "rdev.support-session-fresh-agent-connect-contract.v1"
 const TargetHandoffEnvelopeSchemaVersion = "rdev.support-session-target-handoff-envelope.v1"
+const RemoteControlEntrySchemaVersion = "rdev.support-session-remote-control-entry.v1"
 
 const (
 	targetHTTPConnectTimeoutSeconds = 2
@@ -89,6 +90,14 @@ type HandoffOptions struct {
 	AutoApprove bool
 	Locale      string
 	RdevCommand string
+}
+
+type RemoteControlEntryOptions struct {
+	GatewayURL string
+	TicketCode string
+	Ticket     *model.Ticket
+	Hosts      []model.Host
+	Locale     string
 }
 
 type GatewayURLCandidate struct {
@@ -2139,6 +2148,12 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"--wait",
 		"--locale", locale,
 	}
+	remoteControlEntry := BuildRemoteControlEntry(RemoteControlEntryOptions{
+		GatewayURL: gatewayURL,
+		TicketCode: opts.Ticket.Code,
+		Ticket:     &opts.Ticket,
+		Locale:     locale,
+	})
 	return map[string]any{
 		"schema_version":                         CreatedSchemaVersion,
 		"ok":                                     true,
@@ -2158,7 +2173,8 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"target_command":                         recommended,
 		"target_commands":                        targetCommands,
 		"user_handoff":                           userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
-		"target_handoff_envelope":                targetHandoffEnvelope(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
+		"target_handoff_envelope":                targetHandoffEnvelope(locale, target, recommendedSurface, recommended, joinURL, targetCommands, remoteControlEntry),
+		"remote_control_entry":                   remoteControlEntry,
 		"connection_attempt_policy":              attemptPolicy,
 		"connection_continuity_policy":           continuityPolicy,
 		"connection_supervision":                 connectionSupervision(opts.Ticket.Code, locale, rdevCommand, gatewayURL, attemptPolicy, continuityPolicy),
@@ -2246,19 +2262,24 @@ func userHandoff(locale, target, surface, copyPaste, joinURL string, targetComma
 	}
 }
 
-func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string) map[string]any {
+func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, remoteControlEntry map[string]any) map[string]any {
 	message := localizedUserHandoffMessage(locale, surface)
+	fullText := message + "\n\n" + copyPaste
+	if card := remoteControlEntryText(remoteControlEntry); card != "" {
+		fullText += "\n\n" + card
+	}
 	return map[string]any{
-		"schema_version":   TargetHandoffEnvelopeSchemaVersion,
-		"locale":           locale,
-		"target":           target,
-		"ready_to_forward": true,
-		"format":           "plain-text",
-		"message":          message,
-		"copy_paste":       copyPaste,
-		"copy_paste_kind":  surface,
-		"full_text":        message + "\n\n" + copyPaste,
-		"join_url":         joinURL,
+		"schema_version":       TargetHandoffEnvelopeSchemaVersion,
+		"locale":               locale,
+		"target":               target,
+		"ready_to_forward":     true,
+		"format":               "plain-text",
+		"message":              message,
+		"copy_paste":           copyPaste,
+		"copy_paste_kind":      surface,
+		"full_text":            fullText,
+		"join_url":             joinURL,
+		"remote_control_entry": remoteControlEntry,
 		"fallbacks": map[string]string{
 			"windows_command":     targetCommands["windows"],
 			"macos_linux_command": targetCommands["macos_linux"],
@@ -2276,6 +2297,26 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 			"hidden install or persistence",
 		},
 	}
+}
+
+func remoteControlEntryText(entry map[string]any) string {
+	if len(entry) == 0 {
+		return ""
+	}
+	deviceID, _ := entry["support_device_id"].(string)
+	passcode, _ := entry["session_passcode"].(string)
+	if strings.TrimSpace(deviceID) == "" && strings.TrimSpace(passcode) == "" {
+		return ""
+	}
+	lines := []string{"Remote control style entry:"}
+	if strings.TrimSpace(deviceID) != "" {
+		lines = append(lines, "Device ID: "+deviceID)
+	}
+	if strings.TrimSpace(passcode) != "" {
+		lines = append(lines, "Session Password: "+passcode)
+	}
+	lines = append(lines, "Keep this visible connector open. The Agent will not disconnect it unless the operator explicitly asks.")
+	return strings.Join(lines, "\n")
 }
 
 func autoTargetHandoffRule(target string) string {
@@ -2332,6 +2373,112 @@ func joinURLsForGatewayCandidates(candidates []GatewayURLCandidate, ticketCode s
 		values = append(values, base+"/join/"+ticketCode)
 	}
 	return dedupeStrings(values)
+}
+
+func BuildRemoteControlEntry(opts RemoteControlEntryOptions) map[string]any {
+	ticketCode := strings.TrimSpace(opts.TicketCode)
+	var ticket *model.Ticket
+	if opts.Ticket != nil {
+		ticket = opts.Ticket
+		if ticketCode == "" {
+			ticketCode = strings.TrimSpace(ticket.Code)
+		}
+	}
+	hosts := append([]model.Host(nil), opts.Hosts...)
+	deviceID, deviceIDSource := remoteControlDeviceID(ticketCode, hosts)
+	activeHosts := hostsByStatus(hosts, model.HostStatusActive)
+	staleHosts := hostsByStatus(hosts, model.HostStatusStale)
+	pendingHosts := hostsByStatus(hosts, model.HostStatusPending)
+	passcode := remoteControlSessionPasscode(ticketCode)
+	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+	ephemeralGateway := strings.Contains(strings.ToLower(gatewayURL), ".trycloudflare.com")
+	persistenceMode := "visible-attended-connector"
+	if len(activeHosts) > 0 || len(staleHosts) > 0 || len(pendingHosts) > 0 {
+		persistenceMode = "visible-attended-connector-with-persistent-host-identity"
+	}
+	entry := map[string]any{
+		"schema_version":               RemoteControlEntrySchemaVersion,
+		"product_model":                "remote-control-style support device entry for AI Agents",
+		"entry_name":                   "Support Device Entry",
+		"support_device_id":            deviceID,
+		"support_device_id_source":     deviceIDSource,
+		"session_passcode":             passcode,
+		"session_passcode_kind":        "ticket-scoped session passcode",
+		"session_passcode_rotates":     true,
+		"gateway_url":                  gatewayURL,
+		"ephemeral_gateway":            ephemeralGateway,
+		"stable_gateway_required_for":  []string{"same address across Agent sessions", "managed service reconnect", "owned recurring host"},
+		"connector_persistence":        persistenceMode,
+		"explicit_disconnect_required": true,
+		"agent_rule":                   "Treat this like a remote-control app entry: use support_device_id plus session_passcode/status/report fields, keep the connector online after work, and disconnect/revoke/stop only after an explicit operator request.",
+		"human_rule":                   "The target-side person opens the visible connector and keeps it open; closing the connector or revoking the ticket ends access.",
+		"temporary_support_policy":     "Temporary customer support remains visible and attended but is not auto-disconnected when the Agent finishes a task.",
+		"managed_upgrade_policy":       "For an operator-owned recurring machine, ask for explicit managed-service approval and require a stable gateway before installing service persistence.",
+		"forbidden": []string{
+			"Agent-initiated disconnect after task completion",
+			"hidden install",
+			"unapproved service persistence",
+			"long-lived shared host password",
+		},
+	}
+	if ticketCode != "" {
+		entry["ticket_code"] = ticketCode
+	}
+	if ticket != nil {
+		entry["ticket_status"] = string(ticket.Status)
+		entry["ticket_expires_at"] = ticket.ExpiresAt.UTC().Format(time.RFC3339)
+		entry["ticket_expires_in_seconds"] = maxInt(0, int(ticket.ExpiresAt.Sub(time.Now().UTC()).Seconds()))
+	}
+	if len(activeHosts) == 1 {
+		entry["recommended_job_host_id"] = activeHosts[0].ID
+	}
+	if len(hosts) > 0 {
+		entry["host_count"] = map[string]int{
+			"active":  len(activeHosts),
+			"stale":   len(staleHosts),
+			"pending": len(pendingHosts),
+			"total":   len(hosts),
+		}
+	}
+	return entry
+}
+
+func remoteControlDeviceID(ticketCode string, hosts []model.Host) (string, string) {
+	for _, host := range hosts {
+		if value := strings.TrimSpace(host.IdentityFingerprint); value != "" {
+			return humanCode("RDEV", value), "host_identity_fingerprint"
+		}
+	}
+	for _, host := range hosts {
+		if value := strings.TrimSpace(host.ID); value != "" {
+			return humanCode("RDEV", value), "host_id"
+		}
+	}
+	if ticketCode = strings.TrimSpace(ticketCode); ticketCode != "" {
+		return "RDEV-" + strings.ToUpper(strings.ReplaceAll(ticketCode, "_", "-")), "connection_entry_ticket"
+	}
+	return "RDEV-PENDING", "pending-target-connector"
+}
+
+func remoteControlSessionPasscode(ticketCode string) string {
+	ticketCode = strings.TrimSpace(ticketCode)
+	if ticketCode == "" {
+		return ""
+	}
+	return strings.ToUpper(ticketCode)
+}
+
+func humanCode(prefix, seed string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(seed)))
+	value := strings.ToUpper(hex.EncodeToString(sum[:]))[:12]
+	return prefix + "-" + value[0:4] + "-" + value[4:8] + "-" + value[8:12]
+}
+
+func maxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func connectionAttemptPolicy(candidates []GatewayURLCandidate, joinURLs []string) map[string]any {
@@ -2566,34 +2713,10 @@ func runtimeGatewayCandidates(candidates []GatewayURLCandidate) []GatewayURLCand
 }
 
 func bootstrapURLWithRuntimeCandidates(rawURL string, candidates []GatewayURLCandidate) string {
-	if len(candidates) == 0 {
-		return rawURL
-	}
-	values := make([]map[string]any, 0, len(candidates))
-	for _, candidate := range candidates {
-		if strings.TrimSpace(candidate.URL) == "" {
-			continue
-		}
-		values = append(values, map[string]any{
-			"url":         strings.TrimRight(strings.TrimSpace(candidate.URL), "/"),
-			"kind":        candidate.Kind,
-			"scope":       candidate.Scope,
-			"recommended": candidate.Recommended,
-			"reason":      candidate.Reason,
-		})
-	}
-	if len(values) == 0 {
-		return rawURL
-	}
-	content, err := json.Marshal(values)
-	if err != nil {
-		return rawURL
-	}
-	separator := "?"
-	if strings.Contains(rawURL, "?") {
-		separator = "&"
-	}
-	return rawURL + separator + "gateway_url_candidates=" + neturl.QueryEscape(string(content))
+	// Keep human-facing bootstrap URLs short. Gateway candidates are still
+	// exposed in machine-readable session payloads and signed manifests, but the
+	// copy-paste command must not leak LAN/loopback metadata or become fragile.
+	return rawURL
 }
 
 func BuildPlan(ctx context.Context, opts Options) map[string]any {
@@ -2852,15 +2975,23 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	} else if len(revoked) > 0 {
 		status = "revoked"
 	}
+	remoteControlEntry := BuildRemoteControlEntry(RemoteControlEntryOptions{
+		GatewayURL: opts.GatewayURL,
+		TicketCode: ticketCode,
+		Ticket:     opts.Ticket,
+		Hosts:      hosts,
+		Locale:     locale,
+	})
 	out := map[string]any{
-		"schema_version": StatusSchemaVersion,
-		"ok":             connected || len(pending) > 0 || waiting,
-		"ticket_code":    ticketCode,
-		"status":         status,
-		"connected":      connected,
-		"waiting":        waiting,
-		"feedback":       localizedStatusFeedback(status, locale),
-		"next_action":    localizedStatusNextAction(status, locale),
+		"schema_version":       StatusSchemaVersion,
+		"ok":                   connected || len(pending) > 0 || waiting,
+		"ticket_code":          ticketCode,
+		"status":               status,
+		"connected":            connected,
+		"waiting":              waiting,
+		"feedback":             localizedStatusFeedback(status, locale),
+		"next_action":          localizedStatusNextAction(status, locale),
+		"remote_control_entry": remoteControlEntry,
 		"connected_next_steps": BuildConnectedNextSteps(ConnectedNextStepsOptions{
 			Status:     status,
 			Hosts:      active,
@@ -2925,10 +3056,10 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 		hostName = host.Name
 		capabilities = append([]string(nil), host.Capabilities...)
 	}
-	report := "Connection established. I can see the target host and will inspect capabilities before starting scoped work."
+	report := "Connection established. I can see the target host and will keep the connector online until you explicitly ask me to disconnect, revoke, or stop it."
 	switch opts.Locale {
 	case "zh-CN", "zh":
-		report = "连接已经建立。我已经看到目标主机，会先检查能力范围，再创建最小权限任务。"
+		report = "连接已经建立。我已经看到目标主机，并会保持连接在线，直到你明确要求我断开、撤销或停止。"
 	}
 	actions := []string{}
 	if connected {
@@ -2937,6 +3068,7 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 			"run rdev support-session audit-capabilities against this host before ad-hoc work",
 			"use rdev job create/wait/get/artifacts for the smallest scoped job only after the user's task intent is clear",
 			"export or review evidence before declaring the remote work complete",
+			"keep the connector online after the task unless the operator explicitly requests disconnect, revoke, or stop",
 		}
 	} else {
 		report = ""
@@ -2961,6 +3093,7 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 			"creating a broad shell job before inspecting capabilities",
 			"claiming work is complete before reviewing job evidence",
 			"asking the user for ticket/root/gateway/transport after connected=true",
+			"disconnecting or revoking the support device entry just because a task finished",
 		},
 	}
 }

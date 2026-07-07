@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,8 +68,8 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "推荐入口", "Agent 包目录", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "--identity-store", "host-identity.json", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "--identity-store", "host-identity.json", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.accept != "" {
@@ -913,6 +914,48 @@ func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
 		t.Fatalf("expected signed relay candidate first, got %#v", payload.Manifest.GatewayCandidates)
 	}
 	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
+		t.Fatalf("expected manifest to verify: %v", err)
+	}
+}
+
+func TestTicketManifestEndpointUsesServerSideGatewayCandidateMetadata(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	candidates := `[{"url":"https://relay.example.test/rdev","kind":"relay","scope":"configured-relay","recommended":true},{"url":"http://192.0.2.10:8787","kind":"lan-private"}]`
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewBufferString(`{
+		"mode":"attended-temporary",
+		"ttl_seconds":600,
+		"reason":"metadata manifest",
+		"metadata":{"`+gateway.TicketMetadataGatewayCandidates+`":`+strconv.Quote(candidates)+`}
+	}`))
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var created struct {
+		Ticket model.Ticket `json:"ticket"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+created.Ticket.Code+"/manifest", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Manifest.GatewayCandidates) < 2 || payload.Manifest.GatewayCandidates[0].Kind != "relay" {
+		t.Fatalf("expected server-side metadata gateway candidates, got %#v", payload.Manifest.GatewayCandidates)
+	}
+	if err := payload.Manifest.Verify(created.Ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)
 	}
 }

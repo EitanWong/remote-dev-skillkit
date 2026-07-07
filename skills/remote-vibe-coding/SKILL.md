@@ -105,6 +105,15 @@ revocation.
   with its own public domain/IP, or configure
   `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` plus a reviewed named-tunnel token,
   token file, tunnel name, or start argv.
+  Read `remote_control_entry`, `connection_continuity`, `managed_upgrade`, and
+  `disconnect_policy` from `rdev.support_session.report` or
+  `rdev.support_session.smoke_test` before promising durable reconnect. A
+  `https://*.trycloudflare.com` Quick Tunnel means current-session fallback,
+  not a reusable address.
+  Treat `remote_control_entry.support_device_id` as the DeviceID-like handle
+  and `remote_control_entry.session_passcode` as the current session password.
+  Do not disconnect or revoke after a coding task completes unless the operator
+  explicitly asks.
 - Read `agent_connection_runbook.fresh_agent_failure_prevention` before writing
   any setup code. It captures known bad fresh-Agent failure patterns such as
   manual `gateway serve` plus `invite create`, missing helper assets that make
@@ -215,8 +224,10 @@ revocation.
   is applicable.
 - When status returns `connected=true`, immediately send
   `connected_next_steps.user_report` to the user, call the listed
-  `rdev.hosts.capabilities` follow-up, then create only the smallest scoped job
-  matching the user's task.
+  `rdev.hosts.capabilities` follow-up, run the standard
+  `rdev.support_session.smoke_test` / `rdev support-session smoke-test` when it
+  is available, then create only the smallest scoped job matching the user's
+  task. Do not replace smoke-test with hand-written job batteries.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -304,7 +315,8 @@ revocation.
    `rdev.support_session.status` with `wait=true`, or
    `rdev support-session status --wait`. When `connected=true`, proactively
    report `connected_next_steps.user_report` to the user, inspect
-   `rdev.hosts.capabilities`, and only then create the smallest scoped job. Do
+   `rdev.hosts.capabilities`, run standard smoke-test/report tooling, and only
+   then create the smallest scoped job. Do
    not write custom polling loops. If the wait times out or the target does not appear,
    follow `connection_supervision` and `connection_recovery` instead of writing
    PowerShell, shell, relay, approval, or bootstrap glue. Treat
@@ -400,4 +412,8 @@ Return a compact evidence report:
 - tests/checks run and exit status;
 - artifacts or audit records reviewed;
 - residual risk;
-- whether host/ticket revocation or managed-service cleanup remains.
+- remote-control entry (`support_device_id`, session passcode policy, and
+  explicit disconnect requirement);
+- connection continuity (ephemeral Quick Tunnel vs stable configured gateway);
+- whether the host remains connected, and any explicit operator-requested
+  disconnect/revoke/managed-service cleanup still pending.

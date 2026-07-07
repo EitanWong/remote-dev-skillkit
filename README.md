@@ -11,7 +11,11 @@ building.
 The product is AI-native: the human talks to an agent, and the agent starts
 ordinary "connect this computer" work with `rdev.support_session.connect`.
 That high-level entry returns the one target-side handoff to send, the standard
-status watcher, connection supervision, and recovery guidance. Lower-level
+Support Device Entry (`support_device_id` + session passcode), status watcher,
+connection supervision, and recovery guidance. It behaves more like a
+remote-control connector for agents than a pile of ticket flags: the target
+opens a visible connector, the agent uses the standard entry, and the connector
+stays online until the operator explicitly asks to disconnect. Lower-level
 `rdev.invites.create`, `rdev.connection_entry.plan`, `rdev.hosts.*`, and
 `rdev.jobs.*` tools remain available for reviewed packaging, managed hosts,
 scoped work, approvals, and evidence after the connection path is established.

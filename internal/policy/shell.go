@@ -88,6 +88,101 @@ func ExplainShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExpl
 	return finalizeShellExplanation(explanation)
 }
 
+func ExplainAdapterJob(mode model.HostMode, adapter string, jobPolicy map[string]any) ShellJobExplanation {
+	switch strings.ToLower(strings.TrimSpace(adapter)) {
+	case "powershell":
+		return ExplainPowerShellJob(mode, jobPolicy)
+	default:
+		return ExplainShellJob(mode, jobPolicy)
+	}
+}
+
+func ExplainPowerShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExplanation {
+	explanation := ShellJobExplanation{
+		Mode:    string(mode),
+		Adapter: "powershell",
+	}
+	if !mode.Valid() {
+		explanation.Denials = append(explanation.Denials, "unknown host mode")
+		return finalizeShellExplanation(explanation)
+	}
+
+	workspaceRoot := stringValue(jobPolicy, "workspace_root", "")
+	if workspaceRoot == "" {
+		workspaceRoot = stringValue(jobPolicy, "cwd", "")
+	}
+	if strings.TrimSpace(workspaceRoot) == "" {
+		explanation.Denials = append(explanation.Denials, "workspace root is required")
+	} else {
+		explanation.Reasons = append(explanation.Reasons, "workspace root is declared")
+	}
+
+	capabilities := stringSliceValue(jobPolicy, "capabilities")
+	if !containsString(capabilities, string(CapabilityPowerShellUser)) {
+		explanation.Denials = append(explanation.Denials, "missing powershell.user capability")
+	} else {
+		explanation.Reasons = append(explanation.Reasons, "powershell.user capability is present")
+	}
+
+	command := stringValue(jobPolicy, "command", "")
+	if command == "" {
+		command = stringValue(jobPolicy, "script", "")
+	}
+	allowCommands := stringSliceValue(jobPolicy, "allow_commands")
+	if strings.TrimSpace(command) == "" {
+		explanation.Denials = append(explanation.Denials, "command is required")
+	} else if len(allowCommands) == 0 {
+		explanation.Denials = append(explanation.Denials, "allow_commands is required")
+	} else if !powershellCommandAllowlisted(stringValue(jobPolicy, "powershell_command", ""), allowCommands) {
+		explanation.Denials = append(explanation.Denials, "powershell executable is not allowlisted")
+	} else {
+		explanation.Reasons = append(explanation.Reasons, "powershell executable is allowlisted")
+	}
+
+	for _, scope := range stringSliceValue(jobPolicy, "write_scope") {
+		if writeScopeEscapes(scope) {
+			explanation.Denials = append(explanation.Denials, "write scope escapes workspace root: "+scope)
+		}
+	}
+	if len(stringSliceValue(jobPolicy, "write_scope")) > 0 && !containsString(capabilities, string(CapabilityFSWriteScoped)) {
+		explanation.Warnings = append(explanation.Warnings, "write_scope is set without fs.write.scoped capability")
+	}
+
+	maxDuration := intValue(jobPolicy, "max_duration_seconds", model.DefaultJobTTLSeconds)
+	if maxDuration <= 0 {
+		explanation.Denials = append(explanation.Denials, "max_duration_seconds must be positive")
+	}
+	maxOutput := intValue(jobPolicy, "max_output_bytes", model.DefaultMaxOutputBytes)
+	if maxOutput <= 0 {
+		explanation.Denials = append(explanation.Denials, "max_output_bytes must be positive")
+	}
+	network := stringValue(jobPolicy, "network", "default-deny")
+	if network != "default-deny" {
+		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, "network."+network)
+		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires approval")
+	}
+	for _, approval := range stringSliceValue(jobPolicy, "approvals_required") {
+		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, approval)
+	}
+	if len(explanation.Denials) == 0 {
+		explanation.Reasons = append(explanation.Reasons, "host will still re-validate the signed job envelope and canonical paths before execution")
+	}
+	return finalizeShellExplanation(explanation)
+}
+
+func powershellCommandAllowlisted(command string, allowCommands []string) bool {
+	command = strings.TrimSpace(command)
+	if command != "" {
+		return allowedCommand(command, allowCommands)
+	}
+	for _, candidate := range []string{"powershell.exe", "powershell", "pwsh"} {
+		if allowedCommand(candidate, allowCommands) {
+			return true
+		}
+	}
+	return false
+}
+
 func finalizeShellExplanation(explanation ShellJobExplanation) ShellJobExplanation {
 	explanation.ApprovalRequired = len(explanation.RequiredApprovals) > 0
 	explanation.Allowed = len(explanation.Denials) == 0

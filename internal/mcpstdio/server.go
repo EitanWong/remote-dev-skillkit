@@ -299,6 +299,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.supportSessionStatus(params.Arguments)
 	case "rdev.support_session.report":
 		data, err = s.supportSessionReport(params.Arguments)
+	case "rdev.support_session.smoke_test":
+		data, err = s.supportSessionSmokeTest(params.Arguments)
 	case "rdev.connection_entry.plan":
 		data, err = s.connectionEntryPlan(params.Arguments)
 	case "rdev.acceptance.scaffold_evidence":
@@ -510,6 +512,7 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 
 func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL string, ttl int) (map[string]any, error) {
 	autoApprove := boolArg(args, "auto_approve", true)
+	gatewayCandidates := supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", gatewayURL, nil)
 	metadata := map[string]string{
 		"connection_entry":  "standard-visible",
 		"approval_contract": "target-consent-scoped-ticket",
@@ -517,6 +520,7 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 	if autoApprove {
 		metadata["auto_approve"] = "attended-temporary"
 	}
+	metadata = addGatewayCandidateTicketMetadata(metadata, gatewayCandidates)
 	ticket, err := s.Gateway.CreateTicketWithMetadata(
 		model.HostModeAttendedTemporary,
 		ttl,
@@ -531,7 +535,7 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 	manifestURL := strings.TrimRight(gatewayURL, "/") + "/v1/tickets/" + ticket.Code + "/manifest"
 	return supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
-		GatewayURLCandidates:  supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", gatewayURL, nil),
+		GatewayURLCandidates:  gatewayCandidates,
 		JoinURL:               joinURL,
 		ManifestURL:           manifestURL,
 		ManifestRootPublicKey: manifestRootPublicKey(s.Gateway.ManifestRoot()),
@@ -541,6 +545,38 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 		RdevCommand:           agentRdevCommand(stringArg(args, "rdev_command", "")),
 		AutoApprove:           autoApprove,
 	}), nil
+}
+
+func addGatewayCandidateTicketMetadata(metadata map[string]string, candidates []supportsession.GatewayURLCandidate) map[string]string {
+	if len(candidates) == 0 {
+		return metadata
+	}
+	values := make([]model.JoinManifestGatewayCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		url := strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		if url == "" {
+			continue
+		}
+		values = append(values, model.JoinManifestGatewayCandidate{
+			URL:         url,
+			Kind:        strings.TrimSpace(candidate.Kind),
+			Scope:       strings.TrimSpace(candidate.Scope),
+			Recommended: candidate.Recommended,
+			Reason:      strings.TrimSpace(candidate.Reason),
+		})
+	}
+	if len(values) == 0 {
+		return metadata
+	}
+	content, err := json.Marshal(values)
+	if err != nil {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata[gateway.TicketMetadataGatewayCandidates] = string(content)
+	return metadata
 }
 
 func (s Server) supportSessionPlan(args map[string]any) (any, error) {
@@ -666,6 +702,10 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 					"schema_version":          "rdev.support-session-report.v1",
 					"ok":                      false,
 					"gateway_url":             gatewayURL,
+					"connection_continuity":   supportSessionConnectionContinuityMap(gatewayURL),
+					"disconnect_policy":       "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+					"remote_control_entry":    supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nil),
+					"managed_upgrade":         supportSessionManagedUpgradeRecommendationMap(nil),
 					"ticket_code":             ticketCode,
 					"host_id":                 "",
 					"recommended_job_host_id": "",
@@ -747,6 +787,10 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 		"schema_version":              "rdev.support-session-report.v1",
 		"ok":                          true,
 		"gateway_url":                 gatewayURL,
+		"connection_continuity":       supportSessionConnectionContinuityMap(gatewayURL),
+		"disconnect_policy":           "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+		"remote_control_entry":        supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, host),
+		"managed_upgrade":             supportSessionManagedUpgradeRecommendationMap(host),
 		"ticket_code":                 ticketCode,
 		"host_id":                     hostID,
 		"recommended_job_host_id":     hostID,
@@ -754,7 +798,7 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 		"host":                        host,
 		"jobs":                        jobReports,
 		"human_report":                supportSessionHumanReportMap(host, jobReports),
-		"next_action":                 "Use this report instead of hand-written curl summaries; create jobs only for recommended_job_host_id and revoke the temporary session when remote work is complete.",
+		"next_action":                 "Use this report instead of hand-written curl summaries; create jobs only for recommended_job_host_id; keep the connection alive until the operator explicitly requests disconnect or revocation.",
 		"stale_host_rule":             "Do not create jobs for stale_hosts; run rdev support-session recover if stale hosts or queued jobs accumulated.",
 	}
 	if status != nil {
@@ -766,6 +810,271 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 		report["recommended_job_host_source"] = "ticket_single_active_host"
 	}
 	return report, nil
+}
+
+func (s Server) supportSessionSmokeTest(args map[string]any) (any, error) {
+	gatewayURL := s.effectiveGatewayURL(args)
+	ticketCode := strings.TrimSpace(stringArg(args, "ticket_code", ""))
+	hostID := strings.TrimSpace(stringArg(args, "host_id", ""))
+	timeoutSeconds := intArg(args, "timeout_seconds", 120)
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 120
+	}
+	if timeoutSeconds > 3600 {
+		return nil, fmt.Errorf("timeout_seconds must be between 1 and 3600")
+	}
+	var status map[string]any
+	if hostID == "" && ticketCode != "" {
+		statusAny, err := s.supportSessionStatus(map[string]any{
+			"gateway_url":     gatewayURL,
+			"ticket_code":     ticketCode,
+			"locale":          stringArg(args, "locale", "auto"),
+			"wait":            false,
+			"timeout_seconds": float64(0),
+			"interval_millis": float64(1000),
+		})
+		if err != nil {
+			return nil, err
+		}
+		status = nestedMapOrSelfAny(statusAny, "")
+		activeHosts := mapSliceFromAny(status["active_hosts"])
+		if len(activeHosts) != 1 {
+			return map[string]any{
+				"schema_version":          "rdev.support-session-smoke-test.v1",
+				"ok":                      false,
+				"gateway_url":             gatewayURL,
+				"connection_continuity":   supportSessionConnectionContinuityMap(gatewayURL),
+				"disconnect_policy":       "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+				"remote_control_entry":    supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nil),
+				"managed_upgrade":         supportSessionManagedUpgradeRecommendationMap(nil),
+				"ticket_code":             ticketCode,
+				"host_id":                 "",
+				"recommended_job_host_id": "",
+				"status":                  status,
+				"next_action":             "Smoke-test requires exactly one active host; wait with rdev.support_session.status or pass host_id explicitly.",
+			}, nil
+		}
+		hostID = stringMapValue(activeHosts[0], "id")
+	}
+	if hostID == "" {
+		return nil, fmt.Errorf("support_session.smoke_test requires host_id or ticket_code with exactly one active host")
+	}
+	audit, err := s.runSupportSessionCapabilityAudit(args, gatewayURL, hostID, time.Duration(timeoutSeconds)*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	report := map[string]any{
+		"schema_version":        "rdev.support-session-smoke-test.v1",
+		"ok":                    audit["ok"],
+		"gateway_url":           gatewayURL,
+		"host_id":               hostID,
+		"ticket_code":           ticketCode,
+		"connection_continuity": supportSessionConnectionContinuityMap(gatewayURL),
+		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+		"remote_control_entry":  supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nestedMapOrSelfAny(audit["host"], "")),
+		"managed_upgrade":       supportSessionManagedUpgradeRecommendationMap(nestedMapOrSelfAny(audit["host"], "")),
+		"capability_audit":      audit,
+		"human_report":          supportSessionSmokeHumanReportMap(audit),
+		"next_action":           "Use this single smoke-test report instead of hand-written job probes; keep the host connected for follow-up work unless the operator explicitly asks to disconnect.",
+	}
+	if status != nil {
+		report["status"] = status
+	}
+	return report, nil
+}
+
+func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL, hostID string, timeout time.Duration) (map[string]any, error) {
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	host, err := s.fetchHostMap(gatewayURL, hostID)
+	if err != nil {
+		return nil, err
+	}
+	probes := mcpAuditCapabilityProbes(stringMapValue(host, "os"))
+	results := make([]map[string]any, 0, len(probes))
+	ok := true
+	for _, probe := range probes {
+		created, err := s.createJob(map[string]any{
+			"gateway_url": gatewayURL,
+			"host_id":     hostID,
+			"adapter":     probe.Adapter,
+			"intent":      probe.Intent,
+			"policy":      probe.Policy,
+		})
+		if err != nil {
+			ok = false
+			results = append(results, map[string]any{
+				"name":       probe.Name,
+				"capability": probe.Capability,
+				"status":     "create_failed",
+				"ok":         false,
+				"error":      err.Error(),
+			})
+			continue
+		}
+		job := nestedMapOrSelfAny(created, "job")
+		jobID := stringMapValue(job, "id")
+		if jobID == "" {
+			ok = false
+			results = append(results, map[string]any{
+				"name":       probe.Name,
+				"capability": probe.Capability,
+				"status":     "create_failed",
+				"ok":         false,
+				"error":      "gateway response missing job.id",
+			})
+			continue
+		}
+		jobStatus, err := s.waitForJobTerminal(gatewayURL, jobID, deadline)
+		if err != nil {
+			ok = false
+			results = append(results, map[string]any{
+				"name":       probe.Name,
+				"capability": probe.Capability,
+				"job_id":     jobID,
+				"status":     "wait_failed",
+				"ok":         false,
+				"error":      err.Error(),
+			})
+			continue
+		}
+		status := stringMapValue(jobStatus, "status")
+		resultOK := status == string(model.JobStatusSucceeded) || (probe.FailureIsOK && (status == string(model.JobStatusFailed) || status == string(model.JobStatusCanceled)))
+		if !resultOK {
+			ok = false
+		}
+		artifactSummary := ""
+		artifactCount := 0
+		if artifacts, err := s.listArtifacts(map[string]any{"gateway_url": gatewayURL, "job_id": jobID}); err == nil {
+			artifactMap := nestedMapOrSelfAny(artifacts, "")
+			if values, _ := artifactMap["artifacts"].([]any); values != nil {
+				artifactCount = len(values)
+			}
+			artifactSummary = summarizeFirstArtifactMap(artifactMap)
+		}
+		results = append(results, map[string]any{
+			"name":             probe.Name,
+			"capability":       probe.Capability,
+			"adapter":          probe.Adapter,
+			"job_id":           jobID,
+			"job_status":       status,
+			"ok":               resultOK,
+			"artifact_count":   artifactCount,
+			"artifact_summary": artifactSummary,
+		})
+	}
+	return map[string]any{
+		"schema_version":        "rdev.support-session-capability-audit.v1",
+		"ok":                    ok,
+		"gateway_url":           gatewayURL,
+		"connection_continuity": supportSessionConnectionContinuityMap(gatewayURL),
+		"host":                  host,
+		"results":               results,
+		"next_action":           "Use scoped jobs only after this audit is ok; do not disconnect the host unless the operator asks.",
+	}, nil
+}
+
+func (s Server) fetchHostMap(gatewayURL, hostID string) (map[string]any, error) {
+	if strings.TrimSpace(gatewayURL) != "" {
+		payload, err := s.proxyGETTo(gatewayURL, "/v1/hosts/"+url.PathEscape(hostID))
+		if err != nil {
+			return nil, err
+		}
+		return nestedMapOrSelfAny(payload, "host"), nil
+	}
+	host, err := s.Gateway.Host(hostID)
+	if err != nil {
+		return nil, err
+	}
+	return structToMap(host), nil
+}
+
+func (s Server) waitForJobTerminal(gatewayURL, jobID string, deadline time.Time) (map[string]any, error) {
+	for {
+		payload, err := s.jobStatus(map[string]any{"gateway_url": gatewayURL, "job_id": jobID})
+		if err != nil {
+			return nil, err
+		}
+		job := nestedMapOrSelfAny(payload, "job")
+		status := stringMapValue(job, "status")
+		if isTerminalJobStatus(status) {
+			return job, nil
+		}
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			return job, fmt.Errorf("job %s did not reach a terminal state before timeout; last status=%s", jobID, status)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func isTerminalJobStatus(status string) bool {
+	switch status {
+	case string(model.JobStatusSucceeded), "completed", string(model.JobStatusFailed), string(model.JobStatusCanceled):
+		return true
+	default:
+		return false
+	}
+}
+
+type mcpSupportSessionAuditProbe struct {
+	Name        string
+	Capability  string
+	Adapter     string
+	Intent      string
+	Policy      map[string]any
+	FailureIsOK bool
+}
+
+func mcpAuditCapabilityProbes(hostOS string) []mcpSupportSessionAuditProbe {
+	if strings.EqualFold(hostOS, "windows") {
+		return []mcpSupportSessionAuditProbe{
+			{Name: "identity", Capability: "shell.user", Adapter: "shell", Intent: "capability audit identity", Policy: mcpShellAuditPolicy([]string{"shell.user"}, []string{"cmd", "/c", "hostname && whoami && cd"}, []string{"cmd"})},
+			{Name: "powershell_identity", Capability: "powershell.user", Adapter: "powershell", Intent: "capability audit PowerShell identity", Policy: mcpPowerShellAuditPolicy("Write-Output $env:COMPUTERNAME; whoami; Get-Location")},
+			{Name: "fs_read", Capability: "fs.read", Adapter: "shell", Intent: "capability audit scoped read", Policy: mcpShellAuditPolicy([]string{"shell.user", "fs.read"}, []string{"cmd", "/c", "dir /b ."}, []string{"cmd"})},
+			{Name: "fs_write_scoped", Capability: "fs.write.scoped", Adapter: "shell", Intent: "capability audit scoped write", Policy: mcpShellAuditPolicyWithWriteScope([]string{"shell.user", "fs.write.scoped"}, []string{"cmd", "/c", "echo rdev-audit> rdev_capability_audit.txt && type rdev_capability_audit.txt && del rdev_capability_audit.txt && if not exist rdev_capability_audit.txt echo deleted"}, []string{"cmd"}, []string{"."})},
+			{Name: "process_inspect", Capability: "process.inspect", Adapter: "shell", Intent: "capability audit process inspect", Policy: mcpShellAuditPolicy([]string{"shell.user", "process.inspect"}, []string{"tasklist"}, []string{"tasklist"})},
+		}
+	}
+	return []mcpSupportSessionAuditProbe{
+		{Name: "identity", Capability: "shell.user", Adapter: "shell", Intent: "capability audit identity", Policy: mcpShellAuditPolicy([]string{"shell.user"}, []string{"sh", "-c", "hostname && whoami && pwd"}, []string{"sh"})},
+		{Name: "fs_read", Capability: "fs.read", Adapter: "shell", Intent: "capability audit scoped read", Policy: mcpShellAuditPolicy([]string{"shell.user", "fs.read"}, []string{"sh", "-c", "ls -la . | head -40"}, []string{"sh"})},
+		{Name: "fs_write_scoped", Capability: "fs.write.scoped", Adapter: "shell", Intent: "capability audit scoped write", Policy: mcpShellAuditPolicyWithWriteScope([]string{"shell.user", "fs.write.scoped"}, []string{"sh", "-c", "printf rdev-audit > rdev_capability_audit.txt && cat rdev_capability_audit.txt && rm rdev_capability_audit.txt && test ! -e rdev_capability_audit.txt && echo deleted"}, []string{"sh"}, []string{"."})},
+		{Name: "process_inspect", Capability: "process.inspect", Adapter: "shell", Intent: "capability audit process inspect", Policy: mcpShellAuditPolicy([]string{"shell.user", "process.inspect"}, []string{"sh", "-c", "ps -o pid,comm= -p $$"}, []string{"sh"})},
+	}
+}
+
+func mcpShellAuditPolicy(capabilities, argv, allowCommands []string) map[string]any {
+	return mcpShellAuditPolicyWithWriteScope(capabilities, argv, allowCommands, nil)
+}
+
+func mcpPowerShellAuditPolicy(command string) map[string]any {
+	return map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"powershell.user"},
+		"command":              command,
+		"allow_commands":       []string{"powershell.exe", "powershell", "pwsh"},
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	}
+}
+
+func mcpShellAuditPolicyWithWriteScope(capabilities, argv, allowCommands, writeScope []string) map[string]any {
+	policy := map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         capabilities,
+		"argv":                 argv,
+		"allow_commands":       allowCommands,
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	}
+	if len(writeScope) > 0 {
+		policy["write_scope"] = writeScope
+	}
+	return policy
 }
 
 func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
@@ -1434,8 +1743,133 @@ func supportSessionHumanReportMap(host map[string]any, jobs []map[string]any) st
 		}
 		_, _ = fmt.Fprint(&b, "\n")
 	}
-	_, _ = fmt.Fprint(&b, "- Cleanup: revoke or close the temporary session when finished.")
+	_, _ = fmt.Fprint(&b, "- Connection: keep alive until the operator explicitly asks to disconnect, revoke, or stop it.")
 	return b.String()
+}
+
+func supportSessionSmokeHumanReportMap(audit map[string]any) string {
+	var b strings.Builder
+	_, _ = fmt.Fprintln(&b, "Remote Dev Skillkit smoke-test report")
+	if host, _ := audit["host"].(map[string]any); host != nil {
+		_, _ = fmt.Fprintf(&b, "- Host: %s (%s %s)\n", firstReportFieldMap(host, "name", "hostname", "id"), firstReportFieldMap(host, "os"), firstReportFieldMap(host, "arch"))
+	}
+	for _, result := range mapSliceFromAny(audit["results"]) {
+		_, _ = fmt.Fprintf(&b, "- %s: ok=%v status=%s\n", stringMapValue(result, "name"), result["ok"], firstReportFieldMap(result, "job_status", "status"))
+	}
+	_, _ = fmt.Fprint(&b, "- Connection: keep alive until the operator explicitly asks to disconnect.")
+	return b.String()
+}
+
+func supportSessionRemoteControlEntryMap(gatewayURL, ticketCode string, status, host map[string]any) map[string]any {
+	if status != nil {
+		if entry, ok := status["remote_control_entry"].(map[string]any); ok && len(entry) > 0 {
+			return entry
+		}
+	}
+	hosts := []model.Host{}
+	if host != nil {
+		hosts = append(hosts, model.Host{
+			ID:                  firstReportFieldMap(host, "id", "host_id"),
+			TicketID:            firstReportFieldMap(host, "ticket_id"),
+			Mode:                model.HostMode(firstReportFieldMap(host, "mode")),
+			Status:              model.HostStatus(firstReportFieldMap(host, "status")),
+			Name:                firstReportFieldMap(host, "name", "hostname"),
+			OS:                  firstReportFieldMap(host, "os"),
+			Arch:                firstReportFieldMap(host, "arch"),
+			Capabilities:        stringSliceFromAnyMap(host["capabilities"]),
+			IdentityKeyID:       firstReportFieldMap(host, "identity_key_id"),
+			IdentityPublicKey:   firstReportFieldMap(host, "identity_public_key"),
+			IdentityFingerprint: firstReportFieldMap(host, "identity_fingerprint"),
+		})
+	}
+	return supportsession.BuildRemoteControlEntry(supportsession.RemoteControlEntryOptions{
+		GatewayURL: gatewayURL,
+		TicketCode: ticketCode,
+		Hosts:      hosts,
+		Locale:     "auto",
+	})
+}
+
+func stringSliceFromAnyMap(value any) []string {
+	if typed, ok := value.([]string); ok {
+		return typed
+	}
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if text, ok := item.(string); ok && text != "" {
+			values = append(values, text)
+		}
+	}
+	return values
+}
+
+func supportSessionConnectionContinuityMap(gatewayURL string) map[string]any {
+	gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/")
+	ephemeral := strings.Contains(strings.ToLower(gatewayURL), ".trycloudflare.com")
+	stableConfigured := false
+	stableKinds := []string{}
+	if configured, candidates := supportsession.ConfiguredGatewayURLCandidate(); configured != "" {
+		stableConfigured = true
+		for _, candidate := range candidates {
+			if strings.TrimSpace(candidate.URL) == "" {
+				continue
+			}
+			stableKinds = append(stableKinds, strings.TrimSpace(candidate.Kind))
+		}
+	}
+	stable := gatewayURL != "" && !ephemeral
+	return map[string]any{
+		"schema_version":                          "rdev.support-session-connection-continuity.v1",
+		"gateway_url":                             gatewayURL,
+		"stable_gateway":                          stable,
+		"ephemeral_quick_tunnel":                  ephemeral,
+		"stable_configured":                       stableConfigured,
+		"stable_configured_kinds":                 stableKinds,
+		"managed_reconnect_ready":                 stable && stableConfigured,
+		"managed_service_requires_stable_gateway": true,
+		"operator_action":                         supportSessionContinuityActionMap(ephemeral, stableConfigured),
+		"do_not_expect_quick_reuse":               ephemeral,
+		"recommended_stable_gateway":              []string{"RDEV_HOSTED_GATEWAY_URL", "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"},
+		"disconnect_requires_request":             true,
+	}
+}
+
+func supportSessionManagedUpgradeRecommendationMap(host map[string]any) map[string]any {
+	targetOS := "auto"
+	if host != nil {
+		if value := firstReportFieldMap(host, "os"); value != "" {
+			targetOS = strings.ToLower(value)
+		}
+	}
+	return map[string]any{
+		"schema_version":                      "rdev.support-session-managed-upgrade.v1",
+		"for_owned_recurring_hosts":           true,
+		"for_third_party_temporary":           false,
+		"requires_explicit_operator_approval": true,
+		"requires_stable_gateway":             true,
+		"stable_gateway_env": []string{
+			"RDEV_HOSTED_GATEWAY_URL",
+			"RDEV_CLOUDFLARED_NAMED_TUNNEL_URL",
+		},
+		"target_os":        targetOS,
+		"recommended_tool": "rdev.connection_entry.plan",
+		"agent_rule":       "If this is the operator's own recurring machine, ask one short ownership/persistence approval question, configure a stable gateway, then generate a reviewed managed-service Connection Entry plan. Do not install persistence for third-party temporary support.",
+	}
+}
+
+func supportSessionContinuityActionMap(ephemeral, stableConfigured bool) string {
+	switch {
+	case ephemeral:
+		return "current gateway is a Cloudflare Quick Tunnel and will not be reusable; configure RDEV_HOSTED_GATEWAY_URL or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL before relying on managed reconnect"
+	case stableConfigured:
+		return "stable gateway is configured; keep it running for recurring hosts and managed service reconnect"
+	default:
+		return "gateway is not a Quick Tunnel, but no stable RDEV_* gateway env was detected; verify DNS/IP durability before promising managed reconnect"
+	}
 }
 
 func firstReportFieldMap(payload map[string]any, keys ...string) string {

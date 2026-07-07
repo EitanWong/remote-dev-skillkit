@@ -2,6 +2,8 @@
 
 Remote Dev Skillkit ist eine Sicherheitsschicht für KI-Agenten, die auf echten Mac-, Windows- oder Linux-Maschinen arbeiten müssen. Es ist kein verstecktes Fernsteuerungswerkzeug: Codex, Claude Code, Hermes, OpenClaw/OpenCode und generische MCP-Agenten können echte Entwicklungsarbeit über signierte Jobs, lokale Host-Policy, Freigaben, Evidence Bundles und Audit Chains ausführen.
 
+Das Verbindungsmodell ist Remote-Control-artig für Agenten: Der Zielrechner öffnet einen sichtbaren Connector, der Agent nutzt den standardisierten Support Device Entry (`support_device_id` + Session-Passwort) und trennt erst, wenn der Operator das ausdrücklich verlangt.
+
 ## Highlights
 
 - Ein portables Agent Skillkit für gängige Agent Frameworks.

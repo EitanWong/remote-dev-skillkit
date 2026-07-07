@@ -283,8 +283,8 @@ func Build(opts Options) (Package, error) {
 			"ssh_identity",
 		},
 		StopAndCleanup: []string{
-			"stop the visible process for attended temporary sessions",
-			"revoke the ticket at the gateway when the work is complete",
+			"stop the visible process only when the operator explicitly asks to disconnect or the target-side user closes it",
+			"revoke the ticket at the gateway only when the operator explicitly requests revocation",
 			"remove temporary package files if the target-side user requests cleanup",
 		},
 		NoManualAssembly:       true,

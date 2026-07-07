@@ -81,9 +81,12 @@ If `rdev` is not found in PATH:
 3. Try `go install ./cmd/rdev` if a checkout exists.
 4. Never stop and ask the user to install rdev.
 
-### Rule 5 — Gateway process MUST run in foreground
+### Rule 5 — Temporary gateway process MUST run in foreground
 
-`rdev support-session connect --start` is a **foreground process**. It manages the public tunnel, serves helper assets, and holds session state in memory. If it exits, the tunnel drops and the target machine loses connectivity.
+For attended-temporary sessions, `rdev support-session connect --start` is a
+**foreground process**. It manages the public tunnel, serves helper assets, and
+holds session state in memory. If it exits, the tunnel drops and the target
+machine loses connectivity.
 
 Never run it with `&`, `nohup`, or in a background terminal. Keep it alive for the whole session.
 
@@ -92,6 +95,13 @@ If the gateway process unexpectedly exits:
 2. Wait for the previous host heartbeat to go stale (up to 90 seconds).
 3. Let the target machine re-register and receive automatic approval.
 4. Resume from the generated `target_handoff_envelope.full_text` / `handoff_text_file.path`.
+
+For an operator-owned recurring machine, do not try to make the temporary
+PowerShell or shell window persistent. First confirm ownership and persistence
+approval in one short question, configure a stable gateway
+(`RDEV_HOSTED_GATEWAY_URL` or `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`), then use the
+reviewed managed Connection Entry / Windows Service / systemd / LaunchAgent
+plan surfaces. Never install persistence for third-party temporary support.
 
 ### Rule 6 — MCP tools must target the active gateway
 
@@ -174,6 +184,34 @@ screen-unlock requirements. If a host becomes `stale`, treat sleep/lock/network
 loss as likely causes and use the standard recovery/status flow instead of
 asking the user to edit bootstrap scripts.
 
+### Rule 13 — Do not disconnect automatically
+
+Completing a job is not a signal to disconnect. Keep the host/session alive
+until the operator explicitly asks to disconnect, revoke, stop the gateway, or
+uninstall a managed service. Final reports should state connection continuity:
+ephemeral Quick Tunnel vs stable configured gateway, and whether managed
+reconnect is ready.
+
+### Rule 14 — Treat sessions as Support Device Entries
+
+Remote Dev Skillkit is an AI-native remote-control connector. Do not expose
+ticket/root/gateway internals as the user's mental model. Use the standard
+`remote_control_entry` returned by `connect`, `status`, `report`, and
+`smoke-test`:
+
+- `support_device_id` is the DeviceID-like handle. When the target connector
+  has a persisted host identity, it stays stable across restarts.
+- `session_passcode` is a ticket-scoped session password/passcode. It is not a
+  long-lived shared host password.
+- `explicit_disconnect_required=true` means even temporary customer support
+  stays connected until the operator explicitly asks to disconnect, revoke, or
+  stop it.
+
+For third-party temporary support, keep the connector visible and attended; do
+not install service persistence. For an operator-owned recurring machine, ask
+one short ownership/persistence approval question, require a stable gateway,
+then use the reviewed managed-service upgrade path.
+
 ---
 
 ## Workflow (5 steps, no branching for the user)
@@ -237,6 +275,10 @@ Use `recommended_job_host_id` from that report. If the report says there are no
 active hosts or multiple active hosts, follow its `next_action` instead of
 guessing from stale/pending host IDs.
 
+Also read `remote_control_entry` from the report/status. Use
+`support_device_id` and `session_passcode` as the standard Agent-facing
+connection handle; do not ask humans to copy raw ticket/root/gateway fields.
+
 If multiple stale hosts appear for the same ticket, run:
 
 ```
@@ -248,15 +290,18 @@ switch transports manually unless the recover command is unavailable.
 
 ### Step 5 — Run capability tests then report
 
-After connection, run the built-in audit first (no user prompts):
+After connection, run the built-in smoke test first (no user prompts):
 
 ```
-rdev support-session audit-capabilities --gateway-url <ACTIVE_GATEWAY_URL> --host-id <RECOMMENDED_JOB_HOST_ID>
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --host-id <RECOMMENDED_JOB_HOST_ID>
 ```
 
-This command owns the OS-specific probe commands, short timeouts, scoped write
-test, job waiting, and artifact collection. Do not write ad-hoc `curl` loops or
-custom Windows/Unix capability scripts unless this built-in command is missing.
+This command owns OS-specific probe jobs, PowerShell/cmd fallback semantics,
+short timeouts, scoped write test, job waiting, artifact collection, and
+remote-control entry plus connection-continuity reporting. Do not write ad-hoc
+`curl` loops or custom Windows/Unix capability scripts unless this built-in command is missing. If
+`smoke-test` is unavailable in an older install, use
+`rdev support-session audit-capabilities` as the compatibility fallback.
 
 For subsequent scoped work, use `rdev job create`, `rdev job wait`, `rdev job
 get`, `rdev job artifacts`, `rdev job list`, and `rdev job cancel` before
@@ -270,7 +315,8 @@ For the final summary, prefer:
 rdev support-session report --gateway-url <ACTIVE_GATEWAY_URL> --ticket-code <TICKET>
 ```
 
-Then revoke the session and produce the Audit Report.
+Then produce the Audit Report and keep the connection alive. Do not revoke or
+disconnect after the report unless the operator explicitly asks for cleanup.
 
 ---
 
@@ -321,7 +367,8 @@ After the session, produce a report with these sections:
 <list gaps found>
 
 ## Cleanup
-- Ticket revoked: yes/no
+- Connection kept alive: yes/no
+- Ticket revoked only by explicit operator request: yes/no
 - No-persistence checks: pass/fail
 - Files cleaned: yes/no
 
@@ -335,6 +382,7 @@ After the session, produce a report with these sections:
 ## Default Capabilities for Temporary Sessions
 
 - `shell.user`
+- `powershell.user`
 - `fs.read`
 - `fs.write.scoped`
 - `process.inspect`
@@ -414,12 +462,12 @@ Before invoking any `rdev` subcommand, verify it exists by checking `rdev --help
 - `rdev hosts capabilities` → use `rdev.hosts.capabilities` MCP tool or `GET /v1/hosts`
 
 Prefer first-class CLI commands for gateway interactions when they exist:
-`rdev support-session audit-capabilities`, `rdev job create`, `rdev job list`,
-`rdev job get`, `rdev job wait`, `rdev job artifacts`,
-`rdev job policy-template`, `rdev support-session report`, and
-`rdev job cancel`. Use MCP tools when the current task needs MCP-only surfaces
-such as host capability inspection, and use raw HTTP only as a last-resort
-diagnostic path.
+`rdev support-session smoke-test`, `rdev support-session audit-capabilities`,
+`rdev job create`, `rdev job list`, `rdev job get`, `rdev job wait`,
+`rdev job artifacts`, `rdev job policy-template`,
+`rdev support-session report`, and `rdev job cancel`. Use MCP tools when the
+current task needs MCP-only surfaces such as host capability inspection, and use
+raw HTTP only as a last-resort diagnostic path.
 
 **MCP gateway alignment**
 
