@@ -2,20 +2,27 @@
 
 Remote Dev Skillkit e um skillkit remoto, open-source e nativo para agentes de IA. Ele permite que Codex, Claude Code, Hermes, OpenClaw/OpenCode e agentes MCP trabalhem em hosts Mac, Windows e Linux reais sem receber um shell ilimitado.
 
-O projeto junta Agent Skills, ferramentas MCP, jobs assinados, politica local do host, aprovacoes, auditoria e pacotes de evidencia. A licenca e Apache-2.0.
+## O que faz
 
-## Prompt de instalacao para o agente
+| O agente recebe | A pessoa mantem |
+|---|---|
+| Skills, ferramentas MCP e adaptadores de arquivos/desktop/jobs | Visibilidade, aprovacao, revogacao e auditoria |
+| Jobs assinados com capacidades claras | Politica local do host e limites de seguranca |
+| Artifacts e evidence bundles | Controle sobre o que roda e quando para |
 
-Copie e cole isto no seu agente:
+## Instalar com um agente
+
+Copie o texto abaixo e envie ao agente:
 
 ```text
 Please install Remote Dev Skillkit for your own agent runtime:
 https://github.com/EitanWong/remote-dev-skillkit
 ```
 
-O contrato completo fica em [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
+Contrato completo: [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
 
-## Inicio rapido manual
+<details>
+<summary>Comandos manuais</summary>
 
 ```bash
 go install ./cmd/rdev
@@ -42,17 +49,39 @@ rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --targ
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-## Teste local
+</details>
+
+## Uso
+
+1. Conecte uma maquina:
+
+```text
+Use Remote Dev Skillkit to connect this computer for a visible support session.
+```
+
+```bash
+rdev support-session connect --start
+```
+
+2. Veja ferramentas e rode a demo local:
+
+```bash
+rdev mcp tools
+rdev demo local
+```
+
+3. Revise evidencia basica:
 
 ```bash
 go test ./...
 rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session
-rdev demo local
-rdev mcp tools
 ```
 
 ## Seguranca
 
-Remote Dev Skillkit foi criado para suporte remoto explicito, visivel e com consentimento. Sessoes temporarias de terceiros devem ser visiveis, limitadas no tempo, revogaveis, auditaveis e com permissao de usuario por padrao. O projeto nao aceita persistencia oculta, bypass de UAC/sudo, desativacao de controles locais ou shell sem politica.
+Remote Dev Skillkit foi criado para suporte remoto explicito, visivel e com consentimento. Sessoes temporarias de terceiros devem ser visiveis, limitadas no tempo, revogaveis, auditaveis e com permissao de usuario por padrao. O projeto nao aceita persistencia oculta, bypass de UAC/sudo, desativacao de controles locais ou shell sem politica. Licenca Apache-2.0.
 
-O [README](../../README.md) em ingles e a fonte tecnica autoritativa.
+## Documentos
+
+- README tecnico autoritativo: [../../README.md](../../README.md)
+- Indice de docs: [../README.md](../README.md)

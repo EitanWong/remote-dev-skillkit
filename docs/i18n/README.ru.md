@@ -2,11 +2,17 @@
 
 Remote Dev Skillkit - это open-source, agent-native skillkit для удаленной разработки. Он позволяет Codex, Claude Code, Hermes, OpenClaw/OpenCode и MCP-агентам работать с реальными Mac, Windows и Linux hosts без выдачи неограниченного shell.
 
-Проект объединяет Agent Skills, MCP tools, подписанные задания, локальную политику хоста, approval gates, audit logs и evidence bundles. Лицензия - Apache-2.0.
+## Что он делает
 
-## Prompt для установки через агента
+| Агент получает | Человек сохраняет |
+|---|---|
+| Skills, MCP tools и адаптеры files/desktop/jobs | Видимость, approval, revocation и audit |
+| Подписанные jobs с понятными capabilities | Локальную host policy и security boundaries |
+| Artifacts и evidence bundles | Контроль над тем, что запускается и когда останавливается |
 
-Скопируйте и отправьте это своему агенту:
+## Установка через агента
+
+Скопируйте текст ниже и отправьте его агенту:
 
 ```text
 Please install Remote Dev Skillkit for your own agent runtime:
@@ -15,7 +21,8 @@ https://github.com/EitanWong/remote-dev-skillkit
 
 Полный контракт находится в [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
 
-## Ручной быстрый старт
+<details>
+<summary>Ручные команды</summary>
 
 ```bash
 go install ./cmd/rdev
@@ -42,17 +49,39 @@ rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --targ
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-## Локальная проверка
+</details>
+
+## Использование
+
+1. Подключите машину:
+
+```text
+Use Remote Dev Skillkit to connect this computer for a visible support session.
+```
+
+```bash
+rdev support-session connect --start
+```
+
+2. Посмотрите tools и локальную demo:
+
+```bash
+rdev mcp tools
+rdev demo local
+```
+
+3. Проверьте базовые evidence:
 
 ```bash
 go test ./...
 rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session
-rdev demo local
-rdev mcp tools
 ```
 
 ## Безопасность
 
-Remote Dev Skillkit создан для явной, видимой и согласованной удаленной поддержки разработки. Временные сессии для сторонних устройств должны быть видимыми, ограниченными по времени, отзывными, аудитируемыми и по умолчанию пользовательского уровня. Проект не принимает скрытую персистентность, обход UAC/sudo, отключение локальных защит или shell без политики.
+Remote Dev Skillkit создан для явной, видимой и согласованной удаленной поддержки разработки. Временные сессии для сторонних устройств должны быть видимыми, ограниченными по времени, отзывными, аудитируемыми и по умолчанию пользовательского уровня. Проект не принимает скрытую персистентность, обход UAC/sudo, отключение локальных защит или shell без политики. Лицензия Apache-2.0.
 
-Английский [README](../../README.md) является авторитетным техническим источником.
+## Документация
+
+- Авторитетный английский README: [../../README.md](../../README.md)
+- Индекс документации: [../README.md](../README.md)

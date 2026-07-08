@@ -2,11 +2,17 @@
 
 Remote Dev Skillkit は、AI Agent のためのオープンソースで Agent ネイティブなリモート開発 Skillkit です。Codex、Claude Code、Hermes、OpenClaw/OpenCode、MCP Agent が実際の Mac、Windows、Linux ホストを扱うとき、無制限の shell を渡さずに安全な作業面を提供します。
 
-Agent Skills、MCP ツール、署名済みジョブ、ホスト側ポリシー、承認、監査、証跡バンドルをまとめます。ライセンスは Apache-2.0 です。
+## できること
 
-## Agent に貼り付けるインストールプロンプト
+| Agent が得るもの | 人が保つもの |
+|---|---|
+| Skills、MCP tools、file/desktop/job adapters | 可視性、承認、取り消し、監査 |
+| 明確な capability を持つ署名済み jobs | ホストローカル policy と安全境界 |
+| Artifacts と evidence bundles | 何を実行し、いつ止めるかの制御 |
 
-次をそのまま Agent に送ってください。
+## Agent でインストール
+
+下の文字列を Agent に送ってください。
 
 ```text
 Please install Remote Dev Skillkit for your own agent runtime:
@@ -15,7 +21,8 @@ https://github.com/EitanWong/remote-dev-skillkit
 
 完全な契約は [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md) にあります。
 
-## 手動クイックスタート
+<details>
+<summary>手動コマンド</summary>
 
 ```bash
 go install ./cmd/rdev
@@ -42,17 +49,39 @@ rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --targ
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-## ローカルで試す
+</details>
+
+## 使い方
+
+1. マシンを接続します。
+
+```text
+Use Remote Dev Skillkit to connect this computer for a visible support session.
+```
+
+```bash
+rdev support-session connect --start
+```
+
+2. ツールとローカルデモを確認します。
+
+```bash
+rdev mcp tools
+rdev demo local
+```
+
+3. 基本的な証跡を確認します。
 
 ```bash
 go test ./...
 rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session
-rdev demo local
-rdev mcp tools
 ```
 
 ## 安全性
 
-Remote Dev Skillkit は、明示的で可視の同意ベースのリモート開発支援を前提にしています。一時的な第三者セッションは、可視、期限付き、取り消し可能、監査可能、かつ既定でユーザーレベルである必要があります。隠れた永続化、UAC/sudo バイパス、ローカル安全制御の無効化、ポリシーなしの shell は受け入れません。
+Remote Dev Skillkit は、明示的で可視の同意ベースのリモート開発支援を前提にしています。一時的な第三者セッションは、可視、期限付き、取り消し可能、監査可能、かつ既定でユーザーレベルである必要があります。隠れた永続化、UAC/sudo バイパス、ローカル安全制御の無効化、ポリシーなしの shell は受け入れません。ライセンスは Apache-2.0 です。
 
-技術的な正本は英語の [README](../../README.md) です。
+## Docs
+
+- 技術的な正本: [../../README.md](../../README.md)
+- ドキュメント索引: [../README.md](../README.md)
