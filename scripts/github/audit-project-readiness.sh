@@ -173,8 +173,11 @@ add("ci_runs_release_smoke", "./scripts/ci/release-smoke.sh" in workflow, "")
 
 readme = (repo_root / "README.md").read_text() if (repo_root / "README.md").is_file() else ""
 for phrase in [
-    "Multilingual quick starts",
-    "Project Structure",
+    "## What It Does",
+    "## Install",
+    "## Use",
+    "## Docs",
+    "## Languages",
     "Apache-2.0",
     "Codex",
     "Claude Code",
