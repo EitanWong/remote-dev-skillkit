@@ -1,25 +1,21 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit은 AI Agent가 실제 Mac, Windows, Linux 머신에서 작업할 때 쓰는 안전 레이어입니다. 숨겨진 원격 제어 도구가 아닙니다. Codex, Claude Code, Hermes, OpenClaw/OpenCode, 일반 MCP Agent가 서명된 작업, 호스트 로컬 정책, 승인, 증거 번들, 감사 체인을 통해 실제 개발 작업을 실행하게 합니다.
+Remote Dev Skillkit은 AI Agent를 위한 오픈소스 Agent-native 원격 개발 Skillkit입니다. Codex, Claude Code, Hermes, OpenClaw/OpenCode, MCP Agent가 실제 Mac, Windows, Linux 호스트에서 작업할 때 무제한 shell을 넘기지 않고 안전한 작업 표면을 제공합니다.
 
-연결 모델은 Agent용 원격 제어 커넥터입니다. 대상 머신은 보이는 connector를 열고, Agent는 표준 Support Device Entry(`support_device_id` + 세션 비밀번호)를 사용하며, operator가 명시적으로 요청하기 전에는 연결을 끊지 않습니다.
+이 프로젝트는 Agent Skills, MCP 도구, 서명된 작업, 호스트 로컬 정책, 승인, 감사 로그, 증거 번들을 묶습니다. 라이선스는 Apache-2.0입니다.
 
-## 핵심 포인트
+## Agent에 붙여넣을 설치 프롬프트
 
-- 주요 Agent Framework에 설치할 수 있는 휴대용 Agent Skillkit.
-- 작업은 서명되고 검증된 뒤 실행됩니다. Agent에게 원시 shell 권한을 통째로 주지 않습니다.
-- 표준 `rdev.files.*` / `rdev.desktop.*` 표면은 파일 전송/삭제, 스크린샷/프레임, 창, 키보드/마우스, 클립보드, 앱, URL 작업을 다룹니다.
-- Skills는 OS, shell, service manager, gateway, workspace, adapter, 권한을 먼저 탐지합니다. 불명확하면 추측하지 않고 질문합니다.
-- Codex, Claude Code, ACP/acpx, shell, PowerShell, custom adapters 지원.
-- Apache-2.0 오픈소스 라이선스.
+아래 내용을 그대로 Agent에 보내세요.
 
-## 빠른 설치
+```text
+Please install Remote Dev Skillkit for your own agent runtime:
+https://github.com/EitanWong/remote-dev-skillkit
+```
 
-이미 Codex, Claude Code, Hermes, OpenClaw/OpenCode 또는 다른 MCP Agent 안에 있다면 이 링크를 Agent에게 보내고, 실행 전에 전체 prompt를 읽으라고 지시하세요.
+전체 계약은 [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)에 있습니다.
 
-[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
-
-이 Prompt가 설치 절차의 기준입니다. 저장소 clone/update, 현재 Agent runtime 탐지, Skillkit 설치, MCP 설정, 안전하게 확인할 수 없는 필수 값이 있을 때만 짧게 질문하는 흐름을 정의합니다.
+## 수동 빠른 시작
 
 ```bash
 go install ./cmd/rdev
@@ -27,16 +23,10 @@ rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
 
-`rdev`가 `PATH`에 없으면 `rdev bootstrap agent-plan` 또는 설치 보고서의 `mcp_command` 필드가 알려주는 절대 MCP 명령을 사용하세요.
-
-Skillkit bundle을 내보내고 검증합니다:
-
 ```bash
 rdev skillkit export --source-root . --out dist/remote-dev-skillkit
 rdev skillkit verify --bundle dist/remote-dev-skillkit
 ```
-
-Agent Framework용 검토 가능한 설치 계획을 생성합니다:
 
 ```bash
 rdev skillkit plan-install \
@@ -47,16 +37,12 @@ rdev skillkit plan-install \
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-직접 설치는 기본적으로 dry-run입니다. 보고서를 확인한 뒤 `--execute`를 추가하세요:
-
 ```bash
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-두 번째 install 명령이 검증된 bundle이 있을 때의 one-command install 경로입니다.
-
-## 로컬 데모
+## 로컬 테스트
 
 ```bash
 go test ./...
@@ -65,4 +51,8 @@ rdev demo local
 rdev mcp tools
 ```
 
-기술 기준 문서는 영어 [README](../../README.md)입니다. 번역과 다르면 영어 README를 따르세요.
+## 안전 모델
+
+Remote Dev Skillkit은 명시적이고 보이는 동의 기반 원격 개발 지원을 위해 만들어졌습니다. 임시 제3자 세션은 보이고, 시간 제한이 있으며, 취소 가능하고, 감사 가능하며, 기본적으로 사용자 권한이어야 합니다. 숨겨진 지속성, UAC/sudo 우회, 로컬 보안 제어 비활성화, 정책 없는 shell은 허용하지 않습니다.
+
+영문 [README](../../README.md)가 권위 있는 기술 문서입니다.

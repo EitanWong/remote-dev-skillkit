@@ -1,25 +1,21 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit उन AI Agent के लिए safety layer है जिन्हें असली Mac, Windows और Linux machines पर काम करना होता है। यह कोई छिपा हुआ remote-control tool नहीं है। Codex, Claude Code, Hermes, OpenClaw/OpenCode और generic MCP Agent signed jobs, host-local policy, approvals, evidence bundles और audit chains के साथ असली development work चला सकते हैं।
+Remote Dev Skillkit AI agents के लिए एक open-source, agent-native remote development Skillkit है। यह Codex, Claude Code, Hermes, OpenClaw/OpenCode और MCP agents को असली Mac, Windows और Linux hosts पर काम करने देता है, बिना उन्हें unrestricted shell देने के।
 
-इसका connection model Agent के लिए remote-control connector जैसा है: target machine एक visible connector खोलती है, Agent standard Support Device Entry (`support_device_id` + session password) इस्तेमाल करता है, और operator के स्पष्ट अनुरोध से पहले disconnect नहीं करता।
+यह project Agent Skills, MCP tools, signed jobs, host-local policy, approval gates, audit logs और evidence bundles को एक साथ रखता है। License Apache-2.0 है।
 
-## मुख्य बातें
+## Agent को भेजने वाला install prompt
 
-- Popular Agent Frameworks में install होने वाला portable Agent Skillkit।
-- Jobs पहले signed और verified होते हैं, फिर run होते हैं; Agent को raw shell खुली छूट नहीं मिलती।
-- Standard `rdev.files.*` / `rdev.desktop.*` surfaces file transfer/delete, screenshots/frames, windows, keyboard/mouse, clipboard, apps और URLs को cover करते हैं।
-- Skills पहले OS, shell, service manager, gateway, workspace, adapter और permissions detect करती हैं। unclear हो तो guess नहीं करतीं, पूछती हैं।
-- Codex, Claude Code, ACP/acpx, shell, PowerShell और custom adapters के लिए support।
-- Apache-2.0 open-source license।
+नीचे का prompt अपने agent में copy-paste करें:
 
-## Fast Install
+```text
+Please install Remote Dev Skillkit for your own agent runtime:
+https://github.com/EitanWong/remote-dev-skillkit
+```
 
-अगर आप पहले से Codex, Claude Code, Hermes, OpenClaw/OpenCode या किसी दूसरे MCP Agent में हैं, तो Agent को यह लिंक भेजें और कहें कि action लेने से पहले पूरा prompt पढ़े:
+पूरा contract [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md) में है।
 
-[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
-
-यही prompt installation का source of truth है: repo clone या update करना, current Agent runtime detect करना, Skillkit install करना, MCP configure करना, और कोई required value safely detect न हो पाए तो सिर्फ एक छोटा सवाल पूछना।
+## Manual quick start
 
 ```bash
 go install ./cmd/rdev
@@ -27,16 +23,10 @@ rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
 
-अगर `rdev` `PATH` में नहीं है, तो `rdev bootstrap agent-plan` या install report के `mcp_command` field में दिया गया absolute MCP command इस्तेमाल करें।
-
-Skillkit bundle export और verify करें:
-
 ```bash
 rdev skillkit export --source-root . --out dist/remote-dev-skillkit
 rdev skillkit verify --bundle dist/remote-dev-skillkit
 ```
-
-Agent Frameworks के लिए reviewable install plan बनाएं:
 
 ```bash
 rdev skillkit plan-install \
@@ -47,16 +37,12 @@ rdev skillkit plan-install \
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-Direct install default रूप से dry-run है। Report देखें, फिर `--execute` जोड़ें:
-
 ```bash
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-दूसरी install line verified bundle मिलने के बाद one-command install path है।
-
-## Local Demo
+## Local test
 
 ```bash
 go test ./...
@@ -65,4 +51,8 @@ rdev demo local
 rdev mcp tools
 ```
 
-Technical authority English [README](../../README.md) है। Translation अलग लगे तो English README follow करें।
+## Safety
+
+Remote Dev Skillkit explicit, visible और consent-based remote development support के लिए है। Temporary third-party sessions visible, time-limited, revocable, auditable और default user-level होने चाहिए। Hidden persistence, UAC/sudo bypass, local security controls disable करना, या policy के बिना shell access स्वीकार नहीं है।
+
+English [README](../../README.md) authoritative technical source है।

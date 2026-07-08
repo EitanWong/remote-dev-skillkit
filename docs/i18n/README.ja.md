@@ -1,25 +1,21 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit は、AI Agent が実際の Mac、Windows、Linux マシンで作業するための安全レイヤーです。隠れたリモート操作ツールではありません。Codex、Claude Code、Hermes、OpenClaw/OpenCode、汎用 MCP Agent が、署名済みジョブ、ホスト側ポリシー、承認、証跡バンドル、監査ログを通じて実作業を実行できます。
+Remote Dev Skillkit は、AI Agent のためのオープンソースで Agent ネイティブなリモート開発 Skillkit です。Codex、Claude Code、Hermes、OpenClaw/OpenCode、MCP Agent が実際の Mac、Windows、Linux ホストを扱うとき、無制限の shell を渡さずに安全な作業面を提供します。
 
-接続モデルは Agent 向けのリモート操作コネクタです。対象マシンは見える Connector を開き、Agent は標準の Support Device Entry（`support_device_id` + セッションパスワード）を使い、Operator が明示的に求めるまで切断しません。
+Agent Skills、MCP ツール、署名済みジョブ、ホスト側ポリシー、承認、監査、証跡バンドルをまとめます。ライセンスは Apache-2.0 です。
 
-## 主なポイント
+## Agent に貼り付けるインストールプロンプト
 
-- 主要な Agent Framework に導入できるポータブルな Agent Skillkit。
-- ジョブは署名、検証、その後に実行されます。生の shell 権限をそのまま渡しません。
-- 標準の `rdev.files.*` / `rdev.desktop.*` は、ファイル転送/削除、スクリーンショット/フレーム、ウィンドウ、キーボード/マウス、クリップボード、App、URL 操作を扱います。
-- Skills は OS、shell、service manager、gateway、workspace、adapter、権限を検出します。不明な場合は推測せず質問します。
-- Codex、Claude Code、ACP/acpx、shell、PowerShell、カスタム adapters に対応。
-- Apache-2.0 オープンソースライセンス。
+次をそのまま Agent に送ってください。
 
-## クイックインストール
+```text
+Please install Remote Dev Skillkit for your own agent runtime:
+https://github.com/EitanWong/remote-dev-skillkit
+```
 
-すでに Codex、Claude Code、Hermes、OpenClaw/OpenCode、または別の MCP Agent を使っている場合は、このリンクを Agent に渡し、実行前に全文を読むよう指示してください。
+完全な契約は [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md) にあります。
 
-[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
-
-この Prompt がインストール手順の信頼できる基準です。リポジトリの clone / update、現在の Agent runtime の検出、Skillkit のインストール、MCP 設定、安全に検出できない必須値がある場合だけ短い質問をする流れを定義しています。
+## 手動クイックスタート
 
 ```bash
 go install ./cmd/rdev
@@ -27,16 +23,10 @@ rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
 
-`rdev` が `PATH` にない場合は、`rdev bootstrap agent-plan` またはインストールレポートの `mcp_command` フィールドが示す絶対パスの MCP コマンドを使ってください。
-
-Skillkit bundle をエクスポートして検証します：
-
 ```bash
 rdev skillkit export --source-root . --out dist/remote-dev-skillkit
 rdev skillkit verify --bundle dist/remote-dev-skillkit
 ```
-
-Agent Framework 向けの確認可能なインストール計画を作成します：
 
 ```bash
 rdev skillkit plan-install \
@@ -47,16 +37,12 @@ rdev skillkit plan-install \
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-直接インストールはデフォルトで dry-run です。確認後に `--execute` を追加します：
-
 ```bash
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-2 つ目の install コマンドが、検証済み bundle がある場合の one-command install パスです。
-
-## ローカルデモ
+## ローカルで試す
 
 ```bash
 go test ./...
@@ -65,4 +51,8 @@ rdev demo local
 rdev mcp tools
 ```
 
-技術的な正本は英語の [README](../../README.md) です。翻訳と異なる場合は英語版を優先してください。
+## 安全性
+
+Remote Dev Skillkit は、明示的で可視の同意ベースのリモート開発支援を前提にしています。一時的な第三者セッションは、可視、期限付き、取り消し可能、監査可能、かつ既定でユーザーレベルである必要があります。隠れた永続化、UAC/sudo バイパス、ローカル安全制御の無効化、ポリシーなしの shell は受け入れません。
+
+技術的な正本は英語の [README](../../README.md) です。

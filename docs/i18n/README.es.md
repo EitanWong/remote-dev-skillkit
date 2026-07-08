@@ -1,25 +1,21 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit es una capa de seguridad para agentes de IA que necesitan trabajar en máquinas reales con Mac, Windows o Linux. No es una herramienta oculta de control remoto: permite que Codex, Claude Code, Hermes, OpenClaw/OpenCode y agentes MCP genéricos ejecuten trabajo real con tareas firmadas, política local en el host, aprobaciones, paquetes de evidencia y auditoría.
+Remote Dev Skillkit es un skillkit remoto, abierto y nativo para agentes de IA. Permite que Codex, Claude Code, Hermes, OpenClaw/OpenCode y agentes MCP trabajen en hosts Mac, Windows y Linux reales sin recibir un shell ilimitado.
 
-Su modelo de conexión es de control remoto para agentes: la máquina destino abre un conector visible, el agente usa el Support Device Entry estándar (`support_device_id` + contraseña de sesión) y no desconecta hasta que el operador lo pide explícitamente.
+El proyecto combina Agent Skills, herramientas MCP, trabajos firmados, politica local del host, aprobaciones, auditoria y paquetes de evidencia. La licencia es Apache-2.0.
 
-## Puntos clave
+## Prompt de instalacion para tu agente
 
-- Un Agent Skillkit portable para instalar en frameworks de agentes populares.
-- Las tareas se firman, se verifican y solo después se ejecutan; nada de entregar una shell cruda al agente.
-- Las superficies estándar `rdev.files.*` / `rdev.desktop.*` cubren transferencia/borrado de archivos, capturas/frames, ventanas, teclado/ratón, portapapeles, apps y URLs.
-- Las skills detectan OS, shell, service manager, gateway, workspace, adapter y permisos; si algo no está claro, preguntan.
-- Adaptadores para Codex, Claude Code, ACP/acpx, shell, PowerShell y adapters personalizados.
-- Licencia open source Apache-2.0.
+Copia y pega esto en tu agente:
 
-## Instalación rápida
+```text
+Please install Remote Dev Skillkit for your own agent runtime:
+https://github.com/EitanWong/remote-dev-skillkit
+```
 
-Si ya estás dentro de Codex, Claude Code, Hermes, OpenClaw/OpenCode u otro agente MCP, envíale este enlace y pídele que lea el prompt completo antes de actuar:
+El contrato completo esta en [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
 
-[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
-
-Ese prompt es la fuente de verdad para clonar o actualizar el repositorio, detectar el runtime del agente, instalar el Skillkit, configurar MCP y hacer una sola pregunta corta cuando un valor requerido no pueda descubrirse de forma segura.
+## Inicio rapido manual
 
 ```bash
 go install ./cmd/rdev
@@ -27,16 +23,10 @@ rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
 
-Si `rdev` no está en `PATH`, usa el comando MCP absoluto mostrado por `rdev bootstrap agent-plan` o por el campo `mcp_command` del informe de instalación.
-
-Exporta y verifica el bundle Skillkit:
-
 ```bash
 rdev skillkit export --source-root . --out dist/remote-dev-skillkit
 rdev skillkit verify --bundle dist/remote-dev-skillkit
 ```
-
-Genera un plan de instalación revisable para frameworks de agentes:
 
 ```bash
 rdev skillkit plan-install \
@@ -47,16 +37,12 @@ rdev skillkit plan-install \
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-La instalación directa hace dry-run por defecto. Revisa el resultado y luego añade `--execute`:
-
 ```bash
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-La segunda línea de install es el camino de instalación en un comando cuando el bundle ya fue verificado.
-
-## Demo local
+## Prueba local
 
 ```bash
 go test ./...
@@ -65,4 +51,8 @@ rdev demo local
 rdev mcp tools
 ```
 
-El [README](../../README.md) en inglés es la referencia técnica autoritativa; si una traducción difiere, sigue el README en inglés.
+## Seguridad
+
+Remote Dev Skillkit esta disenado para soporte remoto explicito, visible y con consentimiento. Las sesiones temporales de terceros deben ser visibles, limitadas en el tiempo, revocables, auditables y de nivel usuario por defecto. No se aceptan funciones de persistencia oculta, bypass de UAC/sudo, desactivacion de controles de seguridad, ni shell sin politica.
+
+El [README](../../README.md) en ingles es la fuente tecnica autoritativa.

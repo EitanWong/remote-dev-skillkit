@@ -1,0 +1,110 @@
+<svg width="1200" height="430" viewBox="0 0 1200 430" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Remote Dev Skillkit flow</title>
+  <desc id="desc">AI agents use Skillkit and MCP tools to send scoped jobs through an rdev gateway to a real host. Policy, approval, audit, and evidence keep the human in control.</desc>
+  <style>
+    .bg { fill: #f8fafc; }
+    .card { fill: #ffffff; stroke: #d8dee8; stroke-width: 1.5; }
+    .soft-teal { fill: #ecfdf5; stroke: #99f6e4; }
+    .soft-blue { fill: #eff6ff; stroke: #bfdbfe; }
+    .soft-slate { fill: #f8fafc; stroke: #cbd5e1; }
+    .soft-amber { fill: #fff7ed; stroke: #fed7aa; }
+    .teal { fill: #0f766e; }
+    .blue { fill: #2563eb; }
+    .slate { fill: #334155; }
+    .violet { fill: #7c3aed; }
+    .amber { fill: #d97706; }
+    .divider { stroke: #e2e8f0; stroke-width: 1.5; }
+    .text { fill: #0f172a; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .muted { fill: #475569; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .label { font-size: 23px; font-weight: 760; }
+    .small { font-size: 16px; }
+    .tiny { font-size: 15px; }
+    .arrow { stroke: #64748b; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .rail { stroke: #94a3b8; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 6 9; }
+  </style>
+
+  <rect class="bg" width="1200" height="430" rx="32"/>
+
+  <!-- Main flow cards: icon lane + text lane -->
+  <rect x="48" y="58" width="240" height="128" rx="22" class="card"/>
+  <rect x="76" y="91" width="58" height="58" rx="17" class="teal"/>
+  <path d="M105 101v7" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  <rect x="91" y="108" width="28" height="28" rx="8" stroke="#ffffff" stroke-width="4"/>
+  <circle cx="100" cy="123" r="2.7" fill="#ffffff"/>
+  <circle cx="110" cy="123" r="2.7" fill="#ffffff"/>
+  <path d="M99 131h12" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M154 82v76" class="divider"/>
+  <text x="174" y="112" class="text label">AI Agent</text>
+  <text x="174" y="139" class="muted small">Ask for help</text>
+
+  <path d="M306 122h35" class="arrow"/>
+  <path d="M331 111l12 11-12 11" class="arrow"/>
+
+  <rect x="360" y="58" width="240" height="128" rx="22" class="card"/>
+  <rect x="388" y="91" width="58" height="58" rx="17" class="blue"/>
+  <path d="M407 109h20l4 8h-28l4-8z" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+  <rect x="399" y="117" width="36" height="22" rx="5" stroke="#ffffff" stroke-width="4"/>
+  <path d="M407 128h20" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  <path d="M466 82v76" class="divider"/>
+  <text x="486" y="112" class="text label">Skillkit</text>
+  <text x="486" y="139" class="muted small">Tools + skills</text>
+
+  <path d="M618 122h35" class="arrow"/>
+  <path d="M643 111l12 11-12 11" class="arrow"/>
+
+  <rect x="672" y="58" width="240" height="128" rx="22" class="card"/>
+  <rect x="700" y="91" width="58" height="58" rx="17" class="slate"/>
+  <path d="M729 113v12M723 128l-8 8M735 128l8 8" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="729" cy="108" r="6.5" fill="#ffffff"/>
+  <circle cx="715" cy="138" r="6.5" fill="#ffffff"/>
+  <circle cx="743" cy="138" r="6.5" fill="#ffffff"/>
+  <path d="M778 82v76" class="divider"/>
+  <text x="798" y="112" class="text label">Gateway</text>
+  <text x="798" y="139" class="muted small">Scoped jobs</text>
+
+  <path d="M924 122h20" class="arrow"/>
+  <path d="M934 111l12 11-12 11" class="arrow"/>
+
+  <rect x="952" y="58" width="200" height="128" rx="22" class="card"/>
+  <rect x="978" y="91" width="54" height="54" rx="16" class="violet"/>
+  <rect x="991" y="105" width="28" height="21" rx="4" stroke="#ffffff" stroke-width="4"/>
+  <path d="M986 135h38" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  <path d="M997 134v-4h16v4" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M1048 82v76" class="divider"/>
+  <text x="1068" y="112" class="text label">Host</text>
+  <text x="1068" y="139" class="muted small">Machine</text>
+
+  <!-- Control rail -->
+  <path d="M168 224v-24h900v24" class="rail"/>
+
+  <!-- Safety cards: icons stay in their own lane -->
+  <rect x="62" y="258" width="248" height="86" rx="18" class="soft-teal"/>
+  <circle cx="102" cy="301" r="19" class="teal"/>
+  <path d="M93 301l7 7 13-15" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M136 277v48" class="divider"/>
+  <text x="156" y="296" class="text label">Policy</text>
+  <text x="156" y="322" class="muted tiny">Validated on host</text>
+
+  <rect x="336" y="258" width="248" height="86" rx="18" class="soft-blue"/>
+  <circle cx="376" cy="301" r="19" class="blue"/>
+  <path d="M367 301l7 7 13-15" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M410 277v48" class="divider"/>
+  <text x="430" y="296" class="text label">Approval</text>
+  <text x="430" y="322" class="muted tiny">Human says yes</text>
+
+  <rect x="610" y="258" width="248" height="86" rx="18" class="soft-slate"/>
+  <circle cx="650" cy="301" r="19" class="slate"/>
+  <path d="M642 292h16M642 301h16M642 310h16" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+  <path d="M684 277v48" class="divider"/>
+  <text x="704" y="296" class="text label">Audit</text>
+  <text x="704" y="322" class="muted tiny">Recorded actions</text>
+
+  <rect x="884" y="258" width="248" height="86" rx="18" class="soft-amber"/>
+  <circle cx="924" cy="301" r="19" class="amber"/>
+  <path d="M924 290l11 6v12l-11 6-11-6v-12l11-6z" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M958 277v48" class="divider"/>
+  <text x="978" y="296" class="text label">Evidence</text>
+  <text x="978" y="322" class="muted tiny">Proof artifacts</text>
+
+  <text x="600" y="386" text-anchor="middle" class="muted small">The agent can act. The human stays in control.</text>
+</svg>

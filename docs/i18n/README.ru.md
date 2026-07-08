@@ -1,25 +1,21 @@
 # Remote Dev Skillkit
 
-Remote Dev Skillkit — это слой безопасности для AI Agent, которым нужно работать на реальных машинах Mac, Windows и Linux. Это не скрытый инструмент удаленного управления: Codex, Claude Code, Hermes, OpenClaw/OpenCode и обычные MCP Agent могут выполнять реальную разработку через подписанные задания, локальную политику хоста, подтверждения, evidence bundles и audit chains.
+Remote Dev Skillkit - это open-source, agent-native skillkit для удаленной разработки. Он позволяет Codex, Claude Code, Hermes, OpenClaw/OpenCode и MCP-агентам работать с реальными Mac, Windows и Linux hosts без выдачи неограниченного shell.
 
-Модель подключения похожа на remote-control connector для агентов: целевая машина открывает видимый connector, агент использует стандартный Support Device Entry (`support_device_id` + пароль сессии) и не отключается, пока оператор явно не попросит.
+Проект объединяет Agent Skills, MCP tools, подписанные задания, локальную политику хоста, approval gates, audit logs и evidence bundles. Лицензия - Apache-2.0.
 
-## Главное
+## Prompt для установки через агента
 
-- Портативный Agent Skillkit для популярных Agent Frameworks.
-- Jobs сначала подписываются и проверяются, а только потом выполняются; агент не получает сырой shell без ограничений.
-- Стандартные поверхности `rdev.files.*` / `rdev.desktop.*` покрывают передачу/удаление файлов, скриншоты/frames, окна, клавиатуру/мышь, буфер обмена, приложения и URLs.
-- Skills сначала определяют OS, shell, service manager, gateway, workspace, adapter и permissions; если что-то неясно, они спрашивают.
-- Adapters для Codex, Claude Code, ACP/acpx, shell, PowerShell и custom adapters.
-- Открытая лицензия Apache-2.0.
+Скопируйте и отправьте это своему агенту:
 
-## Быстрая установка
+```text
+Please install Remote Dev Skillkit for your own agent runtime:
+https://github.com/EitanWong/remote-dev-skillkit
+```
 
-Если вы уже работаете в Codex, Claude Code, Hermes, OpenClaw/OpenCode или другом MCP Agent, отправьте агенту эту ссылку и попросите прочитать весь prompt перед выполнением:
+Полный контракт находится в [Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
 
-[Agent Bootstrap Prompt](https://github.com/EitanWong/remote-dev-skillkit/blob/main/docs/operations/AGENT_BOOTSTRAP_PROMPT.md)
-
-Этот prompt является источником истины для clone или update репозитория, определения текущего Agent runtime, установки Skillkit, настройки MCP и одного короткого вопроса, если обязательное значение нельзя безопасно определить.
+## Ручной быстрый старт
 
 ```bash
 go install ./cmd/rdev
@@ -27,16 +23,10 @@ rdev doctor
 rdev bootstrap agent-plan --repo-root .
 ```
 
-Если `rdev` нет в `PATH`, используйте абсолютную MCP-команду из `rdev bootstrap agent-plan` или поля `mcp_command` в отчете установки.
-
-Экспортируйте и проверьте Skillkit bundle:
-
 ```bash
 rdev skillkit export --source-root . --out dist/remote-dev-skillkit
 rdev skillkit verify --bundle dist/remote-dev-skillkit
 ```
-
-Создайте проверяемый план установки для Agent Frameworks:
 
 ```bash
 rdev skillkit plan-install \
@@ -47,16 +37,12 @@ rdev skillkit plan-install \
 rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
 ```
 
-Прямая установка по умолчанию выполняет dry-run. Проверьте отчет, затем добавьте `--execute`:
-
 ```bash
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
 rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
 ```
 
-Вторая строка install — это one-command install после проверки bundle.
-
-## Локальная демо
+## Локальная проверка
 
 ```bash
 go test ./...
@@ -65,4 +51,8 @@ rdev demo local
 rdev mcp tools
 ```
 
-Английский [README](../../README.md) является основным техническим источником; если перевод отличается, следуйте английской версии.
+## Безопасность
+
+Remote Dev Skillkit создан для явной, видимой и согласованной удаленной поддержки разработки. Временные сессии для сторонних устройств должны быть видимыми, ограниченными по времени, отзывными, аудитируемыми и по умолчанию пользовательского уровня. Проект не принимает скрытую персистентность, обход UAC/sudo, отключение локальных защит или shell без политики.
+
+Английский [README](../../README.md) является авторитетным техническим источником.
