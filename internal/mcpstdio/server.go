@@ -329,6 +329,36 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.approveHost(params.Arguments)
 	case "rdev.hosts.revoke":
 		data, err = s.revokeHost(params.Arguments)
+	case "rdev.files.list":
+		data, err = s.fileJob(params.Arguments, "list")
+	case "rdev.files.read":
+		data, err = s.fileJob(params.Arguments, "read")
+	case "rdev.files.write":
+		data, err = s.fileJob(params.Arguments, "write")
+	case "rdev.files.download":
+		data, err = s.fileJob(params.Arguments, "download")
+	case "rdev.files.upload":
+		data, err = s.fileJob(params.Arguments, "upload")
+	case "rdev.files.delete":
+		data, err = s.fileJob(params.Arguments, "delete")
+	case "rdev.desktop.screenshot":
+		data, err = s.desktopJob(params.Arguments, "screen.screenshot")
+	case "rdev.desktop.record":
+		data, err = s.desktopJob(params.Arguments, "screen.record")
+	case "rdev.desktop.windows":
+		data, err = s.desktopJob(params.Arguments, "window.inspect")
+	case "rdev.desktop.input":
+		data, err = s.desktopInputJob(params.Arguments)
+	case "rdev.desktop.app":
+		data, err = s.desktopAppJob(params.Arguments)
+	case "rdev.desktop.url":
+		data, err = s.desktopJob(params.Arguments, "url.open")
+	case "rdev.desktop.clipboard":
+		data, err = s.desktopClipboardJob(params.Arguments)
+	case "rdev.desktop.focus":
+		data, err = s.desktopJob(params.Arguments, "window.focus")
+	case "rdev.desktop.move":
+		data, err = s.desktopJob(params.Arguments, "window.move")
 	case "rdev.jobs.create":
 		data, err = s.createJob(params.Arguments)
 	case "rdev.jobs.policy_template":
@@ -859,23 +889,25 @@ func (s Server) supportSessionSmokeTest(args map[string]any) (any, error) {
 	if hostID == "" {
 		return nil, fmt.Errorf("support_session.smoke_test requires host_id or ticket_code with exactly one active host")
 	}
-	audit, err := s.runSupportSessionCapabilityAudit(args, gatewayURL, hostID, time.Duration(timeoutSeconds)*time.Second)
+	remoteControl := boolArg(args, "remote_control", false)
+	audit, err := s.runSupportSessionCapabilityAudit(args, gatewayURL, hostID, time.Duration(timeoutSeconds)*time.Second, remoteControl)
 	if err != nil {
 		return nil, err
 	}
 	report := map[string]any{
-		"schema_version":        "rdev.support-session-smoke-test.v1",
-		"ok":                    audit["ok"],
-		"gateway_url":           gatewayURL,
-		"host_id":               hostID,
-		"ticket_code":           ticketCode,
-		"connection_continuity": supportSessionConnectionContinuityMap(gatewayURL),
-		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
-		"remote_control_entry":  supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nestedMapOrSelfAny(audit["host"], "")),
-		"managed_upgrade":       supportSessionManagedUpgradeRecommendationMap(nestedMapOrSelfAny(audit["host"], "")),
-		"capability_audit":      audit,
-		"human_report":          supportSessionSmokeHumanReportMap(audit),
-		"next_action":           "Use this single smoke-test report instead of hand-written job probes; keep the host connected for follow-up work unless the operator explicitly asks to disconnect.",
+		"schema_version":           "rdev.support-session-smoke-test.v1",
+		"ok":                       audit["ok"],
+		"gateway_url":              gatewayURL,
+		"host_id":                  hostID,
+		"ticket_code":              ticketCode,
+		"connection_continuity":    supportSessionConnectionContinuityMap(gatewayURL),
+		"disconnect_policy":        "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+		"remote_control_entry":     supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nestedMapOrSelfAny(audit["host"], "")),
+		"managed_upgrade":          supportSessionManagedUpgradeRecommendationMap(nestedMapOrSelfAny(audit["host"], "")),
+		"capability_audit":         audit,
+		"remote_control_requested": remoteControl,
+		"human_report":             supportSessionSmokeHumanReportMap(audit),
+		"next_action":              "Use this single smoke-test report instead of hand-written job probes; keep the host connected for follow-up work unless the operator explicitly asks to disconnect.",
 	}
 	if status != nil {
 		report["status"] = status
@@ -883,7 +915,7 @@ func (s Server) supportSessionSmokeTest(args map[string]any) (any, error) {
 	return report, nil
 }
 
-func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL, hostID string, timeout time.Duration) (map[string]any, error) {
+func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL, hostID string, timeout time.Duration, remoteControl bool) (map[string]any, error) {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
@@ -893,9 +925,16 @@ func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL
 		return nil, err
 	}
 	probes := mcpAuditCapabilityProbes(stringMapValue(host, "os"))
+	if remoteControl {
+		probes = append(probes, mcpRemoteControlAuditProbes(stringMapValue(host, "os"))...)
+	}
 	results := make([]map[string]any, 0, len(probes))
 	ok := true
+	remoteControlProbeCount := 0
 	for _, probe := range probes {
+		if probe.Category == "remote_control" {
+			remoteControlProbeCount++
+		}
 		created, err := s.createJob(map[string]any{
 			"gateway_url": gatewayURL,
 			"host_id":     hostID,
@@ -954,25 +993,33 @@ func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL
 			}
 			artifactSummary = summarizeFirstArtifactMap(artifactMap)
 		}
+		category := probe.Category
+		if category == "" {
+			category = "baseline"
+		}
 		results = append(results, map[string]any{
 			"name":             probe.Name,
+			"category":         category,
 			"capability":       probe.Capability,
 			"adapter":          probe.Adapter,
 			"job_id":           jobID,
 			"job_status":       status,
 			"ok":               resultOK,
+			"expected_failure": probe.FailureIsOK,
 			"artifact_count":   artifactCount,
 			"artifact_summary": artifactSummary,
 		})
 	}
 	return map[string]any{
-		"schema_version":        "rdev.support-session-capability-audit.v1",
-		"ok":                    ok,
-		"gateway_url":           gatewayURL,
-		"connection_continuity": supportSessionConnectionContinuityMap(gatewayURL),
-		"host":                  host,
-		"results":               results,
-		"next_action":           "Use scoped jobs only after this audit is ok; do not disconnect the host unless the operator asks.",
+		"schema_version":             "rdev.support-session-capability-audit.v1",
+		"ok":                         ok,
+		"gateway_url":                gatewayURL,
+		"connection_continuity":      supportSessionConnectionContinuityMap(gatewayURL),
+		"host":                       host,
+		"results":                    results,
+		"remote_control_requested":   remoteControl,
+		"remote_control_probe_count": remoteControlProbeCount,
+		"next_action":                "Use scoped jobs only after this audit is ok; do not disconnect the host unless the operator asks.",
 	}, nil
 }
 
@@ -1020,11 +1067,59 @@ func isTerminalJobStatus(status string) bool {
 
 type mcpSupportSessionAuditProbe struct {
 	Name        string
+	Category    string
 	Capability  string
 	Adapter     string
 	Intent      string
 	Policy      map[string]any
 	FailureIsOK bool
+}
+
+func mcpRemoteControlAuditProbes(hostOS string) []mcpSupportSessionAuditProbe {
+	desktopFailureIsOK := !strings.EqualFold(hostOS, "windows")
+	return []mcpSupportSessionAuditProbe{
+		{
+			Name:       "file_adapter_list",
+			Category:   "remote_control",
+			Capability: "file.transfer.read",
+			Adapter:    "file",
+			Intent:     "remote-control smoke file adapter list",
+			Policy:     mcpFileListSmokePolicy(),
+		},
+		{
+			Name:        "desktop_window_inspect",
+			Category:    "remote_control",
+			Capability:  "window.inspect",
+			Adapter:     "desktop",
+			Intent:      "remote-control smoke desktop window inspect",
+			Policy:      mcpDesktopWindowInspectSmokePolicy(),
+			FailureIsOK: desktopFailureIsOK,
+		},
+	}
+}
+
+func mcpFileListSmokePolicy() map[string]any {
+	return map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"file.transfer.read", "fs.read"},
+		"action":               "list",
+		"path":                 ".",
+		"max_bytes":            1024 * 1024,
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	}
+}
+
+func mcpDesktopWindowInspectSmokePolicy() map[string]any {
+	return map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"window.inspect"},
+		"action":               "window.inspect",
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	}
 }
 
 func mcpAuditCapabilityProbes(hostOS string) []mcpSupportSessionAuditProbe {
@@ -1265,6 +1360,170 @@ func (s Server) createJob(args map[string]any) (any, error) {
 		requiredString(args, "intent"),
 		objectArg(args, "policy"),
 	)
+}
+
+func (s Server) fileJob(args map[string]any, action string) (any, error) {
+	path := stringArg(args, "path", ".")
+	policy := map[string]any{
+		"workspace_root":       stringArg(args, "workspace_root", "."),
+		"capabilities":         []string{"file.transfer.read", "fs.read"},
+		"action":               action,
+		"path":                 path,
+		"max_bytes":            intArg(args, "max_bytes", 1024*1024),
+		"max_duration_seconds": 60,
+		"max_output_bytes":     20000,
+		"network":              "default-deny",
+	}
+	if action == "write" || action == "upload" || action == "delete" {
+		policy["capabilities"] = []string{"file.transfer.write", "fs.write.scoped"}
+		policy["write_scope"] = stringSliceArg(args, "write_scope")
+		if len(policy["write_scope"].([]string)) == 0 {
+			policy["write_scope"] = []string{"."}
+		}
+	}
+	if action == "write" || action == "upload" {
+		policy["content"] = stringArg(args, "content", "")
+		policy["encoding"] = stringArg(args, "encoding", "utf-8")
+	}
+	if action == "delete" {
+		policy["approvals_required"] = []string{"file.delete"}
+	}
+	jobArgs := map[string]any{
+		"host_id": requiredString(args, "host_id"),
+		"adapter": "file",
+		"intent":  fmt.Sprintf("%s remote file %s", action, path),
+		"policy":  policy,
+	}
+	if gwURL := stringArg(args, "gateway_url", ""); gwURL != "" {
+		jobArgs["gateway_url"] = gwURL
+	}
+	return s.createJob(jobArgs)
+}
+
+func (s Server) desktopInputJob(args map[string]any) (any, error) {
+	action := "input.mouse"
+	if strings.TrimSpace(stringArg(args, "text", "")) != "" {
+		action = "input.keyboard"
+	}
+	return s.desktopJob(args, action)
+}
+
+func (s Server) desktopAppJob(args map[string]any) (any, error) {
+	action := "app.launch"
+	if strings.EqualFold(strings.TrimSpace(stringArg(args, "action", "")), "close") {
+		action = "app.close"
+	}
+	return s.desktopJob(args, action)
+}
+
+func (s Server) desktopClipboardJob(args map[string]any) (any, error) {
+	action := "clipboard.read"
+	switch strings.ToLower(strings.TrimSpace(stringArg(args, "action", ""))) {
+	case "", "read", "clipboard.read":
+		action = "clipboard.read"
+	case "write", "clipboard.write":
+		action = "clipboard.write"
+	default:
+		return nil, fmt.Errorf("clipboard action must be read or write")
+	}
+	return s.desktopJob(args, action)
+}
+
+func (s Server) desktopJob(args map[string]any, action string) (any, error) {
+	capability, approval := desktopMCPActionCapability(action)
+	policy := map[string]any{
+		"workspace_root":       stringArg(args, "workspace_root", "."),
+		"capabilities":         []string{capability},
+		"action":               action,
+		"max_duration_seconds": 30,
+		"max_output_bytes":     20000,
+		"network":              "default-deny",
+	}
+	if approval != "" {
+		policy["approvals_required"] = []string{approval}
+	}
+	for _, key := range []string{"window_id", "title", "text", "button", "app", "url"} {
+		if value := stringArg(args, key, ""); value != "" {
+			policy[key] = value
+		}
+	}
+	for _, key := range []string{"x", "y", "width", "height", "frames", "interval_millis"} {
+		if value := intArg(args, key, 0); value != 0 {
+			policy[key] = value
+		}
+	}
+	jobArgs := map[string]any{
+		"host_id": requiredString(args, "host_id"),
+		"adapter": "desktop",
+		"intent":  desktopMCPIntent(action),
+		"policy":  policy,
+	}
+	if gwURL := stringArg(args, "gateway_url", ""); gwURL != "" {
+		jobArgs["gateway_url"] = gwURL
+	}
+	return s.createJob(jobArgs)
+}
+
+func desktopMCPActionCapability(action string) (string, string) {
+	switch action {
+	case "window.inspect":
+		return "window.inspect", ""
+	case "screen.screenshot":
+		return "screen.screenshot", "screen.screenshot"
+	case "screen.record":
+		return "screen.record", "screen.record"
+	case "window.focus":
+		return "window.focus", "window.focus"
+	case "window.move":
+		return "window.move", "window.move"
+	case "input.keyboard":
+		return "input.keyboard", "input.keyboard"
+	case "input.mouse":
+		return "input.mouse", "input.mouse"
+	case "app.launch":
+		return "app.launch", "app.launch"
+	case "app.close":
+		return "app.close", "app.close"
+	case "url.open":
+		return "url.open", "url.open"
+	case "clipboard.read":
+		return "clipboard.read", "clipboard.read"
+	case "clipboard.write":
+		return "clipboard.write", "clipboard.write"
+	default:
+		return action, action
+	}
+}
+
+func desktopMCPIntent(action string) string {
+	switch action {
+	case "window.inspect":
+		return "inspect remote desktop windows"
+	case "screen.screenshot":
+		return "capture remote desktop screenshot"
+	case "screen.record":
+		return "record remote desktop PNG frames"
+	case "window.focus":
+		return "focus remote desktop window"
+	case "window.move":
+		return "move remote desktop window"
+	case "input.keyboard":
+		return "send remote keyboard input"
+	case "input.mouse":
+		return "send remote mouse input"
+	case "app.launch":
+		return "launch remote desktop app"
+	case "app.close":
+		return "close remote desktop app/window"
+	case "url.open":
+		return "open remote desktop URL"
+	case "clipboard.read":
+		return "read remote desktop clipboard"
+	case "clipboard.write":
+		return "write remote desktop clipboard"
+	default:
+		return action
+	}
 }
 
 func (s Server) jobPolicyTemplate(args map[string]any) (any, error) {

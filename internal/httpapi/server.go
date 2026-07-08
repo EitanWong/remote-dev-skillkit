@@ -1323,7 +1323,7 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 	// would deny is rejected at the gateway level instead of being left queued
 	// forever waiting for a host that will never execute it.
 	adapter := strings.ToLower(strings.TrimSpace(req.Adapter))
-	if adapter == "shell" || adapter == "powershell" {
+	if adapter == "shell" || adapter == "powershell" || adapter == "file" || adapter == "desktop" {
 		if host, hostErr := s.Gateway.Host(req.HostID); hostErr == nil {
 			explanation := policy.ExplainAdapterJob(host.Mode, adapter, req.Policy)
 			if !explanation.Allowed {

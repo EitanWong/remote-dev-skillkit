@@ -10,6 +10,8 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/acpxadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/claudecodeadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
+	"github.com/EitanWong/remote-dev-skillkit/internal/desktopadapter"
+	"github.com/EitanWong/remote-dev-skillkit/internal/fileadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/powershelladapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
@@ -180,6 +182,38 @@ func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (s
 			MaxOutputBytes:            envelope.Limits.MaxOutputBytes,
 		})
 		return execution.ArtifactContent(), err
+	case "desktop":
+		execution, err := desktopadapter.ExecuteContext(ctx, desktopadapter.Spec{
+			Action:             stringValue(envelope.Payload, "action", ""),
+			URL:                stringValue(envelope.Payload, "url", ""),
+			App:                stringValue(envelope.Payload, "app", ""),
+			WindowID:           stringValue(envelope.Payload, "window_id", ""),
+			Title:              stringValue(envelope.Payload, "title", ""),
+			Text:               stringValue(envelope.Payload, "text", ""),
+			X:                  intValue(envelope.Payload, "x", 0),
+			Y:                  intValue(envelope.Payload, "y", 0),
+			Width:              intValue(envelope.Payload, "width", 0),
+			Height:             intValue(envelope.Payload, "height", 0),
+			Button:             stringValue(envelope.Payload, "button", ""),
+			Frames:             intValue(envelope.Payload, "frames", 0),
+			IntervalMillis:     intValue(envelope.Payload, "interval_millis", 0),
+			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
+			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
+		})
+		return execution.ArtifactContent(), err
+	case "file":
+		execution, err := fileadapter.ExecuteContext(ctx, fileadapter.Spec{
+			WorkspaceRoot:      envelope.Workspace.Root,
+			WriteScope:         envelope.Workspace.WriteScope,
+			Action:             stringValue(envelope.Payload, "action", ""),
+			Path:               stringValue(envelope.Payload, "path", ""),
+			Content:            stringValue(envelope.Payload, "content", ""),
+			Encoding:           stringValue(envelope.Payload, "encoding", ""),
+			MaxBytes:           intValue(envelope.Payload, "max_bytes", envelope.Limits.MaxOutputBytes),
+			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
+			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
+		})
+		return execution.ArtifactContent(), err
 	case "powershell":
 		execution, err := powershelladapter.ExecuteContext(ctx, powershelladapter.Spec{
 			WorkspaceRoot:      envelope.Workspace.Root,
@@ -227,6 +261,10 @@ func resultSchemaForAdapter(adapter string) string {
 		return claudecodeadapter.ResultSchemaVersion
 	case "codex":
 		return codexadapter.ResultSchemaVersion
+	case "desktop":
+		return desktopadapter.ResultSchemaVersion
+	case "file":
+		return fileadapter.ResultSchemaVersion
 	case "powershell":
 		return powershelladapter.ResultSchemaVersion
 	default:

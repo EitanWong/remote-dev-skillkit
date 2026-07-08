@@ -851,6 +851,73 @@ func TestServerToolCallSupportSessionSmokeTestRunsStandardProbes(t *testing.T) {
 	}
 }
 
+func TestServerToolCallSupportSessionSmokeTestRemoteControlCreatesStandardAdapterProbes(t *testing.T) {
+	jobCounter := 0
+	created := []map[string]any{}
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/hosts/hst_remote":
+			_, _ = w.Write([]byte(`{"host":{"id":"hst_remote","name":"win-dev","os":"windows","arch":"amd64","status":"active"}}` + "\n"))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/jobs":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode job create: %v", err)
+			}
+			created = append(created, body)
+			jobCounter++
+			_, _ = fmt.Fprintf(w, `{"job":{"id":"job_%d","host_id":"hst_remote","status":"queued","adapter":%q,"intent":%q}}`+"\n", jobCounter, body["adapter"], body["intent"])
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_") && strings.HasSuffix(r.URL.Path, "/artifacts"):
+			jobID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/jobs/"), "/artifacts")
+			_, _ = fmt.Fprintf(w, `{"artifacts":[{"id":"art_%s","job_id":%q,"content":"%s ok"}]}`+"\n", jobID, jobID, jobID)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_"):
+			jobID := strings.TrimPrefix(r.URL.Path, "/v1/jobs/")
+			_, _ = fmt.Fprintf(w, `{"job":{"id":%q,"host_id":"hst_remote","status":"succeeded","adapter":"probe","intent":"probe"}}`+"\n", jobID)
+		default:
+			t.Fatalf("unexpected smoke-test request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer remote.Close()
+
+	input := mcpRequestLine(t, "rdev.support_session.smoke_test", map[string]any{
+		"gateway_url":     remote.URL,
+		"host_id":         "hst_remote",
+		"timeout_seconds": 5,
+		"remote_control":  true,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	audit := structured["capability_audit"].(map[string]any)
+	if structured["remote_control_requested"] != true ||
+		audit["remote_control_requested"] != true ||
+		int(audit["remote_control_probe_count"].(float64)) != 2 {
+		t.Fatalf("expected remote-control smoke metadata, got %#v", structured)
+	}
+	adapters := []string{}
+	actions := []string{}
+	for _, body := range created {
+		adapters = append(adapters, body["adapter"].(string))
+		if policy, _ := body["policy"].(map[string]any); policy != nil {
+			if action, _ := policy["action"].(string); action != "" {
+				actions = append(actions, action)
+			}
+		}
+	}
+	if !slices.Contains(adapters, "file") ||
+		!slices.Contains(adapters, "desktop") ||
+		!slices.Contains(actions, "list") ||
+		!slices.Contains(actions, "window.inspect") {
+		t.Fatalf("expected standard file/desktop smoke probes, adapters=%#v actions=%#v created=%#v", adapters, actions, created)
+	}
+}
+
 func TestServerToolCallJobPolicyTemplate(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.jobs.policy_template", map[string]any{
 		"capability": "process.inspect",
@@ -871,6 +938,136 @@ func TestServerToolCallJobPolicyTemplate(t *testing.T) {
 		structured["adapter"] != "shell" ||
 		argv[0] != "tasklist" {
 		t.Fatalf("expected Windows process policy template, got %#v", structured)
+	}
+}
+
+func TestServerToolCallFilesReadCreatesStandardFileJob(t *testing.T) {
+	var received map[string]any
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_file","status":"queued"}}` + "\n"))
+	}))
+	defer remote.Close()
+
+	input := mcpRequestLine(t, "rdev.files.read", map[string]any{
+		"gateway_url": remote.URL,
+		"host_id":     "hst_remote",
+		"path":        "README.md",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	if received["adapter"] != "file" || policy["action"] != "read" || policy["path"] != "README.md" {
+		t.Fatalf("unexpected file MCP job payload: %#v", received)
+	}
+}
+
+func TestServerToolCallDesktopScreenshotCreatesStandardDesktopJob(t *testing.T) {
+	var received map[string]any
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_desktop","status":"queued"}}` + "\n"))
+	}))
+	defer remote.Close()
+
+	input := mcpRequestLine(t, "rdev.desktop.screenshot", map[string]any{
+		"gateway_url": remote.URL,
+		"host_id":     "hst_remote",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]any)
+	if received["adapter"] != "desktop" ||
+		policy["action"] != "screen.screenshot" ||
+		len(approvals) != 1 ||
+		approvals[0] != "screen.screenshot" {
+		t.Fatalf("unexpected desktop MCP job payload: %#v", received)
+	}
+}
+
+func TestServerToolCallFilesDeleteCreatesApprovalGatedFileJob(t *testing.T) {
+	var received map[string]any
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_delete","status":"queued"}}` + "\n"))
+	}))
+	defer remote.Close()
+
+	input := mcpRequestLine(t, "rdev.files.delete", map[string]any{
+		"gateway_url": remote.URL,
+		"host_id":     "hst_remote",
+		"path":        "old.txt",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]any)
+	if received["adapter"] != "file" || policy["action"] != "delete" || len(approvals) != 1 || approvals[0] != "file.delete" {
+		t.Fatalf("unexpected file delete MCP job payload: %#v", received)
+	}
+}
+
+func TestServerToolCallDesktopClipboardCreatesStandardDesktopJob(t *testing.T) {
+	var received map[string]any
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_clipboard","status":"queued"}}` + "\n"))
+	}))
+	defer remote.Close()
+
+	input := mcpRequestLine(t, "rdev.desktop.clipboard", map[string]any{
+		"gateway_url": remote.URL,
+		"host_id":     "hst_remote",
+		"action":      "write",
+		"text":        "hello clipboard",
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]any)
+	if received["adapter"] != "desktop" ||
+		policy["action"] != "clipboard.write" ||
+		policy["text"] != "hello clipboard" ||
+		len(approvals) != 1 ||
+		approvals[0] != "clipboard.write" {
+		t.Fatalf("unexpected desktop clipboard MCP job payload: %#v", received)
 	}
 }
 

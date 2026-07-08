@@ -41,7 +41,7 @@ rdev gateway: tickets, jobs, approvals, artifacts, audit
 rdev host: identity, local policy, adapters, evidence
         |
         v
-shell, PowerShell, Git, Codex, Claude Code, ACP/acpx, custom adapters
+file transfer, desktop control, shell, PowerShell, Git, Codex, Claude Code, ACP/acpx
 ```
 
 Use it when an agent needs to diagnose, repair, test, or review work on a
@@ -54,6 +54,10 @@ and what proof comes back.
   Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - **No raw remote shell free-for-all.** Jobs are signed, policy-checked,
   capability-scoped, host-bound, and revocable.
+- **Native remote control for agents.** Use `rdev.files.*` and
+  `rdev.desktop.*` for file transfer, scoped file delete, screenshots, window
+  inspection, keyboard/mouse input, clipboard read/write, app launch/close, and
+  URL open instead of hand-written OS scripts.
 - **Humans stay in charge.** Risky actions can require explicit approval before
   the host runs them.
 - **Proof over vibes.** Jobs produce structured artifacts, audit chains, adapter

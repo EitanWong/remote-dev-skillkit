@@ -261,7 +261,7 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 
 func supportedAdapter(adapter string) bool {
 	switch adapter {
-	case "shell", "powershell", "codex", "claude-code", "acpx":
+	case "shell", "powershell", "codex", "claude-code", "acpx", "file", "desktop":
 		return true
 	default:
 		return false
@@ -299,8 +299,99 @@ func missingAdapterCapability(envelope model.JobEnvelope) string {
 		if !hasCapability(envelope.Capabilities, "git.diff") {
 			return "git.diff"
 		}
+	case "file":
+		return missingFileCapability(envelope)
+	case "desktop":
+		return missingDesktopCapability(envelope)
 	}
 	return ""
+}
+
+func missingFileCapability(envelope model.JobEnvelope) string {
+	switch normalizeAdapterAction(stringValue(envelope.Payload, "action", "")) {
+	case "list", "read", "download":
+		if !hasCapability(envelope.Capabilities, "file.transfer.read") {
+			return "file.transfer.read"
+		}
+	case "write", "upload", "delete":
+		if !hasCapability(envelope.Capabilities, "file.transfer.write") {
+			return "file.transfer.write"
+		}
+		if !hasCapability(envelope.Capabilities, "fs.write.scoped") {
+			return "fs.write.scoped"
+		}
+	default:
+		return "file.transfer.read"
+	}
+	return ""
+}
+
+func missingDesktopCapability(envelope model.JobEnvelope) string {
+	action := normalizeAdapterAction(stringValue(envelope.Payload, "action", ""))
+	switch action {
+	case "windows", "window.list", "window.inspect":
+		if !hasCapability(envelope.Capabilities, "window.inspect") {
+			return "window.inspect"
+		}
+	case "screenshot", "screen.screenshot":
+		if !hasCapability(envelope.Capabilities, "screen.screenshot") {
+			return "screen.screenshot"
+		}
+	case "record", "screen.record":
+		if !hasCapability(envelope.Capabilities, "screen.record") {
+			return "screen.record"
+		}
+	case "focus", "window.focus":
+		if !hasCapability(envelope.Capabilities, "window.focus") {
+			return "window.focus"
+		}
+	case "move", "window.move":
+		if !hasCapability(envelope.Capabilities, "window.move") {
+			return "window.move"
+		}
+	case "keyboard", "input.keyboard":
+		if !hasCapability(envelope.Capabilities, "input.keyboard") {
+			return "input.keyboard"
+		}
+	case "mouse", "input.mouse":
+		if !hasCapability(envelope.Capabilities, "input.mouse") {
+			return "input.mouse"
+		}
+	case "launch", "app.launch":
+		if !hasCapability(envelope.Capabilities, "app.launch") {
+			return "app.launch"
+		}
+	case "close", "app.close":
+		if !hasCapability(envelope.Capabilities, "app.close") {
+			return "app.close"
+		}
+	case "url", "open.url", "url.open":
+		if !hasCapability(envelope.Capabilities, "url.open") {
+			return "url.open"
+		}
+	case "clipboard.read":
+		if !hasCapability(envelope.Capabilities, "clipboard.read") {
+			return "clipboard.read"
+		}
+	case "clipboard.write":
+		if !hasCapability(envelope.Capabilities, "clipboard.write") {
+			return "clipboard.write"
+		}
+	case "unattended.access":
+		if !hasCapability(envelope.Capabilities, "unattended.access") {
+			return "unattended.access"
+		}
+	default:
+		return "window.inspect"
+	}
+	return ""
+}
+
+func normalizeAdapterAction(action string) string {
+	action = strings.ToLower(strings.TrimSpace(action))
+	action = strings.ReplaceAll(action, "_", ".")
+	action = strings.ReplaceAll(action, "-", ".")
+	return action
 }
 
 func acquireWorkspaceLock(hostID string, envelope model.JobEnvelope, opts Options, now time.Time) (func(), error) {
@@ -646,6 +737,23 @@ func stringValue(values map[string]any, key, fallback string) string {
 		return text
 	}
 	return fallback
+}
+
+func intValue(values map[string]any, key string, fallback int) int {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return fallback
+	}
 }
 
 type denialSpec struct {

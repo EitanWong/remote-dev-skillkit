@@ -8,6 +8,7 @@ Le modèle de connexion est celui d'un contrôle distant pour agents : la machin
 
 - Un Agent Skillkit portable, installable dans les frameworks d'agents courants.
 - Les tâches sont signées, vérifiées, puis exécutées ; pas de shell brut remis à l'agent.
+- Les surfaces standard `rdev.files.*` / `rdev.desktop.*` couvrent transfert/suppression de fichiers, captures/frames, fenêtres, clavier/souris, presse-papiers, apps et URLs.
 - Les skills détectent OS, shell, service manager, gateway, workspace, adapter et permissions ; si la configuration n'est pas claire, elles demandent.
 - Adaptateurs pour Codex, Claude Code, ACP/acpx, shell, PowerShell et adapters personnalisés.
 - Licence open source Apache-2.0.

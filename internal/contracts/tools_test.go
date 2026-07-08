@@ -151,11 +151,12 @@ func TestSupportSessionSmokeTestSchemaAcceptsTicketCodeOrHostID(t *testing.T) {
 		t.Fatal("missing rdev.support_session.smoke_test")
 	}
 	if !strings.Contains(tool.Description, "remote_control_entry") ||
-		!strings.Contains(tool.Description, "keep the host connected") {
+		!strings.Contains(tool.Description, "keep the host connected") ||
+		!strings.Contains(tool.Description, "remote_control=true") {
 		t.Fatalf("smoke-test description should expose remote_control_entry and keep-alive policy: %s", tool.Description)
 	}
 	properties, _ := tool.InputSchema["properties"].(map[string]any)
-	for _, name := range []string{"host_id", "ticket_code", "gateway_url", "timeout_seconds"} {
+	for _, name := range []string{"host_id", "ticket_code", "gateway_url", "timeout_seconds", "remote_control"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("smoke-test schema must expose %s: %#v", name, properties)
 		}

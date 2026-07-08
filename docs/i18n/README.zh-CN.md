@@ -8,6 +8,7 @@ Remote Dev Skillkit 是给 AI Agent 使用真实 Mac、Windows、Linux 机器时
 
 - 一个可移植的 Agent Skillkit，可安装到主流 Agent Framework。
 - 任务先签名、再校验、再执行，不把原始 shell 权限随手交给 Agent。
+- 标准 `rdev.files.*` / `rdev.desktop.*` 覆盖文件传输/删除、截图/录屏帧、窗口、键盘鼠标、剪贴板、App 和 URL 操作。
 - Skills 会先探测 OS、shell、service manager、gateway、workspace、adapter 和权限；不清楚就询问。
 - 支持 Codex、Claude Code、ACP/acpx、shell、PowerShell 和自定义 adapter。
 - Apache-2.0 开源许可证。

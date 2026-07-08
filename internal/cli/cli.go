@@ -139,6 +139,10 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.acceptance(ctx, args[1:])
 	case "adapter":
 		return a.adapter(args[1:])
+	case "desktop":
+		return a.desktop(ctx, args[1:])
+	case "files":
+		return a.files(ctx, args[1:])
 	case "job":
 		return a.job(ctx, args[1:])
 	case "help", "-h", "--help":
@@ -154,6 +158,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 			"invites":          "invite",
 			"policies":         "policy",
 			"gateways":         "gateway",
+			"file":             "files",
 			"connections":      "connection-entry",
 			"connection_entry": "connection-entry",
 			"support_session":  "support-session",
@@ -3570,6 +3575,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		gatewayURL := fs.String("gateway-url", "", "gateway URL that owns the connected support session")
 		hostID := fs.String("host-id", "", "active host ID to test")
 		ticketCode := fs.String("ticket-code", "", "support-session ticket code; when set, rdev selects the single active host")
+		remoteControl := fs.Bool("remote-control", false, "also run low-risk native file/desktop adapter probes: file list and window inspect")
 		timeout := fs.Duration("timeout", 120*time.Second, "maximum duration for the smoke test")
 		timeoutSeconds := fs.Int("timeout-seconds", 0, "alias for --timeout, in whole seconds")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
@@ -3586,6 +3592,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			GatewayURL:        *gatewayURL,
 			HostID:            *hostID,
 			TicketCode:        *ticketCode,
+			RemoteControl:     *remoteControl,
 			Timeout:           *timeout,
 			OperatorTokenFile: *operatorTokenFile,
 		})
@@ -5208,6 +5215,7 @@ func postGatewayJSON(ctx context.Context, endpoint string, body any, bearerToken
 type supportSessionAuditCapabilitiesOptions struct {
 	GatewayURL        string
 	HostID            string
+	RemoteControl     bool
 	Timeout           time.Duration
 	OperatorTokenFile string
 }
@@ -5216,12 +5224,14 @@ type supportSessionSmokeTestOptions struct {
 	GatewayURL        string
 	HostID            string
 	TicketCode        string
+	RemoteControl     bool
 	Timeout           time.Duration
 	OperatorTokenFile string
 }
 
 type supportSessionAuditProbe struct {
 	Name        string
+	Category    string
 	Capability  string
 	Adapter     string
 	Intent      string
@@ -5267,9 +5277,16 @@ func runSupportSessionCapabilityAudit(ctx context.Context, opts supportSessionAu
 	}
 	hostOS, _ := host["os"].(string)
 	probes := auditCapabilityProbes(hostOS)
+	if opts.RemoteControl {
+		probes = append(probes, remoteControlAuditProbes(hostOS)...)
+	}
 	results := make([]map[string]any, 0, len(probes))
 	ok := true
+	remoteControlProbeCount := 0
 	for _, probe := range probes {
+		if probe.Category == "remote_control" {
+			remoteControlProbeCount++
+		}
 		created, err := createJobJSON(ctx, gatewayURL, opts.HostID, probe.Adapter, probe.Intent, probe.Policy, token)
 		if err != nil {
 			ok = false
@@ -5319,9 +5336,15 @@ func runSupportSessionCapabilityAudit(ctx context.Context, opts supportSessionAu
 		if artifacts, artifactErr := fetchJobArtifactsJSON(ctx, gatewayURL, jobID, token); artifactErr == nil {
 			artifactSummary = summarizeFirstArtifact(artifacts)
 		}
+		category := probe.Category
+		if category == "" {
+			category = "baseline"
+		}
 		results = append(results, map[string]any{
 			"name":             probe.Name,
+			"category":         category,
 			"capability":       probe.Capability,
+			"adapter":          probe.Adapter,
 			"job_id":           jobID,
 			"job_status":       jobStatus,
 			"ok":               passed,
@@ -5330,14 +5353,16 @@ func runSupportSessionCapabilityAudit(ctx context.Context, opts supportSessionAu
 		})
 	}
 	report := map[string]any{
-		"schema_version":        "rdev.support-session-capability-audit.v1",
-		"ok":                    ok,
-		"gateway_url":           gatewayURL,
-		"connection_continuity": supportSessionConnectionContinuity(gatewayURL),
-		"remote_control_entry":  supportSessionRemoteControlEntryForReport(gatewayURL, "", nil, host),
-		"host":                  host,
-		"results":               results,
-		"next_action":           "Use rdev job create/wait/artifacts for scoped work only after this audit is ok; do not disconnect the host unless the operator asks.",
+		"schema_version":             "rdev.support-session-capability-audit.v1",
+		"ok":                         ok,
+		"gateway_url":                gatewayURL,
+		"connection_continuity":      supportSessionConnectionContinuity(gatewayURL),
+		"remote_control_entry":       supportSessionRemoteControlEntryForReport(gatewayURL, "", nil, host),
+		"host":                       host,
+		"results":                    results,
+		"remote_control_requested":   opts.RemoteControl,
+		"remote_control_probe_count": remoteControlProbeCount,
+		"next_action":                "Use rdev job create/wait/artifacts for scoped work only after this audit is ok; do not disconnect the host unless the operator asks.",
 	}
 	return report, nil
 }
@@ -5375,24 +5400,26 @@ func (a App) supportSessionSmokeTest(ctx context.Context, opts supportSessionSmo
 		HostID:            hostID,
 		Timeout:           opts.Timeout,
 		OperatorTokenFile: opts.OperatorTokenFile,
+		RemoteControl:     opts.RemoteControl,
 	})
 	if err != nil {
 		return err
 	}
 	auditHost, _ := audit["host"].(map[string]any)
 	report := map[string]any{
-		"schema_version":        "rdev.support-session-smoke-test.v1",
-		"ok":                    audit["ok"],
-		"gateway_url":           gatewayURL,
-		"host_id":               hostID,
-		"ticket_code":           strings.TrimSpace(opts.TicketCode),
-		"connection_continuity": supportSessionConnectionContinuity(gatewayURL),
-		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
-		"remote_control_entry":  supportSessionRemoteControlEntryForReport(gatewayURL, opts.TicketCode, nil, auditHost),
-		"managed_upgrade":       supportSessionManagedUpgradeRecommendation(auditHost),
-		"capability_audit":      audit,
-		"human_report":          supportSessionSmokeHumanReport(audit),
-		"next_action":           "Keep the host connected for follow-up work unless the operator explicitly asks to disconnect; for recurring owned hosts, upgrade to a reviewed managed service with a stable gateway.",
+		"schema_version":           "rdev.support-session-smoke-test.v1",
+		"ok":                       audit["ok"],
+		"gateway_url":              gatewayURL,
+		"host_id":                  hostID,
+		"ticket_code":              strings.TrimSpace(opts.TicketCode),
+		"connection_continuity":    supportSessionConnectionContinuity(gatewayURL),
+		"disconnect_policy":        "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+		"remote_control_entry":     supportSessionRemoteControlEntryForReport(gatewayURL, opts.TicketCode, nil, auditHost),
+		"managed_upgrade":          supportSessionManagedUpgradeRecommendation(auditHost),
+		"capability_audit":         audit,
+		"remote_control_requested": opts.RemoteControl,
+		"human_report":             supportSessionSmokeHumanReport(audit),
+		"next_action":              "Keep the host connected for follow-up work unless the operator explicitly asks to disconnect; for recurring owned hosts, upgrade to a reviewed managed service with a stable gateway.",
 	}
 	return writeJSON(a.Stdout, report)
 }
@@ -5408,6 +5435,53 @@ func supportSessionSmokeHumanReport(audit map[string]any) string {
 	}
 	_, _ = fmt.Fprint(&b, "- Connection: keep alive until the operator explicitly asks to disconnect.")
 	return b.String()
+}
+
+func remoteControlAuditProbes(hostOS string) []supportSessionAuditProbe {
+	desktopFailureIsOK := !strings.EqualFold(hostOS, "windows")
+	return []supportSessionAuditProbe{
+		{
+			Name:       "file_adapter_list",
+			Category:   "remote_control",
+			Capability: "file.transfer.read",
+			Adapter:    "file",
+			Intent:     "remote-control smoke file adapter list",
+			Policy:     fileListSmokePolicy(),
+		},
+		{
+			Name:        "desktop_window_inspect",
+			Category:    "remote_control",
+			Capability:  "window.inspect",
+			Adapter:     "desktop",
+			Intent:      "remote-control smoke desktop window inspect",
+			Policy:      desktopWindowInspectSmokePolicy(),
+			FailureIsOK: desktopFailureIsOK,
+		},
+	}
+}
+
+func fileListSmokePolicy() map[string]any {
+	return map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"file.transfer.read", "fs.read"},
+		"action":               "list",
+		"path":                 ".",
+		"max_bytes":            1024 * 1024,
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	}
+}
+
+func desktopWindowInspectSmokePolicy() map[string]any {
+	return map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"window.inspect"},
+		"action":               "window.inspect",
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+		"network":              "default-deny",
+	}
 }
 
 func auditCapabilityProbes(hostOS string) []supportSessionAuditProbe {
@@ -7934,6 +8008,266 @@ func (a App) job(ctx context.Context, args []string) error {
 
 	default:
 		return fmt.Errorf("unknown job subcommand %q; available: create, list, get, wait, artifacts, policy-template, cancel", args[0])
+	}
+}
+
+func (a App) files(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		_, _ = fmt.Fprintln(a.Stderr, "usage: rdev files <list|read|write|download|upload|delete> [flags]")
+		return fmt.Errorf("missing files subcommand")
+	}
+	action := strings.ToLower(strings.TrimSpace(args[0]))
+	switch action {
+	case "list", "read", "write", "download", "upload", "delete":
+	default:
+		return fmt.Errorf("unknown files subcommand %q; available: list, read, write, download, upload, delete", args[0])
+	}
+	fs := flag.NewFlagSet("files "+action, flag.ContinueOnError)
+	fs.SetOutput(a.Stderr)
+	gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+	hostID := fs.String("host-id", "", "target host ID (required)")
+	path := fs.String("path", ".", "workspace-relative file or directory path")
+	workspaceRoot := fs.String("workspace-root", ".", "target workspace root")
+	writeScope := fs.String("write-scope", ".", "comma-separated workspace-relative write scopes for write/upload")
+	content := fs.String("content", "", "inline content for write/upload")
+	contentFile := fs.String("content-file", "", "file whose content is sent for write/upload")
+	encoding := fs.String("encoding", "utf-8", "content encoding for write/upload: utf-8 or base64")
+	maxBytes := fs.Int("max-bytes", 1024*1024, "max bytes for read/download")
+	operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *gatewayURL == "" {
+		return fmt.Errorf("--gateway-url is required")
+	}
+	if *hostID == "" {
+		return fmt.Errorf("--host-id is required")
+	}
+	policy := map[string]any{
+		"workspace_root":       *workspaceRoot,
+		"capabilities":         []string{"file.transfer.read", "fs.read"},
+		"action":               action,
+		"path":                 *path,
+		"max_bytes":            *maxBytes,
+		"max_duration_seconds": 60,
+		"max_output_bytes":     20000,
+		"network":              "default-deny",
+	}
+	if action == "write" || action == "upload" || action == "delete" {
+		policy["capabilities"] = []string{"file.transfer.write", "fs.write.scoped"}
+		policy["write_scope"] = splitCSV(*writeScope)
+	}
+	if action == "write" || action == "upload" {
+		body, err := fileCommandContent(*content, *contentFile)
+		if err != nil {
+			return err
+		}
+		policy["content"] = body
+		policy["encoding"] = *encoding
+	}
+	if action == "delete" {
+		policy["approvals_required"] = []string{"file.delete"}
+	}
+	intent := fmt.Sprintf("%s remote file %s", action, *path)
+	return a.jobCreate(ctx, *gatewayURL, *hostID, "file", intent, policy, *operatorTokenFile)
+}
+
+func (a App) desktop(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		_, _ = fmt.Fprintln(a.Stderr, "usage: rdev desktop <windows|screenshot|record|focus|move|input|app|url|clipboard> [flags]")
+		return fmt.Errorf("missing desktop subcommand")
+	}
+	subcommand := strings.ToLower(strings.TrimSpace(args[0]))
+	fs := flag.NewFlagSet("desktop "+subcommand, flag.ContinueOnError)
+	fs.SetOutput(a.Stderr)
+	gatewayURL := fs.String("gateway-url", "", "gateway API base URL (required)")
+	hostID := fs.String("host-id", "", "target host ID (required)")
+	workspaceRoot := fs.String("workspace-root", ".", "target workspace root")
+	windowID := fs.String("window-id", "", "target native window handle/id")
+	title := fs.String("title", "", "target window title substring")
+	text := fs.String("text", "", "text for keyboard input")
+	x := fs.Int("x", 0, "screen X coordinate")
+	y := fs.Int("y", 0, "screen Y coordinate")
+	width := fs.Int("width", 0, "window width for move")
+	height := fs.Int("height", 0, "window height for move")
+	button := fs.String("button", "move", "mouse button/action: move, left, right")
+	appName := fs.String("app", "", "app path or name for app launch/close")
+	appAction := fs.String("action", "", "app action: launch/close for app, read/write for clipboard")
+	urlValue := fs.String("url", "", "URL to open")
+	frames := fs.Int("frames", 3, "record frame count")
+	intervalMillis := fs.Int("interval-millis", 500, "record frame interval in milliseconds")
+	operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *gatewayURL == "" {
+		return fmt.Errorf("--gateway-url is required")
+	}
+	if *hostID == "" {
+		return fmt.Errorf("--host-id is required")
+	}
+	action, intent, err := desktopCommandAction(subcommand, *appAction, *text)
+	if err != nil {
+		return err
+	}
+	capability, approval := desktopCapabilityForAction(action)
+	policy := map[string]any{
+		"workspace_root":       *workspaceRoot,
+		"capabilities":         []string{capability},
+		"action":               action,
+		"max_duration_seconds": 30,
+		"max_output_bytes":     20000,
+		"network":              "default-deny",
+	}
+	if approval != "" {
+		policy["approvals_required"] = []string{approval}
+	}
+	if *windowID != "" {
+		policy["window_id"] = *windowID
+	}
+	if *title != "" {
+		policy["title"] = *title
+	}
+	switch action {
+	case "screen.record":
+		policy["frames"] = *frames
+		policy["interval_millis"] = *intervalMillis
+	case "window.move":
+		policy["x"] = *x
+		policy["y"] = *y
+		policy["width"] = *width
+		policy["height"] = *height
+	case "input.keyboard":
+		if strings.TrimSpace(*text) == "" {
+			return fmt.Errorf("--text is required for keyboard input")
+		}
+		policy["text"] = *text
+	case "clipboard.write":
+		if strings.TrimSpace(*text) == "" {
+			return fmt.Errorf("--text is required for clipboard write")
+		}
+		policy["text"] = *text
+	case "input.mouse":
+		policy["x"] = *x
+		policy["y"] = *y
+		policy["button"] = *button
+	case "app.launch":
+		if strings.TrimSpace(*appName) == "" {
+			return fmt.Errorf("--app is required for app launch")
+		}
+		policy["app"] = *appName
+	case "app.close":
+		if strings.TrimSpace(*windowID) == "" && strings.TrimSpace(*title) == "" && strings.TrimSpace(*appName) == "" {
+			return fmt.Errorf("--window-id, --title, or --app is required for app close")
+		}
+		if *appName != "" {
+			policy["app"] = *appName
+		}
+	case "url.open":
+		if strings.TrimSpace(*urlValue) == "" {
+			return fmt.Errorf("--url is required")
+		}
+		policy["url"] = *urlValue
+	}
+	return a.jobCreate(ctx, *gatewayURL, *hostID, "desktop", intent, policy, *operatorTokenFile)
+}
+
+func fileCommandContent(content, contentFile string) (string, error) {
+	if strings.TrimSpace(content) != "" && strings.TrimSpace(contentFile) != "" {
+		return "", fmt.Errorf("use only one of --content or --content-file")
+	}
+	if strings.TrimSpace(contentFile) == "" {
+		return content, nil
+	}
+	data, err := os.ReadFile(contentFile)
+	if err != nil {
+		return "", fmt.Errorf("read --content-file: %w", err)
+	}
+	return string(data), nil
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
+}
+
+func desktopCommandAction(subcommand, appAction, text string) (string, string, error) {
+	switch subcommand {
+	case "windows":
+		return "window.inspect", "inspect remote desktop windows", nil
+	case "screenshot":
+		return "screen.screenshot", "capture remote desktop screenshot", nil
+	case "record":
+		return "screen.record", "record remote desktop PNG frames", nil
+	case "focus":
+		return "window.focus", "focus remote desktop window", nil
+	case "move":
+		return "window.move", "move remote desktop window", nil
+	case "input":
+		if strings.TrimSpace(text) != "" {
+			return "input.keyboard", "send remote keyboard input", nil
+		}
+		return "input.mouse", "send remote mouse input", nil
+	case "app":
+		switch strings.ToLower(strings.TrimSpace(appAction)) {
+		case "", "launch":
+			return "app.launch", "launch remote desktop app", nil
+		case "close":
+			return "app.close", "close remote desktop app/window", nil
+		default:
+			return "", "", fmt.Errorf("--action must be launch or close")
+		}
+	case "url":
+		return "url.open", "open remote desktop URL", nil
+	case "clipboard":
+		switch strings.ToLower(strings.TrimSpace(appAction)) {
+		case "", "read":
+			return "clipboard.read", "read remote desktop clipboard", nil
+		case "write":
+			return "clipboard.write", "write remote desktop clipboard", nil
+		default:
+			return "", "", fmt.Errorf("--action must be read or write for clipboard")
+		}
+	default:
+		return "", "", fmt.Errorf("unknown desktop subcommand %q; available: windows, screenshot, record, focus, move, input, app, url, clipboard", subcommand)
+	}
+}
+
+func desktopCapabilityForAction(action string) (string, string) {
+	switch action {
+	case "window.inspect":
+		return "window.inspect", ""
+	case "screen.screenshot":
+		return "screen.screenshot", "screen.screenshot"
+	case "screen.record":
+		return "screen.record", "screen.record"
+	case "window.focus":
+		return "window.focus", "window.focus"
+	case "window.move":
+		return "window.move", "window.move"
+	case "input.keyboard":
+		return "input.keyboard", "input.keyboard"
+	case "input.mouse":
+		return "input.mouse", "input.mouse"
+	case "app.launch":
+		return "app.launch", "app.launch"
+	case "app.close":
+		return "app.close", "app.close"
+	case "url.open":
+		return "url.open", "url.open"
+	case "clipboard.read":
+		return "clipboard.read", "clipboard.read"
+	case "clipboard.write":
+		return "clipboard.write", "clipboard.write"
+	default:
+		return action, action
 	}
 }
 
@@ -11070,6 +11404,10 @@ Usage:
   rdev job artifacts --gateway-url http://127.0.0.1:8787 --job-id job_...
   rdev job policy-template --capability process.inspect --target-os windows
   rdev job cancel --gateway-url http://127.0.0.1:8787 --job-id job_... --reason "stuck job"
+  rdev files read --gateway-url http://127.0.0.1:8787 --host-id hst_... --path README.md
+  rdev files write --gateway-url http://127.0.0.1:8787 --host-id hst_... --path notes.txt --content "hello"
+  rdev desktop screenshot --gateway-url http://127.0.0.1:8787 --host-id hst_...
+  rdev desktop windows --gateway-url http://127.0.0.1:8787 --host-id hst_...
   rdev invite create --gateway https://api.example.com/v1 --reason "repair target host" --transport auto
   rdev connection-entry plan --invite invite.json --out connection-entry --target-os windows --ownership third-party
   rdev connection-entry run --runner-manifest connection-entry/connection-entry-runner/connection-entry-runner.json --dry-run --evidence-dir relay-evidence
@@ -11188,9 +11526,11 @@ func (a App) printCommandGroupUsage(command string) bool {
 		"bootstrap":        "agent-plan",
 		"connection-entry": "plan, run",
 		"demo":             "local",
+		"desktop":          "windows, screenshot, record, focus, move, input, app, url, clipboard",
 		"deps":             "install",
 		"enrollment":       "issue-certificate, sign-certificate, verify-certificate, renew-certificate, revoke-certificate, init-revocations, verify-revocations, fetch-revocations, lifecycle",
 		"evidence":         "export",
+		"files":            "list, read, write, download, upload, delete",
 		"gateway":          "serve, storage verify",
 		"host":             "serve, install-service, service-status, service-control, uninstall-service",
 		"hosted-provider":  "package, verify",

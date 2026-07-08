@@ -970,6 +970,97 @@ func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T)
 	}
 }
 
+func TestCommandGroupHelpListsRemoteControlSurfaces(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	if err := app.Run(context.Background(), []string{"files", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); !strings.Contains(got, "delete") {
+		t.Fatalf("files help should list delete, got stdout=%q stderr=%q", got, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := app.Run(context.Background(), []string{"desktop", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); !strings.Contains(got, "clipboard") {
+		t.Fatalf("desktop help should list clipboard, got stdout=%q stderr=%q", got, stderr.String())
+	}
+}
+
+func TestSupportSessionSmokeTestRemoteControlCreatesStandardAdapterProbes(t *testing.T) {
+	jobCounter := 0
+	created := []map[string]any{}
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/hosts/hst_remote":
+			_, _ = w.Write([]byte(`{"host":{"id":"hst_remote","name":"win-dev","os":"windows","arch":"amd64","status":"active"}}` + "\n"))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/jobs":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode job create: %v", err)
+			}
+			created = append(created, body)
+			jobCounter++
+			_, _ = fmt.Fprintf(w, `{"job":{"id":"job_%d","host_id":"hst_remote","status":"queued","adapter":%q,"intent":%q}}`+"\n", jobCounter, body["adapter"], body["intent"])
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_") && strings.HasSuffix(r.URL.Path, "/artifacts"):
+			jobID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/jobs/"), "/artifacts")
+			_, _ = fmt.Fprintf(w, `{"artifacts":[{"id":"art_%s","job_id":%q,"content":"%s ok"}]}`+"\n", jobID, jobID, jobID)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_"):
+			jobID := strings.TrimPrefix(r.URL.Path, "/v1/jobs/")
+			_, _ = fmt.Fprintf(w, `{"job":{"id":%q,"host_id":"hst_remote","status":"succeeded","adapter":"probe","intent":"probe"}}`+"\n", jobID)
+		default:
+			t.Fatalf("unexpected smoke-test request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer remote.Close()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{
+		"support-session", "smoke-test",
+		"--gateway-url", remote.URL,
+		"--host-id", "hst_remote",
+		"--timeout-seconds", "5",
+		"--remote-control",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid smoke-test JSON: %v\n%s", err, stdout.String())
+	}
+	audit := report["capability_audit"].(map[string]any)
+	if report["remote_control_requested"] != true ||
+		audit["remote_control_requested"] != true ||
+		int(audit["remote_control_probe_count"].(float64)) != 2 {
+		t.Fatalf("expected remote-control smoke metadata, got %#v", report)
+	}
+	adapters := []string{}
+	actions := []string{}
+	for _, body := range created {
+		adapters = append(adapters, body["adapter"].(string))
+		if policy, _ := body["policy"].(map[string]any); policy != nil {
+			if action, _ := policy["action"].(string); action != "" {
+				actions = append(actions, action)
+			}
+		}
+	}
+	if !slices.Contains(adapters, "file") ||
+		!slices.Contains(adapters, "desktop") ||
+		!slices.Contains(actions, "list") ||
+		!slices.Contains(actions, "window.inspect") {
+		t.Fatalf("expected standard file/desktop smoke probes, adapters=%#v actions=%#v created=%#v", adapters, actions, created)
+	}
+}
+
 func TestManagedPublicTunnelRespectsExplicitGatewayURL(t *testing.T) {
 	if !shouldStartManagedPublicTunnel(true, "") {
 		t.Fatal("expected managed tunnel when public tunnel is needed and no explicit gateway was provided")
@@ -6336,6 +6427,143 @@ func TestJobWaitCLIReadsNestedGatewayJobPayload(t *testing.T) {
 	}
 	if payload.ID != job.ID || payload.Status != model.JobStatusSucceeded {
 		t.Fatalf("expected completed nested job output, got %#v", payload)
+	}
+}
+
+func TestFilesReadCLICreatesFileAdapterJob(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_file","status":"queued"}}`))
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"files", "read",
+		"--gateway-url", server.URL,
+		"--host-id", "hst_1",
+		"--path", "README.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	if received["adapter"] != "file" ||
+		received["intent"] != "read remote file README.md" ||
+		policy["action"] != "read" ||
+		policy["path"] != "README.md" {
+		t.Fatalf("unexpected files read job payload: %#v", received)
+	}
+}
+
+func TestDesktopScreenshotCLICreatesDesktopAdapterJob(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_desktop","status":"queued"}}`))
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"desktop", "screenshot",
+		"--gateway-url", server.URL,
+		"--host-id", "hst_1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]any)
+	if received["adapter"] != "desktop" ||
+		received["intent"] != "capture remote desktop screenshot" ||
+		policy["action"] != "screen.screenshot" ||
+		len(approvals) != 1 ||
+		approvals[0] != "screen.screenshot" {
+		t.Fatalf("unexpected desktop screenshot job payload: %#v", received)
+	}
+}
+
+func TestFilesDeleteCLICreatesApprovalGatedFileAdapterJob(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_delete","status":"queued"}}`))
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"files", "delete",
+		"--gateway-url", server.URL,
+		"--host-id", "hst_1",
+		"--path", "old.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]any)
+	if received["adapter"] != "file" ||
+		policy["action"] != "delete" ||
+		len(approvals) != 1 ||
+		approvals[0] != "file.delete" {
+		t.Fatalf("unexpected files delete job payload: %#v", received)
+	}
+}
+
+func TestDesktopClipboardCLICreatesDesktopAdapterJob(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"job":{"id":"job_clipboard","status":"queued"}}`))
+	}))
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+
+	err := app.Run(context.Background(), []string{
+		"desktop", "clipboard",
+		"--gateway-url", server.URL,
+		"--host-id", "hst_1",
+		"--action", "write",
+		"--text", "hello clipboard",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := received["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]any)
+	if received["adapter"] != "desktop" ||
+		policy["action"] != "clipboard.write" ||
+		policy["text"] != "hello clipboard" ||
+		len(approvals) != 1 ||
+		approvals[0] != "clipboard.write" {
+		t.Fatalf("unexpected desktop clipboard job payload: %#v", received)
 	}
 }
 

@@ -138,6 +138,80 @@ func TestExplainPowerShellJobRejectsMissingPowerShellCapability(t *testing.T) {
 	}
 }
 
+func TestExplainFileJobAllowsScopedRead(t *testing.T) {
+	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "file", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"file.transfer.read", "fs.read"},
+		"action":         "read",
+		"path":           "README.md",
+	})
+	if !explanation.Allowed || explanation.Adapter != "file" {
+		t.Fatalf("expected file read to be allowed: %#v", explanation)
+	}
+	if explanation.ApprovalRequired {
+		t.Fatalf("expected no approval for scoped file read: %#v", explanation)
+	}
+}
+
+func TestExplainFileJobRejectsWriteWithoutScope(t *testing.T) {
+	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "file", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"file.transfer.write", "fs.write.scoped"},
+		"action":         "write",
+		"path":           "notes.txt",
+	})
+	if explanation.Allowed {
+		t.Fatal("expected file write without write_scope to be denied")
+	}
+	if !containsReason(explanation.Denials, "write_scope is required") {
+		t.Fatalf("unexpected denials: %#v", explanation.Denials)
+	}
+}
+
+func TestExplainFileJobRequiresApprovalForDelete(t *testing.T) {
+	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "file", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"file.transfer.write", "fs.write.scoped"},
+		"action":         "delete",
+		"path":           "old.txt",
+		"write_scope":    []string{"."},
+	})
+	if !explanation.Allowed {
+		t.Fatalf("expected scoped delete to be available behind approval: %#v", explanation)
+	}
+	if !explanation.ApprovalRequired || !containsReason(explanation.RequiredApprovals, "file.delete") {
+		t.Fatalf("expected file.delete approval: %#v", explanation)
+	}
+}
+
+func TestExplainDesktopJobRequiresApprovalForScreenshot(t *testing.T) {
+	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "desktop", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"screen.screenshot"},
+		"action":         "screen.screenshot",
+	})
+	if !explanation.Allowed {
+		t.Fatalf("expected screenshot to be available behind approval: %#v", explanation)
+	}
+	if !explanation.ApprovalRequired || !containsReason(explanation.RequiredApprovals, "screen.screenshot") {
+		t.Fatalf("expected screenshot approval requirement: %#v", explanation)
+	}
+}
+
+func TestExplainDesktopJobAllowsWindowInspectWithoutApproval(t *testing.T) {
+	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "desktop", map[string]any{
+		"workspace_root": ".",
+		"capabilities":   []string{"window.inspect"},
+		"action":         "window.inspect",
+	})
+	if !explanation.Allowed {
+		t.Fatalf("expected window inspect to be allowed: %#v", explanation)
+	}
+	if explanation.ApprovalRequired {
+		t.Fatalf("expected no approval for window inspect: %#v", explanation)
+	}
+}
+
 func containsReason(values []string, needle string) bool {
 	for _, value := range values {
 		if strings.Contains(value, needle) {

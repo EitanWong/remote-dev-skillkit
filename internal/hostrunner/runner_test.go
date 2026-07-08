@@ -1788,6 +1788,83 @@ func TestRunDevJobRejectsUnsupportedAdapterWithDenial(t *testing.T) {
 	assertDenial(t, result, err, "unsupported_adapter")
 }
 
+func TestRunDevJobAcceptsFileAdapterRead(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello from file adapter"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "file", "read note", map[string]any{
+		"workspace_root": root,
+		"capabilities":   []string{"file.transfer.read", "fs.read"},
+		"action":         "read",
+		"path":           "note.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.ArtifactContent, `"schema_version": "rdev.file-result.v1"`) ||
+		!strings.Contains(result.ArtifactContent, "hello from file adapter") {
+		t.Fatalf("expected file adapter artifact, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobRequiresDesktopApprovalBeforeExecution(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	job, err := gw.CreateJob(host.ID, "desktop", "take screenshot", map[string]any{
+		"workspace_root":     ".",
+		"capabilities":       []string{"screen.screenshot"},
+		"action":             "screen.screenshot",
+		"approvals_required": []string{"screen.screenshot"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "screen.screenshot")
+	if strings.Contains(result.ArtifactContent, `"schema_version": "rdev.desktop-result.v1"`) {
+		t.Fatalf("approval-required desktop job must not execute adapter, got %s", result.ArtifactContent)
+	}
+}
+
+func TestRunDevJobRequiresFileDeleteApprovalBeforeExecution(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
+	host := activeHost(t, gw)
+	root := t.TempDir()
+	target := filepath.Join(root, "old.txt")
+	if err := os.WriteFile(target, []byte("keep until approved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job, err := gw.CreateJob(host.ID, "file", "delete old file", map[string]any{
+		"workspace_root":     root,
+		"write_scope":        []string{"."},
+		"capabilities":       []string{"file.transfer.write", "fs.write.scoped"},
+		"action":             "delete",
+		"path":               "old.txt",
+		"approvals_required": []string{"file.delete"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RunDevJob(host.ID, gw.TrustBundle(), job, now)
+	assertApprovalRequired(t, result, err, "file.delete")
+	if _, statErr := os.Stat(target); statErr != nil {
+		t.Fatalf("approval-required delete must not remove file: %v", statErr)
+	}
+}
+
 func TestRunDevJobRejectsMissingCapabilityWithDenial(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })

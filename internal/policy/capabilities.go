@@ -10,12 +10,27 @@ const (
 	CapabilityShellAdminJIT          Capability = "shell.admin.jit"
 	CapabilityFSRead                 Capability = "fs.read"
 	CapabilityFSWriteScoped          Capability = "fs.write.scoped"
+	CapabilityFileTransferRead       Capability = "file.transfer.read"
+	CapabilityFileTransferWrite      Capability = "file.transfer.write"
 	CapabilityProcessInspect         Capability = "process.inspect"
 	CapabilityElevationRequest       Capability = "elevation.request"
 	CapabilityPackageInstallApproval Capability = "package.install.requiresApproval"
 	CapabilityServiceModifyApproval  Capability = "service.modify.requiresApproval"
 	CapabilityGUIView                Capability = "gui.view"
 	CapabilityGUIControlApproval     Capability = "gui.control.requiresApproval"
+	CapabilityAppLaunch              Capability = "app.launch"
+	CapabilityAppClose               Capability = "app.close"
+	CapabilityURLOpen                Capability = "url.open"
+	CapabilityScreenScreenshot       Capability = "screen.screenshot"
+	CapabilityScreenRecord           Capability = "screen.record"
+	CapabilityWindowInspect          Capability = "window.inspect"
+	CapabilityWindowFocus            Capability = "window.focus"
+	CapabilityWindowMove             Capability = "window.move"
+	CapabilityInputKeyboard          Capability = "input.keyboard"
+	CapabilityInputMouse             Capability = "input.mouse"
+	CapabilityClipboardRead          Capability = "clipboard.read"
+	CapabilityClipboardWrite         Capability = "clipboard.write"
+	CapabilityUnattendedAccess       Capability = "unattended.access"
 	CapabilityNetworkDiscoveryScoped Capability = "network.discovery.scoped"
 	CapabilityNetworkProbeLAN        Capability = "network.probe.lan"
 	CapabilityRelayUse               Capability = "relay.use"
@@ -33,6 +48,8 @@ func TemporaryDefaults() []Capability {
 		CapabilityPowerShellUser,
 		CapabilityFSRead,
 		CapabilityFSWriteScoped,
+		CapabilityFileTransferRead,
+		CapabilityFileTransferWrite,
 		CapabilityProcessInspect,
 		CapabilityElevationRequest,
 	}
@@ -43,7 +60,20 @@ func IsDangerous(cap Capability) bool {
 	case CapabilityShellAdminJIT,
 		CapabilityPackageInstallApproval,
 		CapabilityServiceModifyApproval,
+		CapabilityGUIView,
 		CapabilityGUIControlApproval,
+		CapabilityAppLaunch,
+		CapabilityAppClose,
+		CapabilityURLOpen,
+		CapabilityScreenScreenshot,
+		CapabilityScreenRecord,
+		CapabilityWindowFocus,
+		CapabilityWindowMove,
+		CapabilityInputKeyboard,
+		CapabilityInputMouse,
+		CapabilityClipboardRead,
+		CapabilityClipboardWrite,
+		CapabilityUnattendedAccess,
 		CapabilityDownstreamControl:
 		return true
 	default:

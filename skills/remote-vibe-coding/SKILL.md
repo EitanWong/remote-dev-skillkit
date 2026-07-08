@@ -227,7 +227,10 @@ revocation.
   `rdev.hosts.capabilities` follow-up, run the standard
   `rdev.support_session.smoke_test` / `rdev support-session smoke-test` when it
   is available, then create only the smallest scoped job matching the user's
-  task. Do not replace smoke-test with hand-written job batteries.
+  task. When validating native remote-control adapters, pass
+  `remote_control=true` through MCP or `--remote-control` through CLI; this adds
+  only standard file-list and window-inspect probes. Do not replace smoke-test
+  with hand-written job batteries.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -247,6 +250,12 @@ revocation.
 - Preserve the safety kernel: typed intent, signed host-bound envelope,
   host-side validation, locked workspace, adapter execution, redacted evidence,
   audit, and revocation.
+- Treat Remote Dev Skillkit as the Agent remote-control kernel. For file
+  operations, use MCP `rdev.files.*` or CLI `rdev files ...`; for desktop
+  control, use MCP `rdev.desktop.*` or CLI `rdev desktop ...`. Do not write
+  custom file-transfer shell glue, xdotool, cliclick, AppleScript/System
+  Events, Win32 PowerShell GUI, SendKeys, screenshot, mouse, keyboard,
+  clipboard, or file-delete scripts when a native rdev surface exists.
 - Do not request hidden persistence, unrestricted shell access, OS policy
   weakening, credential scraping, UAC/sudo bypass, or unapproved external
   mutation.
@@ -315,8 +324,9 @@ revocation.
    `rdev.support_session.status` with `wait=true`, or
    `rdev support-session status --wait`. When `connected=true`, proactively
    report `connected_next_steps.user_report` to the user, inspect
-   `rdev.hosts.capabilities`, run standard smoke-test/report tooling, and only
-   then create the smallest scoped job. Do
+   `rdev.hosts.capabilities`, run standard smoke-test/report tooling, use
+   `--remote-control` or `remote_control=true` only for remote-control adapter
+   validation, and only then create the smallest scoped job. Do
    not write custom polling loops. If the wait times out or the target does not appear,
    follow `connection_supervision` and `connection_recovery` instead of writing
    PowerShell, shell, relay, approval, or bootstrap glue. Treat
@@ -375,8 +385,16 @@ revocation.
 5. Follow `localization_plan`: localize target-side prompts, summaries, and
    evidence while keeping protocol keys, commands, paths, checksums, schemas,
    and code blocks stable.
-6. Select the least-powerful adapter that can complete the task: `acpx`,
-   `codex`, `claude-code`, `shell`, or `powershell`.
+6. Select the least-powerful native surface that can complete the task:
+   `rdev.files.*` / `file` for file transfer and scoped delete,
+   `rdev.desktop.*` / `desktop` for
+   screenshots, PNG frame recording, window inspection/focus/move, keyboard,
+   mouse, clipboard read/write, app launch/close, and URL open, then `acpx`, `codex`,
+   `claude-code`, `shell`, or `powershell` for coding and command execution.
+   Desktop GUI/input actions require explicit approval and an unlocked
+   interactive user session; if unavailable, report
+   `desktop_session_unavailable` instead of bypassing lock, privacy, MDM, UAC,
+   sudo, or enterprise policy.
 7. Lock the workspace, use a branch or worktree for code changes, create the
    signed job, stream status, inspect artifacts/audit, and request approval
    before push, merge, deploy, publish, credentials, elevation, GUI, service, or

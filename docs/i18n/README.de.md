@@ -8,6 +8,7 @@ Das Verbindungsmodell ist Remote-Control-artig für Agenten: Der Zielrechner öf
 
 - Ein portables Agent Skillkit für gängige Agent Frameworks.
 - Jobs werden signiert, geprüft und erst dann ausgeführt; keine rohe Shell als Freifahrtschein.
+- Standardflächen `rdev.files.*` / `rdev.desktop.*` decken Dateiübertragung/-löschung, Screenshots/Frames, Fenster, Tastatur/Maus, Zwischenablage, Apps und URLs ab.
 - Skills erkennen OS, shell, service manager, gateway, workspace, adapter und Berechtigungen; wenn etwas unklar ist, fragen sie.
 - Adapter für Codex, Claude Code, ACP/acpx, shell, PowerShell und eigene adapters.
 - Open-Source-Lizenz Apache-2.0.

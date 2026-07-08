@@ -4,6 +4,98 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator approval.
 
+## 0.1.43-dev
+
+Current phase: make remote-control adapter validation Agent-native instead of
+hand-written job probes.
+
+### Added
+
+- Added optional remote-control probes to `rdev support-session smoke-test`
+  through `--remote-control`. The switch adds only low-risk standard adapter
+  checks: file adapter `list` and desktop adapter `window.inspect`.
+- Added MCP parity for `rdev.support_session.smoke_test` via
+  `remote_control=true`, including `remote_control_requested` and
+  `remote_control_probe_count` report fields.
+- Added tool-contract coverage and regenerated `mcp/tools.json` so MCP-capable
+  Agents can discover the remote-control smoke-test switch without guessing.
+
+### Changed
+
+- Updated source skills so Agents keep baseline smoke tests light by default and
+  use the remote-control smoke-test switch only when validating native
+  `rdev.files.*` / `rdev.desktop.*` adapter surfaces.
+
+## 0.1.42-dev
+
+Current phase: close remote-control surface gaps exposed by the first
+AI-native remote-control kernel pass.
+
+### Added
+
+- Added native `file.delete` support across the file adapter, policy
+  explanations, hostrunner capability checks, CLI, MCP tools, generated
+  `mcp/tools.json`, and policy templates. Deletes are scoped to
+  `write_scope`, require `file.delete` approval, and use non-recursive removal.
+- Added standard clipboard read/write job surfaces across CLI and MCP:
+  `rdev desktop clipboard`, `rdev.desktop.clipboard`, `clipboard.read`, and
+  `clipboard.write`.
+- Added Windows native clipboard backend using Win32 Unicode clipboard APIs.
+  Non-Windows desktop backends continue to fail closed with
+  `desktop_session_unavailable`.
+
+### Changed
+
+- Updated README, multilingual quick starts, source skills, and exported skills
+  so Agents prefer `rdev.files.*` / `rdev.desktop.*` for file delete and
+  clipboard work instead of hand-written OS scripts.
+
+## 0.1.41-dev
+
+Current phase: AI-native remote-control kernel, native-first and Windows-first.
+This slice adds first-class file and desktop control surfaces to the existing
+signed job, approval, audit, and evidence pipeline so Agents stop writing
+ad-hoc GUI/file scripts for ordinary remote-control tasks.
+
+### Added
+
+- Added remote-control capability taxonomy for file transfer, app/URL control,
+  screenshots, PNG frame recording, window inspection/focus/move, keyboard,
+  mouse, clipboard, and unattended-access policy gates.
+- Added built-in `file` adapter with workspace-scoped list/read/download and
+  write/upload actions, including canonical path, symlink escape, write-scope,
+  SHA-256, UTF-8/base64, and truncation evidence.
+- Added built-in `desktop` adapter with a Windows native backend for
+  `EnumWindows`, `SetForegroundWindow`, `SetWindowPos`, `WM_CLOSE`,
+  `ShellExecuteW`, `SendInput`, GDI/BitBlt screenshot capture, and PNG frame
+  recording. Non-Windows platforms fail closed with
+  `desktop_session_unavailable` until native backends are added.
+- Added Agent-facing CLI surfaces: `rdev files ...` and `rdev desktop ...`.
+- Added Agent-facing MCP tools: `rdev.files.*` and `rdev.desktop.*`.
+- Added policy-template support for `file.transfer.*`, `screen.*`,
+  `window.*`, `input.*`, `app.*`, `url.open`, clipboard, and
+  `unattended.access` capabilities.
+- Added unit coverage for file adapter path boundaries, desktop fail-closed
+  behavior, hostrunner adapter dispatch, policy templates, CLI/MCP job
+  wrappers, and remote-control policy gates.
+
+### Changed
+
+- Hostrunner now supports `file` and `desktop` adapters as first-class signed
+  job targets with adapter-specific capability checks and result schemas.
+- HTTP job creation now prechecks `file` and `desktop` policies before queuing
+  jobs, matching shell/PowerShell behavior.
+- `safe-remote-support` and `remote-vibe-coding` now describe Remote Dev
+  Skillkit as an AI Agent remote-control kernel and require native
+  `rdev.files.*` / `rdev.desktop.*` surfaces before any hand-written scripts.
+
+### Security
+
+- Desktop GUI/input/screenshot/record/app/URL/clipboard/unattended actions are
+  approval-gated. GUI control requires an unlocked interactive user session and
+  does not bypass lock screens, OS privacy prompts, MDM, UAC, sudo, or
+  enterprise policy.
+
 ## 0.1.40-dev
 
 Current phase: remote-control-style support entry hardening from real Agent

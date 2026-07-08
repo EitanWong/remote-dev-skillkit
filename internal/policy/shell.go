@@ -92,6 +92,10 @@ func ExplainAdapterJob(mode model.HostMode, adapter string, jobPolicy map[string
 	switch strings.ToLower(strings.TrimSpace(adapter)) {
 	case "powershell":
 		return ExplainPowerShellJob(mode, jobPolicy)
+	case "file":
+		return ExplainFileJob(mode, jobPolicy)
+	case "desktop":
+		return ExplainDesktopJob(mode, jobPolicy)
 	default:
 		return ExplainShellJob(mode, jobPolicy)
 	}
@@ -168,6 +172,154 @@ func ExplainPowerShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJo
 		explanation.Reasons = append(explanation.Reasons, "host will still re-validate the signed job envelope and canonical paths before execution")
 	}
 	return finalizeShellExplanation(explanation)
+}
+
+func ExplainFileJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExplanation {
+	explanation := ShellJobExplanation{
+		Mode:    string(mode),
+		Adapter: "file",
+	}
+	if !mode.Valid() {
+		explanation.Denials = append(explanation.Denials, "unknown host mode")
+		return finalizeShellExplanation(explanation)
+	}
+	if strings.TrimSpace(stringValue(jobPolicy, "workspace_root", stringValue(jobPolicy, "cwd", ""))) == "" {
+		explanation.Denials = append(explanation.Denials, "workspace root is required")
+	} else {
+		explanation.Reasons = append(explanation.Reasons, "workspace root is declared")
+	}
+	action := normalizeRemoteAction(stringValue(jobPolicy, "action", ""))
+	if action == "" {
+		explanation.Denials = append(explanation.Denials, "file action is required")
+	}
+	capabilities := stringSliceValue(jobPolicy, "capabilities")
+	switch action {
+	case "list", "read", "download":
+		requireCapability(&explanation, capabilities, string(CapabilityFileTransferRead))
+		if !containsString(capabilities, string(CapabilityFSRead)) {
+			explanation.Warnings = append(explanation.Warnings, "fs.read is recommended with file.transfer.read")
+		}
+	case "write", "upload", "delete":
+		requireCapability(&explanation, capabilities, string(CapabilityFileTransferWrite))
+		requireCapability(&explanation, capabilities, string(CapabilityFSWriteScoped))
+		if len(stringSliceValue(jobPolicy, "write_scope")) == 0 {
+			explanation.Denials = append(explanation.Denials, "write_scope is required for file write/upload/delete")
+		}
+		if action == "delete" {
+			explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, "file.delete")
+			explanation.Warnings = append(explanation.Warnings, "file delete requires explicit approval")
+		}
+	default:
+		if action != "" {
+			explanation.Denials = append(explanation.Denials, "unsupported file action: "+action)
+		}
+	}
+	for _, scope := range stringSliceValue(jobPolicy, "write_scope") {
+		if writeScopeEscapes(scope) {
+			explanation.Denials = append(explanation.Denials, "write scope escapes workspace root: "+scope)
+		}
+	}
+	appendPolicyApprovals(&explanation, jobPolicy)
+	if len(explanation.Denials) == 0 {
+		explanation.Reasons = append(explanation.Reasons, "file adapter will re-check canonical workspace and write-scope boundaries on the host")
+	}
+	return finalizeShellExplanation(explanation)
+}
+
+func ExplainDesktopJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExplanation {
+	explanation := ShellJobExplanation{
+		Mode:    string(mode),
+		Adapter: "desktop",
+	}
+	if !mode.Valid() {
+		explanation.Denials = append(explanation.Denials, "unknown host mode")
+		return finalizeShellExplanation(explanation)
+	}
+	if strings.TrimSpace(stringValue(jobPolicy, "workspace_root", stringValue(jobPolicy, "cwd", ""))) == "" {
+		explanation.Denials = append(explanation.Denials, "workspace root is required")
+	} else {
+		explanation.Reasons = append(explanation.Reasons, "workspace root is declared")
+	}
+	action := normalizeRemoteAction(stringValue(jobPolicy, "action", ""))
+	if action == "" {
+		explanation.Denials = append(explanation.Denials, "desktop action is required")
+	}
+	capabilities := stringSliceValue(jobPolicy, "capabilities")
+	capability, approval := desktopCapabilityAndApproval(action)
+	if capability == "" {
+		if action != "" {
+			explanation.Denials = append(explanation.Denials, "unsupported desktop action: "+action)
+		}
+	} else {
+		requireCapability(&explanation, capabilities, capability)
+		if approval != "" {
+			explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, approval)
+			explanation.Warnings = append(explanation.Warnings, "desktop action requires explicit approval: "+approval)
+		}
+	}
+	appendPolicyApprovals(&explanation, jobPolicy)
+	if len(explanation.Denials) == 0 {
+		explanation.Reasons = append(explanation.Reasons, "desktop adapter requires an unlocked interactive user session and will fail closed if unavailable")
+	}
+	return finalizeShellExplanation(explanation)
+}
+
+func requireCapability(explanation *ShellJobExplanation, capabilities []string, capability string) {
+	if !containsString(capabilities, capability) {
+		explanation.Denials = append(explanation.Denials, "missing "+capability+" capability")
+		return
+	}
+	explanation.Reasons = append(explanation.Reasons, capability+" capability is present")
+}
+
+func appendPolicyApprovals(explanation *ShellJobExplanation, jobPolicy map[string]any) {
+	network := stringValue(jobPolicy, "network", "default-deny")
+	if network != "default-deny" {
+		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, "network."+network)
+		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires approval")
+	}
+	for _, approval := range stringSliceValue(jobPolicy, "approvals_required") {
+		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, approval)
+	}
+}
+
+func desktopCapabilityAndApproval(action string) (string, string) {
+	switch action {
+	case "windows", "window.inspect":
+		return string(CapabilityWindowInspect), ""
+	case "screenshot", "screen.screenshot":
+		return string(CapabilityScreenScreenshot), "screen.screenshot"
+	case "record", "screen.record":
+		return string(CapabilityScreenRecord), "screen.record"
+	case "focus", "window.focus":
+		return string(CapabilityWindowFocus), "window.focus"
+	case "move", "window.move":
+		return string(CapabilityWindowMove), "window.move"
+	case "keyboard", "input.keyboard":
+		return string(CapabilityInputKeyboard), "input.keyboard"
+	case "mouse", "input.mouse":
+		return string(CapabilityInputMouse), "input.mouse"
+	case "app.launch":
+		return string(CapabilityAppLaunch), "app.launch"
+	case "app.close":
+		return string(CapabilityAppClose), "app.close"
+	case "url.open":
+		return string(CapabilityURLOpen), "url.open"
+	case "clipboard.read":
+		return string(CapabilityClipboardRead), "clipboard.read"
+	case "clipboard.write":
+		return string(CapabilityClipboardWrite), "clipboard.write"
+	case "unattended.access":
+		return string(CapabilityUnattendedAccess), "unattended.access"
+	default:
+		return "", ""
+	}
+}
+
+func normalizeRemoteAction(action string) string {
+	action = strings.ToLower(strings.TrimSpace(action))
+	action = strings.ReplaceAll(action, "_", ".")
+	return action
 }
 
 func powershellCommandAllowlisted(command string, allowCommands []string) bool {

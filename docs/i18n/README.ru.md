@@ -8,6 +8,7 @@ Remote Dev Skillkit — это слой безопасности для AI Agent
 
 - Портативный Agent Skillkit для популярных Agent Frameworks.
 - Jobs сначала подписываются и проверяются, а только потом выполняются; агент не получает сырой shell без ограничений.
+- Стандартные поверхности `rdev.files.*` / `rdev.desktop.*` покрывают передачу/удаление файлов, скриншоты/frames, окна, клавиатуру/мышь, буфер обмена, приложения и URLs.
 - Skills сначала определяют OS, shell, service manager, gateway, workspace, adapter и permissions; если что-то неясно, они спрашивают.
 - Adapters для Codex, Claude Code, ACP/acpx, shell, PowerShell и custom adapters.
 - Открытая лицензия Apache-2.0.

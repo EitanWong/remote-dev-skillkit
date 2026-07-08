@@ -8,6 +8,7 @@ O modelo de conexão é de controle remoto para agentes: a máquina alvo abre um
 
 - Um Agent Skillkit portátil para instalar em Agent Frameworks populares.
 - Jobs são assinados, verificados e só então executados; nada de entregar uma shell crua ao agente.
+- As superfícies padrão `rdev.files.*` / `rdev.desktop.*` cobrem transferência/exclusão de arquivos, capturas/frames, janelas, teclado/mouse, área de transferência, apps e URLs.
 - As skills detectam OS, shell, service manager, gateway, workspace, adapter e permissões; se algo não estiver claro, elas perguntam.
 - Adapters para Codex, Claude Code, ACP/acpx, shell, PowerShell e adapters personalizados.
 - Licença open source Apache-2.0.

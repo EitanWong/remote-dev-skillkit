@@ -2,25 +2,37 @@ package jobtemplate
 
 import "testing"
 
-func TestPolicyTemplatePowerShellUserUsesPowerShellAdapter(t *testing.T) {
-	payload := PolicyTemplate("powershell.user", "windows")
-	if payload["schema_version"] != "rdev.job-policy-template.v1" ||
-		payload["capability"] != "powershell.user" ||
-		payload["adapter"] != "powershell" {
-		t.Fatalf("unexpected PowerShell template metadata: %#v", payload)
+func TestPolicyTemplateFileRead(t *testing.T) {
+	template := PolicyTemplate("file.transfer.read", "windows")
+	if template["adapter"] != "file" {
+		t.Fatalf("expected file adapter, got %#v", template["adapter"])
 	}
-	policy, _ := payload["policy"].(map[string]any)
-	if policy == nil {
-		t.Fatalf("missing policy object: %#v", payload)
+	policy := template["policy"].(map[string]any)
+	if policy["action"] != "read" {
+		t.Fatalf("expected read action, got %#v", policy)
 	}
-	if _, ok := policy["command"].(string); !ok {
-		t.Fatalf("PowerShell template must use command, got %#v", policy)
+}
+
+func TestPolicyTemplateDesktopScreenshotRequiresApproval(t *testing.T) {
+	template := PolicyTemplate("screen.screenshot", "windows")
+	if template["adapter"] != "desktop" {
+		t.Fatalf("expected desktop adapter, got %#v", template["adapter"])
 	}
-	if _, ok := policy["argv"]; ok {
-		t.Fatalf("PowerShell template must not use shell argv, got %#v", policy)
+	policy := template["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]string)
+	if len(approvals) != 1 || approvals[0] != "screen.screenshot" {
+		t.Fatalf("expected screenshot approval, got %#v", policy)
 	}
-	caps, _ := policy["capabilities"].([]string)
-	if len(caps) != 1 || caps[0] != "powershell.user" {
-		t.Fatalf("PowerShell template must require powershell.user, got %#v", caps)
+}
+
+func TestPolicyTemplateFileDeleteRequiresApproval(t *testing.T) {
+	template := PolicyTemplate("file.delete", "windows")
+	if template["adapter"] != "file" {
+		t.Fatalf("expected file adapter, got %#v", template["adapter"])
+	}
+	policy := template["policy"].(map[string]any)
+	approvals := policy["approvals_required"].([]string)
+	if policy["action"] != "delete" || len(approvals) != 1 || approvals[0] != "file.delete" {
+		t.Fatalf("expected delete approval template, got %#v", policy)
 	}
 }

@@ -416,7 +416,7 @@
     },
     {
       "name": "rdev.support_session.smoke_test",
-      "description": "Run the standard Agent-native support-session smoke test against a connected host instead of hand-writing OS-specific job probes. The tool selects the single active host from ticket_code when possible, creates fixed scoped shell jobs for identity, fs.read, fs.write.scoped, and process.inspect, waits for terminal job states, summarizes artifacts, includes remote_control_entry and connection continuity, and tells Agents to keep the host connected unless the operator explicitly asks to disconnect.",
+      "description": "Run the standard Agent-native support-session smoke test against a connected host instead of hand-writing OS-specific job probes. The tool selects the single active host from ticket_code when possible, creates fixed scoped shell jobs for identity, fs.read, fs.write.scoped, and process.inspect, waits for terminal job states, summarizes artifacts, includes remote_control_entry and connection continuity, and tells Agents to keep the host connected unless the operator explicitly asks to disconnect. Pass remote_control=true only when validating the native remote-control adapter surface; it adds low-risk standard rdev.files/rdev.desktop.windows-style probes for file list and window.inspect, not screenshot, input, clipboard, app launch, or destructive file actions.",
       "safety": "Creates small scoped diagnostic jobs on an already connected host. Does not elevate, install software, change services, mutate firewall/DNS/routes, or disconnect the host.",
       "inputSchema": {
         "additionalProperties": false,
@@ -433,6 +433,9 @@
           "locale": {
             "minLength": 1,
             "type": "string"
+          },
+          "remote_control": {
+            "type": "boolean"
           },
           "ticket_code": {
             "minLength": 1,
@@ -944,6 +947,608 @@
       }
     },
     {
+      "name": "rdev.files.list",
+      "description": "Create a standard file adapter job to list files inside the approved workspace.",
+      "safety": "Scoped file metadata read; no custom shell scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_bytes": {
+            "maximum": 10485760,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.files.read",
+      "description": "Create a standard file adapter job to read or download a workspace-scoped file.",
+      "safety": "Scoped file read; no custom shell scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_bytes": {
+            "maximum": 10485760,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.files.write",
+      "description": "Create a standard file adapter job to write workspace-scoped content.",
+      "safety": "Scoped file write inside write_scope; no custom shell scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "encoding": {
+            "enum": [
+              "utf-8",
+              "text",
+              "base64"
+            ],
+            "type": "string"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "write_scope": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "host_id",
+          "path",
+          "content"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.files.download",
+      "description": "Create a standard file adapter job to download a workspace-scoped file as base64 evidence.",
+      "safety": "Scoped file read; no custom shell scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_bytes": {
+            "maximum": 10485760,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.files.upload",
+      "description": "Create a standard file adapter job to upload workspace-scoped content.",
+      "safety": "Scoped file write inside write_scope; no custom shell scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "encoding": {
+            "enum": [
+              "utf-8",
+              "text",
+              "base64"
+            ],
+            "type": "string"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "write_scope": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "host_id",
+          "path",
+          "content"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.files.delete",
+      "description": "Create a standard file adapter job to delete one workspace-scoped file or empty directory.",
+      "safety": "Scoped non-recursive delete inside write_scope; requires file.delete approval; no custom shell scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "write_scope": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "host_id",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.screenshot",
+      "description": "Create a standard desktop adapter job to capture a PNG screenshot artifact.",
+      "safety": "Requires explicit screen.screenshot approval; no custom GUI scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.record",
+      "description": "Create a standard desktop adapter job to capture a PNG frame bundle.",
+      "safety": "Requires explicit screen.record approval; no video encoder dependency.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "frames": {
+            "maximum": 30,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "interval_millis": {
+            "maximum": 10000,
+            "minimum": 50,
+            "type": "integer"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.windows",
+      "description": "Create a standard desktop adapter job to enumerate visible windows.",
+      "safety": "Window metadata read; no GUI control.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.input",
+      "description": "Create a standard desktop adapter job for approved keyboard or mouse input.",
+      "safety": "Requires input.keyboard or input.mouse approval; no custom input scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "button": {
+            "enum": [
+              "move",
+              "left",
+              "right",
+              "click"
+            ],
+            "type": "string"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "x": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.app",
+      "description": "Create a standard desktop adapter job to launch an app or close a window gracefully.",
+      "safety": "Requires app.launch/app.close approval; force-kill is not part of this tool.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "launch",
+              "close"
+            ],
+            "type": "string"
+          },
+          "app": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.url",
+      "description": "Create a standard desktop adapter job to open an approved URL.",
+      "safety": "Requires url.open approval; no browser automation script.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.clipboard",
+      "description": "Create a standard desktop adapter job to read or write clipboard text.",
+      "safety": "Requires clipboard.read or clipboard.write approval; no custom clipboard scripts.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "read",
+              "write"
+            ],
+            "type": "string"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.focus",
+      "description": "Create a standard desktop adapter job to focus a visible window.",
+      "safety": "Requires window.focus approval.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.desktop.move",
+      "description": "Create a standard desktop adapter job to move or resize a visible window.",
+      "safety": "Requires window.move approval.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "height": {
+            "maximum": 20000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "width": {
+            "maximum": 20000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "x": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "y": {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.jobs.create",
       "description": "Create a signed, policy-bound remote job for an approved host.",
       "safety": "May execute on host after policy checks.",
@@ -954,6 +1559,8 @@
             "enum": [
               "shell",
               "powershell",
+              "file",
+              "desktop",
               "acpx",
               "codex",
               "claude-code"
@@ -998,8 +1605,24 @@
               "shell.user",
               "fs.read",
               "fs.write.scoped",
+              "file.transfer.read",
+              "file.transfer.write",
+              "file.delete",
               "process.inspect",
-              "tool.availability"
+              "tool.availability",
+              "window.inspect",
+              "screen.screenshot",
+              "screen.record",
+              "window.focus",
+              "window.move",
+              "input.keyboard",
+              "input.mouse",
+              "app.launch",
+              "app.close",
+              "url.open",
+              "clipboard.read",
+              "clipboard.write",
+              "unattended.access"
             ],
             "type": "string"
           },

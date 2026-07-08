@@ -18,8 +18,13 @@ func PolicyTemplate(capability, targetOS string) map[string]any {
 	allow := []string{"sh"}
 	caps := []string{"shell.user"}
 	writeScope := []string{}
+	approvals := []string{}
 	intent := "basic remote identity and shell probe"
 	adapter := "shell"
+	action := ""
+	path := ""
+	content := ""
+	encoding := ""
 
 	switch capability {
 	case "powershell.user", "powershell":
@@ -67,6 +72,122 @@ func PolicyTemplate(capability, targetOS string) map[string]any {
 		} else {
 			cmd = []string{"sh", "-c", "command -v sh; command -v git || true; command -v curl || true; command -v go || true"}
 		}
+	case "file.transfer.read", "file.read", "file.list", "file.download":
+		capability = "file.transfer.read"
+		adapter = "file"
+		caps = []string{"file.transfer.read", "fs.read"}
+		intent = "scoped file read through native rdev file adapter"
+		action = "read"
+		path = "."
+	case "file.transfer.write", "file.write", "file.upload":
+		capability = "file.transfer.write"
+		adapter = "file"
+		caps = []string{"file.transfer.write", "fs.write.scoped"}
+		writeScope = []string{"."}
+		intent = "scoped file write through native rdev file adapter"
+		action = "write"
+		path = "rdev-file-adapter-test.txt"
+		content = "rdev file adapter test"
+		encoding = "utf-8"
+	case "file.delete", "file.remove":
+		capability = "file.delete"
+		adapter = "file"
+		caps = []string{"file.transfer.write", "fs.write.scoped"}
+		writeScope = []string{"."}
+		approvals = []string{"file.delete"}
+		intent = "delete a scoped file through native rdev file adapter"
+		action = "delete"
+		path = "rdev-file-adapter-delete-target.txt"
+	case "window.inspect", "desktop.windows", "desktop.window.inspect":
+		capability = "window.inspect"
+		adapter = "desktop"
+		caps = []string{"window.inspect"}
+		intent = "inspect visible desktop windows through native rdev desktop adapter"
+		action = "window.inspect"
+	case "screen.screenshot", "desktop.screenshot":
+		capability = "screen.screenshot"
+		adapter = "desktop"
+		caps = []string{"screen.screenshot"}
+		approvals = []string{"screen.screenshot"}
+		intent = "capture a desktop screenshot through native rdev desktop adapter"
+		action = "screen.screenshot"
+	case "screen.record", "desktop.record":
+		capability = "screen.record"
+		adapter = "desktop"
+		caps = []string{"screen.record"}
+		approvals = []string{"screen.record"}
+		intent = "capture a short desktop PNG frame bundle through native rdev desktop adapter"
+		action = "screen.record"
+	case "window.focus", "desktop.focus":
+		capability = "window.focus"
+		adapter = "desktop"
+		caps = []string{"window.focus"}
+		approvals = []string{"window.focus"}
+		intent = "focus a visible desktop window through native rdev desktop adapter"
+		action = "window.focus"
+	case "window.move", "desktop.move":
+		capability = "window.move"
+		adapter = "desktop"
+		caps = []string{"window.move"}
+		approvals = []string{"window.move"}
+		intent = "move a visible desktop window through native rdev desktop adapter"
+		action = "window.move"
+	case "input.keyboard", "desktop.keyboard":
+		capability = "input.keyboard"
+		adapter = "desktop"
+		caps = []string{"input.keyboard"}
+		approvals = []string{"input.keyboard"}
+		intent = "send approved keyboard input through native rdev desktop adapter"
+		action = "input.keyboard"
+	case "input.mouse", "desktop.mouse":
+		capability = "input.mouse"
+		adapter = "desktop"
+		caps = []string{"input.mouse"}
+		approvals = []string{"input.mouse"}
+		intent = "send approved mouse input through native rdev desktop adapter"
+		action = "input.mouse"
+	case "app.launch", "desktop.app.launch":
+		capability = "app.launch"
+		adapter = "desktop"
+		caps = []string{"app.launch"}
+		approvals = []string{"app.launch"}
+		intent = "launch an approved desktop app through native rdev desktop adapter"
+		action = "app.launch"
+	case "app.close", "desktop.app.close":
+		capability = "app.close"
+		adapter = "desktop"
+		caps = []string{"app.close"}
+		approvals = []string{"app.close"}
+		intent = "gracefully close an approved desktop window through native rdev desktop adapter"
+		action = "app.close"
+	case "url.open", "desktop.url.open":
+		capability = "url.open"
+		adapter = "desktop"
+		caps = []string{"url.open"}
+		approvals = []string{"url.open"}
+		intent = "open an approved URL through native rdev desktop adapter"
+		action = "url.open"
+	case "clipboard.read":
+		capability = "clipboard.read"
+		adapter = "desktop"
+		caps = []string{"clipboard.read"}
+		approvals = []string{"clipboard.read"}
+		intent = "read clipboard through native rdev desktop adapter"
+		action = "clipboard.read"
+	case "clipboard.write":
+		capability = "clipboard.write"
+		adapter = "desktop"
+		caps = []string{"clipboard.write"}
+		approvals = []string{"clipboard.write"}
+		intent = "write clipboard through native rdev desktop adapter"
+		action = "clipboard.write"
+	case "unattended.access":
+		capability = "unattended.access"
+		adapter = "desktop"
+		caps = []string{"unattended.access"}
+		approvals = []string{"unattended.access"}
+		intent = "request managed-host unattended access capability"
+		action = "unattended.access"
 	default:
 		capability = "shell.user"
 		if windows {
@@ -85,6 +206,50 @@ func PolicyTemplate(capability, targetOS string) map[string]any {
 	}
 	if adapter == "powershell" {
 		policy["command"] = "Write-Output $env:COMPUTERNAME; whoami; Get-Location"
+	} else if adapter == "file" || adapter == "desktop" {
+		policy["action"] = action
+		delete(policy, "allow_commands")
+		if path != "" {
+			policy["path"] = path
+		}
+		if content != "" {
+			policy["content"] = content
+		}
+		if encoding != "" {
+			policy["encoding"] = encoding
+		}
+		if len(approvals) > 0 {
+			policy["approvals_required"] = approvals
+		}
+		if adapter == "desktop" {
+			switch action {
+			case "input.keyboard":
+				policy["text"] = "rdev"
+			case "input.mouse":
+				policy["x"] = 0
+				policy["y"] = 0
+				policy["button"] = "move"
+			case "app.launch":
+				if windows {
+					policy["app"] = "notepad.exe"
+				} else {
+					policy["app"] = "<APP_PATH_OR_NAME>"
+				}
+			case "app.close", "window.focus":
+				policy["title"] = "<WINDOW_TITLE_CONTAINS>"
+			case "window.move":
+				policy["title"] = "<WINDOW_TITLE_CONTAINS>"
+				policy["x"] = 100
+				policy["y"] = 100
+				policy["width"] = 900
+				policy["height"] = 700
+			case "url.open":
+				policy["url"] = "https://example.com"
+			case "screen.record":
+				policy["frames"] = 3
+				policy["interval_millis"] = 500
+			}
+		}
 	} else {
 		policy["argv"] = cmd
 	}

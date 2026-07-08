@@ -212,6 +212,23 @@ not install service persistence. For an operator-owned recurring machine, ask
 one short ownership/persistence approval question, require a stable gateway,
 then use the reviewed managed-service upgrade path.
 
+### Rule 15 — Use native remote-control tools before scripts
+
+Remote Dev Skillkit is an Agent remote-control kernel. Before shell or
+PowerShell workarounds, use `rdev.files.*` / `rdev files ...`,
+`rdev.desktop.*` / `rdev desktop ...`, and `rdev.jobs.policy_template` /
+`rdev job policy-template --capability <file-or-desktop-capability>`.
+
+Do not write `xdotool`, `cliclick`, AppleScript/System Events, Win32
+PowerShell GUI scripts, raw `SendKeys`, mouse movement scripts, screenshot
+scripts, file-transfer shell glue, or custom Base64 file upload/download code
+when a native `rdev.files.*` or `rdev.desktop.*` surface exists.
+
+GUI and input jobs require an unlocked interactive user session. If the target
+is locked, logged out, asleep, or blocked by OS/enterprise policy, report
+`desktop_session_unavailable` and use the standard recovery path. Do not bypass
+lock screens, privacy prompts, MDM, UAC, sudo, or enterprise controls.
+
 ---
 
 ## Workflow (5 steps, no branching for the user)
@@ -303,11 +320,34 @@ remote-control entry plus connection-continuity reporting. Do not write ad-hoc
 `smoke-test` is unavailable in an older install, use
 `rdev support-session audit-capabilities` as the compatibility fallback.
 
-For subsequent scoped work, use `rdev job create`, `rdev job wait`, `rdev job
-get`, `rdev job artifacts`, `rdev job list`, and `rdev job cancel` before
-considering MCP or raw HTTP. If you need a safe policy JSON, run
+When validating native remote-control surfaces, run the same smoke test with the
+low-risk probe switch:
+
+```
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --host-id <RECOMMENDED_JOB_HOST_ID> --remote-control
+```
+
+For MCP, call `rdev.support_session.smoke_test` with `"remote_control": true`
+and the same explicit `gateway_url`. It adds only file-list and window-inspect
+adapter probes, never screenshot, recording, input, clipboard, app launch, URL
+open, or delete actions.
+
+For subsequent scoped work:
+
+- Use `rdev files ...` or MCP `rdev.files.*` for file list/read/write/download/upload/delete.
+- Use `rdev desktop ...` or MCP `rdev.desktop.*` for screenshots, PNG frame
+  recording, window inspection/focus/move, keyboard/mouse input, clipboard
+  read/write, app launch or close, and URL open.
+- Use `rdev job create`, `rdev job wait`, `rdev job get`,
+  `rdev job artifacts`, `rdev job list`, and `rdev job cancel` for lower-level
+  adapter jobs.
+
+If you need a safe policy JSON, run
 `rdev job policy-template --capability <capability> --target-os <os>` and pass
-the returned `policy` object to `rdev job create`.
+the returned `policy` object to `rdev job create`. Prefer capabilities such as
+`file.transfer.read`, `file.transfer.write`, `window.inspect`,
+`screen.screenshot`, `screen.record`, `input.keyboard`, `input.mouse`,
+`app.launch`, `app.close`, and `url.open` instead of shell scripts.
 
 For the final summary, prefer:
 
@@ -335,47 +375,12 @@ If the target does not appear within 2 minutes:
 
 ## Audit Report Template
 
-After the session, produce a report with these sections:
-
-```
-# Remote Dev Skillkit Capability Audit — <date> — <hostname>
-
-## Session
-- Mode: attended-temporary
-- Gateway: <cloudflare URL or LAN if same network>
-- Ticket: <code>
-- Host: <hostname> / <OS> / <arch>
-- Connection time: <seconds>
-
-## Capabilities Tested
-
-| Capability         | Status  | Evidence |
-|--------------------|---------|----------|
-| shell.user         | ✅ PASS | <output> |
-| fs.read            | ✅ PASS | dir listing |
-| fs.write.scoped    | ✅ PASS | test file created+deleted |
-| process.inspect    | ✅ PASS | process list retrieved |
-| elevation.request  | ⚠️ N/A  | not tested |
-
-## What the Agent Can Do
-<list verified actions>
-
-## What the Agent Cannot Do (policy/capability limits)
-<list denied or unavailable actions>
-
-## Gaps / Missing
-<list gaps found>
-
-## Cleanup
-- Connection kept alive: yes/no
-- Ticket revoked only by explicit operator request: yes/no
-- No-persistence checks: pass/fail
-- Files cleaned: yes/no
-
-## Risk Assessment
-- Residual risk: low/medium/high
-- Recommendation: <next steps>
-```
+After the session, produce a compact capability audit with: session mode,
+gateway continuity, Support Device Entry, host OS/arch, connection time,
+capabilities tested, evidence/artifact IDs, what the Agent can and cannot do,
+gaps, cleanup state, residual risk, and whether the connection remains alive.
+Include file-transfer evidence when used, and screenshot/record/window/input
+audit plus approval token IDs when desktop control was used or attempted.
 
 ---
 
@@ -385,10 +390,16 @@ After the session, produce a report with these sections:
 - `powershell.user`
 - `fs.read`
 - `fs.write.scoped`
+- `file.transfer.read`
+- `file.transfer.write`
 - `process.inspect`
 - `elevation.request`
 
-Never add `service.manage`, `credential.change`, or `gui.control` without explicit approval.
+Never add `service.manage`, `credential.change`, `gui.control`,
+`screen.screenshot`, `screen.record`, `window.focus`, `window.move`,
+`input.keyboard`, `input.mouse`, `app.launch`, `app.close`, `url.open`,
+`clipboard.read`, `clipboard.write`, or `unattended.access` without explicit
+approval.
 
 ---
 
@@ -397,6 +408,9 @@ Never add `service.manage`, `credential.change`, or `gui.control` without explic
 - Sending LAN-only IPs to users who might be remote
 - Asking the user to choose a network path
 - Writing custom PowerShell/bash bootstrap or polling scripts
+- Writing custom file transfer, screenshot, xdotool, cliclick, AppleScript,
+  Win32 PowerShell GUI, SendKeys, mouse, or keyboard scripts instead of native
+  `rdev.files.*` / `rdev.desktop.*` surfaces
 - Manual ticket/gateway/checksum assembly
 - Hidden installation or persistence
 - ExecutionPolicy Bypass
@@ -464,7 +478,8 @@ Before invoking any `rdev` subcommand, verify it exists by checking `rdev --help
 Prefer first-class CLI commands for gateway interactions when they exist:
 `rdev support-session smoke-test`, `rdev support-session audit-capabilities`,
 `rdev job create`, `rdev job list`, `rdev job get`, `rdev job wait`,
-`rdev job artifacts`, `rdev job policy-template`,
+`rdev job artifacts`, `rdev job policy-template`, `rdev files ...`,
+`rdev desktop ...`,
 `rdev support-session report`, and `rdev job cancel`. Use MCP tools when the
 current task needs MCP-only surfaces such as host capability inspection, and use
 raw HTTP only as a last-resort diagnostic path.
