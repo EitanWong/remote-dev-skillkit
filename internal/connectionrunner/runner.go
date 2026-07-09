@@ -81,7 +81,7 @@ type ConnectionPath struct {
 	GatewayOverride                string   `json:"gateway_override,omitempty"`
 	TransportOverride              string   `json:"transport_override,omitempty"`
 	ExecuteWhen                    []string `json:"execute_when"`
-	ApprovalRequired               []string `json:"approval_required,omitempty"`
+	AuthorizationRequired          []string `json:"authorization_required,omitempty"`
 	Evidence                       []string `json:"evidence"`
 }
 
@@ -90,13 +90,13 @@ type RuntimeProbe struct {
 	Intent     string   `json:"intent"`
 	Commands   []string `json:"commands"`
 	NoSecrets  bool     `json:"no_secrets"`
-	CanExecute bool     `json:"can_execute_without_approval"`
+	CanExecute bool     `json:"can_execute_without_authorization"`
 }
 
 type HelperPolicy struct {
 	SchemaVersion            string   `json:"schema_version"`
 	AutoExecuteAllowed       []string `json:"auto_execute_allowed"`
-	ApprovalRequired         []string `json:"approval_required"`
+	AuthorizationRequired    []string `json:"authorization_required"`
 	PreferredOpenSourceFirst []string `json:"preferred_open_source_first"`
 	Disallowed               []string `json:"disallowed"`
 }
@@ -138,13 +138,13 @@ type RunnerPlan struct {
 }
 
 type ConnectivityTool struct {
-	ID               string   `json:"id"`
-	ToolNames        []string `json:"tool_names"`
-	Status           string   `json:"status"`
-	BestFor          string   `json:"best_for"`
-	AutoUseWhen      []string `json:"auto_use_when"`
-	ApprovalRequired []string `json:"approval_required"`
-	Notes            []string `json:"notes"`
+	ID                    string   `json:"id"`
+	ToolNames             []string `json:"tool_names"`
+	Status                string   `json:"status"`
+	BestFor               string   `json:"best_for"`
+	AutoUseWhen           []string `json:"auto_use_when"`
+	AuthorizationRequired []string `json:"authorization_required"`
+	Notes                 []string `json:"notes"`
 }
 
 type Check struct {
@@ -188,7 +188,7 @@ type RunResult struct {
 	HelperTranscript            []string      `json:"helper_transcript,omitempty"`
 	ProbeResults                []ProbeResult `json:"probe_results"`
 	ToolResults                 []ToolResult  `json:"tool_results"`
-	ApprovalRequired            []string      `json:"approval_required,omitempty"`
+	AuthorizationRequired       []string      `json:"authorization_required,omitempty"`
 	ManualActionRequired        []string      `json:"manual_action_required,omitempty"`
 }
 
@@ -271,7 +271,7 @@ func Build(opts Options) (Package, error) {
 		HumanConsent: []string{
 			"This visible Connection Entry starts an rdev host session for the support or development request.",
 			"Closing the launcher stops an attended temporary session.",
-			"Managed service installation is separate and requires explicit operator approval.",
+			"Managed service installation is separate and requires explicit operator authorization.",
 		},
 		AgentOnlyParameters: []string{
 			"manifest_url",
@@ -310,7 +310,7 @@ func Build(opts Options) (Package, error) {
 			"the runner verifies and consumes the signed join manifest before host registration",
 			"the runner probes direct gateway reachability before trying helper connectivity",
 			"the runner invokes rdev host serve with --transport auto unless a selected path requires a narrower fallback",
-			"connectivity helpers provide routing only; rdev ticket, host approval, signed jobs, and policy authorize work",
+			"connectivity helpers provide routing only; rdev ticket, host activation, signed session tasks, and policy authorize work",
 		},
 		SelectionOrder: []string{
 			"native-direct-gateway",
@@ -441,7 +441,7 @@ func Run(opts RunOptions) (RunResult, error) {
 	result.SelectedPath = selected.ID
 	result.SelectedTransport = firstNonEmpty(selected.TransportOverride, manifest.TransportPreference, "auto")
 	result.SelectedGatewayURL = firstNonEmpty(selected.GatewayOverride, manifest.GatewayURL)
-	result.ApprovalRequired = append(result.ApprovalRequired, selected.ApprovalRequired...)
+	result.AuthorizationRequired = append(result.AuthorizationRequired, selected.AuthorizationRequired...)
 	result.HostServeArgs = hostServeArgs(manifest, result.SelectedGatewayURL, result.SelectedTransport, opts.ExtraHostArgs)
 	appendHelperTranscript(&result, "selected_path "+selected.ID)
 	appendHelperTranscript(&result, "selected_transport "+result.SelectedTransport)
@@ -463,9 +463,9 @@ func Run(opts RunOptions) (RunResult, error) {
 	if helperStartConfigured {
 		appendHelperTranscript(&result, "helper_start_configured tool="+helperTool)
 	}
-	if len(result.ApprovalRequired) > 0 && selected.Status != "auto-executable-when-already-configured" {
-		result.ManualActionRequired = append(result.ManualActionRequired, result.ApprovalRequired...)
-		appendHelperTranscript(&result, "manual_action_required approval_required")
+	if len(result.AuthorizationRequired) > 0 && selected.Status != "auto-executable-when-already-configured" {
+		result.ManualActionRequired = append(result.ManualActionRequired, result.AuthorizationRequired...)
+		appendHelperTranscript(&result, "manual_action_required authorization_required")
 		return result, nil
 	}
 	if opts.DryRun {
@@ -795,7 +795,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			HelperStartArgvEnvVars:         []string{"RDEV_SSH_TUNNEL_START_ARGV_JSON"},
 			UsesHostServe:                  true,
 			ExecuteWhen:                    []string{"SSH route and local forward are already configured by operator policy"},
-			ApprovalRequired:               []string{"ask before creating new SSH keys, editing SSH config, or selecting among ambiguous SSH identities"},
+			AuthorizationRequired:          []string{"ask before creating new SSH keys, editing SSH config, or selecting among ambiguous SSH identities"},
 			Evidence:                       []string{"ssh tool detection", "local forward endpoint", "host serve through forwarded gateway"},
 		},
 		{
@@ -811,7 +811,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			HelperStartArgvEnvVars:         []string{"RDEV_RELAY_START_ARGV_JSON"},
 			UsesHostServe:                  true,
 			ExecuteWhen:                    []string{"relay config exists and credential choice is unambiguous"},
-			ApprovalRequired:               []string{"ask before downloading relay binaries, editing relay config, creating relay accounts, opening firewall ports, or using paid relay services"},
+			AuthorizationRequired:          []string{"ask before downloading relay binaries, editing relay config, creating relay accounts, opening firewall ports, or using paid relay services"},
 			Evidence:                       []string{"relay tool detection", "redacted relay config identity", "selected forwarded gateway"},
 		},
 		{
@@ -827,7 +827,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			HelperStartArgvEnvVars:         []string{"RDEV_MESH_START_ARGV_JSON"},
 			UsesHostServe:                  true,
 			ExecuteWhen:                    []string{"mesh route to gateway exists and no new enrollment is needed"},
-			ApprovalRequired:               []string{"ask before mesh enrollment, auth-key use, ACL changes, DNS changes, or persistent service changes"},
+			AuthorizationRequired:          []string{"ask before mesh enrollment, auth-key use, ACL changes, DNS changes, or persistent service changes"},
 			Evidence:                       []string{"mesh tool detection", "redacted mesh route status", "selected mesh gateway"},
 		},
 		{
@@ -843,7 +843,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			HelperStartArgvEnvVars:         []string{"RDEV_VPN_START_ARGV_JSON"},
 			UsesHostServe:                  true,
 			ExecuteWhen:                    []string{"WireGuard route is active and gateway health check succeeds"},
-			ApprovalRequired:               []string{"ask before creating keys, importing profiles, starting persistent VPN tunnels, changing DNS, or editing firewall routes"},
+			AuthorizationRequired:          []string{"ask before creating keys, importing profiles, starting persistent VPN tunnels, changing DNS, or editing firewall routes"},
 			Evidence:                       []string{"WireGuard tool detection", "active route proof", "selected VPN gateway"},
 		},
 		{
@@ -895,9 +895,9 @@ func helperPolicy() HelperPolicy {
 			"already-active mesh or VPN routes",
 			"already-configured non-privileged SSH local forwards",
 			"already-configured non-privileged frp or Chisel relay clients",
-			"operator-approved dependency install actions scoped to user, workspace, attended-visible, or managed-approved policy",
+			"operator-authorized dependency install actions scoped to user, workspace, attended-visible, or managed-authorized policy",
 		},
-		ApprovalRequired: []string{
+		AuthorizationRequired: []string{
 			"installing or downloading frp, Chisel, headscale, Tailscale, WireGuard, SSH, or any connectivity helper",
 			"creating, rotating, or importing SSH keys, WireGuard keys, mesh auth keys, relay tokens, or cloud credentials",
 			"starting persistent services, changing firewall rules, changing DNS, adding routes, or mutating security policy",
@@ -916,7 +916,7 @@ func helperPolicy() HelperPolicy {
 			"UAC, sudo, Gatekeeper, TCC, security product, or firewall bypass",
 			"ExecutionPolicy Bypass, encoded shell commands, or shell command-string wrappers",
 			"printing private keys, relay credentials, mesh tokens, private server addresses, or secrets into public artifacts",
-			"treating connectivity helper success as job authorization",
+			"treating connectivity helper success as task authorization",
 		},
 	}
 }
@@ -929,7 +929,7 @@ func runnerChecks(manifest Manifest) []Check {
 		{Name: "gateway_url", Passed: strings.TrimSpace(manifest.GatewayURL) != "", Detail: manifest.GatewayURL},
 		{Name: "connection_paths", Passed: len(manifest.ConnectionPaths) >= 7, Detail: fmt.Sprint(len(manifest.ConnectionPaths))},
 		{Name: "no_manual_assembly", Passed: manifest.NoManualAssembly, Detail: "runner carries ticket/root/gateway/transport metadata"},
-		{Name: "helper_policy_requires_approval_for_mutation", Passed: len(manifest.HelperPolicy.ApprovalRequired) > 0, Detail: manifest.HelperPolicy.SchemaVersion},
+		{Name: "helper_policy_requires_authorization_for_mutation", Passed: len(manifest.HelperPolicy.AuthorizationRequired) > 0, Detail: manifest.HelperPolicy.SchemaVersion},
 	}
 }
 
@@ -943,8 +943,8 @@ func connectivityTools() []ConnectivityTool {
 			AutoUseWhen: []string{
 				"SSH config, endpoint, local forward, and key choice are already configured and unambiguous",
 			},
-			ApprovalRequired: []string{"new keys", "config edits", "ambiguous identities", "privileged ports"},
-			Notes:            []string{"SSH is a tunnel only; rdev policy still gates all jobs."},
+			AuthorizationRequired: []string{"new keys", "config edits", "ambiguous identities", "privileged ports"},
+			Notes:                 []string{"SSH is a tunnel only; rdev policy still gates all tasks."},
 		},
 		{
 			ID:        "frp",
@@ -952,10 +952,10 @@ func connectivityTools() []ConnectivityTool {
 			Status:    "use-existing-config-only",
 			BestFor:   "reverse proxy/NAT traversal through an operator-controlled relay",
 			AutoUseWhen: []string{
-				"frpc is installed and an approved config is present",
+				"frpc is installed and an authorized config is present",
 			},
-			ApprovalRequired: []string{"download/install", "relay credential creation", "public port changes", "paid relay"},
-			Notes:            []string{"Prefer operator-hosted relay endpoints; keep tokens out of public artifacts."},
+			AuthorizationRequired: []string{"download/install", "relay credential creation", "public port changes", "paid relay"},
+			Notes:                 []string{"Prefer operator-hosted relay endpoints; keep tokens out of public artifacts."},
 		},
 		{
 			ID:        "chisel",
@@ -963,10 +963,10 @@ func connectivityTools() []ConnectivityTool {
 			Status:    "use-existing-config-only",
 			BestFor:   "HTTP(S)-friendly TCP/UDP tunneling",
 			AutoUseWhen: []string{
-				"chisel is installed and an approved client command/config is present",
+				"chisel is installed and an authorized client command/config is present",
 			},
-			ApprovalRequired: []string{"download/install", "new relay server", "credential changes", "persistent service"},
-			Notes:            []string{"Useful when WebSocket is blocked but HTTPS egress exists."},
+			AuthorizationRequired: []string{"download/install", "new relay server", "credential changes", "persistent service"},
+			Notes:                 []string{"Useful when WebSocket is blocked but HTTPS egress exists."},
 		},
 		{
 			ID:        "headscale-tailscale",
@@ -976,8 +976,8 @@ func connectivityTools() []ConnectivityTool {
 			AutoUseWhen: []string{
 				"tailscale status shows an active route to the gateway",
 			},
-			ApprovalRequired: []string{"new enrollment", "auth key use", "ACL/DNS changes", "service changes"},
-			Notes:            []string{"headscale/Tailscale identity assists routing only."},
+			AuthorizationRequired: []string{"new enrollment", "auth key use", "ACL/DNS changes", "service changes"},
+			Notes:                 []string{"headscale/Tailscale identity assists routing only."},
 		},
 		{
 			ID:        "wireguard",
@@ -987,8 +987,8 @@ func connectivityTools() []ConnectivityTool {
 			AutoUseWhen: []string{
 				"an existing active tunnel already routes to the gateway",
 			},
-			ApprovalRequired: []string{"key creation", "profile import", "route/DNS/firewall mutation", "persistent tunnel start"},
-			Notes:            []string{"Never print WireGuard keys or config bodies into evidence."},
+			AuthorizationRequired: []string{"key creation", "profile import", "route/DNS/firewall mutation", "persistent tunnel start"},
+			Notes:                 []string{"Never print WireGuard keys or config bodies into evidence."},
 		},
 	}
 }
@@ -1064,7 +1064,7 @@ func selectPath(manifest Manifest, tools []ToolResult, httpProbe func(string, ti
 				if requiredToolReady {
 					detail = "required helper tooling and configured gateway override detected"
 				} else {
-					detail = "approved dependency install action and configured gateway override detected"
+					detail = "authorized dependency install action and configured gateway override detected"
 				}
 				if err := httpProbe(helperGateway, timeout); err != nil {
 					if helperStartConfigured {
@@ -1214,9 +1214,9 @@ func dependencyInstallAction(path ConnectionPath, mode model.HostMode) (Dependen
 	}
 	switch scope {
 	case "user", "workspace", "attended-visible":
-	case "managed-approved":
+	case "managed-authorized":
 		if mode != model.HostModeManaged {
-			return DependencyInstallAction{}, "", true, fmt.Errorf("%s scope managed-approved requires managed host mode", envName)
+			return DependencyInstallAction{}, "", true, fmt.Errorf("%s scope managed-authorized requires managed host mode", envName)
 		}
 	default:
 		return DependencyInstallAction{}, "", true, fmt.Errorf("%s has unsupported install scope %q", envName, scope)

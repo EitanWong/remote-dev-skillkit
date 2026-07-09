@@ -126,14 +126,14 @@ func TestCoderEnvTemplateHasRequiredVars(t *testing.T) {
 	}
 }
 
-func TestCoderPackageHasApprovals(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "approvals")
+func TestCoderPackageHasAuthorizations(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "authorizations")
 	pkg, err := Build(Options{OutDir: out, GeneratedAt: testNow})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pkg.ApprovalRequired) < 3 {
-		t.Fatalf("expected at least 3 approval entries, got %d", len(pkg.ApprovalRequired))
+	if len(pkg.AuthorizationRequired) < 3 {
+		t.Fatalf("expected at least 3 authorization entries, got %d", len(pkg.AuthorizationRequired))
 	}
 }
 

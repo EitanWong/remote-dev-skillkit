@@ -15,16 +15,33 @@ type ConnectionEntryPackageCatalog struct {
 }
 
 type ConnectionEntryPackageCandidate struct {
-	ID                    string   `json:"id"`
-	TargetOS              string   `json:"target_os"`
-	TargetArch            string   `json:"target_arch"`
-	Label                 string   `json:"label"`
-	PackageArtifact       string   `json:"package_artifact"`
-	PackageStatus         string   `json:"package_status"`
-	FallbackScriptURL     string   `json:"fallback_script_url"`
-	FallbackScriptStatus  string   `json:"fallback_script_status"`
-	SelectionHints        []string `json:"selection_hints"`
-	RequiredReleaseInputs []string `json:"required_release_inputs,omitempty"`
+	ID                    string              `json:"id"`
+	TargetOS              string              `json:"target_os"`
+	TargetArch            string              `json:"target_arch"`
+	Label                 string              `json:"label"`
+	PackageArtifact       string              `json:"package_artifact"`
+	PackageStatus         string              `json:"package_status"`
+	FallbackScriptURL     string              `json:"fallback_script_url"`
+	FallbackScriptStatus  string              `json:"fallback_script_status"`
+	SelectionHints        []string            `json:"selection_hints"`
+	RequiredReleaseInputs []string            `json:"required_release_inputs,omitempty"`
+	HelperAsset           HelperAssetContract `json:"helper_asset,omitempty"`
+}
+
+type HelperAssetContract struct {
+	Name                                   string              `json:"name,omitempty"`
+	ExpectedSHA256                         string              `json:"expected_sha256,omitempty"`
+	SHA256URL                              string              `json:"sha256_url,omitempty"`
+	Mirrors                                []HelperAssetMirror `json:"mirrors,omitempty"`
+	BootstrapCanRunSessionTasks            bool                `json:"bootstrap_can_run_session_tasks"`
+	RequiresFullRunnerBeforeSessionTaskRun bool                `json:"requires_full_runner_before_session_task_run"`
+}
+
+type HelperAssetMirror struct {
+	URL         string `json:"url"`
+	Kind        string `json:"kind,omitempty"`
+	Compression string `json:"compression,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
 }
 
 func NewConnectionEntryPackageCatalog(joinURL string) ConnectionEntryPackageCatalog {

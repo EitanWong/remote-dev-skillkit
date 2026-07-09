@@ -85,7 +85,7 @@ func NewSignedTrustBundle(spec SignedTrustBundleSpec, now time.Time) (SignedTrus
 		NotAfter:           spec.NotAfter.UTC(),
 		PreviousBundleHash: spec.PreviousBundleHash,
 		Keys:               cloneTrustKeys(spec.Keys),
-		SigningAlg:         JobEnvelopeSigningAlg,
+		SigningAlg:         SigningAlgEd25519,
 		SigningKeyID:       spec.SigningKeyID,
 	}
 	if err := bundle.validateForSigning(); err != nil {
@@ -100,7 +100,7 @@ func NewTrustKey(keyID string, publicKey ed25519.PublicKey, status string, now t
 	}
 	return TrustKey{
 		KeyID:      keyID,
-		SigningAlg: JobEnvelopeSigningAlg,
+		SigningAlg: SigningAlgEd25519,
 		PublicKey:  base64.RawURLEncoding.EncodeToString(publicKey),
 		Status:     status,
 		NotBefore:  now.UTC(),
@@ -241,7 +241,7 @@ func (b SignedTrustBundle) validateForSigning() error {
 	if b.IssuedAt.IsZero() || b.NotBefore.IsZero() || b.NotAfter.IsZero() || !b.NotBefore.Before(b.NotAfter) {
 		return fmt.Errorf("%w: invalid validity window", ErrTrustBundleInvalid)
 	}
-	if b.SigningAlg != JobEnvelopeSigningAlg || b.SigningKeyID == "" {
+	if b.SigningAlg != SigningAlgEd25519 || b.SigningKeyID == "" {
 		return fmt.Errorf("%w: unsupported signing metadata", ErrTrustBundleInvalid)
 	}
 	if len(b.Keys) == 0 {
@@ -264,7 +264,7 @@ func validateTrustKey(key TrustKey) error {
 	if key.KeyID == "" {
 		return fmt.Errorf("%w: key id is required", ErrTrustBundleInvalid)
 	}
-	if key.SigningAlg != JobEnvelopeSigningAlg {
+	if key.SigningAlg != SigningAlgEd25519 {
 		return fmt.Errorf("%w: unsupported key algorithm", ErrTrustBundleInvalid)
 	}
 	if key.Status != TrustKeyStatusActive && key.Status != TrustKeyStatusRetired && key.Status != TrustKeyStatusRevoked {

@@ -1,6 +1,0 @@
-interface:
-  display_name: "Remote Job Review"
-  short_description: "Review job evidence before completion"
-  default_prompt: "Use $remote-job-review to verify job artifacts, approvals, audit records, runtime-memory updates, and cleanup before declaring completion."
-policy:
-  allow_implicit_invocation: true

@@ -299,7 +299,7 @@ plan = {
     "recommended_actions": [
         "Confirm verification.ok is true before publishing.",
         "Review asset paths, hashes, release notes, and acceptance evidence.",
-        "Get explicit operator approval before running any gh release command.",
+        "Get explicit operator authorization before running any gh release command.",
         "Create the release as a draft first, then verify downloads before publishing.",
     ],
 }
@@ -307,7 +307,7 @@ plan = {
 (out_dir / "plan.json").write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
 (out_dir / "commands.txt").write_text(
     "\n".join([
-        "# Dry-run release commands. Do not run without explicit operator approval.",
+        "# Dry-run release commands. Do not run without explicit operator authorization.",
         "# This script did not mutate GitHub.",
         "",
         plan["commands"]["create_release"],

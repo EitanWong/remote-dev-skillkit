@@ -2,13 +2,14 @@ package httpapi
 
 import (
 	"bytes"
-	"context"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,7 +23,6 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
-	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 )
 
 func TestCreateTicketAndAudit(t *testing.T) {
@@ -68,8 +68,8 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "推荐入口", "Agent 包目录", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "--identity-store", "host-identity.json", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-jobs 0", "--identity-store", "host-identity.json", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".gz", "gzip -dc", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-tasks 0", "--identity-store", "host-identity.json", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".gz", "GzipStream", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-tasks 0", "--identity-store", "host-identity.json", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.accept != "" {
@@ -89,6 +89,237 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 			strings.Contains(rec.Body.String(), "rdev is required") {
 			t.Fatalf("%s should not require preinstalled rdev or bypass execution policy:\n%s", tc.path, rec.Body.String())
 		}
+	}
+}
+
+func TestBootstrapScriptsReportPreconnectBeforeHelperDownload(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+
+	for _, path := range []string{
+		"/join/" + ticket.Code + "/bootstrap.sh",
+		"/join/" + ticket.Code + "/bootstrap.ps1",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s expected 200, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		for _, want := range []string{"/v1/support-session/preconnect", "downloading-helper", "rdev-bootstrap-preconnect"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s expected %q in bootstrap body:\n%s", path, want, body)
+			}
+		}
+		if rec.Body.Len() >= 1<<20 {
+			t.Fatalf("%s bootstrap must stay below the 1 MB first-connect target, got %d bytes", path, rec.Body.Len())
+		}
+	}
+}
+
+func TestBootstrapScriptsUseVerifiedHelperCache(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+
+	for _, tc := range []struct {
+		name      string
+		path      string
+		contains  []string
+		forbidden []string
+	}{
+		{
+			name: "shell",
+			path: "/join/" + ticket.Code + "/bootstrap.sh",
+			contains: []string{
+				"remote-dev-skillkit/helpers",
+				"using-cached-helper",
+				"verifying-helper",
+				"starting-full-helper",
+				"shasum -a 256",
+				"cp \"$out\" \"$cache_path\"",
+			},
+			forbidden: []string{"systemctl enable", "launchctl load", "sudo "},
+		},
+		{
+			name: "powershell",
+			path: "/join/" + ticket.Code + "/bootstrap.ps1",
+			contains: []string{
+				"RemoteDevSkillkit",
+				"cache",
+				"helpers",
+				"using-cached-helper",
+				"verifying-helper",
+				"starting-full-helper",
+				"Get-FileHash",
+				"Copy-Item -Force -Path $rdevPath -Destination $cachePath",
+			},
+			forbidden: []string{"New-Service", "sc.exe", "Set-Service"},
+		},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s expected 200, got %d: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		for _, want := range tc.contains {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s expected %q in bootstrap body:\n%s", tc.name, want, body)
+			}
+		}
+		for _, forbidden := range tc.forbidden {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s bootstrap should not contain service/persistence command %q:\n%s", tc.name, forbidden, body)
+			}
+		}
+	}
+}
+
+func TestShellBootstrapRetryLoopSurvivesSetE(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+"/bootstrap.sh", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "set -eu") {
+		t.Fatalf("expected strict shell mode in bootstrap body:\n%s", body)
+	}
+	if !strings.Contains(body, "if \"$rdev_cmd\" host serve ") ||
+		!strings.Contains(body, "rdev_exit=0") ||
+		!strings.Contains(body, "rdev_exit=$?") {
+		t.Fatalf("expected retry loop to capture host serve failures without set -e aborting:\n%s", body)
+	}
+	if strings.Contains(body, "\n  \"$rdev_cmd\" host serve ") {
+		t.Fatalf("bootstrap must not run host serve as a bare command under set -e:\n%s", body)
+	}
+}
+
+func TestBootstrapHelperDownloadsUseRetryBackoff(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+"/bootstrap.sh", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected shell bootstrap 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	shellBody := rec.Body.String()
+	for _, want := range []string{
+		"rdev_curl_retry_flags=\"--retry 3 --retry-delay 2 --connect-timeout 10\"",
+		"curl $rdev_curl_retry_flags -fsSL",
+		"\"/${asset}.gz\" -o \"$tmp_gz\"",
+		"\"/${asset}\" -o \"$out\"",
+		"\"/${asset}.sha256\"",
+	} {
+		if !strings.Contains(shellBody, want) {
+			t.Fatalf("expected shell helper download retry/backoff fragment %q in bootstrap body:\n%s", want, shellBody)
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+"/bootstrap.ps1", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected PowerShell bootstrap 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	powerShellBody := rec.Body.String()
+	for _, want := range []string{
+		"function Invoke-RdevWebRequestWithRetry",
+		"[int]$MaxAttempts = 3",
+		"Start-Sleep -Seconds",
+		"Invoke-RdevWebRequestWithRetry -Uri ('",
+		"+ $asset + '.gz') -OutFile $compressedPath",
+		"+ $asset) -OutFile $rdevPath",
+		"+ $asset + '.sha256')",
+	} {
+		if !strings.Contains(powerShellBody, want) {
+			t.Fatalf("expected PowerShell helper download retry/backoff fragment %q in bootstrap body:\n%s", want, powerShellBody)
+		}
+	}
+}
+
+func TestSupportSessionStatusIncludesPreconnectEvents(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+
+	preconnectBody := bytes.NewBufferString(`{"ticket_code":"` + ticket.Code + `","phase":"downloading-helper","os":"windows","arch":"amd64","asset":"rdev-windows-amd64.exe","source":"rdev-bootstrap-preconnect","message":"downloading helper"}`)
+	preconnectReq := httptest.NewRequest(http.MethodPost, "/v1/support-session/preconnect", preconnectBody)
+	preconnectReq.Header.Set("Content-Type", "application/json")
+	preconnectRec := httptest.NewRecorder()
+	handler.ServeHTTP(preconnectRec, preconnectReq)
+	if preconnectRec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for preconnect, got %d: %s", preconnectRec.Code, preconnectRec.Body.String())
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for support-session status, got %d: %s", statusRec.Code, statusRec.Body.String())
+	}
+	var statusPayload struct {
+		Status            string `json:"status"`
+		Waiting           bool   `json:"waiting"`
+		Connected         bool   `json:"connected"`
+		Feedback          string `json:"feedback"`
+		NextAction        string `json:"next_action"`
+		TargetPreconnects []struct {
+			TicketCode string `json:"ticket_code"`
+			Phase      string `json:"phase"`
+			OS         string `json:"os"`
+			Arch       string `json:"arch"`
+			Asset      string `json:"asset"`
+			Source     string `json:"source"`
+			SeenCount  int    `json:"seen_count"`
+		} `json:"target_preconnects"`
+		TargetPreconnectSummary struct {
+			Status              string         `json:"status"`
+			Phase               string         `json:"phase"`
+			AgentInterpretation string         `json:"agent_interpretation"`
+			CountByPhase        map[string]int `json:"count_by_phase"`
+		} `json:"target_preconnect_summary"`
+	}
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatal(err)
+	}
+	if statusPayload.Status != "target-downloading" ||
+		statusPayload.Waiting ||
+		statusPayload.Connected ||
+		!strings.Contains(statusPayload.Feedback, "downloading") ||
+		!strings.Contains(statusPayload.NextAction, "Keep waiting") {
+		t.Fatalf("preconnect should report target-side download without granting host access, got status %#v", statusPayload)
+	}
+	if len(statusPayload.TargetPreconnects) != 1 {
+		t.Fatalf("expected one preconnect event, got %#v", statusPayload.TargetPreconnects)
+	}
+	event := statusPayload.TargetPreconnects[0]
+	if event.TicketCode != ticket.Code ||
+		event.Phase != "downloading-helper" ||
+		event.OS != "windows" ||
+		event.Arch != "amd64" ||
+		event.Asset != "rdev-windows-amd64.exe" ||
+		event.Source != "rdev-bootstrap-preconnect" ||
+		event.SeenCount != 1 {
+		t.Fatalf("unexpected preconnect event: %#v", event)
+	}
+	if statusPayload.TargetPreconnectSummary.Status != "target-downloading" ||
+		statusPayload.TargetPreconnectSummary.Phase != "downloading-helper" ||
+		statusPayload.TargetPreconnectSummary.CountByPhase["downloading-helper"] != 1 ||
+		!strings.Contains(statusPayload.TargetPreconnectSummary.AgentInterpretation, "not disconnected") {
+		t.Fatalf("unexpected preconnect summary: %#v", statusPayload.TargetPreconnectSummary)
 	}
 }
 
@@ -121,86 +352,102 @@ func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
 	}
 }
 
-func TestHostWebSocketRefreshesHeartbeatBeforeClaimingJob(t *testing.T) {
-	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
-	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
-	handler := NewServer(gw).Handler()
-	host, secret := registerAndApproveHostWithSecret(t, handler)
-	job, err := gw.CreateJob(host.ID, "shell", "wss heartbeat regression", map[string]any{
-		"workspace_root": ".",
-		"capabilities":   []any{"shell.user"},
-		"argv":           []any{"echo", "demo"},
-		"allow_commands": []any{
-			"echo",
-		},
-	})
-	if err != nil {
+func TestJoinAssetsServeGzipBinary(t *testing.T) {
+	dir := t.TempDir()
+	binaryPath := filepath.Join(dir, "rdev.exe")
+	content := bytes.Repeat([]byte("fake rdev binary\n"), 1024)
+	if err := os.WriteFile(binaryPath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	now = now.Add(2 * time.Minute)
+	server := NewServer(gateway.NewMemoryGateway())
+	server.Assets.RdevWindowsAMD64Path = binaryPath
+	handler := server.Handler()
 
-	server := httptest.NewServer(handler)
-	defer server.Close()
-	wsURL, err := wsproto.HTTPToWebSocketURL(server.URL, "/v1/ws/hosts/"+url.PathEscape(host.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, err := wsproto.Dial(context.Background(), wsURL+"?host_secret="+url.QueryEscape(secret), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-
-	var msg wsproto.Message
-	if err := conn.ReadJSON(&msg); err != nil {
-		t.Fatal(err)
-	}
-	if msg.Type == wsproto.MessageError {
-		t.Fatalf("websocket should refresh heartbeat before stale check, got error: %s", msg.Error)
-	}
-	if msg.Type != wsproto.MessageJob || msg.JobID != job.ID {
-		t.Fatalf("expected queued job over websocket, got %#v", msg)
-	}
-}
-
-func TestHostNextJobRefreshesHeartbeatBeforeClaimingJob(t *testing.T) {
-	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
-	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
-	handler := NewServer(gw).Handler()
-	host, secret := registerAndApproveHostWithSecret(t, handler)
-	job, err := gw.CreateJob(host.ID, "shell", "long-poll heartbeat regression", map[string]any{
-		"workspace_root": ".",
-		"capabilities":   []any{"shell.user"},
-		"argv":           []any{"echo", "demo"},
-		"allow_commands": []any{"echo"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(2 * time.Minute)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+url.PathEscape(host.ID)+"/jobs/next", nil)
-	req.Header.Set("Authorization", "Bearer "+secret)
+	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-windows-amd64.exe.gz", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected authenticated claim to refresh heartbeat, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var payload struct {
-		Job *model.Job `json:"job"`
+	if got := rec.Header().Get("Content-Type"); got != "application/gzip" {
+		t.Fatalf("expected application/gzip, got %q", got)
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("invalid claim response: %v\n%s", err, rec.Body.String())
-	}
-	if payload.Job == nil || payload.Job.ID != job.ID {
-		t.Fatalf("expected job %s, got %#v", job.ID, payload.Job)
-	}
-	fresh, err := gw.Host(host.ID)
+	reader, err := gzip.NewReader(bytes.NewReader(rec.Body.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.Status != model.HostStatusActive {
-		t.Fatalf("expected host to remain active after authenticated claim, got %s", fresh.Status)
+	got, err := io.ReadAll(reader)
+	if closeErr := reader.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Fatal("gzip helper body did not round trip")
+	}
+}
+
+func TestTicketManifestPackageCatalogIncludesHelperAssetMirrors(t *testing.T) {
+	dir := t.TempDir()
+	windowsHelper := filepath.Join(dir, "rdev-windows-amd64.exe")
+	helperContent := []byte("signed helper mirror contract\n")
+	if err := os.WriteFile(windowsHelper, helperContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(helperContent)
+	expectedSHA := "sha256:" + hex.EncodeToString(sum[:])
+
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	server.Assets.RdevWindowsAMD64Path = windowsHelper
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+ticket.Code+"/manifest", nil)
+	req.Host = "gateway.example.test"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected manifest 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid manifest payload: %v\n%s", err, rec.Body.String())
+	}
+	if err := payload.Manifest.VerifyWithRoot(gw.ManifestRoot(), time.Now()); err != nil {
+		t.Fatalf("manifest must remain signed after adding package catalog asset mirrors: %v", err)
+	}
+	var candidate model.ConnectionEntryPackageCandidate
+	for _, item := range payload.Manifest.PackageCatalog.Candidates {
+		if item.ID == "windows-amd64" {
+			candidate = item
+			break
+		}
+	}
+	if candidate.ID == "" {
+		t.Fatalf("windows-amd64 candidate missing: %#v", payload.Manifest.PackageCatalog.Candidates)
+	}
+	if candidate.HelperAsset.Name != "rdev-windows-amd64.exe" ||
+		candidate.HelperAsset.ExpectedSHA256 != expectedSHA ||
+		candidate.HelperAsset.SHA256URL != "https://gateway.example.test/assets/rdev-windows-amd64.exe.sha256" ||
+		len(candidate.HelperAsset.Mirrors) < 2 {
+		t.Fatalf("expected helper asset mirror contract, got %#v", candidate.HelperAsset)
+	}
+	if candidate.HelperAsset.Mirrors[0].URL != "https://gateway.example.test/assets/rdev-windows-amd64.exe.gz" ||
+		candidate.HelperAsset.Mirrors[0].Compression != "gzip" ||
+		candidate.HelperAsset.Mirrors[1].URL != "https://gateway.example.test/assets/rdev-windows-amd64.exe" ||
+		candidate.HelperAsset.Mirrors[1].Compression != "" {
+		t.Fatalf("unexpected helper mirrors: %#v", candidate.HelperAsset.Mirrors)
+	}
+	if candidate.HelperAsset.BootstrapCanRunSessionTasks {
+		t.Fatalf("helper asset catalog must not imply rdev-bootstrap can run session tasks: %#v", candidate.HelperAsset)
+	}
+	if !candidate.HelperAsset.RequiresFullRunnerBeforeSessionTaskRun {
+		t.Fatalf("helper asset catalog must require the verified full runner before session task execution: %#v", candidate.HelperAsset)
 	}
 }
 
@@ -299,42 +546,6 @@ func TestOperatorAuthIssuerCanUseEnrollmentButNotTickets(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected issuer enrollment success, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestTrustEndpointVerifiesJobEnvelope(t *testing.T) {
-	gw := gateway.NewMemoryGateway()
-	server := NewServer(gw)
-	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
-	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
-		"workspace_root": ".",
-		"capabilities":   []string{"shell.user"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustReq := httptest.NewRequest(http.MethodGet, "/v1/trust", nil)
-	trustRec := httptest.NewRecorder()
-	handler.ServeHTTP(trustRec, trustReq)
-	if trustRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", trustRec.Code, trustRec.Body.String())
-	}
-	var payload struct {
-		Trust model.TrustBundle `json:"trust"`
-	}
-	if err := json.Unmarshal(trustRec.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	publicKey, err := payload.Trust.Ed25519PublicKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.Envelope == nil {
-		t.Fatal("job envelope must be present")
-	}
-	if err := job.Envelope.VerifyForHost(publicKey, host.ID, job.CreatedAt); err != nil {
-		t.Fatalf("expected trust bundle to verify envelope: %v", err)
 	}
 }
 
@@ -778,81 +989,6 @@ func TestTrustBundleEndpointRejectsRollback(t *testing.T) {
 	}
 }
 
-func TestHostTrustBundleUpdateEndpointReportsCurrentAndAvailableUpdate(t *testing.T) {
-	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
-	publicKey, privateKey := httpTestKeyPair(t)
-	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
-	server := NewServer(gw)
-	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
-
-	current := gw.SignedTrustBundle()
-	currentHash, err := current.Hash()
-	if err != nil {
-		t.Fatal(err)
-	}
-	currentURL := "/v1/hosts/" + host.ID + "/trust-bundle/update?current_sequence=1&current_hash=" + url.QueryEscape(currentHash)
-	currentReq := httptest.NewRequest(http.MethodGet, currentURL, nil)
-	currentRec := httptest.NewRecorder()
-	handler.ServeHTTP(currentRec, currentReq)
-	if currentRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", currentRec.Code, currentRec.Body.String())
-	}
-	var currentPayload struct {
-		TrustBundleUpdate model.TrustBundleUpdate `json:"trust_bundle_update"`
-	}
-	if err := json.Unmarshal(currentRec.Body.Bytes(), &currentPayload); err != nil {
-		t.Fatal(err)
-	}
-	if currentPayload.TrustBundleUpdate.Status != model.TrustBundleUpdateStatusCurrent {
-		t.Fatalf("expected current status, got %#v", currentPayload.TrustBundleUpdate)
-	}
-	if currentPayload.TrustBundleUpdate.TrustBundle != nil {
-		t.Fatal("current response should not include a bundle")
-	}
-
-	next, err := model.NewSignedTrustBundle(model.SignedTrustBundleSpec{
-		BundleID:           current.BundleID,
-		Sequence:           2,
-		NotBefore:          now,
-		NotAfter:           now.Add(time.Hour),
-		PreviousBundleHash: currentHash,
-		SigningKeyID:       "gateway-dev",
-		Keys: []model.TrustKey{
-			model.NewTrustKey("gateway-dev", publicKey, model.TrustKeyStatusActive, now),
-		},
-	}, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	next, err = next.Sign(privateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gw.UpdateSignedTrustBundle(next); err != nil {
-		t.Fatal(err)
-	}
-
-	updateReq := httptest.NewRequest(http.MethodGet, currentURL, nil)
-	updateRec := httptest.NewRecorder()
-	handler.ServeHTTP(updateRec, updateReq)
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", updateRec.Code, updateRec.Body.String())
-	}
-	var updatePayload struct {
-		TrustBundleUpdate model.TrustBundleUpdate `json:"trust_bundle_update"`
-	}
-	if err := json.Unmarshal(updateRec.Body.Bytes(), &updatePayload); err != nil {
-		t.Fatal(err)
-	}
-	if updatePayload.TrustBundleUpdate.Status != model.TrustBundleUpdateStatusAvailable {
-		t.Fatalf("expected update_available status, got %#v", updatePayload.TrustBundleUpdate)
-	}
-	if updatePayload.TrustBundleUpdate.TrustBundle == nil || updatePayload.TrustBundleUpdate.TrustBundle.Sequence != 2 {
-		t.Fatalf("expected sequence 2 bundle, got %#v", updatePayload.TrustBundleUpdate.TrustBundle)
-	}
-}
-
 func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
@@ -905,7 +1041,8 @@ func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Manifest model.JoinManifest `json:"manifest"`
+		Manifest         model.JoinManifest     `json:"manifest"`
+		GatewayTimeProof model.GatewayTimeProof `json:"gateway_time_proof"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
@@ -915,6 +1052,13 @@ func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
 	}
 	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)
+	}
+	gatewayTime, err := payload.GatewayTimeProof.Verify(payload.Manifest.Trust, model.GatewayTimeProofPurposeJoinManifest, payload.Manifest)
+	if err != nil {
+		t.Fatalf("expected gateway time proof to verify: %v", err)
+	}
+	if err := payload.Manifest.Verify(gatewayTime); err != nil {
+		t.Fatalf("expected manifest to verify using gateway time proof: %v", err)
 	}
 }
 
@@ -960,688 +1104,6 @@ func TestTicketManifestEndpointUsesServerSideGatewayCandidateMetadata(t *testing
 	}
 }
 
-func TestRegisterAndApproveHost(t *testing.T) {
-	server := NewServer(gateway.NewMemoryGateway())
-	handler := server.Handler()
-
-	ticket := createTicket(t, handler)
-	registerBody := bytes.NewBufferString(`{"ticket_code":"` + ticket.Code + `","name":"win-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
-	registerReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", registerBody)
-	registerRec := httptest.NewRecorder()
-	handler.ServeHTTP(registerRec, registerReq)
-	if registerRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", registerRec.Code, registerRec.Body.String())
-	}
-	var registerPayload struct {
-		Host model.Host `json:"host"`
-	}
-	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
-		t.Fatal(err)
-	}
-	if registerPayload.Host.Status != model.HostStatusPending {
-		t.Fatalf("expected pending host, got %s", registerPayload.Host.Status)
-	}
-
-	approveReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/"+registerPayload.Host.ID+"/approve", bytes.NewBufferString(`{"capabilities":["shell.user","fs.read"]}`))
-	approveRec := httptest.NewRecorder()
-	handler.ServeHTTP(approveRec, approveReq)
-	if approveRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", approveRec.Code, approveRec.Body.String())
-	}
-	var approvePayload struct {
-		Host model.Host `json:"host"`
-	}
-	if err := json.Unmarshal(approveRec.Body.Bytes(), &approvePayload); err != nil {
-		t.Fatal(err)
-	}
-	if approvePayload.Host.Status != model.HostStatusActive {
-		t.Fatalf("expected active host, got %s", approvePayload.Host.Status)
-	}
-
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+approvePayload.Host.ID, nil)
-	getRec := httptest.NewRecorder()
-	handler.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", getRec.Code, getRec.Body.String())
-	}
-}
-
-func TestAutoApproveAttendedTemporaryTicketActivatesHost(t *testing.T) {
-	server := NewServer(gateway.NewMemoryGateway())
-	handler := server.Handler()
-
-	body := bytes.NewBufferString(`{"mode":"attended-temporary","ttl_seconds":600,"reason":"standard support session","auto_approve":true}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/tickets", body)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var ticketPayload struct {
-		Ticket model.Ticket `json:"ticket"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &ticketPayload); err != nil {
-		t.Fatal(err)
-	}
-	if ticketPayload.Ticket.Metadata["auto_approve"] != "attended-temporary" {
-		t.Fatalf("expected auto approve metadata, got %#v", ticketPayload.Ticket.Metadata)
-	}
-
-	registerBody := bytes.NewBufferString(`{"ticket_code":"` + ticketPayload.Ticket.Code + `","name":"standard-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
-	registerReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", registerBody)
-	registerRec := httptest.NewRecorder()
-	handler.ServeHTTP(registerRec, registerReq)
-	if registerRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", registerRec.Code, registerRec.Body.String())
-	}
-	var registerPayload struct {
-		Host model.Host `json:"host"`
-	}
-	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
-		t.Fatal(err)
-	}
-	if registerPayload.Host.Status != model.HostStatusActive || registerPayload.Host.ApprovedAt == nil {
-		t.Fatalf("expected auto-approved active host, got %#v", registerPayload.Host)
-	}
-
-	secondBody := bytes.NewBufferString(`{"ticket_code":"` + ticketPayload.Ticket.Code + `","name":"second-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
-	secondReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", secondBody)
-	secondRec := httptest.NewRecorder()
-	handler.ServeHTTP(secondRec, secondReq)
-	if secondRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for second host registration, got %d: %s", secondRec.Code, secondRec.Body.String())
-	}
-	var secondPayload struct {
-		Host model.Host `json:"host"`
-	}
-	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondPayload); err != nil {
-		t.Fatal(err)
-	}
-	if secondPayload.Host.Status != model.HostStatusPending || secondPayload.Host.ApprovedAt != nil {
-		t.Fatalf("expected only first host to be auto-approved, got %#v", secondPayload.Host)
-	}
-
-	statusReq := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(ticketPayload.Ticket.Code)+"&locale=zh-CN", nil)
-	statusRec := httptest.NewRecorder()
-	handler.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for support-session status, got %d: %s", statusRec.Code, statusRec.Body.String())
-	}
-	var statusPayload struct {
-		SchemaVersion string `json:"schema_version"`
-		Connected     bool   `json:"connected"`
-		Status        string `json:"status"`
-		Feedback      string `json:"feedback"`
-	}
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusPayload); err != nil {
-		t.Fatal(err)
-	}
-	if statusPayload.SchemaVersion != "rdev.support-session-status.v1" ||
-		!statusPayload.Connected ||
-		statusPayload.Status != "connected" ||
-		!strings.Contains(statusPayload.Feedback, "连接已经建立") {
-		t.Fatalf("unexpected support-session status: %#v", statusPayload)
-	}
-}
-
-func TestRegisterHostPreservesIdentityFields(t *testing.T) {
-	server := NewServer(gateway.NewMemoryGateway())
-	handler := server.Handler()
-	ticket := createTicket(t, handler)
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint := httpHostIdentityFingerprint(publicKey)
-	registration := model.HostRegistration{
-		TicketCode:          ticket.Code,
-		Name:                "win-temp",
-		OS:                  "windows",
-		Arch:                "amd64",
-		Capabilities:        []string{"shell.user"},
-		IdentityKeyID:       "host-test",
-		IdentityPublicKey:   base64.RawURLEncoding.EncodeToString(publicKey),
-		IdentityFingerprint: fingerprint,
-	}
-	proof, err := model.SignHostRegistration(registration, privateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	registration.IdentityProof = &proof
-	body, err := json.Marshal(registration)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", bytes.NewReader(body))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Host model.Host `json:"host"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.Host.IdentityKeyID != "host-test" {
-		t.Fatalf("expected identity key id, got %q", payload.Host.IdentityKeyID)
-	}
-	if payload.Host.IdentityFingerprint != fingerprint {
-		t.Fatalf("expected identity fingerprint %q, got %q", fingerprint, payload.Host.IdentityFingerprint)
-	}
-}
-
-func TestRevokeHostCancelsQueuedJobs(t *testing.T) {
-	gw := gateway.NewMemoryGateway()
-	server := NewServer(gw)
-	handler := server.Handler()
-	host := registerAndApproveHost(t, handler)
-
-	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
-	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
-	jobRec := httptest.NewRecorder()
-	handler.ServeHTTP(jobRec, jobReq)
-	if jobRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
-	}
-	var jobPayload struct {
-		Job model.Job `json:"job"`
-	}
-	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
-		t.Fatal(err)
-	}
-
-	revokeReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/"+host.ID+"/revoke", bytes.NewBufferString(`{"reason":"done"}`))
-	revokeRec := httptest.NewRecorder()
-	handler.ServeHTTP(revokeRec, revokeReq)
-	if revokeRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", revokeRec.Code, revokeRec.Body.String())
-	}
-	var revokePayload struct {
-		Host model.Host `json:"host"`
-	}
-	if err := json.Unmarshal(revokeRec.Body.Bytes(), &revokePayload); err != nil {
-		t.Fatal(err)
-	}
-	if revokePayload.Host.Status != model.HostStatusRevoked {
-		t.Fatalf("expected revoked host, got %s", revokePayload.Host.Status)
-	}
-	job, err := gw.Job(jobPayload.Job.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.Status != model.JobStatusCanceled {
-		t.Fatalf("expected canceled job, got %s", job.Status)
-	}
-	auditReq := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
-	auditRec := httptest.NewRecorder()
-	handler.ServeHTTP(auditRec, auditReq)
-	if !bytes.Contains(auditRec.Body.Bytes(), []byte("job.cancel")) {
-		t.Fatalf("expected audit response to include job.cancel, got %s", auditRec.Body.String())
-	}
-}
-
-func TestJobCreateClaimAndComplete(t *testing.T) {
-	server := NewServer(gateway.NewMemoryGateway())
-	handler := server.Handler()
-	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
-
-	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
-	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
-	jobRec := httptest.NewRecorder()
-	handler.ServeHTTP(jobRec, jobReq)
-	if jobRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
-	}
-	var jobPayload struct {
-		Job model.Job `json:"job"`
-	}
-	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
-		t.Fatal(err)
-	}
-	if jobPayload.Job.Envelope == nil || jobPayload.Job.Envelope.Signature == "" {
-		t.Fatal("created job should include signed envelope")
-	}
-
-	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
-	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	nextRec := httptest.NewRecorder()
-	handler.ServeHTTP(nextRec, nextReq)
-	if nextRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
-	}
-	var nextPayload struct {
-		Job model.Job `json:"job"`
-	}
-	if err := json.Unmarshal(nextRec.Body.Bytes(), &nextPayload); err != nil {
-		t.Fatal(err)
-	}
-	if nextPayload.Job.Status != model.JobStatusRunning {
-		t.Fatalf("expected running job after claim, got %s", nextPayload.Job.Status)
-	}
-
-	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"done"}`))
-	completeReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	completeRec := httptest.NewRecorder()
-	handler.ServeHTTP(completeRec, completeReq)
-	if completeRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", completeRec.Code, completeRec.Body.String())
-	}
-	var completePayload struct {
-		Job      model.Job      `json:"job"`
-		Artifact model.Artifact `json:"artifact"`
-	}
-	if err := json.Unmarshal(completeRec.Body.Bytes(), &completePayload); err != nil {
-		t.Fatal(err)
-	}
-	if completePayload.Job.Status != model.JobStatusSucceeded {
-		t.Fatalf("expected succeeded job, got %s", completePayload.Job.Status)
-	}
-	if completePayload.Artifact.Content != "done" {
-		t.Fatalf("expected artifact content, got %q", completePayload.Artifact.Content)
-	}
-
-	artifactsReq := httptest.NewRequest(http.MethodGet, "/v1/jobs/"+jobPayload.Job.ID+"/artifacts", nil)
-	artifactsRec := httptest.NewRecorder()
-	handler.ServeHTTP(artifactsRec, artifactsReq)
-	if artifactsRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", artifactsRec.Code, artifactsRec.Body.String())
-	}
-	var artifactsPayload struct {
-		Artifacts []model.Artifact `json:"artifacts"`
-	}
-	if err := json.Unmarshal(artifactsRec.Body.Bytes(), &artifactsPayload); err != nil {
-		t.Fatal(err)
-	}
-	if len(artifactsPayload.Artifacts) != 1 {
-		t.Fatalf("expected 1 artifact, got %d", len(artifactsPayload.Artifacts))
-	}
-
-	artifactReq := httptest.NewRequest(http.MethodGet, "/v1/artifacts/"+completePayload.Artifact.ID, nil)
-	artifactRec := httptest.NewRecorder()
-	handler.ServeHTTP(artifactRec, artifactReq)
-	if artifactRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", artifactRec.Code, artifactRec.Body.String())
-	}
-	var artifactPayload struct {
-		Artifact model.Artifact `json:"artifact"`
-	}
-	if err := json.Unmarshal(artifactRec.Body.Bytes(), &artifactPayload); err != nil {
-		t.Fatal(err)
-	}
-	if artifactPayload.Artifact.Content != "done" {
-		t.Fatalf("expected artifact content, got %q", artifactPayload.Artifact.Content)
-	}
-}
-
-func TestServerStateSnapshotPersistsGatewayMutations(t *testing.T) {
-	now := time.Date(2026, 6, 30, 18, 30, 0, 0, time.UTC)
-	publicKey, privateKey := httpTestKeyPair(t)
-	statePath := filepath.Join(t.TempDir(), "gateway", "state.json")
-	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
-	server := NewServerWithState(gw, statePath)
-	handler := server.Handler()
-	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
-
-	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "persistent demo"))
-	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
-	jobRec := httptest.NewRecorder()
-	handler.ServeHTTP(jobRec, jobReq)
-	if jobRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
-	}
-	var jobPayload struct {
-		Job model.Job `json:"job"`
-	}
-	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
-		t.Fatal(err)
-	}
-
-	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
-	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	nextRec := httptest.NewRecorder()
-	handler.ServeHTTP(nextRec, nextReq)
-	if nextRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
-	}
-
-	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"durable result"}`))
-	completeReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	completeRec := httptest.NewRecorder()
-	handler.ServeHTTP(completeRec, completeReq)
-	if completeRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", completeRec.Code, completeRec.Body.String())
-	}
-	if _, err := os.Stat(statePath); err != nil {
-		t.Fatalf("expected state snapshot: %v", err)
-	}
-
-	restartedGateway := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
-	snapshot, err := restartedGateway.LoadSnapshot(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.SchemaVersion != gateway.SnapshotSchemaVersion {
-		t.Fatalf("unexpected snapshot schema %q", snapshot.SchemaVersion)
-	}
-	restartedJob, err := restartedGateway.Job(jobPayload.Job.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if restartedJob.Status != model.JobStatusSucceeded {
-		t.Fatalf("expected persisted succeeded job, got %s", restartedJob.Status)
-	}
-	if restartedJob.Envelope == nil {
-		t.Fatal("expected persisted signed envelope")
-	}
-	if err := restartedJob.Envelope.VerifyForHost(publicKey, host.ID, now); err != nil {
-		t.Fatalf("expected persisted envelope to verify: %v", err)
-	}
-	if artifacts := restartedGateway.Artifacts(jobPayload.Job.ID); len(artifacts) != 1 || artifacts[0].Content != "durable result" {
-		t.Fatalf("expected persisted artifact, got %#v", artifacts)
-	}
-	if events := restartedGateway.AuditEvents(); len(events) == 0 || events[len(events)-1].Action != "job.complete" {
-		t.Fatalf("expected persisted job.complete audit event, got %#v", events)
-	}
-}
-
-func TestServerStateStorePersistsGatewayMutations(t *testing.T) {
-	now := time.Date(2026, 6, 30, 18, 30, 0, 0, time.UTC)
-	publicKey, privateKey := httpTestKeyPair(t)
-	store, err := gateway.NewFileStateStore(filepath.Join(t.TempDir(), "gateway", "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	gw := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
-	handler := NewServerWithStateStore(gw, store).Handler()
-	host := registerAndApproveHost(t, handler)
-
-	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "stored demo"))
-	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
-	jobRec := httptest.NewRecorder()
-	handler.ServeHTTP(jobRec, jobReq)
-	if jobRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
-	}
-
-	restartedGateway := gateway.NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-dev", publicKey, privateKey)
-	snapshot, ok, err := store.LoadInto(restartedGateway)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal("expected store load")
-	}
-	if len(snapshot.Jobs) != 1 || snapshot.Jobs[0].Intent != "stored demo" {
-		t.Fatalf("expected persisted job, got %#v", snapshot.Jobs)
-	}
-}
-
-func TestHostJobsNextLongPollWaitsForJob(t *testing.T) {
-	gw := gateway.NewMemoryGateway()
-	server := NewServer(gw)
-	handler := server.Handler()
-	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
-	httpServer := httptest.NewServer(handler)
-	defer httpServer.Close()
-	result := make(chan struct {
-		job model.Job
-		err error
-	}, 1)
-
-	go func() {
-		req, err := http.NewRequest(http.MethodGet, httpServer.URL+"/v1/hosts/"+host.ID+"/jobs/next?wait_ms=1000", nil)
-		if err != nil {
-			result <- struct {
-				job model.Job
-				err error
-			}{err: err}
-			return
-		}
-		req.Header.Set("Authorization", "Bearer "+hostSecret)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			result <- struct {
-				job model.Job
-				err error
-			}{err: err}
-			return
-		}
-		defer resp.Body.Close()
-		var payload struct {
-			Job *model.Job `json:"job"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-			result <- struct {
-				job model.Job
-				err error
-			}{err: err}
-			return
-		}
-		if payload.Job == nil {
-			result <- struct {
-				job model.Job
-				err error
-			}{err: nil}
-			return
-		}
-		result <- struct {
-			job model.Job
-			err error
-		}{job: *payload.Job}
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-	created, err := gw.CreateJob(host.ID, "shell", "long-poll demo", map[string]any{
-		"workspace_root": ".",
-		"capabilities":   []string{"shell.user"},
-		"argv":           []string{"echo", "demo"},
-		"allow_commands": []string{"echo"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case got := <-result:
-		if got.err != nil {
-			t.Fatal(got.err)
-		}
-		if got.job.ID != created.ID {
-			t.Fatalf("expected job %q, got %q", created.ID, got.job.ID)
-		}
-		if got.job.Status != model.JobStatusRunning {
-			t.Fatalf("expected long-polled job to be running, got %s", got.job.Status)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for long-poll result")
-	}
-}
-
-func TestHostJobsNextLongPollTimeoutReturnsNoJob(t *testing.T) {
-	gw := gateway.NewMemoryGateway()
-	server := NewServer(gw)
-	handler := server.Handler()
-	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next?wait_ms=1", nil)
-	req.Header.Set("Authorization", "Bearer "+hostSecret)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte(`"job":null`)) {
-		t.Fatalf("expected null job after timeout, got %s", rec.Body.String())
-	}
-}
-
-func TestJobEvidenceBundleEndpointExportsBundleFromJobID(t *testing.T) {
-	server := NewServer(gateway.NewMemoryGateway())
-	handler := server.Handler()
-	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
-
-	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
-	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
-	jobRec := httptest.NewRecorder()
-	handler.ServeHTTP(jobRec, jobReq)
-	if jobRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
-	}
-	var jobPayload struct {
-		Job model.Job `json:"job"`
-	}
-	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
-		t.Fatal(err)
-	}
-	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
-	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	nextRec := httptest.NewRecorder()
-	handler.ServeHTTP(nextRec, nextReq)
-	if nextRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
-	}
-	completeReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/complete", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"done"}`))
-	completeReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	completeRec := httptest.NewRecorder()
-	handler.ServeHTTP(completeRec, completeReq)
-	if completeRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", completeRec.Code, completeRec.Body.String())
-	}
-
-	out := filepath.Join(t.TempDir(), "bundle")
-	exportReq := httptest.NewRequest(http.MethodGet, "/v1/jobs/"+jobPayload.Job.ID+"/evidence-bundle?out="+url.QueryEscape(out), nil)
-	exportRec := httptest.NewRecorder()
-	handler.ServeHTTP(exportRec, exportReq)
-	if exportRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", exportRec.Code, exportRec.Body.String())
-	}
-	var exportPayload struct {
-		OK       bool   `json:"ok"`
-		JobID    string `json:"job_id"`
-		Manifest struct {
-			SchemaVersion   string `json:"schema_version"`
-			AuditEventCount int    `json:"audit_event_count"`
-		} `json:"manifest"`
-	}
-	if err := json.Unmarshal(exportRec.Body.Bytes(), &exportPayload); err != nil {
-		t.Fatal(err)
-	}
-	if !exportPayload.OK || exportPayload.JobID != jobPayload.Job.ID {
-		t.Fatalf("unexpected export payload: %s", exportRec.Body.String())
-	}
-	if exportPayload.Manifest.SchemaVersion != "rdev.evidence-bundle.v1" {
-		t.Fatalf("unexpected manifest schema %q", exportPayload.Manifest.SchemaVersion)
-	}
-	if exportPayload.Manifest.AuditEventCount == 0 {
-		t.Fatal("expected audit slice in exported bundle")
-	}
-	for _, path := range []string{"manifest.json", "job.json", "artifacts.json", "audit-chain.json", "checksums.txt"} {
-		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(path))); err != nil {
-			t.Fatalf("expected evidence bundle file %s: %v", path, err)
-		}
-	}
-}
-
-func TestJobFail(t *testing.T) {
-	server := NewServer(gateway.NewMemoryGateway())
-	handler := server.Handler()
-	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
-
-	jobBody := bytes.NewBufferString(shellJobCreateJSON(host.ID, "local demo"))
-	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
-	jobRec := httptest.NewRecorder()
-	handler.ServeHTTP(jobRec, jobReq)
-	if jobRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
-	}
-	var jobPayload struct {
-		Job model.Job `json:"job"`
-	}
-	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
-		t.Fatal(err)
-	}
-	nextReq := httptest.NewRequest(http.MethodGet, "/v1/hosts/"+host.ID+"/jobs/next", nil)
-	nextReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	nextRec := httptest.NewRecorder()
-	handler.ServeHTTP(nextRec, nextReq)
-	if nextRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", nextRec.Code, nextRec.Body.String())
-	}
-
-	failReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/fail", bytes.NewBufferString(`{"host_id":"`+host.ID+`","reason":"signature rejected","artifact_content":"failure evidence"}`))
-	failReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	failRec := httptest.NewRecorder()
-	handler.ServeHTTP(failRec, failReq)
-	if failRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", failRec.Code, failRec.Body.String())
-	}
-	var failPayload struct {
-		Job      model.Job      `json:"job"`
-		Artifact model.Artifact `json:"artifact"`
-	}
-	if err := json.Unmarshal(failRec.Body.Bytes(), &failPayload); err != nil {
-		t.Fatal(err)
-	}
-	if failPayload.Job.Status != model.JobStatusFailed {
-		t.Fatalf("expected failed job, got %s", failPayload.Job.Status)
-	}
-	if failPayload.Job.FailureReason != "signature rejected" {
-		t.Fatalf("unexpected failure reason %q", failPayload.Job.FailureReason)
-	}
-	if failPayload.Artifact.Content != "failure evidence" {
-		t.Fatalf("expected failure artifact content, got %q", failPayload.Artifact.Content)
-	}
-}
-
-func TestJobCanceledArtifact(t *testing.T) {
-	gw := gateway.NewMemoryGateway()
-	server := NewServer(gw)
-	handler := server.Handler()
-	host, hostSecret := registerAndApproveHostWithSecret(t, handler)
-
-	jobBody := bytes.NewBufferString(`{"host_id":"` + host.ID + `","adapter":"codex","intent":"local demo","policy":{"workspace_root":".","capabilities":["codex.run","git.diff"]}}`)
-	jobReq := httptest.NewRequest(http.MethodPost, "/v1/jobs", jobBody)
-	jobRec := httptest.NewRecorder()
-	handler.ServeHTTP(jobRec, jobReq)
-	if jobRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", jobRec.Code, jobRec.Body.String())
-	}
-	var jobPayload struct {
-		Job model.Job `json:"job"`
-	}
-	if err := json.Unmarshal(jobRec.Body.Bytes(), &jobPayload); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gw.CancelJob(jobPayload.Job.ID, "operator cancel"); err != nil {
-		t.Fatal(err)
-	}
-
-	artifactReq := httptest.NewRequest(http.MethodPost, "/v1/jobs/"+jobPayload.Job.ID+"/artifact", bytes.NewBufferString(`{"host_id":"`+host.ID+`","artifact_content":"cancellation evidence"}`))
-	artifactReq.Header.Set("Authorization", "Bearer "+hostSecret)
-	artifactRec := httptest.NewRecorder()
-	handler.ServeHTTP(artifactRec, artifactReq)
-	if artifactRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", artifactRec.Code, artifactRec.Body.String())
-	}
-	var artifactPayload struct {
-		Job      model.Job      `json:"job"`
-		Artifact model.Artifact `json:"artifact"`
-	}
-	if err := json.Unmarshal(artifactRec.Body.Bytes(), &artifactPayload); err != nil {
-		t.Fatal(err)
-	}
-	if artifactPayload.Job.Status != model.JobStatusCanceled {
-		t.Fatalf("expected canceled job, got %s", artifactPayload.Job.Status)
-	}
-	if artifactPayload.Artifact.Content != "cancellation evidence" {
-		t.Fatalf("expected cancellation evidence, got %q", artifactPayload.Artifact.Content)
-	}
-	if artifacts := gw.Artifacts(jobPayload.Job.ID); len(artifacts) != 1 {
-		t.Fatalf("expected one artifact, got %d", len(artifacts))
-	}
-}
-
 func createTicket(t *testing.T, handler http.Handler) model.Ticket {
 	t.Helper()
 	body := bytes.NewBufferString(`{"mode":"attended-temporary","ttl_seconds":600,"reason":"test"}`)
@@ -1658,51 +1120,6 @@ func createTicket(t *testing.T, handler http.Handler) model.Ticket {
 		t.Fatal(err)
 	}
 	return payload.Ticket
-}
-
-func registerAndApproveHost(t *testing.T, handler http.Handler) model.Host {
-	t.Helper()
-	host, _ := registerAndApproveHostWithSecret(t, handler)
-	return host
-}
-
-func registerAndApproveHostWithSecret(t *testing.T, handler http.Handler) (model.Host, string) {
-	t.Helper()
-	ticket := createTicket(t, handler)
-	registerBody := bytes.NewBufferString(`{"ticket_code":"` + ticket.Code + `","name":"win-temp","os":"windows","arch":"amd64","capabilities":["shell.user"]}`)
-	registerReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/register", registerBody)
-	registerRec := httptest.NewRecorder()
-	handler.ServeHTTP(registerRec, registerReq)
-	if registerRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", registerRec.Code, registerRec.Body.String())
-	}
-	var registerPayload struct {
-		Host       model.Host `json:"host"`
-		HostSecret string     `json:"host_secret"`
-	}
-	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
-		t.Fatal(err)
-	}
-	if registerPayload.HostSecret == "" {
-		t.Fatalf("expected host_secret in registration response: %s", registerRec.Body.String())
-	}
-	approveReq := httptest.NewRequest(http.MethodPost, "/v1/hosts/"+registerPayload.Host.ID+"/approve", bytes.NewBufferString(`{"capabilities":["shell.user","fs.read"]}`))
-	approveRec := httptest.NewRecorder()
-	handler.ServeHTTP(approveRec, approveReq)
-	if approveRec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", approveRec.Code, approveRec.Body.String())
-	}
-	var approvePayload struct {
-		Host model.Host `json:"host"`
-	}
-	if err := json.Unmarshal(approveRec.Body.Bytes(), &approvePayload); err != nil {
-		t.Fatal(err)
-	}
-	return approvePayload.Host, registerPayload.HostSecret
-}
-
-func shellJobCreateJSON(hostID, intent string) string {
-	return `{"host_id":"` + hostID + `","adapter":"shell","intent":"` + intent + `","policy":{"workspace_root":".","capabilities":["shell.user"],"argv":["echo","demo"],"allow_commands":["echo"]}}`
 }
 
 func httpTestKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {

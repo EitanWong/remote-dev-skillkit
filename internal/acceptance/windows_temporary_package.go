@@ -23,7 +23,7 @@ type WindowsTemporaryPackageOptions struct {
 	ReleaseVerificationPath string
 	AuditPath               string
 	NoPersistenceDir        string
-	ApprovalProbesDir       string
+	DenialProbesDir         string
 	NotesPath               string
 	Now                     time.Time
 }
@@ -128,8 +128,8 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 
 	noPersistenceFiles, noPersistenceNames := copyEvidenceDir(outDir, "evidence/no-persistence", "no-persistence", opts.NoPersistenceDir, redactor, add)
 	files = append(files, noPersistenceFiles...)
-	approvalFiles, approvalNames := copyEvidenceDir(outDir, "evidence/approval-probes", "approval-probe", opts.ApprovalProbesDir, redactor, add)
-	files = append(files, approvalFiles...)
+	denialFiles, denialNames := copyEvidenceDir(outDir, "evidence/denial-probes", "denial-probe", opts.DenialProbesDir, redactor, add)
+	files = append(files, denialFiles...)
 
 	add("transcript_present", fileEntryKindPresent(files, "transcript"), opts.TranscriptPath)
 	releaseOK := releaseVerificationOK(outDir, "evidence/release-verification.txt")
@@ -137,7 +137,7 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 	add("release_verification_ok", releaseOK, opts.ReleaseVerificationPath)
 	add("audit_present", fileEntryKindPresent(files, "audit"), opts.AuditPath)
 	add("no_persistence_evidence_complete", namesCoverWindowsCommands(noPersistenceNames, plan.NoPersistenceChecks), missingWindowsEvidenceNames(noPersistenceNames, windowsCommandNames(plan.NoPersistenceChecks)))
-	add("approval_probe_evidence_complete", namesCoverApprovalProbes(approvalNames, plan.ApprovalProbes), missingApprovalEvidenceNames(approvalNames, plan.ApprovalProbes))
+	add("denial_probe_evidence_complete", namesCoverDenialProbes(denialNames, plan.DenialProbes), missingDenialEvidenceNames(denialNames, plan.DenialProbes))
 
 	if redactor.Redacted() {
 		pkg.RedactionRuleCounts = redactor.Counts()
@@ -349,11 +349,11 @@ func missingWindowsEvidenceNames(names []string, required map[string]bool) strin
 	return strings.Join(missing, ",")
 }
 
-func namesCoverApprovalProbes(names []string, probes []WindowsApprovalProbe) bool {
-	return missingApprovalEvidenceNames(names, probes) == ""
+func namesCoverDenialProbes(names []string, probes []WindowsDenialProbe) bool {
+	return missingDenialEvidenceNames(names, probes) == ""
 }
 
-func missingApprovalEvidenceNames(names []string, probes []WindowsApprovalProbe) string {
+func missingDenialEvidenceNames(names []string, probes []WindowsDenialProbe) string {
 	seen := evidenceNameSet(names)
 	var missing []string
 	for _, probe := range probes {

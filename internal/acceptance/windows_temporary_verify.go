@@ -80,7 +80,7 @@ func VerifyWindowsTemporaryPlan(planPath string) (WindowsTemporaryPlanVerificati
 	add("foreground_command_present", commandNamed(plan.Commands, "run_foreground_temporary_host"), "")
 	add("transcript_commands_present", commandNamed(plan.Commands, "start_transcript") && commandNamed(plan.Commands, "stop_transcript"), "")
 	add("no_persistence_checks_complete", windowsNoPersistenceChecksComplete(plan.NoPersistenceChecks), missingWindowsNoPersistenceChecks(plan.NoPersistenceChecks))
-	add("approval_probes_complete", windowsApprovalProbesComplete(plan.ApprovalProbes), missingWindowsApprovalProbes(plan.ApprovalProbes))
+	add("denial_probes_complete", windowsDenialProbesComplete(plan.DenialProbes), missingWindowsDenialProbes(plan.DenialProbes))
 	add("required_evidence_complete", len(plan.RequiredEvidence) >= 5, "")
 
 	if !verification.OK() {
@@ -201,14 +201,14 @@ func missingWindowsNoPersistenceChecks(commands []WindowsAcceptanceCommand) stri
 	})
 }
 
-func windowsApprovalProbesComplete(probes []WindowsApprovalProbe) bool {
-	return missingWindowsApprovalProbes(probes) == ""
+func windowsDenialProbesComplete(probes []WindowsDenialProbe) bool {
+	return missingWindowsDenialProbes(probes) == ""
 }
 
-func missingWindowsApprovalProbes(probes []WindowsApprovalProbe) string {
+func missingWindowsDenialProbes(probes []WindowsDenialProbe) string {
 	seen := map[string]bool{}
 	for _, probe := range probes {
-		if probe.ExpectedArtifact == "rdev.approval-required.v1" {
+		if probe.ExpectedArtifact == "rdev.host-denial.v1" {
 			seen[probe.Operation] = true
 		}
 	}

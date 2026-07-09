@@ -208,7 +208,7 @@ func TestPackageLinuxManagedServiceEvidencePackagesAndRedacts(t *testing.T) {
 		ReleaseGatePath:         fixture.releaseGatePath,
 		AuditPath:               fixture.auditPath,
 		ReconnectPath:           fixture.reconnectPath,
-		JobEvidenceDir:          fixture.jobEvidenceDir,
+		SessionEvidenceDir:      fixture.sessionEvidenceDir,
 		StopTranscriptPath:      fixture.stopTranscriptPath,
 		UninstallTranscriptPath: fixture.uninstallTranscriptPath,
 		Now:                     time.Date(2026, 6, 30, 14, 0, 0, 0, time.UTC),
@@ -229,8 +229,8 @@ func TestPackageLinuxManagedServiceEvidencePackagesAndRedacts(t *testing.T) {
 		filepath.Join(pkg.OutDir, "plan", "remote-dev-skillkit-host.service"),
 		filepath.Join(pkg.OutDir, "plan", "plan-verification.json"),
 		filepath.Join(pkg.OutDir, "evidence", "start-transcript.txt"),
-		filepath.Join(pkg.OutDir, "evidence", "job-evidence", "manifest.json"),
-		filepath.Join(pkg.OutDir, "evidence", "job-evidence", "artifacts", "approval-required.json"),
+		filepath.Join(pkg.OutDir, "evidence", "session-evidence", "manifest.json"),
+		filepath.Join(pkg.OutDir, "evidence", "session-evidence", "artifacts", "host-denial.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected packaged file %s: %v", path, err)
@@ -260,7 +260,7 @@ func TestPackageLinuxManagedServiceEvidenceRejectsFailedReleaseGate(t *testing.T
 		ReleaseGatePath:         fixture.releaseGatePath,
 		AuditPath:               fixture.auditPath,
 		ReconnectPath:           fixture.reconnectPath,
-		JobEvidenceDir:          fixture.jobEvidenceDir,
+		SessionEvidenceDir:      fixture.sessionEvidenceDir,
 		StopTranscriptPath:      fixture.stopTranscriptPath,
 		UninstallTranscriptPath: fixture.uninstallTranscriptPath,
 	})
@@ -275,10 +275,10 @@ func TestPackageLinuxManagedServiceEvidenceRejectsFailedReleaseGate(t *testing.T
 	}
 }
 
-func TestPackageLinuxManagedServiceEvidenceRequiresJobApprovalProof(t *testing.T) {
+func TestPackageLinuxManagedServiceEvidenceRequiresHostDenialProof(t *testing.T) {
 	fixture := writeLinuxManagedServicePackageFixture(t, `{"ok": true}`)
-	approvalArtifact := filepath.Join(fixture.jobEvidenceDir, "artifacts", "approval-required.json")
-	if err := os.WriteFile(approvalArtifact, []byte(`{"schema_version":"rdev.shell-result.v1"}`+"\n"), 0o600); err != nil {
+	denialArtifact := filepath.Join(fixture.sessionEvidenceDir, "artifacts", "host-denial.json")
+	if err := os.WriteFile(denialArtifact, []byte(`{"schema_version":"rdev.shell-result.v1"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -291,7 +291,7 @@ func TestPackageLinuxManagedServiceEvidenceRequiresJobApprovalProof(t *testing.T
 		ReleaseGatePath:         fixture.releaseGatePath,
 		AuditPath:               fixture.auditPath,
 		ReconnectPath:           fixture.reconnectPath,
-		JobEvidenceDir:          fixture.jobEvidenceDir,
+		SessionEvidenceDir:      fixture.sessionEvidenceDir,
 		StopTranscriptPath:      fixture.stopTranscriptPath,
 		UninstallTranscriptPath: fixture.uninstallTranscriptPath,
 	})
@@ -299,10 +299,10 @@ func TestPackageLinuxManagedServiceEvidenceRequiresJobApprovalProof(t *testing.T
 		t.Fatal(err)
 	}
 	if pkg.OK() {
-		t.Fatalf("expected missing approval-required evidence to fail package checks")
+		t.Fatalf("expected missing host-denial evidence to fail package checks")
 	}
-	if !strings.Contains(failedCheckNames(pkg.Checks), "approval_required_evidence_present") {
-		t.Fatalf("expected approval evidence failure: %#v", pkg.Checks)
+	if !strings.Contains(failedCheckNames(pkg.Checks), "host_denial_probe_evidence_present") {
+		t.Fatalf("expected host-denial evidence failure: %#v", pkg.Checks)
 	}
 }
 
@@ -315,7 +315,7 @@ type linuxManagedServicePackageFixture struct {
 	releaseGatePath         string
 	auditPath               string
 	reconnectPath           string
-	jobEvidenceDir          string
+	sessionEvidenceDir      string
 	stopTranscriptPath      string
 	uninstallTranscriptPath string
 }
@@ -342,17 +342,17 @@ func writeLinuxManagedServicePackageFixture(t *testing.T, releaseGate string) li
 	reconnectPath := filepath.Join(root, "reconnect.txt")
 	stopTranscriptPath := filepath.Join(root, "stop.txt")
 	uninstallTranscriptPath := filepath.Join(root, "uninstall.txt")
-	jobEvidenceDir := filepath.Join(root, "job-evidence")
+	sessionEvidenceDir := filepath.Join(root, "session-evidence")
 	writeFileForLinuxPackageTest(t, startTranscriptPath, "systemctl --user daemon-reload\nsystemctl --user enable --now remote-dev-skillkit-host.service\n")
 	writeFileForLinuxPackageTest(t, statusTranscriptPath, "systemctl --user status remote-dev-skillkit-host.service\nactive (running)\n")
 	writeFileForLinuxPackageTest(t, logsPath, "journalctl --user -u remote-dev-skillkit-host.service\nrelease gate passed\n")
 	writeFileForLinuxPackageTest(t, releaseGatePath, releaseGate+"\n")
-	writeFileForLinuxPackageTest(t, auditPath, `{"event":"host.registered"}`+"\n"+`{"event":"job.completed"}`+"\n")
+	writeFileForLinuxPackageTest(t, auditPath, `{"event":"session.joined"}`+"\n"+`{"event":"task.completed"}`+"\n")
 	writeFileForLinuxPackageTest(t, reconnectPath, "rebooted host reconnected as hst_123\n")
 	writeFileForLinuxPackageTest(t, stopTranscriptPath, "systemctl --user disable --now remote-dev-skillkit-host.service\n")
 	writeFileForLinuxPackageTest(t, uninstallTranscriptPath, "rdev host uninstall-service --platform linux --removed true\n")
-	writeFileForLinuxPackageTest(t, filepath.Join(jobEvidenceDir, "manifest.json"), `{"schema_version":"rdev.evidence-bundle.v1"}`+"\n")
-	writeFileForLinuxPackageTest(t, filepath.Join(jobEvidenceDir, "artifacts", "approval-required.json"), `{"schema_version":"rdev.approval-required.v1"}`+"\n")
+	writeFileForLinuxPackageTest(t, filepath.Join(sessionEvidenceDir, "manifest.json"), `{"schema_version":"rdev.session-evidence.v1"}`+"\n")
+	writeFileForLinuxPackageTest(t, filepath.Join(sessionEvidenceDir, "artifacts", "host-denial.json"), `{"schema_version":"rdev.host-denial.v1"}`+"\n")
 	return linuxManagedServicePackageFixture{
 		root:                    root,
 		planPath:                filepath.Join(planOut, "linux-managed-service-plan.json"),
@@ -362,7 +362,7 @@ func writeLinuxManagedServicePackageFixture(t *testing.T, releaseGate string) li
 		releaseGatePath:         releaseGatePath,
 		auditPath:               auditPath,
 		reconnectPath:           reconnectPath,
-		jobEvidenceDir:          jobEvidenceDir,
+		sessionEvidenceDir:      sessionEvidenceDir,
 		stopTranscriptPath:      stopTranscriptPath,
 		uninstallTranscriptPath: uninstallTranscriptPath,
 	}

@@ -70,8 +70,8 @@ func TestRunWindowsTemporaryPlanWritesLauncherAndChecks(t *testing.T) {
 			t.Fatalf("expected command containing %q in %s", expected, commands)
 		}
 	}
-	if len(plan.ApprovalProbes) < 4 {
-		t.Fatalf("expected approval probes: %#v", plan.ApprovalProbes)
+	if len(plan.DenialProbes) < 4 {
+		t.Fatalf("expected denial probes: %#v", plan.DenialProbes)
 	}
 }
 
@@ -212,7 +212,7 @@ func TestPackageWindowsTemporaryEvidencePackagesAndRedacts(t *testing.T) {
 		ReleaseVerificationPath: fixture.releaseVerificationPath,
 		AuditPath:               fixture.auditPath,
 		NoPersistenceDir:        fixture.noPersistenceDir,
-		ApprovalProbesDir:       fixture.approvalProbesDir,
+		DenialProbesDir:         fixture.denialProbesDir,
 		Now:                     time.Date(2026, 6, 29, 13, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -230,7 +230,7 @@ func TestPackageWindowsTemporaryEvidencePackagesAndRedacts(t *testing.T) {
 		filepath.Join(pkg.OutDir, "plan", "windows-temporary-plan.json"),
 		filepath.Join(pkg.OutDir, "plan", "run-windows-temporary.ps1"),
 		filepath.Join(pkg.OutDir, "evidence", "no-persistence", "scheduled-tasks.txt"),
-		filepath.Join(pkg.OutDir, "evidence", "approval-probes", "package-install.txt"),
+		filepath.Join(pkg.OutDir, "evidence", "denial-probes", "package-install.txt"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected packaged file %s: %v", path, err)
@@ -258,7 +258,7 @@ func TestPackageWindowsTemporaryEvidenceRejectsFailedReleaseVerification(t *test
 		ReleaseVerificationPath: fixture.releaseVerificationPath,
 		AuditPath:               fixture.auditPath,
 		NoPersistenceDir:        fixture.noPersistenceDir,
-		ApprovalProbesDir:       fixture.approvalProbesDir,
+		DenialProbesDir:         fixture.denialProbesDir,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ type windowsTemporaryPackageFixture struct {
 	releaseVerificationPath string
 	auditPath               string
 	noPersistenceDir        string
-	approvalProbesDir       string
+	denialProbesDir         string
 }
 
 func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification string) windowsTemporaryPackageFixture {
@@ -310,14 +310,14 @@ func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification strin
 	releaseVerificationPath := filepath.Join(root, "rdev-verify.json")
 	auditPath := filepath.Join(root, "audit.jsonl")
 	noPersistenceDir := filepath.Join(root, "no-persistence")
-	approvalProbesDir := filepath.Join(root, "approval-probes")
+	denialProbesDir := filepath.Join(root, "denial-probes")
 	if err := os.WriteFile(transcriptPath, []byte("temporary host transcript\nAuthorization: Bearer abcdefghijklmnop\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(releaseVerificationPath, []byte(releaseVerification+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(auditPath, []byte(`{"event":"host.registered"}`+"\n"+`{"event":"job.completed"}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(auditPath, []byte(`{"event":"session.joined"}`+"\n"+`{"event":"task.completed"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeEvidenceFiles(t, noPersistenceDir, []string{
@@ -328,7 +328,7 @@ func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification strin
 		"startup_folders.txt",
 		"firewall_rules.txt",
 	})
-	writeEvidenceFiles(t, approvalProbesDir, []string{
+	writeEvidenceFiles(t, denialProbesDir, []string{
 		"package.install.txt",
 		"elevation.request.txt",
 		"service.manage.txt",
@@ -342,7 +342,7 @@ func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification strin
 		releaseVerificationPath: releaseVerificationPath,
 		auditPath:               auditPath,
 		noPersistenceDir:        noPersistenceDir,
-		approvalProbesDir:       approvalProbesDir,
+		denialProbesDir:         denialProbesDir,
 	}
 }
 

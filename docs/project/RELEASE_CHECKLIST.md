@@ -76,7 +76,7 @@
 - [ ] No unrestricted shell tool.
 - [ ] No hardcoded secrets.
 - [ ] No target-host inbound public port by default.
-- [ ] Dangerous actions require approval gates.
+- [ ] Dangerous actions require explicit session capability, host-denial artifacts, or session interrupts.
 - [ ] Bootstrap does not weaken PowerShell execution policy or Group Policy.
 - [ ] Temporary Windows bootstrap verifies signed manifests and binaries before execution.
 - [ ] Acceptance evidence has been collected and redacted.

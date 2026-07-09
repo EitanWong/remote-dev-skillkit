@@ -4,42 +4,44 @@ import "github.com/EitanWong/remote-dev-skillkit/internal/model"
 
 type Capability string
 
+const DefaultWorkspaceRoot = "~"
+
 const (
-	CapabilityShellUser              Capability = "shell.user"
-	CapabilityPowerShellUser         Capability = "powershell.user"
-	CapabilityShellAdminJIT          Capability = "shell.admin.jit"
-	CapabilityFSRead                 Capability = "fs.read"
-	CapabilityFSWriteScoped          Capability = "fs.write.scoped"
-	CapabilityFileTransferRead       Capability = "file.transfer.read"
-	CapabilityFileTransferWrite      Capability = "file.transfer.write"
-	CapabilityProcessInspect         Capability = "process.inspect"
-	CapabilityElevationRequest       Capability = "elevation.request"
-	CapabilityPackageInstallApproval Capability = "package.install.requiresApproval"
-	CapabilityServiceModifyApproval  Capability = "service.modify.requiresApproval"
-	CapabilityGUIView                Capability = "gui.view"
-	CapabilityGUIControlApproval     Capability = "gui.control.requiresApproval"
-	CapabilityAppLaunch              Capability = "app.launch"
-	CapabilityAppClose               Capability = "app.close"
-	CapabilityURLOpen                Capability = "url.open"
-	CapabilityScreenScreenshot       Capability = "screen.screenshot"
-	CapabilityScreenRecord           Capability = "screen.record"
-	CapabilityWindowInspect          Capability = "window.inspect"
-	CapabilityWindowFocus            Capability = "window.focus"
-	CapabilityWindowMove             Capability = "window.move"
-	CapabilityInputKeyboard          Capability = "input.keyboard"
-	CapabilityInputMouse             Capability = "input.mouse"
-	CapabilityClipboardRead          Capability = "clipboard.read"
-	CapabilityClipboardWrite         Capability = "clipboard.write"
-	CapabilityUnattendedAccess       Capability = "unattended.access"
-	CapabilityNetworkDiscoveryScoped Capability = "network.discovery.scoped"
-	CapabilityNetworkProbeLAN        Capability = "network.probe.lan"
-	CapabilityRelayUse               Capability = "relay.use"
-	CapabilityMeshUse                Capability = "mesh.use"
-	CapabilitySSHTunnel              Capability = "ssh.tunnel"
-	CapabilityDownstreamControl      Capability = "downstream.control.scoped"
-	CapabilityDevCodex               Capability = "dev.codex"
-	CapabilityDevClaudeCode          Capability = "claude-code.run"
-	CapabilityDevACP                 Capability = "acpx.run"
+	CapabilityShellUser                   Capability = "shell.user"
+	CapabilityPowerShellUser              Capability = "powershell.user"
+	CapabilityShellAdminJIT               Capability = "shell.admin.jit"
+	CapabilityFSRead                      Capability = "fs.read"
+	CapabilityFSWriteScoped               Capability = "fs.write.scoped"
+	CapabilityFileTransferRead            Capability = "file.transfer.read"
+	CapabilityFileTransferWrite           Capability = "file.transfer.write"
+	CapabilityProcessInspect              Capability = "process.inspect"
+	CapabilityElevationRequest            Capability = "elevation.request"
+	CapabilityPackageInstallAuthorization Capability = "package.install.requiresAuthorization"
+	CapabilityServiceModifyAuthorization  Capability = "service.modify.requiresAuthorization"
+	CapabilityGUIView                     Capability = "gui.view"
+	CapabilityGUIControlAuthorization     Capability = "gui.control.requiresAuthorization"
+	CapabilityAppLaunch                   Capability = "app.launch"
+	CapabilityAppClose                    Capability = "app.close"
+	CapabilityURLOpen                     Capability = "url.open"
+	CapabilityScreenScreenshot            Capability = "screen.screenshot"
+	CapabilityScreenRecord                Capability = "screen.record"
+	CapabilityWindowInspect               Capability = "window.inspect"
+	CapabilityWindowFocus                 Capability = "window.focus"
+	CapabilityWindowMove                  Capability = "window.move"
+	CapabilityInputKeyboard               Capability = "input.keyboard"
+	CapabilityInputMouse                  Capability = "input.mouse"
+	CapabilityClipboardRead               Capability = "clipboard.read"
+	CapabilityClipboardWrite              Capability = "clipboard.write"
+	CapabilityUnattendedAccess            Capability = "unattended.access"
+	CapabilityNetworkDiscoveryScoped      Capability = "network.discovery.scoped"
+	CapabilityNetworkProbeLAN             Capability = "network.probe.lan"
+	CapabilityRelayUse                    Capability = "relay.use"
+	CapabilityMeshUse                     Capability = "mesh.use"
+	CapabilitySSHTunnel                   Capability = "ssh.tunnel"
+	CapabilityDownstreamControl           Capability = "downstream.control.scoped"
+	CapabilityDevCodex                    Capability = "dev.codex"
+	CapabilityDevClaudeCode               Capability = "claude-code.run"
+	CapabilityDevACP                      Capability = "acpx.run"
 )
 
 func TemporaryDefaults() []Capability {
@@ -58,10 +60,10 @@ func TemporaryDefaults() []Capability {
 func IsDangerous(cap Capability) bool {
 	switch cap {
 	case CapabilityShellAdminJIT,
-		CapabilityPackageInstallApproval,
-		CapabilityServiceModifyApproval,
+		CapabilityPackageInstallAuthorization,
+		CapabilityServiceModifyAuthorization,
 		CapabilityGUIView,
-		CapabilityGUIControlApproval,
+		CapabilityGUIControlAuthorization,
 		CapabilityAppLaunch,
 		CapabilityAppClose,
 		CapabilityURLOpen,
@@ -82,11 +84,11 @@ func IsDangerous(cap Capability) bool {
 }
 
 type Explanation struct {
-	Mode       string `json:"mode"`
-	Capability string `json:"capability"`
-	Allowed    bool   `json:"allowed"`
-	Approval   bool   `json:"approval_required"`
-	Reason     string `json:"reason"`
+	Mode          string `json:"mode"`
+	Capability    string `json:"capability"`
+	Allowed       bool   `json:"allowed"`
+	Authorization bool   `json:"authorization_required"`
+	Reason        string `json:"reason"`
 }
 
 func Explain(mode model.HostMode, capability Capability) Explanation {
@@ -103,21 +105,21 @@ func Explain(mode model.HostMode, capability Capability) Explanation {
 		for _, allowed := range TemporaryDefaults() {
 			if capability == allowed {
 				return Explanation{
-					Mode:       string(mode),
-					Capability: string(capability),
-					Allowed:    true,
-					Approval:   false,
-					Reason:     "allowed by temporary-mode defaults",
+					Mode:          string(mode),
+					Capability:    string(capability),
+					Allowed:       true,
+					Authorization: false,
+					Reason:        "allowed by temporary-mode defaults",
 				}
 			}
 		}
 		if IsDangerous(capability) {
 			return Explanation{
-				Mode:       string(mode),
-				Capability: string(capability),
-				Allowed:    true,
-				Approval:   true,
-				Reason:     "available only through explicit approval gate",
+				Mode:          string(mode),
+				Capability:    string(capability),
+				Allowed:       true,
+				Authorization: true,
+				Reason:        "available only through explicit session capability or operator-reviewed interrupt",
 			}
 		}
 		return Explanation{
@@ -130,19 +132,19 @@ func Explain(mode model.HostMode, capability Capability) Explanation {
 
 	if IsDangerous(capability) {
 		return Explanation{
-			Mode:       string(mode),
-			Capability: string(capability),
-			Allowed:    true,
-			Approval:   true,
-			Reason:     "dangerous capability requires approval",
+			Mode:          string(mode),
+			Capability:    string(capability),
+			Allowed:       true,
+			Authorization: true,
+			Reason:        "dangerous capability requires authorization",
 		}
 	}
 
 	return Explanation{
-		Mode:       string(mode),
-		Capability: string(capability),
-		Allowed:    true,
-		Approval:   false,
-		Reason:     "allowed subject to host and job policy",
+		Mode:          string(mode),
+		Capability:    string(capability),
+		Allowed:       true,
+		Authorization: false,
+		Reason:        "allowed subject to host and task policy",
 	}
 }

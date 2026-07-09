@@ -24,8 +24,6 @@ type WindowsManagedServiceOptions struct {
 	Description              string
 	IdentityStore            string
 	TrustStore               string
-	NonceStore               string
-	ApprovalStore            string
 	WorkspaceLockStore       string
 	ReleaseBundle            string
 	ReleaseRootPublicKey     string
@@ -82,8 +80,6 @@ func RunWindowsManagedServicePlan(opts WindowsManagedServiceOptions) (WindowsMan
 		ManifestURL:              resolved.ManifestURL,
 		IdentityStorePath:        resolved.IdentityStore,
 		TrustStorePath:           resolved.TrustStore,
-		NonceStorePath:           resolved.NonceStore,
-		ApprovalStorePath:        resolved.ApprovalStore,
 		WorkspaceLockStorePath:   resolved.WorkspaceLockStore,
 		ReleaseBundlePath:        resolved.ReleaseBundle,
 		ReleaseRootPublicKey:     resolved.ReleaseRootPublicKey,
@@ -140,9 +136,9 @@ func RunWindowsManagedServicePlan(opts WindowsManagedServiceOptions) (WindowsMan
 			"Elevated PowerShell transcript for reviewed sc.exe create and description commands.",
 			"sc.exe query and sc.exe qc transcript after creation.",
 			"rdev host startup output proving the release-bundle gate passed before registration.",
-			"Gateway host registration, approval, trust refresh, and managed host audit events.",
+			"Gateway session join, endpoint trust refresh, and managed host audit events.",
 			"Service start transcript and reconnect evidence after login or reboot.",
-			"Managed coding or repair job evidence bundle with diff, logs, cancellation, and approval-required artifacts.",
+			"Managed coding or repair session evidence with diff, logs, cancellation, and host-denial probe artifacts.",
 			"Service stop transcript.",
 			"sc.exe delete uninstall transcript.",
 			"Evidence that attended-temporary mode remains non-persistent and is not represented by this managed service.",
@@ -172,8 +168,6 @@ type windowsManagedServiceResolvedOptions struct {
 	Description              string
 	IdentityStore            string
 	TrustStore               string
-	NonceStore               string
-	ApprovalStore            string
 	WorkspaceLockStore       string
 	ReleaseBundle            string
 	ReleaseRootPublicKey     string
@@ -206,8 +200,6 @@ func resolveWindowsManagedServiceOptions(outDir string, opts WindowsManagedServi
 		Description:              firstNonEmptyString(opts.Description, "Remote Dev Skillkit managed host"),
 		IdentityStore:            firstNonEmptyString(opts.IdentityStore, programData+`\identity.json`),
 		TrustStore:               firstNonEmptyString(opts.TrustStore, programData+`\trust-bundle.json`),
-		NonceStore:               firstNonEmptyString(opts.NonceStore, programData+`\nonces.json`),
-		ApprovalStore:            firstNonEmptyString(opts.ApprovalStore, programData+`\approvals.json`),
 		WorkspaceLockStore:       firstNonEmptyString(opts.WorkspaceLockStore, programData+`\workspace-locks`),
 		ReleaseBundle:            strings.TrimSpace(opts.ReleaseBundle),
 		ReleaseRootPublicKey:     strings.TrimSpace(opts.ReleaseRootPublicKey),
@@ -230,8 +222,6 @@ func windowsManagedServiceChecks(plan WindowsManagedServicePlan, opts windowsMan
 		{Name: "workspace_lock_store_arg", Passed: strings.Contains(args, "--workspace-lock-store\x00"+opts.WorkspaceLockStore), Detail: opts.WorkspaceLockStore},
 		{Name: "identity_store_arg", Passed: strings.Contains(args, "--identity-store\x00"+opts.IdentityStore), Detail: opts.IdentityStore},
 		{Name: "trust_store_arg", Passed: strings.Contains(args, "--trust-store\x00"+opts.TrustStore), Detail: opts.TrustStore},
-		{Name: "nonce_store_arg", Passed: strings.Contains(args, "--nonce-store\x00"+opts.NonceStore), Detail: opts.NonceStore},
-		{Name: "approval_store_arg", Passed: strings.Contains(args, "--approval-store\x00"+opts.ApprovalStore), Detail: opts.ApprovalStore},
 		{Name: "enrollment_arg", Passed: enrollmentConfigured(args), Detail: "ticket-code or manifest-url"},
 		{Name: "release_bundle_arg", Passed: strings.Contains(args, "--release-bundle\x00"+opts.ReleaseBundle), Detail: opts.ReleaseBundle},
 		{Name: "release_root_arg", Passed: opts.ReleaseRootPublicKey != "" && strings.Contains(args, "--release-root-public-key\x00"+opts.ReleaseRootPublicKey)},
@@ -459,8 +449,8 @@ func missingWindowsManagedEvidence(evidence []string) string {
 		"sc.exe qc",
 		"release-bundle gate",
 		"reconnect",
-		"evidence bundle",
-		"approval-required",
+		"session evidence",
+		"host-denial",
 		"sc.exe delete",
 		"temporary mode",
 	}

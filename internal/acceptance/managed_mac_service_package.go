@@ -173,8 +173,8 @@ func PackageManagedMacServiceEvidence(opts ManagedMacServicePackageOptions) (Man
 	add("stop_transcript_present", fileEntryKindPresent(files, "stop-transcript"), opts.StopTranscriptPath)
 	add("uninstall_transcript_present", fileEntryKindPresent(files, "uninstall-transcript"), opts.UninstallTranscriptPath)
 	add("managed_evidence_manifest_present", packagePathExists(files, "evidence/managed-mac/evidence/manifest.json"), opts.ManagedReportPath)
-	add("approval_evidence_manifest_present", packagePathExists(files, "evidence/managed-mac/approval-evidence/manifest.json"), opts.ManagedReportPath)
-	add("approval_required_evidence_present", packageTreeContains(outDir, "evidence/managed-mac/approval-evidence", "approval-required"), opts.ManagedReportPath)
+	add("side_effect_probe_evidence_manifest_present", packagePathExists(files, "evidence/managed-mac/side-effect-probe-evidence/manifest.json"), opts.ManagedReportPath)
+	add("side_effect_probe_denial_evidence_present", packageTreeContains(outDir, "evidence/managed-mac/side-effect-probe-evidence", "rdev.host-denial.v1"), opts.ManagedReportPath)
 
 	if redactor.Redacted() {
 		pkg.RedactionRuleCounts = redactor.Counts()
@@ -218,9 +218,9 @@ func copyManagedMacEvidenceTrees(root, reportPath string, redactor *shelladapter
 	if strings.TrimSpace(evidenceDir) == "" || !pathExists(evidenceDir) {
 		evidenceDir = filepath.Join(baseDir, "evidence")
 	}
-	approvalDir := resolveReportPath(baseDir, report.ApprovalEvidenceDir, "approval-evidence")
-	if strings.TrimSpace(approvalDir) == "" || !pathExists(approvalDir) {
-		approvalDir = filepath.Join(baseDir, "approval-evidence")
+	probeDir := resolveReportPath(baseDir, report.ProbeEvidenceDir, "side-effect-probe-evidence")
+	if strings.TrimSpace(probeDir) == "" || !pathExists(probeDir) {
+		probeDir = filepath.Join(baseDir, "side-effect-probe-evidence")
 	}
 	var files []AcceptancePackageFile
 	evidenceFiles, evidenceErr := copyEvidenceTree(root, "evidence/managed-mac/evidence", "managed-mac-evidence", evidenceDir, redactor)
@@ -230,12 +230,12 @@ func copyManagedMacEvidenceTrees(root, reportPath string, redactor *shelladapter
 		files = append(files, evidenceFiles...)
 		add("managed_evidence_dir_copied", len(evidenceFiles) > 0, fmt.Sprintf("%d", len(evidenceFiles)))
 	}
-	approvalFiles, approvalErr := copyEvidenceTree(root, "evidence/managed-mac/approval-evidence", "managed-mac-approval-evidence", approvalDir, redactor)
-	if approvalErr != nil {
-		add("managed_approval_evidence_dir_copied", false, approvalErr.Error())
+	probeFiles, probeErr := copyEvidenceTree(root, "evidence/managed-mac/side-effect-probe-evidence", "managed-mac-side-effect-probe-evidence", probeDir, redactor)
+	if probeErr != nil {
+		add("managed_side_effect_probe_evidence_dir_copied", false, probeErr.Error())
 	} else {
-		files = append(files, approvalFiles...)
-		add("managed_approval_evidence_dir_copied", len(approvalFiles) > 0, fmt.Sprintf("%d", len(approvalFiles)))
+		files = append(files, probeFiles...)
+		add("managed_side_effect_probe_evidence_dir_copied", len(probeFiles) > 0, fmt.Sprintf("%d", len(probeFiles)))
 	}
 	return files
 }

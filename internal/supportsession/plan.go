@@ -1,6 +1,7 @@
 package supportsession
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
+	"github.com/EitanWong/remote-dev-skillkit/internal/cdnopt"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
@@ -32,6 +34,7 @@ const CreatedSchemaVersion = "rdev.support-session-created.v1"
 const StartedSchemaVersion = "rdev.support-session-started.v1"
 const StatusSchemaVersion = "rdev.support-session-status.v1"
 const StatusFileSchemaVersion = "rdev.support-session-status-file.v1"
+const BootstrapConnectorSchemaVersion = "rdev.support-session-bootstrap-connector.v1"
 const HandoffTextFileSchemaVersion = "rdev.support-session-handoff-text-file.v1"
 const ConnectedReportFileSchemaVersion = "rdev.support-session-connected-report-file.v1"
 const ConnectionAttemptPolicySchemaVersion = "rdev.connection-attempt-policy.v1"
@@ -54,19 +57,22 @@ const (
 	targetHTTPMaxTimeSeconds        = 10
 	targetHTTPRetries               = 1
 	targetHTTPRetryDelaySeconds     = 1
+
+	supportSessionHelperGzipBudgetBytes = int64(8 * 1024 * 1024)
+	supportSessionBootstrapTargetBytes  = int64(1 * 1024 * 1024)
 )
 
 type Options struct {
-	RepoRoot    string
-	WorkDir     string
-	GatewayURL  string
-	Addr        string
-	Target      string
-	Reason      string
-	TTLSeconds  int
-	AutoApprove bool
-	Locale      string
-	RdevCommand string
+	RepoRoot     string
+	WorkDir      string
+	GatewayURL   string
+	Addr         string
+	Target       string
+	Reason       string
+	TTLSeconds   int
+	AutoActivate bool
+	Locale       string
+	RdevCommand  string
 }
 
 type PrepareOptions struct {
@@ -80,16 +86,16 @@ type PrepareOptions struct {
 }
 
 type HandoffOptions struct {
-	RepoRoot    string
-	WorkDir     string
-	Addr        string
-	GatewayURL  string
-	Target      string
-	Reason      string
-	TTLSeconds  int
-	AutoApprove bool
-	Locale      string
-	RdevCommand string
+	RepoRoot     string
+	WorkDir      string
+	Addr         string
+	GatewayURL   string
+	Target       string
+	Reason       string
+	TTLSeconds   int
+	AutoActivate bool
+	Locale       string
+	RdevCommand  string
 }
 
 type RemoteControlEntryOptions struct {
@@ -120,13 +126,13 @@ type GatewayEnvCandidate struct {
 }
 
 type connectivityHelperDefinition struct {
-	ID               string
-	Kind             string
-	GatewayEnv       string
-	StartArgvEnv     string
-	InstallActionEnv string
-	AllowedTools     []string
-	ApprovalRequired []string
+	ID                    string
+	Kind                  string
+	GatewayEnv            string
+	StartArgvEnv          string
+	InstallActionEnv      string
+	AllowedTools          []string
+	AuthorizationRequired []string
 }
 
 func BuildHandoff(opts HandoffOptions) map[string]any {
@@ -177,13 +183,13 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	// selection in connect --start.
 	startGatewayURL := resolvedCreateGatewayURL
 	createArgs := map[string]any{
-		"gateway_url":  resolvedCreateGatewayURL,
-		"target":       target,
-		"reason":       reason,
-		"ttl_seconds":  ttl,
-		"auto_approve": opts.AutoApprove,
-		"locale":       locale,
-		"rdev_command": rdevCommand,
+		"gateway_url":   resolvedCreateGatewayURL,
+		"target":        target,
+		"reason":        reason,
+		"ttl_seconds":   ttl,
+		"auto_activate": opts.AutoActivate,
+		"locale":        locale,
+		"rdev_command":  rdevCommand,
 	}
 	startCommand := []string{
 		rdevCommand, "support-session", "start",
@@ -200,10 +206,10 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	if startGatewayURL != "" {
 		startCommand = append(startCommand, "--gateway-url", startGatewayURL)
 	}
-	if opts.AutoApprove {
-		startCommand = append(startCommand, "--auto-approve")
+	if opts.AutoActivate {
+		startCommand = append(startCommand, "--auto-activate")
 	} else {
-		startCommand = append(startCommand, "--auto-approve=false")
+		startCommand = append(startCommand, "--auto-activate=false")
 	}
 	connectStartCommand := []string{
 		rdevCommand, "support-session", "connect",
@@ -221,10 +227,10 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	if startGatewayURL != "" {
 		connectStartCommand = append(connectStartCommand, "--gateway-url", startGatewayURL)
 	}
-	if opts.AutoApprove {
-		connectStartCommand = append(connectStartCommand, "--auto-approve")
+	if opts.AutoActivate {
+		connectStartCommand = append(connectStartCommand, "--auto-activate")
 	} else {
-		connectStartCommand = append(connectStartCommand, "--auto-approve=false")
+		connectStartCommand = append(connectStartCommand, "--auto-activate=false")
 	}
 	return map[string]any{
 		"schema_version":           HandoffSchemaVersion,
@@ -246,7 +252,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 			Locale:       locale,
 			GatewayURL:   gatewayURL,
 			Candidates:   gatewayCandidates,
-			AutoApprove:  opts.AutoApprove,
+			AutoActivate: opts.AutoActivate,
 			RdevCommand:  rdevCommand,
 			NeedStartNow: selectedPath != "create-with-reachable-gateway",
 		}),
@@ -254,8 +260,8 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		"gateway_url_candidates": gatewayCandidates,
 		"target":                 target,
 		"locale":                 locale,
-		"auto_approve": map[string]any{
-			"enabled": opts.AutoApprove,
+		"auto_activate": map[string]any{
+			"enabled": opts.AutoActivate,
 			"scope":   "attended-temporary first host only for this standard visible session",
 		},
 		"human_surface_rule": "humans receive only target_handoff_envelope.full_text from the next tool output; user_handoff remains a compatibility fallback",
@@ -266,7 +272,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 			"ExecutionPolicy Bypass",
 			"hidden install",
 			"UAC or sudo bypass",
-			"service, firewall, DNS, route, credential, paid relay, or cloud changes without explicit approval",
+			"service, firewall, DNS, route, credential, paid relay, or cloud changes without explicit authorization",
 		},
 	}
 }
@@ -288,10 +294,10 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 		},
 	}
 	payload["fresh_agent_connect_contract"] = freshAgentConnectContract(freshAgentConnectContractOptions{
-		Phase:       selectedPath,
-		Ready:       false,
-		RdevCommand: rdevCommandFromHandoff(handoff),
-		AutoApprove: autoApproveFromHandoff(handoff),
+		Phase:        selectedPath,
+		Ready:        false,
+		RdevCommand:  rdevCommandFromHandoff(handoff),
+		AutoActivate: autoActivateFromHandoff(handoff),
 	})
 	if selectedPath == "create-with-reachable-gateway" {
 		payload["ready_to_send_to_human"] = false
@@ -359,13 +365,14 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"connectivity_helper_preflight":              created["connectivity_helper_preflight"],
 		"connection_entry_runner_recommendation":     created["connection_entry_runner_recommendation"],
 		"agent_connection_runbook":                   created["agent_connection_runbook"],
+		"rdev_bootstrap_connector":                   created["rdev_bootstrap_connector"],
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
 			Phase:              "created-with-reachable-gateway",
 			Ready:              true,
 			TicketCode:         stringFromMap(created, "ticket_code"),
 			RdevCommand:        rdevCommandFromRunbook(created["agent_connection_runbook"]),
 			UserHandoffPresent: created["user_handoff"] != nil,
-			AutoApprove:        boolFromMap(created, "auto_approve"),
+			AutoActivate:       boolFromMap(created, "auto_activate"),
 		}),
 		"mcp_follow_up":      created["mcp_follow_up"],
 		"agent_next_step":    "send target_handoff_envelope.full_text to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
@@ -381,10 +388,11 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 }
 
 type StatusOptions struct {
-	TicketCode string
-	Hosts      []model.Host
-	Locale     string
-	GatewayURL string
+	TicketCode  string
+	Hosts       []model.Host
+	Locale      string
+	GatewayURL  string
+	Preconnects []model.SupportSessionPreconnect
 	// Ticket, when non-nil, adds ticket expiry information to the status
 	// response so agents and users can see how much time remains.
 	Ticket *model.Ticket
@@ -400,7 +408,7 @@ type CreatedOptions struct {
 	Target                   string
 	Locale                   string
 	RdevCommand              string
-	AutoApprove              bool
+	AutoActivate             bool
 	TargetBootstrapReadiness any
 }
 
@@ -453,8 +461,8 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"schema_version": "rdev.support-session-foreground-feedback.v1",
 			"stream":         "stderr",
 			"event_prefix":   "rdev support session event: ",
-			"events":         []string{"waiting", "pending-approval", "connected"},
-			"connected_rule": "when event=connected, immediately tell the user the connection has been established before creating jobs",
+			"events":         []string{"waiting", "pending-activation", "connected"},
+			"connected_rule": "when event=connected, immediately tell the user the connection has been established before submitting session tasks",
 			"agent_rule":     "parse foreground feedback events from stderr when this command is kept open; read status_file.path or use the status watcher as fallback sources of truth",
 		},
 		"mcp_follow_up":         session["mcp_follow_up"],
@@ -468,13 +476,14 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		),
 		"connectivity_helper_preflight":          session["connectivity_helper_preflight"],
 		"connection_entry_runner_recommendation": session["connection_entry_runner_recommendation"],
+		"rdev_bootstrap_connector":               session["rdev_bootstrap_connector"],
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
 			Phase:               "foreground-started",
 			Ready:               true,
 			TicketCode:          stringFromMap(session, "ticket_code"),
 			RdevCommand:         rdevCommandFromRunbook(session["agent_connection_runbook"]),
 			UserHandoffPresent:  session["user_handoff"] != nil,
-			AutoApprove:         boolFromMap(session, "auto_approve"),
+			AutoActivate:        boolFromMap(session, "auto_activate"),
 			ReadyFile:           readyFile,
 			StatusFile:          statusFile,
 			HandoffTextFile:     handoffTextFile,
@@ -538,7 +547,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"schema_version": ConnectedReportFileSchemaVersion,
 			"path":           connectedReportFile,
 			"contains":       "connected_next_steps.user_report",
-			"agent_rule":     "when this file exists or status_file.path reports connected=true, send this plain text to the user before creating jobs",
+			"agent_rule":     "when this file exists or status_file.path reports connected=true, send this plain text to the user before submitting session tasks",
 		}
 	}
 	return payload
@@ -589,27 +598,31 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 	gitPath, _ := exec.LookPath("git")
 	rdevPath, _ := exec.LookPath("rdev")
 	currentExecutable, _ := os.Executable()
-	repoValid := pathExists(filepath.Join(repoRoot, "go.mod")) && pathExists(filepath.Join(repoRoot, "cmd", "rdev", "main.go"))
+	repoValid := pathExists(filepath.Join(repoRoot, "go.mod")) && pathExists(filepath.Join(repoRoot, "cmd", "rdev-host", "main.go"))
 	assets := supportSessionAssetSpecs(binDir)
 	missingInputs := []string{}
 	if strings.TrimSpace(goPath) == "" {
 		missingInputs = append(missingInputs, "go binary is required to build missing helper assets from source")
 	}
 	if !repoValid {
-		missingInputs = append(missingInputs, "valid remote-dev-skillkit checkout with go.mod and cmd/rdev/main.go")
+		missingInputs = append(missingInputs, "valid remote-dev-skillkit checkout with go.mod and cmd/rdev-host/main.go")
 	}
 	assetReports := make([]map[string]any, 0, len(assets))
 	allAssetsReady := true
 	for _, asset := range assets {
 		assetReady := false
 		report := map[string]any{
-			"id":           asset.ID,
-			"goos":         asset.GOOS,
-			"goarch":       asset.GOARCH,
-			"path":         asset.Path,
-			"asset_url":    gatewayURL + "/assets/" + asset.Name,
-			"sha256_url":   gatewayURL + "/assets/" + asset.Name + ".sha256",
-			"build_status": "not-requested",
+			"id":                            asset.ID,
+			"goos":                          asset.GOOS,
+			"goarch":                        asset.GOARCH,
+			"path":                          asset.Path,
+			"asset_url":                     supportSessionAssetURL(gatewayURL, asset.Name, ""),
+			"gzip_asset_url":                supportSessionAssetURL(gatewayURL, asset.Name, ".gz"),
+			"sha256_url":                    supportSessionAssetURL(gatewayURL, asset.Name, ".sha256"),
+			"build_status":                  "not-requested",
+			"asset_role":                    "full-helper",
+			"used_by_default_first_connect": true,
+			"native_bootstrap_asset":        false,
 		}
 		if fileExists(asset.Path) {
 			sum, err := fileSHA256Hex(asset.Path)
@@ -619,6 +632,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			} else {
 				report["present"] = true
 				report["sha256"] = sum
+				applySupportSessionAssetDownloadEvidence(report, asset.Path)
 				if opts.BuildAssets && repoValid && strings.TrimSpace(goPath) != "" {
 					report["previous_sha256"] = sum
 					report["build_status"] = "rebuild-requested"
@@ -645,7 +659,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 				report["error"] = err.Error()
 				// do not continue; fall through to prebuilt fallback below
 			} else {
-				cmd := exec.CommandContext(ctx, goPath, "build", "-o", asset.Path, "./cmd/rdev")
+				cmd := exec.CommandContext(ctx, goPath, supportSessionRdevBuildArgs(asset.Path)...)
 				cmd.Dir = repoRoot
 				cmd.Env = append(os.Environ(), "GOOS="+asset.GOOS, "GOARCH="+asset.GOARCH, "CGO_ENABLED=0")
 				output, err := cmd.CombinedOutput()
@@ -666,6 +680,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 						report["present"] = true
 						report["build_status"] = "built"
 						report["sha256"] = sum
+						applySupportSessionAssetDownloadEvidence(report, asset.Path)
 						assetReady = true
 					}
 				}
@@ -684,6 +699,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 						report["present"] = true
 						report["build_status"] = "copied-from-prebuilt"
 						report["sha256"] = sum
+						applySupportSessionAssetDownloadEvidence(report, asset.Path)
 						assetReady = true
 					}
 				}
@@ -694,6 +710,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		}
 		assetReports = append(assetReports, report)
 	}
+	assetDownloadSummary := supportSessionAssetDownloadSummary(assetReports)
 	localRdevUsable := strings.TrimSpace(rdevPath) != ""
 	if !localRdevUsable && strings.TrimSpace(currentExecutable) != "" && strings.Contains(filepath.Base(currentExecutable), "rdev") {
 		localRdevUsable = true
@@ -723,14 +740,14 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		}),
 		"target":                        target,
 		"human_gets_one_command":        true,
-		"auto_approval_contract":        "attended-temporary first host only when created by support-session start/create",
+		"auto_activation_contract":      "attended-temporary first host only when created by support-session start/create",
 		"requires_human_decision_first": []string{"company or owner authorization when the target is not clearly operator-owned"},
 	}
 	recoveryActions := []string{
 		"prefer rdev support-session connect --start when no gateway is running; it creates the ticket, prints one target command, prepares helper assets, and watches through support-session status",
 		"if local_rdev_usable is false, run go install ./cmd/rdev from a valid checkout or use go run ./cmd/rdev bootstrap agent-plan --repo-root . as a temporary planner",
 		"if target_bootstrap_self_repair is false, rerun rdev support-session prepare --build-assets from a valid checkout before giving commands to targets that may not have rdev installed",
-		"do not write custom PowerShell, relay, approval polling, ticket substitution, or bootstrap glue",
+		"do not write custom PowerShell, relay, activation polling, ticket substitution, or bootstrap glue",
 	}
 	return map[string]any{
 		"schema_version":         PrepareSchemaVersion,
@@ -752,10 +769,24 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			"host_capabilities":  hostcap.Detect(ctx),
 		},
 		"asset_report": map[string]any{
-			"schema_version": "rdev.support-session-assets.v1",
-			"build_assets":   opts.BuildAssets,
-			"all_ready":      allAssetsReady,
-			"assets":         assetReports,
+			"schema_version":                                "rdev.support-session-assets.v1",
+			"build_assets":                                  opts.BuildAssets,
+			"all_ready":                                     allAssetsReady,
+			"download_budget_bytes":                         supportSessionHelperGzipBudgetBytes,
+			"all_gzip_within_budget":                        assetDownloadSummary["all_gzip_within_budget"],
+			"bootstrap_target_bytes":                        supportSessionBootstrapTargetBytes,
+			"bootstrap_connector_recommended":               assetDownloadSummary["bootstrap_connector_recommended"],
+			"first_connect_size_strategy":                   assetDownloadSummary["first_connect_size_strategy"],
+			"default_first_connect_surface":                 assetDownloadSummary["default_first_connect_surface"],
+			"default_runner_download_kind":                  assetDownloadSummary["default_runner_download_kind"],
+			"first_task_requires_full_helper":               assetDownloadSummary["first_task_requires_full_helper"],
+			"publishes_native_first_connect_asset":          assetDownloadSummary["publishes_native_first_connect_asset"],
+			"default_full_helper_gzip_estimated_max_bytes":  assetDownloadSummary["default_full_helper_gzip_estimated_max_bytes"],
+			"default_full_helper_meets_bootstrap_target":    assetDownloadSummary["default_full_helper_meets_bootstrap_target"],
+			"native_first_connect_asset":                    assetDownloadSummary["native_first_connect_asset"],
+			"default_first_connect_agent_interpretation":    assetDownloadSummary["default_first_connect_agent_interpretation"],
+			"native_first_connect_asset_publication_policy": assetDownloadSummary["native_first_connect_asset_publication_policy"],
+			"assets": assetReports,
 		},
 		"connectivity_strategy":         connectivityStrategy(gatewayURL, target, gatewayCandidates),
 		"gateway_candidate_preflight":   gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
@@ -780,6 +811,10 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 	}, nil
 }
 
+func supportSessionRdevBuildArgs(outputPath string) []string {
+	return []string{"build", "-trimpath", "-ldflags=-s -w", "-o", outputPath, "./cmd/rdev-host"}
+}
+
 func connectivityStrategy(gatewayURL, target string, gatewayCandidates []GatewayURLCandidate) map[string]any {
 	return map[string]any{
 		"schema_version":         "rdev.support-session-connectivity-strategy.v1",
@@ -802,14 +837,14 @@ func connectivityStrategy(gatewayURL, target string, gatewayCandidates []Gateway
 		"automatic_downgrade": []string{
 			"if WSS is blocked, rdev host serve --transport auto falls back to HTTPS long-poll",
 			"if long-poll is blocked or unstable, rdev host serve --transport auto falls back to short polling",
-			"after registration, rdev host serve --transport auto can switch to another signed join-manifest gateway candidate if the current gateway fails before processing jobs",
+			"after registration, rdev host serve --transport auto can switch to another signed join-manifest gateway candidate if the current gateway fails before processing session tasks",
 			"if a direct gateway health check fails, try LAN/private gateway candidates and configured proxy variables before helper paths",
 			"if a configured helper path fails, report manual_action_required instead of guessing credentials or mutating network policy",
 		},
 		"automatic_upgrade": []string{
 			"prefer LAN/private gateway when probes show both sides are routed locally",
 			"prefer WSS/mTLS-capable gateway when available for lower latency",
-			"for owned recurring machines, use a reviewed managed Connection Entry only after explicit persistence approval",
+			"for owned recurring machines, use a reviewed managed Connection Entry only after explicit persistence authorization",
 			"after reconnect evidence is available, update runtime memory with the best known stable path for this host",
 		},
 		"read_only_probes": []string{
@@ -818,7 +853,7 @@ func connectivityStrategy(gatewayURL, target string, gatewayCandidates []Gateway
 			"detect proxy environment variable names without logging secret values",
 			"probe gateway /healthz and signed manifest reachability",
 			"detect ssh, frpc, chisel, tailscale, headscale, and wg/wireguard tools",
-			"inspect route/LAN hints only within the operator-approved scope",
+			"inspect route/LAN hints only within the operator-authorized scope",
 		},
 		"auto_use_when_configured": []string{
 			"HTTP(S) proxy environment variables",
@@ -827,7 +862,7 @@ func connectivityStrategy(gatewayURL, target string, gatewayCandidates []Gateway
 			"existing mesh gateway URL in RDEV_MESH_GATEWAY_URL",
 			"existing VPN gateway URL in RDEV_VPN_GATEWAY_URL",
 		},
-		"approval_required_for": []string{
+		"authorization_required_for": []string{
 			"installing tunnel, mesh, VPN, driver, service, or firewall components",
 			"creating or editing SSH keys/config",
 			"opening ports or changing router/NAT/firewall/DNS/routes",
@@ -859,7 +894,7 @@ func gatewayCandidatePreflight(gatewayURL, target string, gatewayCandidates []Ga
 		},
 		"ask_human_only_for": []string{
 			"authorization or company policy",
-			"persistent managed-host approval",
+			"persistent managed-host activation",
 			"privileged firewall, DNS, route, service, driver, or credential changes",
 			"real hosted/relay/mesh/VPN/SSH endpoint credentials when none are configured",
 		},
@@ -950,7 +985,7 @@ type agentConnectionRunbookOptions struct {
 	Locale       string
 	GatewayURL   string
 	Candidates   []GatewayURLCandidate
-	AutoApprove  bool
+	AutoActivate bool
 	RdevCommand  string
 	NeedStartNow bool
 	TimedOut     bool
@@ -976,8 +1011,8 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 		"send only target_handoff_envelope.full_text to the target-side human",
 		"keep the target-side command/page and the local foreground gateway open while waiting",
 		"watch with foreground_feedback, connection_supervision.mcp_watch_call, or rdev.support_session.status wait=true",
-		"when connected=true, immediately report connected_next_steps.user_report before creating jobs",
-		"inspect capabilities, create the smallest scoped job, then review evidence before declaring work complete",
+		"when connected=true, immediately report connected_next_steps.user_report before submitting session tasks",
+		"inspect capabilities, submit the smallest scoped session task, then review evidence before declaring work complete",
 	}
 	if opts.NeedStartNow {
 		sequence = append([]string{"run cli_start_now_command before sending anything to the target-side human"}, sequence...)
@@ -1022,8 +1057,8 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 			"rule":        "use only to repair missing local helper assets or inspect gateway candidates before creating a fresh support-session entry",
 		},
 		"fresh_agent_failure_prevention": freshAgentFailurePrevention(),
-		"auto_approve": map[string]any{
-			"enabled": opts.AutoApprove,
+		"auto_activate": map[string]any{
+			"enabled": opts.AutoActivate,
 			"scope":   "standard attended-temporary first host only",
 		},
 		"gateway_candidate_summary": gatewayCandidateRunbookSummary(opts.Candidates),
@@ -1031,9 +1066,9 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 		"watch":                     watch,
 		"on_connected": []string{
 			"tell the user the connection has been established",
-			"call rdev.hosts.capabilities for the connected host",
+			"read rdev.sessions.status for the active Control Plane session",
 			"ask for task intent only if it is still unclear",
-			"create the smallest scoped job allowed by capabilities and policy",
+			"create the smallest scoped rdev.sessions.task allowed by capabilities and policy",
 		},
 		"on_timeout_or_failure": []string{
 			"read connection_recovery and gateway_candidate_preflight from the returned payload",
@@ -1041,7 +1076,7 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 			"if tunnel helpers are missing or blocked, report the standard manual_action_required output instead of writing cloudflared, SSH, or relay scripts",
 			"rerun rdev.support_session.prepare or rdev support-session prepare --build-assets",
 			"create a fresh Connection Entry with configured hosted/relay/mesh/VPN/SSH/cloudflared fallback when LAN-only paths are insufficient",
-			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
+			"ask one short question only for authorization, persistence authorization, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
 		},
 		"human_surface_rule": "target-side humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback",
 		"agent_rule":         "follow this runbook before choosing lower-level support-session tools; never make humans assemble low-level connection values",
@@ -1052,20 +1087,20 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 				"rdev.connection_entry.plan",
 				"rdev connection-entry plan",
 			},
-			"reason": "low-level invite and package materialization surfaces are for reviewed packaging or advanced workflows; fresh Agents should use support_session.connect so helper assets, auto-approval, foreground feedback, and status watching are generated together",
+			"reason": "low-level invite and package materialization surfaces are for reviewed packaging or advanced workflows; fresh Agents should use support_session.connect so helper assets, auto-activation, foreground feedback, and status watching are generated together",
 			"allowed_when": []string{
 				"an operator explicitly asks for package materialization",
-				"managed owned-host service planning has been explicitly approved",
+				"managed owned-host service planning has been explicitly authorized",
 				"support_session.connect or support_session.prepare returns a standard recovery instruction that names Connection Entry planning",
 			},
 		},
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport/checksum assembly",
-			"Agent-authored PowerShell or shell bootstrap, relay, approval, or polling scripts",
+			"Agent-authored PowerShell or shell bootstrap, relay, authorization, or polling scripts",
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
 			"UAC or sudo bypass",
-			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit approval",
+			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit authorization",
 		},
 	}
 }
@@ -1077,7 +1112,7 @@ type freshAgentConnectContractOptions struct {
 	GatewayURL          string
 	RdevCommand         string
 	UserHandoffPresent  bool
-	AutoApprove         bool
+	AutoActivate        bool
 	ReadyFile           string
 	StatusFile          string
 	HandoffTextFile     string
@@ -1106,7 +1141,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 		"ask_human_only_for": []string{
 			"company or device-owner authorization when not already confirmed",
 			"one of: target OS family only when a remote runner package must be materialized and target_os is auto",
-			"approval for privileged persistence, firewall/DNS/route/service/driver changes, credentials, or paid/cloud resources",
+			"authorization for privileged persistence, firewall/DNS/route/service/driver changes, credentials, or paid/cloud resources",
 		},
 		"do_not_ask_human_for": []string{
 			"ticket code",
@@ -1115,7 +1150,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 			"transport",
 			"release checksum",
 			"relay, mesh, VPN, or SSH flags",
-			"approval polling loops",
+			"activation polling loops",
 		},
 		"agent_must_not_generate": []string{
 			"PowerShell bootstrap code",
@@ -1126,8 +1161,8 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 			"hidden install or persistence",
 		},
 		"status_rule": "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, connected_report_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately",
-		"auto_approve": map[string]any{
-			"enabled": opts.AutoApprove,
+		"auto_activate": map[string]any{
+			"enabled": opts.AutoActivate,
 			"scope":   "first attended-temporary host for the standard visible support-session ticket only",
 		},
 	}
@@ -1173,8 +1208,8 @@ func rdevCommandFromHandoff(handoff map[string]any) string {
 	return "rdev"
 }
 
-func autoApproveFromHandoff(handoff map[string]any) bool {
-	value, ok := handoff["auto_approve"].(map[string]any)
+func autoActivateFromHandoff(handoff map[string]any) bool {
+	value, ok := handoff["auto_activate"].(map[string]any)
 	if !ok {
 		return false
 	}
@@ -1199,7 +1234,7 @@ func rdevCommandFromRunbook(value any) string {
 func freshAgentFailurePrevention() map[string]any {
 	return map[string]any{
 		"schema_version": FreshAgentFailurePreventionSchemaVersion,
-		"purpose":        "keep fresh Agents on the standardized connect/start/watch/recover path instead of recreating fragile gateway, invite, bootstrap, and approval glue",
+		"purpose":        "keep fresh Agents on the standardized connect/start/watch/recover path instead of recreating fragile gateway, invite, bootstrap, and authorization glue",
 		"known_failure_pattern": []string{
 			"manual rdev gateway serve plus rdev invite create can omit verified helper assets and produce target bootstraps that fail with rdev is required",
 			"background or ad hoc gateway process management can disappear before the target joins and leaves the Agent without a ready/status file",
@@ -1221,7 +1256,7 @@ func freshAgentFailurePrevention() map[string]any {
 			"if rdev is missing, recover from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
 			"if helper assets are missing, run rdev support-session connect --start or rdev support-session prepare --build-assets from a valid checkout",
 			"if a LAN-only path times out or will not survive network changes, configure a standard hosted/relay/mesh/VPN/SSH gateway candidate and create a fresh Connection Entry",
-			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
+			"ask one short question only for authorization, persistence authorization, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
 			"if the target reports a PowerShell variable error on the bootstrap command, they are running from an existing PowerShell session; tell them to use: irm 'URL' -UseBasicParsing | iex (the join page always shows this simpler form)",
 		},
 		"forbidden_agent_generated_workarounds": []string{
@@ -1233,7 +1268,7 @@ func freshAgentFailurePrevention() map[string]any {
 			"custom relay, mesh, SSH, VPN, or polling scripts outside standard rdev tools",
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
-			"manual approval polling loops",
+			"manual activation polling loops",
 		},
 		"agent_rule": "treat this as a regression guard: if tempted to write setup code, stop and use the standard rdev support-session connect/start/prepare/status contracts instead",
 	}
@@ -1313,7 +1348,7 @@ func standardRecoveryActions(actions []string) []string {
 		"run rdev support-session prepare to inspect local rdev, Go, Git, repository, helper assets, gateway URL, and target command readiness",
 		"if rdev is missing, build it from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
 		"if helper assets are missing, rerun rdev support-session connect --start from a valid checkout so target bootstraps can download verified helpers",
-		"ask one concise question only when authorization, persistence approval, privileged network changes, or a real gateway/relay credential is required",
+		"ask one concise question only when authorization, persistence authorization, privileged network changes, or a real gateway/relay credential is required",
 	}
 }
 
@@ -1487,17 +1522,17 @@ func connectivityHelperPreflight() map[string]any {
 		installActionRaw := strings.TrimSpace(os.Getenv(definition.InstallActionEnv))
 		readyIncremented := false
 		report := map[string]any{
-			"id":                 definition.ID,
-			"kind":               definition.Kind,
-			"gateway_env":        definition.GatewayEnv,
-			"start_argv_env":     definition.StartArgvEnv,
-			"install_action_env": definition.InstallActionEnv,
-			"gateway_configured": gatewayURL != "",
-			"start_configured":   startArgvRaw != "",
-			"install_configured": installActionRaw != "",
-			"allowed_tools":      definition.AllowedTools,
-			"approval_required":  definition.ApprovalRequired,
-			"status":             "not-configured",
+			"id":                     definition.ID,
+			"kind":                   definition.Kind,
+			"gateway_env":            definition.GatewayEnv,
+			"start_argv_env":         definition.StartArgvEnv,
+			"install_action_env":     definition.InstallActionEnv,
+			"gateway_configured":     gatewayURL != "",
+			"start_configured":       startArgvRaw != "",
+			"install_configured":     installActionRaw != "",
+			"allowed_tools":          definition.AllowedTools,
+			"authorization_required": definition.AuthorizationRequired,
+			"status":                 "not-configured",
 		}
 		if gatewayURL != "" {
 			report["gateway_url"] = gatewayURL
@@ -1513,7 +1548,7 @@ func connectivityHelperPreflight() map[string]any {
 				report["start_argc"] = len(argv)
 				report["start_argv_preview"] = safeArgvPreview(argv)
 				if gatewayURL != "" {
-					report["status"] = "ready-to-use-after-approval-check"
+					report["status"] = "ready-to-use-after-authorization-check"
 					readyCount++
 					readyIncremented = true
 				} else {
@@ -1531,7 +1566,7 @@ func connectivityHelperPreflight() map[string]any {
 			report["stable_url_env"] = "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"
 			report["quick_tunnel_ephemeral"] = false
 			if gatewayURL != "" && !readyIncremented && (tokenFileConfigured || tokenConfigured || tunnelNameConfigured) {
-				report["status"] = "ready-to-use-after-approval-check"
+				report["status"] = "ready-to-use-after-authorization-check"
 				readyCount++
 				readyIncremented = true
 			}
@@ -1553,13 +1588,13 @@ func connectivityHelperPreflight() map[string]any {
 		"ready_helper_count":    readyCount,
 		"auto_execute":          false,
 		"standard_next_step":    "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run when helper execution is needed; do not write custom SSH, relay, mesh, VPN, shell, or PowerShell startup code",
-		"agent_rule":            "read this before asking network questions or writing tunnel commands; if a helper is configured, use standard Connection Entry runner metadata and approval boundaries",
+		"agent_rule":            "read this before asking network questions or writing tunnel commands; if a helper is configured, use standard Connection Entry runner metadata and authorization boundaries",
 		"forbidden": []string{
 			"ExecutionPolicy Bypass",
 			"encoded shell commands",
 			"shell command-string wrappers",
 			"printing credentials or private keys",
-			"installing services, drivers, firewall, DNS, route, cloud, or paid resources without explicit approval",
+			"installing services, drivers, firewall, DNS, route, cloud, or paid resources without explicit authorization",
 		},
 	}
 }
@@ -1582,7 +1617,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		NetworkScope:          "auto",
 		AuthorityProfile:      "standard",
 		Once:                  false,
-		RequireHostApproval:   !opts.AutoApprove,
+		RequireHostActivation: !opts.AutoActivate,
 		RdevCommand:           targetRdevCommand,
 	})
 	targetOS := connectionEntryRunnerTargetOS(target)
@@ -1649,7 +1684,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 			"Agent-authored SSH, relay, mesh, VPN, PowerShell, shell, or polling scripts",
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
-			"firewall, DNS, route, service, driver, credential, cloud, or paid relay changes without explicit approval",
+			"firewall, DNS, route, service, driver, credential, cloud, or paid relay changes without explicit authorization",
 		},
 	}
 	if err != nil {
@@ -1716,58 +1751,58 @@ func connectivityHelperDefinitions() []connectivityHelperDefinition {
 		// Detected automatically and started by the managed foreground
 		// support-session flow; Agents must not run it as ad hoc glue.
 		{
-			ID:               "cloudflared-quick-tunnel",
-			Kind:             "cloudflared",
-			GatewayEnv:       "RDEV_CLOUDFLARED_GATEWAY_URL",
-			StartArgvEnv:     "RDEV_CLOUDFLARED_START_ARGV_JSON",
-			InstallActionEnv: "RDEV_CLOUDFLARED_INSTALL_ACTION_JSON",
-			AllowedTools:     []string{"cloudflared"},
-			ApprovalRequired: []string{"download/install if not already present"},
+			ID:                    "cloudflared-quick-tunnel",
+			Kind:                  "cloudflared",
+			GatewayEnv:            "RDEV_CLOUDFLARED_GATEWAY_URL",
+			StartArgvEnv:          "RDEV_CLOUDFLARED_START_ARGV_JSON",
+			InstallActionEnv:      "RDEV_CLOUDFLARED_INSTALL_ACTION_JSON",
+			AllowedTools:          []string{"cloudflared"},
+			AuthorizationRequired: []string{"download/install if not already present"},
 		},
 		{
-			ID:               "cloudflared-named-tunnel",
-			Kind:             "cloudflared-named",
-			GatewayEnv:       "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL",
-			StartArgvEnv:     "RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON",
-			InstallActionEnv: "RDEV_CLOUDFLARED_INSTALL_ACTION_JSON",
-			AllowedTools:     []string{"cloudflared"},
-			ApprovalRequired: []string{"Cloudflare account/zone setup", "DNS route or hostname mapping", "tunnel token or credentials custody"},
+			ID:                    "cloudflared-named-tunnel",
+			Kind:                  "cloudflared-named",
+			GatewayEnv:            "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL",
+			StartArgvEnv:          "RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON",
+			InstallActionEnv:      "RDEV_CLOUDFLARED_INSTALL_ACTION_JSON",
+			AllowedTools:          []string{"cloudflared"},
+			AuthorizationRequired: []string{"Cloudflare account/zone setup", "DNS route or hostname mapping", "tunnel token or credentials custody"},
 		},
 		{
-			ID:               "existing-ssh-tunnel",
-			Kind:             "ssh",
-			GatewayEnv:       "RDEV_SSH_GATEWAY_URL",
-			StartArgvEnv:     "RDEV_SSH_TUNNEL_START_ARGV_JSON",
-			InstallActionEnv: "RDEV_SSH_INSTALL_ACTION_JSON",
-			AllowedTools:     []string{"ssh"},
-			ApprovalRequired: []string{"new keys", "config edits", "ambiguous identities", "privileged ports"},
+			ID:                    "existing-ssh-tunnel",
+			Kind:                  "ssh",
+			GatewayEnv:            "RDEV_SSH_GATEWAY_URL",
+			StartArgvEnv:          "RDEV_SSH_TUNNEL_START_ARGV_JSON",
+			InstallActionEnv:      "RDEV_SSH_INSTALL_ACTION_JSON",
+			AllowedTools:          []string{"ssh"},
+			AuthorizationRequired: []string{"new keys", "config edits", "ambiguous identities", "privileged ports"},
 		},
 		{
-			ID:               "existing-frp-or-chisel-relay",
-			Kind:             "relay",
-			GatewayEnv:       "RDEV_RELAY_GATEWAY_URL",
-			StartArgvEnv:     "RDEV_RELAY_START_ARGV_JSON",
-			InstallActionEnv: "RDEV_RELAY_INSTALL_ACTION_JSON",
-			AllowedTools:     []string{"frpc", "chisel"},
-			ApprovalRequired: []string{"download/install", "relay credential creation", "public port changes", "paid relay", "persistent service"},
+			ID:                    "existing-frp-or-chisel-relay",
+			Kind:                  "relay",
+			GatewayEnv:            "RDEV_RELAY_GATEWAY_URL",
+			StartArgvEnv:          "RDEV_RELAY_START_ARGV_JSON",
+			InstallActionEnv:      "RDEV_RELAY_INSTALL_ACTION_JSON",
+			AllowedTools:          []string{"frpc", "chisel"},
+			AuthorizationRequired: []string{"download/install", "relay credential creation", "public port changes", "paid relay", "persistent service"},
 		},
 		{
-			ID:               "existing-headscale-tailscale-mesh",
-			Kind:             "mesh",
-			GatewayEnv:       "RDEV_MESH_GATEWAY_URL",
-			StartArgvEnv:     "RDEV_MESH_START_ARGV_JSON",
-			InstallActionEnv: "RDEV_MESH_INSTALL_ACTION_JSON",
-			AllowedTools:     []string{"tailscale"},
-			ApprovalRequired: []string{"new enrollment", "auth key use", "ACL changes", "DNS changes", "service changes"},
+			ID:                    "existing-headscale-tailscale-mesh",
+			Kind:                  "mesh",
+			GatewayEnv:            "RDEV_MESH_GATEWAY_URL",
+			StartArgvEnv:          "RDEV_MESH_START_ARGV_JSON",
+			InstallActionEnv:      "RDEV_MESH_INSTALL_ACTION_JSON",
+			AllowedTools:          []string{"tailscale"},
+			AuthorizationRequired: []string{"new enrollment", "auth key use", "ACL changes", "DNS changes", "service changes"},
 		},
 		{
-			ID:               "existing-wireguard-vpn",
-			Kind:             "vpn",
-			GatewayEnv:       "RDEV_VPN_GATEWAY_URL",
-			StartArgvEnv:     "RDEV_VPN_START_ARGV_JSON",
-			InstallActionEnv: "RDEV_VPN_INSTALL_ACTION_JSON",
-			AllowedTools:     []string{"wg", "wg-quick"},
-			ApprovalRequired: []string{"key creation", "profile import", "route/DNS/firewall mutation", "persistent tunnel start"},
+			ID:                    "existing-wireguard-vpn",
+			Kind:                  "vpn",
+			GatewayEnv:            "RDEV_VPN_GATEWAY_URL",
+			StartArgvEnv:          "RDEV_VPN_START_ARGV_JSON",
+			InstallActionEnv:      "RDEV_VPN_INSTALL_ACTION_JSON",
+			AllowedTools:          []string{"wg", "wg-quick"},
+			AuthorizationRequired: []string{"key creation", "profile import", "route/DNS/firewall mutation", "persistent tunnel start"},
 		},
 	}
 }
@@ -1841,7 +1876,7 @@ func parseHelperInstallActionReport(raw, envName string, allowedTools []string) 
 		scope = "user"
 	}
 	switch scope {
-	case "user", "workspace", "attended-visible", "managed-approved":
+	case "user", "workspace", "attended-visible", "managed-authorized":
 	default:
 		report["error"] = fmt.Sprintf("%s has unsupported install scope %q", envName, scope)
 		return report
@@ -2168,7 +2203,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"manifest_root_public_key":               opts.ManifestRootPublicKey,
 		"target":                                 target,
 		"locale":                                 locale,
-		"auto_approve":                           opts.AutoApprove,
+		"auto_activate":                          opts.AutoActivate,
 		"recommended_surface":                    recommendedSurface,
 		"target_command":                         recommended,
 		"target_commands":                        targetCommands,
@@ -2181,6 +2216,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"gateway_candidate_preflight":            gatewayCandidatePreflight(gatewayURL, target, gatewayCandidates),
 		"connectivity_helper_preflight":          helperPreflight,
 		"connection_entry_runner_recommendation": runnerRecommendation,
+		"rdev_bootstrap_connector":               rdevBootstrapConnectorContract(),
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
 			Phase:              "created",
 			Ready:              true,
@@ -2188,18 +2224,18 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 			GatewayURL:         gatewayURL,
 			RdevCommand:        rdevCommand,
 			UserHandoffPresent: true,
-			AutoApprove:        opts.AutoApprove,
+			AutoActivate:       opts.AutoActivate,
 		}),
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
-			Phase:       "created",
-			Status:      "waiting",
-			TicketCode:  opts.Ticket.Code,
-			Target:      target,
-			Locale:      locale,
-			GatewayURL:  gatewayURL,
-			Candidates:  gatewayCandidates,
-			AutoApprove: opts.AutoApprove,
-			RdevCommand: rdevCommand,
+			Phase:        "created",
+			Status:       "waiting",
+			TicketCode:   opts.Ticket.Code,
+			Target:       target,
+			Locale:       locale,
+			GatewayURL:   gatewayURL,
+			Candidates:   gatewayCandidates,
+			AutoActivate: opts.AutoActivate,
+			RdevCommand:  rdevCommand,
 		}),
 		"target_bootstrap_requirements": bootstrapRequirements,
 		"target_bootstrap_readiness":    opts.TargetBootstrapReadiness,
@@ -2233,6 +2269,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 			"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
 			"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
 			"watch connection status with watch_connection_status or rdev.support_session.status",
+			"read rdev_bootstrap_connector before interpreting target_preconnects; preconnect means the target command started before the full helper finished downloading, not that session tasks can run yet",
 			"when connected=true, proactively report that the connection is established",
 			"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
 		},
@@ -2242,6 +2279,63 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 			"manual ticket/root/gateway/transport assembly for target user",
 			"ad hoc bootstrap script generated by the Agent",
 		},
+	}
+}
+
+func rdevBootstrapConnectorContract() map[string]any {
+	return map[string]any{
+		"schema_version":                       BootstrapConnectorSchemaVersion,
+		"first_connect_target_bytes":           supportSessionBootstrapTargetBytes,
+		"bootstrap_surface":                    "script-preconnect",
+		"default_first_connect_surface":        "script-preconnect",
+		"publishes_native_first_connect_asset": false,
+		"preconnect_endpoint":                  "/v1/support-session/preconnect",
+		"preconnect_phase_before_full_helper":  "downloading-helper",
+		"source":                               "rdev-bootstrap-preconnect",
+		"native_connector": map[string]any{
+			"schema_version":                      "rdev.bootstrap-native-connector.v1",
+			"source":                              "rdev-bootstrap-native",
+			"availability":                        "optional-if-rdev-bootstrap-is-already-installed-or-published",
+			"published_by_support_session_assets": false,
+			"default_first_connect_surface":       "script-preconnect",
+			"command":                             []string{"rdev-bootstrap", "upgrade"},
+			"capabilities":                        []string{"preconnect to gateway", "download verified full helper", "verify SHA-256", "exec verified full helper"},
+			"can_run_session_tasks_before_full_runner":  false,
+			"requires_full_runner_before_session_tasks": true,
+			"standard_no_exec_probe":                    []string{"rdev-bootstrap", "upgrade", "--no-exec", "--gateway-url", "<gateway-url>", "--ticket-code", "<ticket-code>", "--asset", "<asset>", "--out", "<path>"},
+			"asset_budget_rule":                         "do not publish native rdev-bootstrap as the default first-connect asset until its compressed release artifact is proven under first_connect_target_bytes",
+			"agent_rule":                                "use rdev-bootstrap upgrade only when rdev-bootstrap is already installed or explicitly published by the release assets; otherwise use script-preconnect and do not treat rdev-bootstrap itself as a session task runner",
+		},
+		"cdn_download_optimizer":                 cdnDownloadOptimizerContract(),
+		"grants_host_access":                     false,
+		"can_run_session_tasks":                  false,
+		"full_runner_phase":                      "download-verified-rdev-host",
+		"upgrade_required_for":                   []string{"shell tasks", "filesystem tasks", "process tasks", "desktop operations", "coding tasks"},
+		"status_fields":                          []string{"target_preconnects", "target_preconnect_count"},
+		"agent_rule":                             "treat target_preconnects as evidence that the target-side bootstrap command started and reached the gateway, not as a connected executable host; wait for connected=true before submitting session tasks",
+		"operator_explanation":                   "bootstrap preconnect is a low-byte first-contact signal that narrows download/network diagnosis before the full verified helper is available",
+		"must_not_be_used_for_authorization":     true,
+		"must_not_skip_full_helper_verification": true,
+	}
+}
+
+func cdnDownloadOptimizerContract() map[string]any {
+	plan := cdnopt.BuildPlan(cdnopt.Options{Provider: "cloudflare"})
+	return map[string]any{
+		"schema_version":           plan.SchemaVersion,
+		"provider":                 plan.Provider,
+		"status":                   plan.Status,
+		"dry_run":                  plan.DryRun,
+		"enabled_by_default":       plan.EnabledByDefault,
+		"requires_explicit_enable": plan.RequiresExplicitEnable,
+		"asset_downloads_only":     plan.AssetDownloadsOnly,
+		"max_concurrency":          plan.MaxConcurrency,
+		"sample_bytes":             plan.SampleBytes,
+		"timeout_seconds":          plan.TimeoutSeconds,
+		"candidate_sources":        plan.CandidateSources,
+		"forbidden_side_effects":   plan.ForbiddenSideEffects,
+		"safety_rules":             plan.SafetyRules,
+		"agent_rule":               plan.AgentRule,
 	}
 }
 
@@ -2292,7 +2386,7 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 			"rewriting copy_paste",
 			"manual ticket/root/gateway/transport assembly",
 			"custom PowerShell or shell bootstrap",
-			"custom relay, mesh, VPN, SSH, approval, or polling scripts",
+			"custom relay, mesh, VPN, SSH, authorization, or polling scripts",
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
 		},
@@ -2413,11 +2507,11 @@ func BuildRemoteControlEntry(opts RemoteControlEntryOptions) map[string]any {
 		"agent_rule":                   "Treat this like a remote-control app entry: use support_device_id plus session_passcode/status/report fields, keep the connector online after work, and disconnect/revoke/stop only after an explicit operator request.",
 		"human_rule":                   "The target-side person opens the visible connector and keeps it open; closing the connector or revoking the ticket ends access.",
 		"temporary_support_policy":     "Temporary customer support remains visible and attended but is not auto-disconnected when the Agent finishes a task.",
-		"managed_upgrade_policy":       "For an operator-owned recurring machine, ask for explicit managed-service approval and require a stable gateway before installing service persistence.",
+		"managed_upgrade_policy":       "For an operator-owned recurring machine, ask for explicit managed-service authorization and require a stable gateway before installing service persistence.",
 		"forbidden": []string{
 			"Agent-initiated disconnect after task completion",
 			"hidden install",
-			"unapproved service persistence",
+			"unauthorized service persistence",
 			"long-lived shared host password",
 		},
 	}
@@ -2430,7 +2524,7 @@ func BuildRemoteControlEntry(opts RemoteControlEntryOptions) map[string]any {
 		entry["ticket_expires_in_seconds"] = maxInt(0, int(ticket.ExpiresAt.Sub(time.Now().UTC()).Seconds()))
 	}
 	if len(activeHosts) == 1 {
-		entry["recommended_job_host_id"] = activeHosts[0].ID
+		entry["recommended_task_endpoint_id"] = activeHosts[0].ID
 	}
 	if len(hosts) > 0 {
 		entry["host_count"] = map[string]int{
@@ -2546,23 +2640,23 @@ func connectionContinuityPolicy(candidates []GatewayURLCandidate) map[string]any
 		assessment = "same-machine-only"
 	}
 	return map[string]any{
-		"schema_version":                 ContinuityPolicySchemaVersion,
-		"intent":                         "agent-readable-continuity-and-reconnect-guidance",
-		"connection_model":               "target-initiated-outbound-connection-entry-with-ordered-candidate-fallback",
-		"candidate_kinds":                dedupeStrings(kinds),
-		"stable_fallback_kinds":          dedupeStrings(stableKinds),
-		"has_lan_candidate":              hasLAN,
-		"has_stable_configured_fallback": stableAfterLANChange,
-		"stable_after_lan_change":        stableAfterLANChange,
-		"assessment":                     assessment,
-		"target_command_behavior":        "the returned target command is human-safe and includes signed gateway candidate metadata for rdev runtime failover after bootstrap",
-		"agent_watch_behavior":           "after handing over target_handoff_envelope.full_text, use rdev.support_session.status wait=true or the returned watcher command and proactively report connected=true",
-		"automatic_downgrade":            []string{"target command tries the next Connection Entry URL when direct or LAN bootstrap fails", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "after registration, host transport auto may switch to another signed join-manifest gateway candidate when the current gateway fails before jobs are processed", "status wait timeout returns connection_recovery instead of requiring custom polling"},
-		"automatic_upgrade":              []string{"when an RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL becomes configured, create a fresh Connection Entry so future target commands include that stable path", "for operator-owned recurring machines, move from attended-temporary to a reviewed managed Connection Entry only after explicit persistence approval", "persist the best verified stable path in scoped runtime memory after evidence is reviewed"},
-		"if_lan_or_loopback_fails":       []string{"run rdev.support_session.prepare or rdev support-session prepare --build-assets to refresh gateway_url_candidates", "prefer configured hosted/relay/mesh/VPN/SSH gateway URLs before asking the human for network details", "ask only when privileged network changes, credentials, paid/cloud resources, or managed persistence are required"},
-		"requires_operator_approval_for": []string{"opening ports, router/NAT/firewall/DNS/route changes", "installing tunnel, mesh, VPN, service, driver, or persistent helper components", "creating or editing SSH credentials/config", "using paid hosted relay or cloud resources", "turning a temporary third-party session into managed persistence"},
-		"forbidden":                      []string{"Agent-authored polling loops", "custom PowerShell or shell relay/bootstrap scripts", "asking humans to assemble ticket/root/gateway/transport/checksum values", "ExecutionPolicy Bypass", "hidden install or persistence"},
-		"agent_rule":                     "treat LAN as an opportunistic first path, not the reliability plan; when stable_after_lan_change is false, prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work before claiming robust connectivity",
+		"schema_version":                      ContinuityPolicySchemaVersion,
+		"intent":                              "agent-readable-continuity-and-reconnect-guidance",
+		"connection_model":                    "target-initiated-outbound-connection-entry-with-ordered-candidate-fallback",
+		"candidate_kinds":                     dedupeStrings(kinds),
+		"stable_fallback_kinds":               dedupeStrings(stableKinds),
+		"has_lan_candidate":                   hasLAN,
+		"has_stable_configured_fallback":      stableAfterLANChange,
+		"stable_after_lan_change":             stableAfterLANChange,
+		"assessment":                          assessment,
+		"target_command_behavior":             "the returned target command is human-safe and includes signed gateway candidate metadata for rdev runtime failover after bootstrap",
+		"agent_watch_behavior":                "after handing over target_handoff_envelope.full_text, use rdev.support_session.status wait=true or the returned watcher command and proactively report connected=true",
+		"automatic_downgrade":                 []string{"target command tries the next Connection Entry URL when direct or LAN bootstrap fails", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "after registration, host transport auto may switch to another signed join-manifest gateway candidate when the current gateway fails before session tasks are processed", "status wait timeout returns connection_recovery instead of requiring custom polling"},
+		"automatic_upgrade":                   []string{"when an RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL becomes configured, create a fresh Connection Entry so future target commands include that stable path", "for operator-owned recurring machines, move from attended-temporary to a reviewed managed Connection Entry only after explicit persistence authorization", "persist the best verified stable path in scoped runtime memory after evidence is reviewed"},
+		"if_lan_or_loopback_fails":            []string{"run rdev.support_session.prepare or rdev support-session prepare --build-assets to refresh gateway_url_candidates", "prefer configured hosted/relay/mesh/VPN/SSH gateway URLs before asking the human for network details", "ask only when privileged network changes, credentials, paid/cloud resources, or managed persistence are required"},
+		"requires_operator_authorization_for": []string{"opening ports, router/NAT/firewall/DNS/route changes", "installing tunnel, mesh, VPN, service, driver, or persistent helper components", "creating or editing SSH credentials/config", "using paid hosted relay or cloud resources", "turning a temporary third-party session into managed persistence"},
+		"forbidden":                           []string{"Agent-authored polling loops", "custom PowerShell or shell relay/bootstrap scripts", "asking humans to assemble ticket/root/gateway/transport/checksum values", "ExecutionPolicy Bypass", "hidden install or persistence"},
+		"agent_rule":                          "treat LAN as an opportunistic first path, not the reliability plan; when stable_after_lan_change is false, prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work before claiming robust connectivity",
 	}
 }
 
@@ -2608,9 +2702,9 @@ func connectionSupervision(ticketCode, locale, rdevCommand, gatewayURL string, a
 			"tool":      "rdev.support_session.status",
 			"arguments": mcpWatchArgs,
 		},
-		"cli_watch_command":     cliWatchCommand,
-		"connected_report_rule": "when status.connected=true, immediately send connected_next_steps.user_report to the user before creating jobs",
-		"pending_approval_rule": "if status=pending-approval, approve only the expected host or wait for scoped attended-temporary auto-approval; do not ask the target human for ticket/root/gateway/transport",
+		"cli_watch_command":       cliWatchCommand,
+		"connected_report_rule":   "when status.connected=true, immediately send connected_next_steps.user_report to the user before submitting session tasks",
+		"pending_activation_rule": "if status=pending-activation, wait briefly for the standard attended-temporary auto-activation path or create a fresh Connection Entry; do not call retired host lifecycle tools and do not ask the target human for ticket/root/gateway/transport",
 		"timeout_recovery_tools": []map[string]any{
 			{"tool": "rdev.support_session.status", "arguments": statusRecoveryArgs},
 			{"tool": "rdev.support_session.prepare", "arguments": map[string]any{"target": "auto", "build_assets": true}},
@@ -2619,17 +2713,17 @@ func connectionSupervision(ticketCode, locale, rdevCommand, gatewayURL string, a
 			statusRecoveryCommand,
 			{rdevCommand, "support-session", "prepare", "--target", "auto", "--build-assets"},
 		},
-		"candidate_order":                candidateOrder,
-		"continuity_assessment":          assessment,
-		"stable_after_lan_change":        stableAfterLANChange,
-		"upgrade_recommended":            upgradeRecommended,
-		"upgrade_reason":                 upgradeReason,
-		"standard_upgrade_paths":         []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence approval", "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
-		"automatic_downgrade_boundaries": []string{"target command owns ordered URL fallback and bounded timeouts", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "host runtime may reuse signed join-manifest gateway candidates after registration if the current gateway fails before processing jobs", "status timeout returns connection_recovery for standard recovery"},
-		"requires_operator_approval_for": continuityPolicy["requires_operator_approval_for"],
-		"agent_rule":                     "after sending target_handoff_envelope.full_text, use this supervision contract to wait, report connected=true, and choose standard upgrade/recovery tools; do not write polling, relay, bootstrap, or network mutation scripts",
-		"human_surface_rule":             "humans receive only target_handoff_envelope.full_text; supervision fields are for the Agent runtime",
-		"forbidden":                      []string{"custom polling loops", "Agent-authored PowerShell or shell relay/bootstrap scripts", "manual ticket/root/gateway/transport assembly", "ExecutionPolicy Bypass", "hidden install or persistence"},
+		"candidate_order":                     candidateOrder,
+		"continuity_assessment":               assessment,
+		"stable_after_lan_change":             stableAfterLANChange,
+		"upgrade_recommended":                 upgradeRecommended,
+		"upgrade_reason":                      upgradeReason,
+		"standard_upgrade_paths":              []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence authorization", "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
+		"automatic_downgrade_boundaries":      []string{"target command owns ordered URL fallback and bounded timeouts", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "host runtime may reuse signed join-manifest gateway candidates after registration if the current gateway fails before processing session tasks", "status timeout returns connection_recovery for standard recovery"},
+		"requires_operator_authorization_for": continuityPolicy["requires_operator_authorization_for"],
+		"agent_rule":                          "after sending target_handoff_envelope.full_text, use this supervision contract to wait, report connected=true, and choose standard upgrade/recovery tools; do not write polling, relay, bootstrap, or network mutation scripts",
+		"human_surface_rule":                  "humans receive only target_handoff_envelope.full_text; supervision fields are for the Agent runtime",
+		"forbidden":                           []string{"custom polling loops", "Agent-authored PowerShell or shell relay/bootstrap scripts", "manual ticket/root/gateway/transport assembly", "ExecutionPolicy Bypass", "hidden install or persistence"},
 	}
 }
 
@@ -2761,18 +2855,18 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 		"--reason", opts.Reason,
 		"--transport", "auto",
 	}
-	if opts.AutoApprove {
-		createInviteCommand = append(createInviteCommand, "--auto-approve")
+	if opts.AutoActivate {
+		createInviteCommand = append(createInviteCommand, "--auto-activate")
 	}
 	helperPreflight := connectivityHelperPreflight()
 	inviteBody, _ := json.Marshal(map[string]any{
-		"mode":         string(model.HostModeAttendedTemporary),
-		"ttl_seconds":  ttl,
-		"reason":       opts.Reason,
-		"auto_approve": opts.AutoApprove,
+		"mode":          string(model.HostModeAttendedTemporary),
+		"ttl_seconds":   ttl,
+		"reason":        opts.Reason,
+		"auto_activate": opts.AutoActivate,
 		"metadata": map[string]string{
-			"connection_entry":  "standard-visible",
-			"approval_contract": "target-consent-scoped-ticket",
+			"connection_entry":    "standard-visible",
+			"activation_contract": "target-consent-scoped-ticket",
 		},
 	})
 	return map[string]any{
@@ -2786,8 +2880,8 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 		"gateway_url":                   gatewayURL,
 		"gateway_url_candidates":        gatewayCandidates,
 		"connectivity_helper_preflight": helperPreflight,
-		"auto_approve": map[string]any{
-			"enabled":        opts.AutoApprove,
+		"auto_activate": map[string]any{
+			"enabled":        opts.AutoActivate,
 			"scope":          "attended-temporary tickets created by this standard plan only",
 			"capabilities":   policyCapabilitiesToStrings(policy.TemporaryDefaults()),
 			"security_model": "target consent plus signed manifest plus scoped ticket capabilities",
@@ -2834,9 +2928,9 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 			"create the invite through HTTP or CLI",
 			"give target user only the localized join URL or one-line visible script",
 			"watch connection status with rdev.support_session.status or rdev support-session status --wait",
-			"when connected=true, proactively tell the user the connection is established before creating jobs",
+			"when connected=true, proactively tell the user the connection is established before creating session tasks",
 			"do not write ad hoc relay/nohup/bootstrap code",
-			"after host connects, it is active when auto_approve is enabled; otherwise call rdev.hosts.approve",
+			"after endpoint connects, continue through session status/events; do not call retired host-activation contracts",
 		},
 		"forbidden": []string{
 			"ExecutionPolicy Bypass",
@@ -2964,16 +3058,20 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	pending := hostsByStatus(hosts, model.HostStatusPending)
 	revoked := hostsByStatus(hosts, model.HostStatusRevoked)
 	connected := len(active) > 0
-	waiting := !connected && len(pending) == 0 && len(stale) == 0
+	preconnectSummary := targetPreconnectSummary(opts.Preconnects)
+	preconnectStatus, _ := preconnectSummary["status"].(string)
+	waiting := !connected && len(pending) == 0 && len(stale) == 0 && len(revoked) == 0 && preconnectStatus == ""
 	status := "waiting"
 	if connected {
 		status = "connected"
 	} else if len(pending) > 0 {
-		status = "pending-approval"
+		status = "pending-activation"
 	} else if len(stale) > 0 {
 		status = "stale"
 	} else if len(revoked) > 0 {
 		status = "revoked"
+	} else if preconnectStatus != "" {
+		status = preconnectStatus
 	}
 	remoteControlEntry := BuildRemoteControlEntry(RemoteControlEntryOptions{
 		GatewayURL: opts.GatewayURL,
@@ -2984,7 +3082,7 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	})
 	out := map[string]any{
 		"schema_version":       StatusSchemaVersion,
-		"ok":                   connected || len(pending) > 0 || waiting,
+		"ok":                   connected || len(pending) > 0 || waiting || preconnectStatus != "",
 		"ticket_code":          ticketCode,
 		"status":               status,
 		"connected":            connected,
@@ -3002,6 +3100,7 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			Status:     status,
 			TicketCode: ticketCode,
 			Locale:     locale,
+			GatewayURL: opts.GatewayURL,
 			TimedOut:   false,
 		}),
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
@@ -3009,12 +3108,17 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			Status:     status,
 			TicketCode: ticketCode,
 			Locale:     locale,
+			GatewayURL: opts.GatewayURL,
 			TimedOut:   false,
 		}),
-		"active_hosts":  active,
-		"stale_hosts":   stale,
-		"pending_hosts": pending,
-		"revoked_hosts": revoked,
+		"active_hosts":       active,
+		"stale_hosts":        stale,
+		"pending_hosts":      pending,
+		"revoked_hosts":      revoked,
+		"target_preconnects": append([]model.SupportSessionPreconnect(nil), opts.Preconnects...),
+		"target_preconnect_count": map[string]int{
+			"total": len(opts.Preconnects),
+		},
 		"host_count": map[string]int{
 			"active":  len(active),
 			"stale":   len(stale),
@@ -3022,6 +3126,9 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			"revoked": len(revoked),
 			"total":   len(hosts),
 		},
+	}
+	if preconnectSummary != nil {
+		out["target_preconnect_summary"] = preconnectSummary
 	}
 	// Attach ticket expiry when the caller provides the ticket so agents and
 	// users can see how much time remains without having to infer it.
@@ -3036,6 +3143,62 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		out["ticket_status"] = string(opts.Ticket.Status)
 	}
 	return out
+}
+
+func targetPreconnectSummary(preconnects []model.SupportSessionPreconnect) map[string]any {
+	if len(preconnects) == 0 {
+		return nil
+	}
+	latest := preconnects[0]
+	countByPhase := map[string]int{}
+	for _, preconnect := range preconnects {
+		phase := strings.TrimSpace(preconnect.Phase)
+		if phase == "" {
+			phase = "started"
+		}
+		countByPhase[phase]++
+		if preconnect.LastSeenAt.After(latest.LastSeenAt) ||
+			(preconnect.LastSeenAt.Equal(latest.LastSeenAt) && preconnect.CreatedAt.After(latest.CreatedAt)) {
+			latest = preconnect
+		}
+	}
+	status := targetPreconnectStatus(latest.Phase)
+	return map[string]any{
+		"status":               status,
+		"phase":                latest.Phase,
+		"latest":               latest,
+		"count_by_phase":       countByPhase,
+		"agent_interpretation": targetPreconnectAgentInterpretation(status),
+	}
+}
+
+func targetPreconnectStatus(phase string) string {
+	normalized := strings.ToLower(strings.TrimSpace(phase))
+	switch {
+	case strings.Contains(normalized, "download"):
+		return "target-downloading"
+	case strings.Contains(normalized, "verify") || strings.Contains(normalized, "checksum"):
+		return "target-verifying"
+	case strings.Contains(normalized, "starting") ||
+		strings.Contains(normalized, "launch") ||
+		strings.Contains(normalized, "register"):
+		return "target-starting"
+	default:
+		return "target-preconnect"
+	}
+}
+
+func targetPreconnectAgentInterpretation(status string) string {
+	switch status {
+	case "target-downloading":
+		return "The target command reached the gateway and is downloading the helper; this is not disconnected or user inaction."
+	case "target-verifying":
+		return "The target command reached the gateway and is verifying a downloaded helper; this is not disconnected or user inaction."
+	case "target-starting":
+		return "The target command reached the gateway and is starting or registering the helper; this is not disconnected or user inaction."
+	default:
+		return "The target command reached the gateway before host registration; this is not disconnected or user inaction."
+	}
 }
 
 type ConnectedNextStepsOptions struct {
@@ -3064,10 +3227,10 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	actions := []string{}
 	if connected {
 		actions = []string{
-			"send user_report to the user before creating jobs",
+			"send user_report to the user before creating session tasks",
 			"run rdev support-session audit-capabilities against this host before ad-hoc work",
-			"use rdev job create/wait/get/artifacts for the smallest scoped job only after the user's task intent is clear",
-			"export or review evidence before declaring the remote work complete",
+			"use rdev.sessions.task/events/artifacts for the smallest scoped task only after the user's task intent is clear",
+			"export or review task evidence before declaring the remote work complete",
 			"keep the connector online after the task unless the operator explicitly requests disconnect, revoke, or stop",
 		}
 	} else {
@@ -3090,8 +3253,8 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 		"mcp_next_calls":     mcpNextCalls,
 		"cli_next_commands":  cliNextCommands,
 		"forbidden": []string{
-			"creating a broad shell job before inspecting capabilities",
-			"claiming work is complete before reviewing job evidence",
+			"creating a broad shell task before inspecting capabilities",
+			"claiming work is complete before reviewing task evidence",
 			"asking the user for ticket/root/gateway/transport after connected=true",
 			"disconnecting or revoking the support device entry just because a task finished",
 		},
@@ -3103,14 +3266,14 @@ func connectedNextMCPCalls(hostID, gatewayURL string) []map[string]any {
 		return nil
 	}
 	args := map[string]any{
-		"host_id": hostID,
+		"session_id": "<session-id>",
 	}
 	if gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/"); gatewayURL != "" {
 		args["gateway_url"] = gatewayURL
 	}
 	return []map[string]any{
 		{
-			"tool":      "rdev.hosts.capabilities",
+			"tool":      "rdev.sessions.status",
 			"arguments": args,
 		},
 	}
@@ -3122,8 +3285,7 @@ func connectedNextCLICommands(hostID string) [][]string {
 	}
 	return [][]string{
 		{"rdev", "support-session", "audit-capabilities", "--gateway-url", "<active-gateway-url>", "--host-id", hostID},
-		{"rdev", "job", "create", "--gateway-url", "<active-gateway-url>", "--host-id", hostID, "--adapter", "shell", "--intent", "<task-intent>", "--policy-file", "<reviewed-policy.json>"},
-		{"rdev", "job", "wait", "--gateway-url", "<active-gateway-url>", "--job-id", "<job-id>", "--timeout-seconds", "120"},
+		{"rdev", "mcp", "serve", "--gateway-url", "<active-gateway-url>"},
 	}
 }
 
@@ -3131,6 +3293,7 @@ type ConnectionRecoveryOptions struct {
 	Status     string
 	TicketCode string
 	Locale     string
+	GatewayURL string
 	TimedOut   bool
 }
 
@@ -3150,14 +3313,44 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 	case "connected":
 		agentActions = []string{
 			"tell the user the connection is established",
-			"inspect host capabilities before creating the smallest scoped job",
-			"review audit and evidence after each job",
+			"inspect host capabilities before creating the smallest scoped session task",
+			"review audit and evidence after each task",
 		}
-	case "pending-approval":
+	case "pending-activation":
 		agentActions = []string{
-			"approve only the expected host when policy requires approval",
-			"wait briefly for auto-approval synchronization when this is a standard attended-temporary session",
+			"wait briefly for standard attended-temporary auto-activation synchronization",
+			"if the endpoint stays pending, create a fresh Connection Entry instead of calling retired host lifecycle tools",
 			"do not ask the target-side human for ticket, root, gateway, or transport values",
+		}
+	case "target-downloading":
+		agentActions = []string{
+			"treat this as target-side helper download progress or a stalled weak-network transfer, not as user inaction",
+			"inspect target_preconnect_summary phase, last_seen_at, asset, source, and seen_count before asking the target-side human for output",
+			"prefer standard asset mirror, retry/backoff, or rdev-bootstrap follow-up paths instead of writing ad hoc download scripts",
+		}
+		humanChecks = []string{
+			"keep the visible target-side command running while the helper download continues",
+			"copy the visible download error only if the standard command reports a failure",
+		}
+	case "target-verifying":
+		agentActions = []string{
+			"treat this as target-side helper verification progress, not as user inaction",
+			"inspect target_preconnect_summary and asset checksum evidence before asking the target-side human to retry",
+			"prefer standard asset/checksum recovery instead of writing ad hoc verification scripts",
+		}
+		humanChecks = []string{
+			"keep the visible target-side command running while helper verification continues",
+			"copy the visible checksum or verification error only if the standard command reports a failure",
+		}
+	case "target-starting", "target-preconnect":
+		agentActions = []string{
+			"treat this as target-side bootstrap progress before host registration, not as user inaction",
+			"inspect target_preconnect_summary before asking the target-side human to retry",
+			"continue using rdev.support_session.status with wait=true instead of writing a polling loop",
+		}
+		humanChecks = []string{
+			"keep the visible target-side command running while registration continues",
+			"copy the visible error only if the standard command reports a failure",
 		}
 	case "revoked":
 		agentActions = []string{
@@ -3201,11 +3394,12 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 			Status:     status,
 			TicketCode: ticketCode,
 			Locale:     locale,
+			GatewayURL: opts.GatewayURL,
 			TimedOut:   opts.TimedOut,
 		}),
 		"agent_rule": localizedConnectionRecoveryAgentRule(locale),
 		"agent_next_actions": append(agentActions, []string{
-			"ask one short question only for authorization, persistence approval, privileged network changes, paid/cloud relay use, credentials, or unclear ownership",
+			"ask one short question only for authorization, persistence authorization, privileged network changes, paid/cloud relay use, credentials, or unclear ownership",
 		}...),
 		"human_checks": humanChecks,
 		"standard_tools": []string{
@@ -3218,10 +3412,11 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 			"rdev support-session start",
 			"rdev.connection_entry.plan",
 			"rdev connection-entry run --dry-run",
-			"rdev job list --gateway-url <url>",
-			"rdev job get --gateway-url <url> --job-id <id>",
-			"rdev job wait --gateway-url <url> --job-id <id> --timeout-seconds <n>",
-			"rdev job cancel --gateway-url <url> --job-id <id> --reason <text>",
+			"rdev.sessions.status",
+			"rdev.sessions.events",
+			"rdev.sessions.task",
+			"rdev.sessions.interrupt",
+			"rdev task policy-template",
 		},
 		"forbidden": []string{
 			"Agent-authored PowerShell or shell relay scripts",
@@ -3229,9 +3424,55 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 			"ExecutionPolicy Bypass",
 			"hidden install",
 			"UAC or sudo bypass",
-			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit approval",
+			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit authorization",
 		},
 	}
+}
+
+func MarkStatusTimedOut(status map[string]any, ticketCode, locale string) map[string]any {
+	if status == nil {
+		status = map[string]any{}
+	}
+	status["ok"] = false
+	status["timed_out"] = true
+	statusText, _ := status["status"].(string)
+	status["next_action"] = localizedTimedOutStatusNextAction(statusText, locale)
+	gatewayURL := ""
+	if entry, ok := status["remote_control_entry"].(map[string]any); ok {
+		gatewayURL, _ = entry["gateway_url"].(string)
+	}
+	status["connection_recovery"] = BuildConnectionRecovery(ConnectionRecoveryOptions{
+		Status:     statusText,
+		TicketCode: ticketCode,
+		Locale:     locale,
+		GatewayURL: gatewayURL,
+		TimedOut:   true,
+	})
+	return status
+}
+
+func localizedTimedOutStatusNextAction(status, locale string) string {
+	switch locale {
+	case "zh-CN", "zh":
+		switch status {
+		case "target-downloading":
+			return "下载仍在进行或已在弱网中停滞；继续等待，检查 target_preconnect_summary 的时间、资产和镜像策略，不要误判为目标端未执行。"
+		case "target-verifying":
+			return "校验仍在进行或已停滞；检查 target_preconnect_summary、校验和和资产镜像，不要让用户重新拼接命令。"
+		case "target-starting", "target-preconnect":
+			return "目标端 bootstrap 已触达网关但尚未完成注册；继续等待并检查 target_preconnect_summary，不要编写临时轮询脚本。"
+		}
+	default:
+		switch status {
+		case "target-downloading":
+			return "The helper download is still in progress or stalled on a weak network; keep waiting, inspect target_preconnect_summary timestamps, asset, and mirror strategy, and do not treat this as the target command not running."
+		case "target-verifying":
+			return "Helper verification is still in progress or stalled; inspect target_preconnect_summary, checksums, and asset mirrors instead of asking the user to reassemble commands."
+		case "target-starting", "target-preconnect":
+			return "The target bootstrap reached the gateway but has not completed registration; keep waiting and inspect target_preconnect_summary instead of writing ad hoc polling scripts."
+		}
+	}
+	return "Keep waiting, or check gateway reachability, network path, and target command output."
 }
 
 func LocalizedTargetInstructions(gatewayURL, locale string) map[string]any {
@@ -3277,8 +3518,16 @@ func localizedStatusFeedback(status, locale string) string {
 		switch status {
 		case "connected":
 			return "连接已经建立，目标主机已在线并可用于受控任务。"
-		case "pending-approval":
+		case "pending-activation":
 			return "目标主机已经出现，正在等待审批或自动批准完成。"
+		case "target-downloading":
+			return "目标端命令已经触达网关，正在下载 rdev helper；这通常是弱网或大包体导致的等待。"
+		case "target-verifying":
+			return "目标端命令已经触达网关，正在校验下载的 rdev helper。"
+		case "target-starting":
+			return "目标端命令已经触达网关，正在启动或注册 rdev helper。"
+		case "target-preconnect":
+			return "目标端命令已经触达网关，但还没有完成主机注册。"
 		case "revoked":
 			return "连接票据或主机已经撤销。"
 		default:
@@ -3288,8 +3537,16 @@ func localizedStatusFeedback(status, locale string) string {
 		switch status {
 		case "connected":
 			return "Connection established. The target host is online and ready for scoped work."
-		case "pending-approval":
-			return "The target host has appeared and is waiting for approval or auto-approval to complete."
+		case "pending-activation":
+			return "The target host has appeared and is waiting for standard auto-activation to complete."
+		case "target-downloading":
+			return "The target command reached the gateway and is downloading the rdev helper; this is usually weak-network or large-asset wait time."
+		case "target-verifying":
+			return "The target command reached the gateway and is verifying the downloaded rdev helper."
+		case "target-starting":
+			return "The target command reached the gateway and is starting or registering the rdev helper."
+		case "target-preconnect":
+			return "The target command reached the gateway but has not completed host registration yet."
 		case "revoked":
 			return "The connection ticket or host has been revoked."
 		default:
@@ -3304,8 +3561,16 @@ func localizedStatusNextAction(status, locale string) string {
 		switch status {
 		case "connected":
 			return "向用户汇报连接已建立，然后检查主机能力并创建最小权限任务。"
-		case "pending-approval":
-			return "如果不是标准自动批准会话，请审批预期主机；否则继续等待短暂同步。"
+		case "pending-activation":
+			return "继续等待标准自动激活短暂同步；如果仍停留，创建新的 Connection Entry。"
+		case "target-downloading":
+			return "继续等待下载完成；不要误判为目标端未执行。必要时检查 target_preconnect_summary 和网络/镜像策略。"
+		case "target-verifying":
+			return "继续等待校验完成；如果长时间停留，检查 helper 校验和与资产镜像。"
+		case "target-starting":
+			return "继续等待主机注册完成；如果长时间停留，检查目标端可见窗口输出。"
+		case "target-preconnect":
+			return "继续等待下一阶段 preconnect 或主机注册；如果没有进展，再查看目标端输出。"
 		case "revoked":
 			return "创建新的 Connection Entry。"
 		default:
@@ -3314,9 +3579,17 @@ func localizedStatusNextAction(status, locale string) string {
 	default:
 		switch status {
 		case "connected":
-			return "Tell the user the connection is established, then inspect capabilities and create the smallest scoped job."
-		case "pending-approval":
-			return "Approve the expected host if this is not a standard auto-approved session; otherwise wait briefly."
+			return "Tell the user the connection is established, then inspect capabilities and create the smallest scoped session task."
+		case "pending-activation":
+			return "Wait briefly for standard auto-activation; create a fresh Connection Entry if the endpoint stays pending."
+		case "target-downloading":
+			return "Keep waiting for the download to finish; do not misdiagnose this as the target command not running. Inspect target_preconnect_summary and network or mirror strategy if it stalls."
+		case "target-verifying":
+			return "Keep waiting for helper verification; if it stalls, inspect checksums and asset mirrors."
+		case "target-starting":
+			return "Keep waiting for host registration; if it stalls, inspect the visible target-side output."
+		case "target-preconnect":
+			return "Keep waiting for the next preconnect phase or host registration; inspect target output only if there is no progress."
 		case "revoked":
 			return "Create a new Connection Entry."
 		default:
@@ -3330,7 +3603,7 @@ func localizedConnectionRecoveryAgentRule(locale string) string {
 	case "zh-CN", "zh":
 		return "使用返回的 Connection Entry、user_handoff、status、prepare、runner 字段恢复连接；不要编写临时 PowerShell、shell、relay、审批轮询或 bootstrap 代码，也不要让人类拼 ticket/root/gateway/transport。"
 	default:
-		return "Recover connection setup through returned Connection Entry, user_handoff, status, prepare, and runner fields; do not write ad hoc PowerShell, shell, relay, approval-polling, or bootstrap code, and do not ask humans to assemble ticket/root/gateway/transport values."
+		return "Recover connection setup through returned Connection Entry, user_handoff, status, prepare, and runner fields; do not write ad hoc PowerShell, shell, relay, activation-polling, or bootstrap code, and do not ask humans to assemble ticket/root/gateway/transport values."
 	}
 }
 
@@ -3364,6 +3637,82 @@ func supportSessionAssetSpecs(binDir string) []supportSessionAssetSpec {
 		{ID: "darwin-amd64", Name: "rdev-darwin-amd64", GOOS: "darwin", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-darwin-amd64")},
 		{ID: "linux-amd64", Name: "rdev-linux-amd64", GOOS: "linux", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-linux-amd64")},
 		{ID: "linux-arm64", Name: "rdev-linux-arm64", GOOS: "linux", GOARCH: "arm64", Path: filepath.Join(binDir, "rdev-linux-arm64")},
+	}
+}
+
+func supportSessionAssetURL(gatewayURL, assetName, suffix string) string {
+	base := strings.TrimRight(strings.TrimSpace(gatewayURL), "/")
+	return base + "/assets/" + assetName + suffix
+}
+
+func applySupportSessionAssetDownloadEvidence(report map[string]any, path string) {
+	sizeBytes, err := fileSizeBytes(path)
+	if err != nil {
+		report["size_error"] = err.Error()
+		return
+	}
+	report["size_bytes"] = sizeBytes
+
+	gzipBytes, err := gzipFileSizeBytes(path)
+	if err != nil {
+		report["gzip_estimate_error"] = err.Error()
+		return
+	}
+	report["gzip_estimated_bytes"] = gzipBytes
+	report["gzip_budget_bytes"] = supportSessionHelperGzipBudgetBytes
+	report["gzip_within_budget"] = gzipBytes <= supportSessionHelperGzipBudgetBytes
+	report["bootstrap_target_bytes"] = supportSessionBootstrapTargetBytes
+	report["bootstrap_target_met"] = gzipBytes <= supportSessionBootstrapTargetBytes
+	if sizeBytes > 0 {
+		report["compression_ratio"] = float64(gzipBytes) / float64(sizeBytes)
+	}
+}
+
+func supportSessionAssetDownloadSummary(assetReports []map[string]any) map[string]any {
+	allGzipWithinBudget := true
+	bootstrapConnectorRecommended := false
+	var maxGzipBytes int64
+	hasGzipEvidence := false
+	for _, report := range assetReports {
+		withinBudget, ok := report["gzip_within_budget"].(bool)
+		if !ok || !withinBudget {
+			allGzipWithinBudget = false
+		}
+		if bootstrapTargetMet, ok := report["bootstrap_target_met"].(bool); ok && !bootstrapTargetMet {
+			bootstrapConnectorRecommended = true
+		}
+		if gzipBytes, ok := report["gzip_estimated_bytes"].(int64); ok {
+			hasGzipEvidence = true
+			if gzipBytes > maxGzipBytes {
+				maxGzipBytes = gzipBytes
+			}
+		}
+	}
+	return map[string]any{
+		"all_gzip_within_budget":                        allGzipWithinBudget,
+		"bootstrap_connector_recommended":               bootstrapConnectorRecommended,
+		"first_connect_size_strategy":                   "serve gzip-compressed full helper assets now; use rdev-bootstrap as the next connector architecture when compressed helpers exceed the 1 MB first-connect target",
+		"default_first_connect_surface":                 "script-preconnect",
+		"default_runner_download_kind":                  "gzip-full-helper",
+		"first_task_requires_full_helper":               true,
+		"publishes_native_first_connect_asset":          false,
+		"default_full_helper_gzip_estimated_max_bytes":  maxGzipBytes,
+		"default_full_helper_meets_bootstrap_target":    hasGzipEvidence && maxGzipBytes <= supportSessionBootstrapTargetBytes,
+		"native_first_connect_asset":                    nativeFirstConnectAssetReport(),
+		"default_first_connect_agent_interpretation":    "the generated bootstrap script reaches preconnect first, then downloads a gzip-compressed full helper before any session tasks can run",
+		"native_first_connect_asset_publication_policy": "publish rdev-bootstrap as a default first-connect asset only after its compressed release artifact is measured under first_connect_target_bytes",
+	}
+}
+
+func nativeFirstConnectAssetReport() map[string]any {
+	return map[string]any{
+		"schema_version": "rdev.support-session-native-first-connect-asset.v1",
+		"name":           "rdev-bootstrap",
+		"published":      false,
+		"measured":       false,
+		"target_bytes":   supportSessionBootstrapTargetBytes,
+		"target_met":     false,
+		"reason":         "rdev-bootstrap is not published by support-session assets, so the default first-connect path must be treated as script preconnect plus full-helper download",
 	}
 }
 
@@ -3413,6 +3762,45 @@ func findRepoRoot(start string) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func fileSizeBytes(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	if info.IsDir() {
+		return 0, fmt.Errorf("%s is a directory", path)
+	}
+	return info.Size(), nil
+}
+
+type countingWriter struct {
+	n int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n += int64(len(p))
+	return len(p), nil
+}
+
+func gzipFileSizeBytes(path string) (int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	counter := &countingWriter{}
+	zw := gzip.NewWriter(counter)
+	_, copyErr := io.Copy(zw, file)
+	closeErr := zw.Close()
+	if copyErr != nil {
+		return 0, copyErr
+	}
+	if closeErr != nil {
+		return 0, closeErr
+	}
+	return counter.n, nil
 }
 
 // copyFile copies src to dst, creating parent directories as needed.

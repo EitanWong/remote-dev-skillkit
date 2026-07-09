@@ -71,7 +71,7 @@ func VerifyWindowsManagedServicePlan(planPath string) (WindowsManagedServicePlan
 	add("release_root_arg", strings.Contains(args, "--release-root-public-key\x00"), "")
 	add("release_required_artifacts_arg", strings.Contains(args, "--release-require-artifacts\x00"), "")
 	add("workspace_lock_store_arg", strings.Contains(args, "--workspace-lock-store\x00"), "")
-	add("identity_trust_nonce_approval_stores", strings.Contains(args, "--identity-store\x00") && strings.Contains(args, "--trust-store\x00") && strings.Contains(args, "--nonce-store\x00") && strings.Contains(args, "--approval-store\x00"), "")
+	add("identity_trust_stores", strings.Contains(args, "--identity-store\x00") && strings.Contains(args, "--trust-store\x00"), "")
 	add("sc_create_present", windowsCommandContains(plan.Service.Commands, "sc.exe", "create"), "")
 	add("sc_description_present", windowsCommandContains(plan.Service.Commands, "sc.exe", "description"), "")
 	add("sc_query_present", windowsCommandContains(plan.Status.Commands, "sc.exe", "query") && windowsCommandContains(plan.Inspect.Commands, "sc.exe", "query"), "")

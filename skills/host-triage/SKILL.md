@@ -1,6 +1,6 @@
 ---
 name: host-triage
-description: Use when an agent needs to inspect or refresh a target host's OS, architecture, shell, service manager, installed tools, permissions, network state, runtime memory, or readiness for Remote Dev Skillkit work before choosing commands or creating jobs.
+description: Use when an agent needs to inspect or refresh a target host's OS, architecture, shell, service manager, installed tools, permissions, network state, runtime memory, or readiness for Remote Dev Skillkit work before choosing commands or creating session tasks.
 ---
 
 # Host Triage
@@ -35,7 +35,7 @@ may be stale.
   `go run ./cmd/rdev bootstrap agent-plan --repo-root .` from a checkout.
 - Existing runtime-memory root and safe reusable facts: gateway source,
   workspace root, adapter availability, framework paths, proxy requirements,
-  release verifier inputs, approval policy, and prior residual risks.
+  release verifier inputs, interrupt policy, and prior residual risks.
 
 ## Adaptive Probes
 
@@ -43,7 +43,7 @@ may be stale.
   `sw_vers`, `ver`, `id`, `whoami`, `command -v`, `where`, `git rev-parse`,
   and directory existence checks.
 - Do not invent a gateway URL, ticket code, root key, release URL, user home
-  path, framework install path, tunnel choice, mesh choice, or approval policy.
+  path, framework install path, tunnel choice, mesh choice, or interrupt policy.
   If it cannot be discovered safely, ask.
 - Keep path and configuration neutral. Do not assume a fixed checkout path,
   user home, temp directory, workspace root, framework install directory,
@@ -67,6 +67,6 @@ Return a short readiness report with stable field names:
 - `detected_capabilities`;
 - `missing_dependencies`;
 - `safe_next_action`;
-- `requires_approval`;
+- `requires_authorization`;
 - `unknowns_to_ask`;
 - `evidence_refs`.

@@ -34,8 +34,8 @@ opening a pull request.
   - Be ashamed of skipping verification; be proud of proactively running
     focused tests, full tests, release smoke, readiness checks, and privacy
     scans when relevant.
-  - Be ashamed of breaking architecture; be proud of following the signed-job,
-    host-policy, approval, evidence, audit, and release-trust contracts.
+  - Be ashamed of breaking architecture; be proud of following the signed-task,
+    host-policy, authorization, evidence, audit, and release-trust contracts.
   - Be ashamed of pretending to understand; be proud of saying what is unknown
     and how it will be checked.
   - Be ashamed of blind modification; be proud of cautious refactoring that is
@@ -63,7 +63,7 @@ opening a pull request.
   covered by tests.
 - High-risk operations such as package installation, elevation, GUI control,
   service changes, publishing, deployment, credential changes, push, and merge
-  must go through approval gates.
+  must go through authorization gates.
 - Public adapter integrations must use the adapterkit conformance surfaces when
   possible.
 
@@ -85,5 +85,5 @@ opening a pull request.
 
 Scripts under `scripts/github/` default to dry-run or plan generation where
 possible. Do not create repositories, publish releases, push tags, mutate issues,
-or upload artifacts unless the maintainer has explicitly approved that external
+or upload artifacts unless the maintainer has explicitly authorized that external
 operation.

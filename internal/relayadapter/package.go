@@ -25,40 +25,40 @@ type Options struct {
 }
 
 type Package struct {
-	SchemaVersion     string        `json:"schema_version"`
-	Name              string        `json:"name"`
-	GeneratedAt       time.Time     `json:"generated_at"`
-	AdapterKind       string        `json:"adapter_kind"`
-	ExternalMutation  bool          `json:"external_mutation"`
-	ProductionClaim   string        `json:"production_claim"`
-	RunnerEnv         RunnerEnv     `json:"runner_env"`
-	Helper            Helper        `json:"helper"`
-	ConnectionPathID  string        `json:"connection_path_id"`
-	StartArgvTemplate []string      `json:"start_argv_template"`
-	InstallAction     InstallAction `json:"install_action_template"`
-	EvidencePlanPath  string        `json:"evidence_plan_path"`
-	EvidenceRequired  []string      `json:"evidence_required"`
-	ApprovalRequired  []string      `json:"approval_required"`
-	AgentRules        []string      `json:"agent_rules"`
-	Files             []PackageFile `json:"files"`
-	Checks            []Check       `json:"checks"`
+	SchemaVersion         string        `json:"schema_version"`
+	Name                  string        `json:"name"`
+	GeneratedAt           time.Time     `json:"generated_at"`
+	AdapterKind           string        `json:"adapter_kind"`
+	ExternalMutation      bool          `json:"external_mutation"`
+	ProductionClaim       string        `json:"production_claim"`
+	RunnerEnv             RunnerEnv     `json:"runner_env"`
+	Helper                Helper        `json:"helper"`
+	ConnectionPathID      string        `json:"connection_path_id"`
+	StartArgvTemplate     []string      `json:"start_argv_template"`
+	InstallAction         InstallAction `json:"install_action_template"`
+	EvidencePlanPath      string        `json:"evidence_plan_path"`
+	EvidenceRequired      []string      `json:"evidence_required"`
+	AuthorizationRequired []string      `json:"authorization_required"`
+	AgentRules            []string      `json:"agent_rules"`
+	Files                 []PackageFile `json:"files"`
+	Checks                []Check       `json:"checks"`
 }
 
 type AcceptanceEvidencePlan struct {
-	SchemaVersion     string             `json:"schema_version"`
-	GeneratedAt       time.Time          `json:"generated_at"`
-	AdapterKind       string             `json:"adapter_kind"`
-	ConnectionPathID  string             `json:"connection_path_id"`
-	PackagePath       string             `json:"package_path"`
-	ExternalMutation  bool               `json:"external_mutation"`
-	EvidenceFiles     []EvidencePlanFile `json:"evidence_files"`
-	DryRunCommand     []string           `json:"dry_run_command"`
-	RunCommand        []string           `json:"run_command"`
-	PackageCommand    []string           `json:"package_command"`
-	VerifyCommand     []string           `json:"verify_command"`
-	AgentRules        []string           `json:"agent_rules"`
-	ApprovalRequired  []string           `json:"approval_required"`
-	UnsupportedClaims []string           `json:"unsupported_claims"`
+	SchemaVersion         string             `json:"schema_version"`
+	GeneratedAt           time.Time          `json:"generated_at"`
+	AdapterKind           string             `json:"adapter_kind"`
+	ConnectionPathID      string             `json:"connection_path_id"`
+	PackagePath           string             `json:"package_path"`
+	ExternalMutation      bool               `json:"external_mutation"`
+	EvidenceFiles         []EvidencePlanFile `json:"evidence_files"`
+	DryRunCommand         []string           `json:"dry_run_command"`
+	RunCommand            []string           `json:"run_command"`
+	PackageCommand        []string           `json:"package_command"`
+	VerifyCommand         []string           `json:"verify_command"`
+	AgentRules            []string           `json:"agent_rules"`
+	AuthorizationRequired []string           `json:"authorization_required"`
+	UnsupportedClaims     []string           `json:"unsupported_claims"`
 }
 
 type EvidencePlanFile struct {
@@ -210,7 +210,7 @@ func Build(opts Options) (Package, error) {
 			"Connection Entry runner result with selected_path=" + descriptor.ConnectionPathID,
 			"host registration and transport fallback evidence from rdev host serve",
 		},
-		ApprovalRequired: []string{
+		AuthorizationRequired: []string{
 			"creating connectivity accounts, keys, profiles, auth keys, or credentials",
 			"editing relay, SSH, mesh, or VPN configuration",
 			"opening firewall, NAT, DNS, or routing paths",
@@ -429,7 +429,7 @@ func installAction(tool, prefix string, downloadable bool) InstallAction {
 	tool = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(tool)), ".exe")
 	argv := []string{"manual-review-required"}
 	expectedSHA := "not-applicable-existing-helper"
-	reason := "Use an existing reviewed helper installation or operator-approved install plan."
+	reason := "Use an existing reviewed helper installation or operator-authorized install plan."
 	if downloadable {
 		argv = []string{"rdev", "deps", "install", "--tool", tool, "--scope", "user", "--url", "${RDEV_" + prefix + "_DOWNLOAD_URL}", "--expected-sha256", "${RDEV_" + prefix + "_SHA256}", "--execute"}
 		expectedSHA = "${RDEV_" + prefix + "_SHA256}"
@@ -456,7 +456,7 @@ func packageChecks(pkg Package) []Check {
 		{Name: "start_argv_template_safe", Passed: safeStartArgv(pkg.AdapterKind, pkg.StartArgvTemplate), Detail: strings.Join(pkg.StartArgvTemplate, " ")},
 		{Name: "install_action_safe", Passed: safeInstallAction(pkg.AdapterKind, pkg.InstallAction), Detail: strings.Join(pkg.InstallAction.Argv, " ")},
 		{Name: "acceptance_evidence_plan_declared", Passed: pkg.EvidencePlanPath == "acceptance-evidence-plan.json", Detail: pkg.EvidencePlanPath},
-		{Name: "approval_boundaries_declared", Passed: len(pkg.ApprovalRequired) >= 3, Detail: fmt.Sprintf("%d", len(pkg.ApprovalRequired))},
+		{Name: "authorization_boundaries_declared", Passed: len(pkg.AuthorizationRequired) >= 3, Detail: fmt.Sprintf("%d", len(pkg.AuthorizationRequired))},
 		{Name: "evidence_required_declared", Passed: len(pkg.EvidenceRequired) >= 4, Detail: fmt.Sprintf("%d", len(pkg.EvidenceRequired))},
 	}
 }
@@ -495,7 +495,7 @@ func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEviden
 			"Redact helper endpoints, credentials, private IPs, local paths, usernames, and hostnames before sharing evidence outside the operator account.",
 			"If endpoint, credential, identity, route, privilege, or persistence is unclear, ask one short question instead of guessing.",
 		},
-		ApprovalRequired: append([]string(nil), pkg.ApprovalRequired...),
+		AuthorizationRequired: append([]string(nil), pkg.AuthorizationRequired...),
 		UnsupportedClaims: []string{
 			"This package and plan do not prove a deployed relay, SSH tunnel, mesh, or VPN path by themselves.",
 			"Production connectivity claims require a verified rdev.acceptance-package.relay-adapter.v1 evidence bundle from a real target environment.",
@@ -660,7 +660,7 @@ Run a Connection Entry dry-run before execution:
 %s
 
 Privileged firewall, NAT, DNS, route, service, driver, paid relay, and relay
-credential changes require explicit operator approval.
+credential changes require explicit operator authorization.
 `, PackageSchemaVersion, pkg.Name, pkg.AdapterKind, pkg.RunnerEnv.GatewayURLVar, pkg.RunnerEnv.StartArgvVar, pkg.RunnerEnv.InstallActionVar, pkg.Helper.VerifyCommand, pkg.RunnerEnv.RunnerCommandHint)
 }
 
@@ -671,7 +671,7 @@ func renderEnvTemplate(pkg Package) string {
 	installNote := "Optional reviewed helper install action. Requires SHA-256 before execution."
 	if len(pkg.InstallAction.Argv) == 1 && pkg.InstallAction.Argv[0] == "manual-review-required" {
 		installValue = ""
-		installNote = "Optional reviewed helper install action. Leave empty unless the operator provides a real reviewed JSON action; enrollment, key, route, profile, or service changes require approval."
+		installNote = "Optional reviewed helper install action. Leave empty unless the operator provides a real reviewed JSON action; enrollment, key, route, profile, or service changes require authorization."
 	}
 	return fmt.Sprintf(`# Reviewed gateway URL reachable by the target host through this helper path.
 %s=

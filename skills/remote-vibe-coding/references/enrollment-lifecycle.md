@@ -33,6 +33,6 @@ operator auth, key custody, fleet renewal, or emergency drills.
   key custody, fleet renewal planning, and emergency drills.
 - Do not store private keys, private hostnames, local machine paths, private
   ticket codes, or operator tokens in public evidence.
-- Real organization-specific custody approvals and emergency procedures remain
+- Real organization-specific custody authorizations and emergency procedures remain
   operator-owned; the project records evidence structure and drills, not the
   operator's secrets.

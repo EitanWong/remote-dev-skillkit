@@ -1,6 +1,6 @@
 ---
 name: safe-remote-support
-description: Use when an agent needs to connect to, operate, or audit a remote machine through Remote Dev Skillkit — covering Windows, macOS, and Linux targets, temporary and managed sessions, public-tunnel first connectivity, scoped jobs, evidence, and cleanup.
+description: Use when an agent needs to connect to, operate, or audit a remote machine through Remote Dev Skillkit — covering Windows, macOS, and Linux targets, temporary and managed sessions, public-tunnel first connectivity, scoped session tasks, evidence, and cleanup.
 ---
 
 # Safe Remote Support
@@ -61,7 +61,7 @@ anything to the target-side human.
 
 ### Adaptive Configuration Contract
 
-Before acting, probe the available `rdev` CLI/MCP surface, gateway state, network reachability, tunnel/mesh helpers, workspace path, target OS/shell, permissions, and connection modes. If any required value is unclear after read-only probes, ask one short question instead of inventing ticket codes, gateway URLs, root keys, checksums, workspace paths, adapter choices, tunnel commands, or approval policy.
+Before acting, probe the available `rdev` CLI/MCP surface, gateway state, network reachability, tunnel/mesh helpers, workspace path, target OS/shell, permissions, and connection modes. If any required value is unclear after read-only probes, ask one short question instead of inventing ticket codes, gateway URLs, root keys, checksums, workspace paths, adapter choices, tunnel commands, or interrupt policy.
 
 ### Rule 3 — Never ask about network configuration
 
@@ -93,27 +93,27 @@ Never run it with `&`, `nohup`, or in a background terminal. Keep it alive for t
 If the gateway process unexpectedly exits:
 1. Re-run `rdev support-session connect --start` with the same `--work-dir`.
 2. Wait for the previous host heartbeat to go stale (up to 90 seconds).
-3. Let the target machine re-register and receive automatic approval.
+3. Let the target machine rejoin and receive automatic session authorization.
 4. Resume from the generated `target_handoff_envelope.full_text` / `handoff_text_file.path`.
 
 For an operator-owned recurring machine, do not try to make the temporary
 PowerShell or shell window persistent. First confirm ownership and persistence
-approval in one short question, configure a stable gateway
+authorization in one short question, configure a stable gateway
 (`RDEV_HOSTED_GATEWAY_URL` or `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`), then use the
 reviewed managed Connection Entry / Windows Service / systemd / LaunchAgent
 plan surfaces. Never install persistence for third-party temporary support.
 
 ### Rule 6 — MCP tools must target the active gateway
 
-The MCP server (`rdev mcp serve`) can maintain its own separate in-memory gateway. It may not see hosts or jobs created by `rdev support-session connect --start`.
+The MCP server (`rdev mcp serve`) can maintain its own separate in-memory gateway. It may not see sessions, endpoints, tasks, or artifacts created by `rdev support-session connect --start`.
 
 Pass `"gateway_url": "<active-gateway-url>"` explicitly on every
-gateway-backed `rdev.hosts.*`, `rdev.jobs.*`, `rdev.artifacts.*`,
-`rdev.audit.query`, and support-session status/report call:
+gateway-backed `rdev.sessions.*`, `rdev.audit.query`, and support-session
+status/report call:
 
 ```
-rdev.jobs.create(gateway_url="<ACTIVE_GATEWAY_URL>", host_id="hst_...", ...)
-rdev.hosts.capabilities(gateway_url="<ACTIVE_GATEWAY_URL>", host_id="hst_...")
+rdev.sessions.status(gateway_url="<ACTIVE_GATEWAY_URL>", session_id="ses_...")
+rdev.sessions.task(gateway_url="<ACTIVE_GATEWAY_URL>", session_id="ses_...", ...)
 ```
 
 Omitting `gateway_url` can hit the wrong empty gateway and produce misleading "not found" or empty-list results.
@@ -143,8 +143,9 @@ Before calling any MCP tool that requires a running gateway:
 2. Verify that exact gateway: `curl -fsS <ACTIVE_GATEWAY_URL>/healthz`.
 3. If no active gateway URL exists, start the standard foreground flow with
    `rdev support-session connect --start`.
-4. Never call `rdev.support_session.create` or `rdev.hosts.*` when no gateway
-   URL is available — the call will fail or hit the wrong in-memory gateway.
+4. Never call `rdev.support_session.create` or `rdev.sessions.*` when no
+   gateway URL is available — the call will fail or hit the wrong in-memory
+   gateway.
 
 ### Rule 10 — Send `target_handoff_envelope.full_text`, not a bare URL
 
@@ -186,7 +187,7 @@ asking the user to edit bootstrap scripts.
 
 ### Rule 13 — Do not disconnect automatically
 
-Completing a job is not a signal to disconnect. Keep the host/session alive
+Completing a task is not a signal to disconnect. Keep the host/session alive
 until the operator explicitly asks to disconnect, revoke, stop the gateway, or
 uninstall a managed service. Final reports should state connection continuity:
 ephemeral Quick Tunnel vs stable configured gateway, and whether managed
@@ -209,22 +210,22 @@ ticket/root/gateway internals as the user's mental model. Use the standard
 
 For third-party temporary support, keep the connector visible and attended; do
 not install service persistence. For an operator-owned recurring machine, ask
-one short ownership/persistence approval question, require a stable gateway,
+one short ownership/persistence authorization question, require a stable gateway,
 then use the reviewed managed-service upgrade path.
 
 ### Rule 15 — Use native remote-control tools before scripts
 
 Remote Dev Skillkit is an Agent remote-control kernel. Before shell or
-PowerShell workarounds, use `rdev.files.*` / `rdev files ...`,
-`rdev.desktop.*` / `rdev desktop ...`, and `rdev.jobs.policy_template` /
-`rdev job policy-template --capability <file-or-desktop-capability>`.
+PowerShell workarounds, use `rdev.sessions.task` with the `file` or
+`desktop` adapter, or the CLI `rdev files ... --session-id ...` and
+`rdev desktop ... --session-id ...` wrappers.
 
 Do not write `xdotool`, `cliclick`, AppleScript/System Events, Win32
 PowerShell GUI scripts, raw `SendKeys`, mouse movement scripts, screenshot
 scripts, file-transfer shell glue, or custom Base64 file upload/download code
-when a native `rdev.files.*` or `rdev.desktop.*` surface exists.
+when a native session-task file or desktop surface exists.
 
-GUI and input jobs require an unlocked interactive user session. If the target
+GUI and input tasks require an unlocked interactive user session. If the target
 is locked, logged out, asleep, or blocked by OS/enterprise policy, report
 `desktop_session_unavailable` and use the standard recovery path. Do not bypass
 lock screens, privacy prompts, MDM, UAC, sudo, or enterprise controls.
@@ -278,8 +279,8 @@ rdev support-session status --ticket-code <TICKET> --wait --gateway-url <TUNNEL_
 Or use MCP: `rdev.support_session.status` with `wait=true` and `gateway_url: "<TUNNEL_URL>"`.
 
 When `connected=true`, immediately tell the user: "Connected to `<hostname>`."
-If the status is `stale`, do **not** create jobs. Report that the target runner
-was seen previously but is no longer job-ready, then use the generated recovery
+If the status is `stale`, do **not** create session tasks. Report that the target runner
+was seen previously but is no longer task-ready, then use the generated recovery
 instructions instead of manually building new bootstrap scripts.
 
 Before any command that needs `--host-id`, prefer:
@@ -288,7 +289,7 @@ Before any command that needs `--host-id`, prefer:
 rdev support-session report --gateway-url <ACTIVE_GATEWAY_URL> --ticket-code <TICKET>
 ```
 
-Use `recommended_job_host_id` from that report. If the report says there are no
+Use `recommended_target_endpoint_id` from that report. If the report says there are no
 active hosts or multiple active hosts, follow its `next_action` instead of
 guessing from stale/pending host IDs.
 
@@ -310,11 +311,11 @@ switch transports manually unless the recover command is unavailable.
 After connection, run the built-in smoke test first (no user prompts):
 
 ```
-rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --host-id <RECOMMENDED_JOB_HOST_ID>
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID>
 ```
 
-This command owns OS-specific probe jobs, PowerShell/cmd fallback semantics,
-short timeouts, scoped write test, job waiting, artifact collection, and
+This command owns OS-specific probe tasks, PowerShell/cmd fallback semantics,
+short timeouts, scoped write test, task waiting, artifact collection, and
 remote-control entry plus connection-continuity reporting. Do not write ad-hoc
 `curl` loops or custom Windows/Unix capability scripts unless this built-in command is missing. If
 `smoke-test` is unavailable in an older install, use
@@ -324,7 +325,7 @@ When validating native remote-control surfaces, run the same smoke test with the
 low-risk probe switch:
 
 ```
-rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --host-id <RECOMMENDED_JOB_HOST_ID> --remote-control
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID> --remote-control
 ```
 
 For MCP, call `rdev.support_session.smoke_test` with `"remote_control": true`
@@ -334,17 +335,18 @@ open, or delete actions.
 
 For subsequent scoped work:
 
-- Use `rdev files ...` or MCP `rdev.files.*` for file list/read/write/download/upload/delete.
-- Use `rdev desktop ...` or MCP `rdev.desktop.*` for screenshots, PNG frame
+- Use `rdev files ... --session-id ...` or MCP `rdev.sessions.task` with the
+  `file` adapter for file list/read/write/download/upload/delete.
+- Use `rdev desktop ... --session-id ...` or MCP `rdev.sessions.task` with the
+  `desktop` adapter for screenshots, PNG frame
   recording, window inspection/focus/move, keyboard/mouse input, clipboard
   read/write, app launch or close, and URL open.
-- Use `rdev job create`, `rdev job wait`, `rdev job get`,
-  `rdev job artifacts`, `rdev job list`, and `rdev job cancel` for lower-level
-  adapter jobs.
+- Use `rdev.sessions.task`, `rdev.sessions.events`, and
+  `rdev.sessions.artifacts` for lower-level adapter work.
 
 If you need a safe policy JSON, run
-`rdev job policy-template --capability <capability> --target-os <os>` and pass
-the returned `policy` object to `rdev job create`. Prefer capabilities such as
+`rdev task policy-template --capability <capability> --target-os <os>` and pass
+the returned `policy` object as the reviewed session task payload. Prefer capabilities such as
 `file.transfer.read`, `file.transfer.write`, `window.inspect`,
 `screen.screenshot`, `screen.record`, `input.keyboard`, `input.mouse`,
 `app.launch`, `app.close`, and `url.open` instead of shell scripts.
@@ -367,7 +369,7 @@ If the target does not appear within 2 minutes:
 1. Check `gateway_candidate_summary` — was a public tunnel URL sent?
 2. If LAN URL was sent by mistake: restart with cloudflared URL, give user new command.
 3. If tunnel dropped: restart cloudflared, get new URL, give user new command.
-4. If stale hosts or queued jobs accumulated: run `rdev support-session recover`.
+4. If stale endpoints or queued tasks accumulated: run `rdev support-session recover`.
 5. **Do not write custom PowerShell/bash polling scripts.**
 6. Use `rdev.support_session.status` or `connection_recovery` returned fields.
 
@@ -380,7 +382,7 @@ gateway continuity, Support Device Entry, host OS/arch, connection time,
 capabilities tested, evidence/artifact IDs, what the Agent can and cannot do,
 gaps, cleanup state, residual risk, and whether the connection remains alive.
 Include file-transfer evidence when used, and screenshot/record/window/input
-audit plus approval token IDs when desktop control was used or attempted.
+audit plus interrupt/event IDs when desktop control was used or attempted.
 
 ---
 
@@ -399,7 +401,7 @@ Never add `service.manage`, `credential.change`, `gui.control`,
 `screen.screenshot`, `screen.record`, `window.focus`, `window.move`,
 `input.keyboard`, `input.mouse`, `app.launch`, `app.close`, `url.open`,
 `clipboard.read`, `clipboard.write`, or `unattended.access` without explicit
-approval.
+authorization.
 
 ---
 
@@ -410,16 +412,16 @@ approval.
 - Writing custom PowerShell/bash bootstrap or polling scripts
 - Writing custom file transfer, screenshot, xdotool, cliclick, AppleScript,
   Win32 PowerShell GUI, SendKeys, mouse, or keyboard scripts instead of native
-  `rdev.files.*` / `rdev.desktop.*` surfaces
+  session-task file/desktop surfaces
 - Manual ticket/gateway/checksum assembly
 - Hidden installation or persistence
 - ExecutionPolicy Bypass
-- UAC or sudo bypass without approval gate
+- UAC or sudo bypass without explicit authorization
 - Bypassing lock-screen, screen-unlock, MDM, or enterprise security policy
 - Storing secrets, tokens, private keys, or raw transcripts in memory
 - Running `rdev support-session connect --start` in a background terminal (`&`, `nohup`, etc.)
 - Calling gateway-backed `rdev.*` MCP tools without passing `"gateway_url": "<active-gateway-url>"`
-- Assuming plural CLI commands such as `rdev hosts` or `rdev jobs` are valid; use `rdev host` / `rdev job` or MCP tools
+- Assuming retired plural host/task CLI groups are valid; use `rdev host` / `rdev task` or MCP tools
 - Manually deleting or replacing target helper binaries instead of using
   `support-session connect --start`, `prepare --build-assets`, or
   `support-session recover`
@@ -449,22 +451,22 @@ These rules apply only when the built-in `rdev` CLI and MCP tools cannot accompl
 **Variable naming**
 
 - Never name a variable `status` in a shell script — it is a **read-only built-in** in zsh and will cause `read-only variable: status` at runtime.
-- Use `job_state`, `host_state`, `rdev_state`, or any other non-conflicting name.
+- Use `task_state`, `host_state`, `rdev_state`, or any other non-conflicting name.
 
 ```bash
 # WRONG — crashes in zsh
 status=$(curl ...)
 
 # CORRECT
-job_state=$(curl ...)
+task_state=$(curl ...)
 ```
 
-**Job terminal states**
+**Task terminal states**
 
 The gateway model uses `"succeeded"` (not `"completed"`) as the success terminal state. Always include all five terminal values in your polling exit condition:
 
 ```bash
-case "$job_state" in
+case "$task_state" in
   succeeded|completed|failed|canceled) break ;;
 esac
 ```
@@ -473,15 +475,14 @@ esac
 
 Before invoking any `rdev` subcommand, verify it exists by checking `rdev --help` output. The following subcommands **do not exist** and will return errors:
 
-- `rdev hosts capabilities` → use `rdev.hosts.capabilities` MCP tool or `GET /v1/hosts`
+- `rdev hosts capabilities` → use `rdev.sessions.status` MCP tool or
+  `rdev support-session audit-capabilities`
 
 Prefer first-class CLI commands for gateway interactions when they exist:
 `rdev support-session smoke-test`, `rdev support-session audit-capabilities`,
-`rdev job create`, `rdev job list`, `rdev job get`, `rdev job wait`,
-`rdev job artifacts`, `rdev job policy-template`, `rdev files ...`,
-`rdev desktop ...`,
-`rdev support-session report`, and `rdev job cancel`. Use MCP tools when the
-current task needs MCP-only surfaces such as host capability inspection, and use
+`rdev task policy-template`, `rdev files ...`, `rdev desktop ...`, and
+`rdev support-session report`. Use `rdev.sessions.*` MCP tools for session
+status, task submission, event replay, interrupts, and artifact metadata. Use
 raw HTTP only as a last-resort diagnostic path.
 
 **MCP gateway alignment**
@@ -491,8 +492,8 @@ The installed MCP server (`rdev-mcp`) connects to a statically configured gatewa
 Fix: pass `"gateway_url": "<active-gateway-url>"` explicitly on every gateway-backed MCP call:
 
 ```
-rdev.jobs.create(gateway_url="<ACTIVE_GATEWAY_URL>", ...)
-rdev.hosts.capabilities(gateway_url="<ACTIVE_GATEWAY_URL>", ...)
+rdev.sessions.status(gateway_url="<ACTIVE_GATEWAY_URL>", session_id="ses_...")
+rdev.sessions.task(gateway_url="<ACTIVE_GATEWAY_URL>", session_id="ses_...", ...)
 ```
 
 Or set `RDEV_CLOUDFLARED_GATEWAY_URL=<url>` before starting the MCP server.

@@ -30,26 +30,26 @@ type StatusOptions struct {
 }
 
 type Scaffold struct {
-	SchemaVersion      string           `json:"schema_version"`
-	GeneratedAt        time.Time        `json:"generated_at"`
-	OK                 bool             `json:"ok"`
-	ReadyForPackaging  bool             `json:"ready_for_packaging"`
-	PlanPath           string           `json:"plan_path"`
-	PlanSchema         string           `json:"plan_schema"`
-	PlanKind           string           `json:"plan_kind"`
-	OutDir             string           `json:"out_dir"`
-	PackageDir         string           `json:"package_dir,omitempty"`
-	CreatePlaceholders bool             `json:"create_placeholders"`
-	EvidenceFiles      []ScaffoldFile   `json:"evidence_files"`
-	Commands           ScaffoldCommands `json:"commands"`
-	ChecklistPath      string           `json:"checklist_path"`
-	PlanCopyPath       string           `json:"plan_copy_path"`
-	ReportPath         string           `json:"report_path"`
-	AgentRules         []string         `json:"agent_rules"`
-	ApprovalRequired   []string         `json:"approval_required,omitempty"`
-	UnsupportedClaims  []string         `json:"unsupported_claims,omitempty"`
-	Checks             []ScaffoldCheck  `json:"checks"`
-	RecommendedActions []string         `json:"recommended_actions,omitempty"`
+	SchemaVersion         string           `json:"schema_version"`
+	GeneratedAt           time.Time        `json:"generated_at"`
+	OK                    bool             `json:"ok"`
+	ReadyForPackaging     bool             `json:"ready_for_packaging"`
+	PlanPath              string           `json:"plan_path"`
+	PlanSchema            string           `json:"plan_schema"`
+	PlanKind              string           `json:"plan_kind"`
+	OutDir                string           `json:"out_dir"`
+	PackageDir            string           `json:"package_dir,omitempty"`
+	CreatePlaceholders    bool             `json:"create_placeholders"`
+	EvidenceFiles         []ScaffoldFile   `json:"evidence_files"`
+	Commands              ScaffoldCommands `json:"commands"`
+	ChecklistPath         string           `json:"checklist_path"`
+	PlanCopyPath          string           `json:"plan_copy_path"`
+	ReportPath            string           `json:"report_path"`
+	AgentRules            []string         `json:"agent_rules"`
+	AuthorizationRequired []string         `json:"authorization_required,omitempty"`
+	UnsupportedClaims     []string         `json:"unsupported_claims,omitempty"`
+	Checks                []ScaffoldCheck  `json:"checks"`
+	RecommendedActions    []string         `json:"recommended_actions,omitempty"`
 }
 
 type Status struct {
@@ -115,22 +115,22 @@ type ScaffoldCheck struct {
 }
 
 type rawPlan struct {
-	SchemaVersion     string        `json:"schema_version"`
-	StorageProvider   string        `json:"storage_provider"`
-	AuthProvider      string        `json:"auth_provider"`
-	AdapterKind       string        `json:"adapter_kind"`
-	ConnectionPathID  string        `json:"connection_path_id"`
-	PackagePath       string        `json:"package_path"`
-	ExternalMutation  bool          `json:"external_mutation"`
-	EvidenceFiles     []rawPlanFile `json:"evidence_files"`
-	PackageCommand    []string      `json:"package_command"`
-	VerifyCommand     []string      `json:"verify_command"`
-	PreflightCommands []string      `json:"preflight_commands"`
-	DryRunCommand     []string      `json:"dry_run_command"`
-	RunCommand        []string      `json:"run_command"`
-	AgentRules        []string      `json:"agent_rules"`
-	ApprovalRequired  []string      `json:"approval_required"`
-	UnsupportedClaims []string      `json:"unsupported_claims"`
+	SchemaVersion         string        `json:"schema_version"`
+	StorageProvider       string        `json:"storage_provider"`
+	AuthProvider          string        `json:"auth_provider"`
+	AdapterKind           string        `json:"adapter_kind"`
+	ConnectionPathID      string        `json:"connection_path_id"`
+	PackagePath           string        `json:"package_path"`
+	ExternalMutation      bool          `json:"external_mutation"`
+	EvidenceFiles         []rawPlanFile `json:"evidence_files"`
+	PackageCommand        []string      `json:"package_command"`
+	VerifyCommand         []string      `json:"verify_command"`
+	PreflightCommands     []string      `json:"preflight_commands"`
+	DryRunCommand         []string      `json:"dry_run_command"`
+	RunCommand            []string      `json:"run_command"`
+	AgentRules            []string      `json:"agent_rules"`
+	AuthorizationRequired []string      `json:"authorization_required"`
+	UnsupportedClaims     []string      `json:"unsupported_claims"`
 }
 
 type rawPlanFile struct {
@@ -185,22 +185,22 @@ func Build(opts Options) (Scaffold, error) {
 		packageDir = abs
 	}
 	scaffold := Scaffold{
-		SchemaVersion:      ScaffoldSchemaVersion,
-		GeneratedAt:        now.UTC(),
-		OK:                 true,
-		ReadyForPackaging:  false,
-		PlanPath:           planPath,
-		PlanSchema:         plan.SchemaVersion,
-		PlanKind:           kind,
-		OutDir:             outDir,
-		PackageDir:         packageDir,
-		CreatePlaceholders: opts.CreatePlaceholders,
-		ChecklistPath:      filepath.Join(outDir, "AGENT_CHECKLIST.md"),
-		PlanCopyPath:       filepath.Join(outDir, filepath.Base(planPath)),
-		ReportPath:         filepath.Join(outDir, "scaffold-report.json"),
-		AgentRules:         append([]string(nil), plan.AgentRules...),
-		ApprovalRequired:   append([]string(nil), plan.ApprovalRequired...),
-		UnsupportedClaims:  append([]string(nil), plan.UnsupportedClaims...),
+		SchemaVersion:         ScaffoldSchemaVersion,
+		GeneratedAt:           now.UTC(),
+		OK:                    true,
+		ReadyForPackaging:     false,
+		PlanPath:              planPath,
+		PlanSchema:            plan.SchemaVersion,
+		PlanKind:              kind,
+		OutDir:                outDir,
+		PackageDir:            packageDir,
+		CreatePlaceholders:    opts.CreatePlaceholders,
+		ChecklistPath:         filepath.Join(outDir, "AGENT_CHECKLIST.md"),
+		PlanCopyPath:          filepath.Join(outDir, filepath.Base(planPath)),
+		ReportPath:            filepath.Join(outDir, "scaffold-report.json"),
+		AgentRules:            append([]string(nil), plan.AgentRules...),
+		AuthorizationRequired: append([]string(nil), plan.AuthorizationRequired...),
+		UnsupportedClaims:     append([]string(nil), plan.UnsupportedClaims...),
 	}
 	addCheck := func(name string, passed bool, detail string) {
 		scaffold.Checks = append(scaffold.Checks, ScaffoldCheck{Name: name, Passed: passed, Detail: detail})

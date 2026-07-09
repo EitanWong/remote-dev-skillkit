@@ -26,7 +26,7 @@ type LinuxManagedServicePackageOptions struct {
 	ReleaseGatePath         string
 	AuditPath               string
 	ReconnectPath           string
-	JobEvidenceDir          string
+	SessionEvidenceDir      string
 	StopTranscriptPath      string
 	UninstallTranscriptPath string
 	NotesPath               string
@@ -135,12 +135,12 @@ func PackageLinuxManagedServiceEvidence(opts LinuxManagedServicePackageOptions) 
 	files = append(files, copyOptionalEvidence(outDir, "evidence/uninstall-transcript.txt", "uninstall-transcript", opts.UninstallTranscriptPath, redactor, add)...)
 	files = append(files, copyNotesEvidence(outDir, opts.NotesPath, redactor, add)...)
 
-	jobFiles, jobErr := copyEvidenceTree(outDir, "evidence/job-evidence", "job-evidence", opts.JobEvidenceDir, redactor)
-	if jobErr != nil {
-		add("job_evidence_dir_copied", false, jobErr.Error())
+	sessionFiles, sessionErr := copyEvidenceTree(outDir, "evidence/session-evidence", "session-evidence", opts.SessionEvidenceDir, redactor)
+	if sessionErr != nil {
+		add("session_evidence_dir_copied", false, sessionErr.Error())
 	} else {
-		files = append(files, jobFiles...)
-		add("job_evidence_dir_copied", len(jobFiles) > 0, fmt.Sprintf("%d", len(jobFiles)))
+		files = append(files, sessionFiles...)
+		add("session_evidence_dir_copied", len(sessionFiles) > 0, fmt.Sprintf("%d", len(sessionFiles)))
 	}
 
 	add("start_transcript_present", fileEntryKindPresent(files, "start-transcript"), opts.StartTranscriptPath)
@@ -152,9 +152,9 @@ func PackageLinuxManagedServiceEvidence(opts LinuxManagedServicePackageOptions) 
 	add("reconnect_evidence_present", fileEntryKindPresent(files, "reconnect"), opts.ReconnectPath)
 	add("stop_transcript_present", fileEntryKindPresent(files, "stop-transcript"), opts.StopTranscriptPath)
 	add("uninstall_transcript_present", fileEntryKindPresent(files, "uninstall-transcript"), opts.UninstallTranscriptPath)
-	add("job_evidence_present", fileEntryKindPresent(files, "job-evidence"), opts.JobEvidenceDir)
-	add("job_evidence_manifest_present", packagePathExists(files, "evidence/job-evidence/manifest.json"), opts.JobEvidenceDir)
-	add("approval_required_evidence_present", packageTreeContains(outDir, "evidence/job-evidence", "approval-required"), opts.JobEvidenceDir)
+	add("session_evidence_present", fileEntryKindPresent(files, "session-evidence"), opts.SessionEvidenceDir)
+	add("session_evidence_manifest_present", packagePathExists(files, "evidence/session-evidence/manifest.json"), opts.SessionEvidenceDir)
+	add("host_denial_probe_evidence_present", packageTreeContains(outDir, "evidence/session-evidence", "host-denial"), opts.SessionEvidenceDir)
 
 	if redactor.Redacted() {
 		pkg.RedactionRuleCounts = redactor.Counts()
@@ -171,7 +171,7 @@ func PackageLinuxManagedServiceEvidence(opts LinuxManagedServicePackageOptions) 
 	if !pkg.OK() {
 		pkg.RecommendedActions = []string{
 			"Collect missing Linux managed-service evidence from the real host run.",
-			"Re-run package-linux-managed-service after redacting transcripts, logs, release-gate output, audit, and evidence bundles.",
+			"Re-run package-linux-managed-service after redacting transcripts, logs, release-gate output, audit, and session evidence.",
 			"Do not publish this Linux managed-service acceptance package as release evidence until every check passes.",
 		}
 	}

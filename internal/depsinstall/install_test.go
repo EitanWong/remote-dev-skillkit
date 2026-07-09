@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,12 @@ import (
 	"testing"
 	"time"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestInstallDryRunReportsPlanOnly(t *testing.T) {
 	report, err := Install(context.Background(), nil, Options{
@@ -63,6 +70,46 @@ func TestInstallDownloadsVerifiesAndExtractsChisel(t *testing.T) {
 	}
 	if string(content) != "fake-chisel" {
 		t.Fatalf("unexpected binary content %q", string(content))
+	}
+}
+
+func TestInstallRetriesTransientDownloadEOF(t *testing.T) {
+	archive := zipBytes(t, "chisel", "fake-chisel")
+	sum := sha256.Sum256(archive)
+	attempts := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if attempts == 1 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(archive)),
+			Request:    req,
+		}, nil
+	})}
+
+	report, err := Install(context.Background(), client, Options{
+		Tool:           "chisel",
+		Scope:          "workspace",
+		Platform:       "linux/amd64",
+		URL:            "https://downloads.example.invalid/chisel.zip",
+		ExpectedSHA256: hex.EncodeToString(sum[:]),
+		InstallDir:     filepath.Join(t.TempDir(), "tools"),
+		Execute:        true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected download retry after EOF, got %d attempts", attempts)
+	}
+	if !report.OK() || !report.Executed || report.InstalledBinary == "" {
+		t.Fatalf("expected executed install report, got %#v", report)
 	}
 }
 

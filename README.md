@@ -21,8 +21,8 @@ without receiving unrestricted shell access.
 
 | Agent gets | Human keeps |
 |---|---|
-| Skills, MCP tools, file/desktop/job adapters | Visibility, approval, revocation, audit |
-| Signed jobs with clear capabilities | Host-local policy and security boundaries |
+| Skills, MCP tools, file/desktop/task adapters | Visibility, authorization, revocation, audit |
+| Signed tasks with clear capabilities | Host-local policy and security boundaries |
 | Artifacts and evidence bundles | Control over what runs and when it stops |
 
 ## Install
@@ -85,7 +85,7 @@ rdev support-session connect --start
 
 ### 2. Run Scoped Work
 
-The agent creates signed jobs for specific capabilities: shell, PowerShell,
+The agent creates signed tasks for specific capabilities: shell, PowerShell,
 files, desktop, Codex, Claude Code, or adapter workflows.
 
 Examples:
@@ -97,7 +97,7 @@ rdev demo local
 
 ### 3. Review Evidence
 
-Jobs return artifacts, audit events, and evidence bundles before the agent
+Tasks return artifacts, audit events, and evidence bundles before the agent
 claims the work is complete.
 
 ```bash

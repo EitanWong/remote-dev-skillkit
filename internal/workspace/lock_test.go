@@ -17,7 +17,7 @@ func TestFileLockStoreAcquireStatusAndRelease(t *testing.T) {
 	lock, err := store.Acquire(LockOptions{
 		RepoRoot:     repo,
 		HostID:       "hst_1",
-		JobID:        "job_1",
+		TaskID:       "task_1",
 		OwnerAdapter: "codex",
 		TTL:          time.Hour,
 	}, now)
@@ -46,11 +46,11 @@ func TestFileLockStoreAcquireStatusAndRelease(t *testing.T) {
 		t.Fatalf("expected lock file permissions 0600, got %#o", got)
 	}
 
-	released, removed, err := store.Release(repo, "job_1", false)
+	released, removed, err := store.Release(repo, "task_1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !removed || released.JobID != "job_1" {
+	if !removed || released.TaskID != "task_1" {
 		t.Fatalf("unexpected release removed=%v lock=%#v", removed, released)
 	}
 	status, err = store.Status(repo, now.Add(time.Minute))
@@ -69,7 +69,7 @@ func TestFileLockStoreRejectsConcurrentWriter(t *testing.T) {
 	if _, err := store.Acquire(LockOptions{
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_1",
+		TaskID:   "task_1",
 		TTL:      time.Hour,
 	}, now); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestFileLockStoreRejectsConcurrentWriter(t *testing.T) {
 	_, err := store.Acquire(LockOptions{
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_2",
+		TaskID:   "task_2",
 		TTL:      time.Hour,
 	}, now.Add(time.Minute))
 	if !errors.Is(err, ErrLocked) {
@@ -92,7 +92,7 @@ func TestFileLockStoreAllowsExpiredLockReplacement(t *testing.T) {
 	if _, err := store.Acquire(LockOptions{
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_old",
+		TaskID:   "task_old",
 		TTL:      time.Minute,
 	}, now); err != nil {
 		t.Fatal(err)
@@ -100,13 +100,13 @@ func TestFileLockStoreAllowsExpiredLockReplacement(t *testing.T) {
 	lock, err := store.Acquire(LockOptions{
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_new",
+		TaskID:   "task_new",
 		TTL:      time.Hour,
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lock.JobID != "job_new" {
+	if lock.TaskID != "task_new" {
 		t.Fatalf("expected replacement lock, got %#v", lock)
 	}
 }
@@ -118,12 +118,12 @@ func TestFileLockStoreReleaseRequiresOwnerUnlessForced(t *testing.T) {
 	if _, err := store.Acquire(LockOptions{
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_1",
+		TaskID:   "task_1",
 		TTL:      time.Hour,
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := store.Release(repo, "job_2", false)
+	_, _, err := store.Release(repo, "task_2", false)
 	if !errors.Is(err, ErrOwnerMismatch) {
 		t.Fatalf("expected owner mismatch, got %v", err)
 	}

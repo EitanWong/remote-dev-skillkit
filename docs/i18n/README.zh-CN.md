@@ -8,7 +8,7 @@ Remote Dev Skillkit 是一个开源的 AI 原生远程开发 Skillkit。它让 C
 |---|---|
 | Skills、MCP 工具、文件/桌面/任务适配器 | 可见性、审批、撤销、审计 |
 | 带明确权限的签名任务 | 主机本地策略和安全边界 |
-| Artifacts 和 evidence bundles | 控制运行内容和停止时间 |
+| Artifacts 和 session evidence | 控制运行内容和停止时间 |
 
 ## AI Agent 安装
 

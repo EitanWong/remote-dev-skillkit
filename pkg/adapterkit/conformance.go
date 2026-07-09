@@ -201,7 +201,7 @@ func VerifyLifecycleManifestJSON(content []byte, contract LifecycleContract) Con
 	}
 	if plan, ok := objectField(phases, "plan"); ok {
 		add("plan_declares_external_consequences", boolFieldEquals(plan, "declares_external_consequences", true), "")
-		add("plan_declares_required_approvals", boolFieldEquals(plan, "declares_required_approvals", true), "")
+		add("plan_declares_required_authorizations", boolFieldEquals(plan, "declares_required_authorizations", true), "")
 	}
 	if prepare, ok := objectField(phases, "prepare"); ok {
 		add("prepare_enforces_workspace_boundary", boolFieldEquals(prepare, "enforces_workspace_boundary", true), "")
@@ -226,8 +226,8 @@ func VerifyLifecycleManifestJSON(content []byte, contract LifecycleContract) Con
 	if contract.RequireSafety {
 		safety, safetyOK := objectField(manifest, "safety")
 		add("safety_object", safetyOK, "")
-		add("safety_adapter_does_not_authorize_jobs", safetyOK && boolFieldEquals(safety, "adapter_authorizes_jobs", false), "")
-		add("safety_adapter_does_not_self_approve", safetyOK && boolFieldEquals(safety, "adapter_approves_dangerous_actions", false), "")
+		add("safety_adapter_does_not_authorize_tasks", safetyOK && boolFieldEquals(safety, "adapter_authorizes_tasks", false), "")
+		add("safety_adapter_does_not_self_authorize", safetyOK && boolFieldEquals(safety, "adapter_authorizes_dangerous_actions", false), "")
 		add("safety_no_hidden_persistence", safetyOK && boolFieldEquals(safety, "adapter_installs_persistence", false), "")
 		add("safety_host_validates_before_run", safetyOK && boolFieldEquals(safety, "host_validates_before_run", true), "")
 		add("safety_redacts_outputs", safetyOK && boolFieldEquals(safety, "redacts_outputs", true), "")

@@ -22,7 +22,7 @@ type Options struct {
 	NetworkScope          string
 	AuthorityProfile      string
 	Once                  bool
-	RequireHostApproval   bool
+	RequireHostActivation bool
 	RdevCommand           string
 	CreatedAt             time.Time
 }
@@ -175,26 +175,26 @@ type HostContextPlan struct {
 }
 
 type ProvisioningPlan struct {
-	SchemaVersion       string   `json:"schema_version"`
-	Mode                string   `json:"mode"`
-	DiscoveryTargets    []string `json:"discovery_targets"`
-	AutoInstallAllowed  []string `json:"auto_install_allowed"`
-	InstallScopes       []string `json:"install_scopes"`
-	ApprovalRequiredFor []string `json:"approval_required_for"`
-	PreferredSources    []string `json:"preferred_sources"`
-	AgentRules          []string `json:"agent_rules"`
-	EvidenceRequired    []string `json:"evidence_required"`
+	SchemaVersion            string   `json:"schema_version"`
+	Mode                     string   `json:"mode"`
+	DiscoveryTargets         []string `json:"discovery_targets"`
+	AutoInstallAllowed       []string `json:"auto_install_allowed"`
+	InstallScopes            []string `json:"install_scopes"`
+	AuthorizationRequiredFor []string `json:"authorization_required_for"`
+	PreferredSources         []string `json:"preferred_sources"`
+	AgentRules               []string `json:"agent_rules"`
+	EvidenceRequired         []string `json:"evidence_required"`
 }
 
 type CollaborationPlan struct {
-	SchemaVersion       string   `json:"schema_version"`
-	Mode                string   `json:"mode"`
-	Protocols           []string `json:"protocols"`
-	DiscoveryTargets    []string `json:"discovery_targets"`
-	CollaborationUses   []string `json:"collaboration_uses"`
-	DelegationRules     []string `json:"delegation_rules"`
-	ApprovalRequiredFor []string `json:"approval_required_for"`
-	EvidenceRequired    []string `json:"evidence_required"`
+	SchemaVersion            string   `json:"schema_version"`
+	Mode                     string   `json:"mode"`
+	Protocols                []string `json:"protocols"`
+	DiscoveryTargets         []string `json:"discovery_targets"`
+	CollaborationUses        []string `json:"collaboration_uses"`
+	DelegationRules          []string `json:"delegation_rules"`
+	AuthorizationRequiredFor []string `json:"authorization_required_for"`
+	EvidenceRequired         []string `json:"evidence_required"`
 }
 
 type LocalizationPlan struct {
@@ -289,13 +289,13 @@ func New(opts Options) (Invite, error) {
 
 	agentActions := []string{
 		"Probe the local runtime with rdev doctor and inspect configured gateway reachability before giving the human a connection entry link, script, or package.",
-		"Poll rdev.hosts.list with status=pending or active until the target host appears.",
-		"Ask the human operator to approve the host if it is pending; then call rdev.hosts.approve with ticket-scoped capabilities.",
-		"Create a job with rdev.jobs.create only after the host is active and the requested policy is explained.",
-		"Read rdev.jobs.status and export evidence before reporting completion.",
+		"Watch rdev.sessions.status/events until the target endpoint appears.",
+		"Use rdev.sessions.interrupt for bounded pause/cancel consent; do not call retired host activation tools.",
+		"Create a task with rdev.sessions.task only after the endpoint is connected and the requested policy is explained.",
+		"Read rdev.sessions.status/events and export evidence before reporting completion.",
 	}
-	if !opts.RequireHostApproval {
-		agentActions[1] = "If the host is pending, request approval; if it is already active, continue to job policy explanation."
+	if !opts.RequireHostActivation {
+		agentActions[1] = "If the endpoint is not connected yet, keep watching session events; if it is connected, continue to task policy explanation."
 	}
 
 	return Invite{
@@ -324,7 +324,7 @@ func New(opts Options) (Invite, error) {
 		},
 		AgentNextActions: agentActions,
 		ConnectivityChecks: []string{
-			"Confirm the gateway URL is reachable from the Agent environment before creating jobs.",
+			"Confirm the gateway URL is reachable from the Agent environment before submitting session tasks.",
 			"Ask the target-side human to open connection_entry.entry_url or run the generated connection entry package; the host connects outbound, so no inbound port should be opened on the target machine.",
 			"If the host does not appear, ask for target-side network symptoms: proxy requirement, TLS interception, blocked outbound 443, DNS failure, captive portal, or VPN requirement.",
 			"Prefer auto transport. It tries WSS first and falls back to HTTPS long-poll, then short polling for restrictive networks.",
@@ -333,18 +333,18 @@ func New(opts Options) (Invite, error) {
 			"When authority_profile permits downstream control, the connected host may act as the field workstation for discovering and controlling other reachable authorized devices.",
 			"Keep remote environment, project structure, requirement notes, and large evidence on the host; load only indexed slices or artifact references into the Agent server context.",
 			"Let the host detect missing skills, MCP tools, adapters, language runtimes, package managers, and project dependencies; install user-scoped missing pieces automatically when policy allows, and ask before elevation or external mutation.",
-			"Discover local or configured Agent peers, including A2A-compatible agents, when collaboration can help; delegate only through signed jobs, scoped policy, approvals, redaction, and evidence.",
-			"Detect the target host language and localize connection entries, skills, MCP responses, job summaries, approval prompts, and evidence summaries; fall back predictably when a locale is unavailable.",
+			"Discover local or configured Agent peers, including A2A-compatible agents, when collaboration can help; delegate only through session tasks, scoped policy, interrupts, redaction, and evidence.",
+			"Detect the target host language and localize connection entries, skills, MCP responses, task summaries, authorization prompts, and evidence summaries; fall back predictably when a locale is unavailable.",
 			"For owned long-running development machines, prefer managed mode with service-backed restart, release gates, enrollment renewal, revocation refresh, workspace locks, host-local context, and reconnect evidence.",
 		},
 		MCPTools: map[string]string{
-			"list_hosts":    "rdev.hosts.list",
-			"approve_host":  "rdev.hosts.approve",
-			"create_job":    "rdev.jobs.create",
-			"job_status":    "rdev.jobs.status",
-			"export_bundle": "rdev.artifacts.export_bundle",
+			"session_status": "rdev.sessions.status",
+			"session_events": "rdev.sessions.events",
+			"create_task":    "rdev.sessions.task",
+			"interrupt":      "rdev.sessions.interrupt",
+			"artifacts":      "rdev.sessions.artifacts",
 		},
-		RequiresHumanAction: []string{"target-host-consent", "operator-approval-when-required"},
+		RequiresHumanAction: []string{"target-host-consent", "operator-authorization-when-required"},
 		CreatedAt:           createdAt,
 	}, nil
 }
@@ -381,10 +381,10 @@ func newManagedDevPlan() ManagedDevPlan {
 		},
 		WorkspaceControls: []string{
 			"workspace locks for one-writer protection",
-			"Git worktree preparation for coding jobs",
+			"Git worktree preparation for coding tasks",
 			"host-local project indexes and context slices",
 			"adapter-specific evidence for Codex, Claude Code, acpx, shell, and PowerShell",
-			"approval gates before push, merge, deploy, publish, credential, service, or external-resource changes",
+			"session interrupts before push, merge, deploy, publish, credential, service, or external-resource changes",
 		},
 		MaintenanceControls: []string{
 			"periodic rdev doctor and host capability probes",
@@ -398,16 +398,16 @@ func newManagedDevPlan() ManagedDevPlan {
 			"keep the host visible and controllable through normal OS service controls",
 			"store project context and large evidence on the host; keep server context indexed and on demand",
 			"reuse verified host-local tools and caches before reinstalling dependencies",
-			"collect evidence for reconnects, service lifecycle, workspace locks, jobs, approvals, and upgrades",
+			"collect evidence for reconnects, service lifecycle, workspace locks, tasks, interrupts, and upgrades",
 			"ask before enabling persistence on a third-party machine",
 		},
 		EvidenceRequired: []string{
-			"managed host registration and approval",
+			"managed session join and endpoint trust",
 			"service plan or foreground managed command",
 			"release-gate verification output",
 			"workspace lock acquire and release evidence",
 			"adapter result artifacts and test evidence",
-			"audit slice and evidence bundle",
+			"audit slice and session evidence",
 			"reconnect transcript for service-backed claims",
 			"safe stop or uninstall instructions",
 		},
@@ -445,8 +445,8 @@ func newLocalizationPlan() LocalizationPlan {
 			"Skillkit README and install notes",
 			"Agent skills and workflow prompts",
 			"MCP tool summaries and user-facing errors",
-			"approval prompts and risk explanations",
-			"job status, artifact summaries, and evidence bundle summaries",
+			"authorization prompts and risk explanations",
+			"task status, artifact summaries, and evidence bundle summaries",
 			"release, verification, and acceptance instructions",
 		},
 		AgentRules: []string{
@@ -455,7 +455,7 @@ func newLocalizationPlan() LocalizationPlan {
 			"prefer the operator's configured language for operator-only reports when known",
 			"keep protocol keys, schema versions, capability ids, command names, paths, and code blocks unchanged",
 			"do not translate secrets, tokens, file paths, shell syntax, JSON field names, or evidence checksums",
-			"include the selected language in evidence when language affects target-side instructions or approvals",
+			"include the selected language in evidence when language affects target-side instructions or authorizations",
 			"ask only when detected languages conflict and the next action is target-facing or high risk",
 		},
 		FallbackOrder: []string{
@@ -480,9 +480,9 @@ func newHostContextPlan() HostContextPlan {
 		ProgressiveDisclosure: []string{
 			"start with host summary, workspace roots, adapter inventory, and active task intent",
 			"request file tree slices only for the selected workspace and depth",
-			"request environment/configuration details only when needed for the current job",
+			"request environment/configuration details only when needed for the current task",
 			"request file contents, logs, command output, and evidence artifacts by explicit path, query, or artifact id",
-			"evict or summarize stale slices after the job step is complete",
+			"evict or summarize stale slices after the task step is complete",
 		},
 		HostLocalStores: []string{
 			"environment probes",
@@ -502,7 +502,7 @@ func newHostContextPlan() HostContextPlan {
 			"do not dump whole repositories or full environment snapshots into server context",
 			"prefer host-side search, indexing, and summarization before requesting raw content",
 			"ask when the workspace, config source, credential boundary, or retention policy is unclear",
-			"use signed jobs for context collection so host policy, redaction, audit, and approval gates apply",
+			"use session tasks for context collection so host policy, redaction, audit, and interrupt handling apply",
 		},
 		RedactionRules: []string{
 			"redact secrets, tokens, private keys, target-side identifiers, and private hostnames before upload",
@@ -535,17 +535,17 @@ func newCollaborationPlan() CollaborationPlan {
 			"delegate a bounded coding, debugging, documentation, or test subtask",
 			"coordinate with an existing project Agent that already knows the workspace",
 			"request tool-specific diagnostics without copying full project context to the central Agent server",
-			"collect peer artifacts, messages, task status, and summaries as rdev evidence",
+			"collect peer artifacts, messages, task status, and summaries as session evidence",
 		},
 		DelegationRules: []string{
 			"treat peer agents as adapters or downstream collaborators, not as authorization roots",
 			"discover peer capabilities before delegation and choose the narrowest useful task",
 			"use host-local context slices and artifact references instead of dumping full repositories into peer prompts",
-			"wrap peer work in signed rdev jobs so host policy, workspace locks, redaction, audit, cancellation, and approval gates apply",
+			"wrap peer work in rdev session tasks so host policy, workspace locks, redaction, audit, cancellation, and interrupt gates apply",
 			"do not expose rdev operator tokens, host private keys, release keys, target-side secrets, or unrestricted shell access to peers",
 			"prefer A2A task, message, and artifact boundaries when a peer advertises an A2A Agent Card",
 		},
-		ApprovalRequiredFor: []string{
+		AuthorizationRequiredFor: []string{
 			"delegating to an untrusted, unauthenticated, or internet-reachable peer",
 			"sharing sensitive target-side data, secrets, credentials, private hostnames, or regulated data",
 			"letting a peer install packages, mutate services, push, deploy, publish, spend money, or change external resources",
@@ -556,8 +556,8 @@ func newCollaborationPlan() CollaborationPlan {
 			"selected protocol and endpoint trust basis",
 			"delegated task intent, scope, and policy",
 			"peer messages, task status, artifacts, checksums, and redaction metadata",
-			"approval tokens used for high-risk collaboration",
-			"final peer summary linked to rdev job and audit ids",
+			"session interrupts or operator-reviewed decisions used for high-risk collaboration",
+			"final peer summary linked to rdev session, task, artifact, and audit ids",
 		},
 	}
 }
@@ -579,15 +579,15 @@ func newProvisioningPlan() ProvisioningPlan {
 			"user-scoped MCP tool metadata from a verified bundle",
 			"project-local development dependencies declared by lockfiles or manifests",
 			"adapter shims or helper binaries from verified release artifacts",
-			"cache directories and host-local context indexes under the approved workspace or rdev data root",
+			"cache directories and host-local context indexes under the authorized workspace or rdev data root",
 		},
 		InstallScopes: []string{
 			"remote-host-local",
 			"user-scoped-by-default",
 			"workspace-scoped-when-project-specific",
-			"managed-service-scoped-only-after-operator-approval",
+			"managed-service-scoped-only-after-operator-authorization",
 		},
-		ApprovalRequiredFor: []string{
+		AuthorizationRequiredFor: []string{
 			"administrator or root elevation",
 			"system-wide package installation",
 			"service, daemon, LaunchAgent, systemd, registry, or login-item changes",
@@ -608,7 +608,7 @@ func newProvisioningPlan() ProvisioningPlan {
 			"verify checksums, signatures, bundle manifests, and lockfiles before execution",
 			"record every install, version, source, checksum, and command as evidence",
 			"do not assume framework paths; detect Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP locations or ask",
-			"ask when install scope, package source, credential boundary, or approval policy is unclear",
+			"ask when install scope, package source, credential boundary, or authorization policy is unclear",
 		},
 		EvidenceRequired: []string{
 			"preflight detection result",
@@ -647,9 +647,9 @@ func newConnectionEntry(joinURL string) ConnectionEntry {
 			"Keep the visible host session running until the Agent reports completion.",
 		},
 		AgentAfterConnect: []string{
-			"watch rdev.hosts.list until the host appears",
-			"approve the expected host when policy requires approval",
-			"run max-control discovery and repair jobs scoped to the support request",
+			"watch rdev.sessions.status/events until the endpoint appears",
+			"use rdev.sessions.interrupt only for bounded pause/cancel consent",
+			"run max-control discovery and repair tasks scoped to the support request",
 			"export evidence and revoke the ticket when finished",
 		},
 		RevocationInstructions: []string{
@@ -670,7 +670,7 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"third-party temporary repair where the target host should not install Go, Git, Node, Python, or other prerequisites first",
 			"operator-owned workstations that should become stable long-running managed development hosts",
 			"cross-subnet LAN, VPN, NAT, firewall, proxy, and CGNAT environments where the entry must choose the best outbound path",
-			"owned workstations that need a quick attended bootstrap before an explicit managed-service plan is approved",
+			"owned workstations that need a quick attended bootstrap before an explicit managed-service plan is authorized",
 			"package-aware join pages where the Agent or browser chooses the target OS package or visible script fallback",
 		},
 		EntryModes: []string{
@@ -682,7 +682,7 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 		ModeSelection: []string{
 			"if the machine is operator-owned or expected to support recurring Agent development work, select managed mode and plan an explicit visible service lifecycle",
 			"if the machine belongs to someone else or the session is one-off support, select attended-temporary mode with no persistence by default",
-			"if ownership, persistence approval, or service policy is unclear, ask one concise question before creating a managed entry",
+			"if ownership, persistence authorization, or service policy is unclear, ask one concise question before creating a managed entry",
 			"do not expose raw ticket codes, manifest roots, gateway URLs, or transport flags to the human when a connection_entry can carry them",
 		},
 		RequiredAgentFlow: []string{
@@ -706,16 +706,16 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"gateway URL: " + placeholderIfEmpty(gatewayURL, "<gateway-url>"),
 			"transport preference: " + placeholderIfEmpty(transport, "auto"),
 			"visible stop/revoke instructions and local cleanup notes",
-			"managed-mode service plan only when the operator explicitly approves persistent owned-host access",
+			"managed-mode service plan only when the operator explicitly authorizes persistent owned-host access",
 			"package catalog with per-OS package candidates and visible script fallbacks",
 		},
 		RuntimeFlow: []string{
 			"show the target-side user the session purpose, gateway, ticket expiry, requested capabilities, and stop instructions before connecting",
 			"detect target OS and architecture from Agent probes, browser hints, inventory, or a single operator answer before selecting a package candidate",
 			"verify the package checksum and signed release bundle before executing the host binary",
-			"fetch and verify the join manifest with the pinned manifest root before trusting ticket, gateway, or job-signing metadata",
+			"fetch and verify the join manifest with the pinned manifest root before trusting ticket, gateway, or task-routing metadata",
 			"select attended-temporary or managed mode from ownership, recurrence, and persistence policy before registering",
-			"register the host, wait for operator approval when required, then start job transport with --transport auto",
+			"register the host, wait for operator authorization when required, then start session task transport with --transport auto",
 			"for attended temporary mode, keep the session visible; closing the launcher stops the host process",
 			"for managed owned-host mode, use a reviewed service plan, release gate, renewal/revocation refresh, reconnect proof, and explicit stop/uninstall instructions",
 		},
@@ -729,7 +729,7 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 		},
 		PrivilegeStrategy: []string{
 			"default to normal user permissions for attended temporary support",
-			"request administrator/root privileges only when a signed job explicitly requires them for the repair",
+			"request administrator/root privileges only when a signed session task explicitly requires them for the repair",
 			"use normal OS authorization surfaces such as UAC or sudo prompts; do not hide elevation or weaken execution policy permanently",
 			"record elevation requests, decisions, commands, exit codes, and post-change verification in evidence",
 		},
@@ -737,15 +737,15 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"prefer sending a connection entry link, script, or package over asking for raw shell access",
 			"do not ask the human to copy ticket codes, root keys, gateway URLs, or transport flags when the invite already contains them",
 			"if the connection entry cannot reach the gateway, collect probe evidence and switch to the next configured connection mode before asking the human",
-			"keep target-side human steps to open/run/approve/keep-window-open whenever possible",
-			"choose managed mode only for owned hosts or explicitly approved durable access; keep third-party hosts temporary by default",
+			"keep target-side human steps to open/run/authorize/keep-window-open whenever possible",
+			"choose managed mode only for owned hosts or explicitly authorized durable access; keep third-party hosts temporary by default",
 		},
 		EvidenceRequired: []string{
 			"package verification result",
 			"join manifest verification result",
 			"selected host mode and ownership/persistence decision basis",
 			"selected transport and fallback attempts",
-			"host registration and approval status",
+			"host registration and activation status",
 			"revocation or stop instructions delivered to the target-side user",
 		},
 		ImplementationGaps: []string{
@@ -770,7 +770,7 @@ func newTargetSelectionPolicy() TargetSelectionPolicy {
 		ThirdPartySignals: []string{
 			"the machine belongs to a customer, friend, vendor, or other third party",
 			"the task is one-off repair, debugging, setup, or short-lived support",
-			"the operator has not explicitly approved persistent service lifecycle or owned-host enrollment",
+			"the operator has not explicitly authorized persistent service lifecycle or owned-host enrollment",
 		},
 		AskWhen: []string{
 			"ownership is ambiguous and the selected mode would create persistence",
@@ -778,8 +778,8 @@ func newTargetSelectionPolicy() TargetSelectionPolicy {
 			"the repair appears to require administrator/root privileges, service installation, firewall, DNS, cloud, paid relay, or security-policy changes",
 		},
 		AgentRules: []string{
-			"decide the target mode from ownership, duration, and persistence approval before materializing the Connection Entry",
-			"use managed only for owned or formally managed machines with explicit durable-access approval",
+			"decide the target mode from ownership, duration, and persistence authorization before materializing the Connection Entry",
+			"use managed only for owned or formally managed machines with explicit durable-access authorization",
 			"use attended-temporary for third-party or one-off machines by default",
 			"ask exactly one short question when the mode cannot be decided safely from probes, inventory, or the operator's request",
 			"never make target-side humans choose between ticket, root, gateway, transport, release, or checksum values",
@@ -858,8 +858,8 @@ func newTransportPlan(rdevCommand, manifestURL, manifestRootPublicKey, transport
 		Candidates:    candidates,
 		Notes: []string{
 			"All candidates are outbound target-host connections; target networks do not need inbound firewall rules.",
-			"Transport only carries signed work and evidence; host-side policy still authorizes every job.",
-			"Relay, VPN, mesh, and SSH are connectivity assists only; they never authorize jobs by themselves.",
+			"Transport only carries signed work and evidence; host-side policy still authorizes every task.",
+			"Relay, VPN, mesh, and SSH are connectivity assists only; they never authorize session tasks by themselves.",
 		},
 	}
 }
@@ -869,14 +869,14 @@ func newAuthorityProfile(profile string) AuthorityProfile {
 		return AuthorityProfile{
 			SchemaVersion:  "rdev.agent-authority.v1",
 			Profile:        profile,
-			RemoteHostRole: "approved-rdev-host",
+			RemoteHostRole: "authorized-rdev-host",
 			Discovery: AuthorityScope{
 				Allowed:     true,
 				Scope:       "host-local",
 				Description: "Inspect the connected host and gateway reachability.",
 				Requirements: []string{
-					"host is registered and approved",
-					"job policy includes read-only inspection capabilities",
+					"host is registered and authorized",
+					"task policy includes read-only inspection capabilities",
 				},
 			},
 			DownstreamControl: AuthorityScope{
@@ -890,8 +890,8 @@ func newAuthorityProfile(profile string) AuthorityProfile {
 				"adapter and tool discovery",
 			},
 			RequiredCapabilities: []string{"process.inspect", "fs.read"},
-			EvidenceRequired:     []string{"diagnostic commands", "host capabilities", "job artifact", "audit events"},
-			StopConditions:       []string{"host approval missing", "job policy denies requested capability"},
+			EvidenceRequired:     []string{"diagnostic commands", "host capabilities", "task artifact", "audit events"},
+			StopConditions:       []string{"host activation missing", "task policy denies requested capability"},
 		}
 	}
 	return AuthorityProfile{
@@ -901,19 +901,19 @@ func newAuthorityProfile(profile string) AuthorityProfile {
 		Discovery: AuthorityScope{
 			Allowed:     true,
 			Scope:       "host-local, scoped LAN/private network, configured public target ranges, configured relay/mesh/SSH routes",
-			Description: "The approved remote host may be used as the Agent's field vantage point for heuristic discovery.",
+			Description: "The authorized remote host may be used as the Agent's field vantage point for heuristic discovery.",
 			Requirements: []string{
-				"host is registered and approved",
-				"job policy includes network.discovery.scoped or equivalent operator-granted capability",
-				"discovery evidence is captured as job artifacts",
+				"host is registered and authorized",
+				"task policy includes network.discovery.scoped or equivalent operator-granted capability",
+				"discovery evidence is captured as task artifacts",
 			},
 		},
 		DownstreamControl: AuthorityScope{
 			Allowed:     true,
 			Scope:       "reachable devices in discovered or configured authorized scopes",
-			Description: "The Agent may control downstream hosts or devices through the approved remote host when credentials, routes, or management protocols are available.",
+			Description: "The Agent may control downstream hosts or devices through the authorized remote host when credentials, routes, or management protocols are available.",
 			Requirements: []string{
-				"job policy includes downstream.control.scoped",
+				"task policy includes downstream.control.scoped",
 				"credentials or control channels are already configured or supplied through local secret storage",
 				"actions remain tied to the stated task intent",
 				"control evidence and affected device identifiers are captured",
@@ -926,7 +926,7 @@ func newAuthorityProfile(profile string) AuthorityProfile {
 			"configured SSH tunnel use",
 			"configured mesh/VPN route use",
 			"configured relay use",
-			"downstream device diagnostics and control within job policy",
+			"downstream device diagnostics and control within task policy",
 		},
 		RequiredCapabilities: []string{
 			"network.discovery.scoped",
@@ -950,8 +950,8 @@ func newAuthorityProfile(profile string) AuthorityProfile {
 		StopConditions: []string{
 			"requested action no longer matches task intent",
 			"credential or target identity is ambiguous",
-			"job policy denies required capability",
-			"action would mutate third-party accounts or credentials without explicit approval",
+			"task policy denies required capability",
+			"action would mutate third-party accounts or credentials without explicit authorization",
 			"downstream device appears outside discovered or configured authorized scope",
 		},
 		ControlPaths: []ConnectionProtocol{
@@ -959,8 +959,8 @@ func newAuthorityProfile(profile string) AuthorityProfile {
 				ID:            "downstream-ssh",
 				Status:        "agent-managed-when-configured",
 				BestFor:       "reachable servers, routers, appliances, and dev machines with existing SSH access",
-				Requirements:  []string{"ssh config or agent entry exists", "job policy permits downstream.control.scoped", "commands are captured and redacted"},
-				SecurityModel: "SSH provides reachability; rdev job policy and audit govern the Agent action",
+				Requirements:  []string{"ssh config or agent entry exists", "task policy permits downstream.control.scoped", "commands are captured and redacted"},
+				SecurityModel: "SSH provides reachability; rdev session task policy and audit govern the Agent action",
 				AgentAction:   "use existing SSH routes automatically when target identity and key choice are unambiguous",
 			},
 			{
@@ -994,9 +994,9 @@ func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
 		{
 			ID:            "outbound-wss-mtls",
 			Status:        "implemented",
-			BestFor:       "public gateway, LAN gateway, low-latency job delivery, and mTLS deployments",
+			BestFor:       "public gateway, LAN gateway, low-latency task delivery, and mTLS deployments",
 			Requirements:  []string{"target can reach gateway over outbound TCP 443 or configured WSS port", "WebSocket upgrade is allowed", "CA/client certificate material is provided when mTLS is required"},
-			SecurityModel: "transport identity only; signed envelopes, host policy, approvals, and evidence remain authoritative",
+			SecurityModel: "transport identity only; signed envelopes, host policy, authorizations, and evidence remain authoritative",
 			AgentAction:   "try first when network scope is auto and the gateway is reachable",
 		},
 		{
@@ -1004,7 +1004,7 @@ func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
 			Status:        "implemented",
 			BestFor:       "corporate proxies, NAT, and firewalls that allow HTTPS but block WebSocket upgrades",
 			Requirements:  []string{"target can reach gateway over outbound HTTP or HTTPS", "long-held requests are not aggressively terminated"},
-			SecurityModel: "same signed job and host-local policy model as WSS",
+			SecurityModel: "same signed session task and host-local policy model as WSS",
 			AgentAction:   "use automatically after WSS fails before any relay, mesh, or SSH escalation",
 		},
 		{
@@ -1012,7 +1012,7 @@ func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
 			Status:        "implemented",
 			BestFor:       "maximum compatibility when long-held requests are interrupted",
 			Requirements:  []string{"target can make repeated outbound HTTP or HTTPS requests to gateway"},
-			SecurityModel: "same signed job and host-local policy model as WSS",
+			SecurityModel: "same signed session task and host-local policy model as WSS",
 			AgentAction:   "use as the final native fallback before agent-managed relay, mesh, or SSH connectivity",
 		},
 		{
@@ -1020,7 +1020,7 @@ func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
 			Status:        lanStatus(gatewayURL),
 			BestFor:       "Agent server and target host on the same LAN or VPN segment",
 			Requirements:  []string{"gateway URL uses a LAN-reachable host/IP", "target can route to that address", "local firewall permits the gateway listener"},
-			SecurityModel: "LAN reachability is not authorization; host still verifies manifests, trust pins, envelopes, and approvals",
+			SecurityModel: "LAN reachability is not authorization; host still verifies manifests, trust pins, envelopes, and authorizations",
 			AgentAction:   "if gateway is local-only or private, probe scoped LAN reachability and use the routable LAN URL when available",
 		},
 	}
@@ -1030,7 +1030,7 @@ func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
 			Status:        "agent-managed-when-configured",
 			BestFor:       "target cannot reach private Agent server directly but can reach a neutral HTTPS relay",
 			Requirements:  []string{"relay URL is configured or discoverable", "relay forwards only rdev gateway HTTP/WSS traffic", "relay credentials stay in local config or secret storage"},
-			SecurityModel: "relay is connectivity only and cannot authorize jobs",
+			SecurityModel: "relay is connectivity only and cannot authorize session tasks",
 			AgentAction:   "use a configured relay automatically after native outbound HTTPS paths fail; ask only if no relay is configured",
 		},
 		{
@@ -1038,15 +1038,15 @@ func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
 			Status:        "agent-managed-when-configured",
 			BestFor:       "owned or managed hosts where Tailscale/headscale/WireGuard-style mesh is installed or available",
 			Requirements:  []string{"mesh CLI/config is present or configured", "gateway URL resolves inside the mesh", "mesh credentials are not emitted in invite output"},
-			SecurityModel: "mesh identity assists routing only; rdev host approval and signed jobs still govern execution",
+			SecurityModel: "mesh identity assists routing only; rdev host activation and signed session tasks still govern execution",
 			AgentAction:   "detect installed mesh tooling and use it automatically when already configured; ask only before new enrollment or external account mutation",
 		},
 		{
 			ID:            "agent-managed-ssh-tunnel",
 			Status:        "agent-managed-when-configured",
 			BestFor:       "reachable hosts where SSH access already exists and HTTPS egress is blocked",
-			Requirements:  []string{"SSH endpoint is discovered or configured", "SSH key custody stays in the local SSH agent/config", "target consent and host approval still happen"},
-			SecurityModel: "SSH is a tunnel only, not job authorization",
+			Requirements:  []string{"SSH endpoint is discovered or configured", "SSH key custody stays in the local SSH agent/config", "target consent and host activation still happen"},
+			SecurityModel: "SSH is a tunnel only, not task authorization",
 			AgentAction:   "use existing SSH config/agent entries automatically for tunnel setup; ask only when endpoint, username, or key choice is unclear",
 		},
 	}
@@ -1068,8 +1068,8 @@ func newConnectionPlan(gatewayURL, networkScope string) ConnectionPlan {
 			Boundaries: []string{
 				"scan local/private networks and any explicit public target ranges provided by the user or configuration",
 				"do not print secrets, tokens, SSH keys, relay credentials, or private server addresses into public artifacts",
-				"do not mutate third-party relay/mesh accounts or credentials without explicit approval",
-				"do not treat a discovered transport path as host approval or job authorization",
+				"do not mutate third-party relay/mesh accounts or credentials without explicit authorization",
+				"do not treat a discovered transport path as host activation or task authorization",
 			},
 			StopWhen: []string{
 				"a host registers and becomes pending or active",

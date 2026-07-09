@@ -27,8 +27,8 @@ max-control discovery, or long-running owned workstations.
   privileged, persistent, paid, firewall, DNS, cloud, or security-policy
   changes.
 - Relay, mesh/VPN, and SSH tunnel paths are connectivity only. They never
-  replace target consent, host approval, signed jobs, local policy checks, or
-  evidence.
+  replace target consent, session authorization, session tasks, local policy
+  checks, or evidence.
 - After choosing any connectivity path, return to the Connection Entry flow.
   The target-side human receives a link, visible script, or signed package from
   `connection_entry` / `entry_package_plan`; raw ticket, root, gateway,
@@ -39,11 +39,11 @@ max-control discovery, or long-running owned workstations.
 
 ## Max-Control Profile
 
-- When `authority_profile=max-control`, the approved remote host may act as the
+- When `authority_profile=max-control`, the authorized remote host may act as the
   Agent's field workstation.
 - It may discover reachable devices and control downstream authorized hosts or
-  devices through configured SSH, mesh, relay, or management APIs only when job
-  policy grants `downstream.control.scoped`.
+  devices through configured SSH, mesh, relay, or management APIs only when
+  task policy grants `downstream.control.scoped`.
 - Capture evidence for every downstream action and keep the task intent bounded.
 
 ## Managed Owned Workstations
@@ -57,4 +57,4 @@ max-control discovery, or long-running owned workstations.
   revocation refresh, workspace locks, Git worktrees, host-local context,
   reconnect evidence, and safe stop/uninstall instructions.
 - Do not claim real Linux or Windows managed-service readiness until a clean
-  host proves start/status/reconnect/job evidence/stop/uninstall acceptance.
+  host proves start/status/reconnect/task evidence/stop/uninstall acceptance.

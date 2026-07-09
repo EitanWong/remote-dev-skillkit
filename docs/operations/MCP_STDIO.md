@@ -36,7 +36,7 @@ SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard. Agents should
 use these tools to prepare reviewed `RDEV_RELAY_*`, `RDEV_SSH_*`,
 `RDEV_MESH_*`, or `RDEV_VPN_*` metadata, then dry-run the Connection Entry
 runner. They should not write custom relay, SSH, mesh, VPN, PowerShell, shell,
-tunnel, approval polling, or bootstrap scripts. The package contains no real
+tunnel, interrupt polling, or bootstrap scripts. The package contains no real
 endpoint, credential, key, private IP, local path, or secret.
 
 `rdev.support_session.connect` returns `rdev.support-session-connect.v1` in
@@ -53,12 +53,12 @@ compatibility. If no gateway is present, it returns
 `ready_to_send_to_human=false` with `cli_start_now_command`, the standard foreground
 `rdev support-session connect --start` command to run in a visible terminal. Agents should
 follow the connect payload instead of choosing between handoff/create/start/plan
-themselves or writing bootstrap, relay, approval-polling, or recovery scripts.
+themselves or writing bootstrap, relay, interrupt-polling, or recovery scripts.
 The payload includes `fresh_agent_connect_contract`, which is the shortest
 machine-readable standard path for a newly installed Agent: recover missing
 `rdev`, forward `target_handoff_envelope.full_text` when present, wait through the standard status
 surfaces, and do not ask humans for ticket/root/gateway values or generate
-custom PowerShell, shell, tunnel, approval, or polling scripts.
+custom PowerShell, shell, tunnel, interrupt, or polling scripts.
 
 `rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
 `structuredContent`. It remains available for review/debug routing details and
@@ -76,7 +76,7 @@ strings have the real ticket code already filled in. The target command is the s
 surface: it can try ordered Connection Entry URLs on the target machine with
 bounded per-candidate timeout/retry behavior before failing. The payload also
 includes `connection_attempt_policy`, so Agents can explain the behavior without
-writing replacement PowerShell, shell, relay, approval polling, or bootstrap
+writing replacement PowerShell, shell, relay, interrupt polling, or bootstrap
 code. It also includes `fresh_agent_connect_contract`; read it before writing
 any setup or recovery code. The ordinary attended bootstrap uses
 `rdev host serve --transport long-poll` for stable HTTPS-only connectivity;
@@ -84,7 +84,7 @@ managed or explicit advanced runners may still use `--transport auto` when WSS
 fallback has been validated for that deployment. It also includes
 `connectivity_helper_preflight`, a read-only contract that reports configured
 SSH, relay, mesh, and VPN helper gateway URLs, start argv JSON, install action
-JSON, allow-listed tools, approval boundaries, and validation errors such as
+JSON, allow-listed tools, authorization boundaries, and validation errors such as
 wrong tools, shell command strings, encoded commands, elevation, or
 `ExecutionPolicy Bypass`. Agents should read this field before writing network
 questions or tunnel commands; helper execution belongs to the Connection Entry
@@ -132,7 +132,7 @@ target URL; loopback candidates are same-machine only. If
 `agent_connection_runbook.fresh_agent_failure_prevention` is present, read it
 before writing setup code: it captures real fresh-Agent failure patterns such
 as manual gateway/invite/bootstrap glue, missing helper assets that produce
-`rdev is required`, background gateway workarounds, custom approval polling,
+`rdev is required`, background gateway workarounds, custom interrupt polling,
 and Agent-written PowerShell/shell setup.
 If
 `RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
@@ -189,12 +189,12 @@ foreground status event to `status_file.path` (`support-session-status.json` by
 default), so Agents can report `event=connected` without inventing a polling
 loop. When the target connects, it writes `connected_report_file.path`
 (`connected-report.txt` by default), a plain-text success report Agents can send
-to the user before creating jobs.
+to the user before creating session tasks.
 This is a CLI foreground process rather than an MCP tool because MCP calls
 should not hide or orphan a long-running gateway.
 Agents should not manually combine `rdev gateway serve` and `rdev invite create`
 for ordinary support sessions; use `rdev support-session connect --start` so
-ready/status files, scoped auto-approval, and helper assets are generated as one
+ready/status files, scoped auto-authorization, and helper assets are generated as one
 standard flow. If a dev gateway is intentionally started by hand, keep the
 default `--auto-build-rdev-assets` behavior enabled from a valid checkout with
 Go, or configure `--rdev-assets-dir` / platform-specific `--rdev-*` asset flags
@@ -202,7 +202,7 @@ before issuing target-side commands.
 
 `rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
 `structuredContent`. Agents should call it before inventing any gateway,
-PowerShell, relay, nohup, ticket, root, transport, approval, or helper install
+PowerShell, relay, nohup, ticket, root, transport, interrupt, or helper install
 steps when they need review/debug access to the underlying gateway argv. The
 plan returns:
 
@@ -212,28 +212,28 @@ plan returns:
 - a gateway start argv with state, signing keys, audit log, and verified helper
   asset flags;
 - HTTP and CLI invite creation commands with scoped attended-temporary
-  `auto_approve` when enabled;
+  `auto_activate` when enabled;
 - localized target-user instructions for Windows and macOS/Linux;
 - forbidden-action guardrails such as no `ExecutionPolicy Bypass`, hidden
   install, unverified binary download, or human assembly of ticket/root/gateway
   values.
 
-The plan is read-only. It does not start the gateway, create a ticket, approve a
+The plan is read-only. It does not start the gateway, create a ticket, authorize a
 host, install software, or execute on the target host. Agents execute only the
 returned argv steps they have verified in the current environment.
 
 `rdev.support_session.status` returns `rdev.support-session-status.v1` in
 `structuredContent`. Agents should call it after giving the target user the
 Connection Entry command, and should continue watching until `connected=true` or
-`status=pending-approval`. When `connected=true`, the Agent must proactively
-tell the user that the connection has been established before creating jobs. The
+`status=pending-activation`. When `connected=true`, the Agent must proactively
+tell the user that the connection has been established before creating session tasks. The
 tool returns localized `feedback` and `next_action` strings so the Agent does
 not need to invent status wording.
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 Fresh Agents should not use it as the first step for ordinary "connect this
 computer" requests; start with `rdev.support_session.connect` instead.
-`invites.create` is for explicit package materialization, approved managed
+`invites.create` is for explicit package materialization, authorized managed
 owned-host planning, or recovery flows that name the lower-level path. It
 creates a ticket and returns a manifest URL, `host_command`,
 `transport_plan`, `connection_plan`, `connection_entry`,
@@ -247,11 +247,11 @@ remotely by itself. For attended temporary support, the visible bootstrap
 default is HTTPS long-poll. `auto` remains available for managed or explicit
 advanced entries where WSS fallback has been validated for the deployment.
 
-When `auto_approve=true`, `rdev.invites.create` creates ticket metadata that can
+When `auto_activate=true`, `rdev.invites.create` creates ticket metadata that can
 auto-activate the first host only for an attended-temporary Connection Entry.
 This is meant for explicit visible support sessions generated by
 `rdev.support_session.create` or `rdev.support_session.plan`; it is not a global
-approval bypass and is rejected for managed or break-glass tickets.
+authorization bypass and is rejected for managed or break-glass tickets.
 
 `rdev.support_session.status` accepts `wait`, `timeout_seconds`, and
 `interval_millis`. Agents should use the MCP wait mode or the CLI
@@ -269,17 +269,17 @@ schema `rdev.support-session-continuity-policy.v1`. Agents should read
 first path and durable work should prefer a configured hosted, relay, mesh, VPN,
 or SSH gateway before claiming robust connectivity.
 When the returned status has `connected=true`, immediately tell the user the
-connection is established before creating jobs. Status payloads include
+connection is established before creating session tasks. Status payloads include
 `connected_next_steps` with schema
 `rdev.support-session-connected-next-steps.v1`; when connected, Agents should
 send `connected_next_steps.user_report`, call the listed
-`rdev.hosts.capabilities` follow-up, then create only the smallest scoped job
-matching the user's task. Status payloads also include
+`rdev.sessions.status` follow-up, then create only the smallest scoped
+`rdev.sessions.task` matching the user's task. Status payloads also include
 `connection_recovery` with schema
 `rdev.support-session-connection-recovery.v1`; when the session is still
-waiting, revoked, pending approval, or the wait call times out, Agents must
+waiting, revoked, pending authorization, or the wait call times out, Agents must
 follow that structured recovery plan and its `standard_tools`/`forbidden`
-fields instead of authoring custom PowerShell, shell, relay, approval-polling,
+fields instead of authoring custom PowerShell, shell, relay, interrupt-polling,
 or bootstrap code.
 
 For every new target host, use `connection_entry.entry_url` or a signed
@@ -293,11 +293,11 @@ raw connection values. Agents should treat those commands as consented startup,
 then choose the correct host mode from
 `connection_entry_plan.target_selection_policy`: `managed` for operator-owned
 machines that need durable development access, or `attended-temporary` for
-third-party or one-off repair. If ownership or persistence approval is unclear,
-ask one short question before managed mode. After the host connects, the Agent
-watches `rdev.hosts.list`, approves the expected host when policy requires
-approval, runs scoped jobs, exports evidence, and revokes or stops the session
-when finished.
+third-party or one-off repair. If ownership or persistence authorization is unclear,
+ask one short question before managed mode. After the endpoint connects, the
+Agent watches `rdev.sessions.status/events`, uses `rdev.sessions.interrupt`
+only for bounded pause/cancel consent, runs scoped session tasks, exports
+evidence, and revokes or stops the session when finished.
 
 `rdev.connection_entry.plan` turns an invite into
 `rdev.connection-entry.materialization-plan.v1`. MCP clients should call it
@@ -334,7 +334,7 @@ adapters, shells, package managers, language runtimes, project lockfiles,
 framework paths, proxy settings, permissions, and trust roots before installing
 anything. Policy may allow user-scoped or workspace-scoped installation of
 verified skills, MCP metadata, adapter helpers, and project dependencies. It
-must ask for approval before elevation, system-wide packages, services,
+must ask for authorization before elevation, system-wide packages, services,
 credentials, firewall changes, external accounts, paid resources, publish,
 deploy, push, or security-policy mutation.
 
@@ -343,14 +343,14 @@ tools on the target host. It includes A2A-style discovery through Agent Cards,
 JSON-RPC/HTTP tasks, SSE streaming, MCP stdio peers, and local Agent CLIs. MCP
 clients may delegate bounded subtasks to discovered peers when doing so helps
 the remote repair or development task, but peer work must be wrapped in rdev
-jobs so host policy, workspace locks, redaction, cancellation, approval gates,
+session tasks so host policy, workspace locks, redaction, cancellation, interrupt gates,
 audit, and evidence still apply.
 
 The `localization_plan` is the standard for cross-language behavior. MCP
 clients should detect the target-side language from explicit `lang`
 inputs, `Accept-Language`, `LANG`/`LC_*`/`LANGUAGE`, Windows UI culture, macOS
 AppleLanguages, Linux locale settings, and operator preferences. User-facing
-instructions, approvals, summaries, and evidence should use the selected BCP 47
+instructions, authorizations, summaries, and evidence should use the selected BCP 47
 language. Protocol keys, schema versions, capability ids, command names, paths,
 JSON field names, checksums, and code blocks must remain stable and untranslated.
 
@@ -360,7 +360,7 @@ owned by the operator and expected to do recurring development work. The plan
 points agents toward reviewed LaunchAgent, systemd user service, or Windows
 Service surfaces, `--once=false`, `--transport auto`, release-bundle startup
 gates, enrollment renewal, revocation refresh, trust-bundle rollback checks,
-workspace locks, Git worktrees, reconnect proof, and evidence bundles.
+workspace locks, Git worktrees, reconnect proof, and session evidence.
 
 The `connection_plan` separates native support from agent-managed paths:
 implemented native paths are outbound WSS/mTLS, HTTPS long-poll, HTTPS
@@ -368,12 +368,12 @@ short-poll, and LAN-reachable gateway URLs. Agent-managed paths such as an
 HTTPS relay, mesh/VPN, or SSH tunnel may be used automatically when local
 configuration or credentials are already available. Missing or ambiguous
 configuration should trigger a concise question; external account or credential
-mutation still requires explicit approval. These paths remain connectivity
+mutation still requires explicit authorization. These paths remain connectivity
 only.
 
-The default `authority_profile` is `max-control`. It allows the approved remote
+The default `authority_profile` is `max-control`. It allows the authorized remote
 host to act as a field workstation for heuristic discovery and downstream
-control when the job policy grants capabilities such as
+control when the task policy grants capabilities such as
 `network.discovery.scoped`, `ssh.tunnel`, `mesh.use`, `relay.use`, and
 `downstream.control.scoped`. MCP clients should treat the profile as the
 machine-readable boundary for autonomous discovery, selected control paths,
@@ -391,9 +391,9 @@ Useful read-only tools include:
 
 `rdev.enrollment.verify_certificate` returns
 `rdev.enrollment-certificate-verification.v1` in `structuredContent`. It
-accepts either `certificate_json` or `artifact_id`, plus a required
+accepts `certificate_json`, plus a required
 `root_public_key` encoded as `key_id:base64url_ed25519_public_key`, optional
-`revocations_json` or `revocations_artifact_id`, and optional RFC3339
+`revocations_json`, and optional RFC3339
 `verify_at`. Invalid certificates, expired windows, wrong roots, stale or
 tampered revocation lists, revoked certificates, and signature mismatches return
 `ok=false` with recommended actions rather than an RPC failure. Missing required
@@ -402,13 +402,12 @@ arguments remain RPC errors.
 When a gateway exposes configured dev revocations through
 `GET /v1/enrollment/revocations`, operators or agents should first fetch and
 verify the list with `rdev enrollment fetch-revocations --root-public-key ...`,
-then pass the fetched JSON as `revocations_json` or store it as an artifact and
-pass `revocations_artifact_id`. Fetching a revocation list is read-only and does
-not approve a host.
+then pass the fetched JSON as `revocations_json`. Fetching a revocation list is
+read-only and does not authorize a host.
 
 `rdev.adapter.verify_result` returns `rdev.adapter-conformance-report.v1` in
-`structuredContent`. It accepts either `artifact_json` or `artifact_id`, plus
-the expected adapter and result schema.
+`structuredContent`. It accepts `artifact_json`, plus the expected adapter and
+result schema.
 
 `rdev.adapter.verify_lifecycle` returns the same report schema for
 `rdev.adapter-lifecycle.v1` manifests. It validates the required adapter
@@ -416,10 +415,10 @@ lifecycle phases, safety declarations, cancellation behavior, cleanup behavior,
 and result schema declarations before a new adapter is exposed to agents.
 
 `rdev.adapter.verify_cancellation` returns the same report schema for canceled
-result artifacts. It accepts either `artifact_json` or `artifact_id`, plus the
-expected adapter and result schema. It verifies normal result conformance first,
-then requires command evidence to show `canceled=true`, `timed_out=false`, an
-`exit_code`, and `output_truncated` metadata.
+result artifacts. It accepts `artifact_json`, plus the expected adapter and
+result schema. It verifies normal result conformance first, then requires
+command evidence to show `canceled=true`, `timed_out=false`, an `exit_code`, and
+`output_truncated` metadata.
 
 `rdev.adapter.verify_runtime` returns the same report schema for
 `rdev.adapter-runtime-fixture.v1` fixtures generated by the public Adapter SDK
@@ -434,7 +433,7 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rdev.invites.create","arguments":{"gateway_url":"https://api.example.com/v1","mode":"attended-temporary","ttl_seconds":600,"reason":"local test","transport":"auto"}}}' \
   '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"rdev.adapter.verify_result","arguments":{"adapter":"shell","schema":"rdev.shell-result.v1","artifact_json":"{\"schema_version\":\"rdev.shell-result.v1\",\"adapter\":\"shell\",\"workspace_root\":\"/tmp/repo\",\"exit_code\":0,\"timed_out\":false,\"canceled\":false,\"output_truncated\":false,\"started_at\":\"2026-06-30T00:00:00Z\",\"ended_at\":\"2026-06-30T00:00:01Z\",\"duration_millis\":1000,\"redacted\":false,\"redaction_rules\":[\"openai_api_key\"]}"}}}' \
-  '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"rdev.adapter.verify_lifecycle","arguments":{"adapter":"claude-code","artifact_json":"{\"schema_version\":\"rdev.adapter-lifecycle.v1\",\"adapter\":\"claude-code\",\"phases\":{\"detect\":{\"implemented\":true,\"evidence\":[\"version\"]},\"plan\":{\"implemented\":true,\"evidence\":[\"commands\"],\"declares_external_consequences\":true,\"declares_required_approvals\":true},\"prepare\":{\"implemented\":true,\"evidence\":[\"workspace\"],\"enforces_workspace_boundary\":true,\"uses_workspace_lock\":true},\"run\":{\"implemented\":true,\"evidence\":[\"process\"],\"supports_timeout\":true,\"supports_cancellation\":true},\"collect\":{\"implemented\":true,\"evidence\":[\"result\"],\"emits_result_artifact\":true,\"result_schema\":\"rdev.claude-code-result.v1\"},\"cleanup\":{\"implemented\":true,\"evidence\":[\"cleanup\"],\"idempotent\":true,\"releases_locks\":true}},\"safety\":{\"adapter_authorizes_jobs\":false,\"adapter_approves_dangerous_actions\":false,\"adapter_installs_persistence\":false,\"host_validates_before_run\":true,\"redacts_outputs\":true},\"cancellation\":{\"supported\":true,\"evidence_field\":\"canceled\",\"timeout_exclusive\":true,\"cleanup_on_cancel\":true}}"}}}' \
+  '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"rdev.adapter.verify_lifecycle","arguments":{"adapter":"claude-code","artifact_json":"{\"schema_version\":\"rdev.adapter-lifecycle.v1\",\"adapter\":\"claude-code\",\"phases\":{\"detect\":{\"implemented\":true,\"evidence\":[\"version\"]},\"plan\":{\"implemented\":true,\"evidence\":[\"commands\"],\"declares_external_consequences\":true,\"declares_required_authorizations\":true},\"prepare\":{\"implemented\":true,\"evidence\":[\"workspace\"],\"enforces_workspace_boundary\":true,\"uses_workspace_lock\":true},\"run\":{\"implemented\":true,\"evidence\":[\"process\"],\"supports_timeout\":true,\"supports_cancellation\":true},\"collect\":{\"implemented\":true,\"evidence\":[\"result\"],\"emits_result_artifact\":true,\"result_schema\":\"rdev.claude-code-result.v1\"},\"cleanup\":{\"implemented\":true,\"evidence\":[\"cleanup\"],\"idempotent\":true,\"releases_locks\":true}},\"safety\":{\"adapter_authorizes_tasks\":false,\"adapter_authorizes_dangerous_actions\":false,\"adapter_installs_persistence\":false,\"host_validates_before_run\":true,\"redacts_outputs\":true},\"cancellation\":{\"supported\":true,\"evidence_field\":\"canceled\",\"timeout_exclusive\":true,\"cleanup_on_cancel\":true}}"}}}' \
   '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"rdev.adapter.verify_cancellation","arguments":{"adapter":"shell","schema":"rdev.shell-result.v1","artifact_json":"{\"schema_version\":\"rdev.shell-result.v1\",\"adapter\":\"shell\",\"workspace_root\":\"/tmp/repo\",\"exit_code\":-1,\"timed_out\":false,\"canceled\":true,\"output_truncated\":false,\"started_at\":\"2026-06-30T00:00:00Z\",\"ended_at\":\"2026-06-30T00:00:01Z\",\"duration_millis\":1000,\"redacted\":false,\"redaction_rules\":[\"openai_api_key\"]}"}}}' \
   | rdev mcp serve
 ```
@@ -448,5 +447,5 @@ Tool calls return:
 
 - In-memory only.
 - Persistent host sessions require a gateway with configured storage.
-- Job envelopes are signed with a development Ed25519 key when no signing key is configured. The stdio server is not itself a gateway storage authority or production key authority — use `--signing-key`, a configured storage provider, or a trust bundle for production deployments.
+- Task envelopes are signed with a development Ed25519 key when no signing key is configured. The stdio server is not itself a gateway storage authority or production key authority — use `--signing-key`, a configured storage provider, or a trust bundle for production deployments.
 - Real host networking is provided by the gateway HTTP/WSS surfaces; this stdio server is the local MCP control surface.

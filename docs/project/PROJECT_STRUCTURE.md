@@ -35,8 +35,8 @@ domain packages.
 HTTP APIs, and MCP surfaces.
 
 `internal/hostrunner`, adapter packages, `internal/policy`, `internal/workspace`,
-`internal/hostidentity`, `internal/hosttrust`, `internal/hostnonce`, and
-`internal/hostapproval` form the host safety kernel.
+`internal/controlplane`, `internal/hostidentity`, and `internal/hosttrust` form
+the host safety kernel.
 
 `internal/release`, `internal/skillkit`, `internal/acceptance`, and `scripts/`
 own distribution, installation, release evidence, and project-management

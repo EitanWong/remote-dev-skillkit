@@ -199,8 +199,8 @@ project_doc = (repo_root / "docs/project/GITHUB_PROJECT_MANAGEMENT.md").read_tex
 for phrase in [
     "No GitHub repository, issues, labels, milestones, project board, release, or push",
     "Local Release Evidence Before External GitHub Mutation",
-    "Seed Issues To Create After Approval",
-    "Recommended sequence after explicit approval",
+    "Seed Issues To Create After Authorization",
+    "Recommended sequence after explicit authorization",
 ]:
     add("project_doc:" + phrase[:48], phrase in project_doc, phrase)
 

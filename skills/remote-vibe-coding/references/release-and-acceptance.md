@@ -10,7 +10,7 @@ planning, platform candidates, or OS acceptance evidence.
 - For installed agents or managed hosts, use `rdev update check` and
   `rdev update plan` to discover newer GitHub Releases and produce reviewable
   update steps. Treat update plans as dry-run evidence until an operator
-  approves the upgrade.
+  authorizes the upgrade.
 - Before publishing artifacts or bootstrap download instructions, create and
   verify a signed release bundle using paths and root keys from the current
   release plan, not examples.
@@ -30,7 +30,7 @@ planning, platform candidates, or OS acceptance evidence.
   Codex, Claude Code, Hermes, OpenClaw/OpenCode, or a generic MCP agent.
 - Review generated install scripts before execution.
 - Require an explicit execute flag before local copying.
-- Keep external mutation false unless the operator explicitly approves a
+- Keep external mutation false unless the operator explicitly authorizes a
   publishing or remote mutation action.
 
 ## GitHub Release Planning
@@ -40,16 +40,16 @@ planning, platform candidates, or OS acceptance evidence.
 - Use the current candidate path and operator-confirmed repository id.
 - Do not run generated `gh release` commands, create repositories, mutate
   labels, mutate milestones, create issues, upload artifacts, or push tags
-  without explicit operator approval.
+  without explicit operator authorization.
 
 ## OS Acceptance
 
 - Managed Mac acceptance requires operator-confirmed output directory and repo
-  path; review evidence and approval-evidence directories from the current run.
+  path; review evidence and interrupt-evidence directories from the current run.
 - Service-backed Mac acceptance must generate and review a plan first; it must
   not auto-run `launchctl`.
 - Linux managed service work must use reviewed systemd user-unit plans with
-  release-bundle gates and must prove start/status/reconnect/job/stop/uninstall
+  release-bundle gates and must prove start/status/reconnect/task/stop/uninstall
   evidence before release claims.
 - Windows managed service work must use reviewed Service Control Manager plans
   with release-bundle gates and must prove create/status/start/reconnect/stop/

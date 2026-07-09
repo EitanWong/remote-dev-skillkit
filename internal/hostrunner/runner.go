@@ -8,16 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
-	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
-const (
-	DenialSchemaVersion           = "rdev.host-denial.v1"
-	ApprovalRequiredSchemaVersion = "rdev.approval-required.v1"
-)
+const DenialSchemaVersion = "rdev.host-denial.v1"
 
 type Result struct {
 	ArtifactContent       string `json:"artifact_content"`
@@ -26,36 +21,41 @@ type Result struct {
 
 type Options struct {
 	IdentityFingerprint   string
-	NonceStore            hostnonce.Store
-	ApprovalStore         hostapproval.Store
 	WorkspaceLockStore    string
 	WorkspaceLockTTL      time.Duration
 	CaptureRuntimeFixture bool
 }
 
-type ApprovalRequired struct {
-	SchemaVersion     string   `json:"schema_version"`
-	Code              string   `json:"code"`
-	Summary           string   `json:"summary"`
-	Detail            string   `json:"detail,omitempty"`
-	JobID             string   `json:"job_id,omitempty"`
-	HostID            string   `json:"host_id,omitempty"`
-	Adapter           string   `json:"adapter,omitempty"`
-	RequiredApprovals []string `json:"required_approvals"`
-	ApprovedApprovals []string `json:"approved_approvals,omitempty"`
-	ApprovalTokenIDs  []string `json:"approval_token_ids,omitempty"`
-	Retryable         bool     `json:"retryable"`
+type SessionTaskSpec struct {
+	TaskID              string
+	EndpointID          string
+	IdentityFingerprint string
+	Adapter             string
+	Intent              string
+	Workspace           model.TaskWorkspace
+	Capabilities        []string
+	Limits              model.TaskLimits
+	Payload             map[string]any
 }
 
-type ApprovalRequiredError struct {
-	Explanation ApprovalRequired
+type taskEnvelope struct {
+	SchemaVersion      string
+	TaskID             string
+	EndpointID         string
+	EndpointIdentity   string
+	Adapter            string
+	Intent             string
+	Workspace          model.TaskWorkspace
+	Capabilities       []string
+	Limits             model.TaskLimits
+	Payload            map[string]any
+	InterruptsRequired []string
 }
 
-func (e ApprovalRequiredError) Error() string {
-	if e.Explanation.Summary != "" {
-		return e.Explanation.Summary
-	}
-	return e.Explanation.Code
+type taskRef struct {
+	TaskID     string
+	EndpointID string
+	Adapter    string
 }
 
 type DenialExplanation struct {
@@ -63,8 +63,8 @@ type DenialExplanation struct {
 	Code          string `json:"code"`
 	Summary       string `json:"summary"`
 	Detail        string `json:"detail,omitempty"`
-	JobID         string `json:"job_id,omitempty"`
-	HostID        string `json:"host_id,omitempty"`
+	TaskID        string `json:"task_id,omitempty"`
+	EndpointID    string `json:"endpoint_id,omitempty"`
 	Adapter       string `json:"adapter,omitempty"`
 	Capability    string `json:"capability,omitempty"`
 	Retryable     bool   `json:"retryable"`
@@ -86,121 +86,11 @@ func (e DenialError) Unwrap() error {
 	return e.Cause
 }
 
-func RunDevJob(hostID string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
-	return RunDevJobWithOptionsContext(context.Background(), hostID, trust, job, now, Options{})
-}
-
-func RunDevJobForIdentity(hostID, identityFingerprint string, trust model.TrustBundle, job model.Job, now time.Time) (Result, error) {
-	return RunDevJobWithOptionsContext(context.Background(), hostID, trust, job, now, Options{IdentityFingerprint: identityFingerprint})
-}
-
-func RunDevJobWithOptions(hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
-	return RunDevJobWithOptionsContext(context.Background(), hostID, trust, job, now, opts)
-}
-
-func RunDevJobWithOptionsContext(ctx context.Context, hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
-	return runDevJob(ctx, hostID, trust, job, now, opts)
-}
-
-func RunDevJobWithTrustBundle(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
-	return RunDevJobWithTrustBundleOptionsContext(context.Background(), hostID, trustBundle, job, now, Options{})
-}
-
-func RunDevJobWithTrustBundleForIdentity(hostID, identityFingerprint string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time) (Result, error) {
-	return RunDevJobWithTrustBundleOptionsContext(context.Background(), hostID, trustBundle, job, now, Options{IdentityFingerprint: identityFingerprint})
-}
-
-func RunDevJobWithTrustBundleOptions(hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
-	return RunDevJobWithTrustBundleOptionsContext(context.Background(), hostID, trustBundle, job, now, opts)
-}
-
-func RunDevJobWithTrustBundleOptionsContext(ctx context.Context, hostID string, trustBundle model.SignedTrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
-	if job.Envelope == nil {
-		return deny(job, denialSpec{
-			Code:      "job_envelope_required",
-			Summary:   "Job envelope is required before host execution.",
-			Detail:    "The host received a job without the signed executable envelope.",
-			Retryable: false,
-		}, fmt.Errorf("job envelope is required"))
-	}
-	trust, err := trustBundle.ActiveTrustBundle(job.Envelope.SigningKeyID, now)
-	if err != nil {
-		return deny(job, trustBundleDenial(job, err), err)
-	}
-	return runDevJob(ctx, hostID, trust, job, now, opts)
-}
-
-func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job model.Job, now time.Time, opts Options) (Result, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if job.Envelope == nil {
-		return deny(job, denialSpec{
-			Code:      "job_envelope_required",
-			Summary:   "Job envelope is required before host execution.",
-			Detail:    "The host received a job without the signed executable envelope.",
-			Retryable: false,
-		}, fmt.Errorf("job envelope is required"))
-	}
-	envelope := *job.Envelope
-	if envelope.HostID != hostID || job.HostID != hostID {
-		return deny(job, denialSpec{
-			Code:      "wrong_host",
-			Summary:   "Job is not assigned to this host.",
-			Detail:    "The job or signed envelope host id did not match the executing host.",
-			Retryable: false,
-		}, fmt.Errorf("job is not assigned to host"))
-	}
-	if opts.IdentityFingerprint != "" && envelope.HostIdentityFingerprint != opts.IdentityFingerprint {
-		return deny(job, denialSpec{
-			Code:      "host_identity_mismatch",
-			Summary:   "Host identity fingerprint did not match the signed job envelope.",
-			Detail:    "The local host identity is not the identity named by the gateway-signed job.",
-			Retryable: false,
-		}, fmt.Errorf("host identity fingerprint mismatch"))
-	}
-	if envelope.SigningKeyID != trust.SigningKeyID {
-		return deny(job, denialSpec{
-			Code:      "signing_key_mismatch",
-			Summary:   "Job signing key did not match the trusted key.",
-			Detail:    "The host refused to verify a job signed by a different key id than the provided trust bundle.",
-			Retryable: false,
-		}, fmt.Errorf("signing key mismatch"))
-	}
-	publicKey, err := trust.Ed25519PublicKey()
-	if err != nil {
-		return deny(job, denialSpec{
-			Code:      "trust_public_key_invalid",
-			Summary:   "Trusted gateway public key is invalid.",
-			Detail:    err.Error(),
-			Retryable: false,
-		}, err)
-	}
-	if err := envelope.VerifyForHost(publicKey, hostID, now); err != nil {
-		return deny(job, envelopeDenial(job, err), err)
-	}
-	if opts.NonceStore != nil {
-		if err := opts.NonceStore.Remember(hostnonce.Entry{
-			JobID:     envelope.JobID,
-			HostID:    envelope.HostID,
-			Nonce:     envelope.Nonce,
-			ExpiresAt: envelope.ExpiresAt,
-		}, now); err != nil {
-			return deny(job, nonceDenial(job, err), err)
-		}
-	}
-	approved, tokenIDs, missing, err := verifyApprovalTokens(trust, envelope, now)
-	if err != nil {
-		return deny(job, approvalTokenDenial(job, err), err)
-	}
-	if len(missing) > 0 {
-		return requireApproval(job, missing, approved, tokenIDs)
-	}
-	if implicitMissing := missingImplicitApprovals(envelope, approved); len(implicitMissing) > 0 {
-		return requireApproval(job, implicitMissing, approved, tokenIDs)
-	}
+func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec, now time.Time, opts Options) (Result, error) {
+	envelope := sessionTaskEnvelope(spec, now)
+	ref := taskRef{TaskID: envelope.TaskID, EndpointID: envelope.EndpointID, Adapter: envelope.Adapter}
 	if !supportedAdapter(envelope.Adapter) {
-		return deny(job, denialSpec{
+		return denyTask(ref, denialSpec{
 			Code:      "unsupported_adapter",
 			Summary:   "Requested adapter is not supported by this host runner.",
 			Detail:    fmt.Sprintf("Adapter %q is not available in the current host runner.", envelope.Adapter),
@@ -209,7 +99,7 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 		}, fmt.Errorf("unsupported dev adapter %q", envelope.Adapter))
 	}
 	if envelope.Workspace.Root == "" {
-		return deny(job, denialSpec{
+		return denyTask(ref, denialSpec{
 			Code:      "workspace_required",
 			Summary:   "Workspace root is required for adapter execution.",
 			Detail:    "Host adapters only run inside an explicit workspace root.",
@@ -218,18 +108,18 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 		}, fmt.Errorf("workspace root is required"))
 	}
 	if missing := missingAdapterCapability(envelope); missing != "" {
-		return deny(job, denialSpec{
+		return denyTask(ref, denialSpec{
 			Code:       "missing_capability",
-			Summary:    fmt.Sprintf("Job is missing the %s capability.", missing),
+			Summary:    fmt.Sprintf("Task is missing the %s capability.", missing),
 			Detail:     fmt.Sprintf("The host requires %s before running the %s adapter.", missing, envelope.Adapter),
 			Adapter:    envelope.Adapter,
 			Capability: missing,
 			Retryable:  true,
 		}, fmt.Errorf("missing %s capability", missing))
 	}
-	releaseWorkspaceLock, err := acquireWorkspaceLock(hostID, envelope, opts, now)
+	releaseWorkspaceLock, err := acquireWorkspaceLock(spec.EndpointID, envelope, opts, now)
 	if err != nil {
-		return deny(job, workspaceLockDenial(err), err)
+		return denyTask(ref, workspaceLockDenial(err), err)
 	}
 	releasedWorkspaceLock := false
 	releaseWorkspaceLockOnce := func() {
@@ -240,23 +130,54 @@ func runDevJob(ctx context.Context, hostID string, trust model.TrustBundle, job 
 		releaseWorkspaceLock()
 	}
 	defer releaseWorkspaceLockOnce()
-	if opts.ApprovalStore != nil {
-		if err := consumeApprovalTokens(opts.ApprovalStore, envelope.ApprovalTokens, now); err != nil {
-			return deny(job, approvalTokenDenial(job, err), err)
-		}
-	}
 	execution, err := executeJobAdapter(ctx, envelope, opts.CaptureRuntimeFixture, releaseWorkspaceLockOnce)
 	result := Result{
 		ArtifactContent:       execution.ArtifactContent,
 		RuntimeFixtureContent: execution.RuntimeFixtureContent,
 	}
 	if err != nil {
-		if denial, ok := adapterDenial(job, envelope.Adapter, err); ok {
-			return deny(job, denial, err)
+		if denial, ok := adapterDenial(envelope.Adapter, err); ok {
+			return denyTask(ref, denial, err)
 		}
 		return result, err
 	}
 	return result, nil
+}
+
+func sessionTaskEnvelope(spec SessionTaskSpec, now time.Time) taskEnvelope {
+	limits := spec.Limits
+	if limits.MaxDurationSeconds == 0 {
+		limits.MaxDurationSeconds = model.DefaultTaskTTLSeconds
+	}
+	if limits.MaxOutputBytes == 0 {
+		limits.MaxOutputBytes = model.DefaultTaskMaxOutputBytes
+	}
+	if strings.TrimSpace(limits.Network) == "" {
+		limits.Network = "default-deny"
+	}
+	return taskEnvelope{
+		SchemaVersion:    "rdev.session-task.v1",
+		TaskID:           spec.TaskID,
+		EndpointID:       spec.EndpointID,
+		EndpointIdentity: spec.IdentityFingerprint,
+		Adapter:          spec.Adapter,
+		Intent:           spec.Intent,
+		Workspace:        spec.Workspace,
+		Capabilities:     append([]string(nil), spec.Capabilities...),
+		Limits:           limits,
+		Payload:          cloneMap(spec.Payload),
+	}
+}
+
+func cloneMap(source map[string]any) map[string]any {
+	if source == nil {
+		return nil
+	}
+	out := make(map[string]any, len(source))
+	for key, value := range source {
+		out[key] = value
+	}
+	return out
 }
 
 func supportedAdapter(adapter string) bool {
@@ -268,7 +189,7 @@ func supportedAdapter(adapter string) bool {
 	}
 }
 
-func missingAdapterCapability(envelope model.JobEnvelope) string {
+func missingAdapterCapability(envelope taskEnvelope) string {
 	switch envelope.Adapter {
 	case "shell":
 		if !hasCapability(envelope.Capabilities, "shell.user") {
@@ -307,7 +228,7 @@ func missingAdapterCapability(envelope model.JobEnvelope) string {
 	return ""
 }
 
-func missingFileCapability(envelope model.JobEnvelope) string {
+func missingFileCapability(envelope taskEnvelope) string {
 	switch normalizeAdapterAction(stringValue(envelope.Payload, "action", "")) {
 	case "list", "read", "download":
 		if !hasCapability(envelope.Capabilities, "file.transfer.read") {
@@ -326,7 +247,7 @@ func missingFileCapability(envelope model.JobEnvelope) string {
 	return ""
 }
 
-func missingDesktopCapability(envelope model.JobEnvelope) string {
+func missingDesktopCapability(envelope taskEnvelope) string {
 	action := normalizeAdapterAction(stringValue(envelope.Payload, "action", ""))
 	switch action {
 	case "windows", "window.list", "window.inspect":
@@ -394,7 +315,7 @@ func normalizeAdapterAction(action string) string {
 	return action
 }
 
-func acquireWorkspaceLock(hostID string, envelope model.JobEnvelope, opts Options, now time.Time) (func(), error) {
+func acquireWorkspaceLock(hostID string, envelope taskEnvelope, opts Options, now time.Time) (func(), error) {
 	if strings.TrimSpace(opts.WorkspaceLockStore) == "" {
 		return func() {}, nil
 	}
@@ -406,7 +327,7 @@ func acquireWorkspaceLock(hostID string, envelope model.JobEnvelope, opts Option
 	lock, err := store.Acquire(workspace.LockOptions{
 		RepoRoot:     envelope.Workspace.Root,
 		HostID:       hostID,
-		JobID:        envelope.JobID,
+		TaskID:       envelope.TaskID,
 		WorktreePath: envelope.Workspace.Root,
 		BaseRef:      "",
 		Branch:       envelope.Workspace.Branch,
@@ -417,17 +338,8 @@ func acquireWorkspaceLock(hostID string, envelope model.JobEnvelope, opts Option
 		return nil, err
 	}
 	return func() {
-		_, _, _ = store.Release(lock.RepoRoot, envelope.JobID, false)
+		_, _, _ = store.Release(lock.RepoRoot, envelope.TaskID, false)
 	}, nil
-}
-
-func consumeApprovalTokens(store hostapproval.Store, tokens []model.ApprovalToken, now time.Time) error {
-	for _, token := range tokens {
-		if err := store.Consume(token, now); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func hasCapability(values []string, want string) bool {
@@ -437,238 +349,6 @@ func hasCapability(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func verifyApprovalTokens(trust model.TrustBundle, envelope model.JobEnvelope, now time.Time) ([]string, []string, []string, error) {
-	approved := make([]string, 0, len(envelope.ApprovalTokens))
-	tokenIDs := make([]string, 0, len(envelope.ApprovalTokens))
-	approvedSet := make(map[string]struct{}, len(envelope.ApprovalTokens))
-	for _, token := range envelope.ApprovalTokens {
-		if err := token.Verify(trust, envelope.JobID, envelope.HostID, token.Operation, now); err != nil {
-			return nil, nil, nil, err
-		}
-		if strings.TrimSpace(token.Operation) != "" {
-			if _, exists := approvedSet[token.Operation]; !exists {
-				approved = append(approved, token.Operation)
-				approvedSet[token.Operation] = struct{}{}
-			}
-		}
-		if strings.TrimSpace(token.TokenID) != "" {
-			tokenIDs = append(tokenIDs, token.TokenID)
-		}
-	}
-	var missing []string
-	for _, value := range envelope.ApprovalsRequired {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := approvedSet[value]; !ok {
-			missing = append(missing, value)
-		}
-	}
-	return approved, tokenIDs, missing, nil
-}
-
-func missingImplicitApprovals(envelope model.JobEnvelope, approved []string) []string {
-	approvedSet := make(map[string]struct{}, len(approved))
-	for _, value := range approved {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			approvedSet[value] = struct{}{}
-		}
-	}
-	var missing []string
-	for _, operation := range implicitRiskApprovals(envelope) {
-		if _, ok := approvedSet[operation]; ok {
-			continue
-		}
-		missing = append(missing, operation)
-	}
-	return missing
-}
-
-func implicitRiskApprovals(envelope model.JobEnvelope) []string {
-	seen := map[string]struct{}{}
-	var operations []string
-	add := func(operation string) {
-		operation = normalizeRiskOperation(operation)
-		if operation == "" {
-			return
-		}
-		if _, ok := seen[operation]; ok {
-			return
-		}
-		seen[operation] = struct{}{}
-		operations = append(operations, operation)
-	}
-	for _, key := range []string{"external_actions", "dangerous_actions", "approval_actions", "requested_approvals"} {
-		for _, action := range stringSliceValue(envelope.Payload, key) {
-			add(action)
-		}
-	}
-	var textValues []string
-	switch envelope.Adapter {
-	case "acpx":
-		textValues = acpxRiskText(envelope)
-	case "codex":
-		textValues = codexRiskText(envelope)
-	case "claude-code":
-		textValues = claudeCodeRiskText(envelope)
-	case "shell", "powershell":
-		textValues = commandRiskText(envelope)
-	default:
-		return operations
-	}
-	text := strings.ToLower(strings.Join(textValues, "\n"))
-	for _, rule := range []struct {
-		operation string
-		needles   []string
-	}{
-		{
-			operation: "git.push",
-			needles:   []string{"git push", "push to origin", "push changes", "push branch"},
-		},
-		{
-			operation: "git.merge",
-			needles:   []string{"git merge", "merge into main", "merge into master", "merge branch"},
-		},
-		{
-			operation: "deploy.run",
-			needles:   []string{"deploy", "deployment", "vercel --prod", "wrangler deploy", "fly deploy", "railway up"},
-		},
-		{
-			operation: "publish.run",
-			needles:   []string{"npm publish", "cargo publish", "twine upload", "gh release create", "publish package", "publish release"},
-		},
-		{
-			operation: "credential.change",
-			needles:   []string{"rotate credential", "change credential", "update secret", "modify secret", "write api key", "gh auth", "aws configure", "security add-generic-password"},
-		},
-		{
-			operation: "service.manage",
-			needles:   []string{"systemctl", "launchctl", "install service", "restart service", "modify service", "set-service", "new-service", "start-service", "stop-service", "restart-service", "register-scheduledtask", "service restart", "service stop", "service start"},
-		},
-		{
-			operation: "package.install",
-			needles:   []string{"brew install", "apt install", "apt-get install", "dnf install", "yum install", "pacman -s", "choco install", "winget install", "scoop install", "pip install", "npm install -g", "cargo install", "package install"},
-		},
-		{
-			operation: "elevation.request",
-			needles:   []string{"sudo ", "sudo\t", "pkexec", "runas", "start-process", "-verb runas", "elevation", "administrator privilege"},
-		},
-		{
-			operation: "gui.control",
-			needles:   []string{"xdotool", "cliclick", "system events", "sendkeys", "setcursorpos", "gui control", "control gui"},
-		},
-		{
-			operation: "elevation.request",
-			needles:   []string{"set-executionpolicy"},
-		},
-	} {
-		for _, needle := range rule.needles {
-			if strings.Contains(text, needle) {
-				add(rule.operation)
-				break
-			}
-		}
-	}
-	return operations
-}
-
-func codexRiskText(envelope model.JobEnvelope) []string {
-	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
-	values = append(values, stringSliceValue(envelope.Payload, "codex_args")...)
-	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
-		values = append(values, strings.Join(command, " "))
-	}
-	return values
-}
-
-func claudeCodeRiskText(envelope model.JobEnvelope) []string {
-	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
-	values = append(values, stringSliceValue(envelope.Payload, "claude_code_args")...)
-	values = append(values, stringSliceValue(envelope.Payload, "claude_args")...)
-	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
-		values = append(values, strings.Join(command, " "))
-	}
-	return values
-}
-
-func acpxRiskText(envelope model.JobEnvelope) []string {
-	values := []string{envelope.Intent, stringValue(envelope.Payload, "prompt", "")}
-	values = append(values, stringValue(envelope.Payload, "acpx_agent", ""))
-	values = append(values, stringSliceValue(envelope.Payload, "acpx_args")...)
-	for _, command := range stringMatrixValue(envelope.Payload, "verification_commands") {
-		values = append(values, strings.Join(command, " "))
-	}
-	return values
-}
-
-func commandRiskText(envelope model.JobEnvelope) []string {
-	values := []string{envelope.Intent}
-	argv := stringSliceValue(envelope.Payload, "argv")
-	if len(argv) > 0 {
-		values = append(values, strings.Join(argv, " "))
-	}
-	values = append(values, stringValue(envelope.Payload, "command", ""))
-	values = append(values, stringValue(envelope.Payload, "script", ""))
-	values = append(values, stringValue(envelope.Payload, "powershell_command", ""))
-	return values
-}
-
-func normalizeRiskOperation(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, "_", ".")
-	value = strings.ReplaceAll(value, "-", ".")
-	switch value {
-	case "git.push", "push", "git push":
-		return "git.push"
-	case "git.merge", "merge", "git merge":
-		return "git.merge"
-	case "deploy", "deployment", "deploy.run", "run.deploy":
-		return "deploy.run"
-	case "publish", "publish.run", "run.publish":
-		return "publish.run"
-	case "credential", "credentials", "credential.change", "credentials.change", "secret", "secret.change":
-		return "credential.change"
-	case "service", "service.manage", "manage.service", "service.change":
-		return "service.manage"
-	case "package", "package.install", "package.install.requiresapproval", "install.package":
-		return "package.install"
-	case "elevation", "elevation.request", "admin", "administrator", "sudo":
-		return "elevation.request"
-	case "gui", "gui.control", "gui.control.requiresapproval", "control.gui":
-		return "gui.control"
-	default:
-		return value
-	}
-}
-
-func requireApproval(job model.Job, missing, approved, tokenIDs []string) (Result, error) {
-	explanation := ApprovalRequired{
-		SchemaVersion:     ApprovalRequiredSchemaVersion,
-		Code:              "approval_required",
-		Summary:           "Job requires approval before host execution.",
-		Detail:            "The signed job envelope lists required approvals that have not been satisfied.",
-		JobID:             job.ID,
-		HostID:            job.HostID,
-		RequiredApprovals: append([]string(nil), missing...),
-		ApprovedApprovals: append([]string(nil), approved...),
-		ApprovalTokenIDs:  append([]string(nil), tokenIDs...),
-		Retryable:         true,
-	}
-	if job.Envelope != nil {
-		if explanation.JobID == "" {
-			explanation.JobID = job.Envelope.JobID
-		}
-		if explanation.HostID == "" {
-			explanation.HostID = job.Envelope.HostID
-		}
-		explanation.Adapter = job.Envelope.Adapter
-	}
-	content, _ := json.MarshalIndent(explanation, "", "  ")
-	return Result{ArtifactContent: string(content)}, ApprovalRequiredError{Explanation: explanation}
 }
 
 func stringSliceValue(values map[string]any, key string) []string {
@@ -765,28 +445,17 @@ type denialSpec struct {
 	Retryable  bool
 }
 
-func deny(job model.Job, spec denialSpec, cause error) (Result, error) {
+func denyTask(task taskRef, spec denialSpec, cause error) (Result, error) {
 	explanation := DenialExplanation{
 		SchemaVersion: DenialSchemaVersion,
 		Code:          spec.Code,
 		Summary:       spec.Summary,
 		Detail:        spec.Detail,
-		JobID:         job.ID,
-		HostID:        job.HostID,
-		Adapter:       spec.Adapter,
+		TaskID:        task.TaskID,
+		EndpointID:    task.EndpointID,
+		Adapter:       firstNonEmptyString(spec.Adapter, task.Adapter),
 		Capability:    spec.Capability,
 		Retryable:     spec.Retryable,
-	}
-	if job.Envelope != nil {
-		if explanation.JobID == "" {
-			explanation.JobID = job.Envelope.JobID
-		}
-		if explanation.HostID == "" {
-			explanation.HostID = job.Envelope.HostID
-		}
-		if explanation.Adapter == "" {
-			explanation.Adapter = job.Envelope.Adapter
-		}
 	}
 	if explanation.Detail == "" && cause != nil {
 		explanation.Detail = cause.Error()
@@ -798,114 +467,20 @@ func deny(job model.Job, spec denialSpec, cause error) (Result, error) {
 	}
 }
 
-func envelopeDenial(job model.Job, err error) denialSpec {
-	switch {
-	case errors.Is(err, model.ErrEnvelopeExpired):
-		return denialSpec{
-			Code:      "envelope_expired",
-			Summary:   "Job envelope has expired.",
-			Detail:    err.Error(),
-			Retryable: true,
-		}
-	case errors.Is(err, model.ErrEnvelopeSignature):
-		return denialSpec{
-			Code:      "envelope_signature_invalid",
-			Summary:   "Job envelope signature is invalid.",
-			Detail:    err.Error(),
-			Retryable: false,
-		}
-	case errors.Is(err, model.ErrEnvelopeInvalid):
-		return denialSpec{
-			Code:      "envelope_invalid",
-			Summary:   "Job envelope is invalid.",
-			Detail:    err.Error(),
-			Retryable: true,
-		}
-	default:
-		return denialSpec{
-			Code:      "envelope_invalid",
-			Summary:   "Job envelope failed host verification.",
-			Detail:    err.Error(),
-			Retryable: false,
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
 		}
 	}
-}
-
-func trustBundleDenial(job model.Job, err error) denialSpec {
-	code := "trust_bundle_invalid"
-	summary := "Signed trust bundle could not authorize the job signing key."
-	if errors.Is(err, model.ErrTrustKeyRevoked) {
-		code = "trust_bundle_revoked"
-		summary = "Job signing key has been revoked."
-	}
-	return denialSpec{
-		Code:      code,
-		Summary:   summary,
-		Detail:    err.Error(),
-		Retryable: false,
-	}
-}
-
-func nonceDenial(job model.Job, err error) denialSpec {
-	code := "nonce_replay"
-	summary := "Job envelope nonce was already used."
-	if !strings.Contains(strings.ToLower(err.Error()), "replay") {
-		code = "nonce_store_error"
-		summary = "Host nonce replay store rejected the job."
-	}
-	return denialSpec{
-		Code:      code,
-		Summary:   summary,
-		Detail:    err.Error(),
-		Retryable: false,
-	}
-}
-
-func approvalTokenDenial(job model.Job, err error) denialSpec {
-	switch {
-	case errors.Is(err, model.ErrApprovalTokenExpired):
-		return denialSpec{
-			Code:      "approval_token_expired",
-			Summary:   "Approval token has expired.",
-			Detail:    err.Error(),
-			Retryable: true,
-		}
-	case errors.Is(err, model.ErrApprovalTokenConsumed):
-		return denialSpec{
-			Code:      "approval_token_consumed",
-			Summary:   "Approval token has already been consumed.",
-			Detail:    err.Error(),
-			Retryable: true,
-		}
-	case errors.Is(err, model.ErrApprovalTokenSignature):
-		return denialSpec{
-			Code:      "approval_token_signature_invalid",
-			Summary:   "Approval token signature is invalid.",
-			Detail:    err.Error(),
-			Retryable: false,
-		}
-	case errors.Is(err, model.ErrApprovalTokenInvalid):
-		return denialSpec{
-			Code:      "approval_token_invalid",
-			Summary:   "Approval token is invalid for this job.",
-			Detail:    err.Error(),
-			Retryable: true,
-		}
-	default:
-		return denialSpec{
-			Code:      "approval_token_invalid",
-			Summary:   "Approval token failed host verification.",
-			Detail:    err.Error(),
-			Retryable: false,
-		}
-	}
+	return ""
 }
 
 func workspaceLockDenial(err error) denialSpec {
 	if errors.Is(err, workspace.ErrLocked) {
 		return denialSpec{
 			Code:      "workspace_locked",
-			Summary:   "Workspace is already locked by another job.",
+			Summary:   "Workspace is already locked by another task.",
 			Detail:    err.Error(),
 			Retryable: true,
 		}
@@ -918,7 +493,7 @@ func workspaceLockDenial(err error) denialSpec {
 	}
 }
 
-func codexDenial(job model.Job, err error) (denialSpec, bool) {
+func codexDenial(err error) (denialSpec, bool) {
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "not allowlisted"):
@@ -958,7 +533,7 @@ func codexDenial(job model.Job, err error) (denialSpec, bool) {
 	}
 }
 
-func claudeCodeDenial(job model.Job, err error) (denialSpec, bool) {
+func claudeCodeDenial(err error) (denialSpec, bool) {
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "not allowlisted"):
@@ -998,7 +573,7 @@ func claudeCodeDenial(job model.Job, err error) (denialSpec, bool) {
 	}
 }
 
-func acpxDenial(job model.Job, err error) (denialSpec, bool) {
+func acpxDenial(err error) (denialSpec, bool) {
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "not allowlisted"):
@@ -1038,7 +613,7 @@ func acpxDenial(job model.Job, err error) (denialSpec, bool) {
 	}
 }
 
-func shellDenial(job model.Job, err error) (denialSpec, bool) {
+func shellDenial(err error) (denialSpec, bool) {
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "not allowlisted"):
@@ -1078,7 +653,7 @@ func shellDenial(job model.Job, err error) (denialSpec, bool) {
 	}
 }
 
-func powershellDenial(job model.Job, err error) (denialSpec, bool) {
+func powershellDenial(err error) (denialSpec, bool) {
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "not allowlisted"):

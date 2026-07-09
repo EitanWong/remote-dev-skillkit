@@ -114,7 +114,7 @@ func encodeKey(key Key) ([]byte, error) {
 	encoded := fileKey{
 		SchemaVersion: FileSchemaVersion,
 		KeyID:         key.ID,
-		SigningAlg:    model.JobEnvelopeSigningAlg,
+		SigningAlg:    model.SigningAlgEd25519,
 		PublicKey:     base64.RawURLEncoding.EncodeToString(key.PublicKey),
 		PrivateKey:    base64.RawURLEncoding.EncodeToString(key.PrivateKey),
 	}
@@ -133,7 +133,7 @@ func decodeKey(content []byte) (Key, error) {
 	if encoded.SchemaVersion != FileSchemaVersion {
 		return Key{}, fmt.Errorf("unsupported signing key schema %q", encoded.SchemaVersion)
 	}
-	if encoded.SigningAlg != model.JobEnvelopeSigningAlg {
+	if encoded.SigningAlg != model.SigningAlgEd25519 {
 		return Key{}, fmt.Errorf("unsupported signing algorithm %q", encoded.SigningAlg)
 	}
 	publicKey, err := base64.RawURLEncoding.DecodeString(encoded.PublicKey)

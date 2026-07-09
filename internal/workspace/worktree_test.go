@@ -21,7 +21,7 @@ func TestPrepareGitWorktreeCreatesWorktreeAndLock(t *testing.T) {
 		StoreDir:     storeDir,
 		RepoRoot:     repo,
 		HostID:       "hst_1",
-		JobID:        "job_1",
+		TaskID:       "task_1",
 		OwnerAdapter: "codex",
 		BaseRef:      "HEAD",
 		TTL:          time.Hour,
@@ -32,10 +32,10 @@ func TestPrepareGitWorktreeCreatesWorktreeAndLock(t *testing.T) {
 	if result.SchemaVersion != GitWorktreePlanSchemaVersion {
 		t.Fatalf("unexpected schema %q", result.SchemaVersion)
 	}
-	if result.Lock.JobID != "job_1" || result.Lock.OwnerAdapter != "codex" {
+	if result.Lock.TaskID != "task_1" || result.Lock.OwnerAdapter != "codex" {
 		t.Fatalf("unexpected lock %#v", result.Lock)
 	}
-	if result.Branch != "rdev/job_job_1" {
+	if result.Branch != "rdev/task_task_1" {
 		t.Fatalf("unexpected branch %q", result.Branch)
 	}
 	if _, err := os.Stat(filepath.Join(result.WorktreePath, "README.md")); err != nil {
@@ -62,7 +62,7 @@ func TestPrepareGitWorktreeRejectsConcurrentWriter(t *testing.T) {
 		StoreDir: storeDir,
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_1",
+		TaskID:   "task_1",
 		TTL:      time.Hour,
 	}, now); err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestPrepareGitWorktreeRejectsConcurrentWriter(t *testing.T) {
 		StoreDir: storeDir,
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_2",
+		TaskID:   "task_2",
 		TTL:      time.Hour,
 	}, now.Add(time.Minute))
 	if !errors.Is(err, ErrLocked) {
@@ -89,7 +89,7 @@ func TestPrepareGitWorktreeReleasesLockWhenGitFails(t *testing.T) {
 		StoreDir: storeDir,
 		RepoRoot: repo,
 		HostID:   "hst_1",
-		JobID:    "job_1",
+		TaskID:   "task_1",
 		BaseRef:  "missing-ref-for-rdev-test",
 		TTL:      time.Hour,
 	}, now)
@@ -106,7 +106,7 @@ func TestPrepareGitWorktreeReleasesLockWhenGitFails(t *testing.T) {
 }
 
 func TestPrepareGitWorktreeSanitizesDefaultBranch(t *testing.T) {
-	if got := safeGitName("job:one/../two"); got != "job_one____two" {
+	if got := safeGitName("task:one/../two"); got != "task_one____two" {
 		t.Fatalf("unexpected safe name %q", got)
 	}
 }

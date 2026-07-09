@@ -25,7 +25,7 @@ the collected result artifact.
 ```go
 fixture, err := adapterkit.RunLifecycle(ctx, adapter, adapterkit.RuntimeRequest{
     Adapter:       "my-adapter",
-    JobID:         "job_123",
+    TaskID:        "task_123",
     WorkspaceRoot: "/repo",
     Intent:        "run adapter acceptance",
 })
@@ -58,11 +58,11 @@ rdev adapter verify-runtime \
 MCP clients can call `rdev.adapter.verify_runtime` with `artifact_json` or
 `artifact_id`. The verifier returns `rdev.adapter-conformance-report.v1`.
 
-Built-in hostrunner adapters can also emit runtime fixtures in real host jobs.
+Built-in hostrunner adapters can also emit runtime fixtures in real host tasks.
 Run `rdev host serve` with `--capture-runtime-fixture` to keep the normal
-adapter result as the primary job artifact and append a second
+adapter result as the primary task artifact and append a second
 `rdev.adapter-runtime-fixture.v1` artifact for shell, PowerShell, Codex, or
-Claude Code jobs:
+Claude Code tasks:
 
 ```bash
 rdev host serve \
@@ -118,13 +118,13 @@ detect -> plan -> prepare -> run -> collect -> cleanup
 The verifier checks that:
 
 - every required phase is present, implemented, and has evidence declarations;
-- `plan` declares external consequences and required approvals;
+- `plan` declares external consequences and required authorizations;
 - `prepare` enforces workspace boundaries and workspace locks;
 - `run` supports timeout and, when required, cancellation;
 - `collect` emits a result artifact and result schema;
 - `cleanup` is idempotent and releases locks;
-- safety declarations state that the adapter does not authorize jobs, self-
-  approve dangerous actions, or install hidden persistence;
+- safety declarations state that the adapter does not authorize tasks, self-
+  authorize dangerous actions, or install hidden persistence;
 - cancellation declarations include a canceled evidence field, timeout
   exclusivity, and cleanup-on-cancel behavior;
 - common unredacted secret patterns are absent when requested.
@@ -224,7 +224,7 @@ The verifier checks:
 
 ## Cancellation Artifact Conformance
 
-Use `adapterkit.VerifyCancellationArtifactJSON` when testing a canceled job or
+Use `adapterkit.VerifyCancellationArtifactJSON` when testing a canceled task or
 before accepting cancellation evidence from a new adapter.
 
 ```go

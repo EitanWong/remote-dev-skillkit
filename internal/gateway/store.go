@@ -226,7 +226,7 @@ func NewRedisStreamStateStore(rawURL string) (RedisStreamStateStore, error) {
 		return RedisStreamStateStore{}, fmt.Errorf("redis-stream state store URL is required")
 	}
 	if redisURLHasInlineSecret(rawURL) {
-		return RedisStreamStateStore{}, fmt.Errorf("redis-stream state store URL must not contain inline credentials; use REDISCLI_AUTH or an operator-approved secret injector")
+		return RedisStreamStateStore{}, fmt.Errorf("redis-stream state store URL must not contain inline credentials; use REDISCLI_AUTH or an operator-authorized secret injector")
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -398,7 +398,7 @@ func NewS3CompatibleStateStore(location string) (S3CompatibleStateStore, error) 
 		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location must use s3://bucket/prefix")
 	}
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location must not contain credentials, query parameters, or fragments; use AWS_PROFILE, AWS_* environment, or an operator-approved secret injector")
+		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location must not contain credentials, query parameters, or fragments; use AWS_PROFILE, AWS_* environment, or an operator-authorized secret injector")
 	}
 	if strings.TrimSpace(parsed.Host) == "" {
 		return S3CompatibleStateStore{}, fmt.Errorf("s3-compatible state store location missing bucket")

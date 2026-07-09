@@ -44,12 +44,12 @@ gateway URLs, transports, release roots, checksums, or helper commands.
 4. User runs the visible PowerShell bootstrap or a signed self-contained
    connection entry package.
 5. Bootstrap downloads or unpacks the signed `rdev-host` binary.
-6. Bootstrap verifies checksum/signature and the signed release bundle.
+6. Bootstrap verifies checksum/signature and the signed release evidence.
 7. Host generates a keypair.
-8. Host registers using the one-time ticket.
-9. Gateway marks the host pending.
-10. Operator approves.
-11. Host receives signed policy and jobs.
+8. Host joins a Control Plane session using the one-time ticket.
+9. Gateway records the target endpoint.
+10. Operator authorizes the session when needed.
+11. Host receives session task events.
 
 During development, `rdev host serve --trust-pin sha256:<hex>` can pin the gateway signing public key from `GET /v1/trust`. Production bootstrap should derive this trust pin from the signed join manifest or a pinned trust root, not from unauthenticated chat text.
 
@@ -98,7 +98,7 @@ systemd user-unit plan before any owned-host Linux acceptance run. These
 commands write and verify the plan only; they do not run `systemctl`. After a
 real Linux run, use `rdev acceptance package-linux-managed-service` to archive
 the reviewed plan, unit, release-gate output, service transcripts, audit,
-reconnect proof, and managed job evidence.
+reconnect proof, and managed task evidence.
 
 The repository also includes release artifact signature primitives:
 
@@ -129,8 +129,8 @@ rdev host serve \
   --release-require-artifacts rdev-host,rdev-verify
 ```
 
-If bundle verification fails, the host does not register and does not poll for
-jobs. `rdev host install-service` accepts the same three release flags and
+If bundle verification fails, the host does not join and does not poll for
+tasks. `rdev host install-service` accepts the same three release flags and
 writes them into macOS LaunchAgent and Linux systemd managed-host definitions,
 or includes them in Windows `sc.exe create` command plans, so the managed host
 self-checks the signed release bundle on restart. This is a startup integrity
@@ -148,7 +148,7 @@ When `ManifestUrl` is provided, the host fetches a signed `rdev.join-manifest.v1
 <key_id>:<base64url_ed25519_public_key>
 ```
 
-When it is present, `rdev-host` verifies the join manifest with that pinned root before it trusts the embedded gateway job-signing bundle. Without it, `rdev-host` only uses the development self-trust path where the manifest is signed by the same gateway key it advertises.
+When it is present, `rdev-host` verifies the join manifest with that pinned root before it trusts the embedded gateway task-signing evidence. Without it, `rdev-host` only uses the development self-trust path where the manifest is signed by the same gateway key it advertises.
 
 ## Bootstrap Requirements
 
@@ -170,11 +170,11 @@ For ordinary "connect this computer" requests, Agents should start with
 through the CLI. That high-level path either returns the ready
 `target_handoff_envelope.full_text` to forward to the human, or the visible
 foreground `rdev support-session connect --start` command that creates the
-gateway, verified helper assets, ready files, status files, auto-approval
+gateway, verified helper assets, ready files, status files, auto-authorization
 metadata, and recovery guidance together.
 
 Low-level invite creation is reserved for explicit package materialization,
-approved managed owned-host planning, or a support-session recovery payload
+authorized managed owned-host planning, or a support-session recovery payload
 that names that path. In those cases, use `rdev.invites.create` or
 `rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
 `connection_entry`:
@@ -209,7 +209,7 @@ target-side instructions. That materializes the invite into
 The same payload includes `connection_entry_plan.target_selection_policy`.
 Agents should use it before materialization: owned personal or fleet machines
 default to `managed`, third-party or one-off machines default to
-`attended-temporary`, and ambiguous ownership or persistence approval requires
+`attended-temporary`, and ambiguous ownership or persistence authorization requires
 one short operator question before creating a managed entry.
 
 When an agent provides an empty `out_dir`, the MCP and CLI materializers write a
@@ -236,12 +236,12 @@ selected only when both the tool and an explicit gateway override are present,
 for example `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
 `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL`. The runner may reuse existing
 SSH/frp/Chisel/headscale/Tailscale-compatible/WireGuard routing. When an
-approved dependency install action is present, it can also invoke
+authorized dependency install action is present, it can also invoke
 `rdev deps install` to download, SHA-256 verify, unpack, and use user/workspace
 scoped helper binaries such as `chisel` or `frpc` without changing PATH,
 installing services, or mutating firewall/DNS/routes. Creating credentials,
 changing routes, firewall, DNS, paid/cloud resources, mesh/VPN service
-enrollment, drivers, or persistent services remains an approval-gated follow-up.
+enrollment, drivers, or persistent services remains an authorization-gated follow-up.
 
 For Windows attended temporary support, the current package implementation wraps
 the existing Windows temporary acceptance plan as
@@ -265,7 +265,7 @@ The same invite also includes `host_context_plan`, which tells agents to keep
 remote environment details, project file structure, requirement notes,
 transcripts, logs, and large evidence on the target host by default. The Agent
 server should keep small indexes and request exact context slices only when a
-job step needs them.
+task step needs them.
 
 `agent_provisioning_plan` defines the companion setup rule. After the host
 connects, the Agent may probe installed skills, MCP tools, adapters, language
@@ -274,7 +274,7 @@ network/proxy settings, and permissions. If missing setup is needed for the
 support task, the Agent should prefer verified, user-scoped or workspace-scoped
 installs on the target host and record the install plan, source, checksum,
 commands, exit codes, and post-install capability report as evidence. It should
-pause for approval before elevation, system-wide packages, service changes,
+pause for authorization before elevation, system-wide packages, service changes,
 credential changes, firewall changes, external account mutation, paid resource
 use, or publish/deploy/push actions.
 
@@ -282,15 +282,15 @@ use, or publish/deploy/push actions.
 has other AI tools or Agents installed, the Agent may discover configured A2A
 Agent Cards, local MCP servers, and local Agent CLIs. It can ask those peers to
 perform bounded diagnostics, summaries, coding subtasks, or tool-specific
-checks, but all delegation must remain inside rdev signed jobs, host policy,
-workspace locks, redaction, approval gates, audit, and evidence.
+checks, but all delegation must remain inside rdev session tasks, host policy,
+workspace locks, redaction, interrupt gates, audit, and evidence.
 
 `localization_plan` defines the language rule. The join page supports `?lang=`
 and `Accept-Language` matching for the repository's supported languages:
 English, Simplified Chinese, Spanish, French, German, Japanese, Korean,
 Brazilian Portuguese, Hindi, Arabic, and Russian. After the host connects, the
 Agent should also inspect the target OS locale and user language settings, then
-localize target-side instructions and approval text. Commands, paths, schema
+localize target-side instructions and authorization text. Commands, paths, schema
 keys, checksums, and code blocks are not translated.
 
 `managed_development_plan` defines the long-running owned-workstation rule.
@@ -298,7 +298,7 @@ For machines controlled by the operator, prefer managed mode with explicit
 service plans, `--once=false`, `--transport auto`, release-bundle startup
 verification, enrollment renewal, revocation refresh, workspace locks, Git
 worktrees, host-local context caches, reconnect proof, audit slices, and
-evidence bundles. This is separate from attended temporary third-party support.
+session evidence. This is separate from attended temporary third-party support.
 
 The development gateway serves:
 
@@ -341,7 +341,7 @@ entry validates WSS/auto fallback. It should probe HTTPS long-poll, short-poll,
 LAN/private gateway reachability, and already configured
 proxy/relay/mesh/SSH paths before asking the human for more network details.
 Elevation is allowed only through normal UAC/sudo/system prompts for a signed
-job that needs it, and the approval must be recorded as evidence.
+session task that needs it, and the authorization must be recorded as evidence.
 
 ## Managed Device Flow
 
@@ -356,7 +356,7 @@ rdev host install-service \
   --plist-out ~/Library/LaunchAgents/com.remote-dev-skillkit.host.plist
 ```
 
-On macOS, the current command writes a LaunchAgent plist and prints the explicit `launchctl bootstrap`, `launchctl bootout`, and `launchctl print` commands. It does not run `launchctl` automatically. This command is not used for third-party temporary sessions. When `--workspace-lock-store` is set, managed jobs enforce one-writer workspace locks before adapter execution.
+On macOS, the current command writes a LaunchAgent plist and prints the explicit `launchctl bootstrap`, `launchctl bootout`, and `launchctl print` commands. It does not run `launchctl` automatically. This command is not used for third-party temporary sessions. When `--workspace-lock-store` is set, managed tasks enforce one-writer workspace locks before adapter execution.
 
 Inspect or remove the LaunchAgent plist without executing `launchctl`:
 

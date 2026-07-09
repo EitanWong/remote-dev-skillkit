@@ -18,7 +18,7 @@ type GitWorktreeOptions struct {
 	StoreDir     string
 	RepoRoot     string
 	HostID       string
-	JobID        string
+	TaskID       string
 	OwnerAdapter string
 	BaseRef      string
 	Branch       string
@@ -47,8 +47,8 @@ type GitWorktreeResult struct {
 }
 
 func PrepareGitWorktree(ctx context.Context, opts GitWorktreeOptions, now time.Time) (GitWorktreeResult, error) {
-	if strings.TrimSpace(opts.JobID) == "" {
-		return GitWorktreeResult{}, fmt.Errorf("job id is required")
+	if strings.TrimSpace(opts.TaskID) == "" {
+		return GitWorktreeResult{}, fmt.Errorf("task id is required")
 	}
 	if strings.TrimSpace(opts.HostID) == "" {
 		return GitWorktreeResult{}, fmt.Errorf("host id is required")
@@ -63,7 +63,7 @@ func PrepareGitWorktree(ctx context.Context, opts GitWorktreeOptions, now time.T
 	}
 	branch := strings.TrimSpace(opts.Branch)
 	if branch == "" {
-		branch = "rdev/job_" + safeGitName(opts.JobID)
+		branch = "rdev/task_" + safeGitName(opts.TaskID)
 	}
 	topLevelEvidence, err := runGit(ctx, repoRoot, "rev-parse", "--show-toplevel")
 	result := GitWorktreeResult{
@@ -94,7 +94,7 @@ func PrepareGitWorktree(ctx context.Context, opts GitWorktreeOptions, now time.T
 		if !filepath.IsAbs(worktreeRoot) {
 			worktreeRoot = filepath.Join(topLevel, worktreeRoot)
 		}
-		worktreePath = filepath.Join(worktreeRoot, "job_"+safeGitName(opts.JobID))
+		worktreePath = filepath.Join(worktreeRoot, "task_"+safeGitName(opts.TaskID))
 	}
 	if !filepath.IsAbs(worktreePath) {
 		worktreePath = filepath.Join(topLevel, worktreePath)
@@ -110,7 +110,7 @@ func PrepareGitWorktree(ctx context.Context, opts GitWorktreeOptions, now time.T
 	lock, err := store.Acquire(LockOptions{
 		RepoRoot:     topLevel,
 		HostID:       opts.HostID,
-		JobID:        opts.JobID,
+		TaskID:       opts.TaskID,
 		WorktreePath: worktreePath,
 		BaseRef:      baseRef,
 		Branch:       branch,
@@ -122,13 +122,13 @@ func PrepareGitWorktree(ctx context.Context, opts GitWorktreeOptions, now time.T
 	}
 	result.Lock = lock
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o700); err != nil {
-		_, _, _ = store.Release(topLevel, opts.JobID, false)
+		_, _, _ = store.Release(topLevel, opts.TaskID, false)
 		return result, err
 	}
 	addEvidence, err := runGit(ctx, topLevel, "worktree", "add", "-b", branch, worktreePath, baseRef)
 	result.Commands = append(result.Commands, addEvidence)
 	if err != nil {
-		_, _, _ = store.Release(topLevel, opts.JobID, false)
+		_, _, _ = store.Release(topLevel, opts.TaskID, false)
 		return result, fmt.Errorf("create git worktree: %w", err)
 	}
 	return result, nil
@@ -168,7 +168,7 @@ func commandExitCode(err error) int {
 func safeGitName(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "job"
+		return "task"
 	}
 	var builder strings.Builder
 	for _, r := range value {
@@ -180,7 +180,7 @@ func safeGitName(value string) string {
 	}
 	cleaned := strings.Trim(builder.String(), ".-_")
 	if cleaned == "" {
-		return "job"
+		return "task"
 	}
 	return cleaned
 }

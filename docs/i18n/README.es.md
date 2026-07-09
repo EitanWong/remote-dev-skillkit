@@ -6,9 +6,9 @@ Remote Dev Skillkit es un skillkit remoto, open-source y nativo para agentes de 
 
 | El agente obtiene | La persona conserva |
 |---|---|
-| Skills, herramientas MCP y adaptadores de archivos/escritorio/jobs | Visibilidad, aprobacion, revocacion y auditoria |
-| Jobs firmados con capacidades claras | Politica local del host y limites de seguridad |
-| Artifacts y evidence bundles | Control sobre que se ejecuta y cuando se detiene |
+| Skills, herramientas MCP y adaptadores de archivos/escritorio/tasks | Visibilidad, aprobacion, revocacion y auditoria |
+| Tasks firmados con capacidades claras | Politica local del host y limites de seguridad |
+| Artifacts y session evidence | Control sobre que se ejecuta y cuando se detiene |
 
 ## Instalar con un agente
 

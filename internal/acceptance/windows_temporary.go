@@ -32,9 +32,6 @@ type WindowsTemporaryOptions struct {
 	VerifierExpectedSHA256         string
 	TrustPin                       string
 	HostName                       string
-	// ApprovalTimeoutSeconds is passed to rdev-host's --approval-timeout flag.
-	// Zero means use the bootstrap script default (300s).
-	ApprovalTimeoutSeconds int
 	// MaxRetries is the number of re-registration attempts after an unexpected
 	// host exit.  Zero means use the bootstrap script default (5).
 	MaxRetries int
@@ -68,7 +65,7 @@ type WindowsTemporaryPlan struct {
 	Checks                         []Check                    `json:"checks"`
 	Commands                       []WindowsAcceptanceCommand `json:"commands"`
 	NoPersistenceChecks            []WindowsAcceptanceCommand `json:"no_persistence_checks"`
-	ApprovalProbes                 []WindowsApprovalProbe     `json:"approval_probes"`
+	DenialProbes                   []WindowsDenialProbe       `json:"denial_probes"`
 	RecommendedActions             []string                   `json:"recommended_actions"`
 	RequiredEvidence               []string                   `json:"required_evidence"`
 }
@@ -81,7 +78,7 @@ type WindowsAcceptanceCommand struct {
 	Manual  bool     `json:"manual"`
 }
 
-type WindowsApprovalProbe struct {
+type WindowsDenialProbe struct {
 	Operation        string `json:"operation"`
 	ExpectedArtifact string `json:"expected_artifact"`
 	Purpose          string `json:"purpose"`
@@ -135,19 +132,19 @@ func RunWindowsTemporaryPlan(opts WindowsTemporaryOptions) (WindowsTemporaryPlan
 		HostExpectedSHA256:             resolved.ExpectedSHA256,
 		Commands:                       windowsTemporaryCommands(resolved),
 		NoPersistenceChecks:            windowsNoPersistenceChecks(),
-		ApprovalProbes:                 windowsApprovalProbes(),
+		DenialProbes:                   windowsDenialProbes(),
 		RecommendedActions: []string{
 			"Review the generated PowerShell launcher and bootstrap script before using them on a Windows host.",
 			"Run the launcher in a clean Windows 10/11 VM or target support host as a visible foreground session.",
-			"Approve only scoped temporary capabilities from the gateway host registry.",
-			"Run bounded diagnostic and repair jobs, then collect evidence and audit exports.",
+			"Accept only the scoped temporary endpoint expected by this session.",
+			"Run bounded diagnostic and repair tasks, then collect evidence and audit exports.",
 			"Revoke the temporary host and run every no-persistence check before publishing the transcript.",
 		},
 		RequiredEvidence: []string{
 			"PowerShell transcript for bootstrap and foreground host startup.",
 			"SHA-256 verification output for the bootstrap script, verifier, and rdev-host binary.",
 			"Signed release manifest or release bundle verification output from rdev-verify.",
-			"Host registration, host approval, job, approval-required, revoke, and cancellation audit events.",
+			"Session join, endpoint trust, task, host-denial probe, revoke, and cancellation audit events.",
 			"No-persistence inspection output for services, scheduled tasks, Run keys, startup folders, and firewall rules.",
 		},
 	}
@@ -178,7 +175,6 @@ type windowsTemporaryResolvedOptions struct {
 	VerifierExpectedSHA256         string
 	TrustPin                       string
 	HostName                       string
-	ApprovalTimeoutSeconds         int
 	MaxRetries                     int
 }
 
@@ -227,7 +223,6 @@ func resolveWindowsTemporaryOptions(outDir string, opts WindowsTemporaryOptions)
 		VerifierExpectedSHA256:         strings.ToLower(strings.TrimSpace(opts.VerifierExpectedSHA256)),
 		TrustPin:                       strings.TrimSpace(opts.TrustPin),
 		HostName:                       strings.TrimSpace(opts.HostName),
-		ApprovalTimeoutSeconds:         opts.ApprovalTimeoutSeconds,
 		MaxRetries:                     opts.MaxRetries,
 	}, nil
 }
@@ -248,7 +243,7 @@ func windowsTemporaryChecks(plan WindowsTemporaryPlan, opts windowsTemporaryReso
 		{Name: "verifier_download_url", Passed: opts.VerifierDownloadURL != "", Detail: opts.VerifierDownloadURL},
 		{Name: "verifier_sha256", Passed: isHexSHA256(opts.VerifierExpectedSHA256), Detail: opts.VerifierExpectedSHA256},
 		{Name: "no_persistence_checks_present", Passed: len(plan.NoPersistenceChecks) >= 5},
-		{Name: "approval_probes_present", Passed: len(plan.ApprovalProbes) >= 4},
+		{Name: "denial_probes_present", Passed: len(plan.DenialProbes) >= 4},
 	}
 }
 
@@ -325,13 +320,13 @@ func windowsNoPersistenceChecks() []WindowsAcceptanceCommand {
 	}
 }
 
-func windowsApprovalProbes() []WindowsApprovalProbe {
-	return []WindowsApprovalProbe{
-		{Operation: "package.install", ExpectedArtifact: "rdev.approval-required.v1", Purpose: "Package installation pauses before side effects."},
-		{Operation: "elevation.request", ExpectedArtifact: "rdev.approval-required.v1", Purpose: "Privilege elevation pauses before side effects."},
-		{Operation: "service.manage", ExpectedArtifact: "rdev.approval-required.v1", Purpose: "Service mutation is not allowed in temporary mode without approval."},
-		{Operation: "gui.control", ExpectedArtifact: "rdev.approval-required.v1", Purpose: "GUI control requires explicit approval and local visibility."},
-		{Operation: "credential.change", ExpectedArtifact: "rdev.approval-required.v1", Purpose: "Credential access or mutation requires approval."},
+func windowsDenialProbes() []WindowsDenialProbe {
+	return []WindowsDenialProbe{
+		{Operation: "package.install", ExpectedArtifact: "rdev.host-denial.v1", Purpose: "Package installation is denied before side effects in temporary mode."},
+		{Operation: "elevation.request", ExpectedArtifact: "rdev.host-denial.v1", Purpose: "Privilege elevation is denied before side effects in temporary mode."},
+		{Operation: "service.manage", ExpectedArtifact: "rdev.host-denial.v1", Purpose: "Service mutation is denied before side effects in temporary mode."},
+		{Operation: "gui.control", ExpectedArtifact: "rdev.host-denial.v1", Purpose: "GUI control is denied unless a visible session capability explicitly allows it."},
+		{Operation: "credential.change", ExpectedArtifact: "rdev.host-denial.v1", Purpose: "Credential access or mutation is denied before side effects in temporary mode."},
 	}
 }
 
@@ -372,9 +367,6 @@ func windowsTemporaryLauncher(opts windowsTemporaryResolvedOptions) string {
 	appendPowerShellArg(&builder, "VerifierExpectedSha256", opts.VerifierExpectedSHA256)
 	appendPowerShellArg(&builder, "TrustPin", opts.TrustPin)
 	appendPowerShellArg(&builder, "HostName", opts.HostName)
-	if opts.ApprovalTimeoutSeconds > 0 {
-		appendPowerShellIntArg(&builder, "ApprovalTimeoutSeconds", opts.ApprovalTimeoutSeconds)
-	}
 	if opts.MaxRetries > 0 {
 		appendPowerShellIntArg(&builder, "MaxRetries", opts.MaxRetries)
 	}

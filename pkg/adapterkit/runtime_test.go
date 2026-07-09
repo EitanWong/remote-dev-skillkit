@@ -13,7 +13,7 @@ func TestRunLifecycleProducesVerifiableRuntimeFixture(t *testing.T) {
 	adapter := lifecycleTestAdapter(&calls, nil)
 	fixture, err := RunLifecycle(context.Background(), adapter, RuntimeRequest{
 		Adapter:       "fake",
-		JobID:         "job_123",
+		TaskID:        "task_123",
 		WorkspaceRoot: "/tmp/repo",
 		Intent:        "exercise runtime sdk",
 	})

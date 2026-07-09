@@ -9,24 +9,58 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
-func TestMemoryGatewaySnapshotRoundTripPreservesSignedState(t *testing.T) {
+func TestMemoryGatewaySnapshotRoundTripPreservesSignedHostState(t *testing.T) {
 	publicKey, privateKey := gatewaySnapshotKeyPair(t)
 	now := time.Date(2026, 6, 30, 18, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
 	host := activeHost(t, gw)
-	job, err := gw.CreateJob(host.ID, "shell", "demo", map[string]any{
-		"workspace_root": ".",
-		"capabilities":   []string{"shell.user"},
-		"argv":           []string{"go", "env", "GOOS"},
-		"allow_commands": []string{"go"},
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Profile:      "attended",
+		Reason:       "snapshot session",
+		Capabilities: []string{"shell.user"},
+		JoinPolicy:   "open",
+		ExpiresAt:    now.Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := gw.CompleteJobForHost(host.ID, job.ID, `{"schema_version":"rdev.shell-result.v1"}`); err != nil {
+	_, endpoint, _, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "snapshot-target",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-snapshot",
+		Capabilities:        []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(session.ID, controlplane.TaskSpec{
+		Adapter:          "shell",
+		Intent:           "demo",
+		TargetEndpointID: endpoint.ID,
+		Capabilities:     []string{"shell.user"},
+		Payload: map[string]any{
+			"workspace_root": ".",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.UpsertSessionArtifact(session.ID, controlplane.ArtifactRef{
+		ID:           "artifact-1",
+		TaskID:       task.ID,
+		Kind:         "result",
+		Name:         "result.json",
+		SizeBytes:    42,
+		SHA256:       "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+		ContentType:  "application/json",
+		UploadOffset: 42,
+		Complete:     true,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,27 +85,25 @@ func TestMemoryGatewaySnapshotRoundTripPreservesSignedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Tickets) != 1 || len(loaded.Hosts) != 1 || len(loaded.Jobs) != 1 {
+	if len(loaded.Tickets) != 1 || len(loaded.Hosts) != 1 {
 		t.Fatalf("unexpected loaded snapshot counts: %#v", loaded)
 	}
-	loadedJob, err := loadedGateway.Job(job.ID)
+	loadedHost, err := loadedGateway.Host(host.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedJob.Status != model.JobStatusSucceeded {
-		t.Fatalf("expected succeeded job, got %s", loadedJob.Status)
+	if loadedHost.Status != model.HostStatusActive {
+		t.Fatalf("expected active host, got %s", loadedHost.Status)
 	}
-	if loadedJob.Envelope == nil {
-		t.Fatal("expected loaded job envelope")
+	loadedSession, err := loadedGateway.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := loadedJob.Envelope.VerifyForHost(publicKey, host.ID, now); err != nil {
-		t.Fatalf("expected loaded envelope to verify: %v", err)
+	if len(loadedSession.Tasks) != 1 || loadedSession.Tasks[0].ID != task.ID {
+		t.Fatalf("expected restored session task %s, got %#v", task.ID, loadedSession.Tasks)
 	}
-	if artifacts := loadedGateway.Artifacts(job.ID); len(artifacts) != 1 {
-		t.Fatalf("expected one artifact after load, got %d", len(artifacts))
-	}
-	if events := loadedGateway.AuditEvents(); len(events) == 0 || events[len(events)-1].Action != "job.complete" {
-		t.Fatalf("expected persisted job.complete audit event, got %#v", events)
+	if len(loadedSession.Artifacts) != 1 || loadedSession.Artifacts[0].ID != "artifact-1" {
+		t.Fatalf("expected restored session artifact, got %#v", loadedSession.Artifacts)
 	}
 }
 

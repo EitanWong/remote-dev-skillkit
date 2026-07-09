@@ -12,7 +12,7 @@ const PolicyPlanSchemaVersion = "rdev.adapter-policy-plan.v1"
 
 // PolicyPlan is the structured output of the plan phase for a third-party
 // adapter. It declares what external effects the adapter will have, which
-// approvals are required before the prepare/run phases can proceed, and what
+// authorizations are required before the prepare/run phases can proceed, and what
 // workspace boundaries constrain the run.
 //
 // Operators and agents review the PolicyPlan before approving execution. The
@@ -21,16 +21,16 @@ const PolicyPlanSchemaVersion = "rdev.adapter-policy-plan.v1"
 type PolicyPlan struct {
 	SchemaVersion string `json:"schema_version"`
 	Adapter       string `json:"adapter"`
-	JobID         string `json:"job_id,omitempty"`
+	TaskID        string `json:"task_id,omitempty"`
 	// ExternalConsequences lists every external side effect this adapter may
 	// cause outside the workspace (network calls, file writes outside scope,
 	// service restarts, etc.). An empty list is valid only if the adapter is
 	// genuinely read-only within the workspace.
 	ExternalConsequences []string `json:"external_consequences"`
-	// RequiredApprovals lists the operator actions that must be pre-approved
+	// RequiredAuthorizations lists the operator actions that must be pre-authorized
 	// before execution. Each entry is a human-readable sentence. Any entry
-	// triggers an approval gate before the prepare phase begins.
-	RequiredApprovals []string `json:"required_approvals"`
+	// triggers an session interrupt or operator review step before the prepare phase begins.
+	RequiredAuthorizations []string `json:"required_authorizations"`
 	// WorkspaceBoundaries lists the paths (or globs) the adapter may write to.
 	// An empty list means the adapter declares no write scope; the host kernel
 	// will enforce the default workspace root boundary.
@@ -49,7 +49,7 @@ type PolicyPlan struct {
 // NewPolicyPlan builds a PolicyPlan for the given adapter and request. Callers
 // provide the plan contents directly; use this constructor to ensure the schema
 // version and timestamp are always set correctly.
-func NewPolicyPlan(adapter, jobID string, externalConsequences, requiredApprovals, workspaceBoundaries, sideEffects []string, estimatedDurationSeconds int, now time.Time) (PolicyPlan, error) {
+func NewPolicyPlan(adapter, taskID string, externalConsequences, requiredAuthorizations, workspaceBoundaries, sideEffects []string, estimatedDurationSeconds int, now time.Time) (PolicyPlan, error) {
 	adapter = strings.TrimSpace(adapter)
 	if adapter == "" {
 		return PolicyPlan{}, fmt.Errorf("policy plan adapter is required")
@@ -57,9 +57,9 @@ func NewPolicyPlan(adapter, jobID string, externalConsequences, requiredApproval
 	return PolicyPlan{
 		SchemaVersion:            PolicyPlanSchemaVersion,
 		Adapter:                  adapter,
-		JobID:                    strings.TrimSpace(jobID),
+		TaskID:                   strings.TrimSpace(taskID),
 		ExternalConsequences:     cloneStringSlice(externalConsequences),
-		RequiredApprovals:        cloneStringSlice(requiredApprovals),
+		RequiredAuthorizations:   cloneStringSlice(requiredAuthorizations),
 		WorkspaceBoundaries:      cloneStringSlice(workspaceBoundaries),
 		DeclaredSideEffects:      cloneStringSlice(sideEffects),
 		EstimatedDurationSeconds: estimatedDurationSeconds,
@@ -71,7 +71,7 @@ func NewPolicyPlan(adapter, jobID string, externalConsequences, requiredApproval
 type PolicyPlanContract struct {
 	Adapter                     string
 	RequireExternalConsequences bool // plan must declare at least one external consequence
-	RequireApprovals            bool // plan must list at least one required approval
+	RequireAuthorizations       bool // plan must list at least one required authorization
 	RequireWorkspaceBoundaries  bool // plan must list at least one boundary
 }
 
@@ -109,9 +109,9 @@ func VerifyPolicyPlanJSON(content []byte, contract PolicyPlanContract) PolicyPla
 	add("external_consequences_declared", len(consequences) > 0 || !contract.RequireExternalConsequences,
 		fmt.Sprintf("%d declared", len(consequences)))
 
-	approvals := stringArrayField(plan, "required_approvals")
-	add("required_approvals_declared", len(approvals) > 0 || !contract.RequireApprovals,
-		fmt.Sprintf("%d declared", len(approvals)))
+	authorizations := stringArrayField(plan, "required_authorizations")
+	add("required_authorizations_declared", len(authorizations) > 0 || !contract.RequireAuthorizations,
+		fmt.Sprintf("%d declared", len(authorizations)))
 
 	boundaries := stringArrayField(plan, "workspace_boundaries")
 	add("workspace_boundaries_declared", len(boundaries) > 0 || !contract.RequireWorkspaceBoundaries,

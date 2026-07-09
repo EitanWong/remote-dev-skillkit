@@ -144,14 +144,14 @@ func TestAcceptanceEvidencePlanHasRequiredFiles(t *testing.T) {
 	}
 }
 
-func TestPackageHasApprovalBoundaries(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "approvals")
+func TestPackageHasAuthorizationBoundaries(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "authorizations")
 	pkg, err := Build(Options{OutDir: out, GeneratedAt: testNow})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pkg.ApprovalRequired) < 4 {
-		t.Fatalf("expected at least 4 approval entries, got %d", len(pkg.ApprovalRequired))
+	if len(pkg.AuthorizationRequired) < 4 {
+		t.Fatalf("expected at least 4 authorization entries, got %d", len(pkg.AuthorizationRequired))
 	}
 }
 

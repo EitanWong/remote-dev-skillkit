@@ -99,7 +99,7 @@ func NewJoinManifest(ticket Ticket, spec JoinManifestSpec, now time.Time) (JoinM
 		TrustFingerprint:  fingerprint,
 		Bootstrap:         spec.Bootstrap,
 		PackageCatalog:    spec.PackageCatalog,
-		SigningAlg:        JobEnvelopeSigningAlg,
+		SigningAlg:        SigningAlgEd25519,
 		SigningKeyID:      spec.SigningKeyID,
 	}, nil
 }
@@ -164,7 +164,7 @@ func (m JoinManifest) validateForSigning() error {
 	if !m.Mode.Valid() {
 		return fmt.Errorf("%w: invalid host mode", ErrJoinManifestInvalid)
 	}
-	if m.SigningAlg != JobEnvelopeSigningAlg || m.SigningKeyID == "" {
+	if m.SigningAlg != SigningAlgEd25519 || m.SigningKeyID == "" {
 		return fmt.Errorf("%w: unsupported signing metadata", ErrJoinManifestInvalid)
 	}
 	if m.PackageCatalog.SchemaVersion != "" && m.PackageCatalog.SchemaVersion != ConnectionEntryPackageCatalogSchemaVersion {

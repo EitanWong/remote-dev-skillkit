@@ -44,19 +44,19 @@ type Package struct {
 }
 
 type RuntimeEvidencePlan struct {
-	SchemaVersion     string             `json:"schema_version"`
-	GeneratedAt       time.Time          `json:"generated_at"`
-	StorageProvider   string             `json:"storage_provider"`
-	AuthProvider      string             `json:"auth_provider"`
-	PackagePath       string             `json:"package_path"`
-	ExternalMutation  bool               `json:"external_mutation"`
-	EvidenceFiles     []EvidencePlanFile `json:"evidence_files"`
-	PackageCommand    []string           `json:"package_command"`
-	VerifyCommand     []string           `json:"verify_command"`
-	PreflightCommands []string           `json:"preflight_commands"`
-	AgentRules        []string           `json:"agent_rules"`
-	ApprovalRequired  []string           `json:"approval_required"`
-	UnsupportedClaims []string           `json:"unsupported_claims"`
+	SchemaVersion         string             `json:"schema_version"`
+	GeneratedAt           time.Time          `json:"generated_at"`
+	StorageProvider       string             `json:"storage_provider"`
+	AuthProvider          string             `json:"auth_provider"`
+	PackagePath           string             `json:"package_path"`
+	ExternalMutation      bool               `json:"external_mutation"`
+	EvidenceFiles         []EvidencePlanFile `json:"evidence_files"`
+	PackageCommand        []string           `json:"package_command"`
+	VerifyCommand         []string           `json:"verify_command"`
+	PreflightCommands     []string           `json:"preflight_commands"`
+	AgentRules            []string           `json:"agent_rules"`
+	AuthorizationRequired []string           `json:"authorization_required"`
+	UnsupportedClaims     []string           `json:"unsupported_claims"`
 }
 
 type EvidencePlanFile struct {
@@ -80,14 +80,14 @@ type Provider struct {
 }
 
 type RuntimeContract struct {
-	SchemaVersion            string                       `json:"schema_version"`
-	StorageProvider          string                       `json:"storage_provider"`
-	AuthProvider             string                       `json:"auth_provider"`
-	RuntimeStatus            string                       `json:"runtime_status"`
-	GatewayLauncher          []string                     `json:"gateway_launcher"`
-	RequiredEvidence         []RuntimeEvidenceRequirement `json:"required_evidence"`
-	OperatorApprovalRequired []string                     `json:"operator_approval_required"`
-	UnsupportedClaims        []string                     `json:"unsupported_claims"`
+	SchemaVersion                 string                       `json:"schema_version"`
+	StorageProvider               string                       `json:"storage_provider"`
+	AuthProvider                  string                       `json:"auth_provider"`
+	RuntimeStatus                 string                       `json:"runtime_status"`
+	GatewayLauncher               []string                     `json:"gateway_launcher"`
+	RequiredEvidence              []RuntimeEvidenceRequirement `json:"required_evidence"`
+	OperatorAuthorizationRequired []string                     `json:"operator_authorization_required"`
+	UnsupportedClaims             []string                     `json:"unsupported_claims"`
 }
 
 type RuntimeEvidenceRequirement struct {
@@ -210,7 +210,7 @@ func Build(opts Options) (Package, error) {
 			"Scaffold runtime evidence with rdev acceptance scaffold-evidence --hosted-provider-package <provider-package-dir> before collecting real hosted-provider evidence.",
 			"Do not place secrets, private endpoints, organization IDs, or local machine paths in this package.",
 			"Ask the operator for one missing value at a time when provider credentials or deployment URLs are unclear.",
-			"Treat external database, object storage, identity provider, DNS, cloud, and paid resource changes as approval-required.",
+			"Treat external database, object storage, identity provider, DNS, cloud, and paid resource changes as host-denial.",
 		},
 	}
 	pkg.Checks = packageChecks(pkg)
@@ -541,8 +541,8 @@ func runtimeEvidencePlan(pkg Package, generatedAt time.Time) RuntimeEvidencePlan
 			"Redact secrets, private endpoints, usernames, tenant IDs, local paths, and hostnames before sharing evidence outside the operator account.",
 			"If a runtime value is unclear, ask one short question instead of guessing.",
 		},
-		ApprovalRequired:  append([]string(nil), pkg.Runtime.OperatorApprovalRequired...),
-		UnsupportedClaims: append([]string(nil), pkg.Runtime.UnsupportedClaims...),
+		AuthorizationRequired: append([]string(nil), pkg.Runtime.OperatorAuthorizationRequired...),
+		UnsupportedClaims:     append([]string(nil), pkg.Runtime.UnsupportedClaims...),
 	}
 }
 
@@ -643,7 +643,7 @@ func runtimeContract(storageProvider, authProvider string) RuntimeContract {
 			{Name: "failure-mode-evidence", Kind: "json", Required: true, Description: "Failure-mode probes with failure_mode_tested=true plus a negative result such as rejected=true, denied=true, unavailable=true, accepted=false, or authorized=false."},
 			{Name: "audit", Kind: "transcript", Required: true, Description: "Redacted audit transcript covering startup, storage/auth probes, role probes, failure probes, and cleanup."},
 		},
-		OperatorApprovalRequired: []string{
+		OperatorAuthorizationRequired: []string{
 			"Creating or mutating external databases, buckets, streams, identity applications, DNS, certificates, cloud accounts, or paid resources.",
 			"Adding real endpoints, tenant identifiers, credentials, keys, certificates, IdP metadata, or organization-specific values to runtime config.",
 			"Changing backup, restore, retention, lifecycle, role-mapping, or break-glass policy.",
@@ -651,7 +651,7 @@ func runtimeContract(storageProvider, authProvider string) RuntimeContract {
 		UnsupportedClaims: []string{
 			"This package alone does not prove a deployed hosted gateway.",
 			"This package does not include credentials, private endpoints, tenant IDs, cloud resources, or a running database/object store/identity provider.",
-			"Production claims require a passing rdev.acceptance-package.hosted-provider-runtime.v1 evidence bundle from a real deployment.",
+			"Production claims require a passing rdev.acceptance-package.hosted-provider-runtime.v1 session evidence from a real deployment.",
 		},
 	}
 }
@@ -660,7 +660,7 @@ func storageEnvironment(provider string) []EnvVar {
 	switch provider {
 	case "postgres":
 		return []EnvVar{
-			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "libpq connection info or service name for the built-in Postgres gateway state store. Do not include inline passwords; use PGSERVICE, .pgpass, or an operator-approved secret injector.", Secret: false},
+			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "libpq connection info or service name for the built-in Postgres gateway state store. Do not include inline passwords; use PGSERVICE, .pgpass, or an operator-authorized secret injector.", Secret: false},
 			{Name: "RDEV_POSTGRES_DSN_SECRET_REF", Required: true, Description: "Secret-manager reference for the PostgreSQL connection info used to populate RDEV_GATEWAY_STORAGE_PATH at runtime.", Secret: true},
 			{Name: "RDEV_POSTGRES_TLS_MODE", Required: true, Description: "Reviewed PostgreSQL TLS mode, for example require or verify-full.", Secret: false},
 			{Name: "RDEV_POSTGRES_MIGRATIONS_REF", Required: true, Description: "Reviewed migration bundle or schema bootstrap reference.", Secret: false},
@@ -668,7 +668,7 @@ func storageEnvironment(provider string) []EnvVar {
 		}
 	case "s3-compatible":
 		return []EnvVar{
-			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "s3://bucket/prefix for the built-in S3-compatible gateway state store. Do not include endpoint query strings, credentials, or fragments; use AWS_PROFILE, AWS_* environment, endpoint config, or an operator-approved secret injector.", Secret: false},
+			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "s3://bucket/prefix for the built-in S3-compatible gateway state store. Do not include endpoint query strings, credentials, or fragments; use AWS_PROFILE, AWS_* environment, endpoint config, or an operator-authorized secret injector.", Secret: false},
 			{Name: "RDEV_S3_ENDPOINT_SECRET_REF", Required: true, Description: "Secret-manager reference for the S3-compatible endpoint.", Secret: true},
 			{Name: "RDEV_S3_BUCKET_SECRET_REF", Required: true, Description: "Secret-manager reference for bucket and access policy configuration.", Secret: true},
 			{Name: "RDEV_S3_REGION", Required: true, Description: "Reviewed region or placement label.", Secret: false},
@@ -677,7 +677,7 @@ func storageEnvironment(provider string) []EnvVar {
 		}
 	case "redis-stream":
 		return []EnvVar{
-			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "Redis URL for the built-in redis-stream gateway state store. Do not include inline credentials; use REDISCLI_AUTH or an operator-approved secret injector.", Secret: false},
+			{Name: "RDEV_GATEWAY_STORAGE_PATH", Required: true, Description: "Redis URL for the built-in redis-stream gateway state store. Do not include inline credentials; use REDISCLI_AUTH or an operator-authorized secret injector.", Secret: false},
 			{Name: "RDEV_REDIS_URL_SECRET_REF", Required: true, Description: "Secret-manager reference for the Redis URL.", Secret: true},
 			{Name: "RDEV_REDIS_STREAM_PREFIX", Required: true, Description: "Reviewed stream key prefix for gateway state and audit events.", Secret: false},
 			{Name: "RDEV_REDIS_TLS_MODE", Required: true, Description: "Reviewed Redis TLS mode.", Secret: false},
@@ -686,7 +686,7 @@ func storageEnvironment(provider string) []EnvVar {
 	default:
 		return []EnvVar{
 			{Name: "RDEV_HOSTED_STORAGE_CONFIG", Required: true, Description: "Path to the reviewed external hosted storage provider configuration.", Secret: false},
-			{Name: "RDEV_HOSTED_STORAGE_SECRET_REF", Required: true, Description: "Reference to provider credentials in an operator-approved secret manager.", Secret: true},
+			{Name: "RDEV_HOSTED_STORAGE_SECRET_REF", Required: true, Description: "Reference to provider credentials in an operator-authorized secret manager.", Secret: true},
 		}
 	}
 }
@@ -786,7 +786,7 @@ Runtime contract:
 %s
 
 External database, identity-provider, cloud, DNS, paid-resource, and retention
-policy changes require operator approval before deployment.
+policy changes require operator authorization before deployment.
 `, PackageSchemaVersion, pkg.Name, pkg.Storage.Kind, pkg.Auth.Kind, pkg.Storage.VerifyCommand, pkg.Auth.VerifyCommand, strings.Join(pkg.GatewayArgs, " "), pkg.Runtime.SchemaVersion)
 }
 
@@ -820,7 +820,7 @@ func renderRuntimeReadme(pkg Package) string {
 		}
 		builder.WriteString("\n")
 	}
-	builder.WriteString("\nOperator approval is required before external database, object storage, identity, DNS, certificate, paid-resource, backup, restore, retention, or role-mapping changes.\n")
+	builder.WriteString("\nOperator authorization is required before external database, object storage, identity, DNS, certificate, paid-resource, backup, restore, retention, or role-mapping changes.\n")
 	builder.WriteString("Do not publish production hosted claims until the runtime evidence is packaged with `rdev acceptance package-hosted-provider-runtime` and verified.\n")
 	return builder.String()
 }

@@ -29,22 +29,22 @@ type Options struct {
 
 // Package is the machine-readable manifest for a Coder workspace adapter.
 // It describes how agents should use the coder CLI to start/stop workspaces,
-// what approvals are required, and what evidence must be collected.
+// what authorizations are required, and what evidence must be collected.
 type Package struct {
-	SchemaVersion    string        `json:"schema_version"`
-	Name             string        `json:"name"`
-	GeneratedAt      time.Time     `json:"generated_at"`
-	AdapterKind      string        `json:"adapter_kind"`
-	ExternalMutation bool          `json:"external_mutation"`
-	ProductionClaim  string        `json:"production_claim"`
-	Helper           Helper        `json:"helper"`
-	ConnectionPathID string        `json:"connection_path_id"`
-	EvidencePlanPath string        `json:"evidence_plan_path"`
-	EvidenceRequired []string      `json:"evidence_required"`
-	ApprovalRequired []string      `json:"approval_required"`
-	AgentRules       []string      `json:"agent_rules"`
-	Files            []PackageFile `json:"files"`
-	Checks           []Check       `json:"checks"`
+	SchemaVersion         string        `json:"schema_version"`
+	Name                  string        `json:"name"`
+	GeneratedAt           time.Time     `json:"generated_at"`
+	AdapterKind           string        `json:"adapter_kind"`
+	ExternalMutation      bool          `json:"external_mutation"`
+	ProductionClaim       string        `json:"production_claim"`
+	Helper                Helper        `json:"helper"`
+	ConnectionPathID      string        `json:"connection_path_id"`
+	EvidencePlanPath      string        `json:"evidence_plan_path"`
+	EvidenceRequired      []string      `json:"evidence_required"`
+	AuthorizationRequired []string      `json:"authorization_required"`
+	AgentRules            []string      `json:"agent_rules"`
+	Files                 []PackageFile `json:"files"`
+	Checks                []Check       `json:"checks"`
 }
 
 // Helper describes the Coder CLI binary.
@@ -97,15 +97,15 @@ type FileCheck struct {
 
 // AcceptanceEvidencePlan describes evidence collection for the Coder adapter.
 type AcceptanceEvidencePlan struct {
-	SchemaVersion    string             `json:"schema_version"`
-	GeneratedAt      time.Time          `json:"generated_at"`
-	AdapterKind      string             `json:"adapter_kind"`
-	ConnectionPathID string             `json:"connection_path_id"`
-	PackagePath      string             `json:"package_path"`
-	ExternalMutation bool               `json:"external_mutation"`
-	EvidenceFiles    []EvidencePlanFile `json:"evidence_files"`
-	AgentRules       []string           `json:"agent_rules"`
-	ApprovalRequired []string           `json:"approval_required"`
+	SchemaVersion         string             `json:"schema_version"`
+	GeneratedAt           time.Time          `json:"generated_at"`
+	AdapterKind           string             `json:"adapter_kind"`
+	ConnectionPathID      string             `json:"connection_path_id"`
+	PackagePath           string             `json:"package_path"`
+	ExternalMutation      bool               `json:"external_mutation"`
+	EvidenceFiles         []EvidencePlanFile `json:"evidence_files"`
+	AgentRules            []string           `json:"agent_rules"`
+	AuthorizationRequired []string           `json:"authorization_required"`
 }
 
 // EvidencePlanFile describes a single expected evidence file.
@@ -191,7 +191,7 @@ func Build(opts Options) (Package, error) {
 			"host registration evidence from rdev host serve",
 			"workspace stop or cleanup evidence",
 		},
-		ApprovalRequired: []string{
+		AuthorizationRequired: []string{
 			"creating or modifying Coder workspaces, templates, or organizations",
 			"using paid Coder cloud or self-hosted Coder deployment resources",
 			"opening ports or SSH tunnels from the Coder workspace to internal networks",
@@ -202,7 +202,7 @@ func Build(opts Options) (Package, error) {
 			"Scaffold evidence before collecting real Coder workspace evidence.",
 			"Ask one short question when the Coder URL, token, template, or workspace name is unclear.",
 			"Keep real Coder URLs, tokens, and organisation identifiers outside this package.",
-			"Confirm workspace stop evidence before marking the job complete.",
+			"Confirm workspace stop evidence before marking the task complete.",
 		},
 	}
 	pkg.Checks = packageChecks(pkg)
@@ -279,7 +279,7 @@ func Verify(path string) (Verification, error) {
 	add("schema_version", pkg.SchemaVersion == PackageSchemaVersion, pkg.SchemaVersion)
 	add("adapter_kind", pkg.AdapterKind == AdapterKind, pkg.AdapterKind)
 	add("production_claim_scoped", pkg.ProductionClaim == "coder-workspace-adapter-package-surface-only", pkg.ProductionClaim)
-	add("approval_boundaries_declared", len(pkg.ApprovalRequired) >= 3, fmt.Sprintf("%d", len(pkg.ApprovalRequired)))
+	add("authorization_boundaries_declared", len(pkg.AuthorizationRequired) >= 3, fmt.Sprintf("%d", len(pkg.AuthorizationRequired)))
 	add("evidence_required_declared", len(pkg.EvidenceRequired) >= 4, fmt.Sprintf("%d", len(pkg.EvidenceRequired)))
 	add("agent_rules_present", len(pkg.AgentRules) >= 4, fmt.Sprintf("%d", len(pkg.AgentRules)))
 	add("acceptance_evidence_plan_declared", pkg.EvidencePlanPath == "acceptance-evidence-plan.json", pkg.EvidencePlanPath)
@@ -298,7 +298,7 @@ func packageChecks(pkg Package) []Check {
 		{Name: "schema_version", Passed: pkg.SchemaVersion == PackageSchemaVersion, Detail: pkg.SchemaVersion},
 		{Name: "adapter_kind", Passed: pkg.AdapterKind == AdapterKind, Detail: pkg.AdapterKind},
 		{Name: "production_claim_scoped", Passed: pkg.ProductionClaim == "coder-workspace-adapter-package-surface-only", Detail: pkg.ProductionClaim},
-		{Name: "approval_boundaries_declared", Passed: len(pkg.ApprovalRequired) >= 3, Detail: fmt.Sprintf("%d", len(pkg.ApprovalRequired))},
+		{Name: "authorization_boundaries_declared", Passed: len(pkg.AuthorizationRequired) >= 3, Detail: fmt.Sprintf("%d", len(pkg.AuthorizationRequired))},
 		{Name: "evidence_required_declared", Passed: len(pkg.EvidenceRequired) >= 4, Detail: fmt.Sprintf("%d", len(pkg.EvidenceRequired))},
 		{Name: "agent_rules_present", Passed: len(pkg.AgentRules) >= 4, Detail: fmt.Sprintf("%d", len(pkg.AgentRules))},
 		{Name: "acceptance_evidence_plan_declared", Passed: pkg.EvidencePlanPath == "acceptance-evidence-plan.json", Detail: pkg.EvidencePlanPath},
@@ -323,10 +323,10 @@ func acceptanceEvidencePlan(pkg Package, generatedAt time.Time) AcceptanceEviden
 		AgentRules: []string{
 			"Use RDEV_CODER_URL and RDEV_CODER_TOKEN from the runner environment; do not hardcode.",
 			"Scaffold evidence before collecting real workspace evidence.",
-			"Confirm workspace stop evidence before marking the job complete.",
+			"Confirm workspace stop evidence before marking the task complete.",
 			"If Coder URL, token, template, or organisation is unclear, ask one short question.",
 		},
-		ApprovalRequired: append([]string(nil), pkg.ApprovalRequired...),
+		AuthorizationRequired: append([]string(nil), pkg.AuthorizationRequired...),
 	}
 }
 
@@ -351,7 +351,7 @@ Runner environment:
 - RDEV_CODER_WORKSPACE: the workspace name to start.
 
 Workspace creation, template modifications, and organisation changes require
-explicit operator approval.
+explicit operator authorization.
 `, PackageSchemaVersion, pkg.Name, pkg.AdapterKind, pkg.Helper.VerifyCommand)
 }
 

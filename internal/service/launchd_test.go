@@ -18,8 +18,6 @@ func TestNewMacOSLaunchAgentBuildsManagedHostArguments(t *testing.T) {
 		TicketCode:               "ABCD-1234",
 		IdentityStorePath:        "/Users/example/.rdev/host/identity.json",
 		TrustStorePath:           "/Users/example/.rdev/host/trust.json",
-		NonceStorePath:           "/Users/example/.rdev/host/nonces.json",
-		ApprovalStorePath:        "/Users/example/.rdev/host/approvals.json",
 		WorkspaceLockStorePath:   "/Users/example/.rdev/host/workspace-locks",
 		ReleaseBundlePath:        "/opt/rdev/release-bundle.json",
 		ReleaseRootPublicKey:     "release-root:abc123",

@@ -78,7 +78,7 @@ func VerifyManagedMacServicePlan(planPath string) (ManagedMacServicePlanVerifica
 	add("release_root_arg", strings.Contains(args, "--release-root-public-key\x00"), "")
 	add("release_required_artifacts_arg", strings.Contains(args, "--release-require-artifacts\x00"), "")
 	add("workspace_lock_store_arg", strings.Contains(args, "--workspace-lock-store\x00"), "")
-	add("identity_trust_nonce_approval_stores", strings.Contains(args, "--identity-store\x00") && strings.Contains(args, "--trust-store\x00") && strings.Contains(args, "--nonce-store\x00") && strings.Contains(args, "--approval-store\x00"), "")
+	add("identity_trust_stores", strings.Contains(args, "--identity-store\x00") && strings.Contains(args, "--trust-store\x00"), "")
 	add("review_plist_command_present", serviceCommandContains(plan.Commands, "plutil", "-lint"), "")
 	add("service_start_command_present", serviceCommandContains(plan.Commands, "service-control", "--platform", "macos", "--action", "start", "--execute"), "")
 	add("service_inspect_command_present", serviceCommandContains(plan.Commands, "service-control", "--platform", "macos", "--action", "inspect", "--execute"), "")

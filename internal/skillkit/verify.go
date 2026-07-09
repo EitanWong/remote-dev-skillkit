@@ -196,7 +196,7 @@ func verifySkills(manifest Manifest) string {
 	for _, skill := range manifest.Skills {
 		names = append(names, skill.Name)
 	}
-	return missingStrings([]string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-job-review"}, names)
+	return missingStrings([]string{"safe-remote-support", "host-triage", "remote-vibe-coding", "remote-session-review"}, names)
 }
 
 func skillPathFailures(manifest Manifest) string {
@@ -213,10 +213,10 @@ func skillPathFailures(manifest Manifest) string {
 
 func skillsAdaptiveContractFailures(bundleDir string, manifest Manifest) string {
 	required := map[string]bool{
-		"safe-remote-support": true,
-		"host-triage":         true,
-		"remote-vibe-coding":  true,
-		"remote-job-review":   true,
+		"safe-remote-support":   true,
+		"host-triage":           true,
+		"remote-vibe-coding":    true,
+		"remote-session-review": true,
 	}
 	var failures []string
 	for _, skill := range manifest.Skills {
@@ -234,10 +234,10 @@ func skillsAdaptiveContractFailures(bundleDir string, manifest Manifest) string 
 
 func skillAgentMetadataFailures(bundleDir string, manifest Manifest) string {
 	required := map[string]bool{
-		"safe-remote-support": true,
-		"host-triage":         true,
-		"remote-vibe-coding":  true,
-		"remote-job-review":   true,
+		"safe-remote-support":   true,
+		"host-triage":           true,
+		"remote-vibe-coding":    true,
+		"remote-session-review": true,
 	}
 	var failures []string
 	for _, skill := range manifest.Skills {

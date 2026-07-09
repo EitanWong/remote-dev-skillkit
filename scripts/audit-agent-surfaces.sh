@@ -18,7 +18,7 @@ agent_files=(
   docs/operations/MCP_STDIO.md
   docs/operations/SKILLKIT_INSTALL.md
   skills/host-triage/SKILL.md
-  skills/remote-job-review/SKILL.md
+  skills/remote-session-review/SKILL.md
   skills/remote-vibe-coding/SKILL.md
   skills/safe-remote-support/SKILL.md
   internal/contracts/tools.go

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -31,139 +30,73 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 			t.Fatalf("tool %s missing input schema", tool.Name)
 		}
 	}
-	if !seen["rdev.adapter.verify_result"] {
-		t.Fatal("expected adapter result verification tool")
+	if seen["rdev.adapter.verify_result"] {
+		t.Fatal("old adapter verification tools must not be part of Control Plane v1 MCP")
 	}
-	if !seen["rdev.enrollment.verify_certificate"] {
-		t.Fatal("expected enrollment certificate verification tool")
-	}
-	if !seen["rdev.adapter.verify_lifecycle"] {
-		t.Fatal("expected adapter lifecycle verification tool")
-	}
-	if !seen["rdev.adapter.verify_cancellation"] {
-		t.Fatal("expected adapter cancellation verification tool")
-	}
-	if !seen["rdev.invites.create"] {
-		t.Fatal("expected agent-first invite creation tool")
-	}
-	if !seen["rdev.support_session.handoff"] {
-		t.Fatal("expected support session handoff tool")
-	}
-	if !seen["rdev.support_session.report"] {
-		t.Fatal("expected support session report tool")
-	}
-	if !seen["rdev.support_session.smoke_test"] {
-		t.Fatal("expected support session smoke-test tool")
-	}
-	if !seen["rdev.jobs.policy_template"] {
-		t.Fatal("expected job policy template tool")
-	}
-	if !seen["rdev.update.check"] || !seen["rdev.update.plan"] {
-		t.Fatal("expected update check and plan tools")
-	}
+	wantSessionTools(t, seen)
 }
 
-func TestSupportSessionConnectIsFirstTool(t *testing.T) {
+func TestSessionsCreateIsFirstTool(t *testing.T) {
 	tools := Tools()
 	if len(tools) == 0 {
 		t.Fatal("expected tools")
 	}
-	if tools[0].Name != "rdev.support_session.connect" {
-		t.Fatalf("fresh-agent tool list must lead with high-level connect, got %q", tools[0].Name)
-	}
-	for index, tool := range tools {
-		if tool.Name == "rdev.invites.create" && index == 0 {
-			t.Fatal("low-level invite tool must not be the first tool for fresh Agents")
-		}
+	if tools[0].Name != "rdev.sessions.create" {
+		t.Fatalf("Control Plane v1 MCP must lead with sessions.create, got %q", tools[0].Name)
 	}
 }
 
-func TestGatewayBackedToolsExposeGatewayURL(t *testing.T) {
-	want := []string{
-		"rdev.support_session.status",
-		"rdev.support_session.report",
-		"rdev.support_session.smoke_test",
-		"rdev.hosts.list",
-		"rdev.hosts.capabilities",
-		"rdev.hosts.approve",
-		"rdev.hosts.revoke",
-		"rdev.jobs.create",
-		"rdev.jobs.status",
-		"rdev.jobs.cancel",
-		"rdev.jobs.approve",
-		"rdev.artifacts.list",
-		"rdev.artifacts.read",
-		"rdev.audit.query",
-	}
-	for _, name := range want {
+func TestSessionToolsExposeGatewayURLAndAgentFields(t *testing.T) {
+	for _, name := range sessionToolNames() {
 		tool := findTool(name)
 		if tool == nil {
 			t.Fatalf("missing tool %s", name)
 		}
 		properties, _ := tool.InputSchema["properties"].(map[string]any)
 		if _, ok := properties["gateway_url"]; !ok {
-			t.Fatalf("tool %s must expose gateway_url in live MCP schema: %#v", name, properties)
+			t.Fatalf("session tool %s must expose gateway_url in live MCP schema: %#v", name, properties)
+		}
+		if !strings.Contains(tool.Description, "agent_next_action") ||
+			!strings.Contains(tool.Description, "user_summary") {
+			t.Fatalf("session tool %s must describe Agent-native recovery fields: %s", name, tool.Description)
 		}
 	}
 }
 
-func TestToolDescriptionsDoNotPromoteGatewayCandidateAssembly(t *testing.T) {
+func TestToolsDoNotExposeOldExperimentalHostJobContracts(t *testing.T) {
+	forbidden := []string{
+		"rdev.hosts.list",
+		"rdev.hosts.capabilities",
+		"rdev.hosts.authorize",
+		"rdev.hosts.revoke",
+		"rdev.jobs.create",
+		"rdev.jobs.policy_template",
+		"rdev.jobs.status",
+		"rdev.jobs.cancel",
+		"rdev.jobs.authorize",
+		"rdev.artifacts.list",
+		"rdev.artifacts.read",
+	}
 	for _, tool := range Tools() {
-		forbidden := []string{
+		for _, name := range forbidden {
+			if tool.Name == name {
+				t.Fatalf("old experimental MCP tool %s must be absent from Control Plane v1", name)
+			}
+		}
+		forbiddenText := []string{
 			"recommended gateway_url_candidates entry",
 			"use the returned gateway_url_candidates",
 			"use gateway_url_candidates",
 			"turn gateway_url_candidates",
+			"authorization_id",
+			"jobs.authorize",
+			"host registration",
 		}
-		for _, text := range forbidden {
+		for _, text := range forbiddenText {
 			if strings.Contains(tool.Description, text) {
-				t.Fatalf("tool %s description promotes gateway candidate assembly with %q: %s", tool.Name, text, tool.Description)
+				t.Fatalf("tool %s description contains old contract wording %q: %s", tool.Name, text, tool.Description)
 			}
 		}
-	}
-}
-
-func TestSupportSessionReportSchemaAcceptsTicketCodeOrHostID(t *testing.T) {
-	tool := findTool("rdev.support_session.report")
-	if tool == nil {
-		t.Fatal("missing rdev.support_session.report")
-	}
-	if !strings.Contains(tool.Description, "remote_control_entry") ||
-		!strings.Contains(tool.Description, "disconnect automatically") {
-		t.Fatalf("report description should expose remote_control_entry and no-auto-disconnect policy: %s", tool.Description)
-	}
-	properties, _ := tool.InputSchema["properties"].(map[string]any)
-	if _, ok := properties["host_id"]; !ok {
-		t.Fatalf("report schema must keep host_id: %#v", properties)
-	}
-	if _, ok := properties["ticket_code"]; !ok {
-		t.Fatalf("report schema must expose ticket_code: %#v", properties)
-	}
-	required, _ := tool.InputSchema["required"].([]string)
-	if slices.Contains(required, "host_id") || slices.Contains(required, "ticket_code") {
-		t.Fatalf("report schema should allow either host_id or ticket_code, got required=%#v", required)
-	}
-}
-
-func TestSupportSessionSmokeTestSchemaAcceptsTicketCodeOrHostID(t *testing.T) {
-	tool := findTool("rdev.support_session.smoke_test")
-	if tool == nil {
-		t.Fatal("missing rdev.support_session.smoke_test")
-	}
-	if !strings.Contains(tool.Description, "remote_control_entry") ||
-		!strings.Contains(tool.Description, "keep the host connected") ||
-		!strings.Contains(tool.Description, "remote_control=true") {
-		t.Fatalf("smoke-test description should expose remote_control_entry and keep-alive policy: %s", tool.Description)
-	}
-	properties, _ := tool.InputSchema["properties"].(map[string]any)
-	for _, name := range []string{"host_id", "ticket_code", "gateway_url", "timeout_seconds", "remote_control"} {
-		if _, ok := properties[name]; !ok {
-			t.Fatalf("smoke-test schema must expose %s: %#v", name, properties)
-		}
-	}
-	required, _ := tool.InputSchema["required"].([]string)
-	if slices.Contains(required, "host_id") || slices.Contains(required, "ticket_code") {
-		t.Fatalf("smoke-test schema should allow either host_id or ticket_code, got required=%#v", required)
 	}
 }
 
@@ -200,25 +133,6 @@ func TestStaticMCPToolsJSONMatchesLiveContract(t *testing.T) {
 	}
 }
 
-func TestJobsCreateAdapterEnumIncludesClaudeCode(t *testing.T) {
-	for _, tool := range Tools() {
-		if tool.Name != "rdev.jobs.create" {
-			continue
-		}
-		properties, _ := tool.InputSchema["properties"].(map[string]any)
-		adapterSchema, _ := properties["adapter"].(map[string]any)
-		values, _ := adapterSchema["enum"].([]any)
-		if !containsEnum(values, "claude-code") {
-			t.Fatalf("jobs.create adapter enum should include claude-code: %#v", values)
-		}
-		if containsEnum(values, "claude") {
-			t.Fatalf("jobs.create adapter enum should use claude-code, not ambiguous claude: %#v", values)
-		}
-		return
-	}
-	t.Fatal("missing rdev.jobs.create tool")
-}
-
 func findTool(name string) *Tool {
 	for _, tool := range Tools() {
 		if tool.Name == name {
@@ -228,11 +142,23 @@ func findTool(name string) *Tool {
 	return nil
 }
 
-func containsEnum(values []any, want string) bool {
-	for _, value := range values {
-		if text, ok := value.(string); ok && text == want {
-			return true
+func wantSessionTools(t *testing.T, seen map[string]bool) {
+	t.Helper()
+	for _, name := range sessionToolNames() {
+		if !seen[name] {
+			t.Fatalf("missing Control Plane v1 session tool %s", name)
 		}
 	}
-	return false
+}
+
+func sessionToolNames() []string {
+	return []string{
+		"rdev.sessions.create",
+		"rdev.sessions.status",
+		"rdev.sessions.events",
+		"rdev.sessions.task",
+		"rdev.sessions.interrupt",
+		"rdev.sessions.artifacts",
+		"rdev.sessions.close",
+	}
 }

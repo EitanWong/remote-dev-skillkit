@@ -18,7 +18,7 @@
         "expected_artifacts"
       ],
       "declares_external_consequences": true,
-      "declares_required_approvals": true
+      "declares_required_authorizations": true
     },
     "prepare": {
       "implemented": true,
@@ -64,8 +64,8 @@
     }
   },
   "safety": {
-    "adapter_authorizes_jobs": false,
-    "adapter_approves_dangerous_actions": false,
+    "adapter_authorizes_tasks": false,
+    "adapter_authorizes_dangerous_actions": false,
     "adapter_installs_persistence": false,
     "host_validates_before_run": true,
     "redacts_outputs": true

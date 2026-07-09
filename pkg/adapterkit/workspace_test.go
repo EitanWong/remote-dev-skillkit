@@ -52,7 +52,7 @@ func TestPrepareWorkspaceSessionRejectsFileRoot(t *testing.T) {
 
 func TestPrepareWorkspaceSessionSetsSessionID(t *testing.T) {
 	root := tmpWorkspaceRoot(t)
-	session, err := PrepareWorkspaceSession("my-adapter", "job_1", root, WorkspaceSessionOptions{}, wsNow)
+	session, err := PrepareWorkspaceSession("my-adapter", "task_1", root, WorkspaceSessionOptions{}, wsNow)
 	if err != nil {
 		t.Fatalf("PrepareWorkspaceSession: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestMarkCleanedSetsFlag(t *testing.T) {
 
 func TestVerifyWorkspaceSessionJSONAcceptsValidSession(t *testing.T) {
 	root := tmpWorkspaceRoot(t)
-	session, err := PrepareWorkspaceSession("my-adapter", "job_1", root, WorkspaceSessionOptions{
+	session, err := PrepareWorkspaceSession("my-adapter", "task_1", root, WorkspaceSessionOptions{
 		LockDir:         t.TempDir(),
 		WriteBoundaries: []string{root},
 	}, wsNow)

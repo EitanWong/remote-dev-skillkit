@@ -4,9 +4,9 @@
 
 Remote Dev Skillkit has four surfaces:
 
-- Agent Skills: instruct agents how to request and review remote jobs safely.
+- Agent Skills: instruct agents how to request and review remote tasks safely.
 - CLI: install, inspect, enroll, debug, and operate the system.
-- MCP tools: expose host, ticket, job, artifact, audit, and policy actions.
+- MCP tools: expose host, ticket, task, artifact, audit, and policy actions.
 - Host/Gateway services: connect target machines to Hermes.
 
 ## Connectivity Layers
@@ -30,19 +30,19 @@ Optional remote desktop support through RustDesk or MeshCentral. GUI control is 
 ## Control Flow
 
 ```text
-Agent -> MCP tool -> rdev-gateway -> signed job -> rdev-host -> adapter -> evidence
+Agent -> MCP tool -> rdev-gateway -> signed task -> rdev-host -> adapter -> evidence
 ```
 
 ## Host Modes
 
 - `attended-temporary`: visible, foreground, TTL-bound, third-party default.
 - `managed`: service mode for owned or formally managed devices.
-- `break-glass`: short TTL and strict approval for incident repair.
+- `break-glass`: short TTL and strict authorization for incident repair.
 
 ## Trust Model
 
 - Tickets are one-time and short-lived.
 - Hosts generate per-device keypairs.
-- Gateway signs jobs.
-- Host verifies job signatures and local policy.
+- Gateway signs tasks.
+- Host verifies task signatures and local policy.
 - Audit is written on server and host.

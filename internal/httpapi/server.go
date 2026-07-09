@@ -1,10 +1,11 @@
 package httpapi
 
 import (
-	"context"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -17,13 +18,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
-	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
-	"github.com/EitanWong/remote-dev-skillkit/internal/wsproto"
 )
 
 type Server struct {
@@ -84,144 +83,273 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/enrollment/certificates", s.issueEnrollmentCertificate)
 	mux.HandleFunc("POST /v1/enrollment/certificates/renew", s.renewEnrollmentCertificate)
 	mux.HandleFunc("POST /v1/trust-bundle", s.updateTrustBundle)
+	mux.HandleFunc("POST /v1/sessions", s.createSession)
+	mux.HandleFunc("POST /v1/session-joins", s.joinSessionByCode)
+	mux.HandleFunc("GET /v1/sessions/", s.sessionRoute)
+	mux.HandleFunc("POST /v1/sessions/", s.sessionRoute)
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
 	mux.HandleFunc("GET /join/", s.join)
 	mux.HandleFunc("GET /assets/", s.asset)
+	mux.HandleFunc("POST /v1/support-session/preconnect", s.supportSessionPreconnect)
 	mux.HandleFunc("GET /v1/support-session/status", s.supportSessionStatus)
-	mux.HandleFunc("GET /v1/hosts", s.listHosts)
-	mux.HandleFunc("POST /v1/hosts/register", s.registerHost)
-	mux.HandleFunc("GET /v1/hosts/", s.hostSubresource)
-	mux.HandleFunc("GET /v1/ws/hosts/", s.hostWebSocket)
-	mux.HandleFunc("POST /v1/hosts/", s.hostAction)
-	mux.HandleFunc("GET /v1/jobs", s.listJobs)
-	mux.HandleFunc("POST /v1/jobs", s.createJob)
-	mux.HandleFunc("GET /v1/jobs/", s.getJob)
-	mux.HandleFunc("POST /v1/jobs/", s.jobAction)
-	mux.HandleFunc("GET /v1/artifacts/", s.getArtifact)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
 	return mux
 }
 
-func (s Server) hostWebSocket(w http.ResponseWriter, r *http.Request) {
-	hostID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/ws/hosts/"), "/")
-	if hostID == "" {
-		writeError(w, http.StatusNotFound, "unknown websocket host endpoint")
+func (s Server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s Server) createSession(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
 		return
 	}
-	hostSecret := extractBearerToken(r)
-	// Validate host secret before upgrading — the secret may be passed as the
-	// "host_secret" query param since WebSocket upgrade headers are limited.
-	if !s.Gateway.ValidateHostSecret(hostID, hostSecret) {
-		writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret> or ?host_secret=<token>")
+	var spec controlplane.SessionSpec
+	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
 		return
 	}
-	conn, err := wsproto.Upgrade(w, r)
+	session, err := s.Gateway.CreateSession(spec)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeControlPlaneError(w, err)
 		return
 	}
-	defer conn.Close()
-	if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
-		_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
+	if !s.persistState(w) {
 		return
 	}
-	for {
-		if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
-			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
-			return
-		}
-		job, ok, err := s.nextJobForAuthenticatedHost(r.Context(), hostID, hostSecret, 60*time.Second)
-		if err != nil {
-			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
-			return
-		}
-		if !ok {
-			if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageNoop, HostID: hostID}); err != nil {
-				return
-			}
-			continue
-		}
-		if !s.persistStateNoResponse() {
-			_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
-			return
-		}
-		if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageJob, HostID: hostID, JobID: job.ID, Job: &job}); err != nil {
-			return
-		}
-	responseLoop:
-		for {
-			if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
-				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
-				return
-			}
-			var msg wsproto.Message
-			if err := conn.ReadJSON(&msg); err != nil {
-				return
-			}
-			if err := s.Gateway.HeartbeatHost(hostID, hostSecret); err != nil {
-				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
-				return
-			}
-			if msg.HostID == "" {
-				msg.HostID = hostID
-			}
-			if msg.JobID == "" {
-				msg.JobID = job.ID
-			}
-			if msg.HostID != hostID || msg.JobID != job.ID {
-				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "websocket job response host or job mismatch"})
-				return
-			}
-			switch msg.Type {
-			case wsproto.MessageComplete:
-				if _, _, err := s.Gateway.CompleteJobForHost(hostID, job.ID, msg.ArtifactContent); err != nil {
-					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
-					return
-				}
-				if !s.persistStateNoResponse() {
-					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
-					return
-				}
-				if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageComplete, HostID: hostID, JobID: job.ID}); err != nil {
-					return
-				}
-				break responseLoop
-			case wsproto.MessageFail:
-				if _, _, err := s.Gateway.FailJobForHostWithArtifact(hostID, job.ID, msg.Reason, msg.ArtifactContent); err != nil {
-					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
-					return
-				}
-				if !s.persistStateNoResponse() {
-					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
-					return
-				}
-				if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageFail, HostID: hostID, JobID: job.ID}); err != nil {
-					return
-				}
-				break responseLoop
-			case wsproto.MessageArtifact:
-				if _, _, err := s.Gateway.AppendJobArtifactForHost(hostID, job.ID, msg.ArtifactContent); err != nil {
-					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: err.Error()})
-					return
-				}
-				if !s.persistStateNoResponse() {
-					_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "persist gateway state failed"})
-					return
-				}
-				if err := conn.WriteJSON(wsproto.Message{Type: wsproto.MessageArtifact, HostID: hostID, JobID: job.ID}); err != nil {
-					return
-				}
-			default:
-				_ = conn.WriteJSON(wsproto.Message{Type: wsproto.MessageError, Error: "unsupported websocket message type"})
-				return
-			}
-		}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"session": session,
+		"status":  session.DeriveStatus(),
+	})
+}
+
+func (s Server) joinSessionByCode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		JoinCode string                    `json:"join_code"`
+		Endpoint controlplane.EndpointSpec `json:"endpoint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	session, endpoint, lease, events, err := s.Gateway.JoinSessionByCode(req.JoinCode, req.Endpoint)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session":  session,
+		"endpoint": endpoint,
+		"lease":    lease,
+		"events":   events,
+	})
+}
+
+func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
+	sessionID, resource, taskID, action, ok := splitSessionPath(r.URL.Path)
+	if !ok {
+		writeProtocolError(w, http.StatusNotFound, protocolHTTPError(controlplane.ErrSessionClosed, "unknown session endpoint", false))
+		return
+	}
+	switch {
+	case r.Method == http.MethodGet && resource == "":
+		s.getSessionSnapshot(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "join":
+		s.joinSession(w, r, sessionID)
+	case r.Method == http.MethodGet && resource == "events":
+		s.sessionEventsAfter(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "events":
+		s.appendSessionEvent(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "tasks" && taskID == "" && action == "":
+		s.submitSessionTask(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "tasks" && taskID != "" && action == "result":
+		s.completeSessionTask(w, r, sessionID, taskID)
+	case r.Method == http.MethodPost && resource == "artifacts":
+		s.upsertSessionArtifact(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "close":
+		s.closeSession(w, r, sessionID)
+	default:
+		writeProtocolError(w, http.StatusNotFound, protocolHTTPError(controlplane.ErrSessionClosed, "unknown session endpoint", false))
 	}
 }
 
-func (s Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+func (s Server) getSessionSnapshot(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "auditor role is required", false))
+		return
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"snapshot": session.Snapshot()})
+}
+
+func (s Server) joinSession(w http.ResponseWriter, r *http.Request, sessionID string) {
+	var spec controlplane.EndpointSpec
+	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	session, endpoint, lease, err := s.Gateway.JoinSession(sessionID, spec)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session":  session,
+		"endpoint": endpoint,
+		"lease":    lease,
+	})
+}
+
+func (s Server) sessionEventsAfter(w http.ResponseWriter, r *http.Request, sessionID string) {
+	afterSeq, err := parseOptionalUint(r.URL.Query().Get("after_seq"), "after_seq")
+	if err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrStaleCursor, err.Error(), true))
+		return
+	}
+	receivedSeq, err := parseOptionalUint(r.URL.Query().Get("received_seq"), "received_seq")
+	if err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrStaleCursor, err.Error(), true))
+		return
+	}
+	processedSeq, err := parseOptionalUint(r.URL.Query().Get("processed_seq"), "processed_seq")
+	if err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrStaleCursor, err.Error(), true))
+		return
+	}
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"), "limit")
+	if err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrTooManyEvents, err.Error(), true))
+		return
+	}
+	events, lease, replay, err := s.Gateway.SessionEventsAfter(sessionID, controlplane.EventCursor{
+		EndpointID:   r.URL.Query().Get("endpoint_id"),
+		LeaseSecret:  extractBearerToken(r),
+		AfterSeq:     afterSeq,
+		ReceivedSeq:  receivedSeq,
+		ProcessedSeq: processedSeq,
+	}, limit)
+	if err != nil {
+		writeControlPlaneErrorWithReplay(w, err, replay)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"events":            events,
+		"lease":             lease,
+		"snapshot_required": replay.SnapshotRequired,
+		"snapshot_seq":      replay.SnapshotSeq,
+		"last_seq":          replay.LastSeq,
+		"retry_after_ms":    replay.RetryAfterMS,
+		"reconnecting":      replay.Reconnecting,
+	})
+}
+
+func (s Server) appendSessionEvent(w http.ResponseWriter, r *http.Request, sessionID string) {
+	var event controlplane.Event
+	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	if event.FromEndpointID != "" && event.FromEndpointID != "agent" && event.FromEndpointID != "gateway" {
+		if err := s.Gateway.ValidateSessionLease(sessionID, event.FromEndpointID, extractBearerToken(r)); err != nil {
+			writeControlPlaneError(w, err)
+			return
+		}
+	}
+	appended, err := s.Gateway.AppendSessionEvent(sessionID, event)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"event": appended})
+}
+
+func (s Server) submitSessionTask(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
+		return
+	}
+	var spec controlplane.TaskSpec
+	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	task, event, err := s.Gateway.SubmitSessionTask(sessionID, spec)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"task": task, "event": event})
+}
+
+func (s Server) completeSessionTask(w http.ResponseWriter, r *http.Request, sessionID, taskID string) {
+	var result map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	task, event, err := s.Gateway.CompleteSessionTask(sessionID, taskID, result)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task, "event": event})
+}
+
+func (s Server) upsertSessionArtifact(w http.ResponseWriter, r *http.Request, sessionID string) {
+	var ref controlplane.ArtifactRef
+	if err := json.NewDecoder(r.Body).Decode(&ref); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	artifact, event, err := s.Gateway.UpsertSessionArtifact(sessionID, ref)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"artifact": artifact, "event": event})
+}
+
+func (s Server) closeSession(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
+		return
+	}
+	session, event, err := s.Gateway.CloseSession(sessionID)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"session": session, "event": event})
 }
 
 func (s Server) trust(w http.ResponseWriter, r *http.Request) {
@@ -390,7 +518,7 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 		TTLSeconds   int               `json:"ttl_seconds"`
 		Capabilities []string          `json:"capabilities"`
 		Reason       string            `json:"reason"`
-		AutoApprove  bool              `json:"auto_approve"`
+		AutoActivate bool              `json:"auto_activate"`
 		Metadata     map[string]string `json:"metadata"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -412,8 +540,8 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 			metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
 		}
 	}
-	if req.AutoApprove {
-		metadata["auto_approve"] = "attended-temporary"
+	if req.AutoActivate {
+		metadata["auto_activate"] = "attended-temporary"
 	}
 	ticket, err := s.Gateway.CreateTicketWithMetadata(req.Mode, req.TTLSeconds, req.Capabilities, req.Reason, metadata)
 	if err != nil {
@@ -439,13 +567,21 @@ func (s Server) ticketSubresource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	baseURL := requestBaseURL(r)
-	manifest, err := s.Gateway.JoinManifestWithGatewayCandidates(code, baseURL, baseURL+"/join/"+code, joinManifestGatewayCandidatesFromRequest(r, baseURL))
+	joinURL := baseURL + "/join/" + code
+	catalog := s.connectionEntryPackageCatalog(joinURL, baseURL)
+	manifest, err := s.Gateway.JoinManifestWithPackageCatalog(code, baseURL, joinURL, joinManifestGatewayCandidatesFromRequest(r, baseURL), catalog)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	timeProof, err := s.Gateway.JoinManifestTimeProof(manifest)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"manifest":              manifest,
+		"gateway_time_proof":    timeProof,
 		"manifestRootPublicKey": manifestRootPublicKey(s.Gateway.ManifestRoot()),
 	})
 }
@@ -466,12 +602,61 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 	case "":
 		s.joinPage(w, r, code, manifestURL)
 	case "bootstrap.sh":
-		s.writeShellBootstrap(w, r, manifestURL, manifestRoot)
+		s.writeShellBootstrap(w, r, code, manifestURL, manifestRoot)
 	case "bootstrap.ps1":
-		s.writePowerShellBootstrap(w, r, manifestURL, manifestRoot)
+		s.writePowerShellBootstrap(w, r, code, manifestURL, manifestRoot)
 	default:
 		writeError(w, http.StatusNotFound, "unknown join resource")
 	}
+}
+
+func (s Server) connectionEntryPackageCatalog(joinURL, gatewayURL string) model.ConnectionEntryPackageCatalog {
+	catalog := model.NewConnectionEntryPackageCatalog(joinURL)
+	assetContracts := s.helperAssetContracts(gatewayURL)
+	for i := range catalog.Candidates {
+		if contract, ok := assetContracts[catalog.Candidates[i].ID]; ok {
+			catalog.Candidates[i].HelperAsset = contract
+		}
+	}
+	return catalog
+}
+
+func (s Server) helperAssetContracts(gatewayURL string) map[string]model.HelperAssetContract {
+	contracts := map[string]model.HelperAssetContract{}
+	for _, asset := range []struct {
+		id   string
+		name string
+		path string
+	}{
+		{id: "windows-amd64", name: "rdev-windows-amd64.exe", path: s.Assets.RdevWindowsAMD64Path},
+		{id: "darwin-arm64", name: "rdev-darwin-arm64", path: s.Assets.RdevDarwinARM64Path},
+		{id: "darwin-amd64", name: "rdev-darwin-amd64", path: s.Assets.RdevDarwinAMD64Path},
+		{id: "linux-amd64", name: "rdev-linux-amd64", path: s.Assets.RdevLinuxAMD64Path},
+		{id: "linux-arm64", name: "rdev-linux-arm64", path: s.Assets.RdevLinuxARM64Path},
+	} {
+		contracts[asset.id] = helperAssetContract(gatewayURL, asset.name, asset.path)
+	}
+	return contracts
+}
+
+func helperAssetContract(gatewayURL, assetName, path string) model.HelperAssetContract {
+	assetURL := strings.TrimRight(strings.TrimSpace(gatewayURL), "/") + "/assets/" + assetName
+	contract := model.HelperAssetContract{
+		Name:      assetName,
+		SHA256URL: assetURL + ".sha256",
+		Mirrors: []model.HelperAssetMirror{
+			{URL: assetURL + ".gz", Kind: "gateway-asset", Compression: "gzip", Recommended: true},
+			{URL: assetURL, Kind: "gateway-asset"},
+		},
+		BootstrapCanRunSessionTasks:            false,
+		RequiresFullRunnerBeforeSessionTaskRun: true,
+	}
+	if strings.TrimSpace(path) != "" {
+		if sum, err := fileSHA256(path); err == nil {
+			contract.ExpectedSHA256 = "sha256:" + sum
+		}
+	}
+	return contract
 }
 
 func manifestURLForJoinRequest(r *http.Request, code string) string {
@@ -712,7 +897,7 @@ func joinCopy(locale string) joinPageCopy {
 			NextHeading: "आगे क्या होगा",
 			StepCheck:   `bootstrap <code>rdev</code> जांचता है।`,
 			StepStart:   `यह <code>--transport long-poll</code> के साथ visible और stable host session शुरू करता है।`,
-			StepAgent:   "Agent host का इंतजार करता है, policy की जरूरत पर approve करता है, और scoped repair jobs चलाता है।",
+			StepAgent:   "Agent host का इंतजार करता है, policy की जरूरत पर authorize करता है, और scoped session tasks चलाता है।",
 		})
 	case "ar":
 		return withDefaults(joinPageCopy{
@@ -732,7 +917,7 @@ func joinCopy(locale string) joinPageCopy {
 			NextHeading: "Что будет дальше",
 			StepCheck:   `bootstrap проверит <code>rdev</code>.`,
 			StepStart:   `Он запустит видимую и стабильную сессию host с <code>--transport long-poll</code>.`,
-			StepAgent:   "Agent дождется host, выполнит approval при необходимости и запустит ограниченные repair jobs.",
+			StepAgent:   "Agent дождется host, выполнит authorization при необходимости и запустит ограниченные session tasks.",
 		})
 	default:
 		return withDefaults(joinPageCopy{
@@ -742,7 +927,7 @@ func joinCopy(locale string) joinPageCopy {
 			NextHeading: "What Happens Next",
 			StepCheck:   `The bootstrap checks for <code>rdev</code>.`,
 			StepStart:   `It starts a visible, stable attended host session with <code>--transport long-poll</code>.`,
-			StepAgent:   "The Agent waits for the host, approves it when policy requires, and runs scoped repair jobs.",
+			StepAgent:   "The Agent waits for the host, authorizes it when policy requires, and runs scoped session tasks.",
 		})
 	}
 }
@@ -797,7 +982,7 @@ func supportedJoinLocale(tag string) string {
 	}
 }
 
-func (s Server) writeShellBootstrap(w http.ResponseWriter, r *http.Request, manifestURL, manifestRootPublicKey string) {
+func (s Server) writeShellBootstrap(w http.ResponseWriter, r *http.Request, ticketCode, manifestURL, manifestRootPublicKey string) {
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
@@ -805,12 +990,25 @@ func (s Server) writeShellBootstrap(w http.ResponseWriter, r *http.Request, mani
 		rootArg = " --manifest-root-public-key " + shellQuote(manifestRootPublicKey)
 	}
 	assetBase := shellQuote(strings.TrimRight(requestBaseURL(r), "/") + "/assets")
+	preconnectURL := shellQuote(strings.TrimRight(requestBaseURL(r), "/") + "/v1/support-session/preconnect")
 	_, _ = fmt.Fprintf(w, `#!/bin/sh
 set -eu
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
-if ! command -v rdev >/dev/null 2>&1; then
-  case "$arch" in
+asset=""
+rdev_preconnect_url=%s
+rdev_preconnect() {
+  phase="$1"
+  message="${2:-}"
+  if command -v curl >/dev/null 2>&1; then
+	    curl -fsS -m 3 -X POST "$rdev_preconnect_url" \
+	      -H 'Content-Type: application/json' \
+	      --data "{\"ticket_code\":\"%s\",\"phase\":\"$phase\",\"os\":\"$os\",\"arch\":\"$arch\",\"asset\":\"$asset\",\"source\":\"rdev-bootstrap-preconnect\",\"message\":\"$message\"}" >/dev/null 2>&1 || true
+	  fi
+	}
+	rdev_curl_retry_flags="--retry 3 --retry-delay 2 --connect-timeout 10"
+	if ! command -v rdev >/dev/null 2>&1; then
+	  case "$arch" in
     x86_64|amd64) arch="amd64" ;;
     arm64|aarch64) arch="arm64" ;;
     *) echo "unsupported architecture: $arch" >&2; exit 127 ;;
@@ -820,25 +1018,65 @@ if ! command -v rdev >/dev/null 2>&1; then
     *) echo "unsupported operating system: $os" >&2; exit 127 ;;
   esac
   asset="rdev-${os}-${arch}"
-  mkdir -p "${TMPDIR:-/tmp}/rdev-connection-entry"
-  out="${TMPDIR:-/tmp}/rdev-connection-entry/rdev"
-  echo "Downloading verified rdev helper ${asset}..."
-  http_status="$(curl -fsS -o /dev/null -w "%%{http_code}" %s"/${asset}" 2>/dev/null || true)"
-  if [ "$http_status" != "200" ]; then
-    echo "rdev helper binary not available at gateway (HTTP $http_status) — the gateway may still be starting. Wait a moment and retry." >&2
-    exit 127
-  fi
-  curl -fsSL %s"/${asset}" -o "$out"
-  expected="$(curl -fsSL %s"/${asset}.sha256")"
-  actual="$(shasum -a 256 "$out" | awk '{print $1}')"
+	  expected="$(curl $rdev_curl_retry_flags -fsSL %s"/${asset}.sha256")"
+	  cache_base="${XDG_CACHE_HOME:-}"
+	  if [ -z "$cache_base" ]; then
+	    if [ -n "${HOME:-}" ]; then
+	      cache_base="$HOME/.cache"
+	    else
+	      cache_base="${TMPDIR:-/tmp}"
+	    fi
+	  fi
+	  cache_dir="$cache_base/remote-dev-skillkit/helpers"
+	  mkdir -p "$cache_dir"
+	  cache_path="$cache_dir/${asset}"
+	  if [ -f "$cache_path" ]; then
+	    rdev_preconnect "verifying-helper" "checking cached verified helper"
+	    cache_actual="$(shasum -a 256 "$cache_path" | awk '{print $1}')"
+	    if [ "$cache_actual" = "$expected" ]; then
+	      rdev_preconnect "using-cached-helper" "using cached verified helper"
+	      chmod 700 "$cache_path"
+	      out="$cache_path"
+	      rdev_cmd="$out"
+	    else
+	      rm -f "$cache_path"
+	    fi
+	  fi
+	  if [ -z "${rdev_cmd:-}" ]; then
+	    rdev_preconnect "downloading-helper" "downloading verified helper"
+	    mkdir -p "${TMPDIR:-/tmp}/rdev-connection-entry"
+	    out="${TMPDIR:-/tmp}/rdev-connection-entry/rdev"
+		    echo "Downloading verified rdev helper ${asset}..."
+		  gz_status="000"
+		  if command -v gzip >/dev/null 2>&1; then
+		    gz_status="$(curl $rdev_curl_retry_flags -fsS -o /dev/null -w "%%{http_code}" %s"/${asset}.gz" 2>/dev/null || true)"
+		  fi
+		  if [ "$gz_status" = "200" ]; then
+		    tmp_gz="$out.gz"
+		    curl $rdev_curl_retry_flags -fsSL %s"/${asset}.gz" -o "$tmp_gz"
+		    gzip -dc "$tmp_gz" > "$out"
+		    rm -f "$tmp_gz"
+		  else
+		    http_status="$(curl $rdev_curl_retry_flags -fsS -o /dev/null -w "%%{http_code}" %s"/${asset}" 2>/dev/null || true)"
+		    if [ "$http_status" != "200" ]; then
+		      echo "rdev helper binary not available at gateway (HTTP $http_status) — the gateway may still be starting. Wait a moment and retry." >&2
+		      exit 127
+		    fi
+		    curl $rdev_curl_retry_flags -fsSL %s"/${asset}" -o "$out"
+		  fi
+	    rdev_preconnect "verifying-helper" "verifying downloaded helper"
+		  actual="$(shasum -a 256 "$out" | awk '{print $1}')"
   if [ "$actual" != "$expected" ]; then
     echo "rdev helper SHA-256 mismatch" >&2
     rm -f "$out"
     exit 127
   fi
+	    cp "$out" "$cache_path"
   chmod 700 "$out"
   rdev_cmd="$out"
+	  fi
 else
+  rdev_preconnect "using-installed-helper" "using installed rdev helper"
   rdev_cmd="$(command -v rdev)"
 fi
 rdev_identity_base="${XDG_STATE_HOME:-}"
@@ -854,6 +1092,7 @@ mkdir -p "$rdev_identity_dir"
 rdev_identity_store="$rdev_identity_dir/host-identity.json"
 echo "Starting visible Remote Dev Skillkit host session..."
 echo "[rdev] Persistent support identity: $rdev_identity_store"
+rdev_preconnect "starting-full-helper" "starting verified full helper"
 # Prevent idle/display/system sleep while the rdev session is active when the
 # platform exposes a standard inhibitor. This does not bypass lock-screen
 # policy or enterprise security controls. Kill the inhibitor when the runner
@@ -872,13 +1111,16 @@ else
   echo "[rdev] Sleep prevention unavailable — keep this visible session active to avoid disconnection"
 fi
 rdev_max_retries=5
-rdev_retry_delay=5
-rdev_attempt=0
-while true; do
-  "$rdev_cmd" host serve --manifest-url %s%s --transport long-poll --once=false --max-jobs 0 --identity-store "$rdev_identity_store"
-  rdev_exit=$?
-  rdev_attempt=$((rdev_attempt + 1))
-  echo "[rdev] host process exited with code $rdev_exit"
+	rdev_retry_delay=5
+	rdev_attempt=0
+	while true; do
+	  if "$rdev_cmd" host serve --manifest-url %s%s --transport long-poll --once=false --max-tasks 0 --identity-store "$rdev_identity_store"; then
+	    rdev_exit=0
+	  else
+	    rdev_exit=$?
+	  fi
+	  rdev_attempt=$((rdev_attempt + 1))
+	  echo "[rdev] host process exited with code $rdev_exit"
   if [ $rdev_exit -eq 0 ] || [ $rdev_attempt -gt $rdev_max_retries ]; then
     break
   fi
@@ -892,10 +1134,10 @@ if [ -n "$rdev_inhibit_pid" ]; then
   kill "$rdev_inhibit_pid" 2>/dev/null || true
 fi
 exit $rdev_exit
-`, assetBase, assetBase, assetBase, shellQuote(manifestURL), rootArg)
+	`, preconnectURL, ticketCode, assetBase, assetBase, assetBase, assetBase, assetBase, shellQuote(manifestURL), rootArg)
 }
 
-func (s Server) writePowerShellBootstrap(w http.ResponseWriter, r *http.Request, manifestURL, manifestRootPublicKey string) {
+func (s Server) writePowerShellBootstrap(w http.ResponseWriter, r *http.Request, ticketCode, manifestURL, manifestRootPublicKey string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
@@ -903,30 +1145,113 @@ func (s Server) writePowerShellBootstrap(w http.ResponseWriter, r *http.Request,
 		rootArg = " --manifest-root-public-key '" + powerShellSingleQuoteValue(manifestRootPublicKey) + "'"
 	}
 	assetBase := powerShellSingleQuoteValue(strings.TrimRight(requestBaseURL(r), "/") + "/assets")
+	preconnectURL := powerShellSingleQuoteValue(strings.TrimRight(requestBaseURL(r), "/") + "/v1/support-session/preconnect")
 	_, _ = fmt.Fprintf(w, `$ErrorActionPreference = 'Stop'
+$asset = ''
+$preconnectUrl = '%s'
+function Send-RdevPreconnect([string]$phase, [string]$message) {
+  try {
+    $body = @{
+      ticket_code = '%s'
+      phase = $phase
+      os = 'windows'
+      arch = 'amd64'
+      asset = $asset
+      source = 'rdev-bootstrap-preconnect'
+      message = $message
+    } | ConvertTo-Json -Compress
+    Invoke-WebRequest -Uri $preconnectUrl -Method Post -Body $body -ContentType 'application/json' -UseBasicParsing -TimeoutSec 3 | Out-Null
+  } catch {
+    Write-Host "[rdev] preconnect status update skipped: $($_.Exception.Message)"
+  }
+}
+function Invoke-RdevWebRequestWithRetry([string]$Uri, [string]$OutFile = '', [int]$MaxAttempts = 3, [int]$DelaySeconds = 2) {
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    try {
+      if ([string]::IsNullOrWhiteSpace($OutFile)) {
+        return Invoke-WebRequest -Uri $Uri -UseBasicParsing -ErrorAction Stop -TimeoutSec 30
+      }
+      Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -ErrorAction Stop -TimeoutSec 30
+      return
+    } catch {
+      if ($attempt -ge $MaxAttempts) { throw }
+      Write-Host "[rdev] download attempt $attempt failed: $($_.Exception.Message). Retrying..."
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+}
 $rdevCmd = Get-Command rdev -ErrorAction SilentlyContinue
 if ($rdevCmd) {
+  Send-RdevPreconnect 'using-installed-helper' 'using installed rdev helper'
   $rdevPath = $rdevCmd.Source
 } else {
   if (-not [Environment]::Is64BitOperatingSystem) {
     throw "unsupported Windows architecture: 32-bit"
   }
   $asset = "rdev-windows-amd64.exe"
-  $dir = Join-Path $env:TEMP "rdev-connection-entry"
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  $rdevPath = Join-Path $dir "rdev.exe"
-  Write-Host "Downloading verified rdev helper $asset..."
-  try {
-    Invoke-WebRequest -Uri ('%s/' + $asset) -OutFile $rdevPath -UseBasicParsing -ErrorAction Stop
-  } catch {
-    $errMsg = $_.Exception.Message
-    throw ("Failed to download rdev helper from gateway. The asset binary may not be configured yet — ensure the gateway has finished starting, then run the command again. Detail: " + $errMsg)
+  $expected = (Invoke-RdevWebRequestWithRetry -Uri ('%s/' + $asset + '.sha256')).Content.Trim()
+  $cacheBase = [Environment]::GetFolderPath('LocalApplicationData')
+  if ([string]::IsNullOrWhiteSpace($cacheBase)) { $cacheBase = $env:TEMP }
+  $cacheDir = Join-Path $cacheBase "RemoteDevSkillkit\cache\helpers"
+  New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+  $cachePath = Join-Path $cacheDir $asset
+  if (Test-Path -LiteralPath $cachePath) {
+    Send-RdevPreconnect 'verifying-helper' 'checking cached verified helper'
+    $cacheActual = (Get-FileHash -Algorithm SHA256 -Path $cachePath).Hash.ToLowerInvariant()
+    if ($cacheActual -eq $expected.ToLowerInvariant()) {
+      Send-RdevPreconnect 'using-cached-helper' 'using cached verified helper'
+      $rdevPath = $cachePath
+    } else {
+      Remove-Item -Force $cachePath -ErrorAction SilentlyContinue
+    }
   }
-  $expected = (Invoke-WebRequest -Uri ('%s/' + $asset + '.sha256') -UseBasicParsing).Content.Trim()
-  $actual = (Get-FileHash -Algorithm SHA256 -Path $rdevPath).Hash.ToLowerInvariant()
-  if ($actual -ne $expected.ToLowerInvariant()) {
-    Remove-Item -Force $rdevPath -ErrorAction SilentlyContinue
-    throw "rdev helper SHA-256 mismatch"
+  if ([string]::IsNullOrWhiteSpace($rdevPath)) {
+    Send-RdevPreconnect 'downloading-helper' 'downloading verified helper'
+    $dir = Join-Path $env:TEMP "rdev-connection-entry"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+	    $rdevPath = Join-Path $dir "rdev.exe"
+	    Write-Host "Downloading verified rdev helper $asset..."
+			$compressedPath = $rdevPath + ".gz"
+			$usedCompressed = $false
+			try {
+		    Invoke-RdevWebRequestWithRetry -Uri ('%s/' + $asset + '.gz') -OutFile $compressedPath
+		    $inputStream = [System.IO.File]::OpenRead($compressedPath)
+	    try {
+	      $outputStream = [System.IO.File]::Create($rdevPath)
+	      try {
+	        $gzipStream = [System.IO.Compression.GzipStream]::new($inputStream, [System.IO.Compression.CompressionMode]::Decompress)
+	        try {
+	          $gzipStream.CopyTo($outputStream)
+	        } finally {
+	          $gzipStream.Dispose()
+	        }
+	      } finally {
+	        $outputStream.Dispose()
+	      }
+	    } finally {
+	      $inputStream.Dispose()
+	    }
+	    Remove-Item -Force $compressedPath -ErrorAction SilentlyContinue
+	    $usedCompressed = $true
+	  } catch {
+	    Remove-Item -Force $compressedPath -ErrorAction SilentlyContinue
+	    Write-Host "Compressed rdev helper unavailable; falling back to uncompressed download."
+	  }
+		  if (-not $usedCompressed) {
+		    try {
+		      Invoke-RdevWebRequestWithRetry -Uri ('%s/' + $asset) -OutFile $rdevPath
+		    } catch {
+		    $errMsg = $_.Exception.Message
+		    throw ("Failed to download rdev helper from gateway. The asset binary may not be configured yet — ensure the gateway has finished starting, then run the command again. Detail: " + $errMsg)
+			    }
+			  }
+    Send-RdevPreconnect 'verifying-helper' 'verifying downloaded helper'
+	  $actual = (Get-FileHash -Algorithm SHA256 -Path $rdevPath).Hash.ToLowerInvariant()
+	  if ($actual -ne $expected.ToLowerInvariant()) {
+	    Remove-Item -Force $rdevPath -ErrorAction SilentlyContinue
+	    throw "rdev helper SHA-256 mismatch"
+	  }
+    Copy-Item -Force -Path $rdevPath -Destination $cachePath
   }
 }
 Write-Host "Starting visible Remote Dev Skillkit host session..."
@@ -936,10 +1261,11 @@ $identityDir = Join-Path $identityBase "RemoteDevSkillkit"
 New-Item -ItemType Directory -Force -Path $identityDir | Out-Null
 $identityStore = Join-Path $identityDir "host-identity.json"
 Write-Host "[rdev] Persistent support identity: $identityStore"
+Send-RdevPreconnect 'starting-full-helper' 'starting verified full helper'
 # Prevent Windows idle sleep/display sleep while rdev is running. This does not
 # bypass lock-screen policy or enterprise security controls.
 # SetThreadExecutionState keeps the session awake so the runner can continue to
-# poll for and execute jobs.
+# poll for and execute session tasks.
 try {
   Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
@@ -963,7 +1289,7 @@ do {
     Write-Host ("[rdev] Retrying host registration (attempt $($rdevAttempt + 1) of $($rdevMaxRetries + 1)) after ${rdevRetryDelaySec}s...")
     Start-Sleep -Seconds $rdevRetryDelaySec
   }
-  & $rdevPath host serve --manifest-url '%s'%s --transport long-poll --once=false --max-jobs 0 --identity-store $identityStore
+  & $rdevPath host serve --manifest-url '%s'%s --transport long-poll --once=false --max-tasks 0 --identity-store $identityStore
   $rdevExitCode = $LASTEXITCODE
   $rdevAttempt++
   Write-Host "[rdev] host process exited with code $rdevExitCode"
@@ -971,7 +1297,7 @@ do {
 # Restore normal sleep policy before exiting.
 try { [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS) } catch { }
 exit $rdevExitCode
-`, assetBase, assetBase, powerShellSingleQuoteValue(manifestURL), rootArg)
+	`, preconnectURL, powerShellSingleQuoteValue(ticketCode), assetBase, assetBase, assetBase, powerShellSingleQuoteValue(manifestURL), rootArg)
 }
 
 func (s Server) asset(w http.ResponseWriter, r *http.Request) {
@@ -984,6 +1310,11 @@ func (s Server) asset(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(name, ".sha256") {
 		shaOnly = true
 		name = strings.TrimSuffix(name, ".sha256")
+	}
+	gzipOnly := false
+	if strings.HasSuffix(name, ".gz") {
+		gzipOnly = true
+		name = strings.TrimSuffix(name, ".gz")
 	}
 	path, ok := s.assetPath(name)
 	if !ok {
@@ -1001,7 +1332,28 @@ func (s Server) asset(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, sum)
 		return
 	}
+	if gzipOnly {
+		s.serveGzipAsset(w, path)
+		return
+	}
 	http.ServeFile(w, r, path)
+}
+
+func (s Server) serveGzipAsset(w http.ResponseWriter, path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Content-Type", "application/gzip")
+	w.WriteHeader(http.StatusOK)
+	zw := gzip.NewWriter(w)
+	if _, err := io.Copy(zw, file); err != nil {
+		_ = zw.Close()
+		return
+	}
+	_ = zw.Close()
 }
 
 func (s Server) assetPath(name string) (string, bool) {
@@ -1057,16 +1409,6 @@ func manifestRootPublicKey(root model.TrustBundle) string {
 	return root.SigningKeyID + ":" + root.PublicKey
 }
 
-func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "auditor role is required")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"hosts": s.Gateway.Hosts(r.URL.Query().Get("status")),
-	})
-}
-
 func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
 		writeError(w, http.StatusForbidden, "auditor role is required")
@@ -1079,10 +1421,11 @@ func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	hosts := s.Gateway.HostsForTicketCode(ticketCode, "")
 	opts := supportsession.StatusOptions{
-		TicketCode: ticketCode,
-		Hosts:      hosts,
-		Locale:     r.URL.Query().Get("locale"),
-		GatewayURL: requestBaseURL(r),
+		TicketCode:  ticketCode,
+		Hosts:       hosts,
+		Locale:      r.URL.Query().Get("locale"),
+		GatewayURL:  requestBaseURL(r),
+		Preconnects: s.Gateway.SupportSessionPreconnects(ticketCode),
 	}
 	// Attach ticket expiry when the ticket is found so the status response
 	// includes ticket_expires_at and ticket_expires_in_seconds.
@@ -1093,250 +1436,13 @@ func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
-func (s Server) registerHost(w http.ResponseWriter, r *http.Request) {
-	var req model.HostRegistration
+func (s Server) supportSessionPreconnect(w http.ResponseWriter, r *http.Request) {
+	var req model.SupportSessionPreconnect
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	host, err := s.Gateway.RegisterHost(req)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	// Generate a per-host secret that the host process must present on all
-	// subsequent host-side requests (jobs/next, heartbeat, complete, fail).
-	secret, err := s.Gateway.GenerateHostSecret(host.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "generate host secret: "+err.Error())
-		return
-	}
-	if !s.persistState(w) {
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"host":        host,
-		"host_secret": secret,
-	})
-}
-
-func (s Server) hostAction(w http.ResponseWriter, r *http.Request) {
-	hostID, action, ok := splitHostAction(r.URL.Path)
-	if !ok {
-		writeError(w, http.StatusNotFound, "unknown host endpoint")
-		return
-	}
-	// heartbeat is host-authenticated (not operator-authenticated)
-	if action == "heartbeat" {
-		secret := extractBearerToken(r)
-		if err := s.Gateway.HeartbeatHost(hostID, secret); err != nil {
-			if strings.Contains(err.Error(), "policy denied") {
-				writeError(w, http.StatusUnauthorized, "host authentication required: provide host_secret as Bearer token")
-				return
-			}
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "host_id": hostID})
-		return
-	}
-	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "operator role is required")
-		return
-	}
-	switch action {
-	case "approve":
-		var req struct {
-			Capabilities []string `json:"capabilities"`
-		}
-		if r.Body != nil {
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid JSON body")
-				return
-			}
-		}
-		host, err := s.Gateway.ApproveHost(hostID, req.Capabilities)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !s.persistState(w) {
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"host": host})
-	case "revoke":
-		var req struct {
-			Reason string `json:"reason"`
-		}
-		if r.Body != nil {
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid JSON body")
-				return
-			}
-		}
-		host, err := s.Gateway.RevokeHost(hostID, req.Reason)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !s.persistState(w) {
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"host": host})
-	default:
-		writeError(w, http.StatusNotFound, "unknown host action")
-	}
-}
-
-func (s Server) hostSubresource(w http.ResponseWriter, r *http.Request) {
-	if hostID, ok := splitHostID(r.URL.Path); ok {
-		if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
-			writeError(w, http.StatusForbidden, "auditor role is required")
-			return
-		}
-		host, err := s.Gateway.Host(hostID)
-		if err != nil {
-			writeError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"host": host})
-		return
-	}
-	hostID, resource, action, ok := splitHostSubresource(r.URL.Path)
-	if !ok {
-		writeError(w, http.StatusNotFound, "unknown host endpoint")
-		return
-	}
-	switch {
-	case resource == "jobs" && action == "next":
-		// Validate host secret: prevents unauthenticated callers from claiming
-		// jobs and impersonating the registered host process.
-		if !s.Gateway.ValidateHostSecret(hostID, extractBearerToken(r)) {
-			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
-			return
-		}
-		wait, err := parseLongPollWait(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		job, ok, err := s.nextJobForAuthenticatedHost(r.Context(), hostID, extractBearerToken(r), wait)
-		if err != nil {
-			if err == context.Canceled {
-				return
-			}
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !ok {
-			writeJSON(w, http.StatusOK, map[string]any{"job": nil})
-			return
-		}
-		if !s.persistState(w) {
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"job": job})
-	case resource == "trust-bundle" && action == "update":
-		currentSequence, err := parseOptionalInt(r.URL.Query().Get("current_sequence"), "current_sequence")
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		update, err := s.Gateway.TrustBundleUpdateForHost(hostID, currentSequence, r.URL.Query().Get("current_hash"))
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"trust_bundle_update": update})
-	default:
-		writeError(w, http.StatusNotFound, "unknown host subresource")
-	}
-}
-
-func (s Server) nextJobForHost(ctx context.Context, hostID string, wait time.Duration) (model.Job, bool, error) {
-	if wait <= 0 {
-		return s.Gateway.NextJobForHost(hostID)
-	}
-	deadline := time.NewTimer(wait)
-	defer deadline.Stop()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		job, ok, err := s.Gateway.NextJobForHost(hostID)
-		if err != nil || ok {
-			return job, ok, err
-		}
-		select {
-		case <-ctx.Done():
-			return model.Job{}, false, ctx.Err()
-		case <-deadline.C:
-			return model.Job{}, false, nil
-		case <-ticker.C:
-		}
-	}
-}
-
-func (s Server) nextJobForAuthenticatedHost(ctx context.Context, hostID, hostSecret string, wait time.Duration) (model.Job, bool, error) {
-	if wait <= 0 {
-		return s.Gateway.NextJobForAuthenticatedHost(hostID, hostSecret)
-	}
-	deadline := time.NewTimer(wait)
-	defer deadline.Stop()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		job, ok, err := s.Gateway.NextJobForAuthenticatedHost(hostID, hostSecret)
-		if err != nil || ok {
-			return job, ok, err
-		}
-		select {
-		case <-ctx.Done():
-			return model.Job{}, false, ctx.Err()
-		case <-deadline.C:
-			return model.Job{}, false, nil
-		case <-ticker.C:
-		}
-	}
-}
-
-func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "operator role is required")
-		return
-	}
-	if r.Method == http.MethodGet {
-		s.listJobs(w, r)
-		return
-	}
-	var req struct {
-		HostID  string         `json:"host_id"`
-		Adapter string         `json:"adapter"`
-		Intent  string         `json:"intent"`
-		Policy  map[string]any `json:"policy"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	// Policy pre-check: validate before persisting the job so that policy
-	// explain and job creation are consistent — a job that policy.ExplainShellJob
-	// would deny is rejected at the gateway level instead of being left queued
-	// forever waiting for a host that will never execute it.
-	adapter := strings.ToLower(strings.TrimSpace(req.Adapter))
-	if adapter == "shell" || adapter == "powershell" || adapter == "file" || adapter == "desktop" {
-		if host, hostErr := s.Gateway.Host(req.HostID); hostErr == nil {
-			explanation := policy.ExplainAdapterJob(host.Mode, adapter, req.Policy)
-			if !explanation.Allowed {
-				summary := strings.Join(explanation.Denials, "; ")
-				if summary == "" {
-					summary = "policy denied"
-				}
-				writeError(w, http.StatusUnprocessableEntity, "policy_violation: "+summary)
-				return
-			}
-		}
-	}
-	job, err := s.Gateway.CreateJob(req.HostID, req.Adapter, req.Intent, req.Policy)
+	event, err := s.Gateway.RecordSupportSessionPreconnect(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1344,229 +1450,15 @@ func (s Server) createJob(w http.ResponseWriter, r *http.Request) {
 	if !s.persistState(w) {
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"job": job})
-}
-
-func (s Server) listJobs(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "auditor role is required")
-		return
-	}
-	hostID := strings.TrimSpace(r.URL.Query().Get("host_id"))
-	jobs := s.Gateway.Jobs()
-	if hostID != "" {
-		filtered := jobs[:0]
-		for _, job := range jobs {
-			if job.HostID == hostID {
-				filtered = append(filtered, job)
-			}
-		}
-		jobs = filtered
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
-}
-
-func (s Server) getJob(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "auditor role is required")
-		return
-	}
-	if jobID, resource, ok := splitJobSubresource(r.URL.Path); ok {
-		switch resource {
-		case "artifacts":
-			writeJSON(w, http.StatusOK, map[string]any{"artifacts": s.Gateway.Artifacts(jobID)})
-		case "evidence-bundle":
-			s.exportJobEvidenceBundle(w, r, jobID)
-		default:
-			writeError(w, http.StatusNotFound, "unknown job subresource")
-		}
-		return
-	}
-	jobID, ok := splitJobID(r.URL.Path)
-	if !ok {
-		writeError(w, http.StatusNotFound, "unknown job endpoint")
-		return
-	}
-	job, err := s.Gateway.Job(jobID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"job": job})
-}
-
-func (s Server) getArtifact(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "auditor role is required")
-		return
-	}
-	artifactID, ok := splitArtifactID(r.URL.Path)
-	if !ok {
-		writeError(w, http.StatusNotFound, "unknown artifact endpoint")
-		return
-	}
-	artifact, err := s.Gateway.Artifact(artifactID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"artifact": artifact})
-}
-
-func (s Server) exportJobEvidenceBundle(w http.ResponseWriter, r *http.Request, jobID string) {
-	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
-		writeError(w, http.StatusForbidden, "operator role is required")
-		return
-	}
-	out := r.URL.Query().Get("out")
-	if out == "" {
-		writeError(w, http.StatusBadRequest, "out query parameter is required")
-		return
-	}
-	job, err := s.Gateway.Job(jobID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	manifest, err := evidence.ExportDirectory(out, evidence.Input{
-		Job:         job,
-		Artifacts:   s.Gateway.Artifacts(jobID),
-		AuditEvents: s.Gateway.AuditEvents(),
-		GeneratedAt: time.Now(),
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":                true,
-		"out":               out,
-		"job_id":            manifest.JobID,
-		"file_count":        len(manifest.Files) + 1,
-		"audit_event_count": manifest.AuditEventCount,
-		"audit_root_hash":   manifest.AuditRootHash,
-		"manifest":          manifest,
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":         true,
+		"preconnect": event,
 	})
 }
 
-func (s Server) jobAction(w http.ResponseWriter, r *http.Request) {
-	jobID, action, ok := splitJobAction(r.URL.Path)
-	if !ok {
-		writeError(w, http.StatusNotFound, "unknown job endpoint")
-		return
-	}
-	switch action {
-	case "complete":
-		var req struct {
-			HostID          string `json:"host_id"`
-			ArtifactContent string `json:"artifact_content"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-		if req.HostID == "" {
-			writeError(w, http.StatusBadRequest, "host_id is required")
-			return
-		}
-		if !s.Gateway.ValidateHostSecret(req.HostID, extractBearerToken(r)) {
-			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
-			return
-		}
-		job, artifact, err := s.Gateway.CompleteJobForHost(req.HostID, jobID, req.ArtifactContent)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !s.persistState(w) {
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
-	case "fail":
-		var req struct {
-			HostID          string `json:"host_id"`
-			Reason          string `json:"reason"`
-			ArtifactContent string `json:"artifact_content"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-		if req.HostID == "" {
-			writeError(w, http.StatusBadRequest, "host_id is required")
-			return
-		}
-		if !s.Gateway.ValidateHostSecret(req.HostID, extractBearerToken(r)) {
-			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
-			return
-		}
-		job, artifact, err := s.Gateway.FailJobForHostWithArtifact(req.HostID, jobID, req.Reason, req.ArtifactContent)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !s.persistState(w) {
-			return
-		}
-		payload := map[string]any{"job": job}
-		if artifact != nil {
-			payload["artifact"] = artifact
-		}
-		writeJSON(w, http.StatusOK, payload)
-	case "artifact":
-		var req struct {
-			HostID          string `json:"host_id"`
-			ArtifactContent string `json:"artifact_content"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-		if req.HostID == "" {
-			writeError(w, http.StatusBadRequest, "host_id is required")
-			return
-		}
-		if !s.Gateway.ValidateHostSecret(req.HostID, extractBearerToken(r)) {
-			writeError(w, http.StatusUnauthorized, "host authentication required: include Authorization: Bearer <host_secret>")
-			return
-		}
-		job, artifact, err := s.Gateway.AppendJobArtifactForHost(req.HostID, jobID, req.ArtifactContent)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !s.persistState(w) {
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"job": job, "artifact": artifact})
-	case "cancel":
-		// Operator-side job cancellation. The agent calls this when a job is stuck
-		// or should no longer run. The gateway marks the job as canceled and the
-		// host will see its status transition to "canceled" on the next poll/push.
-		if !s.authorizeOperator(r, operatorauth.RoleOperator) {
-			writeError(w, http.StatusForbidden, "operator role is required")
-			return
-		}
-		var req struct {
-			Reason string `json:"reason"`
-		}
-		// Reason is optional; ignore decode errors so an empty body also works.
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		if req.Reason == "" {
-			req.Reason = "canceled by operator"
-		}
-		job, err := s.Gateway.CancelJob(jobID, req.Reason)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if !s.persistState(w) {
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"job": job})
-	default:
-		writeError(w, http.StatusNotFound, "unknown job action")
-	}
+func requestBodyHash(body []byte) string {
+	sum := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func (s Server) listAudit(w http.ResponseWriter, r *http.Request) {
@@ -1652,16 +1544,15 @@ func parseOptionalInt(raw, name string) (int, error) {
 	return value, nil
 }
 
-func splitHostAction(path string) (hostID string, action string, ok bool) {
-	rest := strings.TrimPrefix(path, "/v1/hosts/")
-	if rest == path {
-		return "", "", false
+func parseOptionalUint(raw, name string) (uint64, error) {
+	if raw == "" {
+		return 0, nil
 	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a non-negative integer", name)
 	}
-	return parts[0], parts[1], true
+	return value, nil
 }
 
 func splitTicketSubresource(path string) (code string, resource string, ok bool) {
@@ -1691,16 +1582,22 @@ func splitJoinPath(path string) (code string, resource string, ok bool) {
 	return "", "", false
 }
 
-func splitHostID(path string) (hostID string, ok bool) {
-	rest := strings.TrimPrefix(path, "/v1/hosts/")
+func splitSessionPath(path string) (sessionID string, resource string, taskID string, action string, ok bool) {
+	rest := strings.TrimPrefix(path, "/v1/sessions/")
 	if rest == path {
-		return "", false
+		return "", "", "", "", false
 	}
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 1 || parts[0] == "" {
-		return "", false
+	switch {
+	case len(parts) == 1 && parts[0] != "":
+		return parts[0], "", "", "", true
+	case len(parts) == 2 && parts[0] != "" && parts[1] != "":
+		return parts[0], parts[1], "", "", true
+	case len(parts) == 4 && parts[0] != "" && parts[1] == "tasks" && parts[2] != "" && parts[3] != "":
+		return parts[0], parts[1], parts[2], parts[3], true
+	default:
+		return "", "", "", "", false
 	}
-	return parts[0], true
 }
 
 func shellQuote(value string) string {
@@ -1717,66 +1614,6 @@ func powerShellSingleQuoteValue(value string) string {
 	return strings.ReplaceAll(value, "'", "''")
 }
 
-func splitHostSubresource(path string) (hostID string, resource string, action string, ok bool) {
-	rest := strings.TrimPrefix(path, "/v1/hosts/")
-	if rest == path {
-		return "", "", "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
-		return "", "", "", false
-	}
-	return parts[0], parts[1], parts[2], true
-}
-
-func splitJobID(path string) (jobID string, ok bool) {
-	rest := strings.TrimPrefix(path, "/v1/jobs/")
-	if rest == path {
-		return "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 1 || parts[0] == "" {
-		return "", false
-	}
-	return parts[0], true
-}
-
-func splitJobAction(path string) (jobID string, action string, ok bool) {
-	rest := strings.TrimPrefix(path, "/v1/jobs/")
-	if rest == path {
-		return "", "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-func splitJobSubresource(path string) (jobID string, resource string, ok bool) {
-	rest := strings.TrimPrefix(path, "/v1/jobs/")
-	if rest == path {
-		return "", "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-func splitArtifactID(path string) (artifactID string, ok bool) {
-	rest := strings.TrimPrefix(path, "/v1/artifacts/")
-	if rest == path {
-		return "", false
-	}
-	parts := strings.Split(strings.Trim(rest, "/"), "/")
-	if len(parts) != 1 || parts[0] == "" {
-		return "", false
-	}
-	return parts[0], true
-}
-
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -1785,6 +1622,79 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{"error": message})
+}
+
+func writeControlPlaneError(w http.ResponseWriter, err error) {
+	var protocolErr controlplane.ProtocolError
+	if errors.As(err, &protocolErr) {
+		writeProtocolError(w, protocolHTTPStatus(protocolErr.Code), protocolErr)
+		return
+	}
+	writeProtocolError(w, http.StatusInternalServerError, protocolHTTPError(controlplane.ErrSessionClosed, err.Error(), false))
+}
+
+func writeControlPlaneErrorWithReplay(w http.ResponseWriter, err error, replay controlplane.EventReplayState) {
+	var protocolErr controlplane.ProtocolError
+	if errors.As(err, &protocolErr) {
+		writeJSON(w, protocolHTTPStatus(protocolErr.Code), map[string]any{
+			"error":             protocolErr,
+			"snapshot_required": replay.SnapshotRequired,
+			"snapshot_seq":      replay.SnapshotSeq,
+			"last_seq":          replay.LastSeq,
+			"retry_after_ms":    replay.RetryAfterMS,
+			"reconnecting":      replay.Reconnecting,
+		})
+		return
+	}
+	writeControlPlaneError(w, err)
+}
+
+func writeProtocolError(w http.ResponseWriter, status int, err controlplane.ProtocolError) {
+	writeJSON(w, status, map[string]any{"error": err})
+}
+
+func protocolHTTPError(code controlplane.ErrorCode, message string, recoverable bool) controlplane.ProtocolError {
+	return controlplane.ProtocolError{
+		SchemaVersion:   controlplane.ErrorSchemaVersion,
+		Code:            code,
+		Message:         message,
+		Recoverable:     recoverable,
+		RetryAfterMS:    500,
+		UserSummary:     message,
+		AgentNextAction: protocolAgentNextAction(code),
+	}
+}
+
+func protocolHTTPStatus(code controlplane.ErrorCode) int {
+	switch code {
+	case controlplane.ErrUnauthorizedEndpoint, controlplane.ErrLeaseExpired:
+		return http.StatusUnauthorized
+	case controlplane.ErrInvalidJoinCode, controlplane.ErrEndpointNotFound, controlplane.ErrTaskNotFound:
+		return http.StatusNotFound
+	case controlplane.ErrIdempotencyConflict, controlplane.ErrTerminalSession, controlplane.ErrSessionClosed, controlplane.ErrTaskAlreadyTerminal, controlplane.ErrJoinPolicyRejected:
+		return http.StatusConflict
+	case controlplane.ErrPayloadTooLarge:
+		return http.StatusRequestEntityTooLarge
+	case controlplane.ErrTooManyEvents, controlplane.ErrStaleCursor, controlplane.ErrSnapshotRequired, controlplane.ErrArtifactOffsetMismatch, controlplane.ErrChecksumMismatch, controlplane.ErrCapabilityUnavailable, controlplane.ErrAuthorityMismatch, controlplane.ErrStaleReplica:
+		return http.StatusBadRequest
+	default:
+		return http.StatusBadRequest
+	}
+}
+
+func protocolAgentNextAction(code controlplane.ErrorCode) string {
+	switch code {
+	case controlplane.ErrSnapshotRequired:
+		return "fetch the session snapshot and resume from snapshot_seq"
+	case controlplane.ErrUnauthorizedEndpoint, controlplane.ErrLeaseExpired:
+		return "join, resume, or renew the endpoint lease"
+	case controlplane.ErrIdempotencyConflict:
+		return "reuse the original idempotent payload or choose a new idempotency key"
+	case controlplane.ErrTerminalSession, controlplane.ErrSessionClosed:
+		return "do not send new work to this session"
+	default:
+		return "inspect the structured error and retry only if recoverable"
+	}
 }
 
 // extractBearerToken returns the token from "Authorization: Bearer <token>"

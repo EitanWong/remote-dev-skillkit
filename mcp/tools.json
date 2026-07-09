@@ -1,81 +1,15 @@
 {
   "tools": [
     {
-      "name": "rdev.support_session.connect",
-      "description": "Single high-level Agent entry for 'connect a computer'. Fresh Agents should call this before rdev.invites.create, rdev.connection_entry.plan, hand-written gateway setup, or package materialization. It returns target_handoff_envelope, the ready-to-forward human message with full_text and copy_paste, remote_control_entry, the DeviceID/session-password style support entry that Agents should use instead of exposing ticket internals, plus fresh_agent_connect_contract, the model-independent standard path that tells Agents how to recover missing rdev, what not to ask humans for, and which custom scripts are forbidden. If a reachable or configured gateway exists, creates the attended-temporary session and returns user_handoff, target_handoff_envelope, remote_control_entry, agent_connection_runbook, gateway_candidate_preflight, connectivity_helper_preflight, connection_entry_runner_recommendation, connection_supervision, and status watcher in one payload. If no gateway is running, returns cli_start_now_command plus agent_connection_runbook for the standard visible foreground rdev support-session connect --start flow, instead of making the Agent choose lower-level handoff/create/start/status steps. The foreground start payload exposes handoff_text_file.path for the exact target-side plain-text handoff and connected_report_file.path for the exact success report, so Agents can avoid parsing long-running terminal JSON. The created target command and host runtime keep signed gateway candidates so target bootstrap and post-registration job transport can fail over inside rdev. Read agent_connection_runbook.fresh_agent_failure_prevention before writing setup code; it captures known failure patterns such as manual gateway/invite/bootstrap glue, missing helper assets that produce 'rdev is required', background gateway workarounds, approval polling, and Agent-written PowerShell/shell scripts. When durable or restrictive-network connectivity is needed, use connection_entry_runner_recommendation to materialize and dry-run the standard self-contained Connection Entry runner instead of writing tunnel code. Do not persist trycloudflare.com Quick Tunnel URLs as durable configuration; prefer RDEV_HOSTED_GATEWAY_URL on a cloud/VPS host or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL for reusable Cloudflare Named Tunnel addresses.",
-      "safety": "Creates a scoped attended-temporary ticket only when a reachable/configured gateway is supplied; otherwise planning only. Does not execute on the target host, install hidden persistence, bypass policy, or mutate firewall/DNS/routes.",
+      "name": "rdev.sessions.create",
+      "description": "Create a Control Plane v1 session and return compact status with user_summary, agent_next_action, recoverable, retry_after_ms, join_code, and session snapshot fields. This is the first Agent-facing MCP entrypoint for new remote work.",
+      "safety": "Creates a session record only. Does not execute on a target, install persistence, mutate network settings, or bypass local OS controls.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "addr": {
+          "authority_id": {
             "minLength": 1,
             "type": "string"
-          },
-          "auto_approve": {
-            "type": "boolean"
-          },
-          "gateway_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "operator_token_file": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "rdev_command": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "repo_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "target": {
-            "enum": [
-              "auto",
-              "windows",
-              "macos",
-              "linux"
-            ],
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "maximum": 86400,
-            "minimum": 60,
-            "type": "integer"
-          },
-          "work_dir": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.invites.create",
-      "description": "Create an Agent-first remote session invite with a universal connection entry, manifest URL, pinned manifest root, transport plan, and next MCP actions. For ordinary 'connect this computer' requests, call rdev.support_session.connect first; use invites.create for reviewed package materialization, managed owned-host planning, or explicit lower-level workflows.",
-      "safety": "Creates an access path and connection metadata; does not execute on the host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "authority_profile": {
-            "enum": [
-              "standard",
-              "max-control"
-            ],
-            "type": "string"
-          },
-          "auto_approve": {
-            "type": "boolean"
           },
           "capabilities": {
             "items": {
@@ -84,811 +18,142 @@
             },
             "type": "array"
           },
-          "gateway_url": {
+          "expires_at": {
             "minLength": 1,
             "type": "string"
           },
-          "mode": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "join_policy": {
+            "enum": [
+              "single-target",
+              "multi-target",
+              "agent-only"
+            ],
+            "type": "string"
+          },
+          "profile": {
             "enum": [
               "attended-temporary",
               "managed",
-              "break-glass"
+              "break-glass",
+              "workspace-provider",
+              "ci-worker"
             ],
-            "type": "string"
-          },
-          "network_scope": {
-            "enum": [
-              "auto",
-              "internet",
-              "lan",
-              "relay",
-              "mesh",
-              "ssh"
-            ],
-            "type": "string"
-          },
-          "once": {
-            "type": "boolean"
-          },
-          "rdev_command": {
-            "minLength": 1,
             "type": "string"
           },
           "reason": {
             "minLength": 1,
             "type": "string"
           },
-          "require_host_approval": {
-            "type": "boolean"
-          },
-          "transport": {
-            "enum": [
-              "auto",
-              "wss",
-              "long-poll",
-              "poll"
-            ],
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "maximum": 86400,
-            "minimum": 60,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "gateway_url",
-          "reason"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.support_session.handoff",
-      "description": "Return the single standard first-contact decision for a fresh Agent that needs to connect a target machine, including agent_connection_runbook and fresh_agent_failure_prevention. If gateway_url is provided or a configured RDEV_*_GATEWAY_URL fallback exists, call rdev.support_session.create next; if not, run cli_start_now_command, the visible foreground rdev support-session connect --start command, then read handoff_text_file.path when present, ready_file.path as JSON fallback, status_file.path for the latest machine-readable connection event, and connected_report_file.path for the plain-text success report. Agents should use this before choosing between prepare/create/start/plan/status, and must not write their own bootstrap, relay, approval-polling, or recovery scripts.",
-      "safety": "Planning only; does not create tickets, start a gateway, approve hosts, execute on the target host, or install persistence.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "addr": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "auto_approve": {
-            "type": "boolean"
-          },
-          "gateway_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "rdev_command": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "repo_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "target": {
-            "enum": [
-              "auto",
-              "windows",
-              "macos",
-              "linux"
-            ],
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "maximum": 86400,
-            "minimum": 60,
+          "reconnect_grace_ms": {
+            "maximum": 3600000,
+            "minimum": 0,
             "type": "integer"
           },
-          "work_dir": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.support_session.prepare",
-      "description": "Inspect a fresh Agent runtime for one-command support-session readiness: local rdev recovery, Go/Git checkout state, gateway URL candidates, agent_connection_runbook, fresh_agent_failure_prevention, gateway_candidate_preflight, connectivity_helper_preflight, configured RDEV_*_GATEWAY_URL fallbacks, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL reusable Cloudflare tunnel fallback, platform helper asset availability, target bootstrap self-repair, and standard recovery actions. Agents should call this before improvising setup when rdev or gateway state is unclear, then use agent_connection_runbook, gateway_candidate_preflight, connectivity_helper_preflight, and standard recovery actions to choose connect --start, a configured gateway, or Connection Entry recovery. Gateway candidates are diagnostic/preflight data, not human-facing command ingredients; trycloudflare.com Quick Tunnel URLs are current-session fallback URLs, not durable gateway config.",
-      "safety": "Read-only by default; with build_assets=true it builds local helper binaries from the checked-out source but does not create tickets, start a gateway, approve hosts, or execute on a target machine.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "addr": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "build_assets": {
-            "type": "boolean"
-          },
-          "gateway_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "rdev_command": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "repo_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "target": {
-            "enum": [
-              "auto",
-              "windows",
-              "macos",
-              "linux"
-            ],
-            "type": "string"
-          },
-          "work_dir": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.support_session.create",
-      "description": "Create an attended temporary support session through an already reachable gateway and return a ready target_handoff_envelope, remote_control_entry, user_handoff, target command, status watcher, fresh_agent_connect_contract, agent_connection_runbook, fresh_agent_failure_prevention, gateway_candidate_preflight, connectivity_helper_preflight, connection_entry_runner_recommendation, connection_supervision, and connection_continuity_policy. If gateway_url is omitted, the tool uses the first configured RDEV_*_GATEWAY_URL or RDEV_CLOUDFLARED_NAMED_TUNNEL_URL fallback. Agents should forward target_handoff_envelope.full_text verbatim to the target-side human, then use remote_control_entry as the remote-control-style DeviceID/session-password status surface and wait through connection_supervision/status surfaces. The target command is the standardized fallback surface and can try ordered gateway URL candidates, including configured hosted/cloudflared/relay/mesh/VPN/SSH fallbacks, with bounded timeout/retry behavior without Agent-authored scripts. After registration, rdev host serve --transport auto can reuse signed join-manifest gateway candidates and switch to another reachable gateway when the current path fails before jobs are processed. Agents should follow fresh_agent_connect_contract and agent_connection_runbook first, read fresh_agent_failure_prevention before writing setup code, read gateway_candidate_preflight and connectivity_helper_preflight before asking humans or writing probes, read connection_entry_runner_recommendation before promising durable or restrictive-network connectivity, read connection_supervision to wait, report connected=true, and choose standard upgrade/recovery tools; read stable_after_lan_change before promising durable connectivity, prefer target_handoff_envelope.full_text for the human-facing response, and use rdev support-session connect --start when no gateway is running instead of manually creating an invite, substituting ticket codes, or writing bootstrap glue.",
-      "safety": "Creates a scoped attended-temporary ticket with first-host auto approval by default; does not execute on the target host or install hidden persistence.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "auto_approve": {
-            "type": "boolean"
-          },
-          "gateway_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "operator_token_file": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "rdev_command": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "target": {
-            "enum": [
-              "auto",
-              "windows",
-              "macos",
-              "linux"
-            ],
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "maximum": 86400,
-            "minimum": 60,
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.support_session.plan",
-      "description": "Create a standardized Agent-native support session plan for review/debug access to gateway startup, diagnostic gateway URL candidates, configured RDEV_*_GATEWAY_URL fallbacks, verified helper assets, invite creation, localized target commands with built-in candidate fallback/timeout policy, and scoped attended-temporary auto-approval. Agents should prefer rdev.support_session.connect, or rdev support-session connect --start when a local foreground gateway is needed.",
-      "safety": "Planning only; does not start a gateway, create a ticket, approve a host, install software, or execute on the target host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "addr": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "auto_approve": {
-            "type": "boolean"
-          },
-          "gateway_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "rdev_command": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "repo_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "target": {
-            "enum": [
-              "auto",
-              "windows",
-              "macos",
-              "linux"
-            ],
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "maximum": 86400,
-            "minimum": 60,
-            "type": "integer"
-          },
-          "work_dir": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.support_session.status",
-      "description": "Read or wait on standardized support-session connection status for a ticket code so Agents can tell the user when the target host has connected, is pending approval, timed out, or is still waiting. Status includes remote_control_entry, a DeviceID/session-password style support entry that remains the Agent-facing connection handle. Pass gateway_url when watching a foreground, tunneled, hosted, relay, mesh, VPN, or SSH gateway that is not the MCP server's local in-memory gateway.",
-      "safety": "Read-only status check; does not approve hosts or execute jobs.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "interval_millis": {
+          "retry_after_ms": {
             "maximum": 60000,
-            "minimum": 100,
-            "type": "integer"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "ticket_code": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "timeout_seconds": {
-            "maximum": 3600,
             "minimum": 0,
             "type": "integer"
           },
-          "wait": {
-            "type": "boolean"
+          "selected_gateway_url": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
-          "ticket_code"
+          "reason"
         ],
         "type": "object"
       }
     },
     {
-      "name": "rdev.support_session.report",
-      "description": "Summarize a support session by ticket_code or host_id, select the single active job-ready host when possible, list stale/pending hosts, jobs, artifact counts, first evidence snippets, remote_control_entry, and connection continuity so Agents can produce final status without hand-written curl or raw HTTP summaries. Pass gateway_url for non-local foreground/tunneled/hosted gateways. Reports must not make Agents disconnect automatically; the host stays connected until the operator explicitly asks to disconnect, revoke, or stop it.",
-      "safety": "Read-only report generation; may expose sensitive job output snippets already available to the operator.",
+      "name": "rdev.sessions.status",
+      "description": "Read a Control Plane v1 session snapshot and derived status with user_summary, agent_next_action, recoverable, retry_after_ms, last_seq, snapshot_seq, selected gateway, endpoints, recent tasks, and artifact references.",
+      "safety": "Read-only. Does not expose endpoint lease secrets, raw unbounded logs, or target-local credentials.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,
             "type": "string"
           },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "ticket_code": {
+          "session_id": {
             "minLength": 1,
             "type": "string"
           }
         },
+        "required": [
+          "session_id"
+        ],
         "type": "object"
       }
     },
     {
-      "name": "rdev.support_session.smoke_test",
-      "description": "Run the standard Agent-native support-session smoke test against a connected host instead of hand-writing OS-specific job probes. The tool selects the single active host from ticket_code when possible, creates fixed scoped shell jobs for identity, fs.read, fs.write.scoped, and process.inspect, waits for terminal job states, summarizes artifacts, includes remote_control_entry and connection continuity, and tells Agents to keep the host connected unless the operator explicitly asks to disconnect. Pass remote_control=true only when validating the native remote-control adapter surface; it adds low-risk standard rdev.files/rdev.desktop.windows-style probes for file list and window.inspect, not screenshot, input, clipboard, app launch, or destructive file actions.",
-      "safety": "Creates small scoped diagnostic jobs on an already connected host. Does not elevate, install software, change services, mutate firewall/DNS/routes, or disconnect the host.",
+      "name": "rdev.sessions.events",
+      "description": "Read Control Plane v1 events after a cursor and return events plus snapshot_required, snapshot_seq, last_seq, retry_after_ms, user_summary, and agent_next_action so Agents can recover from compaction or weak networks.",
+      "safety": "Read-only Agent event replay. Does not expose endpoint lease secrets and does not mutate target state.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "after_seq": {
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "endpoint_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,
             "type": "string"
           },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locale": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "remote_control": {
+          "include_status": {
             "type": "boolean"
           },
-          "ticket_code": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "timeout_seconds": {
-            "maximum": 3600,
+          "limit": {
+            "maximum": 100,
             "minimum": 1,
             "type": "integer"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.connection_entry.plan",
-      "description": "Materialize an invite into the universal Connection Entry handoff and self-contained Connection Entry runner package. Humans receive only a link, visible launcher, or signed package; ticket, gateway, manifest root, transport, release, relay, mesh, VPN, SSH, checksum, helper startup, and approved dependency install values stay in Agent/tool metadata.",
-      "safety": "Planning only; writes no remote state and does not execute on the target host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "force": {
-            "type": "boolean"
           },
-          "host_name": {
-            "minLength": 1,
-            "type": "string"
+          "processed_seq": {
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
           },
-          "invite_json": {
-            "minLength": 1,
-            "type": "string"
+          "received_seq": {
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
           },
-          "managed_binary_path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "managed_service_label": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "managed_service_name": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "managed_unit_name": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "out_dir": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "ownership": {
-            "enum": [
-              "owned",
-              "third-party"
-            ],
-            "type": "string"
-          },
-          "rdev_command": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "release_bundle_path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "release_bundle_required_artifacts": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "release_bundle_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "release_root_public_key": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "session_mode": {
-            "enum": [
-              "attended-temporary",
-              "managed",
-              "break-glass"
-            ],
-            "type": "string"
-          },
-          "target_arch": {
-            "enum": [
-              "amd64",
-              "arm64"
-            ],
-            "type": "string"
-          },
-          "target_os": {
-            "enum": [
-              "windows",
-              "darwin",
-              "linux"
-            ],
-            "type": "string"
-          },
-          "windows_bootstrap_script": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "windows_bootstrap_script_sha256": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "windows_bootstrap_script_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "windows_host_download_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "windows_host_sha256": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "windows_verifier_download_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "windows_verifier_sha256": {
+          "session_id": {
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "invite_json"
+          "session_id"
         ],
         "type": "object"
       }
     },
     {
-      "name": "rdev.acceptance.scaffold_evidence",
-      "description": "Create a standard evidence collection directory from a hosted provider package, relay adapter package, runtime-evidence-plan.json, or acceptance-evidence-plan.json. Agents use this before real hosted-provider or relay/mesh/VPN/SSH acceptance so file names, package commands, verify commands, checklist, and report paths come from rdev instead of model-authored scripts or hand-picked plan paths.",
-      "safety": "Writes local scaffold files only. Does not create fake acceptance, execute helpers, start gateways, mutate network/cloud resources, or make production claims. Placeholder evidence is opt-in and must be replaced before packaging.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "create_placeholders": {
-            "type": "boolean"
-          },
-          "force": {
-            "type": "boolean"
-          },
-          "hosted_provider_package": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "out_dir": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "package_dir": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "plan": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "relay_adapter_package": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "out_dir"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.acceptance.evidence_status",
-      "description": "Read a standard acceptance evidence scaffold and report whether required hosted-provider or relay/mesh/VPN/SSH evidence files are present, non-empty, and not scaffold placeholders before packaging.",
-      "safety": "Read-only status check. Does not create evidence, execute helpers, start gateways, package evidence, mutate network/cloud resources, or make production claims.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "scaffold": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "scaffold"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.acceptance.scaffold_post_release_download",
-      "description": "Create a standard evidence collection directory from a verified post-release install directory or explicit post-release install plan files so Agents collect public GitHub Release download transcripts, candidate verification, bundle verification, and Skillkit evidence with stable file names before packaging.",
-      "safety": "Writes local scaffold files only. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims. Placeholder evidence is opt-in and must be replaced before packaging.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "create_placeholders": {
-            "type": "boolean"
-          },
-          "force": {
-            "type": "boolean"
-          },
-          "out_dir": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "plan": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "plan_verification": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "post_release_install_dir": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "out_dir"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.acceptance.post_release_evidence_status",
-      "description": "Read a post-release download evidence scaffold and report whether every required platform and Skillkit evidence file is present, non-empty, and not a scaffold placeholder before packaging.",
-      "safety": "Read-only status check. Does not publish releases, download assets, execute verification scripts, package evidence, mutate GitHub, or make public download acceptance claims.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "scaffold": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "scaffold"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.acceptance.release_evidence_index",
-      "description": "Verify and index the three release-blocking acceptance evidence packages after real runs: hosted provider runtime, relay/connectivity helper, and post-release public download evidence. Agents use this as the final local release-evidence gate instead of manually deciding whether separate packages are enough for production claims.",
-      "safety": "Verifies local package manifests and writes a local index/checksums only. Does not publish releases, download assets, execute helpers, start gateways, mutate hosted providers, mutate GitHub, or make production claims.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "hosted_provider_runtime_package": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "out_dir": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "post_release_download_package": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "relay_adapter_packages": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "out_dir"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.relay_adapter.package",
-      "description": "Generate a standard connectivity adapter package for restrictive-network Connection Entries. Supports Chisel, frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard packages. The package emits reviewed RDEV_RELAY_*, RDEV_SSH_*, RDEV_MESH_*, or RDEV_VPN_* gateway/helper/install metadata plus evidence and approval boundaries so Agents use rdev runner metadata instead of writing custom relay, PowerShell, shell, SSH, tunnel, mesh, VPN, or polling scripts.",
-      "safety": "Writes local package files only. Does not create relay accounts, mutate firewall/DNS/routes, install helpers, start tunnels, or include real relay endpoints, credentials, private IPs, local paths, or secrets.",
+      "name": "rdev.sessions.task",
+      "description": "Submit or inspect a Control Plane v1 task through the session event stream and return task, event, user_summary, agent_next_action, recoverable, and retry_after_ms. Tasks are routed through session endpoints.",
+      "safety": "Creates a routed task event for an already joined session endpoint. Adapter payloads remain policy-bound by the target runtime and session capabilities.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "adapter": {
-            "enum": [
-              "chisel",
-              "frpc",
-              "ssh-tunnel",
-              "headscale-tailscale",
-              "wireguard"
-            ],
-            "type": "string"
-          },
-          "force": {
-            "type": "boolean"
-          },
-          "name": {
             "minLength": 1,
             "type": "string"
           },
-          "out_dir": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "out_dir"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.relay_adapter.verify",
-      "description": "Verify a relay adapter package before an Agent exports RDEV_RELAY_* environment variables or dry-runs the Connection Entry runner. Checks schema, supported adapter kind, safe helper argv, safe dependency install action, file checksums, and no-private-surface hygiene.",
-      "safety": "Read-only verification. Does not execute helpers, install dependencies, start relay tunnels, or mutate remote/network state.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "package": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "package"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.tickets.create",
-      "description": "Create a short-lived support or remote development ticket for a target host.",
-      "safety": "Creates access path; does not execute on host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "capabilities": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "mode": {
-            "enum": [
-              "attended-temporary",
-              "managed",
-              "break-glass"
-            ],
-            "type": "string"
-          },
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "maximum": 86400,
-            "minimum": 60,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "mode",
-          "ttl_seconds",
-          "reason"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.tickets.revoke",
-      "description": "Revoke a support ticket and prevent new host enrollment through it.",
-      "safety": "Revocation only.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "ticket_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "ticket_id",
-          "reason"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.hosts.list",
-      "description": "List enrolled or pending hosts visible to the operator.",
-      "safety": "Read-only.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "active",
-              "revoked",
-              "offline"
-            ],
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.hosts.capabilities",
-      "description": "Inspect detected and approved capabilities for one host.",
-      "safety": "Read-only.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.hosts.approve",
-      "description": "Approve a pending host for a ticket-scoped policy.",
-      "safety": "Access-granting; requires operator approval.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
           "capabilities": {
             "items": {
               "minLength": 1,
@@ -897,682 +162,11 @@
             "type": "array"
           },
           "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,
             "type": "string"
           },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "ticket_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id",
-          "ticket_id",
-          "capabilities"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.hosts.revoke",
-      "description": "Revoke host access and disconnect active sessions.",
-      "safety": "Revocation only.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reason": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id",
-          "reason"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.files.list",
-      "description": "Create a standard file adapter job to list files inside the approved workspace.",
-      "safety": "Scoped file metadata read; no custom shell scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "max_bytes": {
-            "maximum": 10485760,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.files.read",
-      "description": "Create a standard file adapter job to read or download a workspace-scoped file.",
-      "safety": "Scoped file read; no custom shell scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "max_bytes": {
-            "maximum": 10485760,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id",
-          "path"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.files.write",
-      "description": "Create a standard file adapter job to write workspace-scoped content.",
-      "safety": "Scoped file write inside write_scope; no custom shell scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "encoding": {
-            "enum": [
-              "utf-8",
-              "text",
-              "base64"
-            ],
-            "type": "string"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "write_scope": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "host_id",
-          "path",
-          "content"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.files.download",
-      "description": "Create a standard file adapter job to download a workspace-scoped file as base64 evidence.",
-      "safety": "Scoped file read; no custom shell scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "max_bytes": {
-            "maximum": 10485760,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id",
-          "path"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.files.upload",
-      "description": "Create a standard file adapter job to upload workspace-scoped content.",
-      "safety": "Scoped file write inside write_scope; no custom shell scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "encoding": {
-            "enum": [
-              "utf-8",
-              "text",
-              "base64"
-            ],
-            "type": "string"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "write_scope": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "host_id",
-          "path",
-          "content"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.files.delete",
-      "description": "Create a standard file adapter job to delete one workspace-scoped file or empty directory.",
-      "safety": "Scoped non-recursive delete inside write_scope; requires file.delete approval; no custom shell scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "path": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "write_scope": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "host_id",
-          "path"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.screenshot",
-      "description": "Create a standard desktop adapter job to capture a PNG screenshot artifact.",
-      "safety": "Requires explicit screen.screenshot approval; no custom GUI scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.record",
-      "description": "Create a standard desktop adapter job to capture a PNG frame bundle.",
-      "safety": "Requires explicit screen.record approval; no video encoder dependency.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "frames": {
-            "maximum": 30,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "interval_millis": {
-            "maximum": 10000,
-            "minimum": 50,
-            "type": "integer"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.windows",
-      "description": "Create a standard desktop adapter job to enumerate visible windows.",
-      "safety": "Window metadata read; no GUI control.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.input",
-      "description": "Create a standard desktop adapter job for approved keyboard or mouse input.",
-      "safety": "Requires input.keyboard or input.mouse approval; no custom input scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "button": {
-            "enum": [
-              "move",
-              "left",
-              "right",
-              "click"
-            ],
-            "type": "string"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "text": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "x": {
-            "maximum": 20000,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "y": {
-            "maximum": 20000,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.app",
-      "description": "Create a standard desktop adapter job to launch an app or close a window gracefully.",
-      "safety": "Requires app.launch/app.close approval; force-kill is not part of this tool.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "enum": [
-              "launch",
-              "close"
-            ],
-            "type": "string"
-          },
-          "app": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "title": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "window_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id",
-          "action"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.url",
-      "description": "Create a standard desktop adapter job to open an approved URL.",
-      "safety": "Requires url.open approval; no browser automation script.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id",
-          "url"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.clipboard",
-      "description": "Create a standard desktop adapter job to read or write clipboard text.",
-      "safety": "Requires clipboard.read or clipboard.write approval; no custom clipboard scripts.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "enum": [
-              "read",
-              "write"
-            ],
-            "type": "string"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "text": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id",
-          "action"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.focus",
-      "description": "Create a standard desktop adapter job to focus a visible window.",
-      "safety": "Requires window.focus approval.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "title": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "window_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.desktop.move",
-      "description": "Create a standard desktop adapter job to move or resize a visible window.",
-      "safety": "Requires window.move approval.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "height": {
-            "maximum": 20000,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "host_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "title": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "width": {
-            "maximum": 20000,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "window_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "workspace_root": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "x": {
-            "maximum": 20000,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "y": {
-            "maximum": 20000,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "host_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.jobs.create",
-      "description": "Create a signed, policy-bound remote job for an approved host.",
-      "safety": "May execute on host after policy checks.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter": {
-            "enum": [
-              "shell",
-              "powershell",
-              "file",
-              "desktop",
-              "acpx",
-              "codex",
-              "claude-code"
-            ],
-            "type": "string"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          },
-          "host_id": {
+          "idempotency_key": {
             "minLength": 1,
             "type": "string"
           },
@@ -1580,589 +174,166 @@
             "minLength": 1,
             "type": "string"
           },
-          "policy": {
+          "limits": {
+            "additionalProperties": true,
             "type": "object"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_endpoint_id": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
-          "host_id",
+          "session_id",
           "adapter",
-          "intent",
-          "policy"
+          "idempotency_key"
         ],
         "type": "object"
       }
     },
     {
-      "name": "rdev.jobs.policy_template",
-      "description": "Return a ready safe starter policy for common shell support-session probes so Agents do not search source code or hand-roll policy JSON before rdev.jobs.create.",
-      "safety": "Read-only template generation. Does not create or execute a job.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "capability": {
-            "enum": [
-              "shell.user",
-              "fs.read",
-              "fs.write.scoped",
-              "file.transfer.read",
-              "file.transfer.write",
-              "file.delete",
-              "process.inspect",
-              "tool.availability",
-              "window.inspect",
-              "screen.screenshot",
-              "screen.record",
-              "window.focus",
-              "window.move",
-              "input.keyboard",
-              "input.mouse",
-              "app.launch",
-              "app.close",
-              "url.open",
-              "clipboard.read",
-              "clipboard.write",
-              "unattended.access"
-            ],
-            "type": "string"
-          },
-          "target_os": {
-            "enum": [
-              "auto",
-              "windows",
-              "macos",
-              "darwin",
-              "linux"
-            ],
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.jobs.status",
-      "description": "Read status and latest events for a remote job.",
-      "safety": "Read-only.",
+      "name": "rdev.sessions.interrupt",
+      "description": "Append a small Control Plane v1 interrupt event for local consent, policy pause, cancellation intent, or user stop, and return event, user_summary, agent_next_action, recoverable, and retry_after_ms.",
+      "safety": "Adds a bounded interrupt event only. It is not a separate authorization subsystem and does not bypass local OS or enterprise controls.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,
             "type": "string"
           },
-          "job_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.jobs.cancel",
-      "description": "Request cooperative cancellation of a running job.",
-      "safety": "Cancellation only.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+          "idempotency_key": {
             "minLength": 1,
             "type": "string"
           },
-          "job_id": {
-            "minLength": 1,
-            "type": "string"
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
           },
           "reason": {
             "minLength": 1,
             "type": "string"
-          }
-        },
-        "required": [
-          "job_id",
-          "reason"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.jobs.approve",
-      "description": "Approve a pending high-risk job action such as elevation or package install.",
-      "safety": "Dangerous-action approval.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "approval_id": {
+          },
+          "session_id": {
             "minLength": 1,
             "type": "string"
           },
-          "decision": {
-            "enum": [
-              "approved",
-              "denied"
-            ],
-            "type": "string"
-          },
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+          "task_id": {
             "minLength": 1,
             "type": "string"
           },
-          "job_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reason": {
+          "to_endpoint_id": {
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "job_id",
-          "approval_id",
-          "decision",
-          "reason"
+          "session_id",
+          "reason",
+          "idempotency_key"
         ],
         "type": "object"
       }
     },
     {
-      "name": "rdev.artifacts.list",
-      "description": "List artifacts produced by a job.",
-      "safety": "Read-only metadata.",
+      "name": "rdev.sessions.artifacts",
+      "description": "Record or inspect Control Plane v1 artifact references with size, sha256, upload_offset, complete, user_summary, agent_next_action, recoverable, and retry_after_ms. Large content stays out of MCP responses.",
+      "safety": "Handles artifact metadata and references only. Does not inline large files, screenshots, logs, diffs, or binary content.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
+          "complete": {
+            "type": "boolean"
           },
-          "job_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.artifacts.read",
-      "description": "Read an artifact produced by a job.",
-      "safety": "Read-only; may expose sensitive job output.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "artifact_id": {
+          "content_type": {
             "minLength": 1,
             "type": "string"
           },
           "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "artifact_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.artifacts.export_bundle",
-      "description": "Export a reviewable evidence bundle for one job, including manifest, checksums, envelope, artifacts, and audit slice.",
-      "safety": "Read-only evidence export; may expose sensitive job output.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "job_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.audit.query",
-      "description": "Query redacted audit events for tickets, hosts, and jobs.",
-      "safety": "Read-only audit access.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "gateway_url": {
-            "description": "Optional gateway base URL to proxy this call to, for example https://xxx.trycloudflare.com. Overrides the server-level --gateway-url and RDEV_*_GATEWAY_URL env vars for this single call.",
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,
             "type": "string"
           },
-          "limit": {
-            "maximum": 500,
-            "minimum": 1,
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "include_status": {
+            "type": "boolean"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sha256": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 1000000000,
+            "minimum": 0,
             "type": "integer"
           },
-          "target_id": {
+          "task_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "upload_offset": {
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
-          "target_id"
+          "session_id"
         ],
         "type": "object"
       }
     },
     {
-      "name": "rdev.policy.explain",
-      "description": "Explain whether a requested action would be allowed by policy.",
-      "safety": "Read-only policy simulation.",
+      "name": "rdev.sessions.close",
+      "description": "Close a Control Plane v1 session and return final status with user_summary, agent_next_action, recoverable, retry_after_ms, and close event. Event reads remain available until retention expiry.",
+      "safety": "Closes the session control plane. Does not uninstall software, delete local data, or mutate target OS settings.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "capability": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,
             "type": "string"
           },
-          "mode": {
-            "enum": [
-              "attended-temporary",
-              "managed",
-              "break-glass"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "mode",
-          "capability"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.policy.explain_shell",
-      "description": "Explain whether a shell job policy is structurally allowed before creating a signed job.",
-      "safety": "Read-only policy simulation; host still re-validates before execution.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "mode": {
-            "enum": [
-              "attended-temporary",
-              "managed",
-              "break-glass"
-            ],
-            "type": "string"
-          },
-          "policy": {
-            "type": "object"
-          }
-        },
-        "required": [
-          "mode",
-          "policy"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.enrollment.verify_certificate",
-      "description": "Verify a host enrollment certificate and optional signed revocation list against a pinned enrollment root before trusting a host registration.",
-      "safety": "Read-only certificate and revocation validation; does not issue certificates or grant host access.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "artifact_id": {
+          "idempotency_key": {
             "minLength": 1,
             "type": "string"
           },
-          "certificate_json": {
+          "reason": {
             "minLength": 1,
             "type": "string"
           },
-          "revocations_artifact_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "revocations_json": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "root_public_key": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "verify_at": {
+          "session_id": {
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "root_public_key"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.update.check",
-      "description": "Check the latest GitHub Release for Remote Dev Skillkit and compare it with the installed version.",
-      "safety": "Read-only GitHub release metadata lookup; does not download, install, or replace files.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "api_base_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "current_version": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "repo": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.update.plan",
-      "description": "Create a dry-run update plan from the latest GitHub Release, including platform archive selection and verification steps.",
-      "safety": "Read-only planning; does not download, install, replace binaries, restart services, or mutate configuration.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "api_base_url": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "current_version": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "platform": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "repo": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.adapter.verify_result",
-      "description": "Verify an adapter result artifact against the public result-artifact conformance contract.",
-      "safety": "Read-only artifact validation; does not execute on a host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_json": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "command_fields": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "reject_secret_patterns": {
-            "type": "boolean"
-          },
-          "require_redaction": {
-            "type": "boolean"
-          },
-          "require_timing": {
-            "type": "boolean"
-          },
-          "required_string_fields": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "adapter",
-          "schema"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.adapter.verify_lifecycle",
-      "description": "Verify an adapter lifecycle manifest against the public Adapter SDK lifecycle conformance contract.",
-      "safety": "Read-only manifest validation; does not execute on a host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_json": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "reject_secret_patterns": {
-            "type": "boolean"
-          },
-          "require_cancellation": {
-            "type": "boolean"
-          },
-          "require_result_schema": {
-            "type": "boolean"
-          },
-          "require_safety": {
-            "type": "boolean"
-          },
-          "required_phases": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "adapter"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.adapter.verify_cancellation",
-      "description": "Verify an adapter cancellation result artifact against the public cancellation conformance contract.",
-      "safety": "Read-only artifact validation; does not execute on a host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_json": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "command_fields": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "reject_secret_patterns": {
-            "type": "boolean"
-          },
-          "require_redaction": {
-            "type": "boolean"
-          },
-          "require_timing": {
-            "type": "boolean"
-          },
-          "required_string_fields": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "adapter",
-          "schema"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "name": "rdev.adapter.verify_runtime",
-      "description": "Verify an adapter runtime fixture generated by the public Adapter SDK lifecycle runner.",
-      "safety": "Read-only fixture validation; does not execute on a host.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "artifact_json": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "require_cancellation": {
-            "type": "boolean"
-          },
-          "require_cleanup": {
-            "type": "boolean"
-          },
-          "require_result_artifact": {
-            "type": "boolean"
-          },
-          "require_successful": {
-            "type": "boolean"
-          },
-          "required_phases": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "adapter"
+          "session_id"
         ],
         "type": "object"
       }

@@ -2,12 +2,12 @@
 
 All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
-publication still requires explicit operator approval.
+publication still requires explicit operator authorization.
 
 ## 0.1.43-dev
 
 Current phase: make remote-control adapter validation Agent-native instead of
-hand-written job probes.
+hand-written task probes.
 
 ### Added
 
@@ -36,8 +36,8 @@ AI-native remote-control kernel pass.
 - Added native `file.delete` support across the file adapter, policy
   explanations, hostrunner capability checks, CLI, MCP tools, generated
   `mcp/tools.json`, and policy templates. Deletes are scoped to
-  `write_scope`, require `file.delete` approval, and use non-recursive removal.
-- Added standard clipboard read/write job surfaces across CLI and MCP:
+  `write_scope`, require `file.delete` authorization, and use non-recursive removal.
+- Added standard clipboard read/write task surfaces across CLI and MCP:
   `rdev desktop clipboard`, `rdev.desktop.clipboard`, `clipboard.read`, and
   `clipboard.write`.
 - Added Windows native clipboard backend using Win32 Unicode clipboard APIs.
@@ -54,7 +54,7 @@ AI-native remote-control kernel pass.
 
 Current phase: AI-native remote-control kernel, native-first and Windows-first.
 This slice adds first-class file and desktop control surfaces to the existing
-signed job, approval, audit, and evidence pipeline so Agents stop writing
+signed task, authorization, audit, and evidence pipeline so Agents stop writing
 ad-hoc GUI/file scripts for ordinary remote-control tasks.
 
 ### Added
@@ -76,15 +76,15 @@ ad-hoc GUI/file scripts for ordinary remote-control tasks.
   `window.*`, `input.*`, `app.*`, `url.open`, clipboard, and
   `unattended.access` capabilities.
 - Added unit coverage for file adapter path boundaries, desktop fail-closed
-  behavior, hostrunner adapter dispatch, policy templates, CLI/MCP job
+  behavior, hostrunner adapter dispatch, policy templates, CLI/MCP task
   wrappers, and remote-control policy gates.
 
 ### Changed
 
 - Hostrunner now supports `file` and `desktop` adapters as first-class signed
-  job targets with adapter-specific capability checks and result schemas.
-- HTTP job creation now prechecks `file` and `desktop` policies before queuing
-  jobs, matching shell/PowerShell behavior.
+  task targets with adapter-specific capability checks and result schemas.
+- HTTP task creation now prechecks `file` and `desktop` policies before queuing
+  tasks, matching shell/PowerShell behavior.
 - `safe-remote-support` and `remote-vibe-coding` now describe Remote Dev
   Skillkit as an AI Agent remote-control kernel and require native
   `rdev.files.*` / `rdev.desktop.*` surfaces before any hand-written scripts.
@@ -92,7 +92,7 @@ ad-hoc GUI/file scripts for ordinary remote-control tasks.
 ### Security
 
 - Desktop GUI/input/screenshot/record/app/URL/clipboard/unattended actions are
-  approval-gated. GUI control requires an unlocked interactive user session and
+  authorization-gated. GUI control requires an unlocked interactive user session and
   does not bypass lock screens, OS privacy prompts, MDM, UAC, sudo, or
   enterprise policy.
 
@@ -129,7 +129,7 @@ preserving visible, attended, revocable target-side consent.
 - Clarified the managed-service boundary: third-party temporary support stays
   visible and non-service by default; operator-owned recurring machines should
   use a reviewed managed-service upgrade only after explicit ownership and
-  persistence approval plus a stable gateway.
+  persistence authorization plus a stable gateway.
 
 ### Fixed
 
@@ -171,10 +171,10 @@ contracts.
   installs do not yet have `.remote-dev-skillkit/install.json`.
 - Added `--ticket-code` support to `rdev support-session report` and MCP
   `rdev.support_session.report`. When exactly one active host exists for the
-  ticket, the report now selects it as `recommended_job_host_id` and includes
+  ticket, the report now selects it as `recommended_task_host_id` and includes
   stale/pending host diagnostics.
 - Added regression coverage for ticket-code report selection, MCP report
-  selection, report schema flexibility, and authenticated host job claim after
+  selection, report schema flexibility, and authenticated host task claim after
   an old heartbeat.
 - Added Agent-friendly command-group help for primary CLI groups, so
   `rdev <group> --help` is a successful discovery path instead of an unknown
@@ -194,7 +194,7 @@ contracts.
   standard discovery order: explicit hint, `RDEV_SOURCE_ROOT`, build metadata,
   current executable parent, and current working directory.
 - Updated `safe-remote-support` guidance so Agents use the ticket-level report
-  to obtain `recommended_job_host_id` before creating host-scoped work.
+  to obtain `recommended_task_host_id` before creating host-scoped work.
 - Updated `safe-remote-support` gateway checks to verify the active gateway URL
   from the session payload or configured `RDEV_*_GATEWAY_URL`, instead of
   assuming the default local `127.0.0.1:8787` gateway.
@@ -210,13 +210,13 @@ contracts.
 
 ### Fixed
 
-- Fixed host-side job claim stability by adding an authenticated gateway claim
+- Fixed host-side task claim stability by adding an authenticated gateway claim
   path that validates `host_secret`, refreshes heartbeat, and claims queued work
   atomically. HTTP polling, long-polling, and WSS now avoid rejecting a real
   connected host just because its previous `last_seen_at` crossed the stale
   window before claim.
 - Fixed support-session reporting paths that forced Agents to discover and pass
-  `host_id` manually even when the ticket had a single active job-ready host.
+  `host_id` manually even when the ticket had a single active task-ready host.
 - Fixed stale MCP/static metadata drift by keeping `mcp/tools.json` aligned
   with the live `ticket_code` report schema.
 - Fixed runtime install-manifest discovery so `rdev doctor` also checks the
@@ -224,7 +224,7 @@ contracts.
   current-working-directory candidates.
 - Fixed top-level CLI examples that still showed `support-session report`
   using a raw `--host-id`; the first-contact path now demonstrates
-  `--ticket-code` so Agents use `recommended_job_host_id` before creating work.
+  `--ticket-code` so Agents use `recommended_task_host_id` before creating work.
 - Fixed support-session handoff and prepare commands so opportunistic LAN or
   loopback gateway candidates stay diagnostic and are not promoted into
   generated `--gateway-url` arguments, preserving managed tunnel selection in
@@ -304,12 +304,12 @@ different target handoff behavior.
 
 ### Added
 
-- Added shared `internal/jobtemplate` policy templates so
-  `rdev job policy-template` and MCP `rdev.jobs.policy_template` return the
-  same starter policy for common scoped probes.
+- Added shared `internal/tasktemplate` policy templates so
+  `rdev task policy-template` returns the same starter policy for common scoped
+  probes.
 - Added MCP `rdev.support_session.report`, matching the CLI
   `rdev support-session report` path, so Agents can summarize connected hosts,
-  jobs, artifact counts, and first evidence snippets without hand-written
+  tasks, artifact counts, and first evidence snippets without hand-written
   `curl`.
 - Added a contract test that compares static `mcp/tools.json` with
   `contracts.Tools()`, making stale MCP metadata a CI-visible failure.
@@ -317,8 +317,8 @@ different target handoff behavior.
 ### Changed
 
 - Regenerated `mcp/tools.json` from the live `rdev mcp tools` contract so
-  `gateway_url`, `rdev.support_session.report`, and
-  `rdev.jobs.policy_template` are visible to installed Agent runtimes.
+  `gateway_url` and `rdev.support_session.report` are visible to installed
+  Agent runtimes.
 - Updated support-session status/supervision/runbook contracts to carry
   `gateway_url` through MCP and CLI watch calls, avoiding accidental reads from
   an empty local in-memory gateway.
@@ -346,15 +346,15 @@ not need to search source code, hand-write `curl`, or send bare invite links.
 
 ### Added
 
-- Added `rdev job artifacts`, a first-class CLI reader for
-  `/v1/jobs/<id>/artifacts`, so Agents can retrieve evidence without guessing
+- Added `rdev task artifacts`, a first-class CLI reader for
+  `/v1/tasks/<id>/artifacts`, so Agents can retrieve evidence without guessing
   raw HTTP routes.
-- Added `rdev job policy-template --capability ... --target-os ...` for common
+- Added `rdev task policy-template --capability ... --target-os ...` for common
   safe probes (`shell.user`, `fs.read`, `fs.write.scoped`, `process.inspect`,
   and `tool.availability`). The command returns a ready policy object for
-  `rdev job create`.
+  `rdev task create`.
 - Added `rdev support-session report`, a read-only session summarizer that
-  fetches the host, jobs, artifact summaries, and a human-readable report for
+  fetches the host, tasks, artifact summaries, and a human-readable report for
   completed capability tests or scoped remote work.
 
 ### Changed
@@ -366,14 +366,14 @@ not need to search source code, hand-write `curl`, or send bare invite links.
 - `rdev support-session start` now accepts `--repo-root`, and
   `support-session connect --start --repo-root ...` preserves that checkout
   through the start path when building helper assets for a new work directory.
-- Updated `safe-remote-support` guidance to prefer `job artifacts`,
-  `job policy-template`, and `support-session report` before MCP or raw HTTP
+- Updated `safe-remote-support` guidance to prefer `task artifacts`,
+  `task policy-template`, and `support-session report` before MCP or raw HTTP
   fallback paths.
 
 ### Fixed
 
-- Fixed `rdev job wait` to read both raw job payloads and gateway responses of
-  the form `{"job": {...}}`, preventing false timeouts after jobs have already
+- Fixed `rdev task wait` to read both raw task payloads and gateway responses of
+  the form `{"task": {...}}`, preventing false timeouts after tasks have already
   reached `succeeded`.
 - Simplified the Windows `process.inspect` audit probe to run `tasklist`
   directly, avoiding fragile nested quoting in `cmd /c tasklist /fi ...`.
@@ -388,12 +388,12 @@ in a fresh remote-connection transcript.
 
 - Added `rdev support-session recover`, an operator-side cleanup command that
   reads the active support-session status, revokes stale hosts for the ticket,
-  cancels their queued/running jobs, and returns a structured recovery report
+  cancels their queued/running tasks, and returns a structured recovery report
   instead of making Agents ask users to paste manifest roots or delete helper
   binaries.
-- Added timeout aliases across support-session and job commands:
+- Added timeout aliases across support-session and task commands:
   `support-session status --timeout-seconds`, `support-session
-  audit-capabilities --timeout-seconds`, and `job wait --timeout`.
+  audit-capabilities --timeout-seconds`, and `task wait --timeout`.
 
 ### Changed
 
@@ -415,7 +415,7 @@ in a fresh remote-connection transcript.
 - WSS host connections now refresh host liveness before stale checks and host
   WSS clients also send heartbeat pings, preventing active WebSocket sessions
   from being marked `stale` after the gateway heartbeat window.
-- Registered `GET /v1/jobs` in the HTTP router so CLI/MCP job listing and
+- Registered `GET /v1/tasks` in the HTTP router so CLI/MCP task listing and
   recovery flows hit the documented endpoint.
 - Updated `safe-remote-support` guidance to use `support-session recover`, avoid
   bare `join_url` handoffs, and stop manual helper-binary replacement.
@@ -458,13 +458,13 @@ Agents had to guess CLI, MCP, HTTP, Windows command, or liveness behavior.
 - Added projected `stale` host status for active hosts whose heartbeat is older
   than the gateway liveness window. Support-session status responses now expose
   `stale_hosts` and no longer report `connected=true` for hosts that are not
-  job-ready.
-- Added operator-side `rdev job create` with `--policy-json` and
-  `--policy-file`, so Agents can create scoped jobs through a first-class CLI
+  task-ready.
+- Added operator-side `rdev task create` with `--policy-json` and
+  `--policy-file`, so Agents can create scoped tasks through a first-class CLI
   command instead of hand-writing raw HTTP `curl` requests.
 - Added `rdev support-session audit-capabilities`, a built-in OS-aware audit
   runner for `shell.user`, `fs.read`, `fs.write.scoped`, and `process.inspect`
-  that creates bounded jobs, waits for terminal status, and summarizes
+  that creates bounded tasks, waits for terminal status, and summarizes
   artifacts.
 
 ### Fixed
@@ -472,24 +472,24 @@ Agents had to guess CLI, MCP, HTTP, Windows command, or liveness behavior.
 - Host heartbeats now refresh the host's `last_seen_at`, making host lists,
   support-session status, and debugging output reflect actual runner activity.
 - `CreateJob` and `NextJobForHost` now reject stale hosts before new work is
-  queued or claimed, preventing Agents from sending jobs to a runner that has
+  queued or claimed, preventing Agents from sending tasks to a runner that has
   stopped polling.
-- Attended temporary auto-approval now supersedes matching stale host
+- Attended temporary auto-authorization now supersedes matching stale host
   registrations for the same ticket and machine identity/name, revoking the old
-  host and canceling its queued/running jobs so Agents do not accidentally pick
+  host and canceling its queued/running tasks so Agents do not accidentally pick
   an obsolete host.
-- Polling and WSS host runners now report failed/denied/approval-required jobs
-  as failed job records and keep serving subsequent work instead of terminating
-  the entire host process after one bad job.
-- Updated `safe-remote-support` guidance to treat `stale` as not job-ready, use
+- Polling and WSS host runners now report failed/denied/authorization-required tasks
+  as failed task records and keep serving subsequent work instead of terminating
+  the entire host process after one bad task.
+- Updated `safe-remote-support` guidance to treat `stale` as not task-ready, use
   `rdev support-session audit-capabilities` for capability testing, and prefer
-  first-class `rdev job` CLI commands over raw HTTP or Agent-authored scripts.
+  first-class `rdev task` CLI commands over raw HTTP or Agent-authored scripts.
 
 ## 0.1.33-dev
 
 Current phase: real support-session usability hardening from fresh-Agent
 Windows testing. This slice removes fragile multi-step tunnel handling and adds
-operator-side CLI parity for jobs.
+operator-side CLI parity for tasks.
 
 ### Fixed
 
@@ -506,11 +506,11 @@ operator-side CLI parity for jobs.
   the simple `irm '<url>' -UseBasicParsing | iex` form, while multi-URL retry
   scripts use PowerShell `-EncodedCommand` to avoid variable expansion and
   quoting failures in existing PowerShell sessions.
-- Closed shell job stdin explicitly so shell/PowerShell jobs cannot hang waiting
+- Closed shell task stdin explicitly so shell/PowerShell tasks cannot hang waiting
   for interactive input through an inherited pipe.
-- Added operator-side `rdev job list|get|wait|cancel` CLI commands plus gateway
-  `GET /v1/jobs` and `POST /v1/jobs/<id>/cancel`, so Agents can inspect, wait
-  for, and cancel jobs through the CLI instead of dropping to raw HTTP or
+- Added operator-side `rdev task list|get|wait|cancel` CLI commands plus gateway
+  `GET /v1/tasks` and `POST /v1/tasks/<id>/cancel`, so Agents can inspect, wait
+  for, and cancel tasks through the CLI instead of dropping to raw HTTP or
   MCP-only workflows.
 - Updated support-session runbooks to forbid manual tunnel process management,
   manual `--gateway-url` handoff assembly, and unnecessary multi-step setup
@@ -525,13 +525,13 @@ addresses failures found during attended Windows remote-connection testing.
 ### Fixed
 
 - Updated the Windows temporary bootstrap to run `rdev host serve` with
-  `--once=false` and a longer approval timeout, so the foreground host remains
-  alive to wait for approval and poll jobs instead of exiting immediately after
+  `--once=false` and a longer authorization timeout, so the foreground host remains
+  alive to wait for authorization and poll tasks instead of exiting immediately after
   registration.
 - Added retry parameters to the Windows temporary bootstrap and wired
-  `ApprovalTimeoutSeconds` / `MaxRetries` through the acceptance plan launcher.
+  `AuthorizationTimeoutSeconds` / `MaxRetries` through the acceptance plan launcher.
 - Added `rdev mcp serve --gateway-url` and per-call `gateway_url` MCP tool
-  overrides for host/job/approval/artifact/audit tools, allowing Agents to
+  overrides for host/task/authorization/artifact/audit tools, allowing Agents to
   target a newly created gateway without restarting MCP.
 - Added Cloudflare Quick Tunnel as a detected connectivity helper and exposed
   `RDEV_CLOUDFLARED_GATEWAY_URL` plus runbook hints when only loopback/LAN
@@ -558,17 +558,17 @@ encoding, and retry behavior for tunnel-backed gateways.
 
 ### Fixed
 
-- Made `rdev mcp serve` proxy host, job, approval, artifact, and audit tool
+- Made `rdev mcp serve` proxy host, task, authorization, artifact, and audit tool
   calls to a configured gateway URL (`RDEV_HOSTED_GATEWAY_URL` or another
   `RDEV_*_GATEWAY_URL`) instead of reading an empty local in-memory gateway.
 - Added per-host `host_secret` issuance on registration and required it for
-  host-side job claim, heartbeat, and WSS upgrade requests. Host registration
+  host-side task claim, heartbeat, and WSS upgrade requests. Host registration
   now fails closed client-side when a gateway response omits the secret.
 - Added host heartbeat endpoint/client pings so gateways can track host
   liveness during polling sessions.
-- Added gateway-side shell/PowerShell policy preflight for job creation so
-  invalid jobs are rejected with `422 policy_violation` before they become
-  queued ghost jobs.
+- Added gateway-side shell/PowerShell policy preflight for task creation so
+  invalid tasks are rejected with `422 policy_violation` before they become
+  queued ghost tasks.
 - Forced UTF-8 output handling for Windows `cmd.exe /c` and PowerShell adapter
   runs to avoid localized output corruption in artifacts.
 - Added retrying HTTP transports for idempotent gateway GET/HEAD requests in
@@ -606,7 +606,7 @@ absent.
 - Added `pkg/adapterkit/policy.go` with `PolicyPlan`
   (`rdev.adapter-policy-plan.v1`), `NewPolicyPlan`, `PolicyPlanContract`,
   `PolicyPlanReport`, and `VerifyPolicyPlanJSON`. Third-party adapters can now
-  declare `ExternalConsequences`, `RequiredApprovals`, and
+  declare `ExternalConsequences`, `RequiredAuthorizations`, and
   `WorkspaceBoundaries` in the plan phase and get a machine-verifiable
   conformance report.
 - Added `pkg/adapterkit/workspace.go` with `WorkspaceSession`
@@ -616,7 +616,7 @@ absent.
 - Added `internal/rustdeskadapter` with RustDesk/MeshCentral remote-desktop
   adapter **package/verifier surface**: `Build`, `Verify`,
   `AcceptanceEvidencePlan`, variant support (`rustdesk`/`meshcentral`),
-  approval boundaries, and evidence plan requiring session teardown proof.
+  authorization boundaries, and evidence plan requiring session teardown proof.
 - Added `internal/coderadapter` with Coder workspace adapter **package/verifier
   surface**: `Build`, `Verify`, `AcceptanceEvidencePlan`, `runner.env.example`
   with `RDEV_CODER_URL`/`TOKEN`/`WORKSPACE`, and evidence plan requiring
@@ -888,7 +888,7 @@ Current phase: restrictive-network helpers are moving from package metadata
 toward safer self-repair inside the standard Connection Entry runner. Mesh and
 VPN helpers can now use the same SHA-256 verified user/workspace-scoped
 dependency install path that Chisel/frpc use, while enrollment, keys, routes,
-DNS, services, firewall, and privileged network changes remain approval-gated.
+DNS, services, firewall, and privileged network changes remain authorization-gated.
 
 ### Added
 
@@ -976,7 +976,7 @@ role-mapping, failure-mode, audit, and redaction evidence.
   `s3://bucket/prefix/snapshot-current.json`, performs put/get/delete runtime
   probes through `aws s3api`, and rejects credentials, query strings, and
   fragments in storage locations so credentials stay in `AWS_PROFILE`, `AWS_*`
-  environment injection, endpoint config, or an operator-approved secret
+  environment injection, endpoint config, or an operator-authorized secret
   manager.
 - Updated `rdev hosted-provider package --storage-provider s3-compatible
   --auth-provider hosted-ed25519-jwt` so the generated gateway args use the
@@ -1012,7 +1012,7 @@ role-mapping, audit, and redaction evidence.
   uses `redis-cli`, stores the current `rdev.gateway-snapshot.v1` at a snapshot
   key, appends snapshot/probe events to a Redis stream, performs runtime probe
   readback/cleanup, and rejects inline Redis URL credentials so secrets stay in
-  `REDISCLI_AUTH`, environment injection, or an operator-approved secret
+  `REDISCLI_AUTH`, environment injection, or an operator-authorized secret
   manager.
 - Updated `rdev hosted-provider package --storage-provider redis-stream
   --auth-provider hosted-ed25519-jwt` so the generated gateway args use the
@@ -1046,7 +1046,7 @@ Windows/macOS/Linux acceptance evidence.
 ### Added
 
 - Added regression coverage proving `connectionrunner.Run` can execute
-  approved, already-configured `RDEV_SSH_TUNNEL_START_ARGV_JSON`,
+  authorized, already-configured `RDEV_SSH_TUNNEL_START_ARGV_JSON`,
   `RDEV_MESH_START_ARGV_JSON`, and `RDEV_VPN_START_ARGV_JSON` helper paths,
   wait for their configured gateway override, run `rdev host serve`, and clean
   up the helper process through the same standard runner flow used by
@@ -1083,7 +1083,7 @@ a real deployed database run and packaged backup/restore/retention evidence.
   `rdev.gateway-snapshot.v1` as JSONB in `rdev_gateway_snapshots`, performs
   schema bootstrap, upsert, load, and runtime probe SQL through `psql`, and
   rejects inline passwords in connection info so credentials stay in libpq
-  service files, `.pgpass`, environment injection, or an operator-approved
+  service files, `.pgpass`, environment injection, or an operator-authorized
   secret manager.
 - Updated `rdev hosted-provider package --storage-provider postgres
   --auth-provider hosted-ed25519-jwt` so the generated gateway args use the
@@ -1132,7 +1132,7 @@ download/install verification transcripts after release assets exist.
 
 ### Remaining Gates
 
-- Create the real GitHub Release only after explicit operator approval.
+- Create the real GitHub Release only after explicit operator authorization.
 - Run the generated post-release verification scripts against real public
   release downloads on macOS, Linux, Windows, and Skillkit, then package the
   transcripts with `rdev acceptance package-post-release-download`.
@@ -1202,7 +1202,7 @@ cross-network execution evidence.
 - Kept non-relay helpers scoped to existing reviewed configurations by default.
   SSH, mesh, and WireGuard packages use `manual-review-required` install-action
   metadata because key creation, profile import, enrollment, route/DNS/firewall
-  mutation, and service persistence remain operator-approved actions.
+  mutation, and service persistence remain operator-authorized actions.
 - Updated MCP tool metadata and release smoke so MCP-capable Agents discover
   the new adapter kinds and CI verifies package/verify output for
   `ssh-tunnel`, `headscale-tailscale`, and `wireguard`.
@@ -1220,7 +1220,7 @@ cross-network execution evidence.
   WireGuard, Chisel, and frpc paths across clean Windows/macOS/Linux targets,
   then package evidence with `rdev acceptance package-relay-adapter`.
 - Add deeper runtime execution support where appropriate for mesh/VPN helper
-  startup after explicit operator approval, without weakening the existing
+  startup after explicit operator authorization, without weakening the existing
   no-hidden-persistence and no-privilege-bypass rules.
 
 ## 0.1.16-dev
@@ -1279,14 +1279,14 @@ is not yet real cross-network acceptance evidence for a deployed relay service.
   paths, organization IDs, or secrets. It declares the standard
   `RDEV_RELAY_GATEWAY_URL`, `RDEV_RELAY_START_ARGV_JSON`, and
   `RDEV_RELAY_INSTALL_ACTION_JSON` runner surface, helper install template,
-  approval boundaries, evidence requirements, and Agent rules.
+  authorization boundaries, evidence requirements, and Agent rules.
 - Added `rdev.relay-adapter-package-verification.v1` through
   `rdev relay-adapter verify`. Verification checks schema, supported adapter
   kind, safe helper argv, safe dependency install action, file
   checksums/sizes, unlisted files, and no-private-surface hygiene.
 - Added MCP tools `rdev.relay_adapter.package` and
   `rdev.relay_adapter.verify` so fresh Agents can discover and verify relay
-  adapter packages instead of inventing PowerShell, shell, tunnel, approval, or
+  adapter packages instead of inventing PowerShell, shell, tunnel, authorization, or
   polling scripts.
 - Added `rdev.acceptance-package.relay-adapter.v1` through
   `rdev acceptance package-relay-adapter`, plus
@@ -1328,7 +1328,7 @@ identity-provider consoles are bundled.
   without credentials, private endpoints, local paths, organization IDs, or
   provider-specific domains. The package declares the hosted storage provider,
   hosted auth provider, gateway argument template, required environment
-  variables, approval boundaries, and Agent rules.
+  variables, authorization boundaries, and Agent rules.
 - Added `rdev.hosted-provider-package-verification.v1` through
   `rdev hosted-provider verify`. Verification checks schema, supported
   provider kinds, external-mutation status, gateway args, environment
@@ -1352,7 +1352,7 @@ identity-provider consoles are bundled.
 Current phase: formal release packaging is moving from platform candidate
 directories toward verifiable Connection Entry release archives. This is local
 release evidence only; external GitHub Release publication and real download
-verification still require explicit operator approval.
+verification still require explicit operator authorization.
 
 ### Added
 
@@ -1387,7 +1387,7 @@ verification still require explicit operator approval.
 
 Current phase: real fresh-agent support sessions are standardized so Agents no
 longer improvise gateway startup, Windows bootstrap, `rdev` recovery, ticket
-metadata, status watching, or approval polling by hand.
+metadata, status watching, or authorization polling by hand.
 
 ### Added
 
@@ -1423,7 +1423,7 @@ metadata, status watching, or approval polling by hand.
   compact model-independent contract that says how to recover missing `rdev`,
   when to send the one human handoff, how to wait and report connected status,
   which values not to ask humans for, and which custom PowerShell, shell,
-  tunnel, approval, or polling scripts are forbidden. The fresh-agent acceptance
+  tunnel, authorization, or polling scripts are forbidden. The fresh-agent acceptance
   gate now fails if this contract disappears from the standard one-command
   connection path.
 - Added `rdev.support-session-agent-runbook.v1` to support-session handoff,
@@ -1432,7 +1432,7 @@ metadata, status watching, or approval polling by hand.
   visible connection loop: when to run `cli_start_now_command`, what to send to
   the target-side human, how to wait, when to report `connected=true`, how to
   inspect capabilities, and how to recover without choosing lower-level tools or
-  writing custom PowerShell, shell, relay, approval, bootstrap, or polling
+  writing custom PowerShell, shell, relay, authorization, bootstrap, or polling
   scripts.
 - Tightened `rdev.support-session-agent-runbook.v1` with
   `standard_entry_tool`, `fallback_entry_tool`, and `low_level_entry_rule`.
@@ -1445,7 +1445,7 @@ metadata, status watching, or approval polling by hand.
 - Added `rdev.support-session-fresh-agent-failure-prevention.v1` inside
   `rdev.support-session-agent-runbook.v1`. The runbook now records the real
   fresh-Agent failure class where an Agent manually combined gateway startup,
-  invite creation, Windows bootstrap, background process glue, and approval
+  invite creation, Windows bootstrap, background process glue, and authorization
   polling, then handed the human a target command that failed with
   `rdev is required`. The contract tells Agents to stop before writing those
   workarounds and recover through `cli_start_now_command`, `ready_file.path`,
@@ -1480,7 +1480,7 @@ metadata, status watching, or approval polling by hand.
   fallback.
 - Added post-registration runtime fallback across signed join-manifest gateway
   candidates. When `rdev host serve --transport auto` registers through one
-  candidate but that gateway fails before any jobs are processed, the host now
+  candidate but that gateway fails before any tasks are processed, the host now
   probes the remaining signed candidates and reruns the normal WSS -> long-poll
   -> poll fallback against the next reachable gateway. Support-session
   continuity and supervision contracts now describe this standard path so
@@ -1581,13 +1581,13 @@ metadata, status watching, or approval polling by hand.
   `rdev.support-session-status.v1`. Status and wait-timeout payloads now tell
   Agents which standard tools to call next, which human checks are safe, and
   which recovery improvisations are forbidden, so failed first contact does not
-  turn into hand-written PowerShell, shell, relay, bootstrap, or approval
+  turn into hand-written PowerShell, shell, relay, bootstrap, or authorization
   polling code.
 - Added `rdev.support-session-connected-next-steps.v1` to
   `rdev.support-session-status.v1`. When `connected=true`, Agents now receive a
-  ready user report plus the next standard `rdev.hosts.capabilities` follow-up,
+  ready user report plus the next standard `rdev.sessions.get` follow-up,
   so they can proactively tell the user the connection is established and
-  inspect capabilities before creating the smallest scoped job.
+  inspect capabilities before creating the smallest scoped task.
 - Added `rdev.support-session-target-bootstrap-requirements.v1` to
   `rdev.support-session-created.v1` and CLI-side
   `rdev.support-session-target-bootstrap-readiness.v1` probing. Fresh Agents can
@@ -1608,7 +1608,7 @@ metadata, status watching, or approval polling by hand.
   target commands. The Windows and macOS/Linux one-line commands now try the
   ordered Connection Entry URLs on the target machine before failing, so Agents
   should not write custom PowerShell, shell, relay, ticket substitution,
-  bootstrap, or approval-polling glue.
+  bootstrap, or authorization-polling glue.
 - Added configured gateway fallback discovery for support sessions.
   `RDEV_HOSTED_GATEWAY_URL`, `RDEV_RELAY_GATEWAY_URL`,
   `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, and
@@ -1644,7 +1644,7 @@ metadata, status watching, or approval polling by hand.
   proxy-aware HTTPS, WSS-to-long-poll-to-poll native fallback, existing SSH
   tunnel, existing frp/Chisel relay, existing headscale/Tailscale mesh,
   existing WireGuard VPN, and operator-provided hosted gateway. It also records
-  automatic downgrade/upgrade rules and approval boundaries for privileged,
+  automatic downgrade/upgrade rules and authorization boundaries for privileged,
   persistent, paid, firewall, DNS, route, or cloud changes.
 - Added `rdev support-session start` with schema
   `rdev.support-session-started.v1`. When no gateway is running yet, Agents can
@@ -1700,15 +1700,15 @@ metadata, status watching, or approval polling by hand.
   `.sha256` endpoints. `/join/<ticket>/bootstrap.sh` and
   `/join/<ticket>/bootstrap.ps1` now download a verified helper when `rdev` is
   missing on the target host instead of failing with "rdev is required".
-- Added scoped attended-temporary auto-approval metadata. `auto_approve` can
+- Added scoped attended-temporary auto-authorization metadata. `auto_authorize` can
   activate the first host only for an explicit attended-temporary Connection
-  Entry, with audit events for both registration and auto-approval.
-- Added `--auto-approve` to `rdev invite create` and `auto_approve` to
+  Entry, with audit events for both registration and auto-authorization.
+- Added `--auto-authorize` to `rdev invite create` and `auto_authorize` to
   `rdev.invites.create`.
 - Added regression coverage for foreground support-session start payloads,
   support-session create payloads, support-session plans, localized target
   commands, connection supervision, status feedback, verified helper assets,
-  scoped auto-approval, and ticket metadata snapshot copying.
+  scoped auto-authorization, and ticket metadata snapshot copying.
 
 ### Changed
 
@@ -1726,7 +1726,7 @@ metadata, status watching, or approval polling by hand.
   returned ready handoff or foreground start route. Prepare is used when readiness is unclear,
   planner access is reserved for review/debug, and the standard status watcher
   remains required before claiming the remote host is connected. Connected
-  status now also drives the capability-inspection step before job creation.
+  status now also drives the capability-inspection step before task creation.
 - Docs and Skills now explicitly forbid manually combining
   `rdev gateway serve` plus `rdev invite create` for ordinary support sessions,
   because that path can omit verified bootstrap helper assets and recreate the
@@ -1782,7 +1782,7 @@ decisions do not collapse into multi-question manual troubleshooting.
 Current phase: Connection Entry moved from package catalog plus script fallback
 planning to a real self-contained runner package surface. Relay, mesh, VPN, and
 SSH-assisted connectivity are now represented as executable runner paths with
-runtime probes and approval boundaries instead of documentation-only guidance.
+runtime probes and authorization boundaries instead of documentation-only guidance.
 
 ### Added
 
@@ -1802,8 +1802,8 @@ runtime probes and approval boundaries instead of documentation-only guidance.
 - Added gateway override support for configured helper paths through
   `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, and
   `RDEV_SSH_GATEWAY_URL`.
-- Added approved helper startup and dependency install metadata for runner paths:
-  `RDEV_*_START_ARGV_JSON` starts already-approved helper argv, and
+- Added authorized helper startup and dependency install metadata for runner paths:
+  `RDEV_*_START_ARGV_JSON` starts already-authorized helper argv, and
   `RDEV_*_INSTALL_ACTION_JSON` lets the runner repair missing user/workspace
   helper dependencies before starting the helper.
 - Added `rdev deps install` plus `internal/depsinstall` for reviewed
@@ -1828,7 +1828,7 @@ runtime probes and approval boundaries instead of documentation-only guidance.
   package surface. User/workspace-scoped helper installs can be automated when
   URL and checksum are explicit; credential creation, firewall, DNS, route,
   cloud, paid relay, privileged, service/driver, and persistent changes remain
-  approval-gated.
+  authorization-gated.
 
 ## 0.1.9-dev
 
@@ -1984,7 +1984,7 @@ release, or checksum parameters.
 
 Current phase: Agent-first remote session invites are implemented so AI agents
 can create a target-host connection plan without hand-assembling ticket,
-manifest, transport, and approval steps.
+manifest, transport, and authorization steps.
 
 ### Added
 
@@ -2013,7 +2013,7 @@ manifest, transport, and approval steps.
 - Added `--network-scope` / `network_scope` hints for invites so agents can
   distinguish auto, internet, LAN, relay, mesh, and SSH-assisted contexts.
 - Added `rdev.agent-authority.v1` with `standard` and default `max-control`
-  profiles. The max-control profile lets an approved remote host act as the
+  profiles. The max-control profile lets an authorized remote host act as the
   Agent's field workstation for heuristic discovery and downstream authorized
   device control.
 - Added capability vocabulary for `network.discovery.scoped`,
@@ -2084,12 +2084,12 @@ manifest, transport, and approval steps.
   release artifacts from manifests, probes, active configuration, or explicit
   confirmation instead of hardcoded examples.
 - Added progressive-disclosure references for the core remote-vibe-coding Skill:
-  connectivity/managed hosts, enrollment lifecycle, adapter jobs, and
+  connectivity/managed hosts, enrollment lifecycle, adapter tasks, and
   release/acceptance details now load only when the task needs them.
 - Added Skill runtime memory guidance for dynamically retaining discovered
   environment facts, configuration paths, host capabilities, adapter/tool
   availability, and operator preferences outside the public repository.
-- Added runtime-memory and stable-output expectations to host triage, remote job
+- Added runtime-memory and stable-output expectations to host triage, remote task
   review, and safe remote support Skills so Agent/Harness runs can reuse safe
   discoveries and summarize results consistently.
 - Added `agents/openai.yaml` metadata for all shipped Skills so Codex/Harness
@@ -2115,8 +2115,8 @@ manifest, transport, and approval steps.
 - Updated the remote-vibe-coding skill to make invite creation the preferred
   first step when no suitable host is already active.
 - Updated README, MCP stdio, and dev-gateway docs to describe the AI-native
-  flow: the human runs only the generated target-host command and approves when
-  policy requires it; the Agent handles discovery, waiting, job dispatch,
+  flow: the human runs only the generated target-host command and authorizes when
+  policy requires it; the Agent handles discovery, waiting, task dispatch,
   status, and evidence.
 - Changed invite defaults from WSS-only to auto transport for maximum
   field-connectivity while preserving WSS as the first candidate.
@@ -2137,7 +2137,7 @@ manifest, transport, and approval steps.
 - Documented that agents may scan scoped local/private networks and use
   configured relay, mesh, and SSH paths automatically, while those paths remain
   connectivity choices only and never replace rdev target consent, host
-  approval, signed jobs, local policy checks, or evidence.
+  authorization, signed tasks, local policy checks, or evidence.
 - Documented max-control behavior for using the remote host as a field control
   point over reachable downstream devices while keeping evidence requirements
   and task-intent boundaries explicit.
@@ -2147,14 +2147,14 @@ manifest, transport, and approval steps.
 - Documented host-context-first progressive disclosure as the standard
   AI-native context model for remote sessions.
 - Documented adaptive host-local provisioning for skills, MCP tools,
-  dependencies, and adapter helpers with approval gates for elevated,
+  dependencies, and adapter helpers with authorization gates for elevated,
   system-wide, credential, service, firewall, external, paid, publish, deploy,
   push, or persistent security-policy changes.
 - Documented peer-Agent collaboration as a bounded adapter/collaborator path:
-  A2A/MCP/local Agent work must still use signed jobs, host policy, workspace
-  locks, redaction, approvals, audit, and evidence.
+  A2A/MCP/local Agent work must still use signed tasks, host policy, workspace
+  locks, redaction, authorizations, audit, and evidence.
 - Documented target-host language matching for skills, MCP summaries, bootstrap
-  instructions, approvals, job status, and evidence summaries.
+  instructions, authorizations, task status, and evidence summaries.
 - Documented the long-running owned-workstation workflow for recurring Agent
   development work on the operator's own Mac, Windows PC, or Linux machine.
 - Documented the project's anti-guesswork contribution standard for Agent-led
@@ -2207,7 +2207,7 @@ manifest, transport, and approval steps.
 
 - Targeted invite, MCP, and tool-contract tests pass locally.
 - Host runtime auto-transport fallback is covered by a test that fails WSS and
-  completes the job over HTTPS long-poll.
+  completes the task over HTTPS long-poll.
 - Join page and platform bootstrap script handlers are covered by HTTP tests.
 
 ## 0.1.3-dev
@@ -2215,12 +2215,12 @@ manifest, transport, and approval steps.
 Current phase: production WSS/mTLS host transport, hosted storage/auth
 foundation, and enrollment authority lifecycle evidence are implemented for
 local release validation. External GitHub publication and real
-Windows/Linux/macOS acceptance runs still require explicit operator approval.
+Windows/Linux/macOS acceptance runs still require explicit operator authorization.
 
 ### Added
 
-- Added WSS host job transport through `rdev host serve --transport wss` and
-  `GET /v1/ws/hosts/{host_id}`, including WebSocket acknowledgements for job
+- Added WSS host task transport through `rdev host serve --transport wss` and
+  `GET /v1/ws/hosts/{host_id}`, including WebSocket acknowledgements for task
   completion, failure, and artifact persistence.
 - Wired WSS over the same gateway TLS/mTLS client configuration used by HTTPS
   registration, trust refresh, polling, completion, failure, and artifact
@@ -2256,7 +2256,7 @@ Windows/Linux/macOS acceptance runs still require explicit operator approval.
   evidence.
 - Optional third-party hosted storage provider plugins beyond the built-in
   file-backed provider boundary.
-- Final external GitHub publication after explicit approval.
+- Final external GitHub publication after explicit authorization.
 
 ## 0.1.2-dev
 
@@ -2326,7 +2326,7 @@ lifecycle evidence, or real Windows/Linux/macOS acceptance completion.
   foundation: key custody, fleet renewal policy, emergency drills, and hosted
   authority operations.
 - Production hosted storage/authentication beyond local operator-auth preflight
-  and final external GitHub publication after explicit approval.
+  and final external GitHub publication after explicit authorization.
 
 ## 0.0.9-dev
 
@@ -2388,7 +2388,7 @@ Adapters and host runtime pass.
 ### Added
 
 - Added shell, PowerShell, Codex, Claude Code, and ACP/acpx hostrunner adapter
-  paths with bounded execution, redaction, cancellation evidence, approval
+  paths with bounded execution, redaction, cancellation evidence, authorization
   preflight, and adapter conformance surfaces.
 - Added `pkg/adapterkit` plus adapter result, lifecycle, cancellation, and
   runtime fixture verification through CLI and MCP tools.
@@ -2415,9 +2415,9 @@ Security kernel pass.
 
 ### Added
 
-- Added signed job envelopes, host identity proofs, nonce replay protection,
-  approval gates, approval token consumption, trust pins, and workspace locks.
-- Added host-side denial artifacts and approval-required artifacts before
+- Added signed task envelopes, host identity proofs, nonce replay protection,
+  authorization gates, authorization token consumption, trust pins, and workspace locks.
+- Added host-side denial artifacts and authorization-required artifacts before
   adapter execution.
 - Added evidence bundle export and hash-chained audit verification.
 
@@ -2427,13 +2427,13 @@ Gateway and host loop pass.
 
 ### Added
 
-- Added local dev gateway HTTP APIs for tickets, hosts, jobs, artifacts, audit
+- Added local dev gateway HTTP APIs for tickets, hosts, tasks, artifacts, audit
   events, and trust bundles.
 - Added development HTTPS and mTLS listener/client preflight for local gateway
   and host flows.
 - Added restart-safe development gateway state snapshots when `--state` is used
   with a persistent signing key.
-- Added foreground temporary host registration, polling, job completion,
+- Added foreground temporary host registration, polling, task completion,
   failure reporting, and artifact upload.
 
 ## 0.0.2-dev

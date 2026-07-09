@@ -1,6 +1,6 @@
 interface:
   display_name: "Remote Vibe Coding"
-  short_description: "Run safe remote coding jobs"
+  short_description: "Run safe remote coding session tasks"
   default_prompt: "Use $remote-vibe-coding to connect an enrolled host, run scoped development work, and return evidence."
 policy:
   allow_implicit_invocation: true

@@ -83,7 +83,7 @@ func VerifyLinuxManagedServicePlan(planPath string) (LinuxManagedServicePlanVeri
 	add("release_root_arg", strings.Contains(args, "--release-root-public-key\x00"), "")
 	add("release_required_artifacts_arg", strings.Contains(args, "--release-require-artifacts\x00"), "")
 	add("workspace_lock_store_arg", strings.Contains(args, "--workspace-lock-store\x00"), "")
-	add("identity_trust_nonce_approval_stores", strings.Contains(args, "--identity-store\x00") && strings.Contains(args, "--trust-store\x00") && strings.Contains(args, "--nonce-store\x00") && strings.Contains(args, "--approval-store\x00"), "")
+	add("identity_trust_stores", strings.Contains(args, "--identity-store\x00") && strings.Contains(args, "--trust-store\x00"), "")
 	add("restart_on_failure", plan.Unit.Restart == "on-failure" && unitStatus.Restart == "on-failure", plan.Unit.Restart)
 	add("restart_sec_present", plan.Unit.RestartSec != "" && unitStatus.RestartSec != "", plan.Unit.RestartSec)
 	add("wanted_by_default", plan.Unit.WantedBy == "default.target" && unitStatus.WantedBy == "default.target", plan.Unit.WantedBy)
