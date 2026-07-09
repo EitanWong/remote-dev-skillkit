@@ -11,12 +11,12 @@ The project is complete when:
 1. Agents can install skills and discover `rdev-mcp` tools.
 2. Hermes can create a support ticket.
 3. A Windows target can run a visible bootstrap and connect outbound-only.
-4. Hermes can approve/revoke the host.
-5. an agent can create policy-bound jobs.
-6. The host can execute allowed jobs, stream logs/artifacts, and reject disallowed actions.
-7. Jobs produce audit evidence.
+4. Hermes can authorize/revoke the session.
+5. an agent can create policy-bound session tasks.
+6. The host can execute allowed tasks, stream logs/artifacts, and reject disallowed actions.
+7. Tasks produce audit evidence.
 8. Managed devices can run as stable services with recovery.
-9. Coding jobs can call Codex/Claude/OpenCode through an adapter.
+9. Coding tasks can call Codex/Claude/OpenCode through an adapter.
 10. The system has tests, signed release artifacts, install docs, and a threat model.
 
 ## Phase 1: Safe Local Foundation
@@ -33,12 +33,12 @@ The project is complete when:
 
 - Implement ticket creation and revocation.
 - Add host registry.
-- Add SQLite-backed job queue.
+- Add SQLite-backed session task queue.
 - Add audit event store.
 - Expose local HTTP API for development.
 - Add MCP server transport.
 
-Phase 2 starts with an in-memory gateway to validate ticket, host, job, artifact, and audit state transitions before durable storage.
+Phase 2 starts with an in-memory gateway to validate ticket, session, endpoint, task, artifact, and audit state transitions before durable storage.
 
 ## Phase 3: Windows Temporary Host MVP
 
@@ -46,7 +46,7 @@ Phase 2 starts with an in-memory gateway to validate ticket, host, job, artifact
 - Implement visible foreground host mode.
 - Implement outbound WSS/mTLS channel.
 - Implement one-time enrollment token exchange.
-- Add shell.user and scoped filesystem jobs.
+- Add shell.user and scoped filesystem tasks.
 - Add artifact streaming and local audit spool.
 
 ## Phase 4: Managed Hosts

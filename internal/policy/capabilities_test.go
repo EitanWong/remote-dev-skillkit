@@ -31,9 +31,9 @@ func TestTemporaryDefaultsIncludeFileTransferButExcludeDesktopControl(t *testing
 func TestDangerousCapabilities(t *testing.T) {
 	cases := []Capability{
 		CapabilityShellAdminJIT,
-		CapabilityPackageInstallApproval,
-		CapabilityServiceModifyApproval,
-		CapabilityGUIControlApproval,
+		CapabilityPackageInstallAuthorization,
+		CapabilityServiceModifyAuthorization,
+		CapabilityGUIControlAuthorization,
 		CapabilityScreenScreenshot,
 		CapabilityScreenRecord,
 		CapabilityWindowFocus,
@@ -52,13 +52,13 @@ func TestDangerousCapabilities(t *testing.T) {
 	}
 }
 
-func TestExplainTemporaryModeDangerousCapabilityRequiresApproval(t *testing.T) {
-	explanation := Explain(model.HostModeAttendedTemporary, CapabilityPackageInstallApproval)
+func TestExplainTemporaryModeDangerousCapabilityRequiresAuthorization(t *testing.T) {
+	explanation := Explain(model.HostModeAttendedTemporary, CapabilityPackageInstallAuthorization)
 	if !explanation.Allowed {
-		t.Fatal("package install approval should be available through approval gate")
+		t.Fatal("package install authorization should be available through session policy")
 	}
-	if !explanation.Approval {
-		t.Fatal("package install must require approval")
+	if !explanation.Authorization {
+		t.Fatal("package install must require authorization")
 	}
 }
 

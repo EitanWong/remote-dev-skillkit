@@ -45,7 +45,7 @@ func SignArtifact(path string, key signing.Key, now time.Time) (Manifest, error)
 		ArtifactSHA256: digest,
 		ArtifactSize:   size,
 		IssuedAt:       now.UTC(),
-		SigningAlg:     model.JobEnvelopeSigningAlg,
+		SigningAlg:     model.SigningAlgEd25519,
 		SigningKeyID:   key.ID,
 	}
 	return manifest.Sign(key.PrivateKey)
@@ -139,7 +139,7 @@ func (m Manifest) validateForSigning() error {
 	if m.IssuedAt.IsZero() {
 		return fmt.Errorf("%w: issued_at is required", ErrManifestInvalid)
 	}
-	if m.SigningAlg != model.JobEnvelopeSigningAlg || m.SigningKeyID == "" {
+	if m.SigningAlg != model.SigningAlgEd25519 || m.SigningKeyID == "" {
 		return fmt.Errorf("%w: unsupported signing metadata", ErrManifestInvalid)
 	}
 	return nil

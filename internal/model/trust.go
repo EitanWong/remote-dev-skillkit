@@ -18,13 +18,13 @@ type TrustBundle struct {
 func NewTrustBundle(signingKeyID string, publicKey ed25519.PublicKey) TrustBundle {
 	return TrustBundle{
 		SigningKeyID: signingKeyID,
-		SigningAlg:   JobEnvelopeSigningAlg,
+		SigningAlg:   SigningAlgEd25519,
 		PublicKey:    base64.RawURLEncoding.EncodeToString(publicKey),
 	}
 }
 
 func (b TrustBundle) Ed25519PublicKey() (ed25519.PublicKey, error) {
-	if b.SigningAlg != JobEnvelopeSigningAlg {
+	if b.SigningAlg != SigningAlgEd25519 {
 		return nil, fmt.Errorf("unsupported signing algorithm %q", b.SigningAlg)
 	}
 	key, err := base64.RawURLEncoding.DecodeString(b.PublicKey)

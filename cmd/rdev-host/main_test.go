@@ -1,30 +1,24 @@
 package main
 
 import (
-	"reflect"
+	"go/parser"
+	"go/token"
+	"strconv"
 	"testing"
 )
 
-func TestHostArgsDefaultsToHostServeForFlags(t *testing.T) {
-	got := hostArgs([]string{"--mode", "temporary"})
-	want := []string{"host", "serve", "--mode", "temporary"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("hostArgs() = %#v, want %#v", got, want)
+func TestRdevHostEntrypointDoesNotImportFullCLI(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestHostArgsPreservesExplicitHostCommand(t *testing.T) {
-	got := hostArgs([]string{"host", "serve", "--mode", "temporary"})
-	want := []string{"host", "serve", "--mode", "temporary"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("hostArgs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestHostArgsMapsHostSubcommands(t *testing.T) {
-	got := hostArgs([]string{"service-status", "--platform", "macos"})
-	want := []string{"host", "service-status", "--platform", "macos"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("hostArgs() = %#v, want %#v", got, want)
+	for _, spec := range file.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path == "github.com/EitanWong/remote-dev-skillkit/internal/cli" {
+			t.Fatalf("rdev-host entrypoint must not import the full CLI package; use a host-only command package to keep target helpers small")
+		}
 	}
 }

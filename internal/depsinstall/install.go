@@ -202,6 +202,28 @@ func defaultInstallDir(scope string) string {
 }
 
 func download(ctx context.Context, client *http.Client, rawURL, out string) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt*attempt) * 100 * time.Millisecond):
+			}
+		}
+		err := downloadOnce(ctx, client, rawURL, out)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRetryableDownloadErr(err) {
+			return err
+		}
+	}
+	return lastErr
+}
+
+func downloadOnce(ctx context.Context, client *http.Client, rawURL, out string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
@@ -212,7 +234,11 @@ func download(ctx context.Context, client *http.Client, rawURL, out string) erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: %s", resp.Status)
+		err := fmt.Errorf("download failed: %s", resp.Status)
+		if isRetryableDownloadStatus(resp.StatusCode) {
+			return retryableDownloadError{err: err}
+		}
+		return err
 	}
 	tmp := out + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
@@ -221,12 +247,44 @@ func download(ctx context.Context, client *http.Client, rawURL, out string) erro
 	}
 	if _, err := io.Copy(file, resp.Body); err != nil {
 		_ = file.Close()
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := file.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, out)
+}
+
+type retryableDownloadError struct {
+	err error
+}
+
+func (e retryableDownloadError) Error() string {
+	return e.err.Error()
+}
+
+func (e retryableDownloadError) Unwrap() error {
+	return e.err
+}
+
+func isRetryableDownloadErr(err error) bool {
+	var retryable retryableDownloadError
+	if errors.As(err, &retryable) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "use of closed network connection")
+}
+
+func isRetryableDownloadStatus(status int) bool {
+	return status == http.StatusRequestTimeout ||
+		status == http.StatusTooManyRequests ||
+		status >= 500
 }
 
 func fileSHA256(path string) (string, error) {

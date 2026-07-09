@@ -15,8 +15,6 @@ func TestNewLinuxSystemdUserServiceBuildsManagedHostArguments(t *testing.T) {
 		TicketCode:               "ABCD-1234",
 		IdentityStorePath:        "/home/example/.rdev/host/identity.json",
 		TrustStorePath:           "/home/example/.rdev/host/trust.json",
-		NonceStorePath:           "/home/example/.rdev/host/nonces.json",
-		ApprovalStorePath:        "/home/example/.rdev/host/approvals.json",
 		WorkspaceLockStorePath:   "/home/example/.rdev/host/workspace-locks",
 		ReleaseBundlePath:        "/opt/rdev/release-bundle.json",
 		ReleaseRootPublicKey:     "release-root:abc123",

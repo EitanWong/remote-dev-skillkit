@@ -22,7 +22,7 @@ Production must use separate trust authorities.
 | Release root | offline root or KMS/HSM root | no | root of trust for release artifact signatures |
 | Release artifact signer | short-lived or delegated signing key | no by default | signs `rdev.release-artifact.v1` manifests |
 | Bootstrap manifest signer | delegated key | limited | signs join/bootstrap manifests |
-| Gateway job signer | gateway-held key | yes | signs executable job envelopes |
+| Gateway session signer | gateway-held key | yes | signs session/control-plane records when deployment requires signed control state |
 | Windows code-signing certificate | CA-issued or enterprise-trusted cert | signing service only | Authenticode signs Windows binaries/scripts |
 
 No single key should be able to both publish software and authorize remote execution.
@@ -124,8 +124,8 @@ The trust update primitive is `rdev.trust-bundle.v1`. A trust bundle contains:
 
 Key statuses are:
 
-- `active`: may verify new jobs or manifests for its authority scope;
-- `retired`: retained for historical verification but not new jobs;
+- `active`: may verify new tasks or manifests for its authority scope;
+- `retired`: retained for historical verification but not new tasks;
 - `revoked`: must be rejected for new verification and treated as an incident signal.
 
 Managed hosts should accept an update only when:
@@ -170,7 +170,7 @@ Revocation policy by authority:
 | Release root | freeze releases, publish emergency root migration, invalidate affected artifacts |
 | Release artifact signer | stop releases, rotate signer, re-sign current artifacts |
 | Bootstrap manifest signer | revoke active tickets/manifests, rotate signer, require new join URLs |
-| Gateway job signer | revoke host trust bundle, cancel queued/running jobs, rotate gateway key |
+| Gateway task signer | revoke host trust bundle, cancel queued/running tasks, rotate gateway key |
 | Windows code-signing cert | revoke cert, re-sign binaries, publish advisory |
 
 ## Emergency Stop
@@ -178,11 +178,11 @@ Revocation policy by authority:
 The gateway must have an operator-visible emergency stop that can:
 
 - stop issuing new tickets;
-- stop signing new jobs;
+- stop issuing new tasks;
 - revoke all active temporary tickets;
-- revoke a selected gateway job-signing key;
+- revoke a selected gateway session-signing key;
 - mark release/bootstrap keys revoked in the trust bundle;
-- cancel queued/running jobs for affected hosts;
+- cancel queued/running tasks for affected hosts;
 - export audit evidence.
 
 Emergency stop does not delete audit records.
@@ -197,5 +197,5 @@ This policy is implemented when:
 - Windows release artifacts are Authenticode-signed and CI verifies them;
 - bootstrap rejects missing/invalid release signatures when policy requires them;
 - managed hosts can receive signed trust-bundle updates;
-- revoked keys stop new jobs, tickets, or release verification according to authority scope;
+- revoked keys stop new tasks, tickets, or release verification according to authority scope;
 - release evidence is stored with the release artifacts.

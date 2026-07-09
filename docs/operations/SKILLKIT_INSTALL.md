@@ -45,7 +45,7 @@ the skills and configure local MCP stdio with the install report's
 `--gateway-url https://api.example.com/v1` only when you already have a hosted
 gateway and want that URL recorded as bundle metadata.
 
-The bundle uses schema `rdev.skillkit-bundle.v1` and contains:
+The bundle uses schema `rdev.skillkit-evidence.v1` and contains:
 
 - `manifest.json` with checksums and skill metadata;
 - machine-readable `adaptive_configuration` metadata with schema
@@ -70,7 +70,7 @@ available service manager, gateway configuration, network reachability,
 proxy/DNS state, NAT/firewall/CGNAT hints, SSH config, installed tunnel/mesh
 tools, workspace path, installed agent adapters, and current permissions. If a
 gateway URL, ticket code, root key, release URL, checksum, framework install
-path, workspace root, adapter choice, tunnel/mesh approval, or approval policy
+path, workspace root, adapter choice, tunnel/mesh authorization, or interrupt policy
 cannot be discovered safely, the agent must ask a short follow-up question
 instead of inventing a value.
 
@@ -152,7 +152,7 @@ rdev update plan --repo EitanWong/remote-dev-skillkit
 `rdev.update-plan.v1`, selects the matching platform archive, and prints
 download/checksum/release-bundle verification steps. Treat the plan as dry-run
 evidence. Do not replace binaries, update services, or mutate agent framework
-configuration until the operator approves the upgrade and the selected archive
+configuration until the operator authorizes the upgrade and the selected archive
 and signed `release-bundle.json` verify against the configured release root.
 
 ## Generic Agent Runtime
@@ -166,8 +166,8 @@ and signed `release-bundle.json` verify against the configured release root.
    - `safe-remote-support`;
    - `host-triage`;
    - `remote-vibe-coding`;
-   - `remote-job-review`.
-7. Require the agent to export or read a `rdev.evidence-bundle.v1` bundle before claiming remote work is complete.
+   - `remote-session-review`.
+7. Require the agent to export or read `rdev.session-evidence.v1` evidence before claiming remote work is complete.
 
 ## Framework Notes
 
@@ -181,9 +181,9 @@ and signed `release-bundle.json` verify against the configured release root.
 
 An agent runtime is compatible only if it preserves the safety contract:
 
-- agents request typed jobs, not raw host ownership;
+- agents request typed session tasks, not raw host ownership;
 - temporary hosts use attended foreground mode;
-- high-risk actions require approval;
+- high-risk actions require session interrupts or explicit authorization;
 - host-side validation remains mandatory;
 - evidence and audit are reviewed before completion;
 - temporary sessions are revoked when finished.

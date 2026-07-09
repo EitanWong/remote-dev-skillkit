@@ -125,7 +125,7 @@ func Decode(content []byte) (Identity, error) {
 	if encoded.SchemaVersion != FileSchemaVersion {
 		return Identity{}, fmt.Errorf("unsupported host identity schema %q", encoded.SchemaVersion)
 	}
-	if encoded.SigningAlg != model.JobEnvelopeSigningAlg {
+	if encoded.SigningAlg != model.SigningAlgEd25519 {
 		return Identity{}, fmt.Errorf("unsupported signing algorithm %q", encoded.SigningAlg)
 	}
 	publicKey, err := base64.RawURLEncoding.DecodeString(encoded.PublicKey)
@@ -182,7 +182,7 @@ func encode(identity Identity) ([]byte, error) {
 	encoded := fileIdentity{
 		SchemaVersion: FileSchemaVersion,
 		KeyID:         identity.KeyID,
-		SigningAlg:    model.JobEnvelopeSigningAlg,
+		SigningAlg:    model.SigningAlgEd25519,
 		PublicKey:     identity.EncodedPublicKey(),
 		PrivateKey:    base64.RawURLEncoding.EncodeToString(identity.PrivateKey),
 	}

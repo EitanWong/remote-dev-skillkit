@@ -132,7 +132,7 @@ func TestPackageManagedMacServiceEvidencePackagesAndRedacts(t *testing.T) {
 		filepath.Join(pkg.OutDir, "evidence", "start-transcript.txt"),
 		filepath.Join(pkg.OutDir, "evidence", "managed-mac", "report.json"),
 		filepath.Join(pkg.OutDir, "evidence", "managed-mac", "evidence", "manifest.json"),
-		filepath.Join(pkg.OutDir, "evidence", "managed-mac", "approval-evidence", "manifest.json"),
+		filepath.Join(pkg.OutDir, "evidence", "managed-mac", "side-effect-probe-evidence", "manifest.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected packaged file %s: %v", path, err)
@@ -154,7 +154,7 @@ func TestPackageManagedMacServiceEvidenceRejectsFailedManagedReport(t *testing.T
 	requireGitForAcceptanceTest(t)
 	fakeCodex := writeFakeCodexForAcceptanceTest(t)
 	fixture := writeManagedMacServicePackageFixture(t, fakeCodex, `{"ok": true}`)
-	if err := os.WriteFile(filepath.Join(filepath.Dir(fixture.managedReportPath), "evidence", "artifacts.json"), []byte("tampered"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(filepath.Dir(fixture.managedReportPath), "evidence", "coding-result.json"), []byte("tampered"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	pkg, err := PackageManagedMacServiceEvidence(ManagedMacServicePackageOptions{
@@ -237,7 +237,7 @@ func writeManagedMacServicePackageFixture(t *testing.T, fakeCodex, releaseGate s
 	writeFileForManagedMacServiceTest(t, inspectTranscriptPath, "rdev host service-control --platform macos --action inspect --execute\nstate = running\n")
 	writeFileForManagedMacServiceTest(t, logsPath, "managed host log release gate passed\n")
 	writeFileForManagedMacServiceTest(t, releaseGatePath, releaseGate+"\n")
-	writeFileForManagedMacServiceTest(t, auditPath, `{"event":"host.registered"}`+"\n"+`{"event":"job.completed"}`+"\n")
+	writeFileForManagedMacServiceTest(t, auditPath, `{"event":"host.registered"}`+"\n"+`{"event":"task.completed"}`+"\n")
 	writeFileForManagedMacServiceTest(t, reconnectPath, "logout/login complete; host hst_123 reconnected\n")
 	writeFileForManagedMacServiceTest(t, stopTranscriptPath, "rdev host service-control --platform macos --action stop --execute\n")
 	writeFileForManagedMacServiceTest(t, uninstallTranscriptPath, "rdev host uninstall-service --platform macos --removed true\n")

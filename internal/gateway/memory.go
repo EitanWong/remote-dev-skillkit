@@ -12,15 +12,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 )
 
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrInvalidState  = errors.New("invalid state")
-	ErrPolicyDenied  = errors.New("policy denied")
-	ErrTicketExpired = errors.New("ticket expired")
+	ErrNotFound            = errors.New("not found")
+	ErrInvalidState        = errors.New("invalid state")
+	ErrPolicyDenied        = errors.New("policy denied")
+	ErrTicketExpired       = errors.New("ticket expired")
+	ErrIdempotencyConflict = errors.New("idempotency conflict")
 )
 
 const hostHeartbeatStaleAfter = 90 * time.Second
@@ -31,13 +33,14 @@ type MemoryGateway struct {
 	mu                 sync.Mutex
 	now                func() time.Time
 	auditSink          AuditSink
+	sessionStore       *controlplane.MemoryStore
 	tickets            map[string]model.Ticket
 	codeIndex          map[string]string
 	hosts              map[string]model.Host
 	hostSecrets        map[string]string // per-host auth tokens, never serialised to API
+	hostRegistrationID map[string]HostRegistrationIdempotencyRecord
 	hostHeartbeats     map[string]time.Time
-	jobs               map[string]model.Job
-	artifacts          map[string][]model.Artifact
+	preconnects        map[string]model.SupportSessionPreconnect
 	audit              []model.AuditEvent
 	signingID          string
 	publicKey          ed25519.PublicKey
@@ -71,6 +74,14 @@ type EnrollmentCertificateRenewalRequest struct {
 	ValidMinutes int
 }
 
+type HostRegistrationIdempotencyRecord struct {
+	Key         string
+	RequestHash string
+	HostID      string
+	HostSecret  string
+	CreatedAt   time.Time
+}
+
 type AuditSink interface {
 	Append(model.AuditEvent) error
 }
@@ -98,13 +109,14 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 	}
 	return &MemoryGateway{
 		now:                now,
+		sessionStore:       controlplane.NewMemoryStore(now),
 		tickets:            map[string]model.Ticket{},
 		codeIndex:          map[string]string{},
 		hosts:              map[string]model.Host{},
 		hostSecrets:        map[string]string{},
+		hostRegistrationID: map[string]HostRegistrationIdempotencyRecord{},
 		hostHeartbeats:     map[string]time.Time{},
-		jobs:               map[string]model.Job{},
-		artifacts:          map[string][]model.Artifact{},
+		preconnects:        map[string]model.SupportSessionPreconnect{},
 		signingID:          signingID,
 		publicKey:          append(ed25519.PublicKey(nil), publicKey...),
 		privateKey:         append(ed25519.PrivateKey(nil), privateKey...),
@@ -330,6 +342,59 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	return g.registerHostLocked(registration)
+}
+
+func (g *MemoryGateway) RegisterHostWithIdempotencyKey(idempotencyKey, requestHash string, registration model.HostRegistration) (model.Host, string, error) {
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" {
+		host, err := g.RegisterHost(registration)
+		if err != nil {
+			return model.Host{}, "", err
+		}
+		secret, err := g.GenerateHostSecret(host.ID)
+		if err != nil {
+			return model.Host{}, "", err
+		}
+		return host, secret, nil
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.hostRegistrationID == nil {
+		g.hostRegistrationID = map[string]HostRegistrationIdempotencyRecord{}
+	}
+	if record, ok := g.hostRegistrationID[idempotencyKey]; ok {
+		if record.RequestHash != "" && requestHash != "" && record.RequestHash != requestHash {
+			return model.Host{}, "", fmt.Errorf("%w: idempotency key %q was used for a different host registration request", ErrIdempotencyConflict, idempotencyKey)
+		}
+		if host, exists := g.hosts[record.HostID]; exists && record.HostSecret != "" {
+			g.hostSecrets[record.HostID] = record.HostSecret
+			return host, record.HostSecret, nil
+		}
+		delete(g.hostRegistrationID, idempotencyKey)
+	}
+
+	host, err := g.registerHostLocked(registration)
+	if err != nil {
+		return model.Host{}, "", err
+	}
+	secret, err := g.generateHostSecretLocked(host.ID)
+	if err != nil {
+		return model.Host{}, "", err
+	}
+	g.hostRegistrationID[idempotencyKey] = HostRegistrationIdempotencyRecord{
+		Key:         idempotencyKey,
+		RequestHash: requestHash,
+		HostID:      host.ID,
+		HostSecret:  secret,
+		CreatedAt:   g.now().UTC(),
+	}
+	return host, secret, nil
+}
+
+func (g *MemoryGateway) registerHostLocked(registration model.HostRegistration) (model.Host, error) {
 	ticketID, ok := g.codeIndex[registration.TicketCode]
 	if !ok {
 		return model.Host{}, fmt.Errorf("%w: ticket code", ErrNotFound)
@@ -362,17 +427,17 @@ func (g *MemoryGateway) RegisterHost(registration model.HostRegistration) (model
 	if err != nil {
 		return model.Host{}, err
 	}
-	if ticket.Metadata["auto_approve"] == "attended-temporary" &&
+	if ticket.Metadata["auto_activate"] == "attended-temporary" &&
 		ticket.Mode == model.HostModeAttendedTemporary &&
 		!g.ticketHasActiveRecentHostLocked(ticket.ID, 90*time.Second) {
 		now := g.now().UTC()
 		g.supersedeMatchingHostsLocked(ticket.ID, registration, now)
 		host.Status = model.HostStatusActive
-		host.ApprovedAt = &now
+		host.ActivatedAt = &now
 		host.LastSeenAt = now
 		g.hosts[host.ID] = host
-		g.appendAuditLocked("host", "host.register", host.ID, "registered host with attended-temporary auto approval")
-		g.appendAuditLocked("operator", "host.auto_approve", host.ID, "auto-approved attended-temporary host from standard connection entry")
+		g.appendAuditLocked("host", "host.register", host.ID, "registered host with attended-temporary auto activation")
+		g.appendAuditLocked("operator", "host.auto_activate", host.ID, "auto-activated attended-temporary host from standard connection entry")
 		return host, nil
 	}
 	g.hosts[host.ID] = host
@@ -393,11 +458,11 @@ func (g *MemoryGateway) ticketHasHostLocked(ticketID string) bool {
 // associated with ticketID whose status is Active AND whose LastSeenAt is within
 // the given staleness window.
 //
-// This is used by the auto-approve gate so that a bootstrap re-registration can
-// receive automatic approval once the previous host process has gone silent
+// This is used by the auto-activate gate so that a bootstrap re-registration can
+// receive automatic activation once the previous host process has gone silent
 // (i.e., it exited, crashed, or lost its network path). The staleness window
 // should match the gateway's heartbeat timeout — hosts that stop sending
-// heartbeats will have a stale LastSeenAt, signalling that re-approval is safe.
+// heartbeats will have a stale LastSeenAt, signalling that re-activation is safe.
 func (g *MemoryGateway) ticketHasActiveRecentHostLocked(ticketID string, window time.Duration) bool {
 	cutoff := g.now().Add(-window)
 	for _, host := range g.hosts {
@@ -422,7 +487,6 @@ func (g *MemoryGateway) supersedeMatchingHostsLocked(ticketID string, registrati
 		host.LastSeenAt = now
 		g.hosts[host.ID] = host
 		g.appendAuditLocked("operator", "host.supersede", host.ID, "superseded by newer matching attended-temporary host registration")
-		g.cancelJobsForHostLocked(host.ID, now, "canceled because host was superseded by a newer registration")
 	}
 }
 
@@ -453,7 +517,7 @@ func (g *MemoryGateway) RevokeTicket(ticketID, reason string) (model.Ticket, err
 	return ticket, nil
 }
 
-func (g *MemoryGateway) ApproveHost(hostID string, capabilities []string) (model.Host, error) {
+func (g *MemoryGateway) ActivateHost(hostID string, capabilities []string) (model.Host, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -469,30 +533,10 @@ func (g *MemoryGateway) ApproveHost(hostID string, capabilities []string) (model
 	}
 	now := g.now().UTC()
 	host.Status = model.HostStatusActive
-	host.ApprovedAt = &now
+	host.ActivatedAt = &now
 	host.LastSeenAt = now
 	g.hosts[host.ID] = host
-	g.appendAuditLocked("operator", "host.approve", host.ID, "approved host")
-	return host, nil
-}
-
-func (g *MemoryGateway) RevokeHost(hostID, reason string) (model.Host, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Host{}, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status == model.HostStatusRevoked {
-		return model.Host{}, fmt.Errorf("%w: host already revoked", ErrInvalidState)
-	}
-	now := g.now().UTC()
-	host.Status = model.HostStatusRevoked
-	host.LastSeenAt = now
-	g.hosts[host.ID] = host
-	g.appendAuditLocked("operator", "host.revoke", host.ID, reasonOrDefault(reason, "revoked host"))
-	g.cancelJobsForHostLocked(host.ID, now, "canceled because host was revoked")
+	g.appendAuditLocked("operator", "host.activate", host.ID, "activated host")
 	return host, nil
 }
 
@@ -537,6 +581,95 @@ func (g *MemoryGateway) HostsForTicketCode(ticketCode, status string) []model.Ho
 	return hosts
 }
 
+func (g *MemoryGateway) RecordSupportSessionPreconnect(event model.SupportSessionPreconnect) (model.SupportSessionPreconnect, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ticketCode := strings.TrimSpace(event.TicketCode)
+	if ticketCode == "" {
+		return model.SupportSessionPreconnect{}, fmt.Errorf("%w: ticket code is required", ErrPolicyDenied)
+	}
+	ticketID, ok := g.codeIndex[ticketCode]
+	if !ok {
+		return model.SupportSessionPreconnect{}, fmt.Errorf("%w: ticket code", ErrNotFound)
+	}
+	ticket := g.tickets[ticketID]
+	if ticket.Status != model.TicketStatusActive {
+		return model.SupportSessionPreconnect{}, fmt.Errorf("%w: ticket is not active", ErrInvalidState)
+	}
+	now := g.now().UTC()
+	if !now.Before(ticket.ExpiresAt) {
+		return model.SupportSessionPreconnect{}, ErrTicketExpired
+	}
+	event.TicketCode = ticketCode
+	event.Phase = sanitizePreconnectField(event.Phase, "started", 80)
+	event.OS = sanitizePreconnectField(event.OS, "", 40)
+	event.Arch = sanitizePreconnectField(event.Arch, "", 40)
+	event.Asset = sanitizePreconnectField(event.Asset, "", 160)
+	event.Source = sanitizePreconnectField(event.Source, "rdev-bootstrap-preconnect", 80)
+	event.Message = sanitizePreconnectField(event.Message, "", 240)
+	key := strings.Join([]string{event.TicketCode, event.Phase, event.OS, event.Arch, event.Asset, event.Source}, "\x00")
+	if existing, ok := g.preconnects[key]; ok {
+		existing.LastSeenAt = now
+		existing.SeenCount++
+		if event.Message != "" {
+			existing.Message = event.Message
+		}
+		g.preconnects[key] = existing
+		g.appendAuditLocked("host", "support_session.preconnect", ticketID, "updated target preconnect status: "+event.Phase)
+		return existing, nil
+	}
+	secret, err := generateSecret()
+	if err != nil {
+		return model.SupportSessionPreconnect{}, err
+	}
+	event.ID = "pre_" + secret[:16]
+	event.CreatedAt = now
+	event.LastSeenAt = now
+	event.SeenCount = 1
+	g.preconnects[key] = event
+	g.appendAuditLocked("host", "support_session.preconnect", ticketID, "recorded target preconnect status: "+event.Phase)
+	return event, nil
+}
+
+func (g *MemoryGateway) SupportSessionPreconnects(ticketCode string) []model.SupportSessionPreconnect {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ticketCode = strings.TrimSpace(ticketCode)
+	values := make([]model.SupportSessionPreconnect, 0)
+	for _, event := range g.preconnects {
+		if ticketCode != "" && event.TicketCode != ticketCode {
+			continue
+		}
+		values = append(values, event)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		return values[i].CreatedAt.Before(values[j].CreatedAt)
+	})
+	return values
+}
+
+func sanitizePreconnectField(value, fallback string, maxLen int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	if maxLen > 0 {
+		runes := []rune(value)
+		if len(runes) > maxLen {
+			value = string(runes[:maxLen])
+		}
+	}
+	return value
+}
+
 func (g *MemoryGateway) Host(hostID string) (model.Host, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -568,12 +701,16 @@ func (g *MemoryGateway) TicketForCode(ticketCode string) (model.Ticket, bool) {
 
 // GenerateHostSecret creates a random 32-byte hex secret for a host and stores
 // it internally. The secret is returned once at registration and must be
-// presented by the host process on all subsequent host-side requests
-// (e.g. /jobs/next, heartbeat, job complete/fail).
+// presented by the host process on subsequent host-side requests that still
+// require host-local authentication.
 func (g *MemoryGateway) GenerateHostSecret(hostID string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	return g.generateHostSecretLocked(hostID)
+}
+
+func (g *MemoryGateway) generateHostSecretLocked(hostID string) (string, error) {
 	if _, ok := g.hosts[hostID]; !ok {
 		return "", fmt.Errorf("%w: host", ErrNotFound)
 	}
@@ -657,58 +794,6 @@ func (g *MemoryGateway) hostIsStaleLocked(host model.Host) bool {
 	return g.now().UTC().Sub(lastSeen) > hostHeartbeatStaleAfter
 }
 
-func (g *MemoryGateway) CreateJob(hostID, adapter, intent string, jobPolicy map[string]any) (model.Job, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Job{}, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status != model.HostStatusActive {
-		return model.Job{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
-	}
-	ticket, ok := g.tickets[host.TicketID]
-	if !ok {
-		return model.Job{}, fmt.Errorf("%w: ticket", ErrNotFound)
-	}
-	if ticket.Status != model.TicketStatusActive {
-		return model.Job{}, fmt.Errorf("%w: ticket is not active", ErrInvalidState)
-	}
-	if !g.now().Before(ticket.ExpiresAt) {
-		return model.Job{}, ErrTicketExpired
-	}
-	if g.hostIsStaleLocked(host) {
-		return model.Job{}, fmt.Errorf("%w: host heartbeat is stale", ErrInvalidState)
-	}
-	if adapter == "" || intent == "" {
-		return model.Job{}, fmt.Errorf("%w: adapter and intent are required", ErrPolicyDenied)
-	}
-	job, err := model.NewJob(hostID, adapter, intent, jobPolicy, g.now())
-	if err != nil {
-		return model.Job{}, err
-	}
-	envelope, err := model.NewJobEnvelope(job, host, ticket, jobEnvelopeSpec(jobPolicy, host, g.signingID), g.now())
-	if err != nil {
-		return model.Job{}, err
-	}
-	envelope, err = envelope.Sign(g.privateKey)
-	if err != nil {
-		return model.Job{}, err
-	}
-	job.Envelope = &envelope
-	g.jobs[job.ID] = job
-	g.appendAuditLocked("operator", "job.create", job.ID, "created policy-bound job")
-	return job, nil
-}
-
-func (g *MemoryGateway) VerifyJobEnvelope(envelope model.JobEnvelope, hostID string) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	return envelope.VerifyForHost(g.publicKey, hostID, g.now())
-}
-
 func (g *MemoryGateway) TrustBundle() model.TrustBundle {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -781,6 +866,10 @@ func (g *MemoryGateway) JoinManifest(ticketCode, gatewayURL, joinURL string) (mo
 }
 
 func (g *MemoryGateway) JoinManifestWithGatewayCandidates(ticketCode, gatewayURL, joinURL string, candidates []model.JoinManifestGatewayCandidate) (model.JoinManifest, error) {
+	return g.JoinManifestWithPackageCatalog(ticketCode, gatewayURL, joinURL, candidates, model.ConnectionEntryPackageCatalog{})
+}
+
+func (g *MemoryGateway) JoinManifestWithPackageCatalog(ticketCode, gatewayURL, joinURL string, candidates []model.JoinManifestGatewayCandidate, catalog model.ConnectionEntryPackageCatalog) (model.JoinManifest, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -803,12 +892,20 @@ func (g *MemoryGateway) JoinManifestWithGatewayCandidates(ticketCode, gatewayURL
 		GatewayCandidates: candidates,
 		JoinURL:           joinURL,
 		Trust:             model.NewTrustBundle(g.signingID, g.publicKey),
+		PackageCatalog:    catalog,
 		SigningKeyID:      g.manifestSigningID,
 	}, g.now())
 	if err != nil {
 		return model.JoinManifest{}, err
 	}
 	return manifest.Sign(g.manifestPrivateKey)
+}
+
+func (g *MemoryGateway) JoinManifestTimeProof(manifest model.JoinManifest) (model.GatewayTimeProof, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return model.NewGatewayTimeProof(model.GatewayTimeProofPurposeJoinManifest, manifest, g.manifestSigningID, g.manifestPrivateKey, g.now(), 5*time.Minute)
 }
 
 func gatewayCandidatesFromTicketMetadata(metadata map[string]string) []model.JoinManifestGatewayCandidate {
@@ -832,396 +929,6 @@ func gatewayCandidatesFromTicketMetadata(metadata map[string]string) []model.Joi
 		out = append(out, candidate)
 	}
 	return out
-}
-
-func (g *MemoryGateway) CompleteJob(jobID, artifactContent string) (model.Job, model.Artifact, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	if job.Status != model.JobStatusQueued && job.Status != model.JobStatusRunning {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job must be queued or running", ErrInvalidState)
-	}
-	now := g.now().UTC()
-	if job.StartedAt == nil {
-		job.StartedAt = &now
-	}
-	job.Status = model.JobStatusSucceeded
-	job.EndedAt = &now
-	artifact, err := model.NewArtifact(job.ID, "text", "demo-result.txt", artifactContent, now)
-	if err != nil {
-		return model.Job{}, model.Artifact{}, err
-	}
-	g.jobs[job.ID] = job
-	g.artifacts[job.ID] = append(g.artifacts[job.ID], artifact)
-	g.appendAuditLocked("host", "job.complete", job.ID, "completed job and produced artifact")
-	return job, artifact, nil
-}
-
-func (g *MemoryGateway) CompleteJobForHost(hostID, jobID, artifactContent string) (model.Job, model.Artifact, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status != model.HostStatusActive {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
-	}
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	if job.HostID != hostID {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job is not assigned to host", ErrPolicyDenied)
-	}
-	if job.Status != model.JobStatusQueued && job.Status != model.JobStatusRunning {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job must be queued or running", ErrInvalidState)
-	}
-	now := g.now().UTC()
-	if job.StartedAt == nil {
-		job.StartedAt = &now
-	}
-	job.Status = model.JobStatusSucceeded
-	job.EndedAt = &now
-	artifact, err := model.NewArtifact(job.ID, "text", "demo-result.txt", artifactContent, now)
-	if err != nil {
-		return model.Job{}, model.Artifact{}, err
-	}
-	g.jobs[job.ID] = job
-	g.artifacts[job.ID] = append(g.artifacts[job.ID], artifact)
-	g.appendAuditLocked("host", "job.complete", job.ID, "completed job and produced artifact")
-	return job, artifact, nil
-}
-
-func (g *MemoryGateway) FailJobForHost(hostID, jobID, reason string) (model.Job, error) {
-	job, _, err := g.FailJobForHostWithArtifact(hostID, jobID, reason, "")
-	return job, err
-}
-
-func (g *MemoryGateway) FailJobForHostWithArtifact(hostID, jobID, reason, artifactContent string) (model.Job, *model.Artifact, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Job{}, nil, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status != model.HostStatusActive {
-		return model.Job{}, nil, fmt.Errorf("%w: host must be active", ErrInvalidState)
-	}
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, nil, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	if job.HostID != hostID {
-		return model.Job{}, nil, fmt.Errorf("%w: job is not assigned to host", ErrPolicyDenied)
-	}
-	if job.Status != model.JobStatusQueued && job.Status != model.JobStatusRunning {
-		return model.Job{}, nil, fmt.Errorf("%w: job must be queued or running", ErrInvalidState)
-	}
-	now := g.now().UTC()
-	if job.StartedAt == nil {
-		job.StartedAt = &now
-	}
-	job.Status = model.JobStatusFailed
-	job.FailureReason = reasonOrDefault(reason, "host reported job failure")
-	job.EndedAt = &now
-	var artifact *model.Artifact
-	if artifactContent != "" {
-		created, err := model.NewArtifact(job.ID, "text", "failure-result.txt", artifactContent, now)
-		if err != nil {
-			return model.Job{}, nil, err
-		}
-		artifact = &created
-	}
-	g.jobs[job.ID] = job
-	if artifact != nil {
-		g.artifacts[job.ID] = append(g.artifacts[job.ID], *artifact)
-	}
-	g.appendAuditLocked("host", "job.fail", job.ID, job.FailureReason)
-	return job, artifact, nil
-}
-
-func (g *MemoryGateway) AppendCanceledJobArtifactForHost(hostID, jobID, artifactContent string) (model.Job, model.Artifact, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status != model.HostStatusActive {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
-	}
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	if job.HostID != hostID {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job is not assigned to host", ErrPolicyDenied)
-	}
-	if job.Status != model.JobStatusCanceled {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job must be canceled", ErrInvalidState)
-	}
-	if artifactContent == "" {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: artifact_content is required", ErrPolicyDenied)
-	}
-	now := g.now().UTC()
-	artifact, err := model.NewArtifact(job.ID, "text", "canceled-result.txt", artifactContent, now)
-	if err != nil {
-		return model.Job{}, model.Artifact{}, err
-	}
-	g.artifacts[job.ID] = append(g.artifacts[job.ID], artifact)
-	g.appendAuditLocked("host", "job.artifact", job.ID, "host appended artifact for canceled job")
-	return job, artifact, nil
-}
-
-func (g *MemoryGateway) AppendJobArtifactForHost(hostID, jobID, artifactContent string) (model.Job, model.Artifact, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status != model.HostStatusActive {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: host must be active", ErrInvalidState)
-	}
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	if job.HostID != hostID {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job is not assigned to host", ErrPolicyDenied)
-	}
-	if job.Status == model.JobStatusQueued {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: job must have been claimed before artifact append", ErrInvalidState)
-	}
-	if artifactContent == "" {
-		return model.Job{}, model.Artifact{}, fmt.Errorf("%w: artifact_content is required", ErrPolicyDenied)
-	}
-	now := g.now().UTC()
-	artifact, err := model.NewArtifact(job.ID, "text", appendedArtifactName(artifactContent), artifactContent, now)
-	if err != nil {
-		return model.Job{}, model.Artifact{}, err
-	}
-	g.artifacts[job.ID] = append(g.artifacts[job.ID], artifact)
-	g.appendAuditLocked("host", "job.artifact", job.ID, "host appended artifact")
-	return job, artifact, nil
-}
-
-func (g *MemoryGateway) NextJobForHost(hostID string) (model.Job, bool, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Job{}, false, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status != model.HostStatusActive {
-		return model.Job{}, false, fmt.Errorf("%w: host must be active", ErrInvalidState)
-	}
-	if g.hostIsStaleLocked(host) {
-		return model.Job{}, false, fmt.Errorf("%w: host heartbeat is stale", ErrInvalidState)
-	}
-	jobs := make([]model.Job, 0, len(g.jobs))
-	for _, job := range g.jobs {
-		if job.HostID == hostID && job.Status == model.JobStatusQueued {
-			jobs = append(jobs, job)
-		}
-	}
-	if len(jobs) == 0 {
-		return model.Job{}, false, nil
-	}
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
-	})
-	job := jobs[0]
-	now := g.now().UTC()
-	job.Status = model.JobStatusRunning
-	job.StartedAt = &now
-	g.jobs[job.ID] = job
-	g.appendAuditLocked("host", "job.claim", job.ID, "host claimed queued job")
-	return job, true, nil
-}
-
-func (g *MemoryGateway) NextJobForAuthenticatedHost(hostID, secret string) (model.Job, bool, error) {
-	if !g.ValidateHostSecret(hostID, secret) {
-		return model.Job{}, false, fmt.Errorf("%w: invalid host secret", ErrPolicyDenied)
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	host, ok := g.hosts[hostID]
-	if !ok {
-		return model.Job{}, false, fmt.Errorf("%w: host", ErrNotFound)
-	}
-	if host.Status != model.HostStatusActive {
-		return model.Job{}, false, fmt.Errorf("%w: host must be active", ErrInvalidState)
-	}
-	now := g.now().UTC()
-	host.LastSeenAt = now
-	g.hosts[hostID] = host
-	g.hostHeartbeats[hostID] = now
-	jobs := make([]model.Job, 0, len(g.jobs))
-	for _, job := range g.jobs {
-		if job.HostID == hostID && job.Status == model.JobStatusQueued {
-			jobs = append(jobs, job)
-		}
-	}
-	if len(jobs) == 0 {
-		return model.Job{}, false, nil
-	}
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
-	})
-	job := jobs[0]
-	job.Status = model.JobStatusRunning
-	job.StartedAt = &now
-	g.jobs[job.ID] = job
-	g.appendAuditLocked("host", "job.claim", job.ID, "host claimed queued job")
-	return job, true, nil
-}
-
-func appendedArtifactName(content string) string {
-	if strings.Contains(content, `"schema_version": "rdev.adapter-runtime-fixture.v1"`) || strings.Contains(content, `"schema_version":"rdev.adapter-runtime-fixture.v1"`) {
-		return "adapter-runtime-fixture.json"
-	}
-	return "host-artifact.txt"
-}
-
-func (g *MemoryGateway) Job(jobID string) (model.Job, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	return job, nil
-}
-
-func (g *MemoryGateway) Jobs() []model.Job {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	jobs := make([]model.Job, 0, len(g.jobs))
-	for _, job := range g.jobs {
-		jobs = append(jobs, job)
-	}
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
-	})
-	return jobs
-}
-
-func (g *MemoryGateway) CancelJob(jobID, reason string) (model.Job, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	if job.Status == model.JobStatusSucceeded || job.Status == model.JobStatusFailed || job.Status == model.JobStatusCanceled {
-		return model.Job{}, fmt.Errorf("%w: job already terminal", ErrInvalidState)
-	}
-	now := g.now().UTC()
-	job.Status = model.JobStatusCanceled
-	job.EndedAt = &now
-	g.jobs[job.ID] = job
-	g.appendAuditLocked("operator", "job.cancel", job.ID, reasonOrDefault(reason, "canceled job"))
-	return job, nil
-}
-
-func (g *MemoryGateway) cancelJobsForHostLocked(hostID string, now time.Time, reason string) {
-	for _, job := range g.jobs {
-		if job.HostID != hostID {
-			continue
-		}
-		if job.Status != model.JobStatusQueued && job.Status != model.JobStatusRunning {
-			continue
-		}
-		job.Status = model.JobStatusCanceled
-		job.EndedAt = &now
-		g.jobs[job.ID] = job
-		g.appendAuditLocked("operator", "job.cancel", job.ID, reasonOrDefault(reason, "canceled job"))
-	}
-}
-
-func (g *MemoryGateway) ApproveJob(jobID, approvalID, decision, reason string) (model.Job, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	job, ok := g.jobs[jobID]
-	if !ok {
-		return model.Job{}, fmt.Errorf("%w: job", ErrNotFound)
-	}
-	if decision != "approved" && decision != "denied" {
-		return model.Job{}, fmt.Errorf("%w: decision must be approved or denied", ErrPolicyDenied)
-	}
-	if decision == "approved" {
-		if strings.TrimSpace(approvalID) == "" {
-			return model.Job{}, fmt.Errorf("%w: approval id is required", ErrPolicyDenied)
-		}
-		if job.Envelope == nil {
-			return model.Job{}, fmt.Errorf("%w: job envelope is required", ErrInvalidState)
-		}
-		envelope := *job.Envelope
-		token, err := model.NewApprovalToken(model.ApprovalTokenSpec{
-			JobID:        envelope.JobID,
-			HostID:       envelope.HostID,
-			ApprovalID:   approvalID,
-			Operation:    approvalID,
-			OperatorID:   envelope.OperatorID,
-			Source:       "operator",
-			ExpiresAt:    envelope.ExpiresAt,
-			SigningKeyID: envelope.SigningKeyID,
-		}, g.now())
-		if err != nil {
-			return model.Job{}, err
-		}
-		token, err = token.Sign(g.privateKey)
-		if err != nil {
-			return model.Job{}, err
-		}
-		envelope.ApprovalTokens = appendApprovalToken(envelope.ApprovalTokens, token)
-		envelope.Signature = ""
-		signed, err := envelope.Sign(g.privateKey)
-		if err != nil {
-			return model.Job{}, err
-		}
-		job.Envelope = &signed
-		g.jobs[job.ID] = job
-	}
-	g.appendAuditLocked("operator", "job.approve", job.ID, fmt.Sprintf("%s approval %s: %s", decision, approvalID, reason))
-	return job, nil
-}
-
-func (g *MemoryGateway) Artifacts(jobID string) []model.Artifact {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	return append([]model.Artifact(nil), g.artifacts[jobID]...)
-}
-
-func (g *MemoryGateway) Artifact(artifactID string) (model.Artifact, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	for _, artifacts := range g.artifacts {
-		for _, artifact := range artifacts {
-			if artifact.ID == artifactID {
-				return artifact, nil
-			}
-		}
-	}
-	return model.Artifact{}, fmt.Errorf("%w: artifact", ErrNotFound)
 }
 
 func (g *MemoryGateway) AuditEvents() []model.AuditEvent {
@@ -1274,89 +981,6 @@ func generateSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func jobEnvelopeSpec(jobPolicy map[string]any, host model.Host, signingID string) model.JobEnvelopeSpec {
-	return model.JobEnvelopeSpec{
-		OperatorID:              stringValue(jobPolicy, "operator_id", "operator"),
-		HostIdentityFingerprint: host.IdentityFingerprint,
-		Workspace:               workspaceValue(jobPolicy),
-		Capabilities:            stringSliceValue(jobPolicy, "capabilities", host.Capabilities),
-		Limits:                  limitsValue(jobPolicy),
-		ApprovalsRequired:       stringSliceValue(jobPolicy, "approvals_required", nil),
-		Payload:                 jobPolicy,
-		TTLSeconds:              intValue(jobPolicy, "ttl_seconds", model.DefaultJobTTLSeconds),
-		SigningKeyID:            signingID,
-	}
-}
-
-func workspaceValue(values map[string]any) model.JobWorkspace {
-	root := stringValue(values, "workspace_root", "")
-	if root == "" {
-		root = stringValue(values, "cwd", "")
-	}
-	return model.JobWorkspace{
-		Root:       root,
-		WriteScope: stringSliceValue(values, "write_scope", nil),
-		Branch:     stringValue(values, "branch", ""),
-	}
-}
-
-func limitsValue(values map[string]any) model.JobLimits {
-	return model.JobLimits{
-		MaxDurationSeconds: intValue(values, "max_duration_seconds", model.DefaultJobTTLSeconds),
-		MaxOutputBytes:     intValue(values, "max_output_bytes", model.DefaultMaxOutputBytes),
-		Network:            stringValue(values, "network", "default-deny"),
-	}
-}
-
-func stringValue(values map[string]any, key, fallback string) string {
-	value, ok := values[key]
-	if !ok || value == nil {
-		return fallback
-	}
-	if text, ok := value.(string); ok {
-		return text
-	}
-	return fallback
-}
-
-func intValue(values map[string]any, key string, fallback int) int {
-	value, ok := values[key]
-	if !ok || value == nil {
-		return fallback
-	}
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	default:
-		return fallback
-	}
-}
-
-func stringSliceValue(values map[string]any, key string, fallback []string) []string {
-	value, ok := values[key]
-	if !ok || value == nil {
-		return append([]string(nil), fallback...)
-	}
-	switch typed := value.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		result := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if text, ok := item.(string); ok && text != "" {
-				result = append(result, text)
-			}
-		}
-		return result
-	default:
-		return append([]string(nil), fallback...)
-	}
-}
-
 func normalizeCapabilities(capabilities []string) []string {
 	if len(capabilities) == 0 {
 		return nil
@@ -1389,15 +1013,4 @@ func capabilitiesWithin(requested, allowed []string) bool {
 		}
 	}
 	return true
-}
-
-func appendApprovalToken(values []model.ApprovalToken, next model.ApprovalToken) []model.ApprovalToken {
-	result := append([]model.ApprovalToken(nil), values...)
-	for index, value := range result {
-		if value.ApprovalID == next.ApprovalID && value.Operation == next.Operation {
-			result[index] = next
-			return result
-		}
-	}
-	return append(result, next)
 }

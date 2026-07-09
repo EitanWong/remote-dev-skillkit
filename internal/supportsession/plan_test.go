@@ -1,6 +1,7 @@
 package supportsession
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
@@ -37,6 +39,136 @@ func TestGatewayURLCandidatesPreferPrivateAddressForWildcardListen(t *testing.T)
 			t.Fatalf("candidate should not expose wildcard or non-private test IP: %#v", candidate)
 		}
 	}
+}
+
+func TestSupportSessionRdevBuildArgsStripDebugInfo(t *testing.T) {
+	args := supportSessionRdevBuildArgs("/tmp/rdev")
+	joined := strings.Join(args, " ")
+	if !slices.Contains(args, "-trimpath") ||
+		!slices.Contains(args, "-ldflags=-s -w") ||
+		!strings.Contains(joined, "-o /tmp/rdev") ||
+		args[len(args)-1] != "./cmd/rdev-host" {
+		t.Fatalf("expected stripped reproducible rdev build args, got %#v", args)
+	}
+}
+
+func TestPrepareReportsCompressedAssetBudgetEvidence(t *testing.T) {
+	workDir := t.TempDir()
+	binDir := filepath.Join(workDir, "bin")
+	content := bytes.Repeat([]byte("rdev-helper-payload\n"), 4096)
+	for _, asset := range supportSessionAssetSpecs(binDir) {
+		if err := os.MkdirAll(filepath.Dir(asset.Path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(asset.Path, content, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prepare, err := Prepare(context.Background(), PrepareOptions{
+		RepoRoot:   t.TempDir(),
+		WorkDir:    workDir,
+		GatewayURL: "https://gateway.example.test/rdev",
+		Target:     "windows",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := prepare["asset_report"].(map[string]any)
+	if int64FromAny(t, report["download_budget_bytes"]) != supportSessionHelperGzipBudgetBytes ||
+		int64FromAny(t, report["bootstrap_target_bytes"]) != supportSessionBootstrapTargetBytes ||
+		report["all_gzip_within_budget"] != true ||
+		report["bootstrap_connector_recommended"] != false ||
+		!strings.Contains(report["first_connect_size_strategy"].(string), "gzip") ||
+		!strings.Contains(report["first_connect_size_strategy"].(string), "rdev-bootstrap") {
+		t.Fatalf("expected aggregate compressed download budget evidence, got %#v", report)
+	}
+	assets := report["assets"].([]map[string]any)
+	if len(assets) != 5 {
+		t.Fatalf("expected five assets, got %#v", assets)
+	}
+	for _, asset := range assets {
+		gzipURL, ok := asset["gzip_asset_url"].(string)
+		if !ok || !strings.HasPrefix(gzipURL, "https://gateway.example.test/rdev/assets/") || !strings.HasSuffix(gzipURL, ".gz") {
+			t.Fatalf("expected gzip asset URL, got %#v", asset)
+		}
+		sizeBytes := int64FromAny(t, asset["size_bytes"])
+		gzipBytes := int64FromAny(t, asset["gzip_estimated_bytes"])
+		if sizeBytes != int64(len(content)) ||
+			gzipBytes <= 0 ||
+			gzipBytes >= sizeBytes ||
+			int64FromAny(t, asset["gzip_budget_bytes"]) != supportSessionHelperGzipBudgetBytes ||
+			int64FromAny(t, asset["bootstrap_target_bytes"]) != supportSessionBootstrapTargetBytes ||
+			asset["gzip_within_budget"] != true ||
+			asset["bootstrap_target_met"] != true {
+			t.Fatalf("expected compressed size evidence for asset, got %#v", asset)
+		}
+	}
+}
+
+func TestPrepareReportsDefaultFirstConnectAssetReality(t *testing.T) {
+	workDir := t.TempDir()
+	binDir := filepath.Join(workDir, "bin")
+	content := deterministicBytes(2*1024*1024 + 17)
+	for _, asset := range supportSessionAssetSpecs(binDir) {
+		if err := os.MkdirAll(filepath.Dir(asset.Path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(asset.Path, content, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prepare, err := Prepare(context.Background(), PrepareOptions{
+		RepoRoot:   t.TempDir(),
+		WorkDir:    workDir,
+		GatewayURL: "https://gateway.example.test/rdev",
+		Target:     "windows",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := prepare["asset_report"].(map[string]any)
+	if report["default_first_connect_surface"] != "script-preconnect" ||
+		report["default_runner_download_kind"] != "gzip-full-helper" ||
+		report["first_task_requires_full_helper"] != true ||
+		report["publishes_native_first_connect_asset"] != false {
+		t.Fatalf("expected asset report to state default first-connect reality, got %#v", report)
+	}
+	if maxBytes := int64FromAny(t, report["default_full_helper_gzip_estimated_max_bytes"]); maxBytes <= supportSessionBootstrapTargetBytes {
+		t.Fatalf("expected default full helper gzip max to exceed bootstrap target, got %d", maxBytes)
+	}
+	if report["default_full_helper_meets_bootstrap_target"] != false {
+		t.Fatalf("expected default full helper path not to be reported as bootstrap-target compliant, got %#v", report)
+	}
+	nativeBootstrap := report["native_first_connect_asset"].(map[string]any)
+	if nativeBootstrap["name"] != "rdev-bootstrap" ||
+		nativeBootstrap["published"] != false ||
+		nativeBootstrap["measured"] != false ||
+		int64FromAny(t, nativeBootstrap["target_bytes"]) != supportSessionBootstrapTargetBytes ||
+		nativeBootstrap["target_met"] != false ||
+		!strings.Contains(nativeBootstrap["reason"].(string), "not published") {
+		t.Fatalf("expected native bootstrap publication status, got %#v", nativeBootstrap)
+	}
+	assets := report["assets"].([]map[string]any)
+	for _, asset := range assets {
+		if asset["asset_role"] != "full-helper" ||
+			asset["used_by_default_first_connect"] != true ||
+			asset["native_bootstrap_asset"] != false {
+			t.Fatalf("expected full-helper asset role evidence, got %#v", asset)
+		}
+	}
+}
+
+func deterministicBytes(n int) []byte {
+	out := make([]byte, n)
+	var x uint32 = 0x811c9dc5
+	for i := range out {
+		x ^= uint32(i) + 0x9e3779b9
+		x *= 16777619
+		out[i] = byte(x >> 16)
+	}
+	return out
 }
 
 func TestGatewayURLCandidatesRespectExplicitGateway(t *testing.T) {
@@ -167,21 +299,21 @@ func TestGatewayCandidateSummaryExplainsEphemeralQuickTunnelAndStableOptions(t *
 func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "support")
 	plan := BuildPlan(context.Background(), Options{
-		RepoRoot:    ".",
-		WorkDir:     workDir,
-		GatewayURL:  "http://192.0.2.10:8787",
-		Target:      "windows",
-		Reason:      "company computer support",
-		AutoApprove: true,
-		Locale:      "zh-CN",
+		RepoRoot:     ".",
+		WorkDir:      workDir,
+		GatewayURL:   "http://192.0.2.10:8787",
+		Target:       "windows",
+		Reason:       "company computer support",
+		AutoActivate: true,
+		Locale:       "zh-CN",
 	})
 
 	if plan["schema_version"] != PlanSchemaVersion || plan["ok"] != true {
 		t.Fatalf("unexpected plan identity: %#v", plan)
 	}
-	autoApprove := plan["auto_approve"].(map[string]any)
-	if autoApprove["enabled"] != true || !strings.Contains(autoApprove["scope"].(string), "attended-temporary") {
-		t.Fatalf("expected scoped attended-temporary auto approval, got %#v", autoApprove)
+	autoActivate := plan["auto_activate"].(map[string]any)
+	if autoActivate["enabled"] != true || !strings.Contains(autoActivate["scope"].(string), "attended-temporary") {
+		t.Fatalf("expected scoped attended-temporary auto activation, got %#v", autoActivate)
 	}
 	commands := plan["commands"].(map[string]any)
 	startGateway := strings.Join(anyStrings(commands["start_gateway"].([]string)), "\x00")
@@ -191,8 +323,8 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 		t.Fatalf("expected all helper asset flags, got %s", startGateway)
 	}
 	createInvite := strings.Join(anyStrings(commands["create_invite_cli"].([]string)), "\x00")
-	if !strings.Contains(createInvite, "--auto-approve") {
-		t.Fatalf("expected auto-approve invite command, got %s", createInvite)
+	if !strings.Contains(createInvite, "--auto-activate") {
+		t.Fatalf("expected auto-activate invite command, got %s", createInvite)
 	}
 	watch := strings.Join(anyStrings(commands["watch_connection_status"].([]string)), "\x00")
 	if !strings.Contains(watch, "support-session") || !strings.Contains(watch, "status") || !strings.Contains(watch, "--wait") {
@@ -212,13 +344,13 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 
 func TestBuildHandoffRoutesFreshAgentToStandardEntry(t *testing.T) {
 	handoff := BuildHandoff(HandoffOptions{
-		GatewayURL:  "https://gateway.example.test",
-		Target:      "windows",
-		Reason:      "repair workstation",
-		TTLSeconds:  600,
-		AutoApprove: true,
-		Locale:      "zh-CN",
-		RdevCommand: "rdev",
+		GatewayURL:   "https://gateway.example.test",
+		Target:       "windows",
+		Reason:       "repair workstation",
+		TTLSeconds:   600,
+		AutoActivate: true,
+		Locale:       "zh-CN",
+		RdevCommand:  "rdev",
 	})
 
 	args := handoff["mcp_next_arguments"].(map[string]any)
@@ -236,10 +368,10 @@ func TestBuildHandoffRoutesFreshAgentToStandardEntry(t *testing.T) {
 
 func TestBuildHandoffRoutesMissingGatewayToForegroundStart(t *testing.T) {
 	handoff := BuildHandoff(HandoffOptions{
-		Addr:        "0.0.0.0:8787",
-		Target:      "auto",
-		AutoApprove: true,
-		RdevCommand: "rdev",
+		Addr:         "0.0.0.0:8787",
+		Target:       "auto",
+		AutoActivate: true,
+		RdevCommand:  "rdev",
 	})
 
 	startCommand := strings.Join(anyStrings(handoff["foreground_start_command"].([]string)), "\x00")
@@ -260,9 +392,9 @@ func TestBuildHandoffRoutesMissingGatewayToForegroundStart(t *testing.T) {
 func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
 	handoff := BuildHandoff(HandoffOptions{
-		Target:      "auto",
-		AutoApprove: true,
-		RdevCommand: "rdev",
+		Target:       "auto",
+		AutoActivate: true,
+		RdevCommand:  "rdev",
 	})
 
 	args := handoff["mcp_next_arguments"].(map[string]any)
@@ -278,10 +410,10 @@ func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 
 func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 	handoff := BuildHandoff(HandoffOptions{
-		Addr:        "0.0.0.0:8787",
-		Target:      "auto",
-		AutoApprove: true,
-		RdevCommand: "rdev",
+		Addr:         "0.0.0.0:8787",
+		Target:       "auto",
+		AutoActivate: true,
+		RdevCommand:  "rdev",
 	})
 	connect := BuildConnectFromHandoff(handoff)
 	startCommand := strings.Join(anyStrings(connect["foreground_start_command"].([]string)), "\x00")
@@ -317,7 +449,7 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		Target:                "auto",
 		Locale:                "en",
 		RdevCommand:           "rdev",
-		AutoApprove:           true,
+		AutoActivate:          true,
 	})
 	connect := BuildConnectFromCreated(created)
 
@@ -337,11 +469,11 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		t.Fatalf("expected ready connect payload, got %#v", connect)
 	}
 	contract := connect["fresh_agent_connect_contract"].(map[string]any)
-	autoApprove := contract["auto_approve"].(map[string]any)
+	autoActivate := contract["auto_activate"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
 		contract["ready_to_send_human"] != true ||
 		contract["ticket_code"] != "ABCD-1234" ||
-		autoApprove["enabled"] != true ||
+		autoActivate["enabled"] != true ||
 		!strings.Contains(contract["human_surface"].(string), "target_handoff_envelope.full_text") ||
 		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "manifest root public key") ||
 		!strings.Contains(contract["status_rule"].(string), "connected_next_steps.user_report") {
@@ -366,6 +498,15 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connectRunner["invite_json"] != createdRunner["invite_json"] {
 		t.Fatalf("expected connect payload to mirror runner recommendation, got %#v", connectRunner)
 	}
+	connectBootstrap, ok := connect["rdev_bootstrap_connector"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected connect payload to mirror bootstrap connector contract, got %#v", connect["rdev_bootstrap_connector"])
+	}
+	createdBootstrap := created["rdev_bootstrap_connector"].(map[string]any)
+	if connectBootstrap["schema_version"] != BootstrapConnectorSchemaVersion ||
+		connectBootstrap["agent_rule"] != createdBootstrap["agent_rule"] {
+		t.Fatalf("expected connect payload to mirror bootstrap connector contract, got %#v", connectBootstrap)
+	}
 	runbook := connect["agent_connection_runbook"].(map[string]any)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		!strings.Contains(runbook["agent_rule"].(string), "runbook before choosing lower-level") {
@@ -385,7 +526,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		Target:                "windows",
 		Locale:                "zh-CN",
 		RdevCommand:           "rdev",
-		AutoApprove:           true,
+		AutoActivate:          true,
 	})
 
 	if created["schema_version"] != CreatedSchemaVersion ||
@@ -481,6 +622,55 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "relay, mesh, VPN, SSH, or polling scripts") {
 		t.Fatalf("expected created fresh-Agent connect contract, got %#v", contract)
 	}
+	bootstrap, ok := created["rdev_bootstrap_connector"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected Agent-readable rdev bootstrap connector contract, got %#v", created["rdev_bootstrap_connector"])
+	}
+	if bootstrap["schema_version"] != "rdev.support-session-bootstrap-connector.v1" ||
+		int64FromAny(t, bootstrap["first_connect_target_bytes"]) != supportSessionBootstrapTargetBytes ||
+		bootstrap["default_first_connect_surface"] != "script-preconnect" ||
+		bootstrap["publishes_native_first_connect_asset"] != false ||
+		bootstrap["preconnect_endpoint"] != "/v1/support-session/preconnect" ||
+		bootstrap["preconnect_phase_before_full_helper"] != "downloading-helper" ||
+		bootstrap["source"] != "rdev-bootstrap-preconnect" ||
+		bootstrap["grants_host_access"] != false ||
+		bootstrap["can_run_session_tasks"] != false ||
+		bootstrap["full_runner_phase"] != "download-verified-rdev-host" ||
+		!slices.Contains(bootstrap["status_fields"].([]string), "target_preconnects") ||
+		!slices.Contains(bootstrap["status_fields"].([]string), "target_preconnect_count") ||
+		!strings.Contains(strings.Join(bootstrap["upgrade_required_for"].([]string), "\n"), "desktop") ||
+		!strings.Contains(bootstrap["agent_rule"].(string), "not as a connected executable host") {
+		t.Fatalf("expected bounded bootstrap connector contract, got %#v", bootstrap)
+	}
+	nativeBootstrap := bootstrap["native_connector"].(map[string]any)
+	nativeCommand := nativeBootstrap["command"].([]string)
+	if nativeBootstrap["schema_version"] != "rdev.bootstrap-native-connector.v1" ||
+		nativeBootstrap["source"] != "rdev-bootstrap-native" ||
+		nativeBootstrap["availability"] != "optional-if-rdev-bootstrap-is-already-installed-or-published" ||
+		nativeBootstrap["published_by_support_session_assets"] != false ||
+		nativeBootstrap["default_first_connect_surface"] != "script-preconnect" ||
+		!slices.Contains(nativeCommand, "rdev-bootstrap") ||
+		!slices.Contains(nativeCommand, "upgrade") ||
+		!strings.Contains(strings.Join(nativeBootstrap["capabilities"].([]string), "\n"), "download verified full helper") ||
+		nativeBootstrap["can_run_session_tasks_before_full_runner"] != false {
+		t.Fatalf("expected native rdev-bootstrap staged-upgrade contract, got %#v", nativeBootstrap)
+	}
+	optimizer := bootstrap["cdn_download_optimizer"].(map[string]any)
+	if optimizer["schema_version"] != "rdev.cdn-optimizer-plan.v1" ||
+		optimizer["provider"] != "cloudflare" ||
+		optimizer["status"] != "dry-run-only" ||
+		optimizer["enabled_by_default"] != false ||
+		optimizer["requires_explicit_enable"] != true ||
+		optimizer["asset_downloads_only"] != true {
+		t.Fatalf("expected safe CDN optimizer dry-run plan, got %#v", optimizer)
+	}
+	forbidden := strings.Join(optimizer["forbidden_side_effects"].([]string), "\n")
+	if !strings.Contains(forbidden, "DNS") ||
+		!strings.Contains(forbidden, "hosts") ||
+		!strings.Contains(forbidden, "proxy") ||
+		!strings.Contains(forbidden, "firewall") {
+		t.Fatalf("expected optimizer to forbid system network mutation, got %#v", optimizer["forbidden_side_effects"])
+	}
 	candidateOrder := attemptPolicy["candidate_order"].([]map[string]any)
 	if len(candidateOrder) != 2 ||
 		candidateOrder[0]["join_url"] == "" ||
@@ -573,6 +763,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 	flow := strings.Join(created["agent_flow"].([]string), "\n")
 	if !strings.Contains(flow, "proactively report") ||
+		!strings.Contains(flow, "rdev_bootstrap_connector") ||
 		!strings.Contains(flow, "do not ask the human to assemble") {
 		t.Fatalf("expected Agent-native flow, got %s", flow)
 	}
@@ -615,7 +806,7 @@ func TestBuildCreatedKeepsTargetInvitePortableWhenAgentRdevCommandIsAbsolute(t *
 		Target:                "windows",
 		Locale:                "en",
 		RdevCommand:           agentRdev,
-		AutoApprove:           true,
+		AutoActivate:          true,
 	})
 
 	supervision := created["connection_supervision"].(map[string]any)
@@ -645,7 +836,7 @@ func TestBuildCreatedAutoTargetReturnsMultiPlatformHandoffWithCommandFallbacks(t
 		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
 		Target:                "auto",
 		Locale:                "en",
-		AutoApprove:           true,
+		AutoActivate:          true,
 	})
 
 	if created["recommended_surface"] != "multi_platform" ||
@@ -736,6 +927,12 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		startedRunner["invite_json"] != sessionRunner["invite_json"] {
 		t.Fatalf("expected started payload to mirror runner recommendation, got %#v", startedRunner)
 	}
+	startedBootstrap := started["rdev_bootstrap_connector"].(map[string]any)
+	sessionBootstrap := session["rdev_bootstrap_connector"].(map[string]any)
+	if startedBootstrap["schema_version"] != BootstrapConnectorSchemaVersion ||
+		startedBootstrap["agent_rule"] != sessionBootstrap["agent_rule"] {
+		t.Fatalf("expected started payload to mirror bootstrap connector contract, got %#v", startedBootstrap)
+	}
 	watch := strings.Join(anyStrings(started["watch_connection_status"].([]string)), "\x00")
 	if !strings.Contains(watch, "ABCD-1234") || !strings.Contains(watch, "--wait") {
 		t.Fatalf("expected top-level watcher, got %#v", started["watch_connection_status"])
@@ -813,13 +1010,13 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 
 func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "repo")
-	if err := os.MkdirAll(filepath.Join(repoRoot, "cmd", "rdev"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoRoot, "cmd", "rdev-host"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module example.com/rdevtest\n\ngo 1.22\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "cmd", "rdev", "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, "cmd", "rdev-host", "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	workDir := filepath.Join(t.TempDir(), "support")
@@ -942,7 +1139,7 @@ func TestPrepareReportsConnectivityHelperPreflight(t *testing.T) {
 		}
 	}
 	if relay == nil ||
-		relay["status"] != "ready-to-use-after-approval-check" ||
+		relay["status"] != "ready-to-use-after-authorization-check" ||
 		relay["gateway_configured"] != true ||
 		relay["start_tool"] != "chisel" {
 		t.Fatalf("expected configured relay helper report, got %#v", relay)
@@ -975,7 +1172,7 @@ func TestPrepareReportsCloudflaredNamedTunnelPreflight(t *testing.T) {
 		}
 	}
 	if named == nil ||
-		named["status"] != "ready-to-use-after-approval-check" ||
+		named["status"] != "ready-to-use-after-authorization-check" ||
 		named["gateway_configured"] != true ||
 		named["token_configured"] != true ||
 		named["gateway_url"] != "https://rdev.example.test" {
@@ -1013,6 +1210,7 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 	status := BuildStatus(StatusOptions{
 		TicketCode: "ABCD-1234",
 		Locale:     "zh-CN",
+		GatewayURL: "https://gateway.example.test",
 		Hosts: []model.Host{{
 			ID:                  "host_1",
 			TicketID:            "ticket_1",
@@ -1037,8 +1235,8 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 		next["host_id"] != "host_1" ||
 		!strings.Contains(next["user_report"].(string), "连接已经建立") ||
 		len(calls) != 1 ||
-		calls[0]["tool"] != "rdev.hosts.capabilities" ||
-		calls[0]["arguments"].(map[string]any)["host_id"] != "host_1" {
+		calls[0]["tool"] != "rdev.sessions.status" ||
+		calls[0]["arguments"].(map[string]any)["session_id"] != "<session-id>" {
 		t.Fatalf("expected connected next-step contract, got %#v", next)
 	}
 	if !strings.Contains(next["user_report"].(string), "保持连接在线") {
@@ -1048,15 +1246,75 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 	if remoteEntry["schema_version"] != RemoteControlEntrySchemaVersion ||
 		remoteEntry["support_device_id_source"] != "host_identity_fingerprint" ||
 		remoteEntry["session_passcode"] != "ABCD-1234" ||
-		remoteEntry["recommended_job_host_id"] != "host_1" ||
+		remoteEntry["recommended_task_endpoint_id"] != "host_1" ||
 		remoteEntry["explicit_disconnect_required"] != true {
 		t.Fatalf("expected connected remote-control entry, got %#v", remoteEntry)
 	}
 	runbook := status["agent_connection_runbook"].(map[string]any)
+	watch := runbook["watch"].(map[string]any)
+	watchArgs := watch["mcp_arguments"].(map[string]any)
+	watchCommand := watch["cli_command"].([]string)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		runbook["status"] != "connected" ||
+		runbook["gateway_url"] != "https://gateway.example.test" ||
+		watchArgs["gateway_url"] != "https://gateway.example.test" ||
+		!slices.Contains(watchCommand, "--gateway-url") ||
+		!slices.Contains(watchCommand, "https://gateway.example.test") ||
 		!strings.Contains(strings.Join(runbook["on_connected"].([]string), "\n"), "capabilities") {
 		t.Fatalf("expected connected status runbook, got %#v", runbook)
+	}
+}
+
+func TestBuildStatusReportsTargetDownloadingFromPreconnect(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	status := BuildStatus(StatusOptions{
+		TicketCode: "WAIT-1234",
+		Locale:     "zh-CN",
+		Preconnects: []model.SupportSessionPreconnect{
+			{
+				ID:         "pre_old",
+				TicketCode: "WAIT-1234",
+				Phase:      "started",
+				OS:         "windows",
+				Arch:       "amd64",
+				Source:     "bootstrap.ps1",
+				CreatedAt:  now.Add(-2 * time.Minute),
+				LastSeenAt: now.Add(-2 * time.Minute),
+				SeenCount:  1,
+			},
+			{
+				ID:         "pre_download",
+				TicketCode: "WAIT-1234",
+				Phase:      "downloading-helper",
+				OS:         "windows",
+				Arch:       "amd64",
+				Asset:      "rdev-windows-amd64.exe.gz",
+				Source:     "bootstrap.ps1",
+				Message:    "downloading 18MB helper",
+				CreatedAt:  now.Add(-1 * time.Minute),
+				LastSeenAt: now,
+				SeenCount:  3,
+			},
+		},
+	})
+
+	if status["status"] != "target-downloading" ||
+		status["waiting"] != false ||
+		status["connected"] != false ||
+		!strings.Contains(status["feedback"].(string), "正在下载") ||
+		!strings.Contains(status["next_action"].(string), "继续等待") {
+		t.Fatalf("expected target downloading status, got %#v", status)
+	}
+	summary := status["target_preconnect_summary"].(map[string]any)
+	latest := summary["latest"].(model.SupportSessionPreconnect)
+	countByPhase := summary["count_by_phase"].(map[string]int)
+	if summary["status"] != "target-downloading" ||
+		summary["phase"] != "downloading-helper" ||
+		latest.ID != "pre_download" ||
+		countByPhase["started"] != 1 ||
+		countByPhase["downloading-helper"] != 1 ||
+		!strings.Contains(summary["agent_interpretation"].(string), "not disconnected") {
+		t.Fatalf("expected target preconnect summary, got %#v", summary)
 	}
 }
 
@@ -1064,6 +1322,7 @@ func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
 	status := BuildStatus(StatusOptions{
 		TicketCode: "WAIT-1234",
 		Locale:     "en",
+		GatewayURL: "https://gateway.example.test",
 	})
 
 	recovery := status["connection_recovery"].(map[string]any)
@@ -1077,8 +1336,15 @@ func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
 		t.Fatalf("expected standard connection recovery contract, got %#v", recovery)
 	}
 	runbook := recovery["agent_connection_runbook"].(map[string]any)
+	watch := runbook["watch"].(map[string]any)
+	watchArgs := watch["mcp_arguments"].(map[string]any)
+	watchCommand := watch["cli_command"].([]string)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		runbook["phase"] != "recovery" ||
+		runbook["gateway_url"] != "https://gateway.example.test" ||
+		watchArgs["gateway_url"] != "https://gateway.example.test" ||
+		!slices.Contains(watchCommand, "--gateway-url") ||
+		!slices.Contains(watchCommand, "https://gateway.example.test") ||
 		!strings.Contains(strings.Join(runbook["on_timeout_or_failure"].([]string), "\n"), "gateway_candidate_preflight") {
 		t.Fatalf("expected recovery runbook, got %#v", runbook)
 	}
@@ -1095,4 +1361,19 @@ func anyStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	out = append(out, values...)
 	return out
+}
+
+func int64FromAny(t *testing.T, value any) int64 {
+	t.Helper()
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	default:
+		t.Fatalf("expected numeric value, got %T %#v", value, value)
+		return 0
+	}
 }

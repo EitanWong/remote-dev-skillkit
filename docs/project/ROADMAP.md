@@ -1,12 +1,12 @@
 # Roadmap
 
-The roadmap implements the canonical [Perfect Ending Solution](../architecture/PERFECT_ENDING_SOLUTION.md): consent-first enrollment, outbound-only transport, signed job envelopes, host-side policy enforcement, workspace locks, approval gates, audit evidence, release-bundle verification, and agent-native MCP/Skill packaging. Future architecture changes should patch that decision layer instead of adding another dated "final" layer. The compressed end state is one signed control protocol, two host products, separated release/bootstrap/gateway/host trust authorities, explicit join/run/approve/prove paths, and replayable proof packages. [Final Closure Blueprint](../architecture/FINAL_CLOSURE_BLUEPRINT.md) is the concise release-facing summary, while [Ultimate Closure Design](../architecture/ULTIMATE_CLOSURE_DESIGN.md), [Final System Design](../architecture/FINAL_SYSTEM_DESIGN.md), and [Perfect End-State Architecture](../architecture/PERFECT_END_STATE.md) remain supporting context.
+The roadmap implements the canonical Control Plane v1 direction: consent-first enrollment, outbound-only transport, session tasks, host-side policy enforcement, workspace locks, interrupt gates, audit evidence, release-bundle verification, and agent-native MCP/Skill packaging. Future architecture changes should patch that decision layer instead of adding another dated "final" layer. The compressed end state is one session control protocol, two host products, separated release/bootstrap/gateway/host trust authorities, explicit join/run/interrupt/prove paths, and replayable proof packages.
 
 ## Maturity Gates
 
 | Gate | Proves | Does not claim |
 |---|---|---|
-| `v0.1` Local Safety Kernel | signed jobs, host-side verification, denials, approvals, evidence, audit | production networking or OS service behavior |
+| `v0.1` Local Safety Kernel | session tasks, host-side validation, interrupts, evidence, audit | production networking or OS service behavior |
 | `v0.2` Windows Temporary Host | visible one-command enrollment, release verification, outbound-only repair | unattended managed-device operations |
 | `v0.3` Managed Mac Coding | durable owned-host Codex workflow with workspace evidence | general multi-tenant fleet management |
 | `v0.4` Managed Device Generalization | multi-OS services, durable storage, adapter SDK, reconnects | public protocol stability |
@@ -24,20 +24,20 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 ## v0.1.0 Local Safety Kernel
 
 - Local gateway process.
-- Development gateway state snapshot restore for tickets, hosts, jobs, artifacts, audit events, and trust bundles when started with a persistent signing key.
+- Development gateway state snapshot restore for tickets, sessions, endpoints, tasks, artifacts, audit events, and trust bundles when started with a persistent signing key.
 - Local host process.
-- In-memory tickets, hosts, jobs, artifacts, and audit events.
+- In-memory tickets, sessions, endpoints, tasks, artifacts, and audit events.
 - MCP stdio server for tool calls.
-- Development signed job envelopes.
+- Development session task envelopes.
 - Demonstrable local temporary session.
-- Development HTTPS long-poll host job transport.
-- Production WSS host job transport through `rdev host serve --transport wss`
-  and `GET /v1/ws/hosts/{host_id}`, including completion/failure/artifact
-  acknowledgements and mTLS client certificate reuse.
+- Control Plane v1 session task transport through `/v1/sessions`,
+  `/v1/session-joins`, `/v1/sessions/{session_id}/events`, and
+  `/v1/sessions/{session_id}/tasks`, including reconnect-safe event replay and
+  task/result/artifact state in the session snapshot.
 - Development gateway TLS/mTLS listener through `rdev gateway serve --dev --tls-cert --tls-key [--client-ca]`, requiring client certificates when a client CA is configured while preserving signed-envelope and host-local authorization semantics.
-- Host-side local dev gateway HTTPS/mTLS client support through `rdev host serve --gateway-ca [--gateway-client-cert --gateway-client-key]`, covering join manifests, registration, trust refresh, polling, completion, failure, and artifact appends over local HTTPS/mTLS.
+- Host-side local dev gateway HTTPS/mTLS client support through `rdev host serve --gateway-ca [--gateway-client-cert --gateway-client-key]`, covering join manifests, session joins, trust refresh, event replay, task execution, result reporting, and artifact appends over local HTTPS/mTLS.
 - Scoped shell adapter with workspace boundary, allowlisted argv, timeouts, cooperative cancellation, output caps, and failure reporting.
-- Host identity storage wired into registration and job binding.
+- Host identity storage wired into registration and task binding.
 - Durable host trust bundle store.
 - Signed host registration proofs for identity-bearing registrations.
 - Host enrollment certificate primitive through `rdev.host-enrollment-certificate.v1`, `rdev enrollment sign-certificate`, `rdev enrollment verify-certificate`, `rdev host serve --enrollment-certificate`, and `rdev gateway serve --dev --enrollment-root-public-key`, binding ticket code, mode, host metadata, capabilities, identity fingerprint, validity window, and enrollment root signature before registration when configured.
@@ -85,7 +85,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   `HOSTED_PROVIDER_RUNTIME.md`, covering Postgres, S3-compatible object
   storage, Redis streams, OIDC/JWKS, and SAML runtime evidence requirements
   for verification, backup, restore, retention, role mapping, failure-mode
-  probes, audit, operator approval, and unsupported production claims.
+  probes, audit, operator authorization, and unsupported production claims.
 - Hosted provider runtime evidence plans through
   `rdev.hosted-provider-runtime-evidence-plan.v1` and
   `runtime-evidence-plan.json`, giving Agents standard evidence file names,
@@ -99,7 +99,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   producing Chisel/frpc `RDEV_RELAY_*`, SSH tunnel `RDEV_SSH_*`,
   headscale/Tailscale-compatible `RDEV_MESH_*`, and WireGuard `RDEV_VPN_*`
   runner metadata, safe helper argv, reviewed dependency or manual-review
-  install actions, approval boundaries, checksums, and no-private-surface
+  install actions, authorization boundaries, checksums, and no-private-surface
   evidence without bundling relay endpoints, SSH identities, mesh auth keys,
   WireGuard keys, credentials, private IPs, or local paths.
 - Relay adapter acceptance packaging and verification through
@@ -167,8 +167,8 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Host-bound trust bundle update checks for managed host refresh.
 - Host-side artifact redaction.
 - Hash-chained audit export verifier.
-- Evidence bundle export.
-- Gateway/API evidence bundle export directly from job ids.
+- Session evidence export.
+- Gateway/API session evidence export directly from session task ids.
 - Skillkit bundle export for agent runtimes and mainstream framework notes.
 - Skillkit bundle verification for required skills, required framework notes, file checksums, safe paths, and unlisted-file detection.
 - Skillkit adaptive configuration contract through `rdev.adaptive-configuration-contract.v1`, requiring agents to probe `rdev`, MCP tools, OS/shell, service manager, gateway, workspace, adapters, framework paths, and permissions before acting, and to ask when configuration is unclear instead of inventing values.
@@ -179,7 +179,7 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
 - Connection Entry release launchers verify the packaged signed release bundle
   with packaged `rdev-verify`, pinned release root, and required artifact set
   before running packaged `rdev connection-entry run`.
-- Host startup release gates through `rdev host serve --release-bundle --release-root-public-key --release-require-artifacts`, verifying signed release bundles before host registration or job polling.
+- Host startup release gates through `rdev host serve --release-bundle --release-root-public-key --release-require-artifacts`, verifying signed release bundles before session join or task polling.
 - Real build artifact generation through `scripts/release/build-artifacts.sh`, producing target-specific binaries, `rdev.build-artifacts.v1`, per-artifact `cgo_enabled` metadata, SPDX 2.3 SBOM, `provenance.json`, and checksums before candidate packaging.
 - Per-platform release candidate automation through `scripts/release/prepare-platform-candidates.sh`, grouping real build artifacts by `GOOS/GOARCH`, producing one verified candidate per target, and writing `rdev.platform-release-candidates.v1`.
 - Multi-platform GitHub Release dry-run planning through `scripts/github/plan-platform-release.sh`, producing unique platform archives, `rdev.platform-release-index.v1`, `rdev.github-platform-release-verification.v1`, `INSTALL_PLATFORMS.md`, and command previews without external mutation.
@@ -212,32 +212,32 @@ The roadmap implements the canonical [Perfect Ending Solution](../architecture/P
   relay/connectivity, and post-release download acceptance packages are
   verified together before production release claims.
 - Public adapter onboarding and conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-result`, `rdev adapter verify-lifecycle`, `rdev adapter verify-cancellation`, `rdev adapter verify-runtime`, and MCP tools `rdev.adapter.verify_result` / `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_cancellation` / `rdev.adapter.verify_runtime`, with generated lifecycle manifest templates, runtime lifecycle fixtures, lifecycle checks for required phases, safety boundaries, cancellation, cleanup, and result schemas, and built-in shell, PowerShell, Codex, Claude Code, and acpx result/cancellation tests checking schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
-- Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled jobs.
+- Hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `rdev host serve --capture-runtime-fixture`, preserving primary adapter result artifacts while appending `rdev.adapter-runtime-fixture.v1` evidence for completed, failed, or canceled tasks.
 - Strong symlink/workspace escape regression tests.
-- Explainable denial and approval decisions.
+- Explainable denial and interrupt decisions.
 - Final operational architecture index covering topology, permanent separations, mode contracts, trust keys, protocol spine, permission lattice, host sovereignty, adapter contract, storage/transport, reliability, acceptance gates, and implementation spine.
 
-Exit gate: local demo proves ticket, host registration, outbound host job wait through short-poll or long-poll, signed job execution, artifact storage, evidence export, Skillkit export/verify, release candidate package generation and verification, audit export, approval-token consumption, and host-side rejection of tampered, expired, wrong-host, replayed, non-allowlisted, and workspace-escaping jobs.
+Exit gate: local demo proves ticket, session join, outbound task wait through short-poll or long-poll, signed task execution, artifact storage, evidence export, Skillkit export/verify, release candidate package generation and verification, audit export, interrupt handling, and host-side rejection of tampered, expired, wrong-endpoint, replayed, non-allowlisted, and workspace-escaping tasks.
 
 ## v0.2.0 Windows Temporary Host
 
 - Signed Windows binary.
 - PowerShell bootstrap.
-- PowerShell adapter MVP with `powershell.user` capability, allowlisted executable execution, no execution-policy bypass, approval preflight, redacted `rdev.powershell-result.v1` evidence, and cooperative cancellation.
-- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, including reviewed launcher generation, signed release manifest or release bundle verification requirements, launcher safety checks, approval probes, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
-- Windows temporary acceptance evidence packaging through `rdev acceptance package-windows-temporary`, turning real clean-VM transcripts, release verifier output, audit, approval probes, and no-persistence checks into a redacted checksummed release artifact.
+- PowerShell adapter MVP with `powershell.user` capability, allowlisted executable execution, no execution-policy bypass, interrupt preflight, redacted `rdev.powershell-result.v1` evidence, and cooperative cancellation.
+- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, including reviewed launcher generation, signed release manifest or release bundle verification requirements, launcher safety checks, interrupt probes, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
+- Windows temporary acceptance evidence packaging through `rdev acceptance package-windows-temporary`, turning real clean-VM transcripts, release verifier output, audit, interrupt probes, and no-persistence checks into a redacted checksummed release artifact.
 - Visible foreground support window or console UI.
 - Outbound-only connection to gateway.
 - Durable signing key storage and rotation.
-- Shell and file scoped jobs.
+- Shell and file scoped tasks.
 - Host local audit spool and revocation handling.
 - Authenticode verification policy.
 - Signed release bundle index creation and verification through `rdev release create-bundle` and `rdev release verify-bundle`.
 - No-persistence inspection script.
-- Local-user approval prompt for elevation, GUI, service, and destructive requests.
+- Local-user interrupt prompt for elevation, GUI, service, and destructive requests.
 - Clean Windows acceptance run.
 
-Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signed artifacts before host execution, connects outbound only, enforces approvals, revokes cleanly, leaves no service or autorun persistence, and exports a passing Windows temporary acceptance package.
+Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signed artifacts before host execution, connects outbound only, enforces authorizations, revokes cleanly, leaves no service or autorun persistence, and exports a passing Windows temporary acceptance package.
 
 ## v0.3.0 Managed Mac Coding
 
@@ -247,24 +247,24 @@ Exit gate: clean Windows 10/11 VM joins from one visible command, verifies signe
 - macOS Keychain protected-store references for managed host identity and trust bundle persistence.
 - Workspace lock manager and Git worktree preparation foundation.
 - Workspace locks wired into hostrunner, host serve, and managed LaunchAgent arguments.
-- Codex adapter MVP with hostrunner integration, `codex.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, and redaction.
+- Codex adapter MVP with hostrunner integration, `codex.run` and `git.diff` capability checks, locked-workspace execution, implicit interrupt preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, and redaction.
 - Codex adapter conformance coverage for workspace canonicalization, write-scope escape rejection before execution, nonzero-exit evidence, host-side redaction, output truncation, and timeout cancellation evidence.
-- Claude Code adapter MVP with hostrunner integration, `claude-code.run` and `git.diff` capability checks, locked-workspace execution, implicit approval preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, redaction, and runtime fixture capture.
-- ACP/acpx adapter MVP with hostrunner integration, `acpx.run` and `git.diff` capability checks, default `acpx --cwd <workspace> codex exec <prompt>` execution, signed payload overrides for `acpx_command` / `acpx_agent` / `acpx_args`, locked-workspace execution, implicit approval preflight, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, redaction, cooperative cancellation, and runtime fixture capture.
-- Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
-- Claude Code adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
-- acpx adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of gateway job cancellation state.
+- Claude Code adapter MVP with hostrunner integration, `claude-code.run` and `git.diff` capability checks, locked-workspace execution, implicit interrupt preflight for high-risk external consequences, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, redaction, and runtime fixture capture.
+- ACP/acpx adapter MVP with hostrunner integration, `acpx.run` and `git.diff` capability checks, default `acpx --cwd <workspace> codex exec <prompt>` execution, signed payload overrides for `acpx_command` / `acpx_agent` / `acpx_args`, locked-workspace execution, implicit interrupt preflight, Git diff/status evidence, optional verification command evidence, `go test -json` report parsing, output caps, redaction, cooperative cancellation, and runtime fixture capture.
+- Codex adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of Control Plane task cancellation state.
+- Claude Code adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of Control Plane task cancellation state.
+- acpx adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and host-side polling of Control Plane task cancellation state.
 - Shell adapter cooperative cancellation through `ExecuteContext`, context-aware hostrunner execution, and `rdev.shell-result.v1` artifacts with explicit `canceled` state.
 - PowerShell adapter cooperative cancellation through context-aware hostrunner execution and `rdev.powershell-result.v1` artifacts with explicit `canceled` state.
-- Canceled shell, PowerShell, Codex, Claude Code, and acpx jobs append cancellation evidence artifacts without changing the gateway job's `canceled` terminal state.
-- Managed Mac coding acceptance harness through `rdev acceptance managed-mac`, producing a managed-mode report, locked-worktree Codex evidence bundle, and approval-gate evidence bundle.
-- Acceptance report verification through `rdev acceptance verify`, including evidence bundle checksum validation, artifact index validation, audit-chain verification, approval-gate checks, and workspace-lock release checks.
+- Canceled shell, PowerShell, Codex, Claude Code, and acpx tasks append cancellation evidence artifacts without changing the Control Plane task's `canceled` terminal state.
+- Managed Mac coding acceptance harness through `rdev acceptance managed-mac`, producing a managed-mode report, locked-worktree Codex session evidence, and interrupt-gate session evidence.
+- Acceptance report verification through `rdev acceptance verify`, including session evidence checksum validation, artifact index validation, audit-chain verification, interrupt-gate checks, and workspace-lock release checks.
 - Managed Mac LaunchAgent acceptance planning and verification through `rdev acceptance managed-mac-service` and `rdev acceptance verify-managed-mac-service`, producing a verified plist, release-bundle startup gate, launchctl start/inspect/stop commands, service-backed coding acceptance commands, verification command, and safe uninstall guidance without auto-starting launchd.
-- Managed Mac LaunchAgent acceptance evidence packaging through `rdev acceptance package-managed-mac-service`, turning real LaunchAgent start/inspect/log/release-gate/audit/reconnect/stop/uninstall transcripts plus a verified managed Mac report/evidence bundle into a redacted checksummed release artifact.
+- Managed Mac LaunchAgent acceptance evidence packaging through `rdev acceptance package-managed-mac-service`, turning real LaunchAgent start/inspect/log/release-gate/audit/reconnect/stop/uninstall transcripts plus a verified managed Mac report/session evidence into a redacted checksummed release artifact.
 - macOS LaunchAgent lifecycle control through `rdev host service-control`, dry-running by default and requiring `--execute` before invoking launchctl start, inspect, or stop.
 - Managed macOS LaunchAgent and Linux systemd service definitions can carry the host startup release-bundle gate, so service restarts verify signed release artifacts before registration.
-- Git diff and test evidence bundles.
-- Shared implicit approval preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell, Codex, Claude Code, and acpx jobs.
+- Git diff and test session evidence.
+- Shared implicit interrupt preflight before package install, elevation, GUI control, service changes, push, merge, deploy, publish, or credential changes for built-in shell, Codex, Claude Code, and acpx tasks.
 - Managed install, health, stop, and uninstall commands.
 
 Exit gate: an operator's managed Mac reconnects after reboot, an agent selects it through MCP, Codex runs in a locked worktree, and the result includes diff, tests, artifacts, audit slice, and residual risk.
@@ -275,7 +275,7 @@ Exit gate: an operator's managed Mac reconnects after reboot, an agent selects i
 - Windows managed-service acceptance planning and verification through `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, emitting a machine-readable checked plan with reviewed `sc.exe` create/description/query/qc/start/stop/delete commands, managed host args, `start= demand`, release-bundle startup gate, required evidence checklist, and no PowerShell or `sc.exe` execution.
 - Linux systemd user-unit generation, status inspection, dry-run/opt-in lifecycle control, and safe uninstall.
 - Linux managed-service acceptance planning and verification through `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, emitting a machine-readable checked plan with a written `0600` systemd user unit, reviewed `systemctl --user daemon-reload/enable --now/status/disable --now` commands, managed host args, hardening flags, release-bundle startup gate, required evidence checklist, and no `systemctl` execution.
-- Linux managed-service acceptance evidence packaging through `rdev acceptance package-linux-managed-service`, turning real systemd user-service transcripts, release-gate output, audit, reconnect proof, and managed job evidence into a redacted checksummed release artifact.
+- Linux managed-service acceptance evidence packaging through `rdev acceptance package-linux-managed-service`, turning real systemd user-service transcripts, release-gate output, audit, reconnect proof, and managed task evidence into a redacted checksummed release artifact.
 - Real Linux systemd reboot/reconnect acceptance proof.
 - launchd support.
 - Restart/recovery.

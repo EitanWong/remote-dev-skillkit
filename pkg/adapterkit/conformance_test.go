@@ -198,15 +198,15 @@ func TestVerifyLifecycleManifestJSONAcceptsCompleteManifest(t *testing.T) {
   "adapter": "claude-code",
   "phases": {
     "detect": {"implemented": true, "evidence": ["version", "path"]},
-    "plan": {"implemented": true, "evidence": ["planned_commands"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "plan": {"implemented": true, "evidence": ["planned_commands"], "declares_external_consequences": true, "declares_required_authorizations": true},
     "prepare": {"implemented": true, "evidence": ["workspace_root"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
     "run": {"implemented": true, "evidence": ["argv", "exit_code"], "supports_timeout": true, "supports_cancellation": true},
     "collect": {"implemented": true, "evidence": ["result_artifact"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
     "cleanup": {"implemented": true, "evidence": ["locks_released"], "idempotent": true, "releases_locks": true}
   },
   "safety": {
-    "adapter_authorizes_jobs": false,
-    "adapter_approves_dangerous_actions": false,
+    "adapter_authorizes_tasks": false,
+    "adapter_authorizes_dangerous_actions": false,
     "adapter_installs_persistence": false,
     "host_validates_before_run": true,
     "redacts_outputs": true
@@ -235,15 +235,15 @@ func TestVerifyLifecycleManifestJSONRejectsMissingCancellation(t *testing.T) {
   "adapter": "claude-code",
   "phases": {
     "detect": {"implemented": true, "evidence": ["version"]},
-    "plan": {"implemented": true, "evidence": ["plan"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "plan": {"implemented": true, "evidence": ["plan"], "declares_external_consequences": true, "declares_required_authorizations": true},
     "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
     "run": {"implemented": true, "evidence": ["command"], "supports_timeout": true, "supports_cancellation": false},
     "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
     "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
   },
   "safety": {
-    "adapter_authorizes_jobs": false,
-    "adapter_approves_dangerous_actions": false,
+    "adapter_authorizes_tasks": false,
+    "adapter_authorizes_dangerous_actions": false,
     "adapter_installs_persistence": false,
     "host_validates_before_run": true,
     "redacts_outputs": true
@@ -266,15 +266,15 @@ func TestVerifyLifecycleManifestJSONRejectsHiddenPersistence(t *testing.T) {
   "adapter": "gui",
   "phases": {
     "detect": {"implemented": true, "evidence": ["version"]},
-    "plan": {"implemented": true, "evidence": ["plan"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "plan": {"implemented": true, "evidence": ["plan"], "declares_external_consequences": true, "declares_required_authorizations": true},
     "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
     "run": {"implemented": true, "evidence": ["session"], "supports_timeout": true, "supports_cancellation": true},
     "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.gui-result.v1"},
     "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
   },
   "safety": {
-    "adapter_authorizes_jobs": false,
-    "adapter_approves_dangerous_actions": false,
+    "adapter_authorizes_tasks": false,
+    "adapter_authorizes_dangerous_actions": false,
     "adapter_installs_persistence": true,
     "host_validates_before_run": true,
     "redacts_outputs": true

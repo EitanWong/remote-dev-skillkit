@@ -23,13 +23,13 @@ const (
 var RequiredLifecyclePhases = []string{PhaseDetect, PhasePlan, PhasePrepare, PhaseRun, PhaseCollect, PhaseCleanup}
 
 type RuntimeRequest struct {
-	Adapter       string         `json:"adapter"`
-	JobID         string         `json:"job_id,omitempty"`
-	WorkspaceRoot string         `json:"workspace_root,omitempty"`
-	Intent        string         `json:"intent,omitempty"`
-	Payload       map[string]any `json:"payload,omitempty"`
-	Limits        RuntimeLimits  `json:"limits,omitempty"`
-	Approvals     []string       `json:"approvals,omitempty"`
+	Adapter        string         `json:"adapter"`
+	TaskID         string         `json:"task_id,omitempty"`
+	WorkspaceRoot  string         `json:"workspace_root,omitempty"`
+	Intent         string         `json:"intent,omitempty"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	Limits         RuntimeLimits  `json:"limits,omitempty"`
+	Authorizations []string       `json:"authorizations,omitempty"`
 }
 
 type RuntimeLimits struct {
@@ -58,7 +58,7 @@ type RuntimePhaseResult struct {
 type RuntimeFixture struct {
 	SchemaVersion        string               `json:"schema_version"`
 	Adapter              string               `json:"adapter"`
-	JobID                string               `json:"job_id,omitempty"`
+	TaskID               string               `json:"task_id,omitempty"`
 	WorkspaceRoot        string               `json:"workspace_root,omitempty"`
 	StartedAt            string               `json:"started_at"`
 	EndedAt              string               `json:"ended_at"`
@@ -136,7 +136,7 @@ func RunLifecycleWithOptions(ctx context.Context, adapter RuntimeAdapter, reques
 	fixture := RuntimeFixture{
 		SchemaVersion: RuntimeFixtureSchemaVersion,
 		Adapter:       request.Adapter,
-		JobID:         request.JobID,
+		TaskID:        request.TaskID,
 		WorkspaceRoot: request.WorkspaceRoot,
 		StartedAt:     started.Format(time.RFC3339Nano),
 	}

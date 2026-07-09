@@ -6,7 +6,7 @@ description: Use when an agent needs to delegate coding, repair, setup, or devel
 # Remote Vibe Coding
 
 Use this skill when a human wants an AI agent to work on a remote or managed
-host while preserving consent, host-local policy, approvals, evidence, and
+host while preserving consent, host-local policy, interrupts, evidence, and
 revocation.
 
 ## Non-Negotiables
@@ -22,7 +22,7 @@ revocation.
   verification evidence instead of private internal reasoning.
 - Stay path/config neutral: never assume a checkout path, user home, temp
   directory, framework directory, gateway URL, repo id, workspace root, release
-  artifact, ticket code, root key, or approval policy. Resolve values from the
+  artifact, ticket code, root key, or interrupt policy. Resolve values from the
   active Skillkit manifest, current project root, read-only probes, MCP/CLI
   output, configured policy, generated invite fields, or explicit
   human/operator confirmation.
@@ -30,7 +30,7 @@ revocation.
   `<owner/repo>` as values to discover or ask for, never defaults.
 - Do not invent real configuration from examples, placeholders, memory, or
   guesses when gateway, workspace, framework, release, adapter, host, repo, or
-  approval details are unclear.
+  interrupt details are unclear.
 - Treat Connection Entry as the only target-side handoff for every new remote
   host. Do not invent narrower surfaces such as customer links or connector
   package plans, and do not give humans raw ticket/root/gateway/transport
@@ -58,7 +58,7 @@ revocation.
   `rdev.support_session.prepare` or run
   `rdev support-session prepare --build-assets` from a checkout. Follow its
   `standard_recovery`, `asset_report`, and `connection_readiness` fields
-  instead of writing custom PowerShell, approval polling, ticket substitution,
+  instead of writing custom PowerShell, interrupt polling, ticket substitution,
   relay, or bootstrap glue. Treat `gateway_url_candidates` as diagnostic and
   signed-runtime metadata for `rdev`-generated handoffs, not as values to splice
   into Agent-written target commands. Use the returned
@@ -80,7 +80,7 @@ revocation.
   `low_level_entry_rule`: do not start with `rdev.invites.create`,
   `rdev invite create`, `rdev.connection_entry.plan`, or
   `rdev connection-entry plan` unless the operator explicitly requests reviewed
-  package materialization, approved managed owned-host planning, or a returned
+  package materialization, authorized managed owned-host planning, or a returned
   high-level recovery payload names that path. Read
   `gateway_candidate_preflight` before asking humans network
   questions or writing probes; it classifies LAN/direct, same-machine,
@@ -117,7 +117,7 @@ revocation.
 - Read `agent_connection_runbook.fresh_agent_failure_prevention` before writing
   any setup code. It captures known bad fresh-Agent failure patterns such as
   manual `gateway serve` plus `invite create`, missing helper assets that make
-  Windows say `rdev is required`, background gateway glue, custom approval
+  Windows say `rdev is required`, background gateway glue, custom interrupt
   polling, and Agent-written PowerShell/shell bootstraps. If you are about to
   write one of those workarounds, stop and use the returned
   `cli_start_now_command`, `ready_file.path`, `status_file.path`,
@@ -130,7 +130,7 @@ revocation.
   present, fall back to `user_handoff.message` plus `user_handoff.copy_paste`
   only for older payloads, wait through standard status surfaces, and do not ask
   humans for ticket/root/gateway values or generate custom PowerShell, shell,
-  tunnel, approval, or polling scripts.
+  tunnel, interrupt, or polling scripts.
 - For a new support session, prefer the high-level connect output. If
   `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
   only `target_handoff_envelope.full_text` when present, falling back to the
@@ -144,7 +144,7 @@ revocation.
   present, read that plain-text file and forward it verbatim to the target-side
   human instead of parsing JSON or rebuilding commands. If
   `connected_report_file.path` is present after connection, read that plain text
-  and report it to the user before creating jobs. For lower-level explicit gateway workflows, use
+  and report it to the user before creating session tasks. For lower-level explicit gateway workflows, use
   `rdev.support_session.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
@@ -153,7 +153,7 @@ revocation.
   the same ready session payload before listening. Use
   `rdev.support_session.plan` or `rdev support-session plan` only for
   review/debug planning before creating custom gateway, shell, PowerShell,
-  relay, nohup, approval, or bootstrap steps.
+  relay, nohup, interrupt, or bootstrap steps.
 - When running `rdev support-session connect --start`, keep the foreground
   process open and read `foreground_feedback`. The command emits
   machine-readable stderr lines prefixed with
@@ -165,7 +165,7 @@ revocation.
 - Treat returned `target_command` as the standard fallback surface. It already
   tries ordered gateway URL candidates on the target machine with the returned
   `connection_attempt_policy` timeout/retry behavior; do not wrap it in
-  Agent-authored PowerShell, shell, relay, ticket substitution, approval
+  Agent-authored PowerShell, shell, relay, ticket substitution, interrupt
   polling, or bootstrap scripts. Ordinary attended handoffs now use
   `--transport long-poll` for stable HTTPS-only connectivity; reserve
   `--transport auto` for managed or explicit advanced runner paths where WSS
@@ -215,7 +215,7 @@ revocation.
   helper assets. If a dev gateway must be started by hand, configure
   `--rdev-assets-dir` or platform-specific helper asset flags first.
 - When `rdev.support_session.status` or `rdev support-session status --wait`
-  returns `waiting`, `pending-approval`, `revoked`, or `timed_out=true`, read
+  returns `waiting`, `pending-activation`, `revoked`, or `timed_out=true`, read
   `connection_recovery` and follow its `agent_next_actions`,
   `standard_tools`, and `forbidden` fields. Do not invent target-side recovery
   scripts or ask the human for raw ticket/root/gateway/transport values. CLI
@@ -224,13 +224,13 @@ revocation.
   is applicable.
 - When status returns `connected=true`, immediately send
   `connected_next_steps.user_report` to the user, call the listed
-  `rdev.hosts.capabilities` follow-up, run the standard
+  `rdev.sessions.status` follow-up, run the standard
   `rdev.support_session.smoke_test` / `rdev support-session smoke-test` when it
-  is available, then create only the smallest scoped job matching the user's
+  is available, then create only the smallest scoped session task matching the user's
   task. When validating native remote-control adapters, pass
   `remote_control=true` through MCP or `--remote-control` through CLI; this adds
   only standard file-list and window-inspect probes. Do not replace smoke-test
-  with hand-written job batteries.
+  with hand-written task batteries.
 - Probe network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints,
   SSH configuration, installed tunnel/mesh tools, and available connection
   modes before choosing local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN
@@ -242,7 +242,7 @@ revocation.
   expected SHA-256, target platform, and user/workspace scope. Do not invent
   install commands, use shell command strings, weaken execution policy, elevate,
   install services/drivers, or mutate firewall/DNS/routes without explicit
-  approval.
+  authorization.
 - Maintain dynamic Skill runtime memory for discovered environment facts,
   configuration paths, host capabilities, adapter availability, and operator
   preferences. Read it before repeating probes, refresh stale entries, and keep
@@ -251,13 +251,15 @@ revocation.
   host-side validation, locked workspace, adapter execution, redacted evidence,
   audit, and revocation.
 - Treat Remote Dev Skillkit as the Agent remote-control kernel. For file
-  operations, use MCP `rdev.files.*` or CLI `rdev files ...`; for desktop
-  control, use MCP `rdev.desktop.*` or CLI `rdev desktop ...`. Do not write
+  operations, use MCP `rdev.sessions.task` with the `file` adapter or CLI
+  `rdev files ... --session-id ...`; for desktop control, use MCP
+  `rdev.sessions.task` with the `desktop` adapter or CLI
+  `rdev desktop ... --session-id ...`. Do not write
   custom file-transfer shell glue, xdotool, cliclick, AppleScript/System
   Events, Win32 PowerShell GUI, SendKeys, screenshot, mouse, keyboard,
   clipboard, or file-delete scripts when a native rdev surface exists.
 - Do not request hidden persistence, unrestricted shell access, OS policy
-  weakening, credential scraping, UAC/sudo bypass, or unapproved external
+  weakening, credential scraping, UAC/sudo bypass, or unauthorized external
   mutation.
 
 ## First Move
@@ -275,7 +277,7 @@ revocation.
    and a checkout plus Go are available, use `--build-assets`; use the returned
    `gateway_url_candidates` only as diagnostic metadata carried by
    `rdev`-generated handoffs; do not write custom PowerShell, ticket
-   substitution, approval polling, target commands, or relay glue. Read
+   substitution, interrupt polling, target commands, or relay glue. Read
    `connectivity_helper_preflight` for configured
    `RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` metadata before
    asking about tunnels or helpers. If configured `RDEV_*_GATEWAY_URL` fallback values are present, keep
@@ -284,7 +286,7 @@ revocation.
   was supplied, let handoff/create use the configured gateway candidate before
   falling back to foreground `rdev support-session connect --start`.
 4. Load relevant Skill runtime memory, then verify or refresh any stale facts
-   before using them for commands, paths, approvals, or release decisions.
+   before using them for commands, paths, interrupts, or release decisions.
 5. If no suitable host is active and a reachable gateway already exists, create
    the session with `rdev.support_session.create` or
    `rdev support-session create`; give the target side only
@@ -312,7 +314,7 @@ revocation.
    `rdev connection-entry run --runner-manifest ... --dry-run` when network
    reliability is uncertain; it probes direct gateway, proxy, LAN, relay, mesh,
    VPN, and SSH-assisted paths before starting `rdev host serve`. When the plan
-   includes approved `RDEV_*_INSTALL_ACTION_JSON` metadata, let the runner
+   includes authorized `RDEV_*_INSTALL_ACTION_JSON` metadata, let the runner
    install and verify user/workspace helper binaries before helper startup. Use
    the visible script fallback when release package assets or release inputs are
    missing. Present only the selected
@@ -324,21 +326,21 @@ revocation.
    `rdev.support_session.status` with `wait=true`, or
    `rdev support-session status --wait`. When `connected=true`, proactively
    report `connected_next_steps.user_report` to the user, inspect
-   `rdev.hosts.capabilities`, run standard smoke-test/report tooling, use
+   `rdev.sessions.status`, run standard smoke-test/report tooling, use
    `--remote-control` or `remote_control=true` only for remote-control adapter
-   validation, and only then create the smallest scoped job. Do
+   validation, and only then create the smallest scoped session task. Do
    not write custom polling loops. If the wait times out or the target does not appear,
    follow `connection_supervision` and `connection_recovery` instead of writing
-   PowerShell, shell, relay, approval, or bootstrap glue. Treat
+   PowerShell, shell, relay, interrupt, or bootstrap glue. Treat
    `connection_supervision.automatic_downgrade_boundaries` as the standard
    source for post-registration signed gateway candidate failover. If the
-   standard attended-temporary auto-approval contract activated it, verify it is
-   the expected machine before creating jobs; otherwise approve it only after
+   standard attended-temporary auto-authorization contract activated it, verify it is
+   the expected machine before creating session tasks; otherwise authorize it only after
    the operator confirms it is expected.
-7. Inspect host OS, workspace root, Git state, capabilities, adapters, approval
-   policy, release trust inputs, and language/locale.
+7. Inspect host OS, workspace root, Git state, capabilities, adapters,
+   interrupt policy, release trust inputs, and language/locale.
 8. Ask only for missing authorization, gateway, host, workspace, release,
-   adapter, framework, repo, tunnel/mesh approval, or approval configuration
+   adapter, framework, repo, tunnel/mesh authorization, or interrupt configuration
    that cannot be safely discovered. Do not ask for target OS, ticket, manifest
    root, gateway, transport, release root, checksum, or helper argv assembly
    when a Connection Entry can carry or discover those values.
@@ -353,7 +355,7 @@ revocation.
    connection: if the target is operator-owned or expected to support recurring
    Agent development, choose managed mode with an explicit reviewed service
    lifecycle; if it is third-party or one-off repair, choose attended-temporary
-   mode with no persistence by default. If ownership or persistence approval is
+  mode with no persistence by default. If ownership or persistence authorization is
    unclear, ask one short question before creating a managed entry. Prefer a
    signed self-contained connection entry package with the target-platform
    `rdev` binary, release bundle, manifest URL, pinned manifest root, and
@@ -371,7 +373,7 @@ revocation.
    a Connection Entry. For owned managed machines, prefer the generated reviewed
    LaunchAgent, systemd user-service, or Windows Service package plan over
    hand-written service-manager commands; do not start or install the service
-   until the operator explicitly approves the reviewed service-control steps.
+   until the operator explicitly authorizes the reviewed service-control steps.
    For company or third-party machines, first ask only for authorization to run
    a visible temporary support session. After confirmation, default to
    attended-temporary mode, generate the Connection Entry, and let the join
@@ -385,18 +387,18 @@ revocation.
 5. Follow `localization_plan`: localize target-side prompts, summaries, and
    evidence while keeping protocol keys, commands, paths, checksums, schemas,
    and code blocks stable.
-6. Select the least-powerful native surface that can complete the task:
-   `rdev.files.*` / `file` for file transfer and scoped delete,
-   `rdev.desktop.*` / `desktop` for
+6. Select the least-powerful native session-task surface that can complete the
+   task: `rdev.sessions.task` / `file` for file transfer and scoped delete,
+   `rdev.sessions.task` / `desktop` for
    screenshots, PNG frame recording, window inspection/focus/move, keyboard,
    mouse, clipboard read/write, app launch/close, and URL open, then `acpx`, `codex`,
    `claude-code`, `shell`, or `powershell` for coding and command execution.
-   Desktop GUI/input actions require explicit approval and an unlocked
+   Desktop GUI/input actions require explicit session interrupt authorization and an unlocked
    interactive user session; if unavailable, report
    `desktop_session_unavailable` instead of bypassing lock, privacy, MDM, UAC,
    sudo, or enterprise policy.
 7. Lock the workspace, use a branch or worktree for code changes, create the
-   signed job, stream status, inspect artifacts/audit, and request approval
+   signed session task, stream status, inspect artifacts/audit, and request a session interrupt
    before push, merge, deploy, publish, credentials, elevation, GUI, service, or
    destructive filesystem actions.
 
@@ -410,7 +412,7 @@ revocation.
   [enrollment-lifecycle.md](references/enrollment-lifecycle.md).
 - For Codex, Claude Code, acpx, shell, PowerShell, adapter conformance,
   cancellation, runtime fixtures, or result evidence, read
-  [adapter-jobs.md](references/adapter-jobs.md).
+  [adapter-tasks.md](references/adapter-tasks.md).
 - For dynamic memory locations, record schema, redaction, refresh, invalidation,
   and update rules, read [runtime-memory.md](references/runtime-memory.md).
 - For release candidates, Skillkit distribution, GitHub release planning,
@@ -426,7 +428,7 @@ Return a compact evidence report:
 
 - what changed;
 - host and adapter used;
-- approvals requested or consumed;
+- interrupts or authorizations requested or consumed;
 - tests/checks run and exit status;
 - artifacts or audit records reviewed;
 - residual risk;

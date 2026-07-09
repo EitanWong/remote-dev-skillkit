@@ -16,7 +16,7 @@ func TestNewPolicyPlanRequiresAdapter(t *testing.T) {
 }
 
 func TestNewPolicyPlanSetsSchemaAndTimestamp(t *testing.T) {
-	plan, err := NewPolicyPlan("my-adapter", "job_1", []string{"network call"}, []string{"requires approval"}, nil, nil, 60, policyNow)
+	plan, err := NewPolicyPlan("my-adapter", "task_1", []string{"network call"}, []string{"requires authorization"}, nil, nil, 60, policyNow)
 	if err != nil {
 		t.Fatalf("NewPolicyPlan: %v", err)
 	}
@@ -32,8 +32,8 @@ func TestNewPolicyPlanSetsSchemaAndTimestamp(t *testing.T) {
 	if len(plan.ExternalConsequences) != 1 {
 		t.Fatalf("expected 1 consequence, got %d", len(plan.ExternalConsequences))
 	}
-	if len(plan.RequiredApprovals) != 1 {
-		t.Fatalf("expected 1 approval, got %d", len(plan.RequiredApprovals))
+	if len(plan.RequiredAuthorizations) != 1 {
+		t.Fatalf("expected 1 authorization, got %d", len(plan.RequiredAuthorizations))
 	}
 }
 
@@ -45,13 +45,13 @@ func TestNewPolicyPlanStripsBlankEntries(t *testing.T) {
 	if len(plan.ExternalConsequences) != 1 || plan.ExternalConsequences[0] != "network call" {
 		t.Fatalf("unexpected consequences: %v", plan.ExternalConsequences)
 	}
-	if len(plan.RequiredApprovals) != 0 {
-		t.Fatalf("expected no approvals, got %v", plan.RequiredApprovals)
+	if len(plan.RequiredAuthorizations) != 0 {
+		t.Fatalf("expected no authorizations, got %v", plan.RequiredAuthorizations)
 	}
 }
 
 func TestVerifyPolicyPlanJSONAcceptsValidPlan(t *testing.T) {
-	plan, err := NewPolicyPlan("my-adapter", "job_1", []string{"network call"}, []string{"approval needed"}, []string{"/workspace"}, nil, 60, policyNow)
+	plan, err := NewPolicyPlan("my-adapter", "task_1", []string{"network call"}, []string{"authorization needed"}, []string{"/workspace"}, nil, 60, policyNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestVerifyPolicyPlanJSONAcceptsValidPlan(t *testing.T) {
 	report := VerifyPolicyPlanJSON(content, PolicyPlanContract{
 		Adapter:                     "my-adapter",
 		RequireExternalConsequences: true,
-		RequireApprovals:            true,
+		RequireAuthorizations:       true,
 		RequireWorkspaceBoundaries:  true,
 	})
 	if !report.OK {

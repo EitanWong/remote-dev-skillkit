@@ -6,9 +6,9 @@ Remote Dev Skillkit AI agents के लिए एक open-source, agent-native 
 
 | Agent को मिलता है | Human के पास रहता है |
 |---|---|
-| Skills, MCP tools, file/desktop/job adapters | Visibility, approval, revocation, audit |
-| Clear capabilities वाले signed jobs | Host-local policy और security boundaries |
-| Artifacts और evidence bundles | क्या चलेगा और कब रुकेगा, इसका control |
+| Skills, MCP tools, file/desktop/task adapters | Visibility, authorization, revocation, audit |
+| Clear capabilities वाले signed session tasks | Host-local policy और security boundaries |
+| Artifacts और session evidence | क्या चलेगा और कब रुकेगा, इसका control |
 
 ## Agent से install
 

@@ -2,7 +2,7 @@
 
 ## Project Goal
 
-Build a general-purpose, open-source agent-native remote development skillkit. The end state is a reliable toolkit that lets Hermes, Codex, Claude Code, OpenCode, and similar agents safely delegate coding and repair jobs to enrolled Mac, Windows, and Linux hosts.
+Build a general-purpose, open-source agent-native remote development skillkit. The end state is a reliable toolkit that lets Hermes, Codex, Claude Code, OpenCode, and similar agents safely delegate coding and repair tasks to enrolled Mac, Windows, and Linux hosts.
 
 ## Safety Boundaries
 

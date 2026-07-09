@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,9 +18,9 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/buildinfo"
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/evidenceplan"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
-	"github.com/EitanWong/remote-dev-skillkit/internal/jobtemplate"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
@@ -34,10 +35,10 @@ const protocolVersion = "2025-11-25"
 
 type Server struct {
 	Gateway *gateway.MemoryGateway
-	// RemoteGateway, when non-empty, causes host/job/artifact/audit MCP tool
+	// RemoteGateway, when non-empty, causes session/task/artifact/audit MCP tool
 	// calls to be proxied to a running hosted gateway over HTTP rather than
 	// operating on the local in-memory gateway.  This lets `rdev mcp serve`
-	// see hosts and jobs that were registered through a foreground support-session
+	// see sessions and tasks that were registered through a foreground support-session
 	// process or a separately-started `rdev gateway serve`.
 	//
 	// Set automatically from RDEV_HOSTED_GATEWAY_URL (or any RDEV_*_GATEWAY_URL)
@@ -50,7 +51,7 @@ func NewServer(gw *gateway.MemoryGateway) Server {
 	return Server{Gateway: gw}
 }
 
-// NewServerWithRemoteGateway returns a Server that proxies host/job/artifact/audit
+// NewServerWithRemoteGateway returns a Server that proxies session/task/artifact/audit
 // operations to remoteURL while using the local gw for ticket creation and trust ops.
 // The HTTP client uses a retrying transport so that transient TLS EOF errors
 // from Cloudflare Quick Tunnels or similar reverse proxies are handled silently.
@@ -65,9 +66,10 @@ func NewServerWithRemoteGateway(gw *gateway.MemoryGateway, remoteURL string) Ser
 	}
 }
 
-// retryingMCPTransport wraps http.DefaultTransport and retries GET/HEAD
-// requests on transient connection-level errors (EOF, TLS truncation) that
-// commonly occur behind Cloudflare Quick Tunnels and similar reverse proxies.
+// retryingMCPTransport wraps http.DefaultTransport and retries GET/HEAD and
+// Idempotency-Key POST requests on transient connection-level errors (EOF, TLS
+// truncation) that commonly occur behind Cloudflare Quick Tunnels and similar
+// reverse proxies.
 type retryingMCPTransport struct {
 	Base       http.RoundTripper
 	MaxRetries int
@@ -82,7 +84,7 @@ func (r retryingMCPTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
-	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+	if !requestCanBeRetried(req) {
 		return base.RoundTrip(req)
 	}
 	var lastErr error
@@ -94,7 +96,11 @@ func (r retryingMCPTransport) RoundTrip(req *http.Request) (*http.Response, erro
 			case <-time.After(time.Duration(attempt*attempt) * 100 * time.Millisecond):
 			}
 		}
-		resp, err := base.RoundTrip(req)
+		attemptReq, err := requestForAttempt(req, attempt)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := base.RoundTrip(attemptReq)
 		if err == nil {
 			return resp, nil
 		}
@@ -109,6 +115,28 @@ func (r retryingMCPTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		}
 	}
 	return nil, lastErr
+}
+
+func requestCanBeRetried(req *http.Request) bool {
+	if req.Method == http.MethodGet || req.Method == http.MethodHead {
+		return true
+	}
+	return req.Method == http.MethodPost &&
+		strings.TrimSpace(req.Header.Get("Idempotency-Key")) != "" &&
+		req.GetBody != nil
+}
+
+func requestForAttempt(req *http.Request, attempt int) (*http.Request, error) {
+	if attempt == 0 || req.GetBody == nil {
+		return req, nil
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	next := req.Clone(req.Context())
+	next.Body = body
+	return next, nil
 }
 
 // --- remote-gateway proxy helpers ---
@@ -143,7 +171,11 @@ func (s Server) proxyGETTo(baseURL, path string) (any, error) {
 		return nil, fmt.Errorf("remote gateway GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	return s.decodeRemoteResponse(resp)
+	value, err := s.decodeRemoteResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
 }
 
 // proxyPOSTTo sends a POST to baseURL+path and decodes the response.
@@ -152,14 +184,40 @@ func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.remoteClient().Post(
-		baseURL+path, "application/json", bytes.NewReader(data),
-	)
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if body, ok := payload.(map[string]any); ok {
+		if key, _ := body["idempotency_key"].(string); strings.TrimSpace(key) != "" {
+			req.Header.Set("Idempotency-Key", strings.TrimSpace(key))
+		}
+	}
+	resp, err := s.remoteClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("remote gateway POST %s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	return s.decodeRemoteResponse(resp)
+	value, err := s.decodeRemoteResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func newIdempotencyKey(prefix string) string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	}
+	const alphabet = "0123456789abcdef"
+	out := make([]byte, len(raw)*2)
+	for i, value := range raw {
+		out[i*2] = alphabet[value>>4]
+		out[i*2+1] = alphabet[value&0x0f]
+	}
+	return prefix + "-" + string(out)
 }
 
 // proxyGET is a convenience wrapper using s.RemoteGateway as the base URL.
@@ -283,6 +341,20 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	}
 	var data any
 	switch params.Name {
+	case "rdev.sessions.create":
+		data, err = s.createSession(params.Arguments)
+	case "rdev.sessions.status":
+		data, err = s.sessionStatus(params.Arguments)
+	case "rdev.sessions.events":
+		data, err = s.sessionEvents(params.Arguments)
+	case "rdev.sessions.task":
+		data, err = s.sessionTask(params.Arguments)
+	case "rdev.sessions.interrupt":
+		data, err = s.sessionInterrupt(params.Arguments)
+	case "rdev.sessions.artifacts":
+		data, err = s.sessionArtifacts(params.Arguments)
+	case "rdev.sessions.close":
+		data, err = s.sessionClose(params.Arguments)
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
 	case "rdev.support_session.connect":
@@ -301,6 +373,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.supportSessionReport(params.Arguments)
 	case "rdev.support_session.smoke_test":
 		data, err = s.supportSessionSmokeTest(params.Arguments)
+	case "rdev.support_session.live_e2e_plan":
+		data, err = s.supportSessionLiveE2EPlan(params.Arguments)
 	case "rdev.connection_entry.plan":
 		data, err = s.connectionEntryPlan(params.Arguments)
 	case "rdev.acceptance.scaffold_evidence":
@@ -321,58 +395,6 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.createTicket(params.Arguments)
 	case "rdev.tickets.revoke":
 		data, err = s.revokeTicket(params.Arguments)
-	case "rdev.hosts.list":
-		data, err = s.listHosts(params.Arguments)
-	case "rdev.hosts.capabilities":
-		data, err = s.hostCapabilities(params.Arguments)
-	case "rdev.hosts.approve":
-		data, err = s.approveHost(params.Arguments)
-	case "rdev.hosts.revoke":
-		data, err = s.revokeHost(params.Arguments)
-	case "rdev.files.list":
-		data, err = s.fileJob(params.Arguments, "list")
-	case "rdev.files.read":
-		data, err = s.fileJob(params.Arguments, "read")
-	case "rdev.files.write":
-		data, err = s.fileJob(params.Arguments, "write")
-	case "rdev.files.download":
-		data, err = s.fileJob(params.Arguments, "download")
-	case "rdev.files.upload":
-		data, err = s.fileJob(params.Arguments, "upload")
-	case "rdev.files.delete":
-		data, err = s.fileJob(params.Arguments, "delete")
-	case "rdev.desktop.screenshot":
-		data, err = s.desktopJob(params.Arguments, "screen.screenshot")
-	case "rdev.desktop.record":
-		data, err = s.desktopJob(params.Arguments, "screen.record")
-	case "rdev.desktop.windows":
-		data, err = s.desktopJob(params.Arguments, "window.inspect")
-	case "rdev.desktop.input":
-		data, err = s.desktopInputJob(params.Arguments)
-	case "rdev.desktop.app":
-		data, err = s.desktopAppJob(params.Arguments)
-	case "rdev.desktop.url":
-		data, err = s.desktopJob(params.Arguments, "url.open")
-	case "rdev.desktop.clipboard":
-		data, err = s.desktopClipboardJob(params.Arguments)
-	case "rdev.desktop.focus":
-		data, err = s.desktopJob(params.Arguments, "window.focus")
-	case "rdev.desktop.move":
-		data, err = s.desktopJob(params.Arguments, "window.move")
-	case "rdev.jobs.create":
-		data, err = s.createJob(params.Arguments)
-	case "rdev.jobs.policy_template":
-		data, err = s.jobPolicyTemplate(params.Arguments)
-	case "rdev.jobs.status":
-		data, err = s.jobStatus(params.Arguments)
-	case "rdev.jobs.cancel":
-		data, err = s.cancelJob(params.Arguments)
-	case "rdev.jobs.approve":
-		data, err = s.approveJob(params.Arguments)
-	case "rdev.artifacts.list":
-		data, err = s.listArtifacts(params.Arguments)
-	case "rdev.artifacts.read":
-		data, err = s.readArtifact(params.Arguments)
 	case "rdev.audit.query":
 		data, err = s.queryAudit(params.Arguments)
 	case "rdev.policy.explain":
@@ -402,6 +424,230 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	return toolResult(data)
 }
 
+func (s Server) createSession(args map[string]any) (any, error) {
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/sessions", sessionSpecFromArgs(args))
+	}
+	session, err := s.Gateway.CreateSession(sessionSpecFromArgs(args))
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"session": session,
+		"status":  status,
+	}, status), nil
+}
+
+func (s Server) sessionStatus(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID))
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"snapshot": session.Snapshot(),
+		"status":   status,
+	}, status), nil
+}
+
+func (s Server) sessionEvents(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	afterSeq := uint64(intArg(args, "after_seq", 0))
+	limit := intArg(args, "limit", 100)
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		query := url.Values{}
+		query.Set("after_seq", fmt.Sprintf("%d", afterSeq))
+		query.Set("limit", fmt.Sprintf("%d", limit))
+		if endpointID := stringArg(args, "endpoint_id", ""); endpointID != "" {
+			query.Set("endpoint_id", endpointID)
+		}
+		if received := intArg(args, "received_seq", 0); received > 0 {
+			query.Set("received_seq", fmt.Sprintf("%d", received))
+		}
+		if processed := intArg(args, "processed_seq", 0); processed > 0 {
+			query.Set("processed_seq", fmt.Sprintf("%d", processed))
+		}
+		return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events?"+query.Encode())
+	}
+	events, replay, err := s.Gateway.SessionEventsAfterForAgent(sessionID, afterSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"events":            events,
+		"snapshot_required": replay.SnapshotRequired,
+		"snapshot_seq":      replay.SnapshotSeq,
+		"last_seq":          replay.LastSeq,
+		"retry_after_ms":    replay.RetryAfterMS,
+		"reconnecting":      replay.Reconnecting,
+		"status":            status,
+	}, status), nil
+}
+
+func (s Server) sessionTask(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	spec := controlplane.TaskSpec{
+		TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+		Adapter:          requiredString(args, "adapter"),
+		Intent:           stringArg(args, "intent", ""),
+		Capabilities:     stringSliceArg(args, "capabilities"),
+		Payload:          objectArg(args, "payload"),
+		Limits:           objectArg(args, "limits"),
+		IdempotencyKey:   requiredString(args, "idempotency_key"),
+	}
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks", spec)
+	}
+	task, event, err := s.Gateway.SubmitSessionTask(sessionID, spec)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"task":   task,
+		"event":  event,
+		"status": status,
+	}, status), nil
+}
+
+func (s Server) sessionInterrupt(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	payload := objectArg(args, "payload")
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	reason := requiredString(args, "reason")
+	payload["reason"] = reason
+	event := controlplane.Event{
+		Type:           controlplane.EventTypeInterrupt,
+		FromEndpointID: "agent",
+		ToEndpointID:   stringArg(args, "to_endpoint_id", ""),
+		TaskID:         stringArg(args, "task_id", ""),
+		IdempotencyKey: requiredString(args, "idempotency_key"),
+		Payload:        payload,
+	}
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events", event)
+	}
+	appended, err := s.Gateway.AppendSessionEvent(sessionID, event)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"event":  appended,
+		"status": status,
+	}, status), nil
+}
+
+func (s Server) sessionArtifacts(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	if stringArg(args, "id", "") == "" && stringArg(args, "task_id", "") == "" {
+		session, err := s.Gateway.Session(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		status := session.DeriveStatus()
+		return withSessionStatus(map[string]any{
+			"artifacts": session.Artifacts,
+			"status":    status,
+		}, status), nil
+	}
+	ref := controlplane.ArtifactRef{
+		ID:           stringArg(args, "id", ""),
+		TaskID:       stringArg(args, "task_id", ""),
+		Kind:         stringArg(args, "kind", ""),
+		Name:         stringArg(args, "name", ""),
+		SizeBytes:    int64(intArg(args, "size_bytes", 0)),
+		SHA256:       stringArg(args, "sha256", ""),
+		ContentType:  stringArg(args, "content_type", ""),
+		UploadOffset: int64(intArg(args, "upload_offset", 0)),
+		Complete:     boolArg(args, "complete", false),
+	}
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts", ref)
+	}
+	artifact, event, err := s.Gateway.UpsertSessionArtifact(sessionID, ref)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"artifact": artifact,
+		"event":    event,
+		"status":   status,
+	}, status), nil
+}
+
+func (s Server) sessionClose(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/close", map[string]any{
+			"reason":          stringArg(args, "reason", ""),
+			"idempotency_key": stringArg(args, "idempotency_key", ""),
+		})
+	}
+	session, event, err := s.Gateway.CloseSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"session": session,
+		"event":   event,
+		"status":  status,
+	}, status), nil
+}
+
+func sessionSpecFromArgs(args map[string]any) controlplane.SessionSpec {
+	spec := controlplane.SessionSpec{
+		Profile:            stringArg(args, "profile", "attended-temporary"),
+		Reason:             requiredString(args, "reason"),
+		Capabilities:       stringSliceArg(args, "capabilities"),
+		JoinPolicy:         stringArg(args, "join_policy", "single-target"),
+		AuthorityID:        stringArg(args, "authority_id", ""),
+		SelectedGatewayURL: stringArg(args, "selected_gateway_url", ""),
+		ReconnectGraceMS:   intArg(args, "reconnect_grace_ms", 120000),
+		RetryAfterMS:       intArg(args, "retry_after_ms", 500),
+	}
+	if raw := stringArg(args, "expires_at", ""); raw != "" {
+		if expiresAt, err := time.Parse(time.RFC3339, raw); err == nil {
+			spec.ExpiresAt = expiresAt
+		}
+	}
+	return spec
+}
+
+func withSessionStatus(payload map[string]any, status controlplane.StatusSummary) map[string]any {
+	payload["user_summary"] = status.UserSummary
+	payload["agent_next_action"] = status.AgentNextAction
+	payload["recoverable"] = status.Recoverable
+	payload["retry_after_ms"] = status.RetryAfterMS
+	return payload
+}
+
 func (s Server) supportSessionHandoff(args map[string]any) (any, error) {
 	ttl := intArg(args, "ttl_seconds", 7200)
 	if ttl < 60 || ttl > 86400 {
@@ -409,16 +655,16 @@ func (s Server) supportSessionHandoff(args map[string]any) (any, error) {
 	}
 	rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
 	return supportsession.BuildHandoff(supportsession.HandoffOptions{
-		RepoRoot:    stringArg(args, "repo_root", "."),
-		WorkDir:     stringArg(args, "work_dir", ""),
-		Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
-		GatewayURL:  stringArg(args, "gateway_url", ""),
-		Target:      stringArg(args, "target", "auto"),
-		Reason:      stringArg(args, "reason", "visible temporary remote support"),
-		TTLSeconds:  ttl,
-		AutoApprove: boolArg(args, "auto_approve", true),
-		Locale:      stringArg(args, "locale", "auto"),
-		RdevCommand: rdevCommand,
+		RepoRoot:     stringArg(args, "repo_root", "."),
+		WorkDir:      stringArg(args, "work_dir", ""),
+		Addr:         stringArg(args, "addr", "0.0.0.0:8787"),
+		GatewayURL:   stringArg(args, "gateway_url", ""),
+		Target:       stringArg(args, "target", "auto"),
+		Reason:       stringArg(args, "reason", "visible temporary remote support"),
+		TTLSeconds:   ttl,
+		AutoActivate: boolArg(args, "auto_activate", true),
+		Locale:       stringArg(args, "locale", "auto"),
+		RdevCommand:  rdevCommand,
 	}), nil
 }
 
@@ -446,15 +692,15 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 	if gatewayURL == "" {
 		rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
 		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-			RepoRoot:    stringArg(args, "repo_root", "."),
-			WorkDir:     stringArg(args, "work_dir", ""),
-			Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
-			Target:      stringArg(args, "target", "auto"),
-			Reason:      stringArg(args, "reason", "visible temporary remote support"),
-			TTLSeconds:  ttl,
-			AutoApprove: boolArg(args, "auto_approve", true),
-			Locale:      stringArg(args, "locale", "auto"),
-			RdevCommand: rdevCommand,
+			RepoRoot:     stringArg(args, "repo_root", "."),
+			WorkDir:      stringArg(args, "work_dir", ""),
+			Addr:         stringArg(args, "addr", "0.0.0.0:8787"),
+			Target:       stringArg(args, "target", "auto"),
+			Reason:       stringArg(args, "reason", "visible temporary remote support"),
+			TTLSeconds:   ttl,
+			AutoActivate: boolArg(args, "auto_activate", true),
+			Locale:       stringArg(args, "locale", "auto"),
+			RdevCommand:  rdevCommand,
 		})
 		return supportsession.BuildConnectFromHandoff(handoff), nil
 	}
@@ -492,15 +738,15 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 	ttl := intArg(args, "ttl_seconds", 7200)
 	reason := stringArg(args, "reason", "remote support")
 	capabilities := stringSliceArg(args, "capabilities")
-	autoApprove := boolArg(args, "auto_approve", false)
-	if autoApprove && mode != model.HostModeAttendedTemporary {
-		return nil, fmt.Errorf("auto_approve is only supported for attended-temporary Connection Entries")
+	autoActivate := boolArg(args, "auto_activate", false)
+	if autoActivate && mode != model.HostModeAttendedTemporary {
+		return nil, fmt.Errorf("auto_activate is only supported for attended-temporary Connection Entries")
 	}
 	metadata := map[string]string{}
-	if autoApprove {
-		metadata["auto_approve"] = "attended-temporary"
+	if autoActivate {
+		metadata["auto_activate"] = "attended-temporary"
 		metadata["connection_entry"] = "standard-visible"
-		metadata["approval_contract"] = "target-consent-scoped-ticket"
+		metadata["activation_contract"] = "target-consent-scoped-ticket"
 	}
 	ticket, err := s.Gateway.CreateTicketWithMetadata(mode, ttl, capabilities, reason, metadata)
 	if err != nil {
@@ -516,7 +762,7 @@ func (s Server) createInvite(args map[string]any) (any, error) {
 		NetworkScope:          stringArg(args, "network_scope", "auto"),
 		AuthorityProfile:      stringArg(args, "authority_profile", "max-control"),
 		Once:                  boolArg(args, "once", false),
-		RequireHostApproval:   boolArg(args, "require_host_approval", !autoApprove),
+		RequireHostActivation: boolArg(args, "require_host_activation", !autoActivate),
 		RdevCommand:           stringArg(args, "rdev_command", "rdev"),
 	})
 	if err != nil {
@@ -541,14 +787,14 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 }
 
 func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL string, ttl int) (map[string]any, error) {
-	autoApprove := boolArg(args, "auto_approve", true)
+	autoActivate := boolArg(args, "auto_activate", true)
 	gatewayCandidates := supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", gatewayURL, nil)
 	metadata := map[string]string{
-		"connection_entry":  "standard-visible",
-		"approval_contract": "target-consent-scoped-ticket",
+		"connection_entry":    "standard-visible",
+		"activation_contract": "target-consent-scoped-ticket",
 	}
-	if autoApprove {
-		metadata["auto_approve"] = "attended-temporary"
+	if autoActivate {
+		metadata["auto_activate"] = "attended-temporary"
 	}
 	metadata = addGatewayCandidateTicketMetadata(metadata, gatewayCandidates)
 	ticket, err := s.Gateway.CreateTicketWithMetadata(
@@ -573,7 +819,7 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 		Target:                stringArg(args, "target", "auto"),
 		Locale:                stringArg(args, "locale", "auto"),
 		RdevCommand:           agentRdevCommand(stringArg(args, "rdev_command", "")),
-		AutoApprove:           autoApprove,
+		AutoActivate:          autoActivate,
 	}), nil
 }
 
@@ -611,16 +857,26 @@ func addGatewayCandidateTicketMetadata(metadata map[string]string, candidates []
 
 func (s Server) supportSessionPlan(args map[string]any) (any, error) {
 	return supportsession.BuildPlan(context.Background(), supportsession.Options{
-		RepoRoot:    stringArg(args, "repo_root", "."),
-		WorkDir:     stringArg(args, "work_dir", ""),
-		GatewayURL:  stringArg(args, "gateway_url", ""),
-		Addr:        stringArg(args, "addr", "0.0.0.0:8787"),
-		Target:      stringArg(args, "target", "auto"),
-		Reason:      stringArg(args, "reason", "visible temporary remote support"),
-		TTLSeconds:  intArg(args, "ttl_seconds", 7200),
-		AutoApprove: boolArg(args, "auto_approve", true),
-		Locale:      stringArg(args, "locale", "auto"),
-		RdevCommand: agentRdevCommand(stringArg(args, "rdev_command", "")),
+		RepoRoot:     stringArg(args, "repo_root", "."),
+		WorkDir:      stringArg(args, "work_dir", ""),
+		GatewayURL:   stringArg(args, "gateway_url", ""),
+		Addr:         stringArg(args, "addr", "0.0.0.0:8787"),
+		Target:       stringArg(args, "target", "auto"),
+		Reason:       stringArg(args, "reason", "visible temporary remote support"),
+		TTLSeconds:   intArg(args, "ttl_seconds", 7200),
+		AutoActivate: boolArg(args, "auto_activate", true),
+		Locale:       stringArg(args, "locale", "auto"),
+		RdevCommand:  agentRdevCommand(stringArg(args, "rdev_command", "")),
+	}), nil
+}
+
+func (s Server) supportSessionLiveE2EPlan(args map[string]any) (any, error) {
+	return supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{
+		GatewayURL:     stringArg(args, "gateway_url", ""),
+		TicketCode:     stringArg(args, "ticket_code", ""),
+		HostID:         stringArg(args, "host_id", ""),
+		RdevCommand:    agentRdevCommand(stringArg(args, "rdev_command", "")),
+		TimeoutSeconds: intArg(args, "timeout_seconds", 180),
 	}), nil
 }
 
@@ -641,26 +897,17 @@ func (s Server) supportSessionStatus(args map[string]any) (any, error) {
 	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
 	for {
 		status := supportsession.BuildStatus(supportsession.StatusOptions{
-			TicketCode: ticketCode,
-			Hosts:      s.Gateway.HostsForTicketCode(ticketCode, ""),
-			Locale:     stringArg(args, "locale", "auto"),
-			GatewayURL: s.effectiveGatewayURL(args),
+			TicketCode:  ticketCode,
+			Hosts:       s.Gateway.HostsForTicketCode(ticketCode, ""),
+			Locale:      stringArg(args, "locale", "auto"),
+			GatewayURL:  s.effectiveGatewayURL(args),
+			Preconnects: s.Gateway.SupportSessionPreconnects(ticketCode),
 		})
-		if !wait || status["connected"] == true || status["status"] == "pending-approval" {
+		if !wait || status["connected"] == true || status["status"] == "pending-activation" {
 			return status, nil
 		}
 		if timeoutSeconds > 0 && time.Now().After(deadline) {
-			status["ok"] = false
-			status["timed_out"] = true
-			status["next_action"] = "Keep waiting, or check gateway reachability, network path, and target command output."
-			statusText, _ := status["status"].(string)
-			status["connection_recovery"] = supportsession.BuildConnectionRecovery(supportsession.ConnectionRecoveryOptions{
-				Status:     statusText,
-				TicketCode: ticketCode,
-				Locale:     stringArg(args, "locale", "auto"),
-				TimedOut:   true,
-			})
-			return status, nil
+			return supportsession.MarkStatusTimedOut(status, ticketCode, stringArg(args, "locale", "auto")), nil
 		}
 		time.Sleep(time.Duration(intervalMillis) * time.Millisecond)
 	}
@@ -681,21 +928,11 @@ func (s Server) remoteSupportSessionStatus(args map[string]any, gwURL, ticketCod
 		if status == nil {
 			return nil, fmt.Errorf("remote gateway status response was not an object")
 		}
-		if !wait || status["connected"] == true || status["status"] == "pending-approval" {
+		if !wait || status["connected"] == true || status["status"] == "pending-activation" {
 			return status, nil
 		}
 		if timeoutSeconds > 0 && time.Now().After(deadline) {
-			status["ok"] = false
-			status["timed_out"] = true
-			status["next_action"] = "Keep waiting, or check gateway reachability, network path, and target command output."
-			statusText, _ := status["status"].(string)
-			status["connection_recovery"] = supportsession.BuildConnectionRecovery(supportsession.ConnectionRecoveryOptions{
-				Status:     statusText,
-				TicketCode: ticketCode,
-				Locale:     stringArg(args, "locale", "auto"),
-				TimedOut:   true,
-			})
-			return status, nil
+			return supportsession.MarkStatusTimedOut(status, ticketCode, stringArg(args, "locale", "auto")), nil
 		}
 		time.Sleep(time.Duration(intervalMillis) * time.Millisecond)
 	}
@@ -704,8 +941,11 @@ func (s Server) remoteSupportSessionStatus(args map[string]any, gwURL, ticketCod
 func (s Server) supportSessionReport(args map[string]any) (any, error) {
 	gatewayURL := s.effectiveGatewayURL(args)
 	hostID := strings.TrimSpace(stringArg(args, "host_id", ""))
+	sessionID := strings.TrimSpace(stringArg(args, "session_id", ""))
 	ticketCode := strings.TrimSpace(stringArg(args, "ticket_code", ""))
 	var status map[string]any
+	activeHosts := []map[string]any{}
+	selectedHost := map[string]any{}
 	if ticketCode != "" {
 		statusAny, err := s.supportSessionStatus(map[string]any{
 			"gateway_url":     gatewayURL,
@@ -719,117 +959,86 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 			return nil, err
 		}
 		status = nestedMapOrSelfAny(statusAny, "")
-		activeHosts := mapSliceFromAny(status["active_hosts"])
+		activeHosts = mapSliceFromAny(status["active_hosts"])
 		if hostID == "" {
 			if len(activeHosts) == 1 {
 				hostID = stringMapValue(activeHosts[0], "id")
+				selectedHost = activeHosts[0]
 			} else {
-				nextAction := "No active host is job-ready for this ticket. Wait with rdev.support_session.status or run rdev support-session recover if stale hosts are present."
+				nextAction := "No active target endpoint is ready for this ticket. Wait with rdev.support_session.status or run recovery if stale endpoints are present."
 				if len(activeHosts) > 1 {
-					nextAction = "Multiple active hosts are registered for this ticket; choose the intended host explicitly with host_id before creating jobs."
+					nextAction = "Multiple active targets are registered for this ticket; choose the intended session_id or target_endpoint_id before sending tasks."
 				}
 				return map[string]any{
-					"schema_version":          "rdev.support-session-report.v1",
-					"ok":                      false,
-					"gateway_url":             gatewayURL,
-					"connection_continuity":   supportSessionConnectionContinuityMap(gatewayURL),
-					"disconnect_policy":       "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
-					"remote_control_entry":    supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nil),
-					"managed_upgrade":         supportSessionManagedUpgradeRecommendationMap(nil),
-					"ticket_code":             ticketCode,
-					"host_id":                 "",
-					"recommended_job_host_id": "",
-					"status":                  status,
-					"active_hosts":            status["active_hosts"],
-					"stale_hosts":             status["stale_hosts"],
-					"pending_hosts":           status["pending_hosts"],
-					"host_count":              status["host_count"],
-					"next_action":             nextAction,
-					"stale_host_rule":         "Do not create jobs for stale_hosts; stale means the runner is not job-ready.",
+					"schema_version":        "rdev.support-session-report.v1",
+					"ok":                    false,
+					"gateway_url":           gatewayURL,
+					"connection_continuity": supportSessionConnectionContinuityMap(gatewayURL),
+					"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+					"remote_control_entry":  supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nil),
+					"managed_upgrade":       supportSessionManagedUpgradeRecommendationMap(nil),
+					"ticket_code":           ticketCode,
+					"host_id":               "",
+					"session_id":            "",
+					"status":                status,
+					"active_hosts":          status["active_hosts"],
+					"stale_hosts":           status["stale_hosts"],
+					"pending_hosts":         status["pending_hosts"],
+					"host_count":            status["host_count"],
+					"next_action":           nextAction,
+					"stale_host_rule":       "Do not send tasks to stale endpoints; stale means the runner is not task-ready.",
 				}, nil
 			}
-		}
-	}
-	if hostID == "" {
-		return nil, fmt.Errorf("support_session.report requires host_id or ticket_code")
-	}
-	var host map[string]any
-	var jobs []map[string]any
-	if gatewayURL != "" {
-		hostPayload, err := s.proxyGETTo(gatewayURL, "/v1/hosts/"+url.PathEscape(hostID))
-		if err != nil {
-			return nil, err
-		}
-		host = nestedMapOrSelfAny(hostPayload, "host")
-		jobsPayload, err := s.proxyGETTo(gatewayURL, "/v1/jobs?host_id="+url.QueryEscape(hostID))
-		if err != nil {
-			return nil, err
-		}
-		jobs = mapSliceFromAny(nestedAny(jobsPayload, "jobs"))
-	} else {
-		hostModel, err := s.Gateway.Host(hostID)
-		if err != nil {
-			return nil, err
-		}
-		host = structToMap(hostModel)
-		for _, job := range s.Gateway.Jobs() {
-			if job.HostID == hostID {
-				jobs = append(jobs, structToMap(job))
-			}
-		}
-	}
-	jobReports := make([]map[string]any, 0, len(jobs))
-	for _, job := range jobs {
-		jobID := stringMapValue(job, "id")
-		artifactSummary := ""
-		artifactCount := 0
-		if jobID != "" {
-			artifacts := map[string]any{}
-			if gatewayURL != "" {
-				if payload, err := s.proxyGETTo(gatewayURL, "/v1/jobs/"+url.PathEscape(jobID)+"/artifacts"); err == nil {
-					if m, ok := payload.(map[string]any); ok {
-						artifacts = m
-					}
+		} else {
+			for _, candidate := range activeHosts {
+				if stringMapValue(candidate, "id") == hostID {
+					selectedHost = candidate
+					break
 				}
-			} else {
-				values := s.Gateway.Artifacts(jobID)
-				raw := make([]any, 0, len(values))
-				for _, artifact := range values {
-					raw = append(raw, structToMap(artifact))
-				}
-				artifacts["artifacts"] = raw
 			}
-			if values, _ := artifacts["artifacts"].([]any); values != nil {
-				artifactCount = len(values)
-			}
-			artifactSummary = summarizeFirstArtifactMap(artifacts)
 		}
-		jobReports = append(jobReports, map[string]any{
-			"job_id":           jobID,
-			"status":           stringMapValue(job, "status"),
-			"adapter":          stringMapValue(job, "adapter"),
-			"intent":           stringMapValue(job, "intent"),
-			"artifact_count":   artifactCount,
-			"artifact_summary": artifactSummary,
-		})
+	}
+	if hostID == "" && sessionID == "" {
+		return nil, fmt.Errorf("support_session.report requires session_id, host_id, or ticket_code")
+	}
+	host := selectedHost
+	if hostID != "" {
+		if len(host) == 0 {
+			host = map[string]any{
+				"id":     hostID,
+				"source": "explicit-host-id",
+			}
+		}
+	}
+	var snapshot map[string]any
+	tasks := []map[string]any{}
+	if sessionID != "" {
+		var err error
+		snapshot, err = s.fetchSessionSnapshotMap(gatewayURL, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		tasks = mcpTaskReportsFromSnapshot(snapshot)
+		host = mcpEnrichHostMapFromEndpoint(host, mcpTargetEndpointFromSnapshot(snapshot, stringArg(args, "target_endpoint_id", "")))
 	}
 	report := map[string]any{
-		"schema_version":              "rdev.support-session-report.v1",
-		"ok":                          true,
-		"gateway_url":                 gatewayURL,
-		"connection_continuity":       supportSessionConnectionContinuityMap(gatewayURL),
-		"disconnect_policy":           "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
-		"remote_control_entry":        supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, host),
-		"managed_upgrade":             supportSessionManagedUpgradeRecommendationMap(host),
-		"ticket_code":                 ticketCode,
-		"host_id":                     hostID,
-		"recommended_job_host_id":     hostID,
-		"recommended_job_host_source": "explicit_host_id",
-		"host":                        host,
-		"jobs":                        jobReports,
-		"human_report":                supportSessionHumanReportMap(host, jobReports),
-		"next_action":                 "Use this report instead of hand-written curl summaries; create jobs only for recommended_job_host_id; keep the connection alive until the operator explicitly requests disconnect or revocation.",
-		"stale_host_rule":             "Do not create jobs for stale_hosts; run rdev support-session recover if stale hosts or queued jobs accumulated.",
+		"schema_version":        "rdev.support-session-report.v1",
+		"ok":                    true,
+		"gateway_url":           gatewayURL,
+		"connection_continuity": supportSessionConnectionContinuityMap(gatewayURL),
+		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
+		"remote_control_entry":  supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, host),
+		"managed_upgrade":       supportSessionManagedUpgradeRecommendationMap(host),
+		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID}),
+		"ticket_code":           ticketCode,
+		"host_id":               hostID,
+		"session_id":            sessionID,
+		"host":                  host,
+		"session":               snapshot,
+		"tasks":                 tasks,
+		"human_report":          supportSessionHumanReportMap(host, tasks),
+		"next_action":           "Use rdev.sessions.task/events/artifacts for scoped work; keep the connection alive until the operator explicitly requests disconnect or revocation.",
+		"stale_host_rule":       "Do not send new session tasks to stale endpoints; run recovery or create a fresh session if no target endpoint is online.",
 	}
 	if status != nil {
 		report["status"] = status
@@ -837,7 +1046,6 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 		report["stale_hosts"] = status["stale_hosts"]
 		report["pending_hosts"] = status["pending_hosts"]
 		report["host_count"] = status["host_count"]
-		report["recommended_job_host_source"] = "ticket_single_active_host"
 	}
 	return report, nil
 }
@@ -845,7 +1053,7 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 func (s Server) supportSessionSmokeTest(args map[string]any) (any, error) {
 	gatewayURL := s.effectiveGatewayURL(args)
 	ticketCode := strings.TrimSpace(stringArg(args, "ticket_code", ""))
-	hostID := strings.TrimSpace(stringArg(args, "host_id", ""))
+	sessionID := strings.TrimSpace(stringArg(args, "session_id", ""))
 	timeoutSeconds := intArg(args, "timeout_seconds", 120)
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 120
@@ -853,44 +1061,11 @@ func (s Server) supportSessionSmokeTest(args map[string]any) (any, error) {
 	if timeoutSeconds > 3600 {
 		return nil, fmt.Errorf("timeout_seconds must be between 1 and 3600")
 	}
-	var status map[string]any
-	if hostID == "" && ticketCode != "" {
-		statusAny, err := s.supportSessionStatus(map[string]any{
-			"gateway_url":     gatewayURL,
-			"ticket_code":     ticketCode,
-			"locale":          stringArg(args, "locale", "auto"),
-			"wait":            false,
-			"timeout_seconds": float64(0),
-			"interval_millis": float64(1000),
-		})
-		if err != nil {
-			return nil, err
-		}
-		status = nestedMapOrSelfAny(statusAny, "")
-		activeHosts := mapSliceFromAny(status["active_hosts"])
-		if len(activeHosts) != 1 {
-			return map[string]any{
-				"schema_version":          "rdev.support-session-smoke-test.v1",
-				"ok":                      false,
-				"gateway_url":             gatewayURL,
-				"connection_continuity":   supportSessionConnectionContinuityMap(gatewayURL),
-				"disconnect_policy":       "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
-				"remote_control_entry":    supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nil),
-				"managed_upgrade":         supportSessionManagedUpgradeRecommendationMap(nil),
-				"ticket_code":             ticketCode,
-				"host_id":                 "",
-				"recommended_job_host_id": "",
-				"status":                  status,
-				"next_action":             "Smoke-test requires exactly one active host; wait with rdev.support_session.status or pass host_id explicitly.",
-			}, nil
-		}
-		hostID = stringMapValue(activeHosts[0], "id")
-	}
-	if hostID == "" {
-		return nil, fmt.Errorf("support_session.smoke_test requires host_id or ticket_code with exactly one active host")
+	if sessionID == "" {
+		return nil, fmt.Errorf("support_session.smoke_test requires session_id")
 	}
 	remoteControl := boolArg(args, "remote_control", false)
-	audit, err := s.runSupportSessionCapabilityAudit(args, gatewayURL, hostID, time.Duration(timeoutSeconds)*time.Second, remoteControl)
+	audit, err := s.runSupportSessionCapabilityAudit(args, gatewayURL, sessionID, time.Duration(timeoutSeconds)*time.Second, remoteControl)
 	if err != nil {
 		return nil, err
 	}
@@ -898,32 +1073,34 @@ func (s Server) supportSessionSmokeTest(args map[string]any) (any, error) {
 		"schema_version":           "rdev.support-session-smoke-test.v1",
 		"ok":                       audit["ok"],
 		"gateway_url":              gatewayURL,
-		"host_id":                  hostID,
+		"session_id":               sessionID,
+		"target_endpoint_id":       audit["target_endpoint_id"],
 		"ticket_code":              ticketCode,
 		"connection_continuity":    supportSessionConnectionContinuityMap(gatewayURL),
 		"disconnect_policy":        "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
-		"remote_control_entry":     supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, nestedMapOrSelfAny(audit["host"], "")),
+		"remote_control_entry":     supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, nil, nestedMapOrSelfAny(audit["host"], "")),
 		"managed_upgrade":          supportSessionManagedUpgradeRecommendationMap(nestedMapOrSelfAny(audit["host"], "")),
 		"capability_audit":         audit,
 		"remote_control_requested": remoteControl,
 		"human_report":             supportSessionSmokeHumanReportMap(audit),
-		"next_action":              "Use this single smoke-test report instead of hand-written job probes; keep the host connected for follow-up work unless the operator explicitly asks to disconnect.",
-	}
-	if status != nil {
-		report["status"] = status
+		"next_action":              "Use this single smoke-test report instead of hand-written probes; keep the target endpoint connected for follow-up work unless the operator explicitly asks to disconnect.",
 	}
 	return report, nil
 }
 
-func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL, hostID string, timeout time.Duration, remoteControl bool) (map[string]any, error) {
+func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL, sessionID string, timeout time.Duration, remoteControl bool) (map[string]any, error) {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
 	deadline := time.Now().Add(timeout)
-	host, err := s.fetchHostMap(gatewayURL, hostID)
+	snapshot, err := s.fetchSessionSnapshotMap(gatewayURL, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	targetEndpointID := strings.TrimSpace(stringArg(args, "target_endpoint_id", ""))
+	endpoint := mcpTargetEndpointFromSnapshot(snapshot, targetEndpointID)
+	selectedTargetEndpointID := stringMapValue(endpoint, "id")
+	host := mcpHostMapFromEndpoint(endpoint)
 	probes := mcpAuditCapabilityProbes(stringMapValue(host, "os"))
 	if remoteControl {
 		probes = append(probes, mcpRemoteControlAuditProbes(stringMapValue(host, "os"))...)
@@ -935,12 +1112,16 @@ func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL
 		if probe.Category == "remote_control" {
 			remoteControlProbeCount++
 		}
-		created, err := s.createJob(map[string]any{
-			"gateway_url": gatewayURL,
-			"host_id":     hostID,
-			"adapter":     probe.Adapter,
-			"intent":      probe.Intent,
-			"policy":      probe.Policy,
+		created, err := s.sessionTask(map[string]any{
+			"gateway_url":        gatewayURL,
+			"session_id":         sessionID,
+			"target_endpoint_id": selectedTargetEndpointID,
+			"adapter":            probe.Adapter,
+			"intent":             probe.Intent,
+			"capabilities":       stringSliceFromAnyMap(probe.Policy["capabilities"]),
+			"payload":            probe.Policy,
+			"limits":             mcpSessionLimitsFromPayload(probe.Policy),
+			"idempotency_key":    newIdempotencyKey("support-smoke-" + probe.Name),
 		})
 		if err != nil {
 			ok = false
@@ -953,45 +1134,36 @@ func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL
 			})
 			continue
 		}
-		job := nestedMapOrSelfAny(created, "job")
-		jobID := stringMapValue(job, "id")
-		if jobID == "" {
+		task := nestedMapOrSelfAny(created, "task")
+		taskID := stringMapValue(task, "id")
+		if taskID == "" {
 			ok = false
 			results = append(results, map[string]any{
 				"name":       probe.Name,
 				"capability": probe.Capability,
 				"status":     "create_failed",
 				"ok":         false,
-				"error":      "gateway response missing job.id",
+				"error":      "gateway response missing task.id",
 			})
 			continue
 		}
-		jobStatus, err := s.waitForJobTerminal(gatewayURL, jobID, deadline)
+		taskStatus, err := s.waitForSessionTaskTerminal(gatewayURL, sessionID, taskID, deadline)
 		if err != nil {
 			ok = false
 			results = append(results, map[string]any{
 				"name":       probe.Name,
 				"capability": probe.Capability,
-				"job_id":     jobID,
+				"task_id":    taskID,
 				"status":     "wait_failed",
 				"ok":         false,
 				"error":      err.Error(),
 			})
 			continue
 		}
-		status := stringMapValue(jobStatus, "status")
-		resultOK := status == string(model.JobStatusSucceeded) || (probe.FailureIsOK && (status == string(model.JobStatusFailed) || status == string(model.JobStatusCanceled)))
+		status := stringMapValue(taskStatus, "status")
+		resultOK := status == string(controlplane.TaskStatusSucceeded) || (probe.FailureIsOK && (status == string(controlplane.TaskStatusFailed) || status == string(controlplane.TaskStatusCanceled)))
 		if !resultOK {
 			ok = false
-		}
-		artifactSummary := ""
-		artifactCount := 0
-		if artifacts, err := s.listArtifacts(map[string]any{"gateway_url": gatewayURL, "job_id": jobID}); err == nil {
-			artifactMap := nestedMapOrSelfAny(artifacts, "")
-			if values, _ := artifactMap["artifacts"].([]any); values != nil {
-				artifactCount = len(values)
-			}
-			artifactSummary = summarizeFirstArtifactMap(artifactMap)
 		}
 		category := probe.Category
 		if category == "" {
@@ -1002,63 +1174,174 @@ func (s Server) runSupportSessionCapabilityAudit(args map[string]any, gatewayURL
 			"category":         category,
 			"capability":       probe.Capability,
 			"adapter":          probe.Adapter,
-			"job_id":           jobID,
-			"job_status":       status,
+			"task_id":          taskID,
+			"task_status":      status,
 			"ok":               resultOK,
 			"expected_failure": probe.FailureIsOK,
-			"artifact_count":   artifactCount,
-			"artifact_summary": artifactSummary,
 		})
 	}
 	return map[string]any{
 		"schema_version":             "rdev.support-session-capability-audit.v1",
 		"ok":                         ok,
 		"gateway_url":                gatewayURL,
+		"session_id":                 sessionID,
+		"target_endpoint_id":         selectedTargetEndpointID,
 		"connection_continuity":      supportSessionConnectionContinuityMap(gatewayURL),
 		"host":                       host,
+		"session":                    snapshot,
 		"results":                    results,
 		"remote_control_requested":   remoteControl,
 		"remote_control_probe_count": remoteControlProbeCount,
-		"next_action":                "Use scoped jobs only after this audit is ok; do not disconnect the host unless the operator asks.",
+		"next_action":                "Use scoped session tasks only after this audit is ok; do not disconnect the target endpoint unless the operator asks.",
 	}, nil
 }
 
-func (s Server) fetchHostMap(gatewayURL, hostID string) (map[string]any, error) {
+func (s Server) fetchSessionSnapshotMap(gatewayURL, sessionID string) (map[string]any, error) {
 	if strings.TrimSpace(gatewayURL) != "" {
-		payload, err := s.proxyGETTo(gatewayURL, "/v1/hosts/"+url.PathEscape(hostID))
+		payload, err := s.proxyGETTo(gatewayURL, "/v1/sessions/"+url.PathEscape(sessionID))
 		if err != nil {
 			return nil, err
 		}
-		return nestedMapOrSelfAny(payload, "host"), nil
+		snapshot := nestedMapOrSelfAny(payload, "snapshot")
+		if len(snapshot) == 0 {
+			return nil, fmt.Errorf("session response missing snapshot")
+		}
+		return snapshot, nil
 	}
-	host, err := s.Gateway.Host(hostID)
+	session, err := s.Gateway.Session(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return structToMap(host), nil
+	return structToMap(session.Snapshot()), nil
 }
 
-func (s Server) waitForJobTerminal(gatewayURL, jobID string, deadline time.Time) (map[string]any, error) {
+func mcpTaskReportsFromSnapshot(snapshot map[string]any) []map[string]any {
+	tasks := mapSliceFromAny(snapshot["tasks"])
+	reports := make([]map[string]any, 0, len(tasks))
+	for _, task := range tasks {
+		reports = append(reports, map[string]any{
+			"task_id":            stringMapValue(task, "id"),
+			"target_endpoint_id": stringMapValue(task, "target_endpoint_id"),
+			"status":             stringMapValue(task, "status"),
+			"adapter":            stringMapValue(task, "adapter"),
+			"intent":             stringMapValue(task, "intent"),
+			"attempt_id":         stringMapValue(task, "attempt_id"),
+		})
+	}
+	return reports
+}
+
+func mcpTargetEndpointFromSnapshot(snapshot map[string]any, targetEndpointID string) map[string]any {
+	endpoints := mapSliceFromAny(snapshot["endpoints"])
+	targetEndpointID = strings.TrimSpace(targetEndpointID)
+	if targetEndpointID != "" {
+		for _, endpoint := range endpoints {
+			if stringMapValue(endpoint, "id") == targetEndpointID {
+				return endpoint
+			}
+		}
+	}
+	for _, endpoint := range endpoints {
+		if stringMapValue(endpoint, "role") == string(controlplane.EndpointRoleTarget) && stringMapValue(endpoint, "state") == string(controlplane.EndpointStateOnline) {
+			return endpoint
+		}
+	}
+	for _, endpoint := range endpoints {
+		if stringMapValue(endpoint, "role") == string(controlplane.EndpointRoleTarget) {
+			return endpoint
+		}
+	}
+	return map[string]any{}
+}
+
+func mcpHostMapFromEndpoint(endpoint map[string]any) map[string]any {
+	if len(endpoint) == 0 {
+		return map[string]any{}
+	}
+	platform := stringMapValue(endpoint, "platform")
+	return map[string]any{
+		"id":                   stringMapValue(endpoint, "id"),
+		"name":                 firstReportFieldMap(endpoint, "name", "id"),
+		"os":                   mcpPlatformOS(platform),
+		"arch":                 mcpPlatformArch(platform),
+		"status":               stringMapValue(endpoint, "state"),
+		"platform":             platform,
+		"identity_fingerprint": stringMapValue(endpoint, "identity_fingerprint"),
+		"capabilities":         stringSliceFromAnyMap(endpoint["capabilities"]),
+	}
+}
+
+func mcpEnrichHostMapFromEndpoint(host, endpoint map[string]any) map[string]any {
+	endpointHost := mcpHostMapFromEndpoint(endpoint)
+	if len(host) == 0 {
+		return endpointHost
+	}
+	enriched := map[string]any{}
+	for key, value := range host {
+		enriched[key] = value
+	}
+	for _, key := range []string{"name", "os", "arch", "status", "platform", "identity_fingerprint", "capabilities"} {
+		if _, ok := enriched[key]; !ok {
+			if value, exists := endpointHost[key]; exists {
+				enriched[key] = value
+			}
+		}
+	}
+	return enriched
+}
+
+func mcpPlatformOS(platform string) string {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if before, _, ok := strings.Cut(platform, "/"); ok {
+		return before
+	}
+	return platform
+}
+
+func mcpPlatformArch(platform string) string {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if _, after, ok := strings.Cut(platform, "/"); ok {
+		return after
+	}
+	return ""
+}
+
+func mcpSessionLimitsFromPayload(payload map[string]any) map[string]any {
+	limits := map[string]any{}
+	for _, key := range []string{"max_duration_seconds", "max_output_bytes", "network"} {
+		if value, ok := payload[key]; ok {
+			limits[key] = value
+		}
+	}
+	return limits
+}
+
+func (s Server) waitForSessionTaskTerminal(gatewayURL, sessionID, taskID string, deadline time.Time) (map[string]any, error) {
 	for {
-		payload, err := s.jobStatus(map[string]any{"gateway_url": gatewayURL, "job_id": jobID})
+		snapshot, err := s.fetchSessionSnapshotMap(gatewayURL, sessionID)
 		if err != nil {
 			return nil, err
 		}
-		job := nestedMapOrSelfAny(payload, "job")
-		status := stringMapValue(job, "status")
-		if isTerminalJobStatus(status) {
-			return job, nil
+		for _, task := range mapSliceFromAny(snapshot["tasks"]) {
+			if stringMapValue(task, "id") != taskID {
+				continue
+			}
+			status := stringMapValue(task, "status")
+			if isTerminalTaskStatus(status) {
+				return task, nil
+			}
+			break
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
-			return job, fmt.Errorf("job %s did not reach a terminal state before timeout; last status=%s", jobID, status)
+			return nil, fmt.Errorf("task %s did not reach a terminal state before timeout", taskID)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 }
 
-func isTerminalJobStatus(status string) bool {
+func isTerminalTaskStatus(status string) bool {
 	switch status {
-	case string(model.JobStatusSucceeded), "completed", string(model.JobStatusFailed), string(model.JobStatusCanceled):
+	case string(controlplane.TaskStatusSucceeded), string(controlplane.TaskStatusFailed), string(controlplane.TaskStatusCanceled):
 		return true
 	default:
 		return false
@@ -1100,7 +1383,7 @@ func mcpRemoteControlAuditProbes(hostOS string) []mcpSupportSessionAuditProbe {
 
 func mcpFileListSmokePolicy() map[string]any {
 	return map[string]any{
-		"workspace_root":       ".",
+		"workspace_root":       policy.DefaultWorkspaceRoot,
 		"capabilities":         []string{"file.transfer.read", "fs.read"},
 		"action":               "list",
 		"path":                 ".",
@@ -1113,7 +1396,7 @@ func mcpFileListSmokePolicy() map[string]any {
 
 func mcpDesktopWindowInspectSmokePolicy() map[string]any {
 	return map[string]any{
-		"workspace_root":       ".",
+		"workspace_root":       policy.DefaultWorkspaceRoot,
 		"capabilities":         []string{"window.inspect"},
 		"action":               "window.inspect",
 		"max_duration_seconds": 10,
@@ -1146,7 +1429,7 @@ func mcpShellAuditPolicy(capabilities, argv, allowCommands []string) map[string]
 
 func mcpPowerShellAuditPolicy(command string) map[string]any {
 	return map[string]any{
-		"workspace_root":       ".",
+		"workspace_root":       policy.DefaultWorkspaceRoot,
 		"capabilities":         []string{"powershell.user"},
 		"command":              command,
 		"allow_commands":       []string{"powershell.exe", "powershell", "pwsh"},
@@ -1157,8 +1440,8 @@ func mcpPowerShellAuditPolicy(command string) map[string]any {
 }
 
 func mcpShellAuditPolicyWithWriteScope(capabilities, argv, allowCommands, writeScope []string) map[string]any {
-	policy := map[string]any{
-		"workspace_root":       ".",
+	taskPolicy := map[string]any{
+		"workspace_root":       policy.DefaultWorkspaceRoot,
 		"capabilities":         capabilities,
 		"argv":                 argv,
 		"allow_commands":       allowCommands,
@@ -1167,9 +1450,9 @@ func mcpShellAuditPolicyWithWriteScope(capabilities, argv, allowCommands, writeS
 		"network":              "default-deny",
 	}
 	if len(writeScope) > 0 {
-		policy["write_scope"] = writeScope
+		taskPolicy["write_scope"] = writeScope
 	}
-	return policy
+	return taskPolicy
 }
 
 func (s Server) connectionEntryPlan(args map[string]any) (any, error) {
@@ -1295,296 +1578,6 @@ func (s Server) revokeTicket(args map[string]any) (any, error) {
 	return s.Gateway.RevokeTicket(requiredString(args, "ticket_id"), stringArg(args, "reason", ""))
 }
 
-func (s Server) listHosts(args map[string]any) (any, error) {
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		status := stringArg(args, "status", "")
-		path := "/v1/hosts"
-		if status != "" {
-			path += "?status=" + url.QueryEscape(status)
-		}
-		return s.proxyGETTo(gwURL, path)
-	}
-	return map[string]any{"hosts": s.Gateway.Hosts(stringArg(args, "status", ""))}, nil
-}
-
-func (s Server) hostCapabilities(args map[string]any) (any, error) {
-	hostID := requiredString(args, "host_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyGETTo(gwURL, "/v1/hosts/"+url.PathEscape(hostID))
-	}
-	host, err := s.Gateway.Host(hostID)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"host_id":      host.ID,
-		"status":       host.Status,
-		"capabilities": host.Capabilities,
-	}, nil
-}
-
-func (s Server) approveHost(args map[string]any) (any, error) {
-	hostID := requiredString(args, "host_id")
-	caps := stringSliceArg(args, "capabilities")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/hosts/"+url.PathEscape(hostID)+"/approve", map[string]any{
-			"capabilities": caps,
-		})
-	}
-	return s.Gateway.ApproveHost(hostID, caps)
-}
-
-func (s Server) revokeHost(args map[string]any) (any, error) {
-	hostID := requiredString(args, "host_id")
-	reason := stringArg(args, "reason", "")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/hosts/"+url.PathEscape(hostID)+"/revoke", map[string]any{
-			"reason": reason,
-		})
-	}
-	return s.Gateway.RevokeHost(hostID, reason)
-}
-
-func (s Server) createJob(args map[string]any) (any, error) {
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/jobs", map[string]any{
-			"host_id": requiredString(args, "host_id"),
-			"adapter": requiredString(args, "adapter"),
-			"intent":  requiredString(args, "intent"),
-			"policy":  objectArg(args, "policy"),
-		})
-	}
-	return s.Gateway.CreateJob(
-		requiredString(args, "host_id"),
-		requiredString(args, "adapter"),
-		requiredString(args, "intent"),
-		objectArg(args, "policy"),
-	)
-}
-
-func (s Server) fileJob(args map[string]any, action string) (any, error) {
-	path := stringArg(args, "path", ".")
-	policy := map[string]any{
-		"workspace_root":       stringArg(args, "workspace_root", "."),
-		"capabilities":         []string{"file.transfer.read", "fs.read"},
-		"action":               action,
-		"path":                 path,
-		"max_bytes":            intArg(args, "max_bytes", 1024*1024),
-		"max_duration_seconds": 60,
-		"max_output_bytes":     20000,
-		"network":              "default-deny",
-	}
-	if action == "write" || action == "upload" || action == "delete" {
-		policy["capabilities"] = []string{"file.transfer.write", "fs.write.scoped"}
-		policy["write_scope"] = stringSliceArg(args, "write_scope")
-		if len(policy["write_scope"].([]string)) == 0 {
-			policy["write_scope"] = []string{"."}
-		}
-	}
-	if action == "write" || action == "upload" {
-		policy["content"] = stringArg(args, "content", "")
-		policy["encoding"] = stringArg(args, "encoding", "utf-8")
-	}
-	if action == "delete" {
-		policy["approvals_required"] = []string{"file.delete"}
-	}
-	jobArgs := map[string]any{
-		"host_id": requiredString(args, "host_id"),
-		"adapter": "file",
-		"intent":  fmt.Sprintf("%s remote file %s", action, path),
-		"policy":  policy,
-	}
-	if gwURL := stringArg(args, "gateway_url", ""); gwURL != "" {
-		jobArgs["gateway_url"] = gwURL
-	}
-	return s.createJob(jobArgs)
-}
-
-func (s Server) desktopInputJob(args map[string]any) (any, error) {
-	action := "input.mouse"
-	if strings.TrimSpace(stringArg(args, "text", "")) != "" {
-		action = "input.keyboard"
-	}
-	return s.desktopJob(args, action)
-}
-
-func (s Server) desktopAppJob(args map[string]any) (any, error) {
-	action := "app.launch"
-	if strings.EqualFold(strings.TrimSpace(stringArg(args, "action", "")), "close") {
-		action = "app.close"
-	}
-	return s.desktopJob(args, action)
-}
-
-func (s Server) desktopClipboardJob(args map[string]any) (any, error) {
-	action := "clipboard.read"
-	switch strings.ToLower(strings.TrimSpace(stringArg(args, "action", ""))) {
-	case "", "read", "clipboard.read":
-		action = "clipboard.read"
-	case "write", "clipboard.write":
-		action = "clipboard.write"
-	default:
-		return nil, fmt.Errorf("clipboard action must be read or write")
-	}
-	return s.desktopJob(args, action)
-}
-
-func (s Server) desktopJob(args map[string]any, action string) (any, error) {
-	capability, approval := desktopMCPActionCapability(action)
-	policy := map[string]any{
-		"workspace_root":       stringArg(args, "workspace_root", "."),
-		"capabilities":         []string{capability},
-		"action":               action,
-		"max_duration_seconds": 30,
-		"max_output_bytes":     20000,
-		"network":              "default-deny",
-	}
-	if approval != "" {
-		policy["approvals_required"] = []string{approval}
-	}
-	for _, key := range []string{"window_id", "title", "text", "button", "app", "url"} {
-		if value := stringArg(args, key, ""); value != "" {
-			policy[key] = value
-		}
-	}
-	for _, key := range []string{"x", "y", "width", "height", "frames", "interval_millis"} {
-		if value := intArg(args, key, 0); value != 0 {
-			policy[key] = value
-		}
-	}
-	jobArgs := map[string]any{
-		"host_id": requiredString(args, "host_id"),
-		"adapter": "desktop",
-		"intent":  desktopMCPIntent(action),
-		"policy":  policy,
-	}
-	if gwURL := stringArg(args, "gateway_url", ""); gwURL != "" {
-		jobArgs["gateway_url"] = gwURL
-	}
-	return s.createJob(jobArgs)
-}
-
-func desktopMCPActionCapability(action string) (string, string) {
-	switch action {
-	case "window.inspect":
-		return "window.inspect", ""
-	case "screen.screenshot":
-		return "screen.screenshot", "screen.screenshot"
-	case "screen.record":
-		return "screen.record", "screen.record"
-	case "window.focus":
-		return "window.focus", "window.focus"
-	case "window.move":
-		return "window.move", "window.move"
-	case "input.keyboard":
-		return "input.keyboard", "input.keyboard"
-	case "input.mouse":
-		return "input.mouse", "input.mouse"
-	case "app.launch":
-		return "app.launch", "app.launch"
-	case "app.close":
-		return "app.close", "app.close"
-	case "url.open":
-		return "url.open", "url.open"
-	case "clipboard.read":
-		return "clipboard.read", "clipboard.read"
-	case "clipboard.write":
-		return "clipboard.write", "clipboard.write"
-	default:
-		return action, action
-	}
-}
-
-func desktopMCPIntent(action string) string {
-	switch action {
-	case "window.inspect":
-		return "inspect remote desktop windows"
-	case "screen.screenshot":
-		return "capture remote desktop screenshot"
-	case "screen.record":
-		return "record remote desktop PNG frames"
-	case "window.focus":
-		return "focus remote desktop window"
-	case "window.move":
-		return "move remote desktop window"
-	case "input.keyboard":
-		return "send remote keyboard input"
-	case "input.mouse":
-		return "send remote mouse input"
-	case "app.launch":
-		return "launch remote desktop app"
-	case "app.close":
-		return "close remote desktop app/window"
-	case "url.open":
-		return "open remote desktop URL"
-	case "clipboard.read":
-		return "read remote desktop clipboard"
-	case "clipboard.write":
-		return "write remote desktop clipboard"
-	default:
-		return action
-	}
-}
-
-func (s Server) jobPolicyTemplate(args map[string]any) (any, error) {
-	return jobtemplate.PolicyTemplate(
-		stringArg(args, "capability", "shell.user"),
-		stringArg(args, "target_os", "auto"),
-	), nil
-}
-
-func (s Server) jobStatus(args map[string]any) (any, error) {
-	jobID := requiredString(args, "job_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyGETTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID))
-	}
-	return s.Gateway.Job(jobID)
-}
-
-func (s Server) cancelJob(args map[string]any) (any, error) {
-	jobID := requiredString(args, "job_id")
-	reason := stringArg(args, "reason", "")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID)+"/cancel", map[string]any{
-			"reason": reason,
-		})
-	}
-	return s.Gateway.CancelJob(jobID, reason)
-}
-
-func (s Server) approveJob(args map[string]any) (any, error) {
-	jobID := requiredString(args, "job_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID)+"/approve", map[string]any{
-			"approval_id": requiredString(args, "approval_id"),
-			"decision":    requiredString(args, "decision"),
-			"reason":      stringArg(args, "reason", ""),
-		})
-	}
-	return s.Gateway.ApproveJob(
-		jobID,
-		requiredString(args, "approval_id"),
-		requiredString(args, "decision"),
-		stringArg(args, "reason", ""),
-	)
-}
-
-func (s Server) listArtifacts(args map[string]any) (any, error) {
-	jobID := requiredString(args, "job_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyGETTo(gwURL, "/v1/jobs/"+url.PathEscape(jobID)+"/artifacts")
-	}
-	return map[string]any{"artifacts": s.Gateway.Artifacts(jobID)}, nil
-}
-
-func (s Server) readArtifact(args map[string]any) (any, error) {
-	artifactID := requiredString(args, "artifact_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyGETTo(gwURL, "/v1/artifacts/"+url.PathEscape(artifactID))
-	}
-	return s.Gateway.Artifact(artifactID)
-}
-
 func (s Server) queryAudit(args map[string]any) (any, error) {
 	targetID := stringArg(args, "target_id", "")
 	limit := intArg(args, "limit", 100)
@@ -1616,7 +1609,7 @@ func (s Server) explainPolicy(args map[string]any) (any, error) {
 }
 
 func (s Server) explainShellPolicy(args map[string]any) (any, error) {
-	return policy.ExplainShellJob(
+	return policy.ExplainShellTask(
 		model.HostMode(requiredString(args, "mode")),
 		objectArg(args, "policy"),
 	), nil
@@ -1646,15 +1639,8 @@ type enrollmentCertificateVerificationReport struct {
 
 func (s Server) verifyEnrollmentCertificate(args map[string]any) (any, error) {
 	certificateJSON := stringArg(args, "certificate_json", "")
-	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
-		artifact, err := s.Gateway.Artifact(artifactID)
-		if err != nil {
-			return nil, err
-		}
-		certificateJSON = artifact.Content
-	}
 	if certificateJSON == "" {
-		return nil, fmt.Errorf("certificate_json or artifact_id is required")
+		return nil, fmt.Errorf("certificate_json is required")
 	}
 	rootPublicKey := requiredString(args, "root_public_key")
 	verifyAt := time.Now().UTC()
@@ -1706,14 +1692,7 @@ func (s Server) verifyEnrollmentCertificate(args map[string]any) (any, error) {
 		return report, nil
 	}
 	report.Checks = append(report.Checks, "signature_valid", "validity_window_active", "issuer_matches_root")
-	if revocationsJSON := stringArg(args, "revocations_json", ""); revocationsJSON != "" || stringArg(args, "revocations_artifact_id", "") != "" {
-		if artifactID := stringArg(args, "revocations_artifact_id", ""); artifactID != "" {
-			artifact, err := s.Gateway.Artifact(artifactID)
-			if err != nil {
-				return nil, err
-			}
-			revocationsJSON = artifact.Content
-		}
+	if revocationsJSON := stringArg(args, "revocations_json", ""); revocationsJSON != "" {
 		revocations, err := decodeEnrollmentRevocationListJSON([]byte(revocationsJSON))
 		if err != nil {
 			report.Errors = append(report.Errors, err.Error())
@@ -1775,15 +1754,8 @@ func decodeEnrollmentRevocationListJSON(content []byte) (model.HostEnrollmentRev
 
 func (s Server) verifyAdapterResult(args map[string]any) (any, error) {
 	artifactJSON := stringArg(args, "artifact_json", "")
-	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
-		artifact, err := s.Gateway.Artifact(artifactID)
-		if err != nil {
-			return nil, err
-		}
-		artifactJSON = artifact.Content
-	}
 	if artifactJSON == "" {
-		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+		return nil, fmt.Errorf("artifact_json is required")
 	}
 	requiredFields := stringSliceArg(args, "required_string_fields")
 	if len(requiredFields) == 0 {
@@ -1802,15 +1774,8 @@ func (s Server) verifyAdapterResult(args map[string]any) (any, error) {
 
 func (s Server) verifyAdapterLifecycle(args map[string]any) (any, error) {
 	artifactJSON := stringArg(args, "artifact_json", "")
-	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
-		artifact, err := s.Gateway.Artifact(artifactID)
-		if err != nil {
-			return nil, err
-		}
-		artifactJSON = artifact.Content
-	}
 	if artifactJSON == "" {
-		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+		return nil, fmt.Errorf("artifact_json is required")
 	}
 	schema := stringArg(args, "schema", adapterkit.LifecycleManifestSchemaVersion)
 	return adapterkit.VerifyLifecycleManifestJSON([]byte(artifactJSON), adapterkit.LifecycleContract{
@@ -1826,15 +1791,8 @@ func (s Server) verifyAdapterLifecycle(args map[string]any) (any, error) {
 
 func (s Server) verifyAdapterCancellation(args map[string]any) (any, error) {
 	artifactJSON := stringArg(args, "artifact_json", "")
-	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
-		artifact, err := s.Gateway.Artifact(artifactID)
-		if err != nil {
-			return nil, err
-		}
-		artifactJSON = artifact.Content
-	}
 	if artifactJSON == "" {
-		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+		return nil, fmt.Errorf("artifact_json is required")
 	}
 	requiredFields := stringSliceArg(args, "required_string_fields")
 	if len(requiredFields) == 0 {
@@ -1853,15 +1811,8 @@ func (s Server) verifyAdapterCancellation(args map[string]any) (any, error) {
 
 func (s Server) verifyAdapterRuntime(args map[string]any) (any, error) {
 	artifactJSON := stringArg(args, "artifact_json", "")
-	if artifactID := stringArg(args, "artifact_id", ""); artifactID != "" {
-		artifact, err := s.Gateway.Artifact(artifactID)
-		if err != nil {
-			return nil, err
-		}
-		artifactJSON = artifact.Content
-	}
 	if artifactJSON == "" {
-		return nil, fmt.Errorf("artifact_json or artifact_id is required")
+		return nil, fmt.Errorf("artifact_json is required")
 	}
 	return adapterkit.VerifyRuntimeFixtureJSON([]byte(artifactJSON), adapterkit.RuntimeFixtureContract{
 		Adapter:               requiredString(args, "adapter"),
@@ -1937,12 +1888,6 @@ func mapSliceFromAny(value any) []map[string]any {
 			out = append(out, structToMap(item))
 		}
 		return out
-	case []model.Job:
-		out := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, structToMap(item))
-		}
-		return out
 	}
 	return nil
 }
@@ -1978,7 +1923,7 @@ func summarizeFirstArtifactMap(payload map[string]any) string {
 	return content
 }
 
-func supportSessionHumanReportMap(host map[string]any, jobs []map[string]any) string {
+func supportSessionHumanReportMap(host map[string]any, tasks []map[string]any) string {
 	var b strings.Builder
 	hostName := firstReportFieldMap(host, "name", "hostname", "id")
 	hostOS := firstReportFieldMap(host, "os")
@@ -1991,14 +1936,11 @@ func supportSessionHumanReportMap(host map[string]any, jobs []map[string]any) st
 	if hostOS != "" || hostArch != "" {
 		_, _ = fmt.Fprintf(&b, " (%s %s)", hostOS, hostArch)
 	}
-	_, _ = fmt.Fprintf(&b, "\n- Jobs reviewed: %d\n", len(jobs))
-	for _, job := range jobs {
-		_, _ = fmt.Fprintf(&b, "- %s: %s", job["job_id"], job["status"])
-		if intent, _ := job["intent"].(string); intent != "" {
+	_, _ = fmt.Fprintf(&b, "\n- Tasks reviewed: %d\n", len(tasks))
+	for _, task := range tasks {
+		_, _ = fmt.Fprintf(&b, "- %s: %s", task["task_id"], task["status"])
+		if intent, _ := task["intent"].(string); intent != "" {
 			_, _ = fmt.Fprintf(&b, " - %s", intent)
-		}
-		if summary, _ := job["artifact_summary"].(string); summary != "" {
-			_, _ = fmt.Fprintf(&b, " | evidence: %s", oneLine(summary))
 		}
 		_, _ = fmt.Fprint(&b, "\n")
 	}
@@ -2013,7 +1955,7 @@ func supportSessionSmokeHumanReportMap(audit map[string]any) string {
 		_, _ = fmt.Fprintf(&b, "- Host: %s (%s %s)\n", firstReportFieldMap(host, "name", "hostname", "id"), firstReportFieldMap(host, "os"), firstReportFieldMap(host, "arch"))
 	}
 	for _, result := range mapSliceFromAny(audit["results"]) {
-		_, _ = fmt.Fprintf(&b, "- %s: ok=%v status=%s\n", stringMapValue(result, "name"), result["ok"], firstReportFieldMap(result, "job_status", "status"))
+		_, _ = fmt.Fprintf(&b, "- %s: ok=%v status=%s\n", stringMapValue(result, "name"), result["ok"], firstReportFieldMap(result, "task_status", "status"))
 	}
 	_, _ = fmt.Fprint(&b, "- Connection: keep alive until the operator explicitly asks to disconnect.")
 	return b.String()
@@ -2105,18 +2047,18 @@ func supportSessionManagedUpgradeRecommendationMap(host map[string]any) map[stri
 		}
 	}
 	return map[string]any{
-		"schema_version":                      "rdev.support-session-managed-upgrade.v1",
-		"for_owned_recurring_hosts":           true,
-		"for_third_party_temporary":           false,
-		"requires_explicit_operator_approval": true,
-		"requires_stable_gateway":             true,
+		"schema_version":                           "rdev.support-session-managed-upgrade.v1",
+		"for_owned_recurring_hosts":                true,
+		"for_third_party_temporary":                false,
+		"requires_explicit_operator_authorization": true,
+		"requires_stable_gateway":                  true,
 		"stable_gateway_env": []string{
 			"RDEV_HOSTED_GATEWAY_URL",
 			"RDEV_CLOUDFLARED_NAMED_TUNNEL_URL",
 		},
 		"target_os":        targetOS,
 		"recommended_tool": "rdev.connection_entry.plan",
-		"agent_rule":       "If this is the operator's own recurring machine, ask one short ownership/persistence approval question, configure a stable gateway, then generate a reviewed managed-service Connection Entry plan. Do not install persistence for third-party temporary support.",
+		"agent_rule":       "If this is the operator's own recurring machine, ask one short ownership/persistence authorization question, configure a stable gateway, then generate a reviewed managed-service Connection Entry plan. Do not install persistence for third-party temporary support.",
 	}
 }
 

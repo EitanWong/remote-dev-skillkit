@@ -33,9 +33,23 @@ type Host struct {
 	IdentityKeyID       string     `json:"identity_key_id,omitempty"`
 	IdentityPublicKey   string     `json:"identity_public_key,omitempty"`
 	IdentityFingerprint string     `json:"identity_fingerprint,omitempty"`
-	ApprovedAt          *time.Time `json:"approved_at,omitempty"`
+	ActivatedAt         *time.Time `json:"activated_at,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	LastSeenAt          time.Time  `json:"last_seen_at"`
+}
+
+type SupportSessionPreconnect struct {
+	ID         string    `json:"id"`
+	TicketCode string    `json:"ticket_code"`
+	Phase      string    `json:"phase"`
+	OS         string    `json:"os,omitempty"`
+	Arch       string    `json:"arch,omitempty"`
+	Asset      string    `json:"asset,omitempty"`
+	Source     string    `json:"source,omitempty"`
+	Message    string    `json:"message,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	SeenCount  int       `json:"seen_count"`
 }
 
 type HostRegistration struct {
@@ -181,7 +195,7 @@ func validateHostRegistrationIdentity(registration HostRegistration) error {
 	if registration.IdentityProof.SchemaVersion != HostRegistrationProofSchemaVersion {
 		return fmt.Errorf("unsupported host identity proof schema %q", registration.IdentityProof.SchemaVersion)
 	}
-	if registration.IdentityProof.SigningAlg != JobEnvelopeSigningAlg {
+	if registration.IdentityProof.SigningAlg != SigningAlgEd25519 {
 		return fmt.Errorf("unsupported host identity proof signing algorithm %q", registration.IdentityProof.SigningAlg)
 	}
 	if registration.IdentityProof.KeyID != registration.IdentityKeyID {
@@ -239,7 +253,7 @@ func SignHostRegistration(registration HostRegistration, privateKey ed25519.Priv
 	signature := ed25519.Sign(privateKey, payload)
 	return HostRegistrationProof{
 		SchemaVersion: HostRegistrationProofSchemaVersion,
-		SigningAlg:    JobEnvelopeSigningAlg,
+		SigningAlg:    SigningAlgEd25519,
 		KeyID:         registration.IdentityKeyID,
 		Signature:     base64.RawURLEncoding.EncodeToString(signature),
 	}, nil
@@ -294,7 +308,7 @@ func SignHostEnrollmentCertificate(registration HostRegistration, ticket Ticket,
 	now = now.UTC()
 	certificate := HostEnrollmentCertificate{
 		SchemaVersion:              HostEnrollmentCertificateSchemaVersion,
-		SigningAlg:                 JobEnvelopeSigningAlg,
+		SigningAlg:                 SigningAlgEd25519,
 		IssuerKeyID:                issuerKeyID,
 		SubjectIdentityFingerprint: registration.IdentityFingerprint,
 		TicketCode:                 registration.TicketCode,
@@ -353,7 +367,7 @@ func VerifyHostEnrollmentCertificateSignature(certificate HostEnrollmentCertific
 	if certificate.SchemaVersion != HostEnrollmentCertificateSchemaVersion {
 		return fmt.Errorf("unsupported host enrollment certificate schema %q", certificate.SchemaVersion)
 	}
-	if certificate.SigningAlg != JobEnvelopeSigningAlg {
+	if certificate.SigningAlg != SigningAlgEd25519 {
 		return fmt.Errorf("unsupported host enrollment certificate signing algorithm %q", certificate.SigningAlg)
 	}
 	if certificate.IssuerKeyID == "" {
@@ -468,7 +482,7 @@ func SignHostEnrollmentRevocationList(revocations []HostEnrollmentCertificateRev
 	now = now.UTC()
 	list := HostEnrollmentRevocationList{
 		SchemaVersion:       HostEnrollmentRevocationListSchemaVersion,
-		SigningAlg:          JobEnvelopeSigningAlg,
+		SigningAlg:          SigningAlgEd25519,
 		IssuerKeyID:         issuerKeyID,
 		GeneratedAt:         now,
 		NotAfter:            now.Add(ttl).UTC(),
@@ -486,7 +500,7 @@ func VerifyHostEnrollmentRevocationListSignature(list HostEnrollmentRevocationLi
 	if list.SchemaVersion != HostEnrollmentRevocationListSchemaVersion {
 		return fmt.Errorf("unsupported host enrollment revocation list schema %q", list.SchemaVersion)
 	}
-	if list.SigningAlg != JobEnvelopeSigningAlg {
+	if list.SigningAlg != SigningAlgEd25519 {
 		return fmt.Errorf("unsupported host enrollment revocation list signing algorithm %q", list.SigningAlg)
 	}
 	if list.IssuerKeyID == "" {

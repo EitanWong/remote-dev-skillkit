@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 const ResultSchemaVersion = "rdev.file-result.v1"
@@ -24,6 +26,8 @@ type Spec struct {
 	Path               string
 	Content            string
 	Encoding           string
+	ExpectedBytes      int
+	ExpectedSHA256     string
 	MaxBytes           int
 	MaxDurationSeconds int
 	MaxOutputBytes     int
@@ -50,6 +54,9 @@ type ResultArtifact struct {
 	Encoding        string  `json:"encoding,omitempty"`
 	Bytes           int     `json:"bytes,omitempty"`
 	SHA256          string  `json:"sha256,omitempty"`
+	ExpectedBytes   int     `json:"expected_bytes,omitempty"`
+	ExpectedSHA256  string  `json:"expected_sha256,omitempty"`
+	ByteCompare     string  `json:"byte_compare,omitempty"`
 	Deleted         bool    `json:"deleted,omitempty"`
 	OutputTruncated bool    `json:"output_truncated"`
 	StartedAt       string  `json:"started_at"`
@@ -123,6 +130,7 @@ func ExecuteContext(ctx context.Context, spec Spec) (ResultArtifact, error) {
 		if err := readFileContent(resolved, spec.MaxBytes, &artifact); err != nil {
 			return finish(), err
 		}
+		applyExpectedTransferEvidence(&artifact, spec.ExpectedBytes, spec.ExpectedSHA256)
 	case "write", "upload":
 		resolved, err := resolveWritablePath(root, spec.Path, spec.WriteScope)
 		if err != nil {
@@ -143,6 +151,7 @@ func ExecuteContext(ctx context.Context, spec Spec) (ResultArtifact, error) {
 		artifact.Encoding = encoding
 		artifact.Bytes = len(content)
 		artifact.SHA256 = "sha256:" + hex.EncodeToString(sum[:])
+		applyExpectedTransferEvidence(&artifact, spec.ExpectedBytes, spec.ExpectedSHA256)
 	case "delete":
 		resolved, err := resolveDeletablePath(root, spec.Path, spec.WriteScope)
 		if err != nil {
@@ -179,23 +188,9 @@ func normalizeAction(action string) string {
 }
 
 func canonicalWorkspace(root string) (string, error) {
-	if strings.TrimSpace(root) == "" {
-		return "", fmt.Errorf("workspace root is required")
-	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve workspace root: %w", err)
-	}
-	canonical, err := filepath.EvalSymlinks(abs)
+	canonical, err := workspace.CanonicalDir(root)
 	if err != nil {
 		return "", fmt.Errorf("workspace root must exist: %w", err)
-	}
-	info, err := os.Stat(canonical)
-	if err != nil {
-		return "", fmt.Errorf("stat workspace root: %w", err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("workspace root must be a directory")
 	}
 	return canonical, nil
 }
@@ -394,6 +389,43 @@ func readFileContent(path string, maxBytes int, artifact *ResultArtifact) error 
 		artifact.ContentText = string(content)
 	}
 	return nil
+}
+
+func applyExpectedTransferEvidence(artifact *ResultArtifact, expectedBytes int, expectedSHA256 string) {
+	expectedSHA256 = normalizeSHA256(expectedSHA256)
+	if expectedBytes <= 0 && expectedSHA256 == "" {
+		return
+	}
+	if expectedBytes > 0 {
+		artifact.ExpectedBytes = expectedBytes
+	}
+	if expectedSHA256 != "" {
+		artifact.ExpectedSHA256 = expectedSHA256
+	}
+	match := true
+	if expectedBytes > 0 && artifact.Bytes != expectedBytes {
+		match = false
+	}
+	if expectedSHA256 != "" && normalizeSHA256(artifact.SHA256) != expectedSHA256 {
+		match = false
+	}
+	if match {
+		artifact.ByteCompare = "match"
+		return
+	}
+	artifact.ByteCompare = "mismatch"
+}
+
+func normalizeSHA256(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	value = strings.TrimPrefix(value, "sha256:")
+	if value == "" {
+		return ""
+	}
+	return "sha256:" + value
 }
 
 func decodeContent(content, encoding string) ([]byte, string, error) {

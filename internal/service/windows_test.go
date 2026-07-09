@@ -14,8 +14,6 @@ func TestNewWindowsServiceBuildsManagedHostCommands(t *testing.T) {
 		TicketCode:               "ABCD-1234",
 		IdentityStorePath:        `C:\ProgramData\rdev\identity.json`,
 		TrustStorePath:           `C:\ProgramData\rdev\trust.json`,
-		NonceStorePath:           `C:\ProgramData\rdev\nonces.json`,
-		ApprovalStorePath:        `C:\ProgramData\rdev\approvals.json`,
 		WorkspaceLockStorePath:   `C:\ProgramData\rdev\workspace-locks`,
 		ReleaseBundlePath:        `C:\Program Files\rdev\release-bundle.json`,
 		ReleaseRootPublicKey:     "release-root:abc123",

@@ -7,30 +7,30 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
-type ShellJobExplanation struct {
-	Mode              string   `json:"mode"`
-	Adapter           string   `json:"adapter"`
-	Allowed           bool     `json:"allowed"`
-	ApprovalRequired  bool     `json:"approval_required"`
-	RequiredApprovals []string `json:"required_approvals,omitempty"`
-	Denials           []string `json:"denials,omitempty"`
-	Warnings          []string `json:"warnings,omitempty"`
-	Reasons           []string `json:"reasons,omitempty"`
+type TaskPolicyExplanation struct {
+	Mode                   string   `json:"mode"`
+	Adapter                string   `json:"adapter"`
+	Allowed                bool     `json:"allowed"`
+	AuthorizationRequired  bool     `json:"authorization_required"`
+	RequiredAuthorizations []string `json:"required_authorizations,omitempty"`
+	Denials                []string `json:"denials,omitempty"`
+	Warnings               []string `json:"warnings,omitempty"`
+	Reasons                []string `json:"reasons,omitempty"`
 }
 
-func ExplainShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExplanation {
-	explanation := ShellJobExplanation{
+func ExplainShellTask(mode model.HostMode, taskPolicy map[string]any) TaskPolicyExplanation {
+	explanation := TaskPolicyExplanation{
 		Mode:    string(mode),
 		Adapter: "shell",
 	}
 	if !mode.Valid() {
 		explanation.Denials = append(explanation.Denials, "unknown host mode")
-		return finalizeShellExplanation(explanation)
+		return finalizeTaskExplanation(explanation)
 	}
 
-	workspaceRoot := stringValue(jobPolicy, "workspace_root", "")
+	workspaceRoot := stringValue(taskPolicy, "workspace_root", "")
 	if workspaceRoot == "" {
-		workspaceRoot = stringValue(jobPolicy, "cwd", "")
+		workspaceRoot = stringValue(taskPolicy, "cwd", "")
 	}
 	if strings.TrimSpace(workspaceRoot) == "" {
 		explanation.Denials = append(explanation.Denials, "workspace root is required")
@@ -38,15 +38,15 @@ func ExplainShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExpl
 		explanation.Reasons = append(explanation.Reasons, "workspace root is declared")
 	}
 
-	capabilities := stringSliceValue(jobPolicy, "capabilities")
+	capabilities := stringSliceValue(taskPolicy, "capabilities")
 	if !containsString(capabilities, string(CapabilityShellUser)) {
 		explanation.Denials = append(explanation.Denials, "missing shell.user capability")
 	} else {
 		explanation.Reasons = append(explanation.Reasons, "shell.user capability is present")
 	}
 
-	argv := stringSliceValue(jobPolicy, "argv")
-	allowCommands := stringSliceValue(jobPolicy, "allow_commands")
+	argv := stringSliceValue(taskPolicy, "argv")
+	allowCommands := stringSliceValue(taskPolicy, "allow_commands")
 	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
 		explanation.Denials = append(explanation.Denials, "argv is required")
 	} else if len(allowCommands) == 0 {
@@ -57,63 +57,63 @@ func ExplainShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExpl
 		explanation.Reasons = append(explanation.Reasons, "argv command is allowlisted")
 	}
 
-	for _, scope := range stringSliceValue(jobPolicy, "write_scope") {
+	for _, scope := range stringSliceValue(taskPolicy, "write_scope") {
 		if writeScopeEscapes(scope) {
 			explanation.Denials = append(explanation.Denials, "write scope escapes workspace root: "+scope)
 		}
 	}
-	if len(stringSliceValue(jobPolicy, "write_scope")) > 0 && !containsString(capabilities, string(CapabilityFSWriteScoped)) {
+	if len(stringSliceValue(taskPolicy, "write_scope")) > 0 && !containsString(capabilities, string(CapabilityFSWriteScoped)) {
 		explanation.Warnings = append(explanation.Warnings, "write_scope is set without fs.write.scoped capability")
 	}
 
-	maxDuration := intValue(jobPolicy, "max_duration_seconds", model.DefaultJobTTLSeconds)
+	maxDuration := intValue(taskPolicy, "max_duration_seconds", model.DefaultTaskTTLSeconds)
 	if maxDuration <= 0 {
 		explanation.Denials = append(explanation.Denials, "max_duration_seconds must be positive")
 	}
-	maxOutput := intValue(jobPolicy, "max_output_bytes", model.DefaultMaxOutputBytes)
+	maxOutput := intValue(taskPolicy, "max_output_bytes", model.DefaultTaskMaxOutputBytes)
 	if maxOutput <= 0 {
 		explanation.Denials = append(explanation.Denials, "max_output_bytes must be positive")
 	}
-	network := stringValue(jobPolicy, "network", "default-deny")
+	network := stringValue(taskPolicy, "network", "default-deny")
 	if network != "default-deny" {
-		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, "network."+network)
-		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires approval")
+		explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, "network."+network)
+		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires authorization")
 	}
-	for _, approval := range stringSliceValue(jobPolicy, "approvals_required") {
-		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, approval)
+	for _, authorization := range stringSliceValue(taskPolicy, "authorizations_required") {
+		explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, authorization)
 	}
 	if len(explanation.Denials) == 0 {
-		explanation.Reasons = append(explanation.Reasons, "host will still re-validate the signed job envelope and canonical paths before execution")
+		explanation.Reasons = append(explanation.Reasons, "host will still validate the session task payload and canonical paths before execution")
 	}
-	return finalizeShellExplanation(explanation)
+	return finalizeTaskExplanation(explanation)
 }
 
-func ExplainAdapterJob(mode model.HostMode, adapter string, jobPolicy map[string]any) ShellJobExplanation {
+func ExplainAdapterTask(mode model.HostMode, adapter string, taskPolicy map[string]any) TaskPolicyExplanation {
 	switch strings.ToLower(strings.TrimSpace(adapter)) {
 	case "powershell":
-		return ExplainPowerShellJob(mode, jobPolicy)
+		return ExplainPowerShellTask(mode, taskPolicy)
 	case "file":
-		return ExplainFileJob(mode, jobPolicy)
+		return ExplainFileTask(mode, taskPolicy)
 	case "desktop":
-		return ExplainDesktopJob(mode, jobPolicy)
+		return ExplainDesktopTask(mode, taskPolicy)
 	default:
-		return ExplainShellJob(mode, jobPolicy)
+		return ExplainShellTask(mode, taskPolicy)
 	}
 }
 
-func ExplainPowerShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExplanation {
-	explanation := ShellJobExplanation{
+func ExplainPowerShellTask(mode model.HostMode, taskPolicy map[string]any) TaskPolicyExplanation {
+	explanation := TaskPolicyExplanation{
 		Mode:    string(mode),
 		Adapter: "powershell",
 	}
 	if !mode.Valid() {
 		explanation.Denials = append(explanation.Denials, "unknown host mode")
-		return finalizeShellExplanation(explanation)
+		return finalizeTaskExplanation(explanation)
 	}
 
-	workspaceRoot := stringValue(jobPolicy, "workspace_root", "")
+	workspaceRoot := stringValue(taskPolicy, "workspace_root", "")
 	if workspaceRoot == "" {
-		workspaceRoot = stringValue(jobPolicy, "cwd", "")
+		workspaceRoot = stringValue(taskPolicy, "cwd", "")
 	}
 	if strings.TrimSpace(workspaceRoot) == "" {
 		explanation.Denials = append(explanation.Denials, "workspace root is required")
@@ -121,78 +121,82 @@ func ExplainPowerShellJob(mode model.HostMode, jobPolicy map[string]any) ShellJo
 		explanation.Reasons = append(explanation.Reasons, "workspace root is declared")
 	}
 
-	capabilities := stringSliceValue(jobPolicy, "capabilities")
+	capabilities := stringSliceValue(taskPolicy, "capabilities")
 	if !containsString(capabilities, string(CapabilityPowerShellUser)) {
 		explanation.Denials = append(explanation.Denials, "missing powershell.user capability")
 	} else {
 		explanation.Reasons = append(explanation.Reasons, "powershell.user capability is present")
 	}
 
-	command := stringValue(jobPolicy, "command", "")
+	command := stringValue(taskPolicy, "command", "")
 	if command == "" {
-		command = stringValue(jobPolicy, "script", "")
+		command = stringValue(taskPolicy, "script", "")
 	}
-	allowCommands := stringSliceValue(jobPolicy, "allow_commands")
+	allowCommands := stringSliceValue(taskPolicy, "allow_commands")
 	if strings.TrimSpace(command) == "" {
-		explanation.Denials = append(explanation.Denials, "command is required")
+		if len(stringSliceValue(taskPolicy, "argv")) > 0 {
+			explanation.Denials = append(explanation.Denials, "PowerShell adapter expects policy.command or policy.script; policy.argv is for shell adapter")
+		} else {
+			explanation.Denials = append(explanation.Denials, "command is required")
+		}
 	} else if len(allowCommands) == 0 {
 		explanation.Denials = append(explanation.Denials, "allow_commands is required")
-	} else if !powershellCommandAllowlisted(stringValue(jobPolicy, "powershell_command", ""), allowCommands) {
+	} else if !powershellCommandAllowlisted(stringValue(taskPolicy, "powershell_command", ""), allowCommands) {
 		explanation.Denials = append(explanation.Denials, "powershell executable is not allowlisted")
 	} else {
 		explanation.Reasons = append(explanation.Reasons, "powershell executable is allowlisted")
 	}
 
-	for _, scope := range stringSliceValue(jobPolicy, "write_scope") {
+	for _, scope := range stringSliceValue(taskPolicy, "write_scope") {
 		if writeScopeEscapes(scope) {
 			explanation.Denials = append(explanation.Denials, "write scope escapes workspace root: "+scope)
 		}
 	}
-	if len(stringSliceValue(jobPolicy, "write_scope")) > 0 && !containsString(capabilities, string(CapabilityFSWriteScoped)) {
+	if len(stringSliceValue(taskPolicy, "write_scope")) > 0 && !containsString(capabilities, string(CapabilityFSWriteScoped)) {
 		explanation.Warnings = append(explanation.Warnings, "write_scope is set without fs.write.scoped capability")
 	}
 
-	maxDuration := intValue(jobPolicy, "max_duration_seconds", model.DefaultJobTTLSeconds)
+	maxDuration := intValue(taskPolicy, "max_duration_seconds", model.DefaultTaskTTLSeconds)
 	if maxDuration <= 0 {
 		explanation.Denials = append(explanation.Denials, "max_duration_seconds must be positive")
 	}
-	maxOutput := intValue(jobPolicy, "max_output_bytes", model.DefaultMaxOutputBytes)
+	maxOutput := intValue(taskPolicy, "max_output_bytes", model.DefaultTaskMaxOutputBytes)
 	if maxOutput <= 0 {
 		explanation.Denials = append(explanation.Denials, "max_output_bytes must be positive")
 	}
-	network := stringValue(jobPolicy, "network", "default-deny")
+	network := stringValue(taskPolicy, "network", "default-deny")
 	if network != "default-deny" {
-		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, "network."+network)
-		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires approval")
+		explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, "network."+network)
+		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires authorization")
 	}
-	for _, approval := range stringSliceValue(jobPolicy, "approvals_required") {
-		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, approval)
+	for _, authorization := range stringSliceValue(taskPolicy, "authorizations_required") {
+		explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, authorization)
 	}
 	if len(explanation.Denials) == 0 {
-		explanation.Reasons = append(explanation.Reasons, "host will still re-validate the signed job envelope and canonical paths before execution")
+		explanation.Reasons = append(explanation.Reasons, "host will still validate the session task payload and canonical paths before execution")
 	}
-	return finalizeShellExplanation(explanation)
+	return finalizeTaskExplanation(explanation)
 }
 
-func ExplainFileJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExplanation {
-	explanation := ShellJobExplanation{
+func ExplainFileTask(mode model.HostMode, taskPolicy map[string]any) TaskPolicyExplanation {
+	explanation := TaskPolicyExplanation{
 		Mode:    string(mode),
 		Adapter: "file",
 	}
 	if !mode.Valid() {
 		explanation.Denials = append(explanation.Denials, "unknown host mode")
-		return finalizeShellExplanation(explanation)
+		return finalizeTaskExplanation(explanation)
 	}
-	if strings.TrimSpace(stringValue(jobPolicy, "workspace_root", stringValue(jobPolicy, "cwd", ""))) == "" {
+	if strings.TrimSpace(stringValue(taskPolicy, "workspace_root", stringValue(taskPolicy, "cwd", ""))) == "" {
 		explanation.Denials = append(explanation.Denials, "workspace root is required")
 	} else {
 		explanation.Reasons = append(explanation.Reasons, "workspace root is declared")
 	}
-	action := normalizeRemoteAction(stringValue(jobPolicy, "action", ""))
+	action := normalizeRemoteAction(stringValue(taskPolicy, "action", ""))
 	if action == "" {
 		explanation.Denials = append(explanation.Denials, "file action is required")
 	}
-	capabilities := stringSliceValue(jobPolicy, "capabilities")
+	capabilities := stringSliceValue(taskPolicy, "capabilities")
 	switch action {
 	case "list", "read", "download":
 		requireCapability(&explanation, capabilities, string(CapabilityFileTransferRead))
@@ -202,69 +206,69 @@ func ExplainFileJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExpla
 	case "write", "upload", "delete":
 		requireCapability(&explanation, capabilities, string(CapabilityFileTransferWrite))
 		requireCapability(&explanation, capabilities, string(CapabilityFSWriteScoped))
-		if len(stringSliceValue(jobPolicy, "write_scope")) == 0 {
+		if len(stringSliceValue(taskPolicy, "write_scope")) == 0 {
 			explanation.Denials = append(explanation.Denials, "write_scope is required for file write/upload/delete")
 		}
 		if action == "delete" {
-			explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, "file.delete")
-			explanation.Warnings = append(explanation.Warnings, "file delete requires explicit approval")
+			explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, "file.delete")
+			explanation.Warnings = append(explanation.Warnings, "file delete requires explicit authorization")
 		}
 	default:
 		if action != "" {
 			explanation.Denials = append(explanation.Denials, "unsupported file action: "+action)
 		}
 	}
-	for _, scope := range stringSliceValue(jobPolicy, "write_scope") {
+	for _, scope := range stringSliceValue(taskPolicy, "write_scope") {
 		if writeScopeEscapes(scope) {
 			explanation.Denials = append(explanation.Denials, "write scope escapes workspace root: "+scope)
 		}
 	}
-	appendPolicyApprovals(&explanation, jobPolicy)
+	appendPolicyAuthorizations(&explanation, taskPolicy)
 	if len(explanation.Denials) == 0 {
 		explanation.Reasons = append(explanation.Reasons, "file adapter will re-check canonical workspace and write-scope boundaries on the host")
 	}
-	return finalizeShellExplanation(explanation)
+	return finalizeTaskExplanation(explanation)
 }
 
-func ExplainDesktopJob(mode model.HostMode, jobPolicy map[string]any) ShellJobExplanation {
-	explanation := ShellJobExplanation{
+func ExplainDesktopTask(mode model.HostMode, taskPolicy map[string]any) TaskPolicyExplanation {
+	explanation := TaskPolicyExplanation{
 		Mode:    string(mode),
 		Adapter: "desktop",
 	}
 	if !mode.Valid() {
 		explanation.Denials = append(explanation.Denials, "unknown host mode")
-		return finalizeShellExplanation(explanation)
+		return finalizeTaskExplanation(explanation)
 	}
-	if strings.TrimSpace(stringValue(jobPolicy, "workspace_root", stringValue(jobPolicy, "cwd", ""))) == "" {
+	if strings.TrimSpace(stringValue(taskPolicy, "workspace_root", stringValue(taskPolicy, "cwd", ""))) == "" {
 		explanation.Denials = append(explanation.Denials, "workspace root is required")
 	} else {
 		explanation.Reasons = append(explanation.Reasons, "workspace root is declared")
 	}
-	action := normalizeRemoteAction(stringValue(jobPolicy, "action", ""))
+	action := normalizeRemoteAction(stringValue(taskPolicy, "action", ""))
 	if action == "" {
 		explanation.Denials = append(explanation.Denials, "desktop action is required")
 	}
-	capabilities := stringSliceValue(jobPolicy, "capabilities")
-	capability, approval := desktopCapabilityAndApproval(action)
+	capabilities := stringSliceValue(taskPolicy, "capabilities")
+	capability, authorization := desktopCapabilityAndAuthorization(action)
 	if capability == "" {
 		if action != "" {
 			explanation.Denials = append(explanation.Denials, "unsupported desktop action: "+action)
 		}
 	} else {
 		requireCapability(&explanation, capabilities, capability)
-		if approval != "" {
-			explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, approval)
-			explanation.Warnings = append(explanation.Warnings, "desktop action requires explicit approval: "+approval)
+		if authorization != "" {
+			explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, authorization)
+			explanation.Warnings = append(explanation.Warnings, "desktop action requires explicit authorization: "+authorization)
 		}
 	}
-	appendPolicyApprovals(&explanation, jobPolicy)
+	appendPolicyAuthorizations(&explanation, taskPolicy)
 	if len(explanation.Denials) == 0 {
 		explanation.Reasons = append(explanation.Reasons, "desktop adapter requires an unlocked interactive user session and will fail closed if unavailable")
 	}
-	return finalizeShellExplanation(explanation)
+	return finalizeTaskExplanation(explanation)
 }
 
-func requireCapability(explanation *ShellJobExplanation, capabilities []string, capability string) {
+func requireCapability(explanation *TaskPolicyExplanation, capabilities []string, capability string) {
 	if !containsString(capabilities, capability) {
 		explanation.Denials = append(explanation.Denials, "missing "+capability+" capability")
 		return
@@ -272,18 +276,18 @@ func requireCapability(explanation *ShellJobExplanation, capabilities []string, 
 	explanation.Reasons = append(explanation.Reasons, capability+" capability is present")
 }
 
-func appendPolicyApprovals(explanation *ShellJobExplanation, jobPolicy map[string]any) {
-	network := stringValue(jobPolicy, "network", "default-deny")
+func appendPolicyAuthorizations(explanation *TaskPolicyExplanation, taskPolicy map[string]any) {
+	network := stringValue(taskPolicy, "network", "default-deny")
 	if network != "default-deny" {
-		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, "network."+network)
-		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires approval")
+		explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, "network."+network)
+		explanation.Warnings = append(explanation.Warnings, "non-default network policy requires authorization")
 	}
-	for _, approval := range stringSliceValue(jobPolicy, "approvals_required") {
-		explanation.RequiredApprovals = appendUnique(explanation.RequiredApprovals, approval)
+	for _, authorization := range stringSliceValue(taskPolicy, "authorizations_required") {
+		explanation.RequiredAuthorizations = appendUnique(explanation.RequiredAuthorizations, authorization)
 	}
 }
 
-func desktopCapabilityAndApproval(action string) (string, string) {
+func desktopCapabilityAndAuthorization(action string) (string, string) {
 	switch action {
 	case "windows", "window.inspect":
 		return string(CapabilityWindowInspect), ""
@@ -335,8 +339,8 @@ func powershellCommandAllowlisted(command string, allowCommands []string) bool {
 	return false
 }
 
-func finalizeShellExplanation(explanation ShellJobExplanation) ShellJobExplanation {
-	explanation.ApprovalRequired = len(explanation.RequiredApprovals) > 0
+func finalizeTaskExplanation(explanation TaskPolicyExplanation) TaskPolicyExplanation {
+	explanation.AuthorizationRequired = len(explanation.RequiredAuthorizations) > 0
 	explanation.Allowed = len(explanation.Denials) == 0
 	return explanation
 }

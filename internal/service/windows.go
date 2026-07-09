@@ -17,8 +17,6 @@ type WindowsServiceOptions struct {
 	ManifestURL              string
 	IdentityStorePath        string
 	TrustStorePath           string
-	NonceStorePath           string
-	ApprovalStorePath        string
 	WorkspaceLockStorePath   string
 	ReleaseBundlePath        string
 	ReleaseRootPublicKey     string
@@ -97,12 +95,6 @@ func NewWindowsService(opts WindowsServiceOptions) (WindowsService, error) {
 	}
 	if opts.TrustStorePath != "" {
 		args = append(args, "--trust-store", opts.TrustStorePath)
-	}
-	if opts.NonceStorePath != "" {
-		args = append(args, "--nonce-store", opts.NonceStorePath)
-	}
-	if opts.ApprovalStorePath != "" {
-		args = append(args, "--approval-store", opts.ApprovalStorePath)
 	}
 	if opts.WorkspaceLockStorePath != "" {
 		args = append(args, "--workspace-lock-store", opts.WorkspaceLockStorePath)

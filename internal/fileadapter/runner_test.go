@@ -1,7 +1,9 @@
 package fileadapter
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +50,71 @@ func TestExecuteListReadWriteWithinWorkspace(t *testing.T) {
 	}
 	if string(content) != "done" {
 		t.Fatalf("expected written content, got %q", string(content))
+	}
+}
+
+func TestExecuteWriteReportsExpectedTransferMatch(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("verified upload")
+	sum := sha256.Sum256(content)
+
+	write, err := Execute(Spec{
+		WorkspaceRoot:  root,
+		WriteScope:     []string{"out"},
+		Action:         "upload",
+		Path:           "out/result.txt",
+		Content:        string(content),
+		ExpectedBytes:  len(content),
+		ExpectedSHA256: "sha256:" + hex.EncodeToString(sum[:]),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if write.ByteCompare != "match" ||
+		write.ExpectedBytes != len(content) ||
+		write.ExpectedSHA256 != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Fatalf("expected transfer match evidence, got %#v", write)
+	}
+}
+
+func TestExecuteWriteReportsExpectedTransferMismatch(t *testing.T) {
+	root := t.TempDir()
+
+	write, err := Execute(Spec{
+		WorkspaceRoot:  root,
+		WriteScope:     []string{"out"},
+		Action:         "upload",
+		Path:           "out/result.txt",
+		Content:        "actual",
+		ExpectedBytes:  len("expected"),
+		ExpectedSHA256: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if write.ByteCompare != "mismatch" {
+		t.Fatalf("expected transfer mismatch evidence, got %#v", write)
+	}
+}
+
+func TestExecuteExpandsHomeWorkspaceRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if err := os.WriteFile(filepath.Join(home, "note.txt"), []byte("from home"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	canonicalHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	read, err := Execute(Spec{WorkspaceRoot: "~", Action: "read", Path: "note.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.WorkspaceRoot != canonicalHome || read.ContentText != "from home" {
+		t.Fatalf("expected ~ to resolve to home, got %#v", read)
 	}
 }
 

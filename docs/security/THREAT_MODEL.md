@@ -5,7 +5,7 @@
 - Target host access.
 - Hermes operator identity.
 - Host identity keys.
-- Job transcripts and artifacts.
+- Task transcripts and artifacts.
 - Audit logs.
 - Source code and local secrets on target machines.
 
@@ -14,20 +14,20 @@
 | Threat | Control |
 |---|---|
 | Public scanning of target hosts | No inbound listeners in temporary mode. Target connects outbound to gateway. |
-| Leaked join ticket | Short TTL, one-time use, pending approval, scoped capabilities, revocation. |
-| Prompt injection asks agent to do dangerous work | MCP policy gates, host-side policy gates, explicit approval for dangerous actions. |
+| Leaked join ticket | Short TTL, one-time use, pending authorization, scoped capabilities, revocation. |
+| Prompt injection asks agent to do dangerous work | MCP policy gates, host-side policy gates, explicit session capability or session interrupt for dangerous actions. |
 | Host binary replacement | TLS, manifest checksums, code signing, signed updates. |
 | Silent persistence on third-party hosts | Temporary mode is foreground-only and TTL-bound. Managed mode requires explicit setup. |
 | Credential exfiltration | Secret redaction, deny credential-dump capabilities, no raw prompt secrets. |
 | Gateway compromise | Per-host revocation, signing key separation, audit, emergency revoke-all. |
-| Tampered job envelope | Canonical signed envelopes, host binding, expiry, nonce replay protection, host-side verification. |
+| Tampered task payload | Canonical session task records, endpoint binding, expiry, idempotency, and host-side verification. |
 | Workspace escape | Canonical path checks, scoped write roots, symlink escape rejection, adapter-local policy enforcement. |
-| Agent self-approval | Approval tokens are separate from agent tool calls; dangerous actions require operator or local-user approval. |
+| Agent self-authorization | Session interrupts are explicit audited events; dangerous actions require scoped session capability or operator-reviewed continuation. |
 | Audit tampering | Append-only audit events, durable store, planned hash chain and export verification. |
 
 ## Required Audit Fields
 
-- job id;
+- task id;
 - ticket id;
 - operator;
 - host id;
@@ -39,7 +39,7 @@
 - processes touched;
 - elevation events;
 - artifacts;
-- approval decisions;
+- authorization decisions;
 - start/end timestamps.
 
 ## Final Architecture Reference

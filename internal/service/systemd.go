@@ -20,8 +20,6 @@ type SystemdUserServiceOptions struct {
 	ManifestURL              string
 	IdentityStorePath        string
 	TrustStorePath           string
-	NonceStorePath           string
-	ApprovalStorePath        string
 	WorkspaceLockStorePath   string
 	ReleaseBundlePath        string
 	ReleaseRootPublicKey     string
@@ -117,12 +115,6 @@ func NewLinuxSystemdUserService(opts SystemdUserServiceOptions) (SystemdUserServ
 	}
 	if opts.TrustStorePath != "" {
 		args = append(args, "--trust-store", opts.TrustStorePath)
-	}
-	if opts.NonceStorePath != "" {
-		args = append(args, "--nonce-store", opts.NonceStorePath)
-	}
-	if opts.ApprovalStorePath != "" {
-		args = append(args, "--approval-store", opts.ApprovalStorePath)
 	}
 	if opts.WorkspaceLockStorePath != "" {
 		args = append(args, "--workspace-lock-store", opts.WorkspaceLockStorePath)

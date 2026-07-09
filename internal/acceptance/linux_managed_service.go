@@ -23,8 +23,6 @@ type LinuxManagedServiceOptions struct {
 	UnitOut                  string
 	IdentityStore            string
 	TrustStore               string
-	NonceStore               string
-	ApprovalStore            string
 	WorkspaceLockStore       string
 	LogDir                   string
 	ReleaseBundle            string
@@ -81,8 +79,6 @@ func RunLinuxManagedServicePlan(opts LinuxManagedServiceOptions) (LinuxManagedSe
 		ManifestURL:              resolved.ManifestURL,
 		IdentityStorePath:        resolved.IdentityStore,
 		TrustStorePath:           resolved.TrustStore,
-		NonceStorePath:           resolved.NonceStore,
-		ApprovalStorePath:        resolved.ApprovalStore,
 		WorkspaceLockStorePath:   resolved.WorkspaceLockStore,
 		ReleaseBundlePath:        resolved.ReleaseBundle,
 		ReleaseRootPublicKey:     resolved.ReleaseRootPublicKey,
@@ -149,15 +145,15 @@ func RunLinuxManagedServicePlan(opts LinuxManagedServiceOptions) (LinuxManagedSe
 			"systemctl --user status transcript after start.",
 			"journalctl --user -u transcript or equivalent service log excerpt.",
 			"rdev host startup output proving the release-bundle gate passed before registration.",
-			"Gateway host registration, approval, trust refresh, and managed host audit events.",
-			"Reconnect evidence after logout or reboot, including any separately approved linger/setup transcript if required.",
-			"Managed coding or repair job evidence bundle with diff, logs, cancellation, and approval-required artifacts.",
+			"Gateway session join, endpoint trust refresh, and managed host audit events.",
+			"Reconnect evidence after logout or reboot, including any separately authorized linger/setup transcript if required.",
+			"Managed coding or repair session evidence with diff, logs, cancellation, and host-denial probe artifacts.",
 			"systemctl --user disable --now transcript and uninstall transcript.",
 		},
 		RecommendedActions: []string{
 			"Review the generated systemd user unit and plan JSON before running any systemctl command.",
 			"Start the unit only through rdev host service-control --platform linux --execute on an owned or formally managed Linux host.",
-			"Capture status, logs, release-gate output, gateway audit, reconnect proof, and managed job evidence before claiming acceptance.",
+			"Capture status, logs, release-gate output, gateway audit, reconnect proof, and managed session evidence before claiming acceptance.",
 			"Stop and uninstall the unit after acceptance unless this is a deliberate managed enrollment.",
 			"Do not publish this as Linux managed-service support until a real Linux host produces start/reboot/reconnect/stop/uninstall evidence.",
 		},
@@ -178,8 +174,6 @@ type linuxManagedServiceResolvedOptions struct {
 	UnitOut                  string
 	IdentityStore            string
 	TrustStore               string
-	NonceStore               string
-	ApprovalStore            string
 	WorkspaceLockStore       string
 	LogDir                   string
 	ReleaseBundle            string
@@ -220,8 +214,6 @@ func resolveLinuxManagedServiceOptions(outDir string, opts LinuxManagedServiceOp
 		UnitOut:                  filepath.Clean(unitOut),
 		IdentityStore:            firstNonEmptyString(opts.IdentityStore, filepath.Join(hostDir, "identity.json")),
 		TrustStore:               firstNonEmptyString(opts.TrustStore, filepath.Join(hostDir, "trust-bundle.json")),
-		NonceStore:               firstNonEmptyString(opts.NonceStore, filepath.Join(hostDir, "nonces.json")),
-		ApprovalStore:            firstNonEmptyString(opts.ApprovalStore, filepath.Join(hostDir, "approvals.json")),
 		WorkspaceLockStore:       firstNonEmptyString(opts.WorkspaceLockStore, filepath.Join(outDir, "workspace-locks")),
 		LogDir:                   firstNonEmptyString(opts.LogDir, filepath.Join(outDir, "logs")),
 		ReleaseBundle:            strings.TrimSpace(opts.ReleaseBundle),
@@ -250,8 +242,6 @@ func linuxManagedServiceChecks(plan LinuxManagedServicePlan, opts linuxManagedSe
 		{Name: "workspace_lock_store_arg", Passed: strings.Contains(args, "--workspace-lock-store\x00"+opts.WorkspaceLockStore), Detail: opts.WorkspaceLockStore},
 		{Name: "identity_store_arg", Passed: strings.Contains(args, "--identity-store\x00"+opts.IdentityStore), Detail: opts.IdentityStore},
 		{Name: "trust_store_arg", Passed: strings.Contains(args, "--trust-store\x00"+opts.TrustStore), Detail: opts.TrustStore},
-		{Name: "nonce_store_arg", Passed: strings.Contains(args, "--nonce-store\x00"+opts.NonceStore), Detail: opts.NonceStore},
-		{Name: "approval_store_arg", Passed: strings.Contains(args, "--approval-store\x00"+opts.ApprovalStore), Detail: opts.ApprovalStore},
 		{Name: "enrollment_arg", Passed: enrollmentConfigured(args), Detail: "ticket-code or manifest-url"},
 		{Name: "release_bundle_arg", Passed: strings.Contains(args, "--release-bundle\x00"+opts.ReleaseBundle), Detail: opts.ReleaseBundle},
 		{Name: "release_root_arg", Passed: opts.ReleaseRootPublicKey != "" && strings.Contains(args, "--release-root-public-key\x00"+opts.ReleaseRootPublicKey)},
@@ -273,7 +263,6 @@ func linuxManagedServiceChecks(plan LinuxManagedServicePlan, opts linuxManagedSe
 
 func linuxManagedServiceCommands(outDir string, opts linuxManagedServiceResolvedOptions, start, inspect, stop service.SystemdControlPlan) []ServiceCommand {
 	planPath := filepath.Join(outDir, "linux-managed-service-plan.json")
-	gatewayURL := firstNonEmptyString(opts.GatewayURL, "<gateway-url>")
 	commands := []ServiceCommand{
 		{
 			Name:    "review_unit",
@@ -303,8 +292,8 @@ func linuxManagedServiceCommands(outDir string, opts linuxManagedServiceResolved
 		},
 		ServiceCommand{
 			Name:    "capture_evidence_bundle",
-			Purpose: "Export the managed coding or repair job evidence bundle after running a signed job.",
-			Shell:   "rdev evidence export --gateway " + shellQuote(gatewayURL) + " --job-id <managed-job-id> --out " + shellQuote(filepath.Join(outDir, "linux-managed-evidence")),
+			Purpose: "Collect the managed session task, artifact refs, audit export, and operator summary after running a session task.",
+			Shell:   "mkdir -p " + shellQuote(filepath.Join(outDir, "linux-managed-evidence")) + " && rdev audit export --input <audit-jsonl> --out " + shellQuote(filepath.Join(outDir, "linux-managed-evidence", "audit-chain.json")),
 			Manual:  true,
 		},
 	)
@@ -467,8 +456,8 @@ func missingLinuxManagedEvidence(evidence []string) string {
 		"journalctl --user",
 		"release-bundle gate",
 		"reconnect",
-		"evidence bundle",
-		"approval-required",
+		"session evidence",
+		"host-denial",
 		"systemctl --user disable --now",
 		"uninstall transcript",
 	}

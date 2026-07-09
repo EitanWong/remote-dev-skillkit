@@ -85,7 +85,7 @@ func TestSignedTrustBundleVerifiesRotationUpdate(t *testing.T) {
 		t.Fatalf("expected rotation update to verify: %v", err)
 	}
 	if _, err := second.ActiveTrustBundle("gateway-old", now.Add(2*time.Minute)); err == nil {
-		t.Fatal("retired gateway key should not be active for new jobs")
+		t.Fatal("retired gateway key should not be active for new tasks")
 	}
 	if _, err := second.ActiveTrustBundle("gateway-new", now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("new gateway key should be active: %v", err)

@@ -106,7 +106,7 @@ func TestJoinManifestVerifiesWithSeparateTrustRoot(t *testing.T) {
 	}
 	manifest, err := NewJoinManifest(ticket, JoinManifestSpec{
 		GatewayURL:   "http://127.0.0.1:8787",
-		Trust:        NewTrustBundle("gateway-jobs", gatewayPublicKey),
+		Trust:        NewTrustBundle("gateway-tasks", gatewayPublicKey),
 		SigningKeyID: "release-root",
 	}, now)
 	if err != nil {

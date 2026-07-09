@@ -6,9 +6,9 @@ This surface is suitable for local production-style validation and binds to
 `127.0.0.1` by default. Plain HTTP does not authenticate requests. When
 `--tls-cert` and `--tls-key` are set, the gateway serves HTTPS. When
 `--client-ca` is also set, the gateway requires and verifies client
-certificates signed by that CA. Host job transport supports short polling,
-long polling, and WSS; WSS reuses the same TLS/mTLS client settings as the
-HTTPS API.
+certificates signed by that CA. Host session event transport supports short
+polling, long polling, and WSS; WSS reuses the same TLS/mTLS client settings as
+the HTTPS API.
 
 For Connection Entry bootstraps, the dev gateway defaults
 `--auto-build-rdev-assets=true`. When no explicit `--rdev-assets-dir` or
@@ -124,7 +124,7 @@ credentials. The S3-compatible provider uses `aws s3api`, stores the current
 snapshot object at `s3://bucket/prefix/snapshot-current.json`, and refuses
 credentials, query strings, and fragments in `--storage-path`. Use libpq
 service files, `.pgpass`, `REDISCLI_AUTH`, `AWS_PROFILE`, `AWS_*` environment
-injection, endpoint config, or an operator-approved secret manager instead of
+injection, endpoint config, or an operator-authorized secret manager instead of
 placing database, Redis, or object-storage secrets in process arguments.
 
 ```bash
@@ -227,7 +227,7 @@ rdev gateway serve \
   --client-ca .rdev/tls/client-ca.pem
 ```
 
-`--tls-cert` and `--tls-key` must be provided together. `--client-ca` requires both of them and changes the listener from server-authenticated HTTPS to mTLS by setting the gateway to require and verify client certificates. This does not replace signed job envelopes, enrollment certificates, host-local policy, or approval gates; transport authentication is not job authorization.
+`--tls-cert` and `--tls-key` must be provided together. `--client-ca` requires both of them and changes the listener from server-authenticated HTTPS to mTLS by setting the gateway to require and verify client certificates. This does not replace session leases, enrollment certificates, host-local policy, or task/interrupt gates; transport authentication is not task authorization.
 
 Hosts can connect to the local HTTPS or mTLS gateway with an explicit gateway CA and, when the gateway was started with `--client-ca`, a client certificate/key pair:
 
@@ -242,9 +242,9 @@ rdev host serve \
   --once=false
 ```
 
-`--gateway-client-cert` and `--gateway-client-key` must be provided together. The host uses the same gateway HTTP client for join-manifest fetches, registration, host approval waits, trust-bundle fetches, trust-store refreshes, job polling, job cancellation checks, completion, failure, and artifact appends. Direct `--gateway --ticket-code` registration remains local-dev only. For LAN/private or public gateway registration, use a signed `--manifest-url` plus pinned `--manifest-root-public-key`; that lets private HTTP gateway URLs and HTTPS gateways work without hand-copying ticket or trust fields.
+`--gateway-client-cert` and `--gateway-client-key` must be provided together. The host uses the same gateway HTTP client for join-manifest fetches, session joins, lease refresh, event replay, task result submission, and artifact metadata updates. Direct `--gateway --ticket-code` joins remain local-dev only. For LAN/private or public gateway joins, use a signed `--manifest-url` plus pinned `--manifest-root-public-key`; that lets private HTTP gateway URLs and HTTPS gateways work without hand-copying ticket or trust fields.
 
-Use WSS for the production host job channel:
+Use WSS for the production host session event channel:
 
 ```bash
 rdev host serve \
@@ -258,10 +258,10 @@ rdev host serve \
   --once=false
 ```
 
-WSS job messages carry signed job envelopes exactly like polling. The transport
-does not grant job authority; host-side envelope verification, trust pins,
-nonce replay protection, enrollment certificates, approval tokens, workspace
-locks, and adapter policy still decide whether work can run.
+WSS event messages carry the same Control Plane session events as polling. The
+transport does not grant task authority; leases, trust pins, enrollment
+certificates, idempotency, workspace locks, interrupts, and adapter policy still
+decide whether work can run.
 
 When `--signing-key` is set, the dev gateway creates or reuses an Ed25519 signing key file with `0600` permissions and prints its public-key fingerprint:
 
@@ -272,10 +272,9 @@ rdev gateway manifest root id=manifest-dev public_key=manifest-dev:<base64url_ed
 
 When `--state` is set, the dev gateway writes `rdev.gateway-snapshot.v1` after
 successful state mutations and reloads it on restart. The snapshot preserves
-tickets, hosts, jobs, artifacts, audit events, and the signed trust bundle. It
+sessions, endpoints, tasks, artifact references, audit events, and the signed trust bundle. It
 requires `--signing-key`; restoring a snapshot with a different signing key is
-rejected because old job envelopes and approval tokens must keep the same trust
-root.
+rejected because session events and leases must keep the same trust root.
 
 Hosts can pin that key during local development:
 
@@ -286,7 +285,6 @@ rdev host serve \
   --ticket-code ABCD-1234 \
   --once=false \
   --identity-store .rdev/host/identity.json \
-  --nonce-store .rdev/host/nonces.json \
   --trust-store .rdev/host/trust-bundle.json \
   --trust-pin sha256:<hex>
 ```
@@ -348,24 +346,20 @@ operator-owned workstation that needs durable development access.
 - `GET /v1/trust-bundle`
 - `GET /v1/enrollment/revocations`
 - `POST /v1/trust-bundle`
+- `POST /v1/sessions`
+- `POST /v1/session-joins`
+- `GET /v1/sessions/{session_id}`
+- `GET /v1/sessions/{session_id}/events`
+- `POST /v1/sessions/{session_id}/tasks`
+- `POST /v1/sessions/{session_id}/tasks/{task_id}/result`
+- `POST /v1/sessions/{session_id}/events`
+- `POST /v1/sessions/{session_id}/artifacts`
+- `POST /v1/sessions/{session_id}/close`
 - `POST /v1/tickets`
 - `GET /v1/tickets/{ticket_code}/manifest`
-- `GET /v1/hosts`
-- `POST /v1/hosts/register`
-- `POST /v1/hosts/{host_id}/approve`
-- `POST /v1/hosts/{host_id}/revoke`
-- `GET /v1/hosts/{host_id}/trust-bundle/update?current_sequence=<n>&current_hash=<sha256:...>`
-- `GET /v1/ws/hosts/{host_id}`
-- `POST /v1/jobs`
-- `GET /v1/jobs/{job_id}`
-- `GET /v1/jobs/{job_id}/artifacts`
-- `GET /v1/jobs/{job_id}/evidence-bundle?out=<directory>`
-- `GET /v1/hosts/{host_id}/jobs/next`
-- `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=<1-60>`
-- `POST /v1/jobs/{job_id}/complete`
-- `POST /v1/jobs/{job_id}/fail`
-- `GET /v1/artifacts/{artifact_id}`
 - `GET /v1/audit`
+
+The old experimental host/task polling routes are not mounted. Use the Control Plane v1 session routes instead.
 
 ## Example
 
@@ -404,13 +398,8 @@ curl -s -X POST http://127.0.0.1:8787/v1/trust-bundle \
 
 Trust bundle updates must use schema `rdev.trust-bundle.v1`, verify against the current active signing key, increase the sequence, and include the current bundle hash as `previous_bundle_hash`.
 
-Managed-host trust refresh can use the host-bound update check:
-
-```bash
-curl -s 'http://127.0.0.1:8787/v1/hosts/<host_id>/trust-bundle/update?current_sequence=1&current_hash=sha256:...'
-```
-
-The response uses schema `rdev.trust-bundle-update.v1`. If the host is current, the response status is `current` and omits a bundle. If the gateway has a newer bundle, the response status is `update_available` and includes the candidate `rdev.trust-bundle.v1`; the host still verifies sequence, `previous_bundle_hash`, signature, and validity locally before persisting it.
+Managed hosts refresh trust through signed join manifests and `GET /v1/trust-bundle`.
+The old host-bound trust update route is retired with the experimental host API.
 
 Create and maintain operator-side trust bundles locally:
 
@@ -489,24 +478,22 @@ rdev host serve \
   --identity-store .rdev/host/identity.json
 ```
 
-Create and process one dev job:
+Create and process one session task:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+curl -s -X POST http://127.0.0.1:8787/v1/sessions/<session_id>/tasks \
   -H 'content-type: application/json' \
-  -d '{"host_id":"hst_...","adapter":"shell","intent":"local demo","policy":{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"],"max_duration_seconds":30,"max_output_bytes":65536}}'
+  -d '{"target_endpoint_id":"ep_...","adapter":"shell","intent":"local demo","capabilities":["shell.user"],"payload":{"workspace_root":".","argv":["go","env","GOOS"],"allow_commands":["go"]},"limits":{"max_duration_seconds":30,"max_output_bytes":65536},"idempotency_key":"demo-shell-1"}'
 
 rdev host serve \
   --mode temporary \
   --gateway http://127.0.0.1:8787 \
   --ticket-code ABCD-1234 \
   --once=false \
-  --transport long-poll \
-  --max-jobs=1 \
-  --approval-timeout=30s
+  --transport long-poll
 ```
 
-Preflight the same shell job policy before creating it:
+Preflight the same shell task policy before creating it:
 
 ```bash
 rdev policy explain-shell \
@@ -515,7 +502,7 @@ rdev policy explain-shell \
 
 Agents can call the same policy engine through MCP tool `rdev.policy.explain_shell`.
 
-`rdev host serve` generates an Ed25519 host identity for the session. When `--identity-store <path>` is set, the identity is persisted to a local `0600` JSON file using schema `rdev.host-identity.v1`; the parent directory is created with `0700` permissions. On macOS, `--identity-store keychain:<service>/<account>` stores the same `rdev.host-identity.v1` payload in the user's Keychain instead of a JSON file. On Windows, `--identity-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. On Linux, `--identity-store libsecret:<service>/<account>` stores the same payload through `secret-tool` and the user's Secret Service when available; `--identity-store keyctl:<service>/<account>` stores the same payload in the user's Linux keyring for headless hosts where Secret Service is unavailable. The host registration includes the identity key id, public key, fingerprint, and signed `rdev.host-registration-proof.v1` proof. The gateway verifies that proof before preserving the identity fingerprint. Signed job envelopes include the registered host identity fingerprint, and a host with a local identity rejects jobs bound to a different fingerprint.
+`rdev host serve` generates an Ed25519 host identity for the session. When `--identity-store <path>` is set, the identity is persisted to a local `0600` JSON file using schema `rdev.host-identity.v1`; the parent directory is created with `0700` permissions. On macOS, `--identity-store keychain:<service>/<account>` stores the same `rdev.host-identity.v1` payload in the user's Keychain instead of a JSON file. On Windows, `--identity-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. On Linux, `--identity-store libsecret:<service>/<account>` stores the same payload through `secret-tool` and the user's Secret Service when available; `--identity-store keyctl:<service>/<account>` stores the same payload in the user's Linux keyring for headless hosts where Secret Service is unavailable. The session endpoint advertises the identity key id, public key, and fingerprint during join. Routed tasks include the target endpoint identity context, and a host with a local identity rejects work bound to a different fingerprint.
 
 For a stricter development enrollment path, issue a signed host enrollment
 certificate and configure the dev gateway to require it:
@@ -703,9 +690,15 @@ rdev gateway serve \
   --enrollment-revocations .rdev/enrollment/revocations.json
 ```
 
-`rdev host serve` keeps a nonce replay cache for signed job envelopes. By default, this cache is in-memory for the process. When `--nonce-store <path>` is set, used nonces are persisted to a local `0600` JSON file using schema `rdev.host-nonce-store.v1`; the parent directory is created with `0700` permissions. Expired nonce entries are pruned before new entries are written.
+`rdev host serve` joins Control Plane v1 sessions and receives replayable task
+events from the gateway. Endpoint leases and retry timing are
+gateway-authoritative so target machines with bad system clocks can still
+participate.
 
-When `--once=false`, `rdev host serve` fetches the signed gateway trust bundle from `GET /v1/trust-bundle`, waits until the registered host is approved, refreshes the local trust store through `GET /v1/hosts/{host_id}/trust-bundle/update` when `--trust-store` is configured, polls `GET /v1/hosts/{host_id}/jobs/next`, verifies the signed job envelope against the active key in the trust bundle, the local host identity fingerprint, and the nonce replay cache, runs the development host runner, and reports completion to `POST /v1/jobs/{job_id}/complete`. For older dev gateways, the host falls back to legacy `GET /v1/trust`.
+When `--once=false`, `rdev host serve` joins with `POST /v1/session-joins`,
+reads `GET /v1/sessions/{session_id}/events`, runs only tasks routed to its
+endpoint, and reports completion to
+`POST /v1/sessions/{session_id}/tasks/{task_id}/result`.
 
 For a more realistic outbound host channel during local development, use HTTPS long-poll:
 
@@ -719,9 +712,13 @@ rdev host serve \
   --long-poll-timeout=25s
 ```
 
-Long-poll uses the same safety path as short polling but holds the host's outbound `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=<n>` request open until a job is available or the wait timeout elapses. This is a development bridge toward WSS/mTLS transport; it is not a production transport by itself.
+Long-poll uses the same session event path as short polling but holds the
+host's outbound `GET /v1/sessions/{session_id}/events?after_seq=<n>` request
+open until events are available or the wait timeout elapses. This is a
+development bridge toward WSS/mTLS transport; it is not a production transport
+by itself.
 
-When `--trust-store <path>` is set, the host persists verified signed trust bundles to a local `0600` JSON file. On macOS, `--trust-store keychain:<service>/<account>` stores the same `rdev.host-trust-store.v1` payload in Keychain. On Windows, `--trust-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. On Linux, `--trust-store libsecret:<service>/<account>` stores the same payload through `secret-tool` and the user's Secret Service when available; `--trust-store keyctl:<service>/<account>` stores the same payload in the user's Linux keyring for headless hosts where Secret Service is unavailable. Future updates must verify against the stored bundle's active signing key, increase sequence, and match `previous_bundle_hash`. If the gateway trust-bundle endpoint is unavailable, the host can use the stored bundle for job verification.
+When `--trust-store <path>` is set, the host persists verified signed trust bundles to a local `0600` JSON file. On macOS, `--trust-store keychain:<service>/<account>` stores the same `rdev.host-trust-store.v1` payload in Keychain. On Windows, `--trust-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. On Linux, `--trust-store libsecret:<service>/<account>` stores the same payload through `secret-tool` and the user's Secret Service when available; `--trust-store keyctl:<service>/<account>` stores the same payload in the user's Linux keyring for headless hosts where Secret Service is unavailable. Future updates must verify against the stored bundle's active signing key, increase sequence, and match `previous_bundle_hash`. If the gateway trust-bundle endpoint is unavailable, the host can use the stored bundle for task verification.
 
 For a managed Mac, a protected local identity/trust pair can be configured without changing the rest of the host command:
 
@@ -782,54 +779,68 @@ Linux-only and require the `keyctl` command plus an available user keyring.
 File-backed stores remain available for development and explicitly documented
 degraded paths.
 
-If the host runner rejects a job, the host reports the failure to `POST /v1/jobs/{job_id}/fail`. The gateway marks the job `failed`, stores `failure_reason`, and writes a `job.fail` audit event.
+If the host runner rejects a task, the host reports the failure to
+`POST /v1/sessions/{session_id}/tasks/{task_id}/result`. The gateway marks the
+task `failed`, stores the failure summary in the task result, and writes a
+session task result event.
 
-The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the signed envelope limit. Before execution, the host also runs the shared implicit approval preflight. Shell jobs that request package installation, elevation, GUI control, service management, push, merge, deploy, publish, or credential changes return `rdev.approval-required.v1` unless a matching signed approval token is present. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, cancellation state, truncation state, duration, redaction rules, and redaction counts.
+The development shell adapter executes `policy.argv` directly without shell interpolation. The first argv item must match `policy.allow_commands`, the workspace root must exist, write scopes must remain inside the workspace, and output is capped by the task limit. Before execution, the host also runs the shared preflight. Shell tasks that request package installation, elevation, GUI control, service management, push, merge, deploy, publish, or credential changes should pause through `rdev.sessions.interrupt` instead of a separate session-interrupt subsystem. Completion and failure artifacts use schema `rdev.shell-result.v1` and include argv, canonical workspace, exit code, redacted stdout/stderr excerpts, timeout state, cancellation state, truncation state, duration, redaction rules, and redaction counts.
 
-When the gateway job status becomes `canceled`, `rdev host serve` cancels the local job context. Built-in shell, PowerShell, Codex, Claude Code, and acpx adapters receive that context and stop the running child process cooperatively. The host may append cancellation evidence through `POST /v1/jobs/{job_id}/artifact` while preserving the gateway job's `canceled` terminal state.
+When the session receives an interrupt/cancel event, `rdev host serve` cancels
+the local task context. Built-in shell, PowerShell, Codex, Claude Code, and acpx
+adapters receive that context and stop the running child process cooperatively.
+The host may append cancellation evidence through
+`POST /v1/sessions/{session_id}/artifacts` while preserving the task's terminal
+state.
 
-The development PowerShell adapter uses the same host safety path. Create an `adapter=powershell` job with `powershell.user` capability:
+The development PowerShell adapter uses the same host safety path. Create an `adapter=powershell` session task with `powershell.user` capability:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+curl -s -X POST http://127.0.0.1:8787/v1/sessions/<session_id>/tasks \
   -H 'content-type: application/json' \
   -d '{
-    "host_id": "hst_...",
+    "target_endpoint_id": "ep_...",
     "adapter": "powershell",
     "intent": "diagnose Windows user environment",
-    "policy": {
+    "capabilities": ["powershell.user"],
+    "payload": {
       "workspace_root": ".",
-      "capabilities": ["powershell.user"],
       "command": "Get-ChildItem Env:",
-      "allow_commands": ["pwsh", "powershell", "powershell.exe"],
+      "allow_commands": ["pwsh", "powershell", "powershell.exe"]
+    },
+    "limits": {
       "max_duration_seconds": 120,
       "max_output_bytes": 65536
-    }
+    },
+    "idempotency_key": "powershell-env-1"
   }'
 ```
 
 The adapter runs the selected executable as `-NoProfile -NonInteractive -Command <command>`. It does not add `-ExecutionPolicy Bypass` or install persistence. For deterministic tests or custom hosts, signed payloads may override `powershell_command`; if that value contains a path separator, `allow_commands` must contain the exact same path. Result artifacts use schema `rdev.powershell-result.v1` and include redacted command, argv, stdout/stderr, timeout state, cancellation state, truncation state, duration, redaction rules, and redaction counts.
 
-PowerShell jobs also run the shared implicit approval preflight before workspace lock acquisition and adapter execution. Commands that request service management, package installation, elevation, GUI control, push, merge, deploy, publish, credential changes, or execution-policy changes return `rdev.approval-required.v1` unless a matching approval token is present.
+PowerShell tasks also run the shared preflight before workspace lock acquisition and adapter execution. Commands that request service management, package installation, elevation, GUI control, push, merge, deploy, publish, credential changes, or execution-policy changes should pause through `rdev.sessions.interrupt`.
 
-The development Codex adapter uses the same host safety path. Create an `adapter=codex` job with `codex.run` and `git.diff` capabilities:
+The development Codex adapter uses the same host safety path. Create an `adapter=codex` session task with `codex.run` and `git.diff` capabilities:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+curl -s -X POST http://127.0.0.1:8787/v1/sessions/<session_id>/tasks \
   -H 'content-type: application/json' \
   -d '{
-    "host_id": "hst_...",
+    "target_endpoint_id": "ep_...",
     "adapter": "codex",
     "intent": "update README",
-    "policy": {
+    "capabilities": ["codex.run", "git.diff"],
+    "payload": {
       "workspace_root": ".",
-      "capabilities": ["codex.run", "git.diff"],
       "prompt": "Update README and keep the change scoped to this repository.",
       "verification_commands": [["git", "status", "--short"]],
-      "allow_verification_commands": ["git"],
+      "allow_verification_commands": ["git"]
+    },
+    "limits": {
       "max_duration_seconds": 1800,
       "max_output_bytes": 1048576
-    }
+    },
+    "idempotency_key": "codex-readme-1"
   }'
 ```
 
@@ -839,29 +850,32 @@ By default the adapter runs:
 codex exec -C <workspace_root> --sandbox workspace-write --json <prompt>
 ```
 
-For deterministic local tests, signed job payloads may override `codex_command` and `codex_args`. The result artifact uses schema `rdev.codex-result.v1` and includes Codex command output, Git status, Git diff/stat, optional verification command results, output truncation flags, duration, redaction rules, and redaction counts. Verification commands must be allowlisted through `allow_verification_commands`. When a verification command is `go test -json ...`, the command result also includes a `rdev.test-report.v1` summary with package/test pass, fail, skip counts and parsed test cases.
+For deterministic local tests, task payloads may override `codex_command` and `codex_args`. The result artifact uses schema `rdev.codex-result.v1` and includes Codex command output, Git status, Git diff/stat, optional verification command results, output truncation flags, duration, redaction rules, and redaction counts. Verification commands must be allowlisted through `allow_verification_commands`. When a verification command is `go test -json ...`, the command result also includes a `rdev.test-report.v1` summary with package/test pass, fail, skip counts and parsed test cases.
 
-Codex jobs also run the same implicit approval preflight before workspace lock acquisition and before adapter execution. If `intent`, `prompt`, `codex_args`, `verification_commands`, `external_actions`, `dangerous_actions`, `approval_actions`, or `requested_approvals` request high-risk external consequences, the host returns `rdev.approval-required.v1` unless a matching approval token is present. Current operations include `git.push`, `git.merge`, `deploy.run`, `publish.run`, `credential.change`, `service.manage`, `package.install`, `elevation.request`, and `gui.control`.
+Codex tasks also run the same preflight before workspace lock acquisition and before adapter execution. If `intent`, `prompt`, `codex_args`, `verification_commands`, `external_actions`, `dangerous_actions`, `authorization_actions`, or `requested_authorizations` request high-risk external consequences, the host should pause through `rdev.sessions.interrupt`. Current operations include `git.push`, `git.merge`, `deploy.run`, `publish.run`, `credential.change`, `service.manage`, `package.install`, `elevation.request`, and `gui.control`.
 
 The development Claude Code adapter uses the same host safety path. Create an
-`adapter=claude-code` job with `claude-code.run` and `git.diff` capabilities:
+`adapter=claude-code` session task with `claude-code.run` and `git.diff` capabilities:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+curl -s -X POST http://127.0.0.1:8787/v1/sessions/<session_id>/tasks \
   -H 'content-type: application/json' \
   -d '{
-    "host_id": "hst_...",
+    "target_endpoint_id": "ep_...",
     "adapter": "claude-code",
     "intent": "update README",
-    "policy": {
+    "capabilities": ["claude-code.run", "git.diff"],
+    "payload": {
       "workspace_root": ".",
-      "capabilities": ["claude-code.run", "git.diff"],
       "prompt": "Update README and keep the change scoped to this repository.",
       "verification_commands": [["git", "status", "--short"]],
-      "allow_verification_commands": ["git"],
+      "allow_verification_commands": ["git"]
+    },
+    "limits": {
       "max_duration_seconds": 1800,
       "max_output_bytes": 1048576
-    }
+    },
+    "idempotency_key": "claude-readme-1"
   }'
 ```
 
@@ -871,7 +885,7 @@ By default the adapter runs:
 claude -p <prompt>
 ```
 
-For deterministic local tests or custom hosts, signed job payloads may override
+For deterministic local tests or custom hosts, task payloads may override
 `claude_code_command` and `claude_code_args`. The result artifact uses schema
 `rdev.claude-code-result.v1` and includes Claude Code command output, Git
 status, Git diff/stat, optional verification command results, output
@@ -881,36 +895,39 @@ verification command is `go test -json ...`, the command result also includes a
 `rdev.test-report.v1` summary with package/test pass, fail, skip counts and
 parsed test cases.
 
-Claude Code jobs run the same implicit approval preflight as Codex before
+Claude Code tasks run the same preflight as Codex before
 workspace lock acquisition and before adapter execution. If `intent`, `prompt`,
 `claude_code_args`, `verification_commands`, `external_actions`,
-`dangerous_actions`, `approval_actions`, or `requested_approvals` request
-high-risk external consequences, the host returns `rdev.approval-required.v1`
-unless a matching approval token is present.
+`dangerous_actions`, `authorization_actions`, or `requested_authorizations` request
+high-risk external consequences, the host should pause through
+`rdev.sessions.interrupt`.
 
 The development ACP/acpx adapter uses the same host safety path. acpx is a
 headless Agent Client Protocol CLI and its upstream CLI/runtime are currently
-alpha, so the adapter keeps signed payload overrides as the compatibility
-valve. Create an `adapter=acpx` job with `acpx.run` and `git.diff`
+alpha, so the adapter keeps payload overrides as the compatibility
+valve. Create an `adapter=acpx` session task with `acpx.run` and `git.diff`
 capabilities:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8787/v1/jobs \
+curl -s -X POST http://127.0.0.1:8787/v1/sessions/<session_id>/tasks \
   -H 'content-type: application/json' \
   -d '{
-    "host_id": "hst_...",
+    "target_endpoint_id": "ep_...",
     "adapter": "acpx",
     "intent": "update README through ACP",
-    "policy": {
+    "capabilities": ["acpx.run", "git.diff"],
+    "payload": {
       "workspace_root": ".",
-      "capabilities": ["acpx.run", "git.diff"],
       "prompt": "Update README and keep the change scoped to this repository.",
       "acpx_agent": "codex",
       "verification_commands": [["git", "status", "--short"]],
-      "allow_verification_commands": ["git"],
+      "allow_verification_commands": ["git"]
+    },
+    "limits": {
       "max_duration_seconds": 1800,
       "max_output_bytes": 1048576
-    }
+    },
+    "idempotency_key": "acpx-readme-1"
   }'
 ```
 
@@ -921,7 +938,7 @@ acpx --cwd <workspace_root> codex exec <prompt>
 ```
 
 For deterministic local tests, custom ACP agents, or upstream acpx CLI changes,
-signed job payloads may override `acpx_command`, `acpx_agent`, and `acpx_args`.
+task payloads may override `acpx_command`, `acpx_agent`, and `acpx_args`.
 The result artifact uses schema `rdev.acpx-result.v1` and includes acpx command
 output, Git status, Git diff/stat, optional verification command results,
 output truncation flags, duration, redaction rules, and redaction counts.
@@ -930,16 +947,16 @@ When a verification command is `go test -json ...`, the command result also
 includes a `rdev.test-report.v1` summary with package/test pass, fail, skip
 counts and parsed test cases.
 
-acpx jobs run the same implicit approval preflight as Codex and Claude Code
+acpx tasks run the same preflight as Codex and Claude Code
 before workspace lock acquisition and before adapter execution. If `intent`,
 `prompt`, `acpx_agent`, `acpx_args`, `verification_commands`,
-`external_actions`, `dangerous_actions`, `approval_actions`, or
-`requested_approvals` request high-risk external consequences, the host returns
-`rdev.approval-required.v1` unless a matching approval token is present.
+`external_actions`, `dangerous_actions`, `authorization_actions`, or
+`requested_authorizations` request high-risk external consequences, the host should
+pause through `rdev.sessions.interrupt`.
 
 ## Workspace Locks And Git Worktrees
 
-Managed coding jobs should not mutate the primary checkout directly. The development CLI now includes the workspace foundation that Codex, Claude Code, acpx, future ACP, and Git adapters share.
+Managed coding tasks should not mutate the primary checkout directly. The development CLI now includes the workspace foundation that Codex, Claude Code, acpx, future ACP, and Git adapters share.
 
 Acquire a one-writer lock for a repository:
 
@@ -947,17 +964,17 @@ Acquire a one-writer lock for a repository:
 rdev workspace lock \
   --repo . \
   --host-id hst_... \
-  --job-id job_... \
+  --task-id task_... \
   --adapter codex
 ```
 
-The lock file uses schema `rdev.workspace-lock.v1`, is stored under `<repo>/.rdev/workspace-locks` by default, and is written with `0600` permissions. A second writer for the same canonical repo root is rejected until the lock expires or is released by the owning job.
+The lock file uses schema `rdev.workspace-lock.v1`, is stored under `<repo>/.rdev/workspace-locks` by default, and is written with `0600` permissions. A second writer for the same canonical repo root is rejected until the lock expires or is released by the owning task.
 
 Inspect or release the lock:
 
 ```bash
 rdev workspace status --repo .
-rdev workspace unlock --repo . --job-id job_...
+rdev workspace unlock --repo . --task-id task_...
 ```
 
 Prepare a Git worktree for a coding adapter:
@@ -966,14 +983,14 @@ Prepare a Git worktree for a coding adapter:
 rdev workspace prepare-worktree \
   --repo . \
   --host-id hst_... \
-  --job-id job_... \
+  --task-id task_... \
   --adapter codex \
   --base-ref HEAD
 ```
 
-The response uses schema `rdev.git-worktree-plan.v1`, records the lock, branch, worktree path, and command evidence for `git rev-parse` and `git worktree add`. If `git worktree add` fails, the CLI releases the lock so another job is not blocked by a failed preparation step.
+The response uses schema `rdev.git-worktree-plan.v1`, records the lock, branch, worktree path, and command evidence for `git rev-parse` and `git worktree add`. If `git worktree add` fails, the CLI releases the lock so another task is not blocked by a failed preparation step.
 
-To enforce the same lock during host job execution, start the host with a lock store:
+To enforce the same lock during host task execution, start the host with a lock store:
 
 ```bash
 rdev host serve \
@@ -984,7 +1001,7 @@ rdev host serve \
   --workspace-lock-store .rdev/workspace-locks
 ```
 
-When `--workspace-lock-store` is set, the hostrunner acquires `rdev.workspace-lock.v1` after signature, nonce, identity, capability, and approval checks, and before adapter execution. The lock is released after success or adapter denial. If another active job holds the canonical repo root, the job fails with structured denial code `workspace_locked`.
+When `--workspace-lock-store` is set, the hostrunner acquires `rdev.workspace-lock.v1` after signature, nonce, identity, capability, and authorization checks, and before adapter execution. The lock is released after success or adapter denial. If another active task holds the canonical repo root, the task fails with structured denial code `workspace_locked`.
 
 The host redacts common secret patterns before artifact upload:
 
@@ -998,31 +1015,18 @@ The host redacts common secret patterns before artifact upload:
 Read execution evidence:
 
 ```bash
-curl -s http://127.0.0.1:8787/v1/jobs/<job_id>/artifacts
-curl -s http://127.0.0.1:8787/v1/artifacts/<artifact_id>
+curl -s http://127.0.0.1:8787/v1/sessions/<session_id>
+curl -s 'http://127.0.0.1:8787/v1/sessions/<session_id>/events?after_seq=0'
 ```
 
-Export a complete job evidence bundle from gateway state:
+Archive session evidence by saving the session snapshot, replayed events,
+artifact references, and audit slice. Large artifacts should be referenced by
+hash and storage location rather than inlined in MCP responses.
+
+Close a session and cancel pending/running tasks:
 
 ```bash
-rdev evidence export \
-  --gateway http://127.0.0.1:8787 \
-  --job-id <job_id> \
-  --out .rdev/evidence/<job_id>
-```
-
-The CLI fetches the job, artifacts, and audit events from the gateway API and writes the same `rdev.evidence-bundle.v1` directory shape as file-based export: `manifest.json`, `checksums.txt`, `job.json`, `envelope.json`, `policy-decision.json`, `artifacts.json`, artifact files, `audit-slice.jsonl`, and `audit-chain.json`.
-
-The dev gateway also exposes server-side export for local diagnostics:
-
-```bash
-curl -s "http://127.0.0.1:8787/v1/jobs/<job_id>/evidence-bundle?out=$(pwd)/.rdev/evidence/<job_id>"
-```
-
-Revoke a host and cancel its pending/running jobs:
-
-```bash
-curl -s -X POST http://127.0.0.1:8787/v1/hosts/<host_id>/revoke \
+curl -s -X POST http://127.0.0.1:8787/v1/sessions/<session_id>/close \
   -H 'content-type: application/json' \
   -d '{"reason":"support session complete"}'
 ```
@@ -1109,7 +1113,7 @@ These acceptance commands write a reviewed systemd user unit and plan only.
 They do not execute `systemctl`, enable the unit, start it, stop it, or uninstall
 it. Real Linux managed support still requires a Linux host transcript proving
 start, status, release-gated registration, reconnect after logout or reboot,
-managed job evidence, stop, and uninstall.
+managed task evidence, stop, and uninstall.
 
 After the real host run, package the collected evidence:
 
@@ -1123,15 +1127,14 @@ rdev acceptance package-linux-managed-service \
   --release-gate release-gate.json \
   --audit audit.jsonl \
   --reconnect reconnect.txt \
-  --job-evidence-dir job-evidence \
+  --session-evidence-dir session-evidence \
   --stop-transcript stop.txt \
   --uninstall-transcript uninstall.txt
 ```
 
 The package command redacts copied evidence, writes `package.json` and
 `checksums.txt`, requires release-gate output with `ok=true`, and requires
-job evidence containing an approval-required artifact. It still does not run
-`systemctl`.
+managed session evidence. It still does not run `systemctl`.
 
 Windows uses reviewed `sc.exe` command plans:
 
@@ -1246,21 +1249,20 @@ For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
   -VerifierExpectedSha256 <verifier_sha256>
 ```
 
-The script hash-pins `rdev-verify.exe` before using it to verify the signed release bundle. Single-artifact `-ReleaseManifestUrl` remains supported for compatibility.
+The script hash-pins `rdev-verify.exe` before using it to verify the signed release evidence. Single-artifact `-ReleaseManifestUrl` remains supported for compatibility.
 
 ## Limitations
 
 - In-memory state by default. `--state` / `--storage-provider file` adds a restart-safe JSON snapshot. `--storage-provider postgres`, `--storage-provider redis-stream`, and `--storage-provider s3-compatible` add built-in `psql`/libpq, `redis-cli`, and `aws s3api` state-store runtimes, but production claims still require real backup or replay, restore, retention, role-mapping, failure-mode, audit, and redaction evidence.
-- WSS/mTLS host job transport is implemented for local release validation through `--transport wss`, `--tls-cert`, `--tls-key`, `--client-ca`, `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`. Real NAT, proxy, and platform-service acceptance still require target-environment evidence.
+- WSS/mTLS host session event transport is implemented for local release validation through `--transport wss`, `--tls-cert`, `--tls-key`, `--client-ca`, `--gateway-ca`, `--gateway-client-cert`, and `--gateway-client-key`. Real NAT, proxy, and platform-service acceptance still require target-environment evidence.
 - Hosted operator auth includes provider-neutral EdDSA JWT verification and built-in OIDC/JWKS RS256 verification. Hosted provider packages can describe SAML runtime evidence requirements, but this is not a bundled SSO admin console, organization membership sync, audit-retention service, or hosted multi-tenant control plane.
 - TLS lifecycle automation such as ACME issuance, certificate rotation, and public gateway deployment remains operator-managed. The gateway and host load explicit PEM material and enforce client certificates when `--client-ca` is configured.
-- Without `--signing-key`, signed job envelopes use an in-memory development Ed25519 key.
+- Without `--signing-key`, session signing uses an in-memory development Ed25519 key.
 - With `--signing-key`, the dev gateway persists one Ed25519 key file and host `--trust-pin` can reject unexpected gateway public keys.
 - If `--manifest-signing-key` is omitted, the dev join manifest is signed by the same gateway key it advertises.
-- If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway job-signing bundle. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
+- If `--manifest-signing-key` is provided, the dev join manifest is signed by a separate root key; hosts should pass `--manifest-root-public-key <key_id>:<base64url_ed25519_public_key>` before trusting the embedded gateway/session evidence. Production still needs release-key lifecycle policy, revocation, managed trust bundle updates, and platform-native Windows code signing policy.
 - `GET /v1/trust-bundle` and `POST /v1/trust-bundle` are development endpoints for exercising signed trust bundle rotation. They are not authenticated in dev mode. They are durable across process restarts only when `--state` is enabled with the matching persistent `--signing-key`.
 - `--trust-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available.
-- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; when `--enrollment-root-public-key` is configured, registrations must also include `rdev.host-enrollment-certificate.v1`; when `--enrollment-revocations` is configured, the gateway accepts signed empty revocation baselines, rejects certificates listed in non-empty signed `rdev.host-enrollment-revocations.v1` files, rejects hosted renewal for revoked current certificates, and can require the operator auth token before serving revocation refreshes. Enrollment authority lifecycle evidence is available through `rdev enrollment lifecycle ...`; real organization-specific custody approvals and emergency runbooks remain operator-owned.
-- `--nonce-store` is a file-backed development nonce replay cache. Production managed hosts should use durable local storage with pruning and crash-safe writes.
+- `--identity-store` supports local `0600` JSON files, macOS `keychain:<service>/<account>` references, Windows `dpapi:<service>/<account>` references, Linux `libsecret:<service>/<account>` references when `secret-tool` and Secret Service are available, and Linux `keyctl:<service>/<account>` references when `keyctl` and a user keyring are available. Registrations with identity keys must include `rdev.host-registration-proof.v1`; when `--enrollment-root-public-key` is configured, registrations must also include `rdev.host-enrollment-certificate.v1`; when `--enrollment-revocations` is configured, the gateway accepts signed empty revocation baselines, rejects certificates listed in non-empty signed `rdev.host-enrollment-revocations.v1` files, rejects hosted renewal for revoked current certificates, and can require the operator auth token before serving revocation refreshes. Enrollment authority lifecycle evidence is available through `rdev enrollment lifecycle ...`; real organization-specific custody authorizations and emergency runbooks remain operator-owned.
 - Linux systemd support currently writes and controls user units, `rdev acceptance linux-managed-service` can verify a release-evidence plan, and `rdev acceptance package-linux-managed-service` can archive real run evidence. Real managed Linux acceptance still needs reboot/reconnect evidence from a Linux host.
 - The dev shell adapter is intentionally narrow: allowlisted argv only, no shell interpolation, host-side artifact redaction for common secret patterns, and no OS-specific sandboxing beyond workspace boundary checks.

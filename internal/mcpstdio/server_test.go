@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,11 +21,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestServerInitializeAndToolsList(t *testing.T) {
 	input := strings.Join([]string{
@@ -47,6 +55,49 @@ func TestServerInitializeAndToolsList(t *testing.T) {
 	}
 	if lines[1]["error"] != nil {
 		t.Fatalf("tools/list failed: %v", lines[1]["error"])
+	}
+}
+
+func TestProxyPOSTToRetriesSessionTaskWithIdempotencyKey(t *testing.T) {
+	attempts := 0
+	keys := []string{}
+	server := NewServer(gateway.NewMemoryGateway())
+	server.httpClient = &http.Client{Transport: retryingMCPTransport{
+		MaxRetries: 2,
+		Base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			keys = append(keys, req.Header.Get("Idempotency-Key"))
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), `"idempotency_key":"task-1"`) {
+				t.Fatalf("unexpected body on attempt %d: %s", attempts, string(body))
+			}
+			if attempts == 1 {
+				return nil, io.ErrUnexpectedEOF
+			}
+			return &http.Response{
+				StatusCode: http.StatusAccepted,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"task":{"id":"task_1"}}`)),
+				Request:    req,
+			}, nil
+		}),
+	}}
+	result, err := server.proxyPOSTTo("http://example.test", "/v1/sessions/sess_1/tasks", map[string]any{
+		"adapter":         "shell",
+		"intent":          "demo",
+		"idempotency_key": "task-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || attempts != 2 {
+		t.Fatalf("expected retry result after two attempts, result=%#v attempts=%d", result, attempts)
+	}
+	if len(keys) != 2 || keys[0] == "" || keys[0] != keys[1] {
+		t.Fatalf("expected stable idempotency key across retries, got %#v", keys)
 	}
 }
 
@@ -201,13 +252,13 @@ func TestServerToolCallCreateInvite(t *testing.T) {
 
 func TestServerToolCallSupportSessionPlan(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.plan", map[string]any{
-		"repo_root":    ".",
-		"work_dir":     filepath.Join(t.TempDir(), "support"),
-		"gateway_url":  "http://192.0.2.44:8787",
-		"target":       "windows",
-		"reason":       "company computer support",
-		"auto_approve": true,
-		"locale":       "zh-CN",
+		"repo_root":     ".",
+		"work_dir":      filepath.Join(t.TempDir(), "support"),
+		"gateway_url":   "http://192.0.2.44:8787",
+		"target":        "windows",
+		"reason":        "company computer support",
+		"auto_activate": true,
+		"locale":        "zh-CN",
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -221,9 +272,9 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 	if structured["schema_version"] != "rdev.support-session-plan.v1" {
 		t.Fatalf("expected support-session plan schema, got %#v", structured)
 	}
-	autoApprove := structured["auto_approve"].(map[string]any)
-	if autoApprove["enabled"] != true || !strings.Contains(autoApprove["scope"].(string), "attended-temporary") {
-		t.Fatalf("expected scoped auto approve, got %#v", autoApprove)
+	autoActivate := structured["auto_activate"].(map[string]any)
+	if autoActivate["enabled"] != true || !strings.Contains(autoActivate["scope"].(string), "attended-temporary") {
+		t.Fatalf("expected scoped auto authorize, got %#v", autoActivate)
 	}
 	commands := structured["commands"].(map[string]any)
 	startGateway := strings.Join(anyStrings(commands["start_gateway"].([]any)), "\x00")
@@ -233,8 +284,8 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 		t.Fatalf("expected gateway assets in plan, got %s", startGateway)
 	}
 	createInvite := strings.Join(anyStrings(commands["create_invite_cli"].([]any)), "\x00")
-	if !strings.Contains(createInvite, "--auto-approve") {
-		t.Fatalf("expected CLI auto approve in plan, got %s", createInvite)
+	if !strings.Contains(createInvite, "--auto-activate") {
+		t.Fatalf("expected CLI auto authorize in plan, got %s", createInvite)
 	}
 	target := structured["target_user_instructions"].(map[string]any)
 	if !strings.Contains(target["message"].(string), "目标电脑") ||
@@ -248,13 +299,59 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 	}
 }
 
+func TestServerToolCallSupportSessionLiveE2EPlan(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.live_e2e_plan", map[string]any{
+		"gateway_url":     "https://gateway.example.test/rdev/",
+		"ticket_code":     "ABCD-1234",
+		"host_id":         "hst_1",
+		"rdev_command":    "rdev-test",
+		"timeout_seconds": 180,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	if lines[0]["error"] != nil {
+		t.Fatalf("live E2E plan tool should be callable, got %#v", lines[0]["error"])
+	}
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	if structured["schema_version"] != "rdev.support-session-live-e2e-plan.v1" ||
+		structured["dry_run"] != true ||
+		structured["execute"] != false ||
+		structured["gateway_url"] != "https://gateway.example.test/rdev" ||
+		structured["host_id"] != "hst_1" ||
+		structured["target_os"] != "windows" {
+		t.Fatalf("unexpected live E2E plan header: %#v", structured)
+	}
+	gates := structured["gates"].([]any)
+	if len(gates) != 3 {
+		t.Fatalf("expected three live E2E gates, got %#v", gates)
+	}
+	var interruptGate map[string]any
+	for _, value := range gates {
+		gate := value.(map[string]any)
+		if gate["name"] == "windows_session_interrupt_flow" {
+			interruptGate = gate
+		}
+	}
+	if interruptGate == nil ||
+		interruptGate["mcp_tool"] != "rdev.sessions.interrupt" ||
+		!containsAnyString(interruptGate["required_evidence"].([]any), "rdev.sessions.events replays the interrupt after reconnect") {
+		t.Fatalf("expected MCP session-interrupt proof gate, got %#v", interruptGate)
+	}
+}
+
 func TestServerToolCallSupportSessionHandoff(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.handoff", map[string]any{
-		"gateway_url":  "http://192.0.2.44:8787",
-		"target":       "windows",
-		"reason":       "company computer support",
-		"auto_approve": true,
-		"locale":       "zh-CN",
+		"gateway_url":   "http://192.0.2.44:8787",
+		"target":        "windows",
+		"reason":        "company computer support",
+		"auto_activate": true,
+		"locale":        "zh-CN",
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -392,11 +489,11 @@ func TestServerToolCallSupportSessionConnectAutoDetectsStableRdevCommand(t *test
 
 func TestServerToolCallSupportSessionConnectWithGatewayCreatesReadyHandoff(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
-		"gateway_url":  "http://192.0.2.44:8787",
-		"target":       "windows",
-		"reason":       "company computer support",
-		"auto_approve": true,
-		"locale":       "zh-CN",
+		"gateway_url":   "http://192.0.2.44:8787",
+		"target":        "windows",
+		"reason":        "company computer support",
+		"auto_activate": true,
+		"locale":        "zh-CN",
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -455,7 +552,7 @@ func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 		t.Fatalf("expected adaptive connectivity strategy, got %#v", connectivity)
 	}
 	recovery := anyStrings(structured["standard_recovery"].([]any))
-	if !slices.Contains(recovery, "do not write custom PowerShell, relay, approval polling, ticket substitution, or bootstrap glue") {
+	if !slices.Contains(recovery, "do not write custom PowerShell, relay, activation polling, ticket substitution, or bootstrap glue") {
 		t.Fatalf("expected no-improvisation recovery contract, got %#v", recovery)
 	}
 	runbook := structured["agent_connection_runbook"].(map[string]any)
@@ -469,11 +566,11 @@ func TestServerToolCallSupportSessionPrepare(t *testing.T) {
 func TestServerToolCallSupportSessionCreate(t *testing.T) {
 	t.Setenv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev")
 	input := mcpRequestLine(t, "rdev.support_session.create", map[string]any{
-		"gateway_url":  "http://192.0.2.44:8787",
-		"target":       "windows",
-		"reason":       "company computer support",
-		"auto_approve": true,
-		"locale":       "zh-CN",
+		"gateway_url":   "http://192.0.2.44:8787",
+		"target":        "windows",
+		"reason":        "company computer support",
+		"auto_activate": true,
+		"locale":        "zh-CN",
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -486,7 +583,7 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 	structured := result["structuredContent"].(map[string]any)
 	if structured["schema_version"] != "rdev.support-session-created.v1" ||
 		structured["recommended_surface"] != "windows" ||
-		structured["auto_approve"] != true {
+		structured["auto_activate"] != true {
 		t.Fatalf("expected created support session payload, got %#v", structured)
 	}
 	ticketCode, _ := structured["ticket_code"].(string)
@@ -564,10 +661,10 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 func TestServerToolCallSupportSessionCreateUsesConfiguredGateway(t *testing.T) {
 	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
 	input := mcpRequestLine(t, "rdev.support_session.create", map[string]any{
-		"target":       "auto",
-		"reason":       "company computer support",
-		"auto_approve": true,
-		"locale":       "en",
+		"target":        "auto",
+		"reason":        "company computer support",
+		"auto_activate": true,
+		"locale":        "en",
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -598,7 +695,7 @@ func TestServerToolCallSupportSessionCreateUsesConfiguredGateway(t *testing.T) {
 func TestServerToolCallSupportSessionStatus(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "company computer support", map[string]string{
-		"auto_approve": "attended-temporary",
+		"auto_activate": "attended-temporary",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -638,7 +735,7 @@ func TestServerToolCallSupportSessionStatus(t *testing.T) {
 		next["host_id"] == "" ||
 		!strings.Contains(next["user_report"].(string), "连接已经建立") ||
 		len(calls) != 1 ||
-		calls[0].(map[string]any)["tool"] != "rdev.hosts.capabilities" {
+		calls[0].(map[string]any)["tool"] != "rdev.sessions.status" {
 		t.Fatalf("expected connected next-step contract, got %#v", next)
 	}
 }
@@ -684,15 +781,8 @@ func TestServerToolCallSupportSessionReport(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/v1/hosts/hst_remote":
-			_, _ = w.Write([]byte(`{"host":{"id":"hst_remote","name":"win-dev","os":"windows","arch":"amd64","status":"active","identity_fingerprint":"sha256:mcp-remote-fingerprint"}}` + "\n"))
-		case "/v1/jobs":
-			if r.URL.Query().Get("host_id") != "hst_remote" {
-				t.Fatalf("expected host job filter, got %s", r.URL.RawQuery)
-			}
-			_, _ = w.Write([]byte(`{"jobs":[{"id":"job_1","host_id":"hst_remote","status":"succeeded","adapter":"shell","intent":"identity probe"}]}` + "\n"))
-		case "/v1/jobs/job_1/artifacts":
-			_, _ = w.Write([]byte(`{"artifacts":[{"id":"art_1","job_id":"job_1","content":"hostname ok"}]}` + "\n"))
+		case "/v1/sessions/sess_remote":
+			_, _ = w.Write([]byte(`{"snapshot":{"id":"sess_remote","endpoints":[{"id":"ep_remote","role":"target","state":"online","name":"win-dev","platform":"windows/amd64","identity_fingerprint":"sha256:mcp-remote-fingerprint"}],"tasks":[{"id":"task_1","target_endpoint_id":"ep_remote","status":"succeeded","adapter":"shell","intent":"identity probe","attempt_id":"attempt_1"}]}}` + "\n"))
 		default:
 			t.Fatalf("unexpected report request: %s", r.URL.String())
 		}
@@ -702,6 +792,7 @@ func TestServerToolCallSupportSessionReport(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.report", map[string]any{
 		"gateway_url": remote.URL,
 		"host_id":     "hst_remote",
+		"session_id":  "sess_remote",
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -712,15 +803,23 @@ func TestServerToolCallSupportSessionReport(t *testing.T) {
 	lines := responseLines(t, out.String())
 	result := lines[0]["result"].(map[string]any)
 	structured := result["structuredContent"].(map[string]any)
-	jobs := structured["jobs"].([]any)
+	tasks := structured["tasks"].([]any)
 	remoteEntry := structured["remote_control_entry"].(map[string]any)
+	livePlan, _ := structured["live_remote_e2e_plan"].(map[string]any)
 	if structured["schema_version"] != "rdev.support-session-report.v1" ||
 		structured["host_id"] != "hst_remote" ||
-		len(jobs) != 1 ||
+		structured["session_id"] != "sess_remote" ||
+		len(tasks) != 1 ||
 		remoteEntry["support_device_id_source"] != "host_identity_fingerprint" ||
 		remoteEntry["explicit_disconnect_required"] != true ||
+		livePlan["schema_version"] != "rdev.support-session-live-e2e-plan.v1" ||
+		livePlan["dry_run"] != true ||
 		!strings.Contains(structured["human_report"].(string), "identity probe") {
 		t.Fatalf("expected support session report, got %#v", structured)
+	}
+	gates, _ := livePlan["gates"].([]any)
+	if len(gates) != 3 {
+		t.Fatalf("expected report to include live E2E gates, got %#v", livePlan)
 	}
 }
 
@@ -740,24 +839,48 @@ func TestServerToolCallSupportSessionReportTicketCodeSelectsSingleActiveHost(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err = gw.ApproveHost(host.ID, []string{"shell.user"})
+	host, err = gw.ActivateHost(host.ID, []string{"shell.user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := gw.CreateJob(host.ID, "shell", "identity probe", map[string]any{
-		"workspace_root": ".",
-		"capabilities":   []string{"shell.user"},
-		"argv":           []string{"cmd", "/c", "hostname"},
-		"allow_commands": []string{"cmd"},
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Reason:       "mcp ticket report",
+		Capabilities: []string{"shell.user"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := gw.CompleteJob(job.ID, "MCP-REPORT-HOST"); err != nil {
+	_, endpoint, _, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "mcp-ticket-report-host",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-mcp-ticket",
+		Capabilities:        []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(session.ID, controlplane.TaskSpec{
+		TargetEndpointID: endpoint.ID,
+		Adapter:          "shell",
+		Intent:           "identity probe",
+		Capabilities:     []string{"shell.user"},
+		Payload: map[string]any{
+			"workspace_root": ".",
+			"argv":           []any{"cmd", "/c", "hostname"},
+			"allow_commands": []any{"cmd"},
+		},
+		IdempotencyKey: "mcp-ticket-report-task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteSessionTask(session.ID, task.ID, map[string]any{"status": "succeeded", "artifact_content": "MCP-REPORT-HOST"}); err != nil {
 		t.Fatal(err)
 	}
 	input := mcpRequestLine(t, "rdev.support_session.report", map[string]any{
 		"ticket_code": ticket.Code,
+		"session_id":  session.ID,
 	})
 	var out bytes.Buffer
 	server := NewServer(gw)
@@ -768,51 +891,80 @@ func TestServerToolCallSupportSessionReportTicketCodeSelectsSingleActiveHost(t *
 	lines := responseLines(t, out.String())
 	result := lines[0]["result"].(map[string]any)
 	structured := result["structuredContent"].(map[string]any)
-	jobs := structured["jobs"].([]any)
+	tasks := structured["tasks"].([]any)
 	activeHosts := structured["active_hosts"].([]any)
 	remoteEntry := structured["remote_control_entry"].(map[string]any)
 	if structured["schema_version"] != "rdev.support-session-report.v1" ||
 		structured["ok"] != true ||
 		structured["ticket_code"] != ticket.Code ||
 		structured["host_id"] != host.ID ||
-		structured["recommended_job_host_id"] != host.ID ||
-		structured["recommended_job_host_source"] != "ticket_single_active_host" ||
+		structured["session_id"] != session.ID ||
 		len(activeHosts) != 1 ||
-		len(jobs) != 1 ||
+		len(tasks) != 1 ||
 		remoteEntry["session_passcode"] != ticket.Code ||
-		remoteEntry["recommended_job_host_id"] != host.ID ||
 		remoteEntry["explicit_disconnect_required"] != true ||
-		!strings.Contains(structured["human_report"].(string), "MCP-REPORT-HOST") ||
-		!strings.Contains(structured["stale_host_rule"].(string), "Do not create jobs for stale_hosts") {
+		!strings.Contains(structured["human_report"].(string), "identity probe") ||
+		!strings.Contains(structured["stale_host_rule"].(string), "Do not send new session tasks") {
 		t.Fatalf("expected ticket-code support session report, got %#v", structured)
 	}
 }
 
+func TestRemoteControlSmokePoliciesDefaultToHomeWorkspace(t *testing.T) {
+	policies := []map[string]any{
+		mcpFileListSmokePolicy(),
+		mcpDesktopWindowInspectSmokePolicy(),
+		mcpPowerShellAuditPolicy("Get-Location"),
+		mcpShellAuditPolicy([]string{"shell.user"}, []string{"sh", "-c", "pwd"}, []string{"sh"}),
+		mcpShellAuditPolicyWithWriteScope([]string{"shell.user", "fs.write.scoped"}, []string{"sh", "-c", "true"}, []string{"sh"}, []string{"."}),
+	}
+	for _, policy := range policies {
+		if policy["workspace_root"] != "~" {
+			t.Fatalf("expected generated remote-control policy to default workspace_root to home, got %#v", policy)
+		}
+	}
+}
+
 func TestServerToolCallSupportSessionSmokeTestRunsStandardProbes(t *testing.T) {
-	jobCounter := 0
+	taskCounter := 0
 	createdIntents := []string{}
+	tasks := []map[string]any{}
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/hosts/hst_remote":
-			_, _ = w.Write([]byte(`{"host":{"id":"hst_remote","name":"win-dev","os":"windows","arch":"amd64","status":"active"}}` + "\n"))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/jobs":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sessions/sess_remote":
+			_ = json.NewEncoder(w).Encode(map[string]any{"snapshot": map[string]any{
+				"id": "sess_remote",
+				"endpoints": []map[string]any{{
+					"id":       "ep_remote",
+					"role":     "target",
+					"state":    "online",
+					"name":     "win-dev",
+					"platform": "windows/amd64",
+				}},
+				"tasks": tasks,
+			}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/sessions/sess_remote/tasks":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode job create: %v", err)
+				t.Fatalf("decode task create: %v", err)
 			}
-			if body["host_id"] != "hst_remote" || (body["adapter"] != "shell" && body["adapter"] != "powershell") {
-				t.Fatalf("unexpected smoke job body: %#v", body)
+			if body["adapter"] != "shell" && body["adapter"] != "powershell" {
+				t.Fatalf("unexpected smoke task body: %#v", body)
+			}
+			if body["target_endpoint_id"] != "ep_remote" {
+				t.Fatalf("expected smoke task to target selected endpoint, got %#v", body)
 			}
 			createdIntents = append(createdIntents, body["intent"].(string))
-			jobCounter++
-			_, _ = fmt.Fprintf(w, `{"job":{"id":"job_%d","host_id":"hst_remote","status":"queued","adapter":"shell","intent":%q}}`+"\n", jobCounter, body["intent"].(string))
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_") && strings.HasSuffix(r.URL.Path, "/artifacts"):
-			jobID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/jobs/"), "/artifacts")
-			_, _ = fmt.Fprintf(w, `{"artifacts":[{"id":"art_%s","job_id":%q,"content":"%s ok"}]}`+"\n", jobID, jobID, jobID)
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_"):
-			jobID := strings.TrimPrefix(r.URL.Path, "/v1/jobs/")
-			_, _ = fmt.Fprintf(w, `{"job":{"id":%q,"host_id":"hst_remote","status":"succeeded","adapter":"shell","intent":"probe"}}`+"\n", jobID)
+			taskCounter++
+			task := map[string]any{
+				"id":                 fmt.Sprintf("task_%d", taskCounter),
+				"target_endpoint_id": "ep_remote",
+				"status":             "succeeded",
+				"adapter":            body["adapter"],
+				"intent":             body["intent"],
+			}
+			tasks = append(tasks, task)
+			_ = json.NewEncoder(w).Encode(map[string]any{"task": task})
 		default:
 			t.Fatalf("unexpected smoke-test request: %s %s", r.Method, r.URL.String())
 		}
@@ -821,7 +973,7 @@ func TestServerToolCallSupportSessionSmokeTestRunsStandardProbes(t *testing.T) {
 
 	input := mcpRequestLine(t, "rdev.support_session.smoke_test", map[string]any{
 		"gateway_url":     remote.URL,
-		"host_id":         "hst_remote",
+		"session_id":      "sess_remote",
 		"timeout_seconds": 5,
 	})
 	var out bytes.Buffer
@@ -838,41 +990,57 @@ func TestServerToolCallSupportSessionSmokeTestRunsStandardProbes(t *testing.T) {
 	remoteEntry := structured["remote_control_entry"].(map[string]any)
 	if structured["schema_version"] != "rdev.support-session-smoke-test.v1" ||
 		structured["ok"] != true ||
-		structured["host_id"] != "hst_remote" ||
+		structured["session_id"] != "sess_remote" ||
+		structured["target_endpoint_id"] != "ep_remote" ||
 		len(results) != 5 ||
-		remoteEntry["support_device_id_source"] != "host_id" ||
 		remoteEntry["explicit_disconnect_required"] != true ||
-		!strings.Contains(structured["next_action"].(string), "keep the host connected") ||
+		!strings.Contains(structured["next_action"].(string), "keep the target endpoint connected") ||
 		!strings.Contains(structured["human_report"].(string), "Connection: keep alive") {
 		t.Fatalf("expected successful smoke-test report, got %#v", structured)
 	}
 	if len(createdIntents) != 5 || !strings.Contains(strings.Join(createdIntents, "\n"), "capability audit PowerShell identity") {
-		t.Fatalf("expected standard probe jobs, got %#v", createdIntents)
+		t.Fatalf("expected standard probe tasks, got %#v", createdIntents)
 	}
 }
 
 func TestServerToolCallSupportSessionSmokeTestRemoteControlCreatesStandardAdapterProbes(t *testing.T) {
-	jobCounter := 0
+	taskCounter := 0
 	created := []map[string]any{}
+	tasks := []map[string]any{}
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/hosts/hst_remote":
-			_, _ = w.Write([]byte(`{"host":{"id":"hst_remote","name":"win-dev","os":"windows","arch":"amd64","status":"active"}}` + "\n"))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/jobs":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sessions/sess_remote":
+			_ = json.NewEncoder(w).Encode(map[string]any{"snapshot": map[string]any{
+				"id": "sess_remote",
+				"endpoints": []map[string]any{{
+					"id":       "ep_remote",
+					"role":     "target",
+					"state":    "online",
+					"name":     "win-dev",
+					"platform": "windows/amd64",
+				}},
+				"tasks": tasks,
+			}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/sessions/sess_remote/tasks":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode job create: %v", err)
+				t.Fatalf("decode task create: %v", err)
+			}
+			if body["target_endpoint_id"] != "ep_remote" {
+				t.Fatalf("expected remote-control task to target selected endpoint, got %#v", body)
 			}
 			created = append(created, body)
-			jobCounter++
-			_, _ = fmt.Fprintf(w, `{"job":{"id":"job_%d","host_id":"hst_remote","status":"queued","adapter":%q,"intent":%q}}`+"\n", jobCounter, body["adapter"], body["intent"])
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_") && strings.HasSuffix(r.URL.Path, "/artifacts"):
-			jobID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/jobs/"), "/artifacts")
-			_, _ = fmt.Fprintf(w, `{"artifacts":[{"id":"art_%s","job_id":%q,"content":"%s ok"}]}`+"\n", jobID, jobID, jobID)
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/jobs/job_"):
-			jobID := strings.TrimPrefix(r.URL.Path, "/v1/jobs/")
-			_, _ = fmt.Fprintf(w, `{"job":{"id":%q,"host_id":"hst_remote","status":"succeeded","adapter":"probe","intent":"probe"}}`+"\n", jobID)
+			taskCounter++
+			task := map[string]any{
+				"id":                 fmt.Sprintf("task_%d", taskCounter),
+				"target_endpoint_id": "ep_remote",
+				"status":             "succeeded",
+				"adapter":            body["adapter"],
+				"intent":             body["intent"],
+			}
+			tasks = append(tasks, task)
+			_ = json.NewEncoder(w).Encode(map[string]any{"task": task})
 		default:
 			t.Fatalf("unexpected smoke-test request: %s %s", r.Method, r.URL.String())
 		}
@@ -881,7 +1049,7 @@ func TestServerToolCallSupportSessionSmokeTestRemoteControlCreatesStandardAdapte
 
 	input := mcpRequestLine(t, "rdev.support_session.smoke_test", map[string]any{
 		"gateway_url":     remote.URL,
-		"host_id":         "hst_remote",
+		"session_id":      "sess_remote",
 		"timeout_seconds": 5,
 		"remote_control":  true,
 	})
@@ -904,8 +1072,8 @@ func TestServerToolCallSupportSessionSmokeTestRemoteControlCreatesStandardAdapte
 	actions := []string{}
 	for _, body := range created {
 		adapters = append(adapters, body["adapter"].(string))
-		if policy, _ := body["policy"].(map[string]any); policy != nil {
-			if action, _ := policy["action"].(string); action != "" {
+		if payload, _ := body["payload"].(map[string]any); payload != nil {
+			if action, _ := payload["action"].(string); action != "" {
 				actions = append(actions, action)
 			}
 		}
@@ -918,156 +1086,63 @@ func TestServerToolCallSupportSessionSmokeTestRemoteControlCreatesStandardAdapte
 	}
 }
 
-func TestServerToolCallJobPolicyTemplate(t *testing.T) {
-	input := mcpRequestLine(t, "rdev.jobs.policy_template", map[string]any{
-		"capability": "process.inspect",
-		"target_os":  "windows",
-	})
-	var out bytes.Buffer
-	server := NewServer(gateway.NewMemoryGateway())
-
-	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatal(err)
-	}
-	lines := responseLines(t, out.String())
-	result := lines[0]["result"].(map[string]any)
-	structured := result["structuredContent"].(map[string]any)
-	policy := structured["policy"].(map[string]any)
-	argv := policy["argv"].([]any)
-	if structured["schema_version"] != "rdev.job-policy-template.v1" ||
-		structured["adapter"] != "shell" ||
-		argv[0] != "tasklist" {
-		t.Fatalf("expected Windows process policy template, got %#v", structured)
+func TestServerToolCallOldJobToolsAreUnknown(t *testing.T) {
+	for _, tool := range []string{
+		"rdev.jobs.policy_template",
+		"rdev.jobs.create",
+		"rdev.jobs.status",
+		"rdev.jobs.cancel",
+		"rdev.jobs.authorize",
+	} {
+		var out bytes.Buffer
+		server := NewServer(gateway.NewMemoryGateway())
+		if err := server.Serve(context.Background(), strings.NewReader(mcpRequestLine(t, tool, map[string]any{
+			"job_id":           "job_old",
+			"host_id":          "hst_old",
+			"adapter":          "shell",
+			"intent":           "old job contract",
+			"policy":           map[string]any{},
+			"authorization_id": "screen.screenshot",
+			"decision":         "authorized",
+			"idempotency_key":  "old",
+			"capability":       "process.inspect",
+			"timeout_seconds":  float64(1),
+			"max_output_bytes": float64(1),
+		})), &out); err != nil {
+			t.Fatal(err)
+		}
+		lines := responseLines(t, out.String())
+		errPayload, ok := lines[0]["error"].(map[string]any)
+		if !ok || !strings.Contains(errPayload["message"].(string), "unknown tool") {
+			t.Fatalf("old tool %s should be unknown, got %#v", tool, lines[0])
+		}
 	}
 }
 
-func TestServerToolCallFilesReadCreatesStandardFileJob(t *testing.T) {
-	var received map[string]any
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
-		}
-		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+func TestServerToolCallOldFileAndDesktopToolsAreUnknown(t *testing.T) {
+	for _, tool := range []string{
+		"rdev.files.read",
+		"rdev.files.upload",
+		"rdev.files.delete",
+		"rdev.desktop.screenshot",
+		"rdev.desktop.clipboard",
+	} {
+		var out bytes.Buffer
+		server := NewServer(gateway.NewMemoryGateway())
+		if err := server.Serve(context.Background(), strings.NewReader(mcpRequestLine(t, tool, map[string]any{
+			"gateway_url": "https://gateway.example.test",
+			"host_id":     "hst_old",
+			"path":        "README.md",
+			"action":      "write",
+			"text":        "old desktop tool",
+		})), &out); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write([]byte(`{"job":{"id":"job_file","status":"queued"}}` + "\n"))
-	}))
-	defer remote.Close()
-
-	input := mcpRequestLine(t, "rdev.files.read", map[string]any{
-		"gateway_url": remote.URL,
-		"host_id":     "hst_remote",
-		"path":        "README.md",
-	})
-	var out bytes.Buffer
-	server := NewServer(gateway.NewMemoryGateway())
-
-	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatal(err)
-	}
-	policy := received["policy"].(map[string]any)
-	if received["adapter"] != "file" || policy["action"] != "read" || policy["path"] != "README.md" {
-		t.Fatalf("unexpected file MCP job payload: %#v", received)
-	}
-}
-
-func TestServerToolCallDesktopScreenshotCreatesStandardDesktopJob(t *testing.T) {
-	var received map[string]any
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		lines := responseLines(t, out.String())
+		errPayload, ok := lines[0]["error"].(map[string]any)
+		if !ok || !strings.Contains(errPayload["message"].(string), "unknown tool") {
+			t.Fatalf("old tool %s should be unknown, got %#v", tool, lines[0])
 		}
-		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
-			t.Fatal(err)
-		}
-		_, _ = w.Write([]byte(`{"job":{"id":"job_desktop","status":"queued"}}` + "\n"))
-	}))
-	defer remote.Close()
-
-	input := mcpRequestLine(t, "rdev.desktop.screenshot", map[string]any{
-		"gateway_url": remote.URL,
-		"host_id":     "hst_remote",
-	})
-	var out bytes.Buffer
-	server := NewServer(gateway.NewMemoryGateway())
-
-	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatal(err)
-	}
-	policy := received["policy"].(map[string]any)
-	approvals := policy["approvals_required"].([]any)
-	if received["adapter"] != "desktop" ||
-		policy["action"] != "screen.screenshot" ||
-		len(approvals) != 1 ||
-		approvals[0] != "screen.screenshot" {
-		t.Fatalf("unexpected desktop MCP job payload: %#v", received)
-	}
-}
-
-func TestServerToolCallFilesDeleteCreatesApprovalGatedFileJob(t *testing.T) {
-	var received map[string]any
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
-		}
-		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
-			t.Fatal(err)
-		}
-		_, _ = w.Write([]byte(`{"job":{"id":"job_delete","status":"queued"}}` + "\n"))
-	}))
-	defer remote.Close()
-
-	input := mcpRequestLine(t, "rdev.files.delete", map[string]any{
-		"gateway_url": remote.URL,
-		"host_id":     "hst_remote",
-		"path":        "old.txt",
-	})
-	var out bytes.Buffer
-	server := NewServer(gateway.NewMemoryGateway())
-
-	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatal(err)
-	}
-	policy := received["policy"].(map[string]any)
-	approvals := policy["approvals_required"].([]any)
-	if received["adapter"] != "file" || policy["action"] != "delete" || len(approvals) != 1 || approvals[0] != "file.delete" {
-		t.Fatalf("unexpected file delete MCP job payload: %#v", received)
-	}
-}
-
-func TestServerToolCallDesktopClipboardCreatesStandardDesktopJob(t *testing.T) {
-	var received map[string]any
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/jobs" {
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
-		}
-		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
-			t.Fatal(err)
-		}
-		_, _ = w.Write([]byte(`{"job":{"id":"job_clipboard","status":"queued"}}` + "\n"))
-	}))
-	defer remote.Close()
-
-	input := mcpRequestLine(t, "rdev.desktop.clipboard", map[string]any{
-		"gateway_url": remote.URL,
-		"host_id":     "hst_remote",
-		"action":      "write",
-		"text":        "hello clipboard",
-	})
-	var out bytes.Buffer
-	server := NewServer(gateway.NewMemoryGateway())
-
-	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
-		t.Fatal(err)
-	}
-	policy := received["policy"].(map[string]any)
-	approvals := policy["approvals_required"].([]any)
-	if received["adapter"] != "desktop" ||
-		policy["action"] != "clipboard.write" ||
-		policy["text"] != "hello clipboard" ||
-		len(approvals) != 1 ||
-		approvals[0] != "clipboard.write" {
-		t.Fatalf("unexpected desktop clipboard MCP job payload: %#v", received)
 	}
 }
 
@@ -1468,41 +1543,18 @@ func TestServerToolCallUpdatePlan(t *testing.T) {
 	}
 }
 
-func TestServerToolCallCreateJobReturnsEnvelope(t *testing.T) {
-	gw := gateway.NewMemoryGateway()
-	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	host, err := gw.RegisterHost(model.HostRegistration{
-		TicketCode: ticket.Code,
-		Name:       "local",
-		OS:         "darwin",
-		Arch:       "arm64",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	host, err = gw.ApproveHost(host.ID, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rdev.jobs.create","arguments":{"host_id":"` + host.ID + `","adapter":"codex","intent":"fix tests","policy":{"workspace_root":"/repo","capabilities":["fs.read","fs.write.scoped","dev.codex"]}}}}` + "\n"
+func TestServerToolCallOldCreateJobEnvelopeToolIsUnknown(t *testing.T) {
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rdev.jobs.create","arguments":{"host_id":"hst_old","adapter":"codex","intent":"fix tests","policy":{"workspace_root":"/repo","capabilities":["fs.read","fs.write.scoped","dev.codex"]}}}}` + "\n"
 	var out bytes.Buffer
-	server := NewServer(gw)
+	server := NewServer(gateway.NewMemoryGateway())
 
 	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatal(err)
 	}
 	lines := responseLines(t, out.String())
-	result := lines[0]["result"].(map[string]any)
-	structured := result["structuredContent"].(map[string]any)
-	envelope := structured["envelope"].(map[string]any)
-	if envelope["signature"] == "" {
-		t.Fatalf("expected signed envelope, got %#v", envelope)
-	}
-	if envelope["host_id"] != host.ID {
-		t.Fatalf("expected envelope host binding %q, got %#v", host.ID, envelope["host_id"])
+	errPayload, ok := lines[0]["error"].(map[string]any)
+	if !ok || !strings.Contains(errPayload["message"].(string), "unknown tool") {
+		t.Fatalf("old rdev.jobs.create should be unknown, got %#v", lines[0])
 	}
 }
 
@@ -1713,15 +1765,15 @@ func TestServerToolCallVerifyAdapterLifecycle(t *testing.T) {
   "adapter": "claude-code",
   "phases": {
     "detect": {"implemented": true, "evidence": ["version"]},
-    "plan": {"implemented": true, "evidence": ["commands"], "declares_external_consequences": true, "declares_required_approvals": true},
+    "plan": {"implemented": true, "evidence": ["commands"], "declares_external_consequences": true, "declares_required_authorizations": true},
     "prepare": {"implemented": true, "evidence": ["workspace"], "enforces_workspace_boundary": true, "uses_workspace_lock": true},
     "run": {"implemented": true, "evidence": ["process"], "supports_timeout": true, "supports_cancellation": true},
     "collect": {"implemented": true, "evidence": ["result"], "emits_result_artifact": true, "result_schema": "rdev.claude-code-result.v1"},
     "cleanup": {"implemented": true, "evidence": ["cleanup"], "idempotent": true, "releases_locks": true}
   },
   "safety": {
-    "adapter_authorizes_jobs": false,
-    "adapter_approves_dangerous_actions": false,
+    "adapter_authorizes_tasks": false,
+    "adapter_authorizes_dangerous_actions": false,
     "adapter_installs_persistence": false,
     "host_validates_before_run": true,
     "redacts_outputs": true
@@ -1784,7 +1836,7 @@ func TestServerToolCallVerifyAdapterRuntime(t *testing.T) {
 	fixture := `{
   "schema_version": "rdev.adapter-runtime-fixture.v1",
   "adapter": "fake",
-  "job_id": "job_123",
+  "task_id": "task_123",
   "workspace_root": "/tmp/repo",
   "started_at": "2026-06-30T00:00:00Z",
   "ended_at": "2026-06-30T00:00:01Z",

@@ -21,7 +21,7 @@ type WorkspaceSession struct {
 	SchemaVersion   string   `json:"schema_version"`
 	SessionID       string   `json:"session_id"`
 	Adapter         string   `json:"adapter"`
-	JobID           string   `json:"job_id,omitempty"`
+	TaskID          string   `json:"task_id,omitempty"`
 	WorkspaceRoot   string   `json:"workspace_root"`
 	LockPath        string   `json:"lock_path,omitempty"`
 	WriteBoundaries []string `json:"write_boundaries,omitempty"`
@@ -45,7 +45,7 @@ type WorkspaceSessionOptions struct {
 // resolves and canonicalises the root, and returns an initialised session.
 // The caller is responsible for acquiring a workspace lock separately via the
 // workspace package if required.
-func PrepareWorkspaceSession(adapter, jobID, workspaceRoot string, opts WorkspaceSessionOptions, now time.Time) (WorkspaceSession, error) {
+func PrepareWorkspaceSession(adapter, taskID, workspaceRoot string, opts WorkspaceSessionOptions, now time.Time) (WorkspaceSession, error) {
 	adapter = strings.TrimSpace(adapter)
 	if adapter == "" {
 		return WorkspaceSession{}, fmt.Errorf("workspace session adapter is required")
@@ -74,7 +74,7 @@ func PrepareWorkspaceSession(adapter, jobID, workspaceRoot string, opts Workspac
 		SchemaVersion:   WorkspaceSessionSchemaVersion,
 		SessionID:       sessionID,
 		Adapter:         adapter,
-		JobID:           strings.TrimSpace(jobID),
+		TaskID:          strings.TrimSpace(taskID),
 		WorkspaceRoot:   canonical,
 		LockPath:        lockPath,
 		WriteBoundaries: boundaries,

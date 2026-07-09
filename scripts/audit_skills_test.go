@@ -94,7 +94,7 @@ func runAuditSkills(t *testing.T, skillsRoot string) (string, error) {
 func writeSkillTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	for _, name := range []string{"host-triage", "remote-job-review", "remote-vibe-coding", "safe-remote-support"} {
+	for _, name := range []string{"host-triage", "remote-session-review", "remote-vibe-coding", "safe-remote-support"} {
 		writeSkill(t, root, name)
 	}
 	writeFile(t, filepath.Join(root, "remote-vibe-coding", "references", "runtime-memory.md"), strings.Join([]string{

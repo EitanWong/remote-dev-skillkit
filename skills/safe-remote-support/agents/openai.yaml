@@ -1,6 +1,6 @@
 interface:
   display_name: "Safe Remote Support"
   short_description: "Run consent-based support sessions"
-  default_prompt: "Use $safe-remote-support to create a visible support session, run scoped jobs, review evidence, and revoke access."
+  default_prompt: "Use $safe-remote-support to create a visible support session, run scoped session tasks, review evidence, and revoke access."
 policy:
   allow_implicit_invocation: true

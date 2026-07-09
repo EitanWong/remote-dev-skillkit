@@ -25,7 +25,7 @@ Use it for:
   network constraints;
 - resolved gateway, join, manifest, workspace, release, verifier, framework,
   and adapter paths;
-- host capabilities, approval policy, enrolled host identity hints, and
+- host capabilities, interrupt policy, enrolled host identity hints, and
   managed-service status;
 - project structure summaries, safe probe results, tool versions, and
   dependency availability;
@@ -42,7 +42,7 @@ Use it for:
   those scopes are known. Do not reuse one customer's memory for another
   customer.
 - Default to user/workspace-scoped storage. Elevation, service-wide memory,
-  shared fleet memory, hosted sync, or external storage requires approval and
+  shared fleet memory, hosted sync, or external storage requires authorization and
   an audit record.
 - Do not store secrets, private keys, bearer tokens, operator tokens, raw
   credentials, unredacted transcripts, private hostnames, customer personal
@@ -64,7 +64,7 @@ Use records compatible with `rdev.skill-runtime-memory.v1`:
     {
       "key": "workspace.root",
       "value_ref": "redacted-or-host-local-reference",
-      "source": "probe|manifest|mcp|operator|job-artifact",
+      "source": "probe|manifest|mcp|operator|task-artifact",
       "confidence": "confirmed|observed|inferred",
       "sensitivity": "public|internal|sensitive",
       "observed_at": "RFC3339",
@@ -88,7 +88,7 @@ Before probing or asking the human, check runtime memory for:
 - framework install paths and user/workspace tool locations;
 - release root, verifier, bundle, and checksum locations;
 - proxy, TLS interception, LAN, relay, mesh, SSH, or VPN requirements;
-- prior approvals, denials, residual risks, and revocation status.
+- prior interrupts, denials, residual risks, and revocation status.
 
 Memory is a hint, not authority. Re-verify stale, sensitive, or high-impact
 facts before use.
@@ -98,12 +98,12 @@ facts before use.
 Update runtime memory after:
 
 - successful host triage or environment probing;
-- invite creation and host approval;
+- invite creation and session authorization;
 - workspace discovery or worktree preparation;
 - adapter/tool/runtime detection;
 - dependency or Skill provisioning;
 - release/verification input discovery;
-- job completion, denial, approval-required pause, cancellation, or revocation.
+- task completion, denial, interrupt pause, cancellation, or revocation.
 
 Write only the smallest durable fact that will help the next run. Prefer
 structured facts and artifact references over raw logs.
@@ -111,7 +111,7 @@ structured facts and artifact references over raw logs.
 ## Refresh and Invalidate
 
 - Refresh facts when tool versions, Git state, network state, service status,
-  trust roots, enrollment certificates, revocations, approvals, or release
+  trust roots, enrollment certificates, revocations, interrupts, or release
   artifacts may have changed.
 - Treat inferred facts as short-lived. Treat confirmed facts as reusable only
   within their scope.
@@ -124,7 +124,7 @@ structured facts and artifact references over raw logs.
 ## Evidence and Privacy
 
 - Every memory write should be explainable by a probe, manifest, MCP result,
-  job artifact, audit record, or operator confirmation.
+  task artifact, audit record, or operator confirmation.
 - Public reports should cite memory keys and evidence ids, not sensitive raw
   values.
 - Memory export must redact sensitive values and preserve enough metadata to

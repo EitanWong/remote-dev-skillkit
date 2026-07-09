@@ -7,7 +7,7 @@ exercise the same safety loop before a real-environment run.
 
 The target behavior is defined in the canonical final architecture lock,
 `docs/architecture/PERFECT_ENDING_SOLUTION.md`: typed intent, signed host-bound
-envelopes, host-side validation, workspace locks, approval gates, evidence,
+task payloads, host-side validation, workspace locks, host-denial probes, evidence,
 audit, and revocation.
 
 ## Evidence Plan Scaffolding
@@ -200,7 +200,7 @@ one-message flow:
    foreground watcher from `waiting` to `connected` after host registration;
 8. expose `connected_report_file.path` for the exact plain-text success report
    after the target connects, so an Agent can proactively tell the user the
-   connection is established before creating jobs;
+   connection is established before submitting session tasks;
 9. expose foreground stderr feedback events so an Agent can report
    `event=connected` from the kept-open command;
 10. wait for status with `rdev.support_session.status` as the fallback source of
@@ -219,7 +219,7 @@ one-message flow:
     URL, so the fetched join manifest can carry ordered gateway candidates to
     `rdev host serve` and the target host can select a reachable signed
     candidate before registration;
-15. avoid custom PowerShell, shell, relay, approval-polling, ticket, root,
+15. avoid custom PowerShell, shell, relay, authorization-polling, ticket, root,
    gateway, transport, or bootstrap glue;
 16. include `rdev.support-session-target-handoff-envelope.v1` on created,
    connected, and started payloads, so Agents no longer need to reconstruct the
@@ -227,7 +227,7 @@ one-message flow:
 17. include `agent_connection_runbook.fresh_agent_failure_prevention`, a
    machine-readable regression guard for real fresh-Agent failures such as
    manual gateway/invite/bootstrap assembly, missing helper assets that produce
-   `rdev is required`, background gateway workarounds, custom approval polling,
+   `rdev is required`, background gateway workarounds, custom authorization polling,
    and Agent-written PowerShell/shell setup.
 
 The command writes `report.json` with schema
@@ -290,13 +290,13 @@ rdev acceptance managed-mac --out .rdev/acceptance/managed-mac --repo .
 
 The command creates a local managed-mode acceptance run:
 
-1. creates a managed ticket and approved host in the local safety kernel;
+1. creates a managed session and target endpoint in the local control plane;
 2. creates a Git worktree for the target repository;
-3. runs an `adapter=codex` job in the worktree with workspace locking enabled;
+3. runs an `adapter=codex` session task in the worktree with workspace locking enabled;
 4. collects Codex output, Git status, Git diff/stat, Git diff, and verification command evidence;
-5. creates a second job that attempts `git push` and confirms `rdev.approval-required.v1`;
-6. exports an evidence bundle for the coding job;
-7. exports an evidence bundle for the approval-gate probe;
+5. creates a second task that attempts `git push` and confirms a structured host-denial artifact;
+6. exports session evidence for the coding task;
+7. exports session evidence for the side-effect probe;
 8. writes `report.json` with pass/fail checks and next steps.
 
 If `--repo` is omitted, the command creates a fixture Git repository inside `--out`.
@@ -325,8 +325,8 @@ The output directory must not exist or must be empty. The command writes:
 | Path | Purpose |
 |---|---|
 | `report.json` | `rdev.acceptance.managed-mac.v1` report with checks and IDs |
-| `evidence/` | `rdev.evidence-bundle.v1` bundle for the successful coding job |
-| `approval-evidence/` | evidence bundle for the approval-required probe |
+| `evidence/` | `rdev.session-evidence.v1` manifest for the successful coding task |
+| `side-effect-probe-evidence/` | session evidence for the host-denial side-effect probe |
 | `worktrees/` | generated Git worktree |
 | `workspace-locks/` | workspace lock store used during the run |
 
@@ -335,18 +335,18 @@ The report is considered passing only when all checks are true:
 - managed host mode is used;
 - host is active;
 - worktree was created;
-- coding job succeeded;
+- coding task succeeded;
 - `rdev.codex-result.v1` artifact exists;
 - Git diff evidence exists;
 - verification evidence exists;
 - fixture runs include `rdev.test-report.v1`;
-- approval probe returns `rdev.approval-required.v1` for `git.push`;
+- side-effect probe returns `rdev.host-denial.v1` for `git.push`;
 - workspace lock is released after execution;
-- evidence bundle is written.
+- session evidence is written.
 
 ## Acceptance Verification
 
-After a run, verify the report and both evidence bundles:
+After a run, verify the report and both session evidence directories:
 
 ```bash
 rdev acceptance verify --report .rdev/acceptance/managed-mac/report.json
@@ -356,14 +356,14 @@ The verifier emits `rdev.acceptance-verification.managed-mac.v1` JSON and exits
 nonzero if any release-gate check fails. It validates:
 
 - report schema and generated acceptance checks;
-- coding evidence bundle manifest checksums;
-- approval evidence bundle manifest checksums;
+- coding session evidence manifest checksums;
+- side-effect probe evidence manifest checksums;
 - artifact index consistency;
 - audit slice and hash-chained audit export;
 - embedded report manifests against on-disk manifests;
 - Codex result, diff, verification output, and fixture test-report evidence;
-- `git.push` approval-required probe;
-- workspace lock release after the job.
+- `git.push` host-denial side-effect probe;
+- workspace lock release after the task.
 
 ## Managed Mac LaunchAgent Plan
 
@@ -392,7 +392,7 @@ validates:
 - label matches the generated plist;
 - `RunAtLoad` and `KeepAlive` are enabled for explicit managed mode;
 - host arguments include `--mode managed`, `--once=false`, transport, identity,
-  trust, nonce, approval, and workspace-lock stores;
+  trust, nonce, authorization, and workspace-lock stores;
 - release-bundle startup gate arguments are present;
 - enrollment uses either `--ticket-code` or `--manifest-url`;
 - manual `rdev host service-control --execute` start/inspect/stop commands,
@@ -423,10 +423,10 @@ rdev acceptance package-managed-mac-service \
 The package command emits `rdev.acceptance-package.managed-mac-service.v1`,
 writes `package.json` and `checksums.txt`, copies the verified plan, LaunchAgent
 plist, plan-verifier output, service transcripts, logs, release-gate output,
-audit, reconnect proof, and verified managed Mac evidence bundle, then redacts
+audit, reconnect proof, and verified managed Mac session evidence, then redacts
 copied evidence. It fails closed until release-gate output contains `ok=true`,
 the managed Mac report verifies through `rdev acceptance verify`, and the
-approval-required proof is present in the bundled evidence.
+host-denial proof is present in the bundled evidence.
 
 ## Windows Temporary Host Plan
 
@@ -456,7 +456,7 @@ validates:
 - signed release manifest or signed release bundle, release root, verifier
   download URL, verifier SHA-256, and bundle required artifacts when bundle mode
   is used;
-- approval probes for package install, elevation, service management, GUI
+- host-denial probes for package install, elevation, service management, GUI
   control, and credential changes;
 - no-persistence inspection commands for services, scheduled tasks, Run keys,
   startup folders, and firewall rules.
@@ -485,8 +485,8 @@ and exits nonzero if any preflight check fails. It validates:
   bootstrap SHA-256 when the launcher downloads the script by URL;
 - signed release manifest or signed release bundle, release root, verifier URL,
   host SHA-256, verifier SHA-256, and bundle required-artifact inputs;
-- foreground run command, transcript commands, no-persistence checks, approval
-  probes, and required evidence checklist.
+- foreground run command, transcript commands, no-persistence checks,
+  host-denial probes, and required evidence checklist.
 
 After the real Windows VM or support-host run, package the collected evidence:
 
@@ -498,7 +498,7 @@ rdev acceptance package-windows-temporary \
   --release-verification rdev-verify.json \
   --audit audit.jsonl \
   --no-persistence-dir no-persistence \
-  --approval-probes-dir approval-probes
+  --denial-probes-dir denial-probes
 ```
 
 The package command emits `rdev.acceptance-package.windows-temporary.v1` JSON,
@@ -508,11 +508,11 @@ evidence is present:
 
 - PowerShell transcript from bootstrap and foreground host startup;
 - standalone `rdev-verify` output with `"ok": true`;
-- host registration, approval, job, approval-required, revoke, and cancellation
+- session join, endpoint trust, task, host-denial probe, revoke, and cancellation
   audit evidence;
 - one no-persistence evidence file for services, scheduled tasks, HKCU/HKLM Run
   keys, startup folders, and firewall rules;
-- one approval-probe evidence file for package install, elevation, service
+- one host-denial probe evidence file for package install, elevation, service
   management, GUI control, and credential change.
 
 Use the packaged directory as the release-candidate artifact. Do not publish a
@@ -552,7 +552,7 @@ rdev acceptance package-linux-managed-service \
   --release-gate release-gate.json \
   --audit audit.jsonl \
   --reconnect reconnect.txt \
-  --job-evidence-dir job-evidence \
+  --session-evidence-dir session-evidence \
   --stop-transcript stop.txt \
   --uninstall-transcript uninstall.txt
 ```
@@ -560,9 +560,9 @@ rdev acceptance package-linux-managed-service \
 The package command emits `rdev.acceptance-package.linux-managed-service.v1`,
 writes `package.json` and `checksums.txt`, copies the plan, generated unit,
 plan-verifier output, transcripts, logs, release-gate output, audit, reconnect
-proof, and managed job evidence, then redacts copied evidence. It fails closed
-until release-gate output contains `ok=true`, job evidence contains a manifest
-and approval-required proof, and all required service transcripts are present.
+proof, and managed session evidence, then redacts copied evidence. It fails closed
+until release-gate output contains `ok=true`, session evidence contains a manifest
+and host-denial proof, and all required service transcripts are present.
 
 Use the packaged directory as the Linux managed-service release evidence
 artifact. Do not publish Linux managed-service support from a generated plan
@@ -586,9 +586,9 @@ Those remain real-environment acceptance gates.
 
 The next managed Mac acceptance command should prove the LaunchAgent path: generate
 the plist, start it with the documented `launchctl` command, confirm reconnect after
-login or reboot, run the same locked-worktree Codex job, export service-backed
+login or reboot, run the same locked-worktree Codex task, export service-backed
 evidence, and uninstall the service without touching unrelated plists.
 
 The next Windows acceptance run should execute the generated Windows plan on a
-clean Windows 10/11 VM, collect release-verification output, approval-required
+clean Windows 10/11 VM, collect release-verification output, host-denial
 probe evidence, revocation transcript, and no-persistence inspection output.

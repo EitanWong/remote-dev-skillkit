@@ -11,7 +11,7 @@ root = Path(os.environ.get("SKILLS_ROOT", "skills"))
 failures = []
 required_skills = {
     "host-triage",
-    "remote-job-review",
+    "remote-session-review",
     "remote-vibe-coding",
     "safe-remote-support",
 }

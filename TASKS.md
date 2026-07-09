@@ -12,18 +12,18 @@
 - [x] Add local preview ticket creation.
 - [x] Add policy explanation command.
 - [x] Add real MCP stdio server.
-- [x] Add in-memory gateway for tickets, hosts, jobs, artifacts, and audit.
-- [x] Add local demo flow for ticket-host-job-audit.
+- [x] Add in-memory gateway for tickets, hosts, session tasks, artifacts, and audit.
+- [x] Add local demo flow for ticket-host-task-audit.
 - [x] Add foreground temporary host local loop.
 - [x] Add JSONL audit store.
 - [x] Add local HTTP development gateway.
-- [x] Add development gateway state snapshots for restart-safe tickets, hosts, jobs, artifacts, audit, and trust bundles.
-- [x] Add signed job envelope model.
+- [x] Add development gateway state snapshots for restart-safe tickets, hosts, session tasks, artifacts, audit, and trust bundles.
+- [x] Add signed task envelope model.
 - [x] Add foreground temporary host local registration loop.
-- [x] Add local dev job polling and completion loop.
-- [x] Add host-side dev envelope/policy checks.
+- [x] Add local dev task polling and completion loop.
+- [x] Add host-side task payload/policy checks.
 - [x] Add dev trust bundle endpoint and host-side envelope signature verification.
-- [x] Add host-reported job failure endpoint and audit event.
+- [x] Add host-reported task failure endpoint and audit event.
 - [x] Add perfect end-state architecture blueprint.
 - [x] Refine final system design for implementation, deployment, and open-source packaging.
 - [x] Lock final system design state machines, trust protocols, discovery model, capability vocabulary, adapter contract, and release gates.
@@ -32,16 +32,16 @@
 - [x] Add initial release/bootstrap trust root verification for join manifests.
 - [x] Add release artifact signature manifest and CLI verifier.
 - [x] Wire release artifact signature verification into Windows bootstrap via hash-pinned verifier.
-- [x] Add shell job policy explain engine and MCP tool.
-- [x] Make host revocation cancel queued/running jobs and audit the stop.
-- [x] Add host identity key storage and signed job identity binding.
-- [x] Add host-side nonce replay cache.
+- [x] Add shell task policy explain engine and MCP tool.
+- [x] Make host revocation terminate queued/running session work and audit the stop.
+- [x] Add host identity key storage and signed task identity binding.
+- [x] Add host-side idempotency/replay protection.
 - [x] Add hash-chained audit export verifier.
 - [x] Reconcile final architecture into one canonical product contract.
-- [x] Add structured host-side denial explanations for failed job validation.
-- [x] Add structured host-side approval-required results for gated jobs.
-- [x] Add signed approval token model for gateway-approved job operations.
-- [x] Add durable host-side approval token consumption store.
+- [x] Add structured host-side denial explanations for failed task validation.
+- [x] Add structured host-side interrupt/denial results for gated tasks.
+- [x] Replace the retired authorization-exception model with session interrupts and operator-reviewed decisions.
+- [x] Remove durable host-side authorization-exception consumption from the active protocol.
 - [x] Finalize endgame operating model, authority separation, maturity gates, and failure conditions in the canonical design.
 - [x] Add final endgame solution layer with architecture scorecard, operating modes, authority map, golden paths, and v1.0 release definition.
 - [x] Lock final refined architecture as a safety microkernel with replaceable adapters, runtime loops, scheduler rules, temporary/managed host boundaries, storage model, and release contract.
@@ -50,12 +50,12 @@
 - [x] Add ultimate closure design with protocol objects, capability rings, host runtime rules, golden paths, and v1.0 gates.
 - [x] Add perfect ending solution with state machines, authority map, discovery model, mode contracts, evidence gates, and final implementation order.
 - [x] Refresh GitHub project management with current milestones, seed backlog, dry-run bootstrap, and issue/PR templates.
-- [x] Add development HTTPS long-poll host job transport prototype.
+- [x] Add development HTTPS long-poll host task transport prototype.
 - [x] Add development gateway TLS/mTLS listener primitive with optional client certificate enforcement.
 - [x] Add host-side local dev gateway HTTPS/mTLS client flags for registration, trust fetches, polling, completion, and join-manifest fetches.
 - [x] Add portable agent Skillkit bundle export for mainstream frameworks.
 - [x] Add Skillkit bundle verification for mainstream framework installation.
-- [x] Add machine-readable adaptive configuration contract to Skillkit bundles and install plans so agents probe environment first and ask when gateway/workspace/framework/adapter/approval configuration is unclear.
+- [x] Add machine-readable adaptive configuration contract to Skillkit bundles and install plans so agents probe environment first and ask when gateway/workspace/framework/adapter/authorization configuration is unclear.
 - [x] Add local release candidate packaging for open-source publication.
 - [x] Refine the canonical perfect ending into a final control-plane blueprint, product cuts, release ladder, and remaining gap ledger.
 - [x] Add GitHub Release dry-run planning from verified release candidates.
@@ -86,7 +86,7 @@
 - [x] Add definitive perfect-ending blueprint as the single architecture decision layer for product surfaces, protocol spine, mode contracts, state machines, host sovereignty, adapter lifecycle, reliability, security, golden paths, v1.0 proof gates, and close order.
 - [x] Add final closure specification with kernel/plugin boundaries, gateway data model, host kernel layers, API/MCP surface, deployment profiles, acceptance matrix, release shape, and final build order.
 - [x] Add converged perfect-ending decision lens so future architecture changes patch the canonical layer instead of appending more dated final sections.
-- [x] Add final operating decision that compresses the endgame into one signed control protocol, two host products, separated trust roots, join/run/approve/prove paths, and release/Skillkit/acceptance/evidence/conformance proof packages.
+- [x] Add final operating decision that compresses the endgame into one signed control protocol, two host products, separated trust roots, join/run/authorize/prove paths, and release/Skillkit/acceptance/evidence/conformance proof packages.
 - [x] Add hostrunner-integrated runtime fixture capture for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters through `--capture-runtime-fixture`.
 - [x] Add verifiable Skillkit install planning for Codex, Claude Code, Hermes, OpenClaw, OpenCode, and generic MCP agents through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`.
 - [x] Add dry-run-by-default direct Skillkit installer for mainstream Agent frameworks through `rdev skillkit install`.
@@ -120,7 +120,7 @@
 - [x] Add relay adapter acceptance evidence packaging and verification with `rdev.acceptance-package.relay-adapter.v1`, `rdev.acceptance-verification.relay-adapter-package.v1`, `rdev acceptance package-relay-adapter`, `rdev acceptance verify-relay-adapter-package`, standard connectivity path checks for Chisel/frpc, SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard, connected-status checks, redaction, checksums, selected-path reporting, and release-smoke coverage.
 - [x] Add hosted provider runtime acceptance evidence packaging and verification with `rdev.acceptance-package.hosted-provider-runtime.v1`, `rdev.acceptance-verification.hosted-provider-runtime-package.v1`, `rdev acceptance package-hosted-provider-runtime`, `rdev acceptance verify-hosted-provider-runtime-package`, storage/auth verification checks, backup/restore/retention evidence checks, role-mapping authorization probes, failure-mode probes, redaction, checksums, and release-smoke coverage.
 - [x] Add production enrollment authority lifecycle evidence for key custody, fleet renewal plans, and emergency drill packages.
-- [x] Add production WSS/mTLS host job transport with WebSocket job delivery, completion/failure/artifact acknowledgements, and TLS/mTLS client certificate reuse.
+- [x] Add production WSS/mTLS host task transport with WebSocket task delivery, completion/failure/artifact acknowledgements, and TLS/mTLS client certificate reuse.
 - [x] Add AI-native Agent invite workflow with `rdev.agent-invite.v1`, `rdev invite create`, and MCP tool `rdev.invites.create`.
 - [x] Add auto transport fallback planning and runtime fallback from WSS to HTTPS long-poll to short polling for restrictive networks.
 - [x] Add Agent connection protocol matrix with LAN scope, scoped discovery plan, and agent-managed relay/mesh/SSH connectivity candidates.
@@ -128,12 +128,12 @@
 - [x] Add universal Connection Entry materialization with `rdev.connection_entry.plan`, `rdev connection-entry plan`, `rdev.connection-entry.materialization-plan.v1`, and generic `entry_package_plan` output so all scenarios produce a link, visible script, or package instead of human-assembled ticket/root/gateway/transport values; MCP and CLI can both write `CONNECTION_ENTRY.md`, `connection-entry-plan.json`, and generated launcher/package planning files when an empty output directory is provided.
 - [x] Add owned managed Connection Entry package materialization for macOS LaunchAgent, Linux systemd user-service, and Windows Service reviewed plans without executing service installation or persistence.
 - [x] Promote Connection Entry to the universal target-side handoff contract with machine-readable invite/materialization fields, required Agent flow, MCP/CLI tests, docs, Skills, and i18n prompts so all remote-host scenarios use invite plus materialized package plan instead of customer/connector-specific names or human-assembled low-level parameters.
-- [x] Add machine-readable Connection Entry target-selection policy so Agents choose `managed` for owned long-running machines and `attended-temporary` for third-party or one-off machines before materialization, asking only when ownership or persistence approval is ambiguous.
+- [x] Add machine-readable Connection Entry target-selection policy so Agents choose `managed` for owned long-running machines and `attended-temporary` for third-party or one-off machines before materialization, asking only when ownership or persistence authorization is ambiguous.
 - [x] Add signed package-aware Connection Entry catalog metadata with Windows/macOS/Linux candidates, visible script fallbacks, join page recommendation, invite output, signed join manifest coverage, and regression tests so Agents select target OS packages without human flag assembly.
 - [x] Add self-contained Connection Entry runner package surface with runner manifest, visible launcher, dry-run path selection, direct/LAN/proxy/native fallback probes, and configured SSH/frp/Chisel/headscale/Tailscale/WireGuard helper gateway overrides.
 - [x] Add local verifiable per-platform Connection Entry release archive generation and verification inside release candidates, bundling platform artifacts, release metadata, runner template, visible launchers, archive checksums, and no-private-parameter policy checks.
-- [x] Add real runner execution for approved helper startup and user/workspace-scoped dependency repair through structured `RDEV_*_START_ARGV_JSON`, `RDEV_*_INSTALL_ACTION_JSON`, and `rdev deps install` for SHA-256 verified Chisel/frpc helper installs.
-- [x] Extend user/workspace-scoped helper dependency repair to mesh/VPN helper binaries by supporting `tailscale` and `wg` in `rdev deps install` and emitting standard `RDEV_MESH_INSTALL_ACTION_JSON` / `RDEV_VPN_INSTALL_ACTION_JSON` templates from relay adapter packages, while keeping enrollment, keys, routes, DNS, firewall, services, drivers, and privileged network changes approval-gated.
+- [x] Add real runner execution for authorized helper startup and user/workspace-scoped dependency repair through structured `RDEV_*_START_ARGV_JSON`, `RDEV_*_INSTALL_ACTION_JSON`, and `rdev deps install` for SHA-256 verified Chisel/frpc helper installs.
+- [x] Extend user/workspace-scoped helper dependency repair to mesh/VPN helper binaries by supporting `tailscale` and `wg` in `rdev deps install` and emitting standard `RDEV_MESH_INSTALL_ACTION_JSON` / `RDEV_VPN_INSTALL_ACTION_JSON` templates from relay adapter packages, while keeping enrollment, keys, routes, DNS, firewall, services, drivers, and privileged network changes authorization-gated.
 - [x] Extend real Connection Entry runner execution evidence to configured SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard helper startup paths, including `rdev connection-entry run --result-out` evidence archival and release-smoke coverage from an actual runner invocation instead of synthetic runner-result JSON.
 - [x] Harden Connection Entry helper dependency repair so `RDEV_*_INSTALL_ACTION_JSON` can only execute the standard schema-checked `rdev deps install --execute` contract with matching tool, scope, URL, and SHA-256 instead of arbitrary Agent-authored install commands.
 - [x] Add `rdev.support-session-fresh-agent-connect-contract.v1` so high-level support-session payloads tell newly installed Agents how to recover missing `rdev`, send the one human handoff, wait/report connection status, and avoid model-authored setup scripts.
@@ -144,14 +144,14 @@
 - [x] Add `rdev.support-session-foreground-feedback.v1` and machine-readable `rdev.support-session-foreground-event.v1` stderr events so a foreground `connect --start` command can report `connected` without requiring the Agent to invent a polling loop.
 - [x] Add fresh-Agent `rdev support-session handoff` / `rdev.support_session.handoff` so Agents get one first-contact routing decision before choosing create vs foreground start, reducing model-dependent use of prepare/plan or ad hoc bootstrap code.
 - [x] Make `rdev support-session start` auto-prepare verified Windows/macOS/Linux helper assets when a checkout and Go are available, and include asset/readiness/connectivity reports in `rdev.support-session-started.v1`.
-- [x] Add standardized support-session planning through `rdev support-session plan` and MCP tool `rdev.support_session.plan` so Agents get gateway startup, verified helper assets, invite creation, localized target commands, and scoped attended-temporary auto-approval without writing ad hoc bootstrap or approval code.
+- [x] Add standardized support-session planning through `rdev support-session plan` and MCP tool `rdev.support_session.plan` so Agents get gateway startup, verified helper assets, invite creation, localized target commands, and scoped attended-temporary auto-authorization without writing ad hoc bootstrap or authorization code.
 - [x] Add standardized support-session creation through `rdev support-session create` and MCP tool `rdev.support_session.create` so Agents with a reachable gateway get a ready target command, join URL, real ticket code, manifest root, and status watcher without manual invite parsing or placeholder substitution.
 - [x] Add foreground support-session startup through `rdev support-session start` so Agents without a running gateway can start the local gateway, create the session, print the ready target command, and keep serving without ad hoc background process management.
 - [x] Add `rdev.support-session-ready-file.v1` and default `support-session-ready.json` output for `rdev support-session start` so Agents can read `ready_file.path` when foreground stdout is hard to parse.
 - [x] Add `rdev acceptance fresh-agent-support-session` as a local contract gate for the handoff/create/start/status flow so regressions in one-command fresh-Agent behavior fail before real multi-harness acceptance.
 - [x] Add standardized support-session status feedback through `rdev support-session status`, `GET /v1/support-session/status`, and MCP tool `rdev.support_session.status` so Agents can watch the target host and proactively report when `connected=true`.
 - [x] Add target-side bootstrap self-repair for missing `rdev` through configured gateway `/assets` helper downloads with SHA-256 verification for Windows/macOS/Linux.
-- [x] Add first-host-only attended-temporary auto-approval metadata for standard visible Connection Entries, with audit events and regression coverage.
+- [x] Add first-host-only attended-temporary auto-authorization metadata for standard visible Connection Entries, with audit events and regression coverage.
 - [x] Add support-session `gateway_url_candidates` and default wildcard listen handling so runtime-generated Connection Entry commands carry ordered signed gateway failover metadata, while fresh Agents treat candidates as diagnostic/preflight data and never send `0.0.0.0`, loopback, or hand-picked gateway URLs to remote hosts.
 - [x] Add ordered gateway-candidate fallback directly into `rdev.support-session-created.v1` target commands so target-side one-liners try known Connection Entry URLs before failing and Agents do not write ad hoc PowerShell/shell fallback scripts.
 - [x] Add configured hosted/relay/mesh/VPN/SSH gateway fallback discovery through `RDEV_*_GATEWAY_URL` so support-session prepare/start/create append operator-configured reachable paths after direct/LAN candidates and before loopback, keeping fallback selection inside the standard target command instead of Agent-authored scripts.
@@ -164,23 +164,23 @@
 - [x] Add `rdev.support-session-connectivity-helper-preflight.v1` to prepare/create/plan payloads so Agents inspect configured SSH/relay/mesh/VPN helper gateway, start argv, and install action metadata instead of inventing tunnel scripts.
 - [x] Add `rdev.support-session-connection-entry-runner-recommendation.v1` to created/connect/started payloads so Agents can upgrade from a simple support-session handoff to the self-contained adaptive Connection Entry runner using inline invite JSON and standard plan/dry-run commands.
 - [x] Add `rdev.support-session-agent-runbook.v1` to handoff/prepare/create/start/connect/status/recovery payloads so fresh Agents get one standard connect/wait/report/recover sequence before choosing lower-level tools.
-- [x] Tighten fresh-Agent runbook routing so ordinary "connect this computer" requests start with `rdev.support_session.connect` / `rdev support-session connect`, and low-level invite/package planning is reserved for explicit package materialization, approved managed owned-host planning, or high-level recovery instructions.
-- [x] Add `rdev.support-session-fresh-agent-failure-prevention.v1` inside the Agent runbook so real failure modes like manual gateway/invite/bootstrap glue, missing helper assets that produce `rdev is required`, background gateway workarounds, custom approval polling, and Agent-written PowerShell/shell setup are captured as machine-readable forbidden paths with standard recovery routes.
+- [x] Tighten fresh-Agent runbook routing so ordinary "connect this computer" requests start with `rdev.support_session.connect` / `rdev support-session connect`, and low-level invite/package planning is reserved for explicit package materialization, authorized managed owned-host planning, or high-level recovery instructions.
+- [x] Add `rdev.support-session-fresh-agent-failure-prevention.v1` inside the Agent runbook so real failure modes like manual gateway/invite/bootstrap glue, missing helper assets that produce `rdev is required`, background gateway workarounds, custom authorization polling, and Agent-written PowerShell/shell setup are captured as machine-readable forbidden paths with standard recovery routes.
 - [x] Put `rdev.support_session.connect` first in the public MCP tool contract so fresh Agents discover the high-level connection entry before low-level invite/package tools.
 - [x] Add `rdev.connection-attempt-policy.v1` and bounded target-side timeout/retry behavior so Windows/macOS/Linux one-liners fail over quickly instead of hanging on a dead gateway candidate.
 - [x] Add MCP wait support to `rdev.support_session.status` so Agents can wait for connection feedback through the standard tool instead of writing custom polling loops.
 - [x] Add `rdev.support-session-user-handoff.v1` so Agents can send a localized message plus exact copy-paste command/link to humans without rewriting the target command.
 - [x] Add `rdev.support-session-target-handoff-envelope.v1` acceptance checks so created, connected, and foreground-started payloads all provide `target_handoff_envelope.full_text` as the preferred human-facing handoff, with `user_handoff` retained for compatibility.
 - [x] Add `user_handoff.auto_target_rule` so Agents handle unknown target OS by sending the join URL first and using returned platform commands only when needed.
-- [x] Add `rdev.support-session-connection-recovery.v1` to status and wait-timeout payloads so Agents recover failed first contact through standard `rdev` tools instead of writing custom PowerShell, shell, relay, approval-polling, or bootstrap code.
-- [x] Add `rdev.support-session-connected-next-steps.v1` to status payloads so Agents proactively report established connections, inspect `rdev.hosts.capabilities`, and create only the smallest scoped job after `connected=true`.
+- [x] Add `rdev.support-session-connection-recovery.v1` to status and wait-timeout payloads so Agents recover failed first contact through standard `rdev` tools instead of writing custom PowerShell, shell, relay, authorization-polling, or bootstrap code.
+- [x] Add `rdev.support-session-connected-next-steps.v1` to status payloads so Agents proactively report established connections, inspect session endpoint capabilities, and create only the smallest scoped task after `connected=true`.
 - [x] Add `rdev.support-session-target-bootstrap-requirements.v1` and CLI `rdev.support-session-target-bootstrap-readiness.v1` probing so Agents detect missing gateway helper assets before sending clean-machine Windows/macOS/Linux commands.
 - [x] Add `rdev gateway serve --rdev-assets-dir` for explicit low-level dev gateways, while keeping ordinary support sessions on `rdev support-session start/create/status`.
 - [x] Add default `rdev gateway serve --dev --auto-build-rdev-assets` so accidental low-level dev gateways build and serve verified Windows/macOS/Linux helpers from a valid checkout with Go, reducing clean-target `rdev is required` failures when a fresh Agent chooses `gateway serve` plus `invite create`.
 - [x] Add fresh-Agent bootstrap self-repair acceptance coverage so the local gate fetches join page, Windows/macOS/Linux bootstrap scripts, and helper asset hashes, proving clean targets are not told to install `rdev` manually.
 - [x] Add configured stable fallback acceptance coverage so the local fresh-Agent gate proves `RDEV_RELAY_GATEWAY_URL` is auto-selected, target commands use relay join URLs, and Agent supervision treats the session as durable after LAN changes.
 - [x] Add signed join-manifest gateway candidates so generated support-session bootstraps pass ordered gateway candidates into `rdev host serve`, and the target host selects a reachable signed candidate before registration.
-- [x] Add post-registration runtime fallback across signed join-manifest gateway candidates so `rdev host serve --transport auto` can switch to another reachable candidate when the current gateway fails before jobs are processed.
+- [x] Add post-registration runtime fallback across signed join-manifest gateway candidates so `rdev host serve --transport auto` can switch to another reachable candidate when the current gateway fails before session tasks are processed.
 - [x] Add foreground `support-session-status.json` output and `rdev.support-session-status-file.v1` metadata so Agents can read the latest machine-readable connection event from `status_file.path` instead of parsing long-running terminal output or writing polling loops.
 - [x] Add regression coverage that drives the foreground status-file watcher from `waiting` to `connected` after a real in-memory host registration, proving Agents can read connected feedback from `status_file.path`.
 - [x] Add foreground `target-handoff.txt` and `connected-report.txt` output with `rdev.support-session-handoff-text-file.v1` and `rdev.support-session-connected-report-file.v1` metadata so fresh Agents can forward the target-side command and connection-success report from plain-text files instead of parsing JSON or terminal streams.
@@ -201,7 +201,7 @@
 - [x] Add directory-level `rdev acceptance scaffold-post-release-download --post-release-install-dir` and MCP `post_release_install_dir` inputs so Agents scaffold public download evidence without hand-picking post-release plan and verification JSON files.
 - [ ] Run real clean-machine Windows Connection Entry acceptance using the standardized support-session plan and verified helper asset path.
 - [ ] Run real fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode acceptance to confirm the Agent calls `rdev.support_session.create` when a gateway is reachable, uses `rdev support-session connect --start` when no gateway exists, reserves `rdev.support_session.plan` for review/debug, and never invents gateway/bootstrap code.
-- [ ] Run clean Windows target acceptance using the `connect --start` generated PowerShell handoff to prove `/assets/rdev-windows-amd64.exe` self-repair, SHA-256 verification, auto-approved first host registration, status wait, revocation, and no-persistence cleanup.
+- [ ] Run clean Windows target acceptance using the `connect --start` generated PowerShell handoff to prove `/assets/rdev-windows-amd64.exe` self-repair, SHA-256 verification, auto-activated first host registration, status wait, session close, and no-persistence cleanup.
 - [x] Auto-include manifest root public keys in gateway ticket responses, Agent invite host commands, MCP invite output, and join bootstrap scripts so target users do not copy trust roots from chat.
 - [x] Allow signed-manifest-verified LAN/private and HTTPS gateway registration while keeping raw `--gateway --ticket-code` registration local-dev only.
 - [x] Add max-control Agent authority profile for remote-host-assisted discovery and downstream authorized device control.
@@ -209,7 +209,7 @@
 - [x] Sync Agent Bootstrap Prompt and multilingual quick starts so remote-host setup uses connection entries instead of human-assembled ticket/root/gateway/transport values.
 - [x] Add host-context-first progressive disclosure plan so remote host environment, project structure, requirements, logs, and evidence stay on the host while agents load indexed slices on demand.
 - [x] Add adaptive host-local provisioning plan so agents can probe and install verified skills, MCP tools, adapters, and dependencies on the target host when policy allows.
-- [x] Add A2A-aware peer-Agent collaboration plan so target-host AI tools can assist through bounded signed jobs, policy, approvals, and evidence.
+- [x] Add A2A-aware peer-Agent collaboration plan so target-host AI tools can assist through bounded signed session tasks, policy, authorizations, and evidence.
 - [x] Add target-host language matching plan and localized join page support for supported project languages.
 - [x] Add managed development plan for stable long-running Agent work on operator-owned workstations.
 - [x] Add Agent engineering discipline to contribution rules and remote-vibe-coding skill guidance.
@@ -236,13 +236,13 @@
 
 - [x] Define ticket data model.
 - [x] Define host data model.
-- [x] Define signed job envelope.
-- [x] Define job/artifact/audit models.
+- [x] Define signed task/session payload.
+- [x] Define task/artifact/audit models.
 - [x] Implement JSONL audit store.
 - [x] Implement local HTTP gateway for development.
 - [x] Add PowerShell bootstrap draft.
 - [x] Add Windows capability detector.
-- [x] Add dev gateway job create/status/claim/complete endpoints.
+- [x] Add dev gateway task create/status/claim/complete endpoints.
 - [x] Add policy explain engine.
 - [x] Add production key rotation/revocation and host trust update flow.
 - [x] Add production release/bootstrap trust root for join manifests.
@@ -254,7 +254,7 @@
 - [x] Add durable shell adapter audit schema and redaction rules.
 - [x] Add signed trust bundle rotation/revocation primitive.
 - [x] Add development trust bundle read/update endpoint.
-- [x] Wire host-side job verification to signed trust bundle active keys.
+- [x] Wire host-side task verification to signed trust bundle active keys.
 - [x] Add durable host trust bundle file store.
 - [x] Add durable host identity key store.
 - [x] Add signed host registration proof for identity-bearing registrations.
@@ -264,12 +264,12 @@
 - [x] Add final buy-vs-build boundary for MCP, Tailscale/headscale, SSH, Coder, DevPod, VS Code Remote Tunnels, RustDesk/MeshCentral, and Sigstore-style release trust.
 - [x] Add explicit exit criteria for v0.1 through v1.0 gates.
 - [x] Add stronger workspace and symlink escape tests.
-- [x] Add local evidence bundle export.
+- [x] Add local session evidence export.
 - [x] Add policy explanation for every host-side denial result.
-- [x] Add approval-required results for signed jobs with unsatisfied approval requirements.
-- [x] Add signed approval tokens for package install, elevation, GUI, service changes, push, merge, and deploy operations.
-- [x] Add durable approval-token consumption and persistence.
-- [x] Add gateway/API evidence bundle export directly from job ids.
+- [x] Add host-denial/session-interrupt results for signed tasks with unsatisfied policy requirements.
+- [x] Replace the retired authorization-exception model with session interrupts for package install, elevation, GUI, service changes, push, merge, and deploy operations.
+- [x] Remove durable session interrupt acknowledgement and persistence from the active protocol.
+- [x] Add gateway/API session evidence export directly from task ids.
 - [x] Add HTTPS long-poll fallback before WSS/mTLS transport.
 - [x] Add installable Skillkit bundle generation with manifest checksums and framework notes.
 - [x] Add installable Skillkit bundle verification for required skills, framework docs, file checksums, safe paths, and unlisted files.
@@ -283,21 +283,21 @@
 - [x] Add workspace lock manager and Git worktree preparation foundation.
 - [x] Wire workspace locks into hostrunner, host serve, and managed LaunchAgent arguments.
 - [x] Add Codex adapter MVP with locked-workspace execution, Git diff/status evidence, optional verification command evidence, output caps, and redaction.
-- [x] Add Codex adapter implicit approval preflight for push, merge, deploy, publish, credential, and service intents before adapter execution.
+- [x] Add Codex adapter implicit authorization preflight for push, merge, deploy, publish, credential, and service intents before adapter execution.
 - [x] Add Codex adapter `go test -json` parsing into `rdev.test-report.v1` verification summaries.
 - [x] Add Codex adapter conformance coverage for workspace canonicalization, write-scope escapes, failure evidence, redaction, truncation, and timeout cancellation evidence.
-- [x] Add Codex adapter cooperative cancellation from host/job context and gateway job cancellation polling.
-- [x] Add shell adapter cooperative cancellation from host/job context with explicit canceled evidence.
-- [x] Add PowerShell adapter MVP with capability gate, approval preflight, redacted evidence, workspace locking, and cooperative cancellation.
-- [x] Add canceled-job artifact reporting without changing the gateway job's canceled terminal state.
-- [x] Add shared implicit approval preflight for risky shell and Codex actions.
+- [x] Add Codex adapter cooperative cancellation from host/task context and gateway task cancellation polling.
+- [x] Add shell adapter cooperative cancellation from host/task context with explicit canceled evidence.
+- [x] Add PowerShell adapter MVP with capability gate, host-denial preflight, redacted evidence, workspace locking, and cooperative cancellation.
+- [x] Add canceled-task artifact reporting without changing the control plane task's canceled terminal state.
+- [x] Add shared host-denial preflight for risky shell and Codex actions.
 - [x] Add managed Mac coding acceptance harness with locked-worktree evidence export.
-- [x] Add acceptance report verifier for evidence checksums, artifact index, audit chain, approval gate, and workspace-lock release.
+- [x] Add acceptance report verifier for evidence checksums, artifact index, audit chain, host-denial probe, and workspace-lock release.
 - [x] Add managed Mac LaunchAgent acceptance plan command with checked plist, launchctl steps, service-backed acceptance commands, and uninstall guidance.
 - [x] Add managed Mac LaunchAgent acceptance plan verification and evidence packaging.
 - [x] Add opt-in macOS LaunchAgent service-control dry-run/execute command for start, inspect, and stop.
-- [x] Add Windows temporary acceptance plan command with reviewed launcher, release-verification requirements, approval probes, no-persistence checks, and evidence checklist.
-- [x] Add Windows temporary acceptance plan verifier for launcher safety, hashes, release inputs, approval probes, no-persistence checks, and required evidence.
+- [x] Add Windows temporary acceptance plan command with reviewed launcher, release-verification requirements, host-denial probes, no-persistence checks, and evidence checklist.
+- [x] Add Windows temporary acceptance plan verifier for launcher safety, hashes, release inputs, host-denial probes, no-persistence checks, and required evidence.
 - [x] Add signed release bundle index creation and verification for release artifacts, manifests, hashes, sizes, and required artifact presence.
 - [x] Add standalone `rdev-verify --bundle` support for bootstrap-side signed release bundle verification.
 - [x] Wire signed release bundle verification into Windows temporary bootstrap and acceptance-plan verification.
@@ -327,7 +327,7 @@
 - [ ] Add real restrictive-network acceptance evidence for frp, Chisel, headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel paths across Windows/macOS/Linux using the standard connectivity adapter packages and `rdev acceptance package-relay-adapter`.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.
-- [x] Add Linux managed-service acceptance package generation for start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence.
+- [x] Add Linux managed-service acceptance package generation for start/status/log/release-gate/audit/reconnect/session/stop/uninstall evidence.
 - [ ] Add real Linux systemd acceptance execution with reboot/reconnect proof.
 - [x] Add acpx adapter.
 - [x] Add cancellation artifact conformance for built-in shell, PowerShell, Codex, Claude Code, and acpx result evidence.
@@ -344,36 +344,36 @@
 ## Final End-State Gates
 
 - [ ] Temporary Windows host joins from one visible PowerShell command and leaves no service behind.
-- [x] Windows temporary acceptance can generate a preflight plan, foreground launcher, no-persistence checks, approval probes, and required evidence checklist without executing PowerShell.
+- [x] Windows temporary acceptance can generate a preflight plan, foreground launcher, no-persistence checks, host-denial probes, and required evidence checklist without executing PowerShell.
 - [x] Windows temporary acceptance plans can be independently verified before running on a target host.
-- [ ] Managed Mac runs a Codex coding job in a locked worktree and returns diff/test evidence.
+- [ ] Managed Mac runs a Codex coding task in a locked worktree and returns diff/test evidence.
 - [x] Tampered, expired, wrong-host, or replayed envelopes are rejected host-side.
 - [x] Workspace escape and non-allowlisted command attempts are rejected host-side.
 - [x] Host-side denials return structured `rdev.host-denial.v1` artifacts.
-- [x] Unsatisfied job approvals return structured `rdev.approval-required.v1` artifacts before adapter execution.
-- [x] Gateway-approved jobs carry signed `rdev.approval-token.v1` tokens.
-- [x] Host-side approval token consumption is persisted and rejects token reuse.
-- [x] Package install, elevation, GUI control, service changes, push, merge, and deploy require approval.
-- [x] Revocation stops future jobs and is recorded in audit.
+- [x] Unsatisfied task policy returns structured `rdev.host-denial.v1` artifacts or session interrupts before adapter side effects.
+- [x] Gateway-issued tasks carry session/task scope instead of the retired authorization-exception model.
+- [x] Host-side authorization-exception consumption is retired from the active protocol.
+- [x] Package install, elevation, GUI control, service changes, push, merge, and deploy require explicit session capability or interrupt handling.
+- [x] Revocation stops future tasks and is recorded in audit.
 - [x] Agent Skillkit can be exported as a checksummed bundle for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Agent Skillkit bundles can be independently verified before installation into Codex, Claude Code, Hermes, OpenClaw/OpenCode, and generic MCP agents.
 - [x] Release candidates can be packaged locally before GitHub Release publication.
 - [x] Release candidates can be independently verified after staging or download.
 - [x] Release candidates include and verify an SPDX 2.3 SBOM covering staged release artifacts.
 - [x] Release candidates include and verify `rdev.release-provenance.v1` provenance covering artifacts, release bundle, SBOM, and Skillkit files without leaking local output paths.
-- [x] Hostrunner can execute `adapter=codex` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
-- [x] Hostrunner can execute `adapter=acpx` jobs after signed envelope, identity, nonce, approval, capability, workspace, and lock checks, returning `rdev.acpx-result.v1` artifacts.
-- [x] Codex jobs that request push, merge, deploy, publish, credential changes, or service changes pause with `rdev.approval-required.v1` before adapter execution unless a matching approval token is present.
+- [x] Hostrunner can execute `adapter=codex` tasks after session/task, identity, capability, workspace, and lock checks, returning `rdev.codex-result.v1` artifacts.
+- [x] Hostrunner can execute `adapter=acpx` tasks after session/task, identity, capability, workspace, and lock checks, returning `rdev.acpx-result.v1` artifacts.
+- [x] Codex tasks that request push, merge, deploy, publish, credential changes, or service changes produce a host-denial artifact or session interrupt before adapter side effects.
 - [x] Managed Mac acceptance reports can be independently verified through `rdev acceptance verify`, including checksum and audit-chain validation.
-- [x] Managed Mac LaunchAgent service-backed acceptance evidence can be packaged with verified plan/plist, release-gate output, reconnect proof, verified managed Mac report, approval-required evidence, redaction, and checksums.
+- [x] Managed Mac LaunchAgent service-backed acceptance evidence can be packaged with verified plan/plist, release-gate output, reconnect proof, verified managed Mac report, host-denial probe evidence, redaction, and checksums.
 - [x] Release bundle indexes can be signed and verified before publishing, including every listed artifact manifest and binary checksum.
 - [x] Standalone `rdev-verify` can verify signed release bundles before target-host execution.
 - [x] Windows bootstrap can verify signed release bundles before target-host execution through a hash-pinned standalone verifier.
-- [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, approval probes, no-persistence checks, redaction, and checksums.
+- [x] Windows temporary acceptance evidence can be packaged with transcript, verifier output, audit, host-denial probes, no-persistence checks, redaction, and checksums.
 - [x] Windows managed-service acceptance can generate and verify a preflight plan with service create/status/start/stop/delete commands, release gate, required evidence, and explicit no-execution semantics.
 - [x] Linux managed-service acceptance can generate and verify a preflight plan with a written systemd user unit, service start/status/stop commands, hardening flags, release gate, required evidence, and explicit no-execution semantics.
-- [x] Linux managed-service acceptance evidence can be packaged with plan/unit/verifier output, start/status/log/release-gate/audit/reconnect/job/stop/uninstall evidence, redaction, and checksums.
-- [x] Host serve can verify a signed release bundle before host registration or job polling.
+- [x] Linux managed-service acceptance evidence can be packaged with plan/unit/verifier output, start/status/log/release-gate/audit/reconnect/session/stop/uninstall evidence, redaction, and checksums.
+- [x] Host serve can verify a signed release bundle before host registration or task polling.
 - [x] Gateway can require a signed `rdev.host-enrollment-certificate.v1` before host registration when an enrollment root is configured.
 - [x] MCP stdio exposes enrollment certificate verification as `rdev.enrollment.verify_certificate`, returning structured success/failure reports without granting access.
 - [x] Gateway can load a signed `rdev.host-enrollment-revocations.v1` list and reject host registration with a revoked enrollment certificate.
@@ -390,18 +390,18 @@
 - [x] Third-party adapter authors can scaffold a lifecycle manifest and verify it before runtime integration.
 - [x] Adapter cancellation artifacts can be verified through `pkg/adapterkit`, `rdev adapter verify-cancellation`, and MCP tool `rdev.adapter.verify_cancellation`.
 - [x] Adapter runtime lifecycle fixtures can be generated through `adapterkit.RunLifecycle` and verified through `pkg/adapterkit`, `rdev adapter verify-runtime`, and MCP tool `rdev.adapter.verify_runtime`.
-- [x] Built-in shell, PowerShell, Codex, Claude Code, and acpx hostrunner jobs can append `rdev.adapter-runtime-fixture.v1` artifacts with `--capture-runtime-fixture`.
+- [x] Built-in shell, PowerShell, Codex, Claude Code, and acpx hostrunner tasks can append `rdev.adapter-runtime-fixture.v1` artifacts with `--capture-runtime-fixture`.
 
 ## Definition Of Done For v0.1.0
 
-- Local gateway and local host can complete a demo ticket/job flow.
+- Local gateway and local host can complete a demo ticket/task flow.
 - MCP stdio server exposes the Phase 1 tools.
-- All jobs produce audit records.
+- All tasks produce audit records.
 - Audit records can be exported as a verifiable hash chain.
-- Jobs can be exported as local evidence bundles with manifest, checksums, artifacts, envelope, policy decision, audit slice, and audit chain.
-- Gateway/API can export the same evidence bundle directly from a job id.
+- Tasks can be exported as local session evidence with manifest, checksums, artifacts, policy decision, audit slice, and audit chain.
+- Gateway/API can export the same session evidence directly from a task id.
 - Agent Skills and MCP contracts can be exported as a portable Skillkit bundle with checksums and framework install notes.
-- Host-side denials and approval-required pauses are structured artifacts, not opaque errors.
-- Signed approval tokens are scoped, expiring, and consumed once by the host.
+- Host-side denials and session interrupts are structured artifacts/events, not opaque errors.
+- Retired authorization-exception contracts stay out of the active protocol; session capabilities and interrupts carry the active protocol.
 - Tests cover policy gates and command contracts.
 - README has a working local demo.

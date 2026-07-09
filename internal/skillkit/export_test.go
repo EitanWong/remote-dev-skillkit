@@ -33,7 +33,7 @@ func TestExportWritesInstallableSkillkitBundle(t *testing.T) {
 		t.Fatalf("unexpected gateway URL %q", manifest.GatewayURL)
 	}
 	assertAdaptiveConfigurationContract(t, manifest.AdaptiveConfiguration)
-	for _, skill := range []string{"safe-remote-support", "host-triage", "remote-job-review", "remote-vibe-coding"} {
+	for _, skill := range []string{"safe-remote-support", "host-triage", "remote-session-review", "remote-vibe-coding"} {
 		if !hasSkill(manifest, skill) {
 			t.Fatalf("expected skill %q in manifest: %#v", skill, manifest.Skills)
 		}
@@ -752,8 +752,8 @@ func assertAdaptiveConfigurationContract(t *testing.T, contract AdaptiveConfigur
 		"framework install path",
 		"workspace root",
 		"adapter choice",
-		"tunnel or mesh approval",
-		"approval policy",
+		"tunnel or mesh authorization",
+		"authorization policy",
 	} {
 		if !containsString(contract.AskIfUnclear, want) {
 			t.Fatalf("adaptive configuration ask list missing %q: %#v", want, contract.AskIfUnclear)

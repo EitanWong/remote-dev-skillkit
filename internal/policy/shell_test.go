@@ -7,8 +7,8 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
-func TestExplainShellJobAllowsScopedCommand(t *testing.T) {
-	explanation := ExplainShellJob(model.HostModeAttendedTemporary, map[string]any{
+func TestExplainShellTaskAllowsScopedCommand(t *testing.T) {
+	explanation := ExplainShellTask(model.HostModeAttendedTemporary, map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user", "fs.write.scoped"},
 		"argv":           []string{"go", "env", "GOOS"},
@@ -16,15 +16,15 @@ func TestExplainShellJobAllowsScopedCommand(t *testing.T) {
 		"write_scope":    []string{"."},
 	})
 	if !explanation.Allowed {
-		t.Fatalf("expected shell job to be allowed: %#v", explanation)
+		t.Fatalf("expected shell task to be allowed: %#v", explanation)
 	}
-	if explanation.ApprovalRequired {
-		t.Fatalf("expected no approval requirement: %#v", explanation)
+	if explanation.AuthorizationRequired {
+		t.Fatalf("expected no authorization requirement: %#v", explanation)
 	}
 }
 
-func TestExplainShellJobRejectsMissingWorkspace(t *testing.T) {
-	explanation := ExplainShellJob(model.HostModeAttendedTemporary, map[string]any{
+func TestExplainShellTaskRejectsMissingWorkspace(t *testing.T) {
+	explanation := ExplainShellTask(model.HostModeAttendedTemporary, map[string]any{
 		"capabilities":   []string{"shell.user"},
 		"argv":           []string{"go", "env", "GOOS"},
 		"allow_commands": []string{"go"},
@@ -37,8 +37,8 @@ func TestExplainShellJobRejectsMissingWorkspace(t *testing.T) {
 	}
 }
 
-func TestExplainShellJobRejectsCommandNotAllowlisted(t *testing.T) {
-	explanation := ExplainShellJob(model.HostModeAttendedTemporary, map[string]any{
+func TestExplainShellTaskRejectsCommandNotAllowlisted(t *testing.T) {
+	explanation := ExplainShellTask(model.HostModeAttendedTemporary, map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user"},
 		"argv":           []string{"go", "env", "GOOS"},
@@ -52,8 +52,8 @@ func TestExplainShellJobRejectsCommandNotAllowlisted(t *testing.T) {
 	}
 }
 
-func TestExplainShellJobRejectsEscapingWriteScope(t *testing.T) {
-	explanation := ExplainShellJob(model.HostModeAttendedTemporary, map[string]any{
+func TestExplainShellTaskRejectsEscapingWriteScope(t *testing.T) {
+	explanation := ExplainShellTask(model.HostModeAttendedTemporary, map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user", "fs.write.scoped"},
 		"argv":           []string{"go", "env", "GOOS"},
@@ -68,8 +68,8 @@ func TestExplainShellJobRejectsEscapingWriteScope(t *testing.T) {
 	}
 }
 
-func TestExplainShellJobRejectsWindowsEscapingWriteScope(t *testing.T) {
-	explanation := ExplainShellJob(model.HostModeAttendedTemporary, map[string]any{
+func TestExplainShellTaskRejectsWindowsEscapingWriteScope(t *testing.T) {
+	explanation := ExplainShellTask(model.HostModeAttendedTemporary, map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user", "fs.write.scoped"},
 		"argv":           []string{"go", "env", "GOOS"},
@@ -84,8 +84,8 @@ func TestExplainShellJobRejectsWindowsEscapingWriteScope(t *testing.T) {
 	}
 }
 
-func TestExplainShellJobRequiresApprovalForNetwork(t *testing.T) {
-	explanation := ExplainShellJob(model.HostModeAttendedTemporary, map[string]any{
+func TestExplainShellTaskRequiresAuthorizationForNetwork(t *testing.T) {
+	explanation := ExplainShellTask(model.HostModeAttendedTemporary, map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"shell.user"},
 		"argv":           []string{"go", "env", "GOOS"},
@@ -95,16 +95,16 @@ func TestExplainShellJobRequiresApprovalForNetwork(t *testing.T) {
 	if !explanation.Allowed {
 		t.Fatalf("network warning should not deny by itself: %#v", explanation)
 	}
-	if !explanation.ApprovalRequired {
-		t.Fatal("non-default network should require approval")
+	if !explanation.AuthorizationRequired {
+		t.Fatal("non-default network should require authorization")
 	}
-	if !containsReason(explanation.RequiredApprovals, "network.egress") {
-		t.Fatalf("unexpected approvals: %#v", explanation.RequiredApprovals)
+	if !containsReason(explanation.RequiredAuthorizations, "network.egress") {
+		t.Fatalf("unexpected authorizations: %#v", explanation.RequiredAuthorizations)
 	}
 }
 
-func TestExplainPowerShellJobAllowsStandardWindowsProbe(t *testing.T) {
-	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "powershell", map[string]any{
+func TestExplainPowerShellTaskAllowsStandardWindowsProbe(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "powershell", map[string]any{
 		"workspace_root":       ".",
 		"capabilities":         []string{"powershell.user"},
 		"command":              "Write-Output $env:COMPUTERNAME; whoami; Get-Location",
@@ -114,15 +114,15 @@ func TestExplainPowerShellJobAllowsStandardWindowsProbe(t *testing.T) {
 		"network":              "default-deny",
 	})
 	if !explanation.Allowed || explanation.Adapter != "powershell" {
-		t.Fatalf("expected powershell job to be allowed: %#v", explanation)
+		t.Fatalf("expected powershell task to be allowed: %#v", explanation)
 	}
-	if explanation.ApprovalRequired {
-		t.Fatalf("expected no approval requirement: %#v", explanation)
+	if explanation.AuthorizationRequired {
+		t.Fatalf("expected no authorization requirement: %#v", explanation)
 	}
 }
 
-func TestExplainPowerShellJobRejectsMissingPowerShellCapability(t *testing.T) {
-	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "powershell", map[string]any{
+func TestExplainPowerShellTaskRejectsMissingPowerShellCapability(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "powershell", map[string]any{
 		"workspace_root":       ".",
 		"capabilities":         []string{"shell.user"},
 		"command":              "Get-Location",
@@ -138,8 +138,25 @@ func TestExplainPowerShellJobRejectsMissingPowerShellCapability(t *testing.T) {
 	}
 }
 
-func TestExplainFileJobAllowsScopedRead(t *testing.T) {
-	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "file", map[string]any{
+func TestExplainPowerShellTaskExplainsArgvSchemaMismatch(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "powershell", map[string]any{
+		"workspace_root":       ".",
+		"capabilities":         []string{"powershell.user"},
+		"argv":                 []string{"powershell.exe", "-NoProfile", "-Command", "Get-Location"},
+		"allow_commands":       []string{"powershell.exe", "powershell", "pwsh"},
+		"max_duration_seconds": 10,
+		"max_output_bytes":     12000,
+	})
+	if explanation.Allowed {
+		t.Fatal("expected powershell argv-only policy to be denied")
+	}
+	if !containsReason(explanation.Denials, "PowerShell adapter expects policy.command or policy.script; policy.argv is for shell adapter") {
+		t.Fatalf("expected schema guidance for argv mismatch, got %#v", explanation.Denials)
+	}
+}
+
+func TestExplainFileTaskAllowsScopedRead(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "file", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"file.transfer.read", "fs.read"},
 		"action":         "read",
@@ -148,13 +165,13 @@ func TestExplainFileJobAllowsScopedRead(t *testing.T) {
 	if !explanation.Allowed || explanation.Adapter != "file" {
 		t.Fatalf("expected file read to be allowed: %#v", explanation)
 	}
-	if explanation.ApprovalRequired {
-		t.Fatalf("expected no approval for scoped file read: %#v", explanation)
+	if explanation.AuthorizationRequired {
+		t.Fatalf("expected no authorization for scoped file read: %#v", explanation)
 	}
 }
 
-func TestExplainFileJobRejectsWriteWithoutScope(t *testing.T) {
-	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "file", map[string]any{
+func TestExplainFileTaskRejectsWriteWithoutScope(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "file", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"file.transfer.write", "fs.write.scoped"},
 		"action":         "write",
@@ -168,8 +185,8 @@ func TestExplainFileJobRejectsWriteWithoutScope(t *testing.T) {
 	}
 }
 
-func TestExplainFileJobRequiresApprovalForDelete(t *testing.T) {
-	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "file", map[string]any{
+func TestExplainFileTaskRequiresAuthorizationForDelete(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "file", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"file.transfer.write", "fs.write.scoped"},
 		"action":         "delete",
@@ -177,29 +194,29 @@ func TestExplainFileJobRequiresApprovalForDelete(t *testing.T) {
 		"write_scope":    []string{"."},
 	})
 	if !explanation.Allowed {
-		t.Fatalf("expected scoped delete to be available behind approval: %#v", explanation)
+		t.Fatalf("expected scoped delete to be available behind authorization: %#v", explanation)
 	}
-	if !explanation.ApprovalRequired || !containsReason(explanation.RequiredApprovals, "file.delete") {
-		t.Fatalf("expected file.delete approval: %#v", explanation)
+	if !explanation.AuthorizationRequired || !containsReason(explanation.RequiredAuthorizations, "file.delete") {
+		t.Fatalf("expected file.delete authorization: %#v", explanation)
 	}
 }
 
-func TestExplainDesktopJobRequiresApprovalForScreenshot(t *testing.T) {
-	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "desktop", map[string]any{
+func TestExplainDesktopTaskRequiresAuthorizationForScreenshot(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "desktop", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"screen.screenshot"},
 		"action":         "screen.screenshot",
 	})
 	if !explanation.Allowed {
-		t.Fatalf("expected screenshot to be available behind approval: %#v", explanation)
+		t.Fatalf("expected screenshot to be available behind authorization: %#v", explanation)
 	}
-	if !explanation.ApprovalRequired || !containsReason(explanation.RequiredApprovals, "screen.screenshot") {
-		t.Fatalf("expected screenshot approval requirement: %#v", explanation)
+	if !explanation.AuthorizationRequired || !containsReason(explanation.RequiredAuthorizations, "screen.screenshot") {
+		t.Fatalf("expected screenshot authorization requirement: %#v", explanation)
 	}
 }
 
-func TestExplainDesktopJobAllowsWindowInspectWithoutApproval(t *testing.T) {
-	explanation := ExplainAdapterJob(model.HostModeAttendedTemporary, "desktop", map[string]any{
+func TestExplainDesktopTaskAllowsWindowInspectWithoutAuthorization(t *testing.T) {
+	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "desktop", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"window.inspect"},
 		"action":         "window.inspect",
@@ -207,8 +224,8 @@ func TestExplainDesktopJobAllowsWindowInspectWithoutApproval(t *testing.T) {
 	if !explanation.Allowed {
 		t.Fatalf("expected window inspect to be allowed: %#v", explanation)
 	}
-	if explanation.ApprovalRequired {
-		t.Fatalf("expected no approval for window inspect: %#v", explanation)
+	if explanation.AuthorizationRequired {
+		t.Fatalf("expected no authorization for window inspect: %#v", explanation)
 	}
 }
 

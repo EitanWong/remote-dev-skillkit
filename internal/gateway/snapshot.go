@@ -10,20 +10,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
 const SnapshotSchemaVersion = "rdev.gateway-snapshot.v1"
 
 type Snapshot struct {
-	SchemaVersion string                      `json:"schema_version"`
-	GeneratedAt   time.Time                   `json:"generated_at"`
-	TrustBundle   model.SignedTrustBundle     `json:"trust_bundle"`
-	Tickets       []model.Ticket              `json:"tickets"`
-	Hosts         []model.Host                `json:"hosts"`
-	Jobs          []model.Job                 `json:"jobs"`
-	Artifacts     map[string][]model.Artifact `json:"artifacts"`
-	Audit         []model.AuditEvent          `json:"audit"`
+	SchemaVersion string                  `json:"schema_version"`
+	GeneratedAt   time.Time               `json:"generated_at"`
+	TrustBundle   model.SignedTrustBundle `json:"trust_bundle"`
+	Tickets       []model.Ticket          `json:"tickets"`
+	Hosts         []model.Host            `json:"hosts"`
+	ControlPlane  controlplane.Snapshot   `json:"control_plane"`
+	Audit         []model.AuditEvent      `json:"audit"`
 }
 
 func (g *MemoryGateway) Snapshot() Snapshot {
@@ -98,23 +98,18 @@ func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
 	for _, host := range snapshot.Hosts {
 		hosts[host.ID] = host
 	}
-	jobs := make(map[string]model.Job, len(snapshot.Jobs))
-	for _, job := range snapshot.Jobs {
-		jobs[job.ID] = job
-	}
-	artifacts := make(map[string][]model.Artifact, len(snapshot.Artifacts))
-	for jobID, values := range snapshot.Artifacts {
-		artifacts[jobID] = append([]model.Artifact(nil), values...)
-	}
 	auditEvents := append([]model.AuditEvent(nil), snapshot.Audit...)
+	sessionStore := controlplane.NewMemoryStore(g.now)
+	if err := sessionStore.RestoreSnapshot(snapshot.ControlPlane); err != nil {
+		return err
+	}
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.tickets = tickets
 	g.codeIndex = codeIndex
 	g.hosts = hosts
-	g.jobs = jobs
-	g.artifacts = artifacts
+	g.sessionStore = sessionStore
 	g.audit = auditEvents
 	g.trustBundle = snapshot.TrustBundle
 	return nil
@@ -140,27 +135,13 @@ func (g *MemoryGateway) snapshotLocked(now time.Time) Snapshot {
 		return hosts[i].CreatedAt.Before(hosts[j].CreatedAt)
 	})
 
-	jobs := make([]model.Job, 0, len(g.jobs))
-	for _, job := range g.jobs {
-		jobs = append(jobs, job)
-	}
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
-	})
-
-	artifacts := make(map[string][]model.Artifact, len(g.artifacts))
-	for jobID, values := range g.artifacts {
-		copied := append([]model.Artifact(nil), values...)
-		sort.Slice(copied, func(i, j int) bool {
-			return copied[i].CreatedAt.Before(copied[j].CreatedAt)
-		})
-		artifacts[jobID] = copied
-	}
-
 	auditEvents := append([]model.AuditEvent(nil), g.audit...)
 	sort.Slice(auditEvents, func(i, j int) bool {
 		return auditEvents[i].Sequence < auditEvents[j].Sequence
 	})
+	if g.sessionStore == nil {
+		g.sessionStore = controlplane.NewMemoryStore(g.now)
+	}
 
 	return Snapshot{
 		SchemaVersion: SnapshotSchemaVersion,
@@ -168,8 +149,7 @@ func (g *MemoryGateway) snapshotLocked(now time.Time) Snapshot {
 		TrustBundle:   g.trustBundle,
 		Tickets:       tickets,
 		Hosts:         hosts,
-		Jobs:          jobs,
-		Artifacts:     artifacts,
+		ControlPlane:  g.sessionStore.Snapshot(),
 		Audit:         auditEvents,
 	}
 }
@@ -228,37 +208,6 @@ func (g *MemoryGateway) validateSnapshot(snapshot Snapshot) error {
 			return fmt.Errorf("snapshot contains duplicate host id %q", host.ID)
 		}
 		hostIDs[host.ID] = struct{}{}
-	}
-	jobIDs := map[string]struct{}{}
-	for _, job := range snapshot.Jobs {
-		if job.ID == "" {
-			return fmt.Errorf("snapshot contains job with missing id")
-		}
-		if _, exists := hostIDs[job.HostID]; !exists {
-			return fmt.Errorf("snapshot job %q references missing host %q", job.ID, job.HostID)
-		}
-		if _, exists := jobIDs[job.ID]; exists {
-			return fmt.Errorf("snapshot contains duplicate job id %q", job.ID)
-		}
-		jobIDs[job.ID] = struct{}{}
-	}
-	artifactIDs := map[string]struct{}{}
-	for jobID, artifacts := range snapshot.Artifacts {
-		if _, exists := jobIDs[jobID]; !exists {
-			return fmt.Errorf("snapshot artifacts reference missing job %q", jobID)
-		}
-		for _, artifact := range artifacts {
-			if artifact.ID == "" {
-				return fmt.Errorf("snapshot contains artifact with missing id")
-			}
-			if artifact.JobID != jobID {
-				return fmt.Errorf("snapshot artifact %q is stored under wrong job %q", artifact.ID, jobID)
-			}
-			if _, exists := artifactIDs[artifact.ID]; exists {
-				return fmt.Errorf("snapshot contains duplicate artifact id %q", artifact.ID)
-			}
-			artifactIDs[artifact.ID] = struct{}{}
-		}
 	}
 	for index, event := range snapshot.Audit {
 		if event.Sequence != index+1 {

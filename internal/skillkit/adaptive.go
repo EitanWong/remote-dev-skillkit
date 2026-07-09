@@ -42,8 +42,8 @@ func defaultAdaptiveConfigurationContract() AdaptiveConfigurationContract {
 			"framework install path",
 			"workspace root",
 			"adapter choice",
-			"tunnel or mesh approval",
-			"approval policy",
+			"tunnel or mesh authorization",
+			"authorization policy",
 		},
 		Placeholders: []string{
 			"https://api.example.com/v1",

@@ -26,8 +26,6 @@ type ManagedMacServiceOptions struct {
 	PlistOut                 string
 	IdentityStore            string
 	TrustStore               string
-	NonceStore               string
-	ApprovalStore            string
 	WorkspaceLockStore       string
 	LogDir                   string
 	ReleaseBundle            string
@@ -99,8 +97,6 @@ func RunManagedMacServicePlan(ctx context.Context, opts ManagedMacServiceOptions
 		ManifestURL:              defaults.ManifestURL,
 		IdentityStorePath:        defaults.IdentityStore,
 		TrustStorePath:           defaults.TrustStore,
-		NonceStorePath:           defaults.NonceStore,
-		ApprovalStorePath:        defaults.ApprovalStore,
 		WorkspaceLockStorePath:   defaults.WorkspaceLockStore,
 		ReleaseBundlePath:        defaults.ReleaseBundle,
 		ReleaseRootPublicKey:     defaults.ReleaseRootPublicKey,
@@ -139,9 +135,9 @@ func RunManagedMacServicePlan(ctx context.Context, opts ManagedMacServiceOptions
 			"rdev host service-control --platform macos --action start --execute transcript proving the LaunchAgent was loaded.",
 			"rdev host service-control --platform macos --action inspect --execute transcript or launchctl print output.",
 			"rdev host startup output proving the release-bundle gate passed before registration.",
-			"Gateway host registration, approval, trust refresh, and managed host audit events.",
+			"Gateway session join, endpoint trust refresh, and managed host audit events.",
 			"Reconnect evidence after logout, login, or reboot.",
-			"Managed Mac acceptance report and evidence bundle with diff, tests, audit chain, and approval-required artifacts.",
+			"Managed Mac acceptance report and session evidence with diff, tests, audit chain, and host-denial probe artifacts.",
 			"rdev acceptance verify output with ok=true for the service-backed managed Mac report.",
 			"rdev host service-control --platform macos --action stop --execute transcript.",
 			"rdev host uninstall-service --platform macos transcript confirming only the reviewed plist was removed.",
@@ -169,8 +165,6 @@ type managedMacServiceResolvedOptions struct {
 	PlistOut                 string
 	IdentityStore            string
 	TrustStore               string
-	NonceStore               string
-	ApprovalStore            string
 	WorkspaceLockStore       string
 	LogDir                   string
 	ReleaseBundle            string
@@ -218,8 +212,6 @@ func managedMacServiceDefaults(outDir string, opts ManagedMacServiceOptions) (ma
 		PlistOut:                 filepath.Clean(plistOut),
 		IdentityStore:            firstNonEmptyString(opts.IdentityStore, filepath.Join(hostDir, "identity.json")),
 		TrustStore:               firstNonEmptyString(opts.TrustStore, filepath.Join(hostDir, "trust-bundle.json")),
-		NonceStore:               firstNonEmptyString(opts.NonceStore, filepath.Join(hostDir, "nonces.json")),
-		ApprovalStore:            firstNonEmptyString(opts.ApprovalStore, filepath.Join(hostDir, "approvals.json")),
 		WorkspaceLockStore:       firstNonEmptyString(opts.WorkspaceLockStore, filepath.Join(outDir, "workspace-locks")),
 		LogDir:                   firstNonEmptyString(opts.LogDir, filepath.Join(outDir, "logs")),
 		ReleaseBundle:            strings.TrimSpace(opts.ReleaseBundle),
@@ -244,8 +236,6 @@ func managedMacServiceChecks(plan ManagedMacServicePlan, opts managedMacServiceR
 		{Name: "workspace_lock_store_arg", Passed: strings.Contains(args, "--workspace-lock-store\x00"+opts.WorkspaceLockStore), Detail: opts.WorkspaceLockStore},
 		{Name: "identity_store_arg", Passed: strings.Contains(args, "--identity-store\x00"+opts.IdentityStore), Detail: opts.IdentityStore},
 		{Name: "trust_store_arg", Passed: strings.Contains(args, "--trust-store\x00"+opts.TrustStore), Detail: opts.TrustStore},
-		{Name: "nonce_store_arg", Passed: strings.Contains(args, "--nonce-store\x00"+opts.NonceStore), Detail: opts.NonceStore},
-		{Name: "approval_store_arg", Passed: strings.Contains(args, "--approval-store\x00"+opts.ApprovalStore), Detail: opts.ApprovalStore},
 		{Name: "enrollment_arg", Passed: enrollmentConfigured(args), Detail: "ticket-code or manifest-url"},
 		{Name: "release_bundle_arg", Passed: opts.ReleaseBundle != "" && strings.Contains(args, "--release-bundle\x00"+opts.ReleaseBundle), Detail: opts.ReleaseBundle},
 		{Name: "release_root_arg", Passed: opts.ReleaseRootPublicKey != "" && strings.Contains(args, "--release-root-public-key\x00"+opts.ReleaseRootPublicKey)},
@@ -266,8 +256,8 @@ func missingManagedMacServiceEvidence(evidence []string) string {
 		"service-control --platform macos --action inspect",
 		"release-bundle gate",
 		"reconnect",
-		"evidence bundle",
-		"approval-required",
+		"session evidence",
+		"host-denial",
 		"acceptance verify",
 		"service-control --platform macos --action stop",
 		"uninstall-service --platform macos",
@@ -319,7 +309,7 @@ func managedMacServiceCommands(opts managedMacServiceResolvedOptions, repoRoot s
 		},
 		{
 			Name:    "verify_acceptance",
-			Purpose: "Verify evidence, checksums, approval gate, audit chain, and workspace lock release.",
+			Purpose: "Verify session evidence, checksums, host-denial probe, audit chain, and workspace lock release.",
 			Shell:   "rdev acceptance verify --report " + shellQuote(filepath.Join(acceptanceOut, "report.json")),
 			Manual:  true,
 		},

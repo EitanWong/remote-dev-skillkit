@@ -5,7 +5,7 @@ This document defines the acceptance gates for the two golden paths in Remote De
 - temporary Windows repair;
 - managed Mac coding.
 
-It also defines the shared security evidence that must be collected before a release can claim support for either path. The acceptance model follows the canonical [Perfect Ending Solution](../architecture/PERFECT_ENDING_SOLUTION.md): every successful path must prove typed intent, signed host-bound envelopes, host-side validation, approval gates, evidence bundles, audit, and revocation.
+It also defines the shared security evidence that must be collected before a release can claim support for either path. The acceptance model follows the canonical [Perfect Ending Solution](../architecture/PERFECT_ENDING_SOLUTION.md): every successful path must prove typed intent, session task authorization, host-side validation, interrupt gates, session evidence, audit, and revocation.
 
 ## Evidence Rules
 
@@ -15,8 +15,8 @@ Every acceptance run must record:
 - gateway URL and mode;
 - host OS, version, architecture, and hostname alias;
 - command transcript;
-- ticket id and host id;
-- job ids;
+- ticket id, session id, and endpoint id;
+- task ids;
 - artifact ids and checksums;
 - audit export path;
 - pass/fail result for every gate.
@@ -26,19 +26,19 @@ Secrets, host usernames, public IPs, and customer-specific paths must be redacte
 ## Gate 0: Development Gateway Recovery Regression
 
 Purpose: prove the local development gateway can survive a restart without
-reissuing trust or losing already acknowledged tickets, hosts, jobs, artifacts,
+reissuing trust or losing already acknowledged tickets, sessions, endpoints, tasks, artifacts,
 and audit events.
 
 ### Steps
 
 1. Start `rdev gateway serve --dev` with both `--signing-key` and `--state`.
-2. Create a ticket, register and approve a host, create a signed job, claim it,
-   and complete it with an artifact.
+2. Create a ticket, join a target endpoint to a session, create a signed task,
+   claim it, and complete it with an artifact.
 3. Stop the gateway.
 4. Restart the gateway with the same `--signing-key` and `--state`.
 5. Confirm the restored snapshot uses `rdev.gateway-snapshot.v1`.
-6. Confirm the restored job envelope still verifies against the same gateway
-   signing key and host id.
+6. Confirm the restored task binding still verifies against the same gateway
+   signing key and endpoint id.
 7. Confirm artifacts and audit events are still present.
 8. Start the gateway with a different signing key against the same snapshot and
    confirm restoration is rejected.
@@ -47,7 +47,7 @@ and audit events.
 
 - The snapshot file is written atomically with mode `0600` under a private
   parent directory.
-- Restoration preserves tickets, hosts, jobs, artifacts, audit events, and the
+- Restoration preserves tickets, hosts, tasks, artifacts, audit events, and the
   signed trust bundle.
 - Restoration rejects schema mismatch, signing-key mismatch, duplicate ids,
   broken references, and audit sequence gaps.
@@ -84,14 +84,14 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 7. Confirm `rdev-host.exe` is verified through the signed release bundle or signed host release manifest.
 8. Confirm Authenticode is checked when the release policy requires it.
 9. Confirm the host starts in foreground temporary mode.
-10. Approve the pending host with only scoped capabilities.
-11. Run a diagnostic shell or PowerShell job that reads toolchain state.
-12. Run a scoped write job inside a temporary workspace.
+10. Authorize the pending host with only scoped capabilities.
+11. Run a diagnostic shell or PowerShell task that reads toolchain state.
+12. Run a scoped write task inside a temporary workspace.
 13. Attempt a non-allowlisted command and confirm rejection.
 14. Attempt a workspace escape and confirm rejection.
-15. Request package installation or elevation and confirm approval is required.
+15. Request package installation or elevation and confirm authorization is required.
 16. Revoke the host from the gateway.
-17. Confirm queued/running jobs are canceled.
+17. Confirm queued/running tasks are canceled.
 18. Close the foreground host window.
 19. Confirm no Windows Service, scheduled task, Run key, startup shortcut, or firewall rule was installed by temporary mode.
 
@@ -102,11 +102,11 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 - `Get-FileHash` evidence for downloaded verifier and host binary.
 - Release bundle or release manifest verification output.
 - Authenticode verification output when enabled.
-- Host registration and approval audit events.
-- Job artifacts with schema versions and redaction metadata.
+- Host registration and authorization audit events.
+- Task artifacts with schema versions and redaction metadata.
 - Policy denial evidence for non-allowlisted command and workspace escape.
-- Approval-required evidence for elevation/package install.
-- Host revoke audit event and job cancellation audit event.
+- Authorization-required evidence for elevation/package install.
+- Host revoke audit event and task cancellation audit event.
 - Windows checks proving no persistence:
   - `Get-Service *rdev*`
   - `Get-ScheduledTask | Where-Object TaskName -match 'rdev|remote-dev'`
@@ -118,9 +118,9 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 - The host only opens outbound connections.
 - The host never exposes a public inbound listener.
 - Temporary mode leaves no service or autorun persistence.
-- Every executed job has a signed envelope and artifact evidence.
-- Unsafe or out-of-policy actions are denied or require approval.
-- Revocation prevents future jobs and cancels outstanding jobs.
+- Every executed task has a signed envelope and artifact evidence.
+- Unsafe or out-of-policy actions are denied or require authorization.
+- Revocation prevents future tasks and cancels outstanding tasks.
 
 ### Fail Criteria
 
@@ -129,11 +129,11 @@ Purpose: prove that a third-party Windows machine can join from one visible comm
 - Host binary executes before release verification.
 - Temporary mode installs hidden persistence.
 - An agent can run arbitrary shell without allowlist and policy checks.
-- A secret-like token appears unredacted in job artifacts.
+- A secret-like token appears unredacted in task artifacts.
 
 ## Gate B: Managed Mac Coding
 
-Purpose: prove that an operator-owned Mac can run a agent-requested coding job through a managed host and return diff/test evidence without pushing or merging automatically.
+Purpose: prove that an operator-owned Mac can run a agent-requested coding task through a managed host and return diff/test evidence without pushing or merging automatically.
 
 ### Required Environment
 
@@ -142,7 +142,7 @@ Purpose: prove that an operator-owned Mac can run a agent-requested coding job t
 - Codex CLI installed and authenticated locally.
 - Git installed.
 - Test repository with a clean baseline.
-- Gateway has the host approved as `managed`.
+- Gateway has the host authorized as `managed`.
 
 ### Steps
 
@@ -152,7 +152,7 @@ Purpose: prove that an operator-owned Mac can run a agent-requested coding job t
    - `shell.user`
    - Codex or the selected coding adapter
    - workspace roots allowed by policy.
-3. Create a coding job bound to one repository.
+3. Create a coding task bound to one repository.
 4. Confirm the host locks the workspace.
 5. Confirm the host creates a task branch or Git worktree.
 6. Run the Codex adapter or documented shell-backed coding adapter.
@@ -160,8 +160,8 @@ Purpose: prove that an operator-owned Mac can run a agent-requested coding job t
 8. Collect changed files, diff summary, test commands, exit codes, and artifacts.
 9. Attempt a second writer for the same workspace and confirm lock rejection.
 10. Attempt write outside the workspace and confirm rejection.
-11. Attempt `git push`, merge, deploy, or credential change and confirm approval is required.
-12. Cancel or complete the job and confirm the lock is released.
+11. Attempt `git push`, merge, deploy, or credential change and confirm authorization is required.
+12. Cancel or complete the task and confirm the lock is released.
 
 ### Real LaunchAgent Extension
 
@@ -171,40 +171,40 @@ The local `rdev acceptance managed-mac` harness proves the safety loop without r
 2. Review the generated plist, service label, logs path, trust root, workspace lock store, stop command, and uninstall command.
 3. Start it through the documented `launchctl` command.
 4. Confirm the host reconnects after logout/login or reboot.
-5. Run the same Codex locked-worktree job through the managed service.
-6. Export the evidence bundle and audit slice from the service-backed run.
+5. Run the same Codex locked-worktree task through the managed service.
+6. Export the session evidence and audit slice from the service-backed run.
 7. Stop and uninstall the LaunchAgent.
 8. Confirm no unrelated plist or service entry is modified.
 
 ### Required Evidence
 
 - Host capability inventory.
-- Host identity key id, public key fingerprint, and evidence that the job envelope is bound to the same fingerprint.
+- Host identity key id, public key fingerprint, and evidence that the session task is bound to the same endpoint identity.
 - Managed install or managed test-mode transcript.
-- Job envelope showing host and workspace binding.
+- Session task record showing endpoint and workspace binding.
 - Workspace lock evidence.
 - Branch or worktree name.
 - Diff output.
 - Test command output and exit codes.
-- Job artifact with `rdev.shell-result.v1` or adapter-specific result schema.
+- Task artifact with `rdev.shell-result.v1` or adapter-specific result schema.
 - Policy denial evidence for workspace escape.
-- Approval-required evidence for push/merge/deploy.
-- Audit export covering ticket or managed policy, host, job, artifacts, approvals, and completion.
+- Authorization-required evidence for push/merge/deploy.
+- Audit export covering ticket or managed policy, host, task, artifacts, authorizations, and completion.
 
 ### Pass Criteria
 
-- Coding job runs only in the approved workspace.
+- Coding task runs only in the authorized workspace.
 - One writer holds the workspace lock.
 - Diff and tests are returned before completion.
-- Push, merge, deploy, service changes, and credential changes require approval.
-- The agent cannot approve its own dangerous action.
+- Push, merge, deploy, service changes, and credential changes require authorization.
+- The agent cannot authorize its own dangerous action.
 
 ### Fail Criteria
 
-- The managed host writes outside approved roots.
-- The job runs on an unapproved host.
+- The managed host writes outside authorized roots.
+- The task runs on an unauthorized host.
 - A second writer can mutate the same workspace without an isolated worktree.
-- Push, merge, or deploy happens without approval.
+- Push, merge, or deploy happens without authorization.
 - Artifacts omit the diff/test evidence needed for review.
 
 ## Gate C: Shared Security Regression
@@ -225,7 +225,7 @@ The host must reject:
 
 ### Policy Validation
 
-The host must reject or require approval for:
+The host must reject or require authorization for:
 
 - workspace escape;
 - symlink escape;
@@ -236,7 +236,7 @@ The host must reject or require approval for:
 - service changes;
 - credential access;
 - destructive filesystem operation outside the workspace;
-- push, merge, deploy, publish, or paid job.
+- push, merge, deploy, publish, or paid task.
 
 ### Release Validation
 
@@ -255,13 +255,13 @@ Audit export must prove:
 
 - ticket creation;
 - host registration;
-- host approval;
+- host authorization;
 - policy decisions;
-- job creation;
-- job lease or claim;
-- job completion/failure/cancel;
+- task creation;
+- task lease or claim;
+- task completion/failure/cancel;
 - artifact creation;
-- approval decisions;
+- authorization decisions;
 - host revocation.
 
 ## Gate D: Managed Windows Service
@@ -295,10 +295,10 @@ These commands generate and verify a plan only. They do not run PowerShell,
   `sc.exe description`.
 - `sc.exe query` and `sc.exe qc` transcript after creation and after start.
 - Release-bundle startup gate output before host registration.
-- Gateway host registration, approval, trust refresh, and managed-host audit
+- Gateway session join, endpoint trust refresh, and managed-host audit
   events.
 - Reconnect evidence after login or reboot.
-- Managed coding or repair evidence bundle with approval-required artifacts.
+- Managed coding or repair session evidence with host-denial probe artifacts.
 - `sc.exe stop` and `sc.exe delete` uninstall transcript.
 - Evidence that attended-temporary mode remains non-persistent and separate.
 
@@ -306,7 +306,7 @@ These commands generate and verify a plan only. They do not run PowerShell,
 
 - The service uses `start= demand` unless a later explicit policy changes it.
 - The service command runs `rdev host serve --mode managed --once=false`.
-- Identity, trust, nonce, approval, workspace-lock, and release-bundle gate
+- Identity, trust, workspace-lock, and release-bundle gate
   arguments are present.
 - The host reconnects and rejects out-of-policy work locally.
 - Stop and uninstall are explicit, transcripted, and auditable.
@@ -358,7 +358,7 @@ rdev acceptance package-linux-managed-service \
   --release-gate release-gate.json \
   --audit audit.jsonl \
   --reconnect reconnect.txt \
-  --job-evidence-dir job-evidence \
+  --session-evidence-dir session-evidence \
   --stop-transcript stop.txt \
   --uninstall-transcript uninstall.txt
 ```
@@ -376,17 +376,17 @@ is missing.
 - `systemctl --user status <unit>` transcript after start.
 - `journalctl --user -u <unit>` service log excerpt.
 - Release-bundle startup gate output before host registration.
-- Gateway host registration, approval, trust refresh, and managed-host audit
+- Gateway session join, endpoint trust refresh, and managed-host audit
   events.
-- Reconnect evidence after logout or reboot, including any separately approved
+- Reconnect evidence after logout or reboot, including any separately authorized
   linger/setup transcript if required.
-- Managed coding or repair evidence bundle with approval-required artifacts.
+- Managed coding or repair session evidence with host-denial probe artifacts.
 - `systemctl --user disable --now <unit>` and uninstall transcript.
 
 ### Pass Criteria
 
 - The unit runs `rdev host serve --mode managed --once=false`.
-- Identity, trust, nonce, approval, workspace-lock, and release-bundle gate
+- Identity, trust, workspace-lock, and release-bundle gate
   arguments are present.
 - The unit uses systemd user service scope, `Restart=on-failure`,
   `NoNewPrivileges=true`, and `PrivateTmp=true`.
@@ -398,7 +398,7 @@ is missing.
 
 - The plan or transcript writes to `/etc/systemd/system`, requires unreviewed
   `sudo`, weakens firewall policy, installs cron persistence, or changes login
-  linger policy without a separate approval transcript.
+  linger policy without a separate authorization transcript.
 - A Linux managed-service claim is made from a plan without real Linux host
   start/status/reboot/reconnect/stop/uninstall transcripts.
 - The service silently grants L3/L4 operations or external consequences.
@@ -408,16 +408,16 @@ is missing.
 
 The local test suite currently covers:
 
-- signed job envelope creation and host verification;
+- session task creation and host-side validation;
 - signed trust bundle rotation, rollback rejection, previous-hash validation, and key revocation checks;
 - tamper and expiry rejection;
-- host-bound job execution;
+- session task execution;
 - scoped shell execution;
 - allowlist rejection;
 - workspace write-scope rejection;
 - symlink write-scope escape rejection, including missing child paths below symlinks;
 - shell policy explain;
-- host revocation canceling queued/running jobs;
+- host revocation canceling queued/running tasks;
 - release artifact signing and verification primitives;
 - Windows bootstrap verifier handoff logic;
 - shell artifact schema and redaction metadata;
@@ -433,13 +433,12 @@ The local test suite currently covers:
 - dev revocation-list distribution checks through `GET /v1/enrollment/revocations` and `rdev enrollment fetch-revocations`, including empty and non-empty signed lists, operator-auth issuer-role enforcement, CLI operator-token propagation, pinned-root verification, and wrong-root rejection before the fetched list is used by CLI or MCP workflows;
 - host-side hosted revocation refresh checks through `rdev host serve --fetch-enrollment-revocations --enrollment-root-public-key`, including explicit flag requirements, optional operator-token propagation through the gateway client, signed list verification, local certificate signature verification against the pinned root, success summaries, and revoked-certificate rejection before registration is attempted;
 - MCP enrollment certificate verification through `rdev.enrollment.verify_certificate`, including structured `rdev.enrollment-certificate-verification.v1` success/failure reports, certificate fingerprints, optional revocation-list checks, revoked-certificate failure evidence, and wrong-root failure evidence before an agent trusts a host registration;
-- host-side job verification through signed trust bundle active keys, with legacy trust fallback.
+- host-side task verification through signed trust bundle active keys, with legacy trust fallback only for retired internal evidence fixtures.
 - durable host trust bundle file storage with 0600 permissions, update verification, rollback rejection, and stored-bundle fallback.
-- durable host identity key file storage with 0600 permissions, registration identity preservation, signed job envelope identity binding, and host-side fingerprint mismatch rejection.
-- host-side nonce replay rejection with in-memory and file-backed stores.
+- durable host identity key file storage with 0600 permissions, session endpoint identity preservation, task identity binding, and host-side fingerprint mismatch rejection.
+- host-side replay rejection with in-memory and file-backed stores.
 - hash-chained audit export and verification through `rdev audit export` / `rdev audit verify`.
-- local evidence bundle export through `rdev evidence export`, including manifest, checksums, signed envelope, policy decision, artifacts, audit slice, and audit chain.
-- gateway/API evidence bundle export from job ids through `GET /v1/jobs/{job_id}/evidence-bundle` and `rdev evidence export --gateway ... --job-id ...`.
+- session evidence export from Control Plane v1 session/task/artifact state, without any retired task gateway route, retired evidence-export CLI, or task-id gateway mode.
 - Skillkit bundle export and verification through `rdev skillkit export` and `rdev skillkit verify`, including manifest checksums, required skills, MCP contracts, framework install notes, safe bundle paths, listed file SHA-256/size checks, and unlisted-file detection.
 - Skillkit framework install planning through `rdev skillkit plan-install` and `rdev skillkit verify-install-plan`, including bundle verification, per-framework shell/PowerShell scripts, no external mutation, no silent MCP config writes, no overwrite without `RDEV_SKILLKIT_FORCE=1`, explicit generic MCP target env, listed file SHA-256/size checks, and unlisted-file detection.
 - Skillkit direct installation through `rdev skillkit install`, including dry-run-by-default reports, explicit `--execute` before local mutation, bundle verification before copy, target root refusal, generic target enforcement, conflict refusal unless `--force`, copied skills/reference files, and `external_mutation=false`.
@@ -451,7 +450,7 @@ The local test suite currently covers:
 - Built-in SAML operator-auth runtime checks through `operatorauth.SAMLVerifier`, `rdev operator-auth verify-saml`, and `rdev gateway serve --saml-operator-auth`, covering signed SAMLResponse verification, IdP issuer, audience, assertion consumer recipient, time-condition warnings promoted to failures, SHA-256-or-better XML signature enforcement, certificate trust, subject mapping, role-attribute checks, and rejection of private key material in certificate config.
 - Hosted provider runtime evidence planning, packaging, and verification through `rdev.hosted-provider-runtime-evidence-plan.v1`, `runtime-evidence-plan.json`, `rdev acceptance package-hosted-provider-runtime --evidence-dir`, and `rdev acceptance verify-hosted-provider-runtime-package`, covering verified hosted provider package archival, standard gateway startup/storage/auth/backup/restore/retention/role/failure/audit evidence file names, package/verify commands, storage verification, hosted auth verification, role-mapping probes with both authorized and denied decisions, failure-mode probes, audit JSONL archival, redaction, checksums, and no-private-surface checks. Built-in `file` plus `hosted-ed25519-jwt` evidence can satisfy a single-node smoke gate; complete external provider evidence verifies as `external-durable-hosted-runtime-evidence`, but durable production claims still require deployed provider evidence.
 - Hosted provider and relay/connectivity evidence scaffolding and readiness status through `rdev.acceptance-evidence-scaffold.v1`, `rdev acceptance scaffold-evidence --hosted-provider-package`, `rdev acceptance scaffold-evidence --relay-adapter-package`, MCP tool `rdev.acceptance.scaffold_evidence`, `rdev.acceptance-evidence-status.v1`, `rdev acceptance evidence-status`, and MCP tool `rdev.acceptance.evidence_status`, covering package-level scaffold inputs, generated package runbooks, evidence-plan Agent rules, verifier checks for scaffold-first guidance, reviewed `--plan` overrides, standard checklist/report generation, and missing, empty, and placeholder evidence detection before any `rdev acceptance package-*` command can be treated as ready for real release evidence.
-- Connectivity adapter package generation and verification through `rdev relay-adapter package` and `rdev relay-adapter verify`, including Chisel/frpc `RDEV_RELAY_*`, SSH tunnel `RDEV_SSH_*`, headscale/Tailscale-compatible mesh `RDEV_MESH_*`, and WireGuard `RDEV_VPN_*` adapter schemas, safe helper argv, safe dependency or manual-review install actions, checksums/sizes, unlisted-file rejection, `external_mutation=false`, and no-private-surface checks. The safe dependency path covers SHA-256 verified user/workspace-scoped `chisel`, `frpc`, `tailscale`, and `wg` helper binaries; SSH identities, mesh enrollment, VPN profiles, keys, routes, DNS, firewall, services, drivers, and privileged network changes remain outside automatic install and require approval.
+- Connectivity adapter package generation and verification through `rdev relay-adapter package` and `rdev relay-adapter verify`, including Chisel/frpc `RDEV_RELAY_*`, SSH tunnel `RDEV_SSH_*`, headscale/Tailscale-compatible mesh `RDEV_MESH_*`, and WireGuard `RDEV_VPN_*` adapter schemas, safe helper argv, safe dependency or manual-review install actions, checksums/sizes, unlisted-file rejection, `external_mutation=false`, and no-private-surface checks. The safe dependency path covers SHA-256 verified user/workspace-scoped `chisel`, `frpc`, `tailscale`, and `wg` helper binaries; SSH identities, mesh enrollment, VPN profiles, keys, routes, DNS, firewall, services, drivers, and privileged network changes remain outside automatic install and require authorization.
 - Relay adapter acceptance evidence planning, packaging, and verification through `rdev.relay-adapter-acceptance-evidence-plan.v1`, `acceptance-evidence-plan.json`, `rdev acceptance package-relay-adapter --evidence-dir`, and `rdev acceptance verify-relay-adapter-package`, covering verified relay adapter package archival, standard `rdev connection-entry run --evidence-dir` runner capture, runner-generated helper transcript evidence, helper transcript redaction, runner-generated gateway/host/connection status archival, runner-generated audit JSONL archival, checksums, a standard connectivity adapter `selected_path` (`existing-frp-or-chisel-relay`, `existing-ssh-tunnel`, `existing-headscale-tailscale-mesh`, or `existing-wireguard-vpn`), and `connected=true`.
 - Release candidate packaging through `rdev release prepare-candidate`, covering staged built artifacts, signed artifact manifests, signed release bundle verification, Skillkit export/verify, SPDX 2.3 SBOM, local provenance, checksums, `connection-entry-release.zip`, visible launchers that verify the packaged signed release bundle before packaged execution, and `rdev.release-candidate.v1` summary generation without publishing to GitHub or leaking local output paths.
 - release candidate verification through `rdev release verify-candidate`, covering relocated candidates, summary schema, root public key, checksums, signed release bundle verification, required artifacts, Skillkit verification, SBOM coverage, provenance coverage, Connection Entry release archive schema/checksums/no-private-parameter policy, launcher `rdev-verify --bundle --root-public-key --require-artifacts` checks, listed file hashes/sizes, and unlisted-file rejection.
@@ -464,40 +463,40 @@ The local test suite currently covers:
 - combined release evidence indexing through `rdev acceptance release-evidence-index` and MCP tool `rdev.acceptance.release_evidence_index`, covering hosted provider runtime package verification, relay/connectivity package verification, post-release download package verification, package-manifest hashing without copying source-path-heavy package manifests, fail-closed missing-gate reports, and `release-evidence-index.json` plus `checksums.txt` output.
 - GitHub Actions CI through `.github/workflows/ci.yml`, covering `./scripts/check.sh` and `./scripts/ci/release-smoke.sh`.
 - structured host-side denial artifacts through `rdev.host-denial.v1`, covering missing envelope, wrong host, identity mismatch, expired/tampered envelopes, replayed nonce, unsupported adapter, missing capability, missing workspace, non-allowlisted command, and workspace escape.
-- CLI host polling reports host-side denials to the dev gateway as failed-job artifacts.
-- development HTTPS long-poll host job transport through `GET /v1/hosts/{host_id}/jobs/next?wait_seconds=...` and `rdev host serve --transport long-poll`.
-- development gateway TLS/mTLS pre-production transport proof through `rdev gateway serve --dev --tls-cert --tls-key --client-ca` plus `rdev host serve --gateway https://127.0.0.1:<port> --gateway-ca --gateway-client-cert --gateway-client-key`, proving local HTTPS registration and host job HTTP calls work with a CA-signed client certificate and fail without one.
-- structured host-side approval-required artifacts through `rdev.approval-required.v1`; unsatisfied signed approvals pause before adapter execution, and gateway-approved jobs carry signed `rdev.approval-token.v1` tokens in the re-signed job envelope.
-- shared implicit approval preflight for built-in shell and Codex jobs, covering package installation, elevation, GUI control, service management, push, merge, deploy, publish, and credential changes before adapter execution.
-- durable host-side approval token consumption through in-memory and file-backed `rdev.host-approval-store.v1`, including 0600 file permissions, 0700 directory permissions, expiry pruning, and CLI `--approval-store` wiring.
+- CLI host session execution reports host-side denials to the dev gateway as task result artifacts.
+- development HTTPS long-poll session event transport through `GET /v1/sessions/{session_id}/events?after_seq=...` and `rdev host serve --transport long-poll`.
+- development gateway TLS/mTLS pre-production transport proof through `rdev gateway serve --dev --tls-cert --tls-key --client-ca` plus `rdev host serve --gateway https://127.0.0.1:<port> --gateway-ca --gateway-client-cert --gateway-client-key`, proving local HTTPS session joins and task event calls work with a CA-signed client certificate and fail without one.
+- structured session interrupt artifacts through `rdev.sessions.interrupt`; pause, cancel, and local consent are represented as replayable Control Plane events rather than a separate task authorization subsystem.
+- shared preflight for built-in shell and Codex session tasks, covering package installation, elevation, GUI control, service management, push, merge, deploy, publish, and credential changes before adapter execution.
+- durable interrupt/idempotency handling for repeated pause/cancel events, including replay after reconnect and duplicate idempotency-key suppression.
 - macOS LaunchAgent plist generation through `rdev host install-service --platform macos`, including managed host arguments, `0600` plist permissions, and explicit launchctl next steps without auto-starting the service.
 - macOS LaunchAgent plist status and safe uninstall through `rdev host service-status` and `rdev host uninstall-service`, including label-mismatch refusal to avoid deleting unrelated plists.
 - Linux systemd user-unit generation through `rdev host install-service --platform linux`, including managed host arguments, `0600` unit permissions, basic hardening flags, explicit `systemctl --user` next steps, status inspection, dry-run service-control planning, unit mismatch refusal, and safe uninstall without auto-starting the service.
 - Linux managed-service acceptance planning and verification through `rdev acceptance linux-managed-service` and `rdev acceptance verify-linux-managed-service`, covering written `0600` systemd user units, managed args, hardening flags, release-bundle gate requirements, required evidence checklist, forbidden policy-weakening command rejection, missing-unit rejection, and no `systemctl` execution.
-- Linux managed-service acceptance evidence packaging through `rdev acceptance package-linux-managed-service`, covering verified plan and unit archival, plan-verifier output, redacted start/status/log/release-gate/audit/reconnect/stop/uninstall transcripts, managed job evidence bundle archival, approval-required proof, checksums, and release-blocking failure when release-gate output is not `ok=true`.
+- Linux managed-service acceptance evidence packaging through `rdev acceptance package-linux-managed-service`, covering verified plan and unit archival, plan-verifier output, redacted start/status/log/release-gate/audit/reconnect/stop/uninstall transcripts, managed task session evidence archival, interrupt-required proof, checksums, and release-blocking failure when release-gate output is not `ok=true`.
 - Windows Service managed-host planning through `rdev host install-service --platform windows`, including managed host arguments, release-bundle gate arguments, `start= demand`, reviewed `sc.exe create` / `description` command plans, dry-run status/control/uninstall command planning, explicit `service-control --execute` before invoking `sc.exe`, and no claim of real Windows Service acceptance yet.
 - Windows managed-service acceptance planning and verification through `rdev acceptance windows-managed-service` and `rdev acceptance verify-windows-managed-service`, covering reviewed `sc.exe` create/description/query/qc/start/stop/delete plans, managed args, `start= demand`, release-bundle gate requirements, required evidence checklist, forbidden policy-weakening command rejection, and no PowerShell or `sc.exe` execution.
 - workspace lock and Git worktree preparation foundation through `rdev.workspace-lock.v1`, `rdev.git-worktree-plan.v1`, `rdev workspace lock/status/unlock`, and `rdev workspace prepare-worktree`, including one-writer rejection, expired-lock replacement, owner-checked unlock, lock cleanup on failed worktree creation, and real `git worktree add` coverage.
 - workspace lock enforcement during host execution through `rdev host serve --workspace-lock-store`, including hostrunner lock acquire/release, `workspace_locked` structured denial artifacts, lock release after adapter denial, and managed LaunchAgent `--workspace-lock-store` argument generation.
-- managed Mac coding harness through `rdev acceptance managed-mac`, covering managed host registration, Git worktree creation, Codex adapter execution with workspace locking, diff/test evidence export, approval-required probe for `git.push`, workspace lock release, and evidence bundle creation.
-- acceptance report verification through `rdev acceptance verify`, covering report checks, coding and approval evidence bundle checksums, artifact index consistency, audit-chain verification, approval-required probe evidence, and workspace-lock release.
+- managed Mac coding harness through `rdev acceptance managed-mac`, covering managed endpoint registration, Git worktree creation, Codex adapter execution with workspace locking, diff/test evidence export, interrupt-required probe for `git.push`, workspace lock release, and session evidence creation.
+- acceptance report verification through `rdev acceptance verify`, covering report checks, coding and interrupt session evidence checksums, artifact index consistency, audit-chain verification, interrupt-required probe evidence, and workspace-lock release.
 - managed Mac LaunchAgent acceptance planning and verification through `rdev acceptance managed-mac-service` and `rdev acceptance verify-managed-mac-service`, covering checked plist generation, managed host arguments, release-bundle gate requirements, `rdev host service-control --execute` command plan, service-backed acceptance command plan, evidence verification command plan, forbidden policy-weakening command rejection, and uninstall guidance without auto-starting launchd.
-- managed Mac LaunchAgent acceptance evidence packaging through `rdev acceptance package-managed-mac-service`, covering verified plan and plist archival, plan-verifier output, redacted review/start/inspect/log/release-gate/audit/reconnect/stop/uninstall transcripts, verified managed Mac report/evidence bundle archival, approval-required proof, checksums, and release-blocking failure when release-gate output is not `ok=true` or the managed Mac report fails verification.
+- managed Mac LaunchAgent acceptance evidence packaging through `rdev acceptance package-managed-mac-service`, covering verified plan and plist archival, plan-verifier output, redacted review/start/inspect/log/release-gate/audit/reconnect/stop/uninstall transcripts, verified managed Mac report/session evidence archival, interrupt-required proof, checksums, and release-blocking failure when release-gate output is not `ok=true` or the managed Mac report fails verification.
 - macOS LaunchAgent lifecycle control through `rdev host service-control`, covering dry-run by default, explicit `--execute` for launchctl, plist label checks, and start/inspect/stop action planning.
-- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, covering reviewed PowerShell launcher generation, bootstrap script hash capture, signed release manifest or release bundle verifier requirements, launcher safety checks, approval probes for package/elevation/service/GUI/credential operations, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
-- Windows temporary acceptance evidence packaging through `rdev acceptance package-windows-temporary`, covering verified plan and launcher archival, redacted transcript and verifier output, audit capture, approval-probe evidence coverage, no-persistence evidence coverage, checksums, and release-blocking failure when verifier output is not `ok=true`.
+- Windows temporary acceptance planning and verification through `rdev acceptance windows-temporary` and `rdev acceptance verify-windows-temporary`, covering reviewed PowerShell launcher generation, bootstrap script hash capture, signed release manifest or release bundle verifier requirements, launcher safety checks, interrupt probes for package/elevation/service/GUI/credential operations, no-persistence inspection commands, and required evidence checklist without executing PowerShell.
+- Windows temporary acceptance evidence packaging through `rdev acceptance package-windows-temporary`, covering verified plan and launcher archival, redacted transcript and verifier output, audit capture, interrupt-probe evidence coverage, no-persistence evidence coverage, checksums, and release-blocking failure when verifier output is not `ok=true`.
 - release bundle verification through `rdev release create-bundle`, `rdev release verify-bundle`, and standalone `rdev-verify --bundle`, covering signed bundle index verification, per-artifact signed manifest verification, artifact and manifest SHA-256/size checks, required artifact presence, and tamper failure evidence.
 - shell adapter cooperative cancellation through `ExecuteContext` and hostrunner context propagation, returning `rdev.shell-result.v1` artifacts with `canceled=true` instead of timeout evidence.
-- PowerShell adapter MVP through `adapter=powershell`, covering `powershell.user` capability enforcement, allowlisted PowerShell executable execution, no `-ExecutionPolicy Bypass`, `rdev.powershell-result.v1` evidence, redaction, workspace-lock release, approval-required service-management detection, and context cancellation.
-- canceled-job artifact reporting for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters, preserving the gateway job's `canceled` terminal state while adding reviewable cancellation evidence.
+- PowerShell adapter MVP through `adapter=powershell`, covering `powershell.user` capability enforcement, allowlisted PowerShell executable execution, no `-ExecutionPolicy Bypass`, `rdev.powershell-result.v1` evidence, redaction, workspace-lock release, interrupt-required service-management detection, and context cancellation.
+- canceled-task artifact reporting for built-in shell, PowerShell, Codex, Claude Code, and acpx adapters, preserving the Control Plane task's `canceled` terminal state while adding reviewable cancellation evidence.
 - public adapterkit lifecycle-manifest, runtime-fixture, result-artifact, and cancellation-artifact conformance through `pkg/adapterkit`, `adapterkit.RunLifecycle`, `rdev adapter scaffold`, `rdev adapter verify-lifecycle`, `rdev adapter verify-runtime`, `rdev adapter verify-result`, `rdev adapter verify-cancellation`, and MCP tools `rdev.adapter.verify_lifecycle` / `rdev.adapter.verify_runtime` / `rdev.adapter.verify_result` / `rdev.adapter.verify_cancellation`, covering generated adapter templates, executable adapter phase fixtures, adapter phases, safety boundaries, cancellation, cleanup, result schemas, and built-in shell, PowerShell, Codex, Claude Code, and acpx artifacts for schema, timing, redaction metadata, command evidence, canceled-vs-timeout proof, and secret-pattern rejection.
 - hostrunner runtime fixture capture through `rdev host serve --capture-runtime-fixture`, including primary adapter result preservation plus appended `rdev.adapter-runtime-fixture.v1` artifacts for shell, PowerShell, Codex, Claude Code, acpx, and canceled shell cleanup.
 
 ## Next Automation Targets
 
 - Real managed Mac LaunchAgent acceptance execution: review generated plan, start/inspect/stop with `rdev host service-control --execute`, reconnect after reboot, run locked-worktree Codex, verify evidence, package the run with `rdev acceptance package-managed-mac-service`, and uninstall.
-- Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, approval-required probes, and revocation transcript.
-- Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and evidence bundle checksums for each release candidate.
+- Windows temporary host acceptance execution: verify the generated plan, run it on a clean Windows VM, verify signed release artifacts, run visible foreground bootstrap, confirm outbound-only host loop, collect no-persistence inspection output, host-denial probes, and revocation transcript.
+- Release transcript packaging: publish redacted acceptance command transcript, verified report JSON, Windows temporary evidence package when applicable, and session evidence checksums for each release candidate.
 - Windows Service managed-host acceptance execution: run the verified reviewed `sc.exe` plan on a clean Windows machine, verify service creation/status/start/stop/delete, confirm release-bundle startup gate, reconnect behavior, local stop/uninstall, and absence of temporary-mode persistence leakage.
 - Restrictive-network relay acceptance execution: run a verified Chisel/frpc, SSH tunnel, headscale/Tailscale-compatible mesh, or WireGuard connectivity adapter package against a deployed or already configured route on clean Windows/macOS/Linux targets, capture the Connection Entry runner evidence directory, then package it with `rdev acceptance package-relay-adapter --evidence-dir` and verify it with `rdev acceptance verify-relay-adapter-package`.
 - Hosted provider runtime acceptance execution: run a hosted gateway with a verified provider package, capture the standard hosted runtime evidence directory with gateway startup, `rdev gateway storage verify`, `rdev operator-auth verify-hosted`, `rdev operator-auth verify-oidc-jwks`, `rdev operator-auth verify-saml`, or equivalent hosted auth verification, backup, restore, retention, role-mapping authorization probes, failure-mode probes, and audit JSONL, then package it with `rdev acceptance package-hosted-provider-runtime --evidence-dir` and verify it with `rdev acceptance verify-hosted-provider-runtime-package`.

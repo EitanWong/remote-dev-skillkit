@@ -3,6 +3,7 @@ package acceptance
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,17 +15,16 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
-	"github.com/EitanWong/remote-dev-skillkit/internal/evidence"
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
-	"github.com/EitanWong/remote-dev-skillkit/internal/hostapproval"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
-	"github.com/EitanWong/remote-dev-skillkit/internal/hostnonce"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 const ManagedMacReportSchemaVersion = "rdev.acceptance.managed-mac.v1"
+const SessionEvidenceSchemaVersion = "rdev.session-evidence.v1"
 
 type ManagedMacOptions struct {
 	RepoRoot                  string
@@ -43,25 +43,49 @@ type ManagedMacOptions struct {
 
 type ManagedMacReport struct {
 	SchemaVersion        string                      `json:"schema_version"`
+	Protocol             string                      `json:"protocol"`
 	GeneratedAt          time.Time                   `json:"generated_at"`
 	Mode                 string                      `json:"mode"`
 	FixtureRepo          bool                        `json:"fixture_repo"`
 	RepoRoot             string                      `json:"repo_root"`
 	OutDir               string                      `json:"out_dir"`
 	WorkspaceLockStore   string                      `json:"workspace_lock_store"`
-	Ticket               model.Ticket                `json:"ticket"`
-	Host                 model.Host                  `json:"host"`
+	SessionID            string                      `json:"session_id"`
+	SessionStatus        controlplane.SessionStatus  `json:"session_status"`
+	TargetEndpoint       controlplane.Endpoint       `json:"target_endpoint"`
 	Worktree             workspace.GitWorktreeResult `json:"worktree"`
-	CodingJob            model.Job                   `json:"coding_job"`
-	ApprovalJob          model.Job                   `json:"approval_job"`
-	CodingArtifacts      []model.Artifact            `json:"coding_artifacts"`
-	ApprovalArtifacts    []model.Artifact            `json:"approval_artifacts"`
+	CodingTask           controlplane.Task           `json:"coding_task"`
+	SideEffectProbeTask  controlplane.Task           `json:"side_effect_probe_task"`
+	CodingArtifacts      []SessionArtifact           `json:"coding_artifacts"`
+	ProbeArtifacts       []SessionArtifact           `json:"side_effect_probe_artifacts"`
 	EvidenceDir          string                      `json:"evidence_dir"`
-	ApprovalEvidenceDir  string                      `json:"approval_evidence_dir"`
-	EvidenceManifest     evidence.Manifest           `json:"evidence_manifest"`
-	ApprovalManifest     evidence.Manifest           `json:"approval_manifest"`
+	ProbeEvidenceDir     string                      `json:"side_effect_probe_evidence_dir"`
+	EvidenceManifest     SessionEvidenceManifest     `json:"evidence_manifest"`
+	ProbeManifest        SessionEvidenceManifest     `json:"side_effect_probe_manifest"`
 	Checks               []Check                     `json:"checks"`
 	RecommendedNextSteps []string                    `json:"recommended_next_steps"`
+}
+
+type SessionArtifact struct {
+	Ref     controlplane.ArtifactRef `json:"ref"`
+	Content string                   `json:"content"`
+}
+
+type SessionEvidenceManifest struct {
+	SchemaVersion string                     `json:"schema_version"`
+	GeneratedAt   time.Time                  `json:"generated_at"`
+	SessionID     string                     `json:"session_id"`
+	TaskID        string                     `json:"task_id"`
+	TaskStatus    controlplane.TaskStatus    `json:"task_status"`
+	Artifacts     []controlplane.ArtifactRef `json:"artifacts"`
+	Files         []SessionEvidenceFile      `json:"files"`
+}
+
+type SessionEvidenceFile struct {
+	Path      string `json:"path"`
+	Kind      string `json:"kind"`
+	SizeBytes int64  `json:"size_bytes"`
+	SHA256    string `json:"sha256"`
 }
 
 type Check struct {
@@ -113,44 +137,40 @@ func RunManagedMac(ctx context.Context, opts ManagedMacOptions) (ManagedMacRepor
 
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
 	capabilities := []string{"shell.user", "codex.run", "git.diff"}
-	ticket, err := gw.CreateTicket(model.HostModeManaged, 7200, capabilities, "managed Mac acceptance")
-	if err != nil {
-		return ManagedMacReport{}, err
-	}
 	identity, err := hostidentity.Generate("acceptance-host")
 	if err != nil {
 		return ManagedMacReport{}, err
 	}
-	registration := model.HostRegistration{
-		TicketCode:          ticket.Code,
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Profile:            "managed",
+		Reason:             "managed Mac acceptance",
+		Capabilities:       capabilities,
+		JoinPolicy:         "single-target",
+		SelectedGatewayURL: "local://acceptance",
+		AuthorityID:        "acceptance-gateway",
+		ExpiresAt:          now.UTC().Add(2 * time.Hour),
+	})
+	if err != nil {
+		return ManagedMacReport{}, err
+	}
+	_, targetEndpoint, _, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
 		Name:                "managed-mac-acceptance",
-		OS:                  runtime.GOOS,
-		Arch:                runtime.GOARCH,
-		Capabilities:        capabilities,
-		IdentityKeyID:       identity.KeyID,
-		IdentityPublicKey:   identity.EncodedPublicKey(),
+		Platform:            runtime.GOOS + "/" + runtime.GOARCH,
 		IdentityFingerprint: identity.Fingerprint(),
-	}
-	proof, err := model.SignHostRegistration(registration, identity.PrivateKey)
-	if err != nil {
-		return ManagedMacReport{}, err
-	}
-	registration.IdentityProof = &proof
-	host, err := gw.RegisterHost(registration)
-	if err != nil {
-		return ManagedMacReport{}, err
-	}
-	host, err = gw.ApproveHost(host.ID, capabilities)
+		Capabilities:        capabilities,
+		Transport:           controlplane.TransportLocal,
+	})
 	if err != nil {
 		return ManagedMacReport{}, err
 	}
 
-	prepareJobID := "job_acceptance_prepare"
+	prepareTaskID := "task_acceptance_prepare"
 	worktree, err := workspace.PrepareGitWorktree(ctx, workspace.GitWorktreeOptions{
 		StoreDir:     workspaceLockStore,
 		RepoRoot:     repoRoot,
-		HostID:       host.ID,
-		JobID:        prepareJobID,
+		HostID:       targetEndpoint.ID,
+		TaskID:       prepareTaskID,
 		OwnerAdapter: "codex",
 		BaseRef:      "HEAD",
 		Branch:       "rdev/acceptance-managed-mac",
@@ -160,7 +180,7 @@ func RunManagedMac(ctx context.Context, opts ManagedMacOptions) (ManagedMacRepor
 	if err != nil {
 		return ManagedMacReport{}, err
 	}
-	_, _, _ = workspace.NewFileLockStore(workspaceLockStore).Release(repoRoot, prepareJobID, false)
+	_, _, _ = workspace.NewFileLockStore(workspaceLockStore).Release(repoRoot, prepareTaskID, false)
 
 	verificationCommands, allowVerificationCommands := managedMacVerificationCommands(opts, fixture)
 	prompt := strings.TrimSpace(opts.Prompt)
@@ -184,39 +204,54 @@ func RunManagedMac(ctx context.Context, opts ManagedMacOptions) (ManagedMacRepor
 	if len(opts.CodexArgs) > 0 {
 		codingPolicy["codex_args"] = opts.CodexArgs
 	}
-	codingJob, err := gw.CreateJob(host.ID, "codex", "managed Mac acceptance coding job", codingPolicy)
-	if err != nil {
-		return ManagedMacReport{}, err
-	}
 	runnerOpts := hostrunner.Options{
 		IdentityFingerprint: identity.Fingerprint(),
-		NonceStore:          hostnonce.NewMemoryStore(),
-		ApprovalStore:       hostapproval.NewMemoryStore(),
 		WorkspaceLockStore:  workspaceLockStore,
 	}
-	codingResult, err := hostrunner.RunDevJobWithOptionsContext(ctx, host.ID, gw.TrustBundle(), codingJob, now, runnerOpts)
-	if err != nil {
-		_, _, _ = gw.FailJobForHostWithArtifact(host.ID, codingJob.ID, err.Error(), codingResult.ArtifactContent)
-		return ManagedMacReport{}, err
-	}
-	codingJob, _, err = gw.CompleteJobForHost(host.ID, codingJob.ID, codingResult.ArtifactContent)
-	if err != nil {
-		return ManagedMacReport{}, err
-	}
-
-	approvalJob, approvalArtifacts, approvalManifest, err := runApprovalGateProbe(ctx, gw, host, identity, worktree.WorktreePath, workspaceLockStore, now, outDir)
+	codingTask, codingArtifact, err := runManagedMacSessionTask(ctx, gw, session.ID, targetEndpoint, identity, managedMacSessionTaskRequest{
+		Adapter:        "codex",
+		Intent:         "managed Mac acceptance coding task",
+		Capabilities:   []string{"codex.run", "git.diff"},
+		Payload:        codingPolicy,
+		IdempotencyKey: "managed-mac-coding",
+		ArtifactName:   "coding-result.json",
+	}, now, runnerOpts)
 	if err != nil {
 		return ManagedMacReport{}, err
 	}
 
-	codingArtifacts := gw.Artifacts(codingJob.ID)
+	probeTask, probeArtifact, err := runManagedMacSessionTask(ctx, gw, session.ID, targetEndpoint, identity, managedMacSessionTaskRequest{
+		Adapter:      "shell",
+		Intent:       "attempt git push side effect should fail safely",
+		Capabilities: nil,
+		Payload: map[string]any{
+			"workspace_root":       worktree.WorktreePath,
+			"write_scope":          []string{worktree.WorktreePath},
+			"branch":               worktree.Branch,
+			"argv":                 []string{"git", "push", "origin", "main"},
+			"allow_commands":       []string{"git"},
+			"max_duration_seconds": 30,
+			"max_output_bytes":     4096,
+		},
+		IdempotencyKey: "managed-mac-side-effect-probe",
+		ArtifactName:   "side-effect-probe-result.json",
+	}, now, runnerOpts)
+	if err == nil {
+		return ManagedMacReport{}, fmt.Errorf("expected side-effect probe to fail before external consequence")
+	}
+	var denialErr hostrunner.DenialError
+	if !errors.As(err, &denialErr) {
+		return ManagedMacReport{}, fmt.Errorf("expected session task denial for side-effect probe, got %v", err)
+	}
+	codingArtifacts := []SessionArtifact{codingArtifact}
+	probeArtifacts := []SessionArtifact{probeArtifact}
 	evidenceDir := filepath.Join(outDir, "evidence")
-	evidenceManifest, err := evidence.ExportDirectory(evidenceDir, evidence.Input{
-		Job:         codingJob,
-		Artifacts:   codingArtifacts,
-		AuditEvents: gw.AuditEvents(),
-		GeneratedAt: now,
-	})
+	evidenceManifest, err := writeSessionEvidenceDirectory(evidenceDir, session.ID, codingTask, codingArtifacts, now)
+	if err != nil {
+		return ManagedMacReport{}, err
+	}
+	probeEvidenceDir := filepath.Join(outDir, "side-effect-probe-evidence")
+	probeManifest, err := writeSessionEvidenceDirectory(probeEvidenceDir, session.ID, probeTask, probeArtifacts, now)
 	if err != nil {
 		return ManagedMacReport{}, err
 	}
@@ -225,39 +260,46 @@ func RunManagedMac(ctx context.Context, opts ManagedMacOptions) (ManagedMacRepor
 	if err != nil {
 		return ManagedMacReport{}, err
 	}
+	session, err = gw.Session(session.ID)
+	if err != nil {
+		return ManagedMacReport{}, err
+	}
 	report := ManagedMacReport{
 		SchemaVersion:       ManagedMacReportSchemaVersion,
+		Protocol:            controlplane.SessionSchemaVersion,
 		GeneratedAt:         now.UTC(),
-		Mode:                string(model.HostModeManaged),
+		Mode:                "managed",
 		FixtureRepo:         fixture,
 		RepoRoot:            repoRoot,
 		OutDir:              outDir,
 		WorkspaceLockStore:  workspaceLockStore,
-		Ticket:              ticket,
-		Host:                host,
+		SessionID:           session.ID,
+		SessionStatus:       session.Status,
+		TargetEndpoint:      targetEndpoint,
 		Worktree:            worktree,
-		CodingJob:           codingJob,
-		ApprovalJob:         approvalJob,
+		CodingTask:          codingTask,
+		SideEffectProbeTask: probeTask,
 		CodingArtifacts:     codingArtifacts,
-		ApprovalArtifacts:   approvalArtifacts,
+		ProbeArtifacts:      probeArtifacts,
 		EvidenceDir:         evidenceDir,
-		ApprovalEvidenceDir: filepath.Join(outDir, "approval-evidence"),
+		ProbeEvidenceDir:    probeEvidenceDir,
 		EvidenceManifest:    evidenceManifest,
-		ApprovalManifest:    approvalManifest,
+		ProbeManifest:       probeManifest,
 		Checks: acceptanceChecks(acceptanceCheckInput{
-			Host:              host,
-			Worktree:          worktree,
-			CodingJob:         codingJob,
-			CodingArtifacts:   codingArtifacts,
-			ApprovalJob:       approvalJob,
-			ApprovalArtifacts: approvalArtifacts,
-			LockStatus:        status,
-			EvidenceManifest:  evidenceManifest,
-			Fixture:           fixture,
+			Session:               session,
+			TargetEndpoint:        targetEndpoint,
+			Worktree:              worktree,
+			CodingTask:            codingTask,
+			CodingArtifacts:       codingArtifacts,
+			SideEffectProbeTask:   probeTask,
+			SideEffectProbeOutput: probeArtifact.Content,
+			LockStatus:            status,
+			EvidenceManifest:      evidenceManifest,
+			Fixture:               fixture,
 		}),
 		RecommendedNextSteps: []string{
-			"Review evidence/manifest.json and artifacts before approving any external consequence.",
-			"Use a separate approval token before push, merge, deploy, credential, GUI, package, elevation, or service actions.",
+			"Review evidence/manifest.json, side-effect-probe-evidence/manifest.json, and session task artifacts before any external consequence.",
+			"Use a fresh explicit session task for push, merge, deploy, credential, GUI, package, elevation, or service actions.",
 			"For a real managed Mac run, install the LaunchAgent explicitly and repeat this acceptance command with --repo.",
 		},
 	}
@@ -267,69 +309,197 @@ func RunManagedMac(ctx context.Context, opts ManagedMacOptions) (ManagedMacRepor
 	return report, nil
 }
 
-func runApprovalGateProbe(ctx context.Context, gw *gateway.MemoryGateway, host model.Host, identity hostidentity.Identity, workspaceRoot, lockStore string, now time.Time, outDir string) (model.Job, []model.Artifact, evidence.Manifest, error) {
-	approvalJob, err := gw.CreateJob(host.ID, "shell", "attempt git push should require approval", map[string]any{
-		"workspace_root":       workspaceRoot,
-		"capabilities":         []string{"shell.user"},
-		"argv":                 []string{"git", "push", "origin", "main"},
-		"allow_commands":       []string{"git"},
-		"max_duration_seconds": 30,
-		"max_output_bytes":     4096,
+type managedMacSessionTaskRequest struct {
+	Adapter        string
+	Intent         string
+	Capabilities   []string
+	Payload        map[string]any
+	IdempotencyKey string
+	ArtifactName   string
+}
+
+func runManagedMacSessionTask(ctx context.Context, gw *gateway.MemoryGateway, sessionID string, endpoint controlplane.Endpoint, identity hostidentity.Identity, req managedMacSessionTaskRequest, now time.Time, opts hostrunner.Options) (controlplane.Task, SessionArtifact, error) {
+	task, _, err := gw.SubmitSessionTask(sessionID, controlplane.TaskSpec{
+		TargetEndpointID: endpoint.ID,
+		Adapter:          req.Adapter,
+		Intent:           req.Intent,
+		Capabilities:     append([]string(nil), req.Capabilities...),
+		Payload:          cloneStringAnyMap(req.Payload),
+		Limits: map[string]any{
+			"max_duration_seconds": intValueFromAny(req.Payload["max_duration_seconds"]),
+			"max_output_bytes":     intValueFromAny(req.Payload["max_output_bytes"]),
+			"network":              stringValueFromAny(req.Payload["network"]),
+		},
+		IdempotencyKey: req.IdempotencyKey,
 	})
 	if err != nil {
-		return model.Job{}, nil, evidence.Manifest{}, err
+		return controlplane.Task{}, SessionArtifact{}, err
 	}
-	result, err := hostrunner.RunDevJobWithOptionsContext(ctx, host.ID, gw.TrustBundle(), approvalJob, now, hostrunner.Options{
-		IdentityFingerprint: identity.Fingerprint(),
-		NonceStore:          hostnonce.NewMemoryStore(),
-		ApprovalStore:       hostapproval.NewMemoryStore(),
-		WorkspaceLockStore:  lockStore,
-	})
-	var approvalErr hostrunner.ApprovalRequiredError
-	if !errors.As(err, &approvalErr) {
-		return model.Job{}, nil, evidence.Manifest{}, fmt.Errorf("expected approval-required probe, got %v", err)
+	if _, err := gw.MarkSessionTaskRunning(sessionID, task.ID); err != nil {
+		return controlplane.Task{}, SessionArtifact{}, err
 	}
-	approvalJob, _, err = gw.FailJobForHostWithArtifact(host.ID, approvalJob.ID, approvalErr.Error(), result.ArtifactContent)
+
+	result, runErr := hostrunner.RunSessionTaskWithOptionsContext(ctx, managedMacHostTaskSpec(task, endpoint.ID, identity.Fingerprint()), now, opts)
+	status := string(controlplane.TaskStatusSucceeded)
+	resultPayload := map[string]any{
+		"status":           status,
+		"attempt_id":       task.AttemptID,
+		"idempotency_key":  req.IdempotencyKey + "-result",
+		"artifact_content": result.ArtifactContent,
+	}
+	if runErr != nil {
+		status = string(controlplane.TaskStatusFailed)
+		resultPayload["status"] = status
+		resultPayload["reason"] = runErr.Error()
+	}
+	if result.RuntimeFixtureContent != "" {
+		resultPayload["runtime_fixture_content"] = result.RuntimeFixtureContent
+	}
+	completed, _, completeErr := gw.CompleteSessionTask(sessionID, task.ID, resultPayload)
+	if completeErr != nil {
+		if runErr != nil {
+			return completed, SessionArtifact{}, fmt.Errorf("%v; additionally failed to complete session task: %w", runErr, completeErr)
+		}
+		return completed, SessionArtifact{}, completeErr
+	}
+	artifactContent := result.ArtifactContent
+	if strings.TrimSpace(artifactContent) == "" && runErr != nil {
+		artifactContent = fmt.Sprintf(`{"schema_version":"rdev.task-error.v1","task_id":%q,"error":%q}`, completed.ID, runErr.Error())
+	}
+	artifact, _, artifactErr := gw.UpsertSessionArtifact(sessionID, sessionArtifactRef(completed.ID, req.ArtifactName, artifactContent))
+	sessionArtifact := SessionArtifact{Ref: artifact, Content: artifactContent}
+	if artifactErr != nil {
+		if runErr != nil {
+			return completed, sessionArtifact, fmt.Errorf("%v; additionally failed to upsert session artifact: %w", runErr, artifactErr)
+		}
+		return completed, sessionArtifact, artifactErr
+	}
+	return completed, sessionArtifact, runErr
+}
+
+func managedMacHostTaskSpec(task controlplane.Task, endpointID, identityFingerprint string) hostrunner.SessionTaskSpec {
+	payload := cloneStringAnyMap(task.Payload)
+	writeScope := stringSliceFromAny(payload["write_scope"])
+	if len(writeScope) == 0 {
+		writeScope = []string{stringValueFromAny(payload["workspace_root"])}
+	}
+	return hostrunner.SessionTaskSpec{
+		TaskID:              task.ID,
+		EndpointID:          endpointID,
+		IdentityFingerprint: identityFingerprint,
+		Adapter:             task.Adapter,
+		Intent:              task.Intent,
+		Workspace: model.TaskWorkspace{
+			Root:       stringValueFromAny(payload["workspace_root"]),
+			WriteScope: writeScope,
+			Branch:     stringValueFromAny(payload["branch"]),
+		},
+		Capabilities: append([]string(nil), task.Capabilities...),
+		Limits: model.TaskLimits{
+			MaxDurationSeconds: intValueFromAny(firstPresent(payload["max_duration_seconds"], task.Limits["max_duration_seconds"])),
+			MaxOutputBytes:     intValueFromAny(firstPresent(payload["max_output_bytes"], task.Limits["max_output_bytes"])),
+			Network:            stringValueFromAny(firstPresent(payload["network"], task.Limits["network"])),
+		},
+		Payload: payload,
+	}
+}
+
+func sessionArtifactRef(taskID, name, content string) controlplane.ArtifactRef {
+	sum := sha256.Sum256([]byte(content))
+	return controlplane.ArtifactRef{
+		TaskID:       taskID,
+		Kind:         "json",
+		Name:         name,
+		SizeBytes:    int64(len(content)),
+		SHA256:       fmt.Sprintf("%x", sum),
+		ContentType:  "application/json",
+		UploadOffset: int64(len(content)),
+		Complete:     true,
+	}
+}
+
+func writeSessionEvidenceDirectory(dir, sessionID string, task controlplane.Task, artifacts []SessionArtifact, now time.Time) (SessionEvidenceManifest, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return SessionEvidenceManifest{}, err
+	}
+	manifest := SessionEvidenceManifest{
+		SchemaVersion: SessionEvidenceSchemaVersion,
+		GeneratedAt:   now.UTC(),
+		SessionID:     sessionID,
+		TaskID:        task.ID,
+		TaskStatus:    task.Status,
+	}
+	var checksums strings.Builder
+	for i, artifact := range artifacts {
+		name := safeEvidenceFileName(artifact.Ref.Name, i)
+		content := []byte(artifact.Content)
+		sum := sha256.Sum256(content)
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o600); err != nil {
+			return SessionEvidenceManifest{}, err
+		}
+		manifest.Artifacts = append(manifest.Artifacts, artifact.Ref)
+		manifest.Files = append(manifest.Files, SessionEvidenceFile{
+			Path:      name,
+			Kind:      artifact.Ref.Kind,
+			SizeBytes: int64(len(content)),
+			SHA256:    fmt.Sprintf("%x", sum),
+		})
+		checksums.WriteString(fmt.Sprintf("%x  %s\n", sum, name))
+	}
+	content, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		return model.Job{}, nil, evidence.Manifest{}, err
+		return SessionEvidenceManifest{}, err
 	}
-	artifacts := gw.Artifacts(approvalJob.ID)
-	manifest, err := evidence.ExportDirectory(filepath.Join(outDir, "approval-evidence"), evidence.Input{
-		Job:         approvalJob,
-		Artifacts:   artifacts,
-		AuditEvents: gw.AuditEvents(),
-		GeneratedAt: now,
-	})
-	return approvalJob, artifacts, manifest, err
+	content = append(content, '\n')
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), content, 0o600); err != nil {
+		return SessionEvidenceManifest{}, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "checksums.txt"), []byte(checksums.String()), 0o600); err != nil {
+		return SessionEvidenceManifest{}, err
+	}
+	return manifest, nil
+}
+
+func safeEvidenceFileName(name string, index int) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = fmt.Sprintf("artifact-%d.json", index+1)
+	}
+	name = strings.ReplaceAll(name, "\\", "_")
+	name = strings.ReplaceAll(name, "/", "_")
+	if !strings.HasSuffix(name, ".json") {
+		name += ".json"
+	}
+	return name
 }
 
 type acceptanceCheckInput struct {
-	Host              model.Host
-	Worktree          workspace.GitWorktreeResult
-	CodingJob         model.Job
-	CodingArtifacts   []model.Artifact
-	ApprovalJob       model.Job
-	ApprovalArtifacts []model.Artifact
-	LockStatus        workspace.LockStatus
-	EvidenceManifest  evidence.Manifest
-	Fixture           bool
+	Session               controlplane.Session
+	TargetEndpoint        controlplane.Endpoint
+	Worktree              workspace.GitWorktreeResult
+	CodingTask            controlplane.Task
+	CodingArtifacts       []SessionArtifact
+	SideEffectProbeTask   controlplane.Task
+	SideEffectProbeOutput string
+	LockStatus            workspace.LockStatus
+	EvidenceManifest      SessionEvidenceManifest
+	Fixture               bool
 }
 
 func acceptanceChecks(input acceptanceCheckInput) []Check {
 	artifactText := joinedArtifacts(input.CodingArtifacts)
-	approvalText := joinedArtifacts(input.ApprovalArtifacts)
 	return []Check{
-		{Name: "host_mode_managed", Passed: input.Host.Mode == model.HostModeManaged, Detail: string(input.Host.Mode)},
-		{Name: "host_active", Passed: input.Host.Status == model.HostStatusActive, Detail: string(input.Host.Status)},
+		{Name: "session_protocol", Passed: input.Session.SchemaVersion == controlplane.SessionSchemaVersion && input.Session.ID != "", Detail: input.Session.ID},
+		{Name: "target_endpoint_online", Passed: input.TargetEndpoint.State == controlplane.EndpointStateOnline, Detail: string(input.TargetEndpoint.State)},
 		{Name: "worktree_created", Passed: input.Worktree.WorktreePath != "" && pathExists(input.Worktree.WorktreePath), Detail: input.Worktree.WorktreePath},
-		{Name: "coding_job_succeeded", Passed: input.CodingJob.Status == model.JobStatusSucceeded, Detail: string(input.CodingJob.Status)},
+		{Name: "coding_task_succeeded", Passed: input.CodingTask.Status == controlplane.TaskStatusSucceeded, Detail: string(input.CodingTask.Status)},
 		{Name: "codex_result_artifact", Passed: strings.Contains(artifactText, codexadapter.ResultSchemaVersion)},
 		{Name: "diff_evidence_present", Passed: strings.Contains(artifactText, "git_diff") && strings.Contains(artifactText, "git_diff_stat")},
 		{Name: "verification_evidence_present", Passed: strings.Contains(artifactText, "verification_results")},
 		{Name: "test_report_present_when_fixture", Passed: !input.Fixture || strings.Contains(artifactText, codexadapter.TestReportSchemaVersion)},
-		{Name: "approval_required_probe", Passed: strings.Contains(approvalText, hostrunner.ApprovalRequiredSchemaVersion) && strings.Contains(approvalText, "git.push")},
+		{Name: "side_effect_probe_failed", Passed: input.SideEffectProbeTask.Status == controlplane.TaskStatusFailed && strings.Contains(input.SideEffectProbeOutput, hostrunner.DenialSchemaVersion), Detail: string(input.SideEffectProbeTask.Status)},
 		{Name: "workspace_lock_released", Passed: !input.LockStatus.Exists, Detail: input.LockStatus.StorePath},
-		{Name: "evidence_bundle_written", Passed: input.EvidenceManifest.SchemaVersion == evidence.BundleSchemaVersion && input.EvidenceManifest.JobID == input.CodingJob.ID},
+		{Name: "session_evidence_written", Passed: input.EvidenceManifest.SchemaVersion == SessionEvidenceSchemaVersion && input.EvidenceManifest.TaskID == input.CodingTask.ID},
 	}
 }
 
@@ -415,7 +585,7 @@ func writeReport(path string, report ManagedMacReport) error {
 	return os.WriteFile(path, content, 0o600)
 }
 
-func joinedArtifacts(artifacts []model.Artifact) string {
+func joinedArtifacts(artifacts []SessionArtifact) string {
 	var builder strings.Builder
 	for _, artifact := range artifacts {
 		builder.WriteString(artifact.Content)
@@ -442,4 +612,49 @@ func positiveOrDefault(value, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+func cloneStringAnyMap(source map[string]any) map[string]any {
+	if source == nil {
+		return nil
+	}
+	out := make(map[string]any, len(source))
+	for key, value := range source {
+		out[key] = value
+	}
+	return out
+}
+
+func firstPresent(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func stringValueFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return ""
+	}
+}
+
+func intValueFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		n, _ := typed.Int64()
+		return int(n)
+	default:
+		return 0
+	}
 }

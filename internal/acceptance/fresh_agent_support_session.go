@@ -31,23 +31,24 @@ type FreshAgentSupportSessionOptions struct {
 }
 
 type FreshAgentSupportSessionReport struct {
-	SchemaVersion           string         `json:"schema_version"`
-	GeneratedAt             time.Time      `json:"generated_at"`
-	OutDir                  string         `json:"out_dir"`
-	GatewayURL              string         `json:"gateway_url"`
-	ConnectNoGateway        map[string]any `json:"connect_no_gateway"`
-	ConnectReachableGateway map[string]any `json:"connect_reachable_gateway"`
-	HandoffNoGateway        map[string]any `json:"handoff_no_gateway"`
-	HandoffReachableGateway map[string]any `json:"handoff_reachable_gateway"`
-	CreatedSession          map[string]any `json:"created_session"`
-	StartedSession          map[string]any `json:"started_session"`
-	StableFallbackSession   map[string]any `json:"stable_fallback_session"`
-	ConnectedStatus         map[string]any `json:"connected_status"`
-	WaitingRecovery         map[string]any `json:"waiting_recovery"`
-	BootstrapSelfRepair     map[string]any `json:"bootstrap_self_repair"`
-	Checks                  []Check        `json:"checks"`
-	RecommendedNextSteps    []string       `json:"recommended_next_steps"`
-	RealEnvironmentRequired []string       `json:"real_environment_required"`
+	SchemaVersion           string           `json:"schema_version"`
+	GeneratedAt             time.Time        `json:"generated_at"`
+	OutDir                  string           `json:"out_dir"`
+	GatewayURL              string           `json:"gateway_url"`
+	ConnectNoGateway        map[string]any   `json:"connect_no_gateway"`
+	ConnectReachableGateway map[string]any   `json:"connect_reachable_gateway"`
+	HandoffNoGateway        map[string]any   `json:"handoff_no_gateway"`
+	HandoffReachableGateway map[string]any   `json:"handoff_reachable_gateway"`
+	CreatedSession          map[string]any   `json:"created_session"`
+	StartedSession          map[string]any   `json:"started_session"`
+	StableFallbackSession   map[string]any   `json:"stable_fallback_session"`
+	ConnectedStatus         map[string]any   `json:"connected_status"`
+	WaitingRecovery         map[string]any   `json:"waiting_recovery"`
+	BootstrapSelfRepair     map[string]any   `json:"bootstrap_self_repair"`
+	LiveRemoteE2EGates      []map[string]any `json:"live_remote_e2e_gates"`
+	Checks                  []Check          `json:"checks"`
+	RecommendedNextSteps    []string         `json:"recommended_next_steps"`
+	RealEnvironmentRequired []string         `json:"real_environment_required"`
 }
 
 func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAgentSupportSessionReport, error) {
@@ -80,24 +81,24 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 
 	handoffNoGateway := withFreshAgentGatewayEnvCleared(func() map[string]any {
 		return supportsession.BuildHandoff(supportsession.HandoffOptions{
-			Addr:        "0.0.0.0:8787",
-			Target:      "auto",
-			Reason:      "fresh Agent support-session acceptance",
-			TTLSeconds:  7200,
-			AutoApprove: true,
-			Locale:      locale,
-			RdevCommand: rdevCommand,
+			Addr:         "0.0.0.0:8787",
+			Target:       "auto",
+			Reason:       "fresh Agent support-session acceptance",
+			TTLSeconds:   7200,
+			AutoActivate: true,
+			Locale:       locale,
+			RdevCommand:  rdevCommand,
 		})
 	})
 	handoffReachableGateway := supportsession.BuildHandoff(supportsession.HandoffOptions{
-		Addr:        "0.0.0.0:8787",
-		GatewayURL:  gatewayURL,
-		Target:      "auto",
-		Reason:      "fresh Agent support-session acceptance",
-		TTLSeconds:  7200,
-		AutoApprove: true,
-		Locale:      locale,
-		RdevCommand: rdevCommand,
+		Addr:         "0.0.0.0:8787",
+		GatewayURL:   gatewayURL,
+		Target:       "auto",
+		Reason:       "fresh Agent support-session acceptance",
+		TTLSeconds:   7200,
+		AutoActivate: true,
+		Locale:       locale,
+		RdevCommand:  rdevCommand,
 	})
 	connectNoGateway := supportsession.BuildConnectFromHandoff(handoffNoGateway)
 
@@ -108,9 +109,9 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		policyCapabilitiesToStringsForFreshAgent(policy.TemporaryDefaults()),
 		"fresh Agent support-session acceptance",
 		map[string]string{
-			"connection_entry":  "standard-visible",
-			"approval_contract": "target-consent-scoped-ticket",
-			"auto_approve":      "attended-temporary",
+			"connection_entry":    "standard-visible",
+			"activation_contract": "target-consent-scoped-ticket",
+			"auto_activate":       "attended-temporary",
 		},
 	)
 	if err != nil {
@@ -124,7 +125,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		Target:                "auto",
 		Locale:                locale,
 		RdevCommand:           rdevCommand,
-		AutoApprove:           true,
+		AutoActivate:          true,
 	})
 	connectReachableGateway := supportsession.BuildConnectFromCreated(created)
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
@@ -145,22 +146,22 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 			policyCapabilitiesToStringsForFreshAgent(policy.TemporaryDefaults()),
 			"fresh Agent stable fallback acceptance",
 			map[string]string{
-				"connection_entry":  "standard-visible",
-				"approval_contract": "target-consent-scoped-ticket",
-				"auto_approve":      "attended-temporary",
+				"connection_entry":    "standard-visible",
+				"activation_contract": "target-consent-scoped-ticket",
+				"auto_activate":       "attended-temporary",
 			},
 		)
 		if err != nil {
 			return map[string]any{"error": err.Error()}
 		}
 		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-			Addr:        "0.0.0.0:8787",
-			Target:      "auto",
-			Reason:      "fresh Agent stable fallback acceptance",
-			TTLSeconds:  7200,
-			AutoApprove: true,
-			Locale:      locale,
-			RdevCommand: rdevCommand,
+			Addr:         "0.0.0.0:8787",
+			Target:       "auto",
+			Reason:       "fresh Agent stable fallback acceptance",
+			TTLSeconds:   7200,
+			AutoActivate: true,
+			Locale:       locale,
+			RdevCommand:  rdevCommand,
 		})
 		created := supportsession.BuildCreated(supportsession.CreatedOptions{
 			GatewayURL:            stableURL,
@@ -170,7 +171,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 			Target:                "windows",
 			Locale:                locale,
 			RdevCommand:           rdevCommand,
-			AutoApprove:           true,
+			AutoActivate:          true,
 		})
 		return map[string]any{
 			"schema_version": "rdev.acceptance.stable-fallback-session.v1",
@@ -201,7 +202,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		Locale:     locale,
 		TimedOut:   true,
 	})
-	bootstrapSelfRepair, bootstrapChecks, err := buildBootstrapSelfRepairContract(outDir, now)
+	bootstrapSelfRepair, bootstrapChecks, err := buildBootstrapSelfRepairContract(outDir, now, mapFromAny(created["rdev_bootstrap_connector"]))
 	if err != nil {
 		return FreshAgentSupportSessionReport{}, err
 	}
@@ -221,6 +222,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		ConnectedStatus:         connectedStatus,
 		WaitingRecovery:         waitingRecovery,
 		BootstrapSelfRepair:     bootstrapSelfRepair,
+		LiveRemoteE2EGates:      liveRemoteE2EGates(gatewayURL, rdevCommand),
 		Checks: freshAgentSupportSessionChecks(freshAgentSupportSessionCheckInput{
 			HandoffNoGateway:        handoffNoGateway,
 			HandoffReachableGateway: handoffReachableGateway,
@@ -242,6 +244,9 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		RealEnvironmentRequired: []string{
 			"fresh-agent Codex/Claude Code/Hermes/OpenClaw/OpenCode runs",
 			"clean Windows/macOS/Linux target machines",
+			"live Windows attended-temporary support session with support-session smoke-test --remote-control evidence",
+			"live Windows file upload/download byte_compare=match evidence",
+			"live Windows session interrupt/replay evidence through rdev.sessions.interrupt",
 			"real LAN departure or restrictive-network relay/mesh/VPN/SSH paths",
 		},
 	}
@@ -250,6 +255,16 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		return FreshAgentSupportSessionReport{}, err
 	}
 	return report, nil
+}
+
+func liveRemoteE2EGates(gatewayURL, rdevCommand string) []map[string]any {
+	plan := supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{
+		GatewayURL:     gatewayURL,
+		RdevCommand:    rdevCommand,
+		TimeoutSeconds: 180,
+	})
+	gates, _ := plan["gates"].([]map[string]any)
+	return gates
 }
 
 type freshAgentSupportSessionCheckInput struct {
@@ -364,9 +379,9 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "stable_fallback_continuity_is_durable", Passed: boolFromAny(stableFallbackContinuity["stable_after_lan_change"]) && strings.Contains(strings.Join(stringSliceFromAny(stableFallbackContinuity["stable_fallback_kinds"]), "\n"), "relay"), Detail: fmt.Sprintf("%v", stableFallbackContinuity)},
 		{Name: "stable_fallback_supervision_does_not_request_upgrade", Passed: stableFallbackSupervision["upgrade_recommended"] == false && strings.Contains(stringFromAny(stableFallbackSupervision["upgrade_reason"]), "stable hosted/relay/mesh/VPN/SSH fallback already configured"), Detail: stringFromAny(stableFallbackSupervision["upgrade_reason"])},
 		{Name: "stable_fallback_runbook_reports_stable_candidate", Passed: boolFromAny(stableFallbackRunbookSummary["has_stable_configured_fallback"]) && strings.Contains(strings.Join(stringSliceFromAny(stableFallbackRunbookSummary["candidate_kinds"]), "\n"), "relay"), Detail: fmt.Sprintf("%v", stableFallbackRunbookSummary)},
-		{Name: "auto_approval_connects_first_attended_host", Passed: input.Host.Status == model.HostStatusActive && input.ConnectedStatus["connected"] == true, Detail: string(input.Host.Status)},
+		{Name: "auto_activation_connects_first_attended_host", Passed: input.Host.Status == model.HostStatusActive && input.ConnectedStatus["connected"] == true, Detail: string(input.Host.Status)},
 		{Name: "connected_status_has_user_report", Passed: stringFromAny(connectedNext["schema_version"]) == supportsession.ConnectedNextStepsSchemaVersion && strings.TrimSpace(stringFromAny(connectedNext["user_report"])) != "", Detail: stringFromAny(connectedNext["user_report"])},
-		{Name: "connected_status_points_to_capability_probe", Passed: strings.Contains(fmt.Sprintf("%v", connectedNext["mcp_next_calls"]), "rdev.hosts.capabilities"), Detail: fmt.Sprintf("%v", connectedNext["mcp_next_calls"])},
+		{Name: "connected_status_points_to_session_probe", Passed: strings.Contains(fmt.Sprintf("%v", connectedNext["mcp_next_calls"]), "rdev.sessions.status"), Detail: fmt.Sprintf("%v", connectedNext["mcp_next_calls"])},
 		{Name: "connected_status_has_agent_runbook", Passed: stringFromAny(statusRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && stringFromAny(statusRunbook["status"]) == "connected", Detail: stringFromAny(statusRunbook["phase"])},
 		{Name: "waiting_recovery_has_agent_runbook", Passed: stringFromAny(recoveryRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(recoveryRunbook["on_timeout_or_failure"]), "\n"), "gateway_candidate_preflight"), Detail: stringFromAny(recoveryRunbook["phase"])},
 		{Name: "waiting_recovery_forbids_custom_scripts", Passed: strings.Contains(recoveryForbidden, "Agent-authored PowerShell") && strings.Contains(recoveryForbidden, "manual ticket/root/gateway/transport"), Detail: recoveryForbidden},
@@ -375,7 +390,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	return checks
 }
 
-func buildBootstrapSelfRepairContract(outDir string, now time.Time) (map[string]any, []Check, error) {
+func buildBootstrapSelfRepairContract(outDir string, now time.Time, bootstrapConnector map[string]any) (map[string]any, []Check, error) {
 	assetDir := filepath.Join(outDir, "bootstrap-self-repair-assets")
 	if err := os.MkdirAll(assetDir, 0o700); err != nil {
 		return nil, nil, err
@@ -405,9 +420,9 @@ func buildBootstrapSelfRepairContract(outDir string, now time.Time) (map[string]
 		policyCapabilitiesToStringsForFreshAgent(policy.TemporaryDefaults()),
 		"fresh Agent bootstrap self-repair acceptance",
 		map[string]string{
-			"connection_entry":  "standard-visible",
-			"approval_contract": "target-consent-scoped-ticket",
-			"auto_approve":      "attended-temporary",
+			"connection_entry":    "standard-visible",
+			"activation_contract": "target-consent-scoped-ticket",
+			"auto_activate":       "attended-temporary",
 		},
 	)
 	if err != nil {
@@ -461,24 +476,51 @@ func buildBootstrapSelfRepairContract(outDir string, now time.Time) (map[string]
 		}
 		assetResults = append(assetResults, result)
 	}
+	bootstrapTargetBytes := intFromAny(bootstrapConnector["first_connect_target_bytes"])
+	nativeBootstrapConnector := mapFromAny(bootstrapConnector["native_connector"])
+	bootstrapFirstConnect := map[string]any{
+		"schema_version":                           "rdev.acceptance.bootstrap-first-connect.v1",
+		"bootstrap_connector_schema_version":       bootstrapConnector["schema_version"],
+		"native_connector":                         nativeBootstrapConnector,
+		"first_connect_target_bytes":               bootstrapTargetBytes,
+		"default_first_connect_surface":            bootstrapConnector["default_first_connect_surface"],
+		"publishes_native_first_connect_asset":     bootstrapConnector["publishes_native_first_connect_asset"],
+		"windows_script_bytes":                     len(windowsBootstrap),
+		"shell_script_bytes":                       len(shellBootstrap),
+		"windows_within_budget":                    bootstrapTargetBytes > 0 && len(windowsBootstrap) < bootstrapTargetBytes,
+		"shell_within_budget":                      bootstrapTargetBytes > 0 && len(shellBootstrap) < bootstrapTargetBytes,
+		"preconnect_endpoint":                      bootstrapConnector["preconnect_endpoint"],
+		"preconnect_source":                        bootstrapConnector["source"],
+		"preconnect_grants_host_access":            boolFromAny(bootstrapConnector["grants_host_access"]),
+		"can_run_session_tasks_before_full_runner": boolFromAny(bootstrapConnector["can_run_session_tasks"]),
+		"full_runner_phase":                        bootstrapConnector["full_runner_phase"],
+		"must_not_skip_full_helper_verification": boolFromAny(
+			bootstrapConnector["must_not_skip_full_helper_verification"],
+		),
+		"staged_upgrade_rule": "preconnect is a sub-1MB first-contact signal only; session task execution requires downloading the full helper with retry/backoff, verifying SHA-256, then starting host serve",
+	}
 	report := map[string]any{
-		"schema_version":       "rdev.acceptance.bootstrap-self-repair.v1",
-		"join_url":             joinBase,
-		"ticket_code":          ticket.Code,
-		"windows_script_bytes": len(windowsBootstrap),
-		"shell_script_bytes":   len(shellBootstrap),
-		"asset_sha256":         assetResults,
-		"agent_rule":           "fresh Agents should rely on support-session join bootstrap self-repair instead of asking target users to install rdev manually",
+		"schema_version":          "rdev.acceptance.bootstrap-self-repair.v1",
+		"join_url":                joinBase,
+		"ticket_code":             ticket.Code,
+		"windows_script_bytes":    len(windowsBootstrap),
+		"shell_script_bytes":      len(shellBootstrap),
+		"asset_sha256":            assetResults,
+		"bootstrap_first_connect": bootstrapFirstConnect,
+		"agent_rule":              "fresh Agents should rely on support-session join bootstrap self-repair instead of asking target users to install rdev manually",
 	}
 	forbidden := joinPage + "\n" + windowsBootstrap + "\n" + shellBootstrap
 	checks := []Check{
 		{Name: "bootstrap_self_repair_join_page_available", Passed: strings.Contains(joinPage, "bootstrap.ps1") && strings.Contains(joinPage, "bootstrap.sh") && strings.Contains(joinPage, "rdev.connection-entry.package-catalog.v1"), Detail: joinBase},
-		{Name: "bootstrap_self_repair_windows_downloads_verified_helper", Passed: strings.Contains(windowsBootstrap, "Downloading verified rdev helper") && strings.Contains(windowsBootstrap, "Invoke-WebRequest") && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(windowsBootstrap, ".sha256"), Detail: "PowerShell downloads and verifies rdev-windows-amd64.exe when rdev is absent"},
-		{Name: "bootstrap_self_repair_shell_downloads_verified_helper", Passed: strings.Contains(shellBootstrap, "Downloading verified rdev helper") && strings.Contains(shellBootstrap, "curl -fsSL") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(shellBootstrap, ".sha256"), Detail: "shell downloads and verifies target OS/arch helper when rdev is absent"},
+		{Name: "bootstrap_self_repair_windows_downloads_verified_helper", Passed: strings.Contains(windowsBootstrap, "Downloading verified rdev helper") && strings.Contains(windowsBootstrap, "Invoke-RdevWebRequestWithRetry") && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(windowsBootstrap, ".sha256"), Detail: "PowerShell downloads with retry/backoff and verifies rdev-windows-amd64.exe when rdev is absent"},
+		{Name: "bootstrap_self_repair_shell_downloads_verified_helper", Passed: strings.Contains(shellBootstrap, "Downloading verified rdev helper") && strings.Contains(shellBootstrap, "rdev_curl_retry_flags") && strings.Contains(shellBootstrap, "curl $rdev_curl_retry_flags -fsSL") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(shellBootstrap, ".sha256"), Detail: "shell downloads with retry/backoff and verifies target OS/arch helper when rdev is absent"},
 		{Name: "bootstrap_self_repair_pins_manifest_root", Passed: strings.Contains(windowsBootstrap, "--manifest-root-public-key") && strings.Contains(shellBootstrap, "--manifest-root-public-key"), Detail: "bootstrap scripts pin the join manifest trust root"},
 		{Name: "bootstrap_self_repair_starts_visible_host", Passed: strings.Contains(windowsBootstrap, "host serve") && strings.Contains(shellBootstrap, "host serve") && strings.Contains(windowsBootstrap, "--transport long-poll") && strings.Contains(shellBootstrap, "--transport long-poll") && strings.Contains(windowsBootstrap, "--once=false") && strings.Contains(shellBootstrap, "--once=false"), Detail: "bootstrap scripts start attended host serve with stable long-poll transport"},
 		{Name: "bootstrap_self_repair_assets_have_hashes", Passed: allAssetsOK, Detail: fmt.Sprintf("%v", assetResults)},
 		{Name: "bootstrap_self_repair_no_manual_rdev_requirement", Passed: !strings.Contains(forbidden, "rdev is required") && !strings.Contains(forbidden, "Install the verified rdev release package") && !strings.Contains(forbidden, "ExecutionPolicy Bypass"), Detail: "join/bootstrap surface must not ask the target user to manually install rdev or bypass execution policy"},
+		{Name: "bootstrap_first_connect_scripts_under_budget", Passed: boolFromAny(bootstrapFirstConnect["windows_within_budget"]) && boolFromAny(bootstrapFirstConnect["shell_within_budget"]), Detail: fmt.Sprintf("windows=%d shell=%d target=%d", len(windowsBootstrap), len(shellBootstrap), bootstrapTargetBytes)},
+		{Name: "bootstrap_first_connect_preconnect_does_not_grant_host_access", Passed: stringFromAny(bootstrapConnector["schema_version"]) == supportsession.BootstrapConnectorSchemaVersion && stringFromAny(bootstrapConnector["preconnect_endpoint"]) == "/v1/support-session/preconnect" && !boolFromAny(bootstrapConnector["grants_host_access"]) && !boolFromAny(bootstrapConnector["can_run_session_tasks"]), Detail: fmt.Sprintf("%v", bootstrapConnector)},
+		{Name: "bootstrap_first_connect_requires_verified_full_helper_upgrade", Passed: stringFromAny(bootstrapConnector["full_runner_phase"]) == "download-verified-rdev-host" && boolFromAny(bootstrapConnector["must_not_skip_full_helper_verification"]) && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(windowsBootstrap, "Invoke-RdevWebRequestWithRetry") && strings.Contains(shellBootstrap, "curl $rdev_curl_retry_flags -fsSL"), Detail: "full helper upgrade must use retry/backoff plus SHA-256 verification before host serve can run session tasks"},
 	}
 	return report, checks, nil
 }

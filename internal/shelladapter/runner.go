@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 const ResultSchemaVersion = "rdev.shell-result.v1"
@@ -220,20 +222,9 @@ func canonicalWorkspace(root string) (string, error) {
 	if runtime.GOOS == "windows" {
 		root = safeWindowsWorkspaceRoot(root)
 	}
-	abs, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve workspace root: %w", err)
-	}
-	canonical, err := filepath.EvalSymlinks(abs)
+	canonical, err := workspace.CanonicalDir(root)
 	if err != nil {
 		return "", fmt.Errorf("workspace root must exist: %w", err)
-	}
-	info, err := os.Stat(canonical)
-	if err != nil {
-		return "", fmt.Errorf("stat workspace root: %w", err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("workspace root must be a directory")
 	}
 	return canonical, nil
 }

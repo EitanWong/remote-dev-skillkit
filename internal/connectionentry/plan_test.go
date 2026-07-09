@@ -238,7 +238,7 @@ func TestFromInviteGeneratesManagedServiceMaterialization(t *testing.T) {
 			}
 			if !slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "managed_binary_path") ||
 				!slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "release_bundle_path") ||
-				!slices.Contains(plan.HumanSurface, "reviewed managed-service entry package after owned-host approval") {
+				!slices.Contains(plan.HumanSurface, "reviewed managed-service entry package after owned-host activation") {
 				t.Fatalf("expected managed metadata and surface split: %#v", plan)
 			}
 		})

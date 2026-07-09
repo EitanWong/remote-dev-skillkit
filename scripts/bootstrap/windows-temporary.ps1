@@ -31,12 +31,8 @@ param(
 
   [string]$HostName = $env:COMPUTERNAME,
 
-  # How long (seconds) to wait for operator approval before giving up.
-  # Raise this if the agent needs more time to review and approve the host.
-  [int]$ApprovalTimeoutSeconds = 300,
-
-  # Maximum number of times to re-register after an approval timeout or
-  # unexpected exit.  Set to 0 to disable the retry loop.
+  # Maximum number of times to re-register after an unexpected exit.
+  # Set to 0 to disable the retry loop.
   [int]$MaxRetries = 5,
 
   # Seconds to wait between retry attempts.
@@ -197,7 +193,7 @@ if ($ReleaseBundleUrl -ne "") {
   Write-Host "Release bundle: $ReleaseBundleUrl"
 }
 Write-Host "Mode:    attended temporary foreground"
-Write-Host "ApprovalTimeout: ${ApprovalTimeoutSeconds}s (retries: $MaxRetries)"
+Write-Host "Retries: $MaxRetries"
 Write-Host ""
 Write-Host "This script does not install a Windows Service and does not create hidden persistence."
 Write-Host "Close this window to stop the foreground host process."
@@ -239,8 +235,7 @@ $hostArgs = @(
   "host", "serve",
   "--mode", "temporary",
   "--name", $HostName,
-  "--once=false",
-  "--approval-timeout", "${ApprovalTimeoutSeconds}s"
+  "--once=false"
 )
 if ($ManifestUrl -ne "") {
   $hostArgs += @("--manifest-url", $ManifestUrl)
@@ -254,7 +249,7 @@ if ($TrustPin -ne "") {
   $hostArgs += @("--trust-pin", $TrustPin)
 }
 
-# Retry loop: re-register if host exits due to approval timeout or transient error.
+# Retry loop: re-register if host exits due to a transient error.
 $attempt = 0
 do {
   if ($attempt -gt 0) {

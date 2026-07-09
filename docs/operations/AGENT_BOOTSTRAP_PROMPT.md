@@ -49,7 +49,7 @@ Rules:
   open-source and free options first, such as frp, Chisel, headscale/Tailscale
   compatible mesh, or WireGuard, when they fit the operator's environment.
   Treat managed commercial tunnels as fallback choices that need explicit
-  approval.
+  authorization.
 - If a required value is unclear, ask exactly one short question, wait for the
   answer, then continue.
 - Do not ask humans for values the Connection Entry can discover or carry:
@@ -58,7 +58,7 @@ Rules:
 - Do not hardcode private server addresses, personal paths, secrets, dates, or
   machine-specific values.
 - Do not weaken OS security policy, create hidden persistence, or install
-  system-wide components unless I explicitly approve that specific action.
+  system-wide components unless I explicitly authorize that specific action.
 - Prefer user-scoped or workspace-scoped installation.
 - Verify before copying files. Dry-run before execute when the command supports it.
 
@@ -128,11 +128,11 @@ Steps:
     for the latest machine-readable connection event when terminal output is
     unavailable, and read `connected_report_file.path` when it appears after
     connection establishment so you can report the ready plain-text success
-    message before creating jobs. Always
+    message before creating session tasks. Always
     read `fresh_agent_connect_contract` when present; it is the
     machine-readable standard path for fresh Agents. It tells you how to recover
     missing `rdev`, what not to ask humans for, and which custom PowerShell,
-    shell, tunnel, approval, or polling scripts are forbidden. If you are about
+    shell, tunnel, interrupt, or polling scripts are forbidden. If you are about
     to improvise setup code, stop and follow that contract instead. If local
     `rdev`, gateway state, or target helper assets are unclear, call
     `rdev.support_session.prepare` through MCP or run
@@ -144,7 +144,7 @@ Steps:
     `agent_connection_runbook.low_level_entry_rule`: do not start with
     `rdev.invites.create`, `rdev invite create`,
     `rdev.connection_entry.plan`, or `rdev connection-entry plan` unless the
-    operator explicitly asks for reviewed package materialization, approved
+    operator explicitly asks for reviewed package materialization, authorized
     managed owned-host planning, or a high-level support-session recovery
     payload names that path.
     Treat `gateway_url_candidates` as diagnostic and signed-runtime metadata for
@@ -186,7 +186,7 @@ Steps:
     and status watcher in one payload. The target command already tries ordered
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
-    PowerShell, shell, relay, or approval-polling fallback. Ordinary attended
+    PowerShell, shell, relay, or interrupt-polling fallback. Ordinary attended
     `/join/.../bootstrap.*` handoffs use `rdev host serve --transport
     long-poll` for stable HTTPS-only connectivity. Use `--transport auto` only
     for managed or explicit advanced runner paths where WSS fallback has been
@@ -197,7 +197,7 @@ Steps:
     `agent_connection_runbook.fresh_agent_failure_prevention` before writing
     any setup code: it captures known bad fresh-Agent failure patterns such as
     manual `gateway serve` plus `invite create`, missing helper assets that make
-    Windows say `rdev is required`, background gateway glue, custom approval
+    Windows say `rdev is required`, background gateway glue, custom interrupt
     polling, and Agent-written PowerShell/shell bootstraps. If you are about to
     write one of those workarounds, stop and use the returned
     `cli_start_now_command`, `ready_file.path`, `status_file.path`,
@@ -259,7 +259,7 @@ Steps:
     read it and report immediately when it shows `event=connected` or
     `status.connected=true`. When the target connects, it writes
     `connected_report_file.path` (`connected-report.txt` by default), the exact
-    plain-text success report to send to the user before creating jobs. Use
+    plain-text success report to send to the user before creating session tasks. Use
     `rdev.support_session.plan` or
     `rdev support-session plan`
     only for review/debug planning or when the operator asks for the underlying
@@ -271,17 +271,18 @@ Steps:
     command when configured gateway metadata is present, otherwise use
     `watch_connection_status`. When the status returns
     `connected=true`, proactively tell me that the connection has been
-    established before creating any jobs. Then follow `connected_next_steps`:
-    send `user_report`, inspect `rdev.hosts.capabilities`, and create only the
-    smallest scoped job for my task. If status waiting times out or the
+    established before creating any session tasks. Then follow
+    `connected_next_steps`: send `user_report`, inspect `rdev.sessions.status`,
+    and create only the smallest scoped `rdev.sessions.task` for my task. If
+    status waiting times out or the
     target does not appear, read `connection_recovery` and follow its
     `agent_next_actions`, `standard_tools`, and `forbidden` fields. Do not
     write a custom polling loop.
-    Do not write ad hoc PowerShell, shell, relay, nohup, approval, or bootstrap
+    Do not write ad hoc PowerShell, shell, relay, nohup, interrupt, or bootstrap
     code when the plan can provide it. Do not manually combine
     `rdev gateway serve` plus `rdev invite create` for a normal support session;
     use `rdev support-session connect --start` so ready/status files,
-    auto-approval, and helper assets are created together. If a low-level dev
+    auto-authorization, and helper assets are created together. If a low-level dev
     gateway is explicitly required, keep the default
     `--auto-build-rdev-assets` behavior enabled from a valid checkout with Go,
     or configure helper assets with `--rdev-assets-dir` / platform-specific
@@ -305,7 +306,7 @@ Steps:
     `managed` for my own personal/fleet machines that need durable development
     access; use `attended-temporary` for third-party or one-off repair machines.
     Ask one short question before managed mode when ownership or persistence
-    approval is unclear.
+    authorization is unclear.
     If the remote machine is a company or third-party device, ask only the
     authorization question first: "Please confirm that company policy and the
     device owner allow a visible temporary Remote Dev Skillkit support session
@@ -360,7 +361,7 @@ Steps:
     - any remaining values I must provide before using real remote sessions
 
 After installation, use `host-triage` before remote work, `remote-vibe-coding`
-or `safe-remote-support` to run sessions, and `remote-job-review` before
+or `safe-remote-support` to run sessions, and `remote-session-review` before
 claiming completion.
 ```
 
@@ -426,7 +427,7 @@ The agent should choose the simplest working path, in this order:
 5. NAT/firewall/CGNAT: prefer open-source/free tunnel or mesh tools before
    paid hosted services.
 6. Hosted/public gateway: use when the operator already has one or explicitly
-   approves creating one.
+   authorizes creating one.
 
 Once a path is selected, the user-facing output must be a universal Connection
 Entry: a link, visible script, or signed package. Raw `host_command`, ticket,

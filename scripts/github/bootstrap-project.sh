@@ -101,7 +101,7 @@ create_issue_if_missing() {
 
 ensure_label "area:gateway" "1f77b4" "gateway state, APIs, queues, leases, storage"
 ensure_label "area:host" "2ca02c" "host runtime, identity, trust, execution loop"
-ensure_label "area:policy" "d62728" "policy decisions, approval gates, denial explanations"
+ensure_label "area:policy" "d62728" "policy decisions, authorization gates, denial explanations"
 ensure_label "area:evidence" "9467bd" "artifacts, evidence bundles, audit export, redaction"
 ensure_label "area:transport" "17becf" "HTTPS polling, WSS, mTLS, reconnect"
 ensure_label "area:adapter" "ff7f0e" "shell, PowerShell, Git, Codex, Claude Code, ACP, GUI, mesh"
@@ -119,8 +119,8 @@ ensure_label "priority:p0" "b60205" "blocks safe use or release"
 ensure_label "priority:p1" "fbca04" "required for current milestone"
 ensure_label "priority:p2" "c5def5" "useful but not blocking current milestone"
 
-ensure_milestone "v0.1 Local Safety Kernel" "Signed local job execution, host-side verification, approval gates, evidence bundles, audit verification, and portable Skillkit export."
-ensure_milestone "v0.2 Temporary Windows Host" "One visible verified Windows command starts an outbound-only foreground host, enforces approvals, revokes cleanly, and leaves no persistence."
+ensure_milestone "v0.1 Local Safety Kernel" "Signed local task execution, host-side verification, authorization gates, evidence bundles, audit verification, and portable Skillkit export."
+ensure_milestone "v0.2 Temporary Windows Host" "One visible verified Windows command starts an outbound-only foreground host, enforces authorizations, revokes cleanly, and leaves no persistence."
 ensure_milestone "v0.3 Managed Mac Coding" "operator-owned managed Mac reconnects after reboot, runs Codex in a locked worktree, returns diff/test evidence, and gates push/merge/deploy."
 ensure_milestone "v0.4 Managed Device Generalization" "Windows Service, systemd, OS-protected storage, WSS/mTLS, adapter SDK, and durable reconnect across platforms."
 ensure_milestone "v1.0 Public Skillkit" "Stable self-hostable open-source release with signed artifacts, installer docs, conformance suite, threat model, and public acceptance transcripts."
@@ -133,10 +133,10 @@ create_issue_if_missing "Run service-backed managed Mac acceptance transcript" "
 
 Acceptance:
 - generate a managed Mac LaunchAgent plan
-- review the plist, label, logs, identity/trust/nonce/approval stores, and workspace-lock store
+- review the plist, label, logs, identity/trust/nonce/authorization stores, and workspace-lock store
 - start and inspect with rdev host service-control --execute
 - confirm reconnect after login or reboot
-- run the managed Mac Codex acceptance job through the service
+- run the managed Mac Codex acceptance task through the service
 - run rdev acceptance verify on service-backed evidence
 - stop and uninstall the LaunchAgent without touching unrelated plists
 
@@ -157,7 +157,7 @@ Acceptance:
 - bootstrap verifies pinned verifier and signed host artifact before execution
 - host runs foreground, shows reason, TTL, gateway, and stop instructions
 - host connects outbound only
-- package install/elevation/service/GUI probes return approval-required
+- package install/elevation/service/GUI probes return authorization-required
 - host revoke cancels queued/running work where possible
 - no service, scheduled task, Run key, startup shortcut, or firewall rule remains
 
@@ -173,11 +173,11 @@ create_issue_if_missing "Add production WSS host channel with authenticated fall
 - docs/project/ROADMAP.md v0.4
 
 Acceptance:
-- host can connect over authenticated WSS for interactive job status and artifact events
+- host can connect over authenticated WSS for interactive task status and artifact events
 - HTTPS long-poll remains a supported fallback
 - reconnect and bounded leases are tested
-- cancellation/revocation propagates to running jobs
-- transport identity never replaces signed job authorization
+- cancellation/revocation propagates to running tasks
+- transport identity never replaces signed task authorization
 
 Verification:
 - unit/integration tests cover WSS connect, reconnect, cancellation, and fallback
@@ -207,7 +207,7 @@ create_issue_if_missing "Extract adapter SDK and conformance suite" "v0.4 Manage
 Acceptance:
 - define detect, plan, prepare, run, collect, cleanup interfaces
 - shell and Codex adapters pass shared conformance fixtures
-- tests cover capability mapping, workspace escape rejection, approval pause, cancellation, redaction, evidence, and cleanup
+- tests cover capability mapping, workspace escape rejection, authorization pause, cancellation, redaction, evidence, and cleanup
 - new adapter authors can run the conformance suite locally
 
 Verification:
@@ -220,7 +220,7 @@ create_issue_if_missing "Implement Claude Code and ACP adapters behind the safet
 - skills/remote-vibe-coding/SKILL.md
 
 Acceptance:
-- adapters run only after signed envelope, host validation, workspace lock, and approval preflight
+- adapters run only after signed envelope, host validation, workspace lock, and authorization preflight
 - diff/test evidence matches Codex adapter expectations where possible
 - push/merge/deploy/publish/credential/service intents pause before execution
 - Skillkit documents when to select Codex, Claude Code, ACP, shell, or PowerShell
@@ -237,7 +237,7 @@ create_issue_if_missing "Add Windows Service and systemd managed host lifecycle"
 Acceptance:
 - rdev host install-service supports Windows Service and systemd modes
 - install, status, service-control, stop, and uninstall are explicit and inspectable
-- managed service arguments include identity, trust, nonce, approval, and workspace-lock stores
+- managed service arguments include identity, trust, nonce, authorization, and workspace-lock stores
 - temporary mode cannot install persistence through these commands
 
 Verification:
@@ -252,7 +252,7 @@ create_issue_if_missing "Package public Skillkit install paths for Codex Claude 
 Acceptance:
 - one install path each for Codex, Claude Code, OpenCode/OpenClaw, Hermes, and generic MCP
 - exported bundle includes manifest checksums and framework notes
-- quickstart proves a local self-host user can create a ticket, run a job, and export evidence
+- quickstart proves a local self-host user can create a ticket, run a task, and export evidence
 - no Hermes-specific assumption is required for generic users
 
 Verification:

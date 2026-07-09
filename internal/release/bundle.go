@@ -158,7 +158,7 @@ func CreateBundle(opts BundleOptions) (Bundle, error) {
 	bundle := Bundle{
 		SchemaVersion:     BundleSchemaVersion,
 		GeneratedAt:       now.UTC(),
-		SigningAlg:        model.JobEnvelopeSigningAlg,
+		SigningAlg:        model.SigningAlgEd25519,
 		SigningKeyID:      opts.Key.ID,
 		RequiredArtifacts: cleanStringList(opts.RequiredArtifacts),
 		Artifacts:         artifacts,
@@ -331,7 +331,7 @@ func (b Bundle) validateForSigning() error {
 	if b.GeneratedAt.IsZero() {
 		return fmt.Errorf("%w: generated_at is required", ErrManifestInvalid)
 	}
-	if b.SigningAlg != model.JobEnvelopeSigningAlg || b.SigningKeyID == "" {
+	if b.SigningAlg != model.SigningAlgEd25519 || b.SigningKeyID == "" {
 		return fmt.Errorf("%w: unsupported release bundle signing metadata", ErrManifestInvalid)
 	}
 	if len(b.Artifacts) == 0 {

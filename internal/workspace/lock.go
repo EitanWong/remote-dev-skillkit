@@ -27,7 +27,7 @@ type Lock struct {
 	SchemaVersion string    `json:"schema_version"`
 	LockID        string    `json:"lock_id"`
 	HostID        string    `json:"host_id"`
-	JobID         string    `json:"job_id"`
+	TaskID        string    `json:"task_id"`
 	RepoRoot      string    `json:"repo_root"`
 	WorktreePath  string    `json:"worktree_path,omitempty"`
 	BaseRef       string    `json:"base_ref,omitempty"`
@@ -41,7 +41,7 @@ type LockOptions struct {
 	StoreDir     string
 	RepoRoot     string
 	HostID       string
-	JobID        string
+	TaskID       string
 	WorktreePath string
 	BaseRef      string
 	Branch       string
@@ -73,8 +73,8 @@ func DefaultStoreDir(repoRoot string) (string, error) {
 }
 
 func (s FileLockStore) Acquire(opts LockOptions, now time.Time) (Lock, error) {
-	if strings.TrimSpace(opts.JobID) == "" {
-		return Lock{}, fmt.Errorf("job id is required")
+	if strings.TrimSpace(opts.TaskID) == "" {
+		return Lock{}, fmt.Errorf("task id is required")
 	}
 	if strings.TrimSpace(opts.HostID) == "" {
 		return Lock{}, fmt.Errorf("host id is required")
@@ -100,9 +100,9 @@ func (s FileLockStore) Acquire(opts LockOptions, now time.Time) (Lock, error) {
 	now = now.UTC()
 	lock := Lock{
 		SchemaVersion: LockSchemaVersion,
-		LockID:        newLockID(root, opts.JobID, now),
+		LockID:        newLockID(root, opts.TaskID, now),
 		HostID:        opts.HostID,
-		JobID:         opts.JobID,
+		TaskID:        opts.TaskID,
 		RepoRoot:      root,
 		WorktreePath:  cleanOptionalPath(opts.WorktreePath),
 		BaseRef:       strings.TrimSpace(opts.BaseRef),
@@ -138,7 +138,7 @@ func (s FileLockStore) Acquire(opts LockOptions, now time.Time) (Lock, error) {
 			return Lock{}, readErr
 		}
 		if now.Before(existing.ExpiresAt) {
-			return Lock{}, fmt.Errorf("%w: repo %q is held by job %q until %s", ErrLocked, root, existing.JobID, existing.ExpiresAt.Format(time.RFC3339))
+			return Lock{}, fmt.Errorf("%w: repo %q is held by task %q until %s", ErrLocked, root, existing.TaskID, existing.ExpiresAt.Format(time.RFC3339))
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return Lock{}, err
@@ -175,7 +175,7 @@ func (s FileLockStore) Status(repoRoot string, now time.Time) (LockStatus, error
 	}, nil
 }
 
-func (s FileLockStore) Release(repoRoot, jobID string, force bool) (Lock, bool, error) {
+func (s FileLockStore) Release(repoRoot, taskID string, force bool) (Lock, bool, error) {
 	root, err := CanonicalDir(repoRoot)
 	if err != nil {
 		return Lock{}, false, err
@@ -195,11 +195,11 @@ func (s FileLockStore) Release(repoRoot, jobID string, force bool) (Lock, bool, 
 	if err != nil {
 		return Lock{}, false, err
 	}
-	if !force && strings.TrimSpace(jobID) != "" && lock.JobID != jobID {
-		return Lock{}, false, fmt.Errorf("%w: lock belongs to job %q", ErrOwnerMismatch, lock.JobID)
+	if !force && strings.TrimSpace(taskID) != "" && lock.TaskID != taskID {
+		return Lock{}, false, fmt.Errorf("%w: lock belongs to task %q", ErrOwnerMismatch, lock.TaskID)
 	}
-	if !force && strings.TrimSpace(jobID) == "" {
-		return Lock{}, false, fmt.Errorf("%w: job id is required unless force is set", ErrOwnerMismatch)
+	if !force && strings.TrimSpace(taskID) == "" {
+		return Lock{}, false, fmt.Errorf("%w: task id is required unless force is set", ErrOwnerMismatch)
 	}
 	if err := os.Remove(path); err != nil {
 		return Lock{}, false, err
@@ -210,6 +210,10 @@ func (s FileLockStore) Release(repoRoot, jobID string, force bool) (Lock, bool, 
 func CanonicalDir(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("path is required")
+	}
+	path, err := expandUserHome(path)
+	if err != nil {
+		return "", err
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -227,6 +231,21 @@ func CanonicalDir(path string) (string, error) {
 		return "", fmt.Errorf("path must be a directory")
 	}
 	return filepath.Clean(canonical), nil
+}
+
+func expandUserHome(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("resolve user home: %w", err)
+	}
+	if path == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, path[2:]), nil
 }
 
 func readLock(path string) (Lock, error) {
@@ -249,8 +268,8 @@ func lockPath(storeDir, repoRoot string) string {
 	return filepath.Join(storeDir, hex.EncodeToString(sum[:])+".json")
 }
 
-func newLockID(repoRoot, jobID string, now time.Time) string {
-	sum := sha256.Sum256([]byte(repoRoot + "\x00" + jobID + "\x00" + now.Format(time.RFC3339Nano)))
+func newLockID(repoRoot, taskID string, now time.Time) string {
+	sum := sha256.Sum256([]byte(repoRoot + "\x00" + taskID + "\x00" + now.Format(time.RFC3339Nano)))
 	return "wlk_" + hex.EncodeToString(sum[:8])
 }
 

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Remote Session Review"
+  short_description: "Review session task evidence before completion"
+  default_prompt: "Use $remote-session-review to verify session task artifacts, interrupts, audit records, runtime-memory updates, and cleanup before declaring completion."
+policy:
+  allow_implicit_invocation: true

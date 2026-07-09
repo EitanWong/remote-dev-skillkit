@@ -9,7 +9,7 @@ For the concise release-facing summary, see
 
 Remote Dev Skillkit should be a consent-first, agent-native remote work fabric, not a remote shell, remote desktop clone, or generic terminal MCP server.
 
-The system should give agents broad usefulness only through narrow, signed, policy-checked jobs. It should never give agents ambient machine ownership.
+The system should give agents broad usefulness only through narrow, signed, policy-checked tasks. It should never give agents ambient machine ownership.
 
 The winning design is:
 
@@ -43,15 +43,15 @@ This is the final refined architecture decision for the project. The product sho
 agent intent
   -> typed Skill/MCP request
   -> gateway policy dry-run
-  -> signed, host-bound job envelope
+  -> signed, host-bound session task
   -> outbound host lease
   -> host-side validation
   -> locked workspace/session
   -> adapter execution
   -> redacted artifacts
-  -> evidence bundle
+  -> session evidence
   -> hash-chained audit
-  -> approval, continuation, or revocation
+  -> authorization, continuation, or revocation
 ```
 
 The "perfect ending" is not maximum remote control. It is maximum useful delegation without ambient machine ownership.
@@ -70,16 +70,16 @@ Remote Dev Skillkit is an agent work-control system. It is not a remote shell pr
 The product is correct only when all three statements remain true:
 
 1. Agents request typed work; they do not receive ambient machine ownership.
-2. Hosts execute only signed, scoped, expiring, locally verified jobs.
-3. Humans can approve, stop, review, audit, and revoke every meaningful remote action.
+2. Hosts execute only signed, scoped, expiring, locally verified tasks.
+3. Humans can authorize, stop, review, audit, and revoke every meaningful remote action.
 
 Every executable attempt must end in exactly one reviewable outcome:
 
 | Outcome | Meaning |
 |---|---|
 | `rdev.host-denial.v1` | the safe answer is no, with a machine-readable reason and next safe action |
-| `rdev.approval-required.v1` | the safe answer is not yet; a scoped approval token is required |
-| `rdev.evidence-bundle.v1` | the action ran and produced reviewable artifacts, redaction metadata, and audit events |
+| `rdev.session-interrupt.v1` | the safe answer is not yet; a scoped interrupt or operator-reviewed continuation is required |
+| `rdev.session-evidence.v1` | the action ran and produced reviewable artifacts, redaction metadata, and audit events |
 
 Natural-language agent confidence is never a completion proof. Evidence is the completion proof.
 
@@ -89,10 +89,10 @@ The final system has four planes. They may live in one binary at first, but thei
 
 | Plane | Owns | Must not own |
 |---|---|---|
-| Agent interface | Skills, MCP tools, API clients, policy dry-run requests, evidence review workflows | host credentials, dangerous-action approval authority |
-| Gateway governance | tickets, host registry, leases, signing, policy, approvals, artifacts, audit, revocation | local host execution or release signing authority |
-| Host sovereignty | host identity, trust bundle, local policy validation, nonce store, approval consumption, workspace/session locks, adapter runner, local stop control | broader policy than the gateway granted |
-| Adapter execution | shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevPod work | authorization, approval, persistence, or trust roots |
+| Agent interface | Skills, MCP tools, API clients, policy dry-run requests, evidence review workflows | host credentials, dangerous-action authorization authority |
+| Gateway governance | tickets, host registry, leases, signing, policy, authorizations, artifacts, audit, revocation | local host execution or release signing authority |
+| Host sovereignty | host identity, trust bundle, local policy validation, nonce store, authorization consumption, workspace/session locks, adapter runner, local stop control | broader policy than the gateway granted |
+| Adapter execution | shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, Coder, DevPod work | authorization, authorization, persistence, or trust roots |
 
 This split is the architecture's main safety property. If an adapter, transport, mesh, SSH tunnel, GUI tool, or coding CLI becomes the security root, the design has regressed.
 
@@ -104,19 +104,19 @@ Every remote-development workflow must follow the same loop:
 agent intent
   -> typed Skill/MCP/API request
   -> gateway policy dry-run
-  -> signed host-bound job envelope
+  -> signed host-bound session task
   -> outbound host lease
   -> host-side validation
   -> locked workspace or foreground session
   -> adapter execution
   -> redacted artifacts
-  -> evidence bundle
+  -> session evidence
   -> hash-chained audit
   -> review
-  -> approval, continuation, cancellation, or revocation
+  -> authorization, continuation, cancellation, or revocation
 ```
 
-No product surface is allowed to skip the signed envelope, host-side validation, approval gates, evidence, or audit path.
+No product surface is allowed to skip the signed envelope, host-side validation, session interrupts, evidence, or audit path.
 
 ### Final Operating Modes
 
@@ -125,11 +125,11 @@ The same kernel supports four intentionally separate modes:
 | Mode | Use case | Persistence | Default authority | Non-negotiable rule |
 |---|---|---:|---|---|
 | `attended-temporary` | third-party or short-lived support | none | foreground, TTL-bound, scoped repair | no service, autorun, hidden restart, or silent resurrection |
-| `managed` | operator-owned or formally managed machines | explicit service | durable reconnect with approved roots | service install, status, stop, and uninstall must be visible |
-| `break-glass` | urgent recovery | short-lived only | narrow, high-audit emergency actions | stronger approvals and shorter TTL than normal temporary mode |
-| `workspace-provider` | Coder, DevPod, devcontainers, disposable cloud workspaces | provider-owned | bounded workspace lifecycle | provider identity never replaces rdev job authorization |
+| `managed` | operator-owned or formally managed machines | explicit service | durable reconnect with authorized roots | service install, status, stop, and uninstall must be visible |
+| `break-glass` | urgent recovery | short-lived only | narrow, high-audit emergency actions | stronger authorizations and shorter TTL than normal temporary mode |
+| `workspace-provider` | Coder, DevPod, devcontainers, disposable cloud workspaces | provider-owned | bounded workspace lifecycle | provider identity never replaces rdev task authorization |
 
-Temporary mode never upgrades itself into managed mode. Managed mode never inherits approval for push, merge, deploy, publish, credential changes, GUI control, service changes, or paid actions.
+Temporary mode never upgrades itself into managed mode. Managed mode never inherits authorization for push, merge, deploy, publish, credential changes, GUI control, service changes, or paid actions.
 
 ### Authority Separation
 
@@ -137,12 +137,12 @@ The final architecture deliberately avoids any one master credential.
 
 | Authority | Grants | Does not grant |
 |---|---|---|
-| Agent client auth | permission to request rdev tools | permission to run on hosts or approve danger |
-| Operator session | permission to approve hosts and scoped actions | permission to bypass host verification |
-| Gateway job-signing key | one bounded executable job envelope | release trust, host identity, or approval by itself |
-| Approval token key | one scoped exception for one operation | reusable standing privilege |
+| Agent client auth | permission to request rdev tools | permission to run on hosts or authorize danger |
+| Operator session | permission to authorize hosts and scoped actions | permission to bypass host verification |
+| Gateway session-signing key | one bounded executable session task | release trust, host identity, or authorization by itself |
+| Authorization token key | one scoped exception for one operation | reusable standing privilege |
 | Host identity key | proof of the enrolled host | permission to broaden local policy |
-| Release signing key | software artifact trust | runtime job authority |
+| Release signing key | software artifact trust | runtime task authority |
 | Audit chain | tamper evidence | authorization |
 
 The blast radius target is simple: compromising any one authority must not grant all three powers of publishing software, enrolling hosts, and authorizing execution.
@@ -153,18 +153,18 @@ All adapters implement the same safety wrapper:
 
 ```text
 detect(context) -> capabilities
-plan(job, host_policy) -> required_capabilities, approvals, workspace_or_session_plan
-prepare(job, locks, limits) -> prepared_workspace_or_session
-run(job, cancellation, limits) -> events, raw_result
-collect(job, raw_result) -> redacted_artifacts, checksums, evidence_manifest
-cleanup(job, result) -> cleanup_status
+plan(task, host_policy) -> required_capabilities, authorizations, workspace_or_session_plan
+prepare(task, locks, limits) -> prepared_workspace_or_session
+run(task, cancellation, limits) -> events, raw_result
+collect(task, raw_result) -> redacted_artifacts, checksums, evidence_manifest
+cleanup(task, result) -> cleanup_status
 ```
 
 Conformance tests must prove:
 
 - capability mapping is explicit and deny-by-default;
 - workspace and symlink escapes are rejected;
-- approval-required operations pause before side effects;
+- session-interrupt-required operations pause before side effects;
 - cancellation is honored where the underlying tool allows it;
 - output limits and redaction apply to argv, prompt, stdout, stderr, files, diffs, and screenshots;
 - failures still produce artifacts or structured denials;
@@ -182,7 +182,7 @@ Hermes
   -> MCP HTTP or local bridge
   -> https://api.example.com/v1
   -> rdev-gateway
-  -> tickets, hosts, jobs, approvals, artifacts, audit, signing
+  -> tickets, hosts, tasks, authorizations, artifacts, audit, signing
   -> https://agent.example.com
   -> join page, release manifests, bootstrap, outbound host relay
   -> managed operator hosts and attended temporary hosts
@@ -208,18 +208,18 @@ The public package succeeds only if another user can adopt the safe workflow wit
 
 The final architecture is realized when these gates pass:
 
-1. A temporary Windows host joins from one visible verified command, connects outbound only, runs foreground, enforces approvals, and leaves no persistence.
-2. an operator's managed Mac reconnects after reboot, receives a agent-requested Codex job, locks a Git worktree, returns diff/test evidence, and requires approval before push or merge.
-3. Tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, workspace-escaping, or missing-capability jobs are rejected host-side with structured denials.
-4. Package install, elevation, GUI control, service mutation, credential changes, push, merge, deploy, publish, and paid actions require scoped approval tokens.
-5. Revocation of tickets, hosts, jobs, approvals, or keys prevents future work and cancels queued or running work where possible.
+1. A temporary Windows host joins from one visible verified command, connects outbound only, runs foreground, enforces authorizations, and leaves no persistence.
+2. an operator's managed Mac reconnects after reboot, receives a agent-requested Codex task, locks a Git worktree, returns diff/test evidence, and requires authorization before push or merge.
+3. Tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, workspace-escaping, or missing-capability tasks are rejected host-side with structured denials.
+4. Package install, elevation, GUI control, service mutation, credential changes, push, merge, deploy, publish, and paid actions require scoped session interrupts.
+5. Revocation of tickets, hosts, tasks, authorizations, or keys prevents future work and cancels queued or running work where possible.
 6. Release manifests and binaries are signature and checksum verified before host execution.
-7. Evidence bundles and audit export are sufficient for another human or agent to reconstruct what happened.
+7. Session evidence and audit export are sufficient for another human or agent to reconstruct what happened.
 8. Built-in adapters pass conformance tests and cannot bypass the safety kernel.
 9. Skillkit export installs cleanly into mainstream agent runtimes without Hermes-specific assumptions.
 10. The threat model, release process, security policy, and acceptance transcripts match the shipped behavior.
 
-The perfect ending is reached when the operator can say, "an agent, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
+The perfect ending is reached when the operator can say, "an agent, use that authorized machine to solve this," and the system responds with bounded execution, local verification, session interrupts, evidence, audit, and revocation instead of trust-me automation.
 
 ### Final Product Boundary
 
@@ -227,12 +227,12 @@ Remote Dev Skillkit owns the agent safety kernel. It should not try to replace e
 
 | Layer | Final decision |
 |---|---|
-| Agent workflow | Agent Skills plus MCP tools teach agents how to invite, approve, run, review, and revoke |
-| Control plane | `rdev-gateway` owns tickets, host registry, policy, signing, approvals, artifacts, audit, and revocation |
+| Agent workflow | Agent Skills plus MCP tools teach agents how to invite, authorize, run, review, and revoke |
+| Control plane | `rdev-gateway` owns tickets, host registry, policy, signing, authorizations, artifacts, audit, and revocation |
 | Host plane | `rdev-host` owns local identity, trust, policy validation, workspace locks, adapters, evidence, and local stop controls |
 | Transport | outbound HTTPS/WSS first; mesh or SSH only as optional owned-host transports |
 | Execution | shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, Coder, DevPod, and mesh are adapters |
-| Proof | every job ends in structured denial, approval request, or evidence bundle |
+| Proof | every task ends in structured denial, authorization request, or session evidence |
 
 This boundary keeps the core small enough to secure while leaving the ecosystem broad enough to be useful.
 
@@ -246,7 +246,7 @@ Hermes
   -> MCP HTTP or local MCP bridge
   -> https://api.example.com/v1
   -> rdev-gateway
-  -> tickets, jobs, approvals, artifacts, audit, signing
+  -> tickets, tasks, authorizations, artifacts, audit, signing
   -> https://agent.example.com
   -> join page, signed manifests, host relay, release downloads
   -> managed hosts or temporary attended hosts
@@ -257,8 +257,8 @@ The server can start as one binary on one VPS, but the architecture must preserv
 - `api.example.com/v1` is the authenticated agent/operator API surface.
 - `agent.example.com` is the human join, bootstrap, release, and host-relay surface.
 - Hermes holds an agent-client identity, not host credentials.
-- the operator approves high-risk operations through scoped approval tokens.
-- The host verifies every executable job even if the gateway or client behaves incorrectly.
+- the operator authorizes high-risk operations through scoped session interrupts.
+- The host verifies every executable task even if the gateway or client behaves incorrectly.
 
 ### Final Runtime Loops
 
@@ -266,9 +266,9 @@ The system has three loops. Every feature must fit one of them.
 
 | Loop | Purpose | Final output |
 |---|---|---|
-| Enrollment loop | turn a human-approved machine into an identified host | ticket, host identity, capability inventory, host policy, trust bundle |
+| Enrollment loop | turn a human-authorized machine into an identified host | ticket, host identity, capability inventory, host policy, trust bundle |
 | Execution loop | turn agent intent into bounded machine work | signed envelope, lease, adapter run, denial or artifacts |
-| Review loop | turn remote work into an auditable decision | evidence bundle, audit slice, approval request, continuation, or revoke |
+| Review loop | turn remote work into an auditable decision | session evidence, audit slice, authorization request, continuation, or revoke |
 
 The loops are intentionally boring. They make retries, reconnects, cancellation, and audit reconstruction possible.
 
@@ -282,7 +282,7 @@ Selection inputs:
 - mode: `attended-temporary`, `managed`, `break-glass`, or `workspace-provider`;
 - online status, last heartbeat, current lease, and load;
 - platform, architecture, tools, adapters, and coding CLIs;
-- approved workspace roots and capability rings;
+- authorized workspace roots and capability rings;
 - trust bundle sequence and revocation state;
 - local stop status and remaining session TTL;
 - workspace lock status and active worktrees.
@@ -292,7 +292,7 @@ Selection output:
 - selected host id;
 - selected adapter;
 - selected workspace or new worktree;
-- required approvals before execution;
+- required authorizations before execution;
 - risk explanation when the best host is temporary, privileged, stale, or missing evidence.
 
 ### Final Scheduler And Concurrency Model
@@ -301,12 +301,12 @@ The gateway schedules intent. The host owns execution.
 
 | Concern | Final rule |
 |---|---|
-| Job binding | every job is bound to one host id before execution |
+| Task binding | every task is bound to one host id before execution |
 | Leasing | a host must claim a bounded lease before running |
-| Idempotency | job creation, claim, completion, artifact upload, and cancellation must be retry-safe |
+| Idempotency | task creation, claim, completion, artifact upload, and cancellation must be retry-safe |
 | Workspace writes | one active writer per workspace root unless distinct worktrees are used |
-| Approval tokens | consumed only after envelope, policy, nonce, capability, workspace, and lock checks pass |
-| Cancellation | host, ticket, job, key, or approval revocation cancels queued work and requests cooperative stop for running work |
+| Authorization tokens | consumed only after envelope, policy, nonce, capability, workspace, and lock checks pass |
+| Cancellation | host, ticket, task, key, or authorization revocation cancels queued work and requests cooperative stop for running work |
 | Offline behavior | managed hosts may reconnect and flush audit/evidence; temporary hosts do not silently resurrect after stop or expiry |
 
 The current workspace lock implementation is part of this contract: coding adapters should run only after the host has acquired the lock or prepared a separate worktree.
@@ -317,22 +317,22 @@ Adapters are plugins behind the safety kernel. They may be powerful, but they do
 
 ```text
 detect(context) -> adapter_capabilities
-plan(job, host_policy) -> required_capabilities, approvals, workspace_plan
-prepare(job) -> locked_workspace_or_session
-run(job, limits) -> stream, artifacts, exit_status
-collect(job) -> evidence_manifest
-cleanup(job) -> cleanup_status
+plan(task, host_policy) -> required_capabilities, authorizations, workspace_plan
+prepare(task) -> locked_workspace_or_session
+run(task, limits) -> stream, artifacts, exit_status
+collect(task) -> evidence_manifest
+cleanup(task) -> cleanup_status
 ```
 
 Required adapter guarantees:
 
 - no execution before host validation;
 - no writes outside declared workspace scope;
-- no push, merge, deploy, publish, credential access, service mutation, GUI control, or elevation without approval;
+- no push, merge, deploy, publish, credential access, service mutation, GUI control, or elevation without authorization;
 - bounded logs and output redaction;
 - stable artifacts with checksums;
 - cancellation hooks;
-- conformance tests for capability mapping, denials, approvals, evidence, and cleanup.
+- conformance tests for capability mapping, denials, authorizations, evidence, and cleanup.
 
 Initial adapter priority:
 
@@ -352,11 +352,11 @@ Final properties:
 - local stop control;
 - short TTL;
 - outbound-only HTTPS/WSS connection;
-- no service install, autorun entry, registry persistence, launchd job, systemd unit, scheduled task, or hidden restart;
+- no service install, autorun entry, registry persistence, launchd task, systemd unit, scheduled task, or hidden restart;
 - signed join manifest and signed release artifact verification before host execution;
 - local host key generated for the session;
-- pending approval before first job;
-- approval gates for elevation, GUI, service changes, package installation, destructive actions, credential access, push, merge, deploy, publish, and long unattended work;
+- pending authorization before first task;
+- session interrupts for elevation, GUI, service changes, package installation, destructive actions, credential access, push, merge, deploy, publish, and long unattended work;
 - automatic cleanup and final audit/evidence upload when the session ends.
 
 If a temporary host needs durable reconnect after reboot, the correct answer is not silent persistence. The correct answer is a separate managed enrollment with explicit consent.
@@ -374,23 +374,23 @@ Final properties:
 - signed trust bundle update protocol;
 - watchdog/restart only for managed mode;
 - health/status/stop/uninstall commands;
-- no inherited approval for external consequences such as push, merge, deploy, publish, paid actions, or credential changes.
+- no inherited authorization for external consequences such as push, merge, deploy, publish, paid actions, or credential changes.
 
 Managed mode gives reliability, not unlimited authority.
 
 ### Final Policy Kernel
 
-Policy should be deny-by-default and explainable. The same vocabulary must be used by gateway dry-runs, host validation, adapter planning, evidence bundles, and Skills.
+Policy should be deny-by-default and explainable. The same vocabulary must be used by gateway dry-runs, host validation, adapter planning, session evidence, and Skills.
 
 | Ring | Default posture | Examples |
 |---|---|---|
-| Ring 0 observe | allowed after host approval | capability detection, git status, read-only logs |
-| Ring 1 workspace | allowed when root is approved | scoped reads/writes, tests, build commands |
-| Ring 2 repair | approval or managed narrow grant | package changes, dependency repair, process kill |
-| Ring 3 privileged/visual | per-operation approval | elevation, GUI control, screenshots, service mutation |
-| Ring 4 external consequence | per-operation approval after evidence review | push, merge, deploy, publish, paid actions, credential changes |
+| Ring 0 observe | allowed after host authorization | capability detection, git status, read-only logs |
+| Ring 1 workspace | allowed when root is authorized | scoped reads/writes, tests, build commands |
+| Ring 2 repair | authorization or managed narrow grant | package changes, dependency repair, process kill |
+| Ring 3 privileged/visual | per-operation authorization | elevation, GUI control, screenshots, service mutation |
+| Ring 4 external consequence | per-operation authorization after evidence review | push, merge, deploy, publish, paid actions, credential changes |
 
-Denial is a valid successful outcome. The agent should receive `rdev.host-denial.v1` or `rdev.approval-required.v1` instead of a vague failure when the safe answer is "not yet."
+Denial is a valid successful outcome. The agent should receive `rdev.host-denial.v1` or `rdev.session-interrupt.v1` instead of a vague failure when the safe answer is "not yet."
 
 ### Final Storage And Evidence Model
 
@@ -404,9 +404,9 @@ The first production deployment can be single-operator and simple, but the objec
 | gateway signing keys | locked file or OS store | rotation, revocation, KMS/HSM option |
 | host identity | file-backed dev store | OS keychain/DPAPI/libsecret for managed mode |
 | host trust | file-backed trust bundle | signed update protocol and rollback protection |
-| approval tokens | gateway state plus host consumption store | single-use, scoped, expiring, auditable |
+| session interrupts | gateway state plus host consumption store | single-use, scoped, expiring, auditable |
 
-Evidence bundles are the unit of review. They should contain envelope, policy decisions, approval tokens used, adapter result, logs, diffs, test output, artifact checksums, redaction metadata, and an audit slice.
+Session evidence is the unit of review. They should contain envelope, policy decisions, session interrupts used, adapter result, logs, diffs, test output, artifact checksums, redaction metadata, and an audit slice.
 
 ### Final Release And Bootstrap Model
 
@@ -448,12 +448,12 @@ Success means other users can adopt the safe workflow without adopting Hermes, w
 
 The final architecture is done when these are true:
 
-1. A temporary Windows machine can join from a visible verified command, run bounded repair jobs, and leave no persistence.
-2. an operator's managed Mac can reconnect after reboot, receive a Codex job, lock a worktree, return diff/test evidence, and require approval before push or merge.
-3. Every executable job is a signed, host-bound, nonce-protected, expiring envelope.
+1. A temporary Windows machine can join from a visible verified command, run bounded repair tasks, and leave no persistence.
+2. an operator's managed Mac can reconnect after reboot, receive a Codex task, lock a worktree, return diff/test evidence, and require authorization before push or merge.
+3. Every executable task is a signed, host-bound, nonce-protected, expiring envelope.
 4. Gateway policy and host policy both enforce the same capability vocabulary.
-5. Adapters cannot bypass workspace locks, approval gates, evidence, redaction, or audit.
-6. Revocation stops future work and cancels queued or running jobs where possible.
+5. Adapters cannot bypass workspace locks, session interrupts, evidence, redaction, or audit.
+6. Revocation stops future work and cancels queued or running tasks where possible.
 7. Skillkit export installs cleanly into Hermes, Codex, Claude Code, OpenCode, and generic MCP environments.
 8. Public releases verify signed manifests and binaries before host execution.
 
@@ -469,12 +469,12 @@ The endgame is a remote-development control plane where agents can cause useful 
 |---|---|---|
 | User consent | temporary sessions are visible, foreground, TTL-bound; managed service is explicit | support tool becomes hidden remote admin |
 | Agent authority | agents request typed work through Skills/MCP/API | agent receives raw SSH/RDP/VNC or unrestricted shell by default |
-| Gateway authority | gateway owns policy, signing, approvals, artifacts, audit, revocation | a transport or adapter becomes the security root |
-| Host authority | host independently verifies every signed job before execution | gateway/client compromise directly runs code on hosts |
-| Adapter authority | adapters execute inside bounded workspace, capability, approval, and evidence rules | Codex/shell/GUI/mesh bypasses the safety kernel |
+| Gateway authority | gateway owns policy, signing, authorizations, artifacts, audit, revocation | a transport or adapter becomes the security root |
+| Host authority | host independently verifies every signed task before execution | gateway/client compromise directly runs code on hosts |
+| Adapter authority | adapters execute inside bounded workspace, capability, authorization, and evidence rules | Codex/shell/GUI/mesh bypasses the safety kernel |
 | Evidence authority | completion requires artifacts and audit, not narration | agent claims success without reviewable proof |
 | Release authority | bootstrap verifies signed manifests and artifacts before running host code | one-command install becomes supply-chain blind trust |
-| Revocation authority | tickets, hosts, jobs, approvals, and keys can be stopped and audited | mistakes or compromise keep running after stop |
+| Revocation authority | tickets, hosts, tasks, authorizations, and keys can be stopped and audited | mistakes or compromise keep running after stop |
 
 The product is correct only when all boundaries hold at the same time.
 
@@ -490,7 +490,7 @@ Skillkit + MCP/API Surface
         |
         v
 rdev Gateway
-  tickets, host registry, policy, signing, approvals, leases,
+  tickets, host registry, policy, signing, authorizations, leases,
   artifacts, audit, trust bundles, revocation
         |
         v
@@ -499,7 +499,7 @@ Outbound Host Channel
         |
         v
 rdev Host Runtime
-  local identity, trust store, policy verifier, nonce/approval stores,
+  local identity, trust store, policy verifier, nonce/authorization stores,
   workspace locks, adapter runner, local audit spool
         |
         v
@@ -508,7 +508,7 @@ Adapters
   Coder, DevPod, SSH, Tailscale/headscale
 ```
 
-The gateway may coordinate, but the host must remain sovereign over local execution. The host's default answer to anything ambiguous is deny or approval-required.
+The gateway may coordinate, but the host must remain sovereign over local execution. The host's default answer to anything ambiguous is deny or host-denial.
 
 ### Final Operating Modes
 
@@ -517,11 +517,11 @@ The same kernel supports four modes. Modes must stay visibly separate in CLI, po
 | Mode | Target | Persistence | Who consents | Typical work | Hard stop |
 |---|---|---:|---|---|---|
 | `attended-temporary` | third-party or short-lived machine | none | local user plus operator | repair, diagnostics, scoped fix | TTL, stop, ticket revoke |
-| `managed` | operator-owned or formally managed device | explicit service | operator during install and policy approval | durable coding, tests, scheduled maintenance | host revoke, policy revoke, service uninstall |
-| `break-glass` | emergency repair | no hidden persistence; short-lived | stronger local/operator approval | urgent recovery | short TTL and dense audit |
+| `managed` | operator-owned or formally managed device | explicit service | operator during install and policy authorization | durable coding, tests, scheduled maintenance | host revoke, policy revoke, service uninstall |
+| `break-glass` | emergency repair | no hidden persistence; short-lived | stronger local/operator authorization | urgent recovery | short TTL and dense audit |
 | `workspace-provider` | Coder/DevPod/cloud workspace | provider-managed | operator and workspace policy | disposable coding environment | workspace destroy/revoke |
 
-Temporary mode never upgrades itself into managed mode. Managed mode never inherits approval to push, merge, deploy, publish, change credentials, or control GUI without a scoped approval.
+Temporary mode never upgrades itself into managed mode. Managed mode never inherits authorization to push, merge, deploy, publish, change credentials, or control GUI without a scoped authorization.
 
 ### Final Authority Map
 
@@ -529,12 +529,12 @@ No single actor receives all powers.
 
 | Actor | Can do | Cannot do |
 |---|---|---|
-| Agent runtime | request tickets/jobs, explain approvals, review evidence | approve its own dangerous action, bypass policy, receive raw host credentials |
-| Operator | approve hosts, approvals, revocations, policies | bypass host-side verification |
-| Gateway | sign bounded jobs and approval tokens | execute locally on a host without host validation |
+| Agent runtime | request tickets/tasks, explain authorizations, review evidence | authorize its own dangerous action, bypass policy, receive raw host credentials |
+| Operator | authorize hosts, authorizations, revocations, policies | bypass host-side verification |
+| Gateway | sign bounded tasks and session interrupts | execute locally on a host without host validation |
 | Host runtime | verify and execute bounded work | broaden its own policy or trust roots |
 | Adapter | run a declared operation | create private persistence, widen workspace, skip evidence |
-| Release system | bless binaries and scripts | authorize jobs or approvals |
+| Release system | bless binaries and scripts | authorize tasks or authorizations |
 
 This separation is the core defense against both prompt injection and ordinary operational mistakes.
 
@@ -544,8 +544,8 @@ The project is finished when these paths work without special pleading.
 
 | Path | Final user experience | Required proof |
 |---|---|---|
-| Temporary Windows repair | an operator sends a join link/command; the user runs a visible verified bootstrap; an agent triages and repairs through signed jobs | no persistence, outbound only, release verification, approval pauses, denials, artifacts, audit, revoke |
-| Managed Mac coding | an agent selects an operator's Mac, locks a Git worktree, runs Codex, runs tests, returns diff/evidence | host identity, workspace lock, Codex adapter result, diff/tests, audit slice, approval before push/merge |
+| Temporary Windows repair | an operator sends a join link/command; the user runs a visible verified bootstrap; an agent triages and repairs through signed tasks | no persistence, outbound only, release verification, session interrupt pauses, denials, artifacts, audit, revoke |
+| Managed Mac coding | an agent selects an operator's Mac, locks a Git worktree, runs Codex, runs tests, returns diff/evidence | host identity, workspace lock, Codex adapter result, diff/tests, audit slice, authorization before push/merge |
 | Public Skillkit install | another agent user installs skills and MCP contracts without Hermes assumptions | exported Skillkit bundle, stable schemas, self-host docs, signed releases, threat model |
 | Adapter extension | contributor adds a new adapter | conformance tests prove capability mapping, workspace enforcement, cancellation, redaction, evidence, and audit |
 
@@ -555,10 +555,10 @@ Before adding or accepting any feature, answer these questions:
 
 1. Does the agent request a typed operation instead of raw access?
 2. Does the gateway sign only a bounded, host-specific, expiring envelope?
-3. Can the host independently reject the job if the gateway, client, or transport behaves badly?
-4. Are capabilities, workspace, limits, approvals, and redaction explicit?
+3. Can the host independently reject the task if the gateway, client, or transport behaves badly?
+4. Are capabilities, workspace, limits, authorizations, and redaction explicit?
 5. Does the action produce evidence and audit events sufficient for another reviewer?
-6. Can the operator revoke the ticket, host, job, approval, or key and see the result?
+6. Can the operator revoke the ticket, host, task, authorization, or key and see the result?
 7. Does temporary mode remain visible, foreground, outbound-only, and non-persistent?
 8. Does managed mode remain explicitly installed with health/status/uninstall paths?
 
@@ -571,14 +571,14 @@ If any answer is no, the feature is outside the final architecture until redesig
 `v1.0` requires:
 
 - signed and verifiable release artifacts for supported platforms;
-- stable schema versions for tickets, join manifests, trust bundles, jobs, approvals, denials, artifacts, evidence bundles, and audit events;
+- stable schema versions for tickets, join manifests, trust bundles, tasks, authorizations, denials, artifacts, session evidence, and audit events;
 - MCP tools and Agent Skills that expose typed workflows, not raw shells;
 - local demo, self-host deployment, temporary Windows repair, and managed coding documentation;
 - conformance tests for every built-in adapter;
 - threat model, release key lifecycle, security policy, and emergency revocation process;
 - acceptance evidence for Temporary Windows Repair and Managed Mac Coding.
 
-The perfect ending is reached when the operator can say "an agent, use that approved machine to solve this," and the system responds with bounded execution, local verification, approval gates, evidence, audit, and revocation instead of trust-me automation.
+The perfect ending is reached when the operator can say "an agent, use that authorized machine to solve this," and the system responds with bounded execution, local verification, session interrupts, evidence, audit, and revocation instead of trust-me automation.
 
 ## Endgame Operating Model
 
@@ -588,14 +588,14 @@ The final product should be understood as one operating model rather than a pile
 agent intent
   -> typed MCP/CLI request
   -> gateway policy decision
-  -> signed job envelope
+  -> signed session task
   -> host lease over outbound channel
   -> host-side verification
   -> adapter execution
   -> redacted artifacts
   -> hash-chained audit
   -> human or agent review
-  -> approval, continuation, or revocation
+  -> authorization, continuation, or revocation
 ```
 
 This loop is the product. Everything else is implementation detail.
@@ -610,7 +610,7 @@ Remote Dev Skillkit wins only if it becomes the safety and orchestration layer a
 - Adapters execute useful work without owning trust.
 - Evidence lets another agent or human review the result.
 
-The final system therefore has one stable core and many replaceable edges. The core is identity, policy, envelope signing, host validation, approvals, revocation, audit, and evidence. The edges are transports, coding CLIs, GUI tools, mesh networks, hosted workspaces, and future agent runtimes.
+The final system therefore has one stable core and many replaceable edges. The core is identity, policy, envelope signing, host validation, authorizations, revocation, audit, and evidence. The edges are transports, coding CLIs, GUI tools, mesh networks, hosted workspaces, and future agent runtimes.
 
 ### Final Product Form
 
@@ -618,9 +618,9 @@ The complete open-source product should ship as four installable surfaces and on
 
 | Surface | Primary user | Final responsibility |
 |---|---|---|
-| Agent Skills | Hermes, Codex, Claude Code, OpenCode, Cursor-style agents | teach safe workflows: invite, triage, job, approval, evidence, revoke |
-| MCP/API gateway | operator or self-hosted service | own tickets, host registry, policy, signing, approvals, artifacts, audit, revocation |
-| Host runtime | target Mac, Windows, Linux machine | connect outbound, validate every job, run adapters, spool evidence |
+| Agent Skills | Hermes, Codex, Claude Code, OpenCode, Cursor-style agents | teach safe workflows: invite, triage, task, authorization, evidence, revoke |
+| MCP/API gateway | operator or self-hosted service | own tickets, host registry, policy, signing, authorizations, artifacts, audit, revocation |
+| Host runtime | target Mac, Windows, Linux machine | connect outbound, validate every task, run adapters, spool evidence |
 | Operator CLI | human operator and developer | bootstrap, debug, inspect, export evidence, verify releases |
 | Protocol contracts | all components | schema-versioned tickets, manifests, envelopes, tokens, artifacts, audit events |
 
@@ -633,10 +633,10 @@ The finished project should ship as one coherent system with five deliverables. 
 | Deliverable | Shipped as | Final contract |
 |---|---|---|
 | Skillkit Bundle | `rdev skillkit export` | portable skills, MCP tool contracts, framework install notes, and checksummed manifest |
-| Gateway | `rdev gateway serve` plus HTTP/MCP API | tickets, host registry, policies, signing, approvals, artifacts, audit, revocation |
+| Gateway | `rdev gateway serve` plus HTTP/MCP API | tickets, host registry, policies, signing, authorizations, artifacts, audit, revocation |
 | Host Runtime | `rdev host serve` plus managed service installers | outbound channel, host identity, local policy, adapters, local audit spool |
 | Adapter SDK | Go interfaces, schemas, conformance tests | shell, PowerShell, Git, Codex, Claude Code, ACP, browser, GUI, mesh, workspace integrations |
-| Evidence Tooling | `rdev evidence export`, `rdev audit export`, verifiers | portable review bundles and tamper-evident audit reconstruction |
+| Evidence Tooling | session task/artifact evidence, `rdev audit export`, verifiers | portable review bundles and tamper-evident audit reconstruction |
 
 The final open-source install flow should therefore be:
 
@@ -645,13 +645,13 @@ install rdev
   -> export or install Skillkit
   -> configure MCP stdio/HTTP
   -> start or connect gateway
-  -> invite or approve host
-  -> run typed job
+  -> invite or authorize host
+  -> run typed task
   -> review evidence
-  -> approve continuation or revoke
+  -> authorize continuation or revoke
 ```
 
-This is the universal shape for Hermes, Codex, Claude Code, OpenCode, Cursor-style agents, and generic MCP agents. A runtime may present different UI, but it must preserve the same protocol objects and approval boundaries.
+This is the universal shape for Hermes, Codex, Claude Code, OpenCode, Cursor-style agents, and generic MCP agents. A runtime may present different UI, but it must preserve the same protocol objects and authorization boundaries.
 
 ### Final Capability Rings
 
@@ -659,13 +659,13 @@ Capabilities should be organized into rings so agents and operators can reason a
 
 | Ring | Examples | Default posture |
 |---|---|---|
-| Ring 0: observe | host info, tool versions, git status, read-only logs | allowed after host approval |
-| Ring 1: scoped workspace | read/write inside approved repo or temp directory, run allowlisted tests | allowed by explicit host policy |
-| Ring 2: environment repair | package manager, dependency changes, service inspection, network diagnostics | approval required unless managed policy grants it narrowly |
-| Ring 3: privileged or visual | elevation, GUI control, screenshots, browser profile access, service mutation | per-operation approval required |
-| Ring 4: external consequence | push, merge, deploy, publish, paid action, credential change | per-operation approval and evidence review required |
+| Ring 0: observe | host info, tool versions, git status, read-only logs | allowed after host authorization |
+| Ring 1: scoped workspace | read/write inside authorized repo or temp directory, run allowlisted tests | allowed by explicit host policy |
+| Ring 2: environment repair | package manager, dependency changes, service inspection, network diagnostics | authorization required unless managed policy grants it narrowly |
+| Ring 3: privileged or visual | elevation, GUI control, screenshots, browser profile access, service mutation | per-operation authorization required |
+| Ring 4: external consequence | push, merge, deploy, publish, paid action, credential change | per-operation authorization and evidence review required |
 
-Adapters must map their local actions into these rings before execution. Unknown actions default to denied or approval-required.
+Adapters must map their local actions into these rings before execution. Unknown actions default to denied or host-denial.
 
 ### Final Protocol Set
 
@@ -673,18 +673,18 @@ The end state is complete only when these schemas are stable, versioned, documen
 
 | Schema | Purpose |
 |---|---|
-| `rdev.skillkit-bundle.v1` | portable agent installation bundle |
+| `rdev.skillkit-evidence.v1` | portable agent installation bundle |
 | `rdev.ticket.v1` | temporary or managed invitation intent |
 | `rdev.join-manifest.v1` | bootstrap trust, downloads, release roots, and ticket binding |
 | `rdev.release-artifact.v1` | signed artifact digest, size, platform policy, and verification metadata |
-| `rdev.trust-bundle.v1` | gateway job-signing key set, rotation sequence, and revocation state |
+| `rdev.trust-bundle.v1` | gateway session-signing key set, rotation sequence, and revocation state |
 | `rdev.trust-bundle-update.v1` | host-bound trust-store refresh check for managed hosts |
-| `rdev.host-policy.v1` | approved capabilities, adapters, workspaces, limits, and approval gates |
-| `rdev.job.v1` | canonical signed executable intent |
-| `rdev.approval-token.v1` | scoped human decision for one high-risk operation |
+| `rdev.host-policy.v1` | authorized capabilities, adapters, workspaces, limits, and session interrupts |
+| `rdev.task.v1` | canonical signed executable intent |
+| `rdev.session-interrupt.v1` | scoped human decision for one high-risk operation |
 | `rdev.host-denial.v1` | structured refusal with safer next step |
-| `rdev.approval-required.v1` | structured pause before dangerous execution |
-| `rdev.evidence-bundle.v1` | review package containing artifacts, policy, envelope, audit slice, and checksums |
+| `rdev.session-interrupt.v1` | structured pause before dangerous execution |
+| `rdev.session-evidence.v1` | review package containing artifacts, policy, envelope, audit slice, and checksums |
 | `rdev.audit-event.v1` | append-only event for tamper-evident reconstruction |
 
 The schemas are the product's durable API. CLIs, hosted deployments, UI consoles, and agent frameworks can evolve around them.
@@ -698,17 +698,17 @@ Hermes
   -> Remote Dev Skillkit skills
   -> rdev MCP HTTP at https://api.example.com/v1
   -> rdev-gateway on the server
-  -> job signing, approvals, artifacts, audit
+  -> task signing, authorizations, artifacts, audit
   -> host relay/join surface at https://agent.example.com
   -> managed operator hosts or attended temporary hosts
 ```
 
 The server may initially run one binary, but the public contract should keep `api.example.com` and `agent.example.com` separate in responsibility:
 
-- `api.example.com/v1`: authenticated agent/operator API, MCP tools, jobs, approvals, artifacts, audit.
+- `api.example.com/v1`: authenticated agent/operator API, MCP tools, tasks, authorizations, artifacts, audit.
 - `agent.example.com`: human join page, bootstrap manifests, release downloads, outbound host relay.
 
-Hermes should hold an agent-client identity with tool permissions. It should not hold reusable host credentials, raw SSH passwords, or approval power for dangerous operations.
+Hermes should hold an agent-client identity with tool permissions. It should not hold reusable host credentials, raw SSH passwords, or authorization power for dangerous operations.
 
 ### Final Public Install Experience
 
@@ -733,7 +733,7 @@ The remaining path to the perfect ending should be implemented in this order:
 5. Add adapter SDK and conformance tests so Codex, Claude Code, ACP, GUI, mesh, Coder, and DevPod integrations cannot bypass the kernel.
 6. Stabilize schemas, signed releases, docs, threat model, and public install paths for v1.0.
 
-Any shortcut that makes a demo easier but weakens signed envelopes, local host validation, approval gates, evidence, or revocation is not on the final path.
+Any shortcut that makes a demo easier but weakens signed envelopes, local host validation, session interrupts, evidence, or revocation is not on the final path.
 
 ### Authority Separation
 
@@ -741,19 +741,19 @@ No final deployment may collapse all authority into one bearer token, one SSH cr
 
 | Authority | Grants | Does not grant |
 |---|---|---|
-| Agent client auth | permission to request tools | permission to execute on hosts or approve danger |
-| Operator session | permission to approve scoped actions | permission to bypass host validation |
-| Gateway job signing key | executable intent for a bounded job | release trust or host identity |
+| Agent client auth | permission to request tools | permission to execute on hosts or authorize danger |
+| Operator session | permission to authorize scoped actions | permission to bypass host validation |
+| Gateway session signing key | executable intent for a bounded task | release trust or host identity |
 | Host identity key | proof of the enrolled machine | permission to broaden policy |
-| Approval token key | one scoped exception | reusable standing privilege |
-| Release signing key | software artifact trust | job execution authority |
+| Authorization token key | one scoped exception | reusable standing privilege |
+| Release signing key | software artifact trust | task execution authority |
 | Audit chain | tamper evidence | authorization by itself |
 
 This separation is the reason the system can be useful without becoming ambient machine ownership.
 
 ### The Perfect Ending In One Sentence
 
-An agent can safely say "use that machine to solve this" because the machine only accepts signed, scoped, reviewable work that a human can approve, stop, audit, and revoke.
+An agent can safely say "use that machine to solve this" because the machine only accepts signed, scoped, reviewable work that a human can authorize, stop, audit, and revoke.
 
 ### Failure Conditions
 
@@ -761,9 +761,9 @@ The architecture is considered to have failed if any of these become normal beha
 
 - an agent receives raw long-lived SSH/RDP/VNC credentials as the default path;
 - a temporary third-party host installs a background service or autorun entry;
-- a mesh ACL, hostname, IP address, or remote desktop session authorizes job execution without a signed envelope;
-- an adapter runs outside workspace policy, approval gates, artifact redaction, or audit;
-- package install, elevation, GUI control, service mutation, push, merge, deploy, publish, paid action, or credential change happens without scoped approval;
+- a mesh ACL, hostname, IP address, or remote desktop session authorizes task execution without a signed envelope;
+- an adapter runs outside workspace policy, session interrupts, artifact redaction, or audit;
+- package install, elevation, GUI control, service mutation, push, merge, deploy, publish, paid action, or credential change happens without scoped authorization;
 - evidence is replaced by a natural-language summary without artifacts and audit proof;
 - release/bootstrap verification is treated as optional for one-command installation.
 
@@ -787,20 +787,20 @@ Codex, Claude Code, ACP, shell, PowerShell, Git, browser, GUI, SSH,
 Tailscale/headscale, Coder, DevPod, local tmux, future agent runtimes
 ```
 
-Adapters may be powerful, but they do not get to define trust. They receive bounded jobs from the kernel, return evidence to the kernel, and are revoked by the kernel.
+Adapters may be powerful, but they do not get to define trust. They receive bounded tasks from the kernel, return evidence to the kernel, and are revoked by the kernel.
 
 ### Kernel Responsibilities
 
 | Kernel area | Final responsibility | Why it cannot be delegated |
 |---|---|---|
-| identity | operator, agent client, gateway, host, release, approval identities | every other decision depends on knowing who asked and who executes |
-| policy | capability rings, workspace scope, approval gates, limits | adapters and prompts are not reliable security boundaries |
+| identity | operator, agent client, gateway, host, release, authorization identities | every other decision depends on knowing who asked and who executes |
+| policy | capability rings, workspace scope, session interrupts, limits | adapters and prompts are not reliable security boundaries |
 | envelope | canonical signed executable request | prevents ambiguous intent, tampering, wrong-host execution, and replay |
-| host validation | local verification before every run | gateway approval alone is not enough when clients or transports fail |
-| approval | human decision bound to one operation | agents can request escalation but cannot grant it to themselves |
+| host validation | local verification before every run | gateway authorization alone is not enough when clients or transports fail |
+| authorization | human decision bound to one operation | agents can request escalation but cannot grant it to themselves |
 | audit | append-only hash-chained events | remote work must be reviewable after the fact |
-| evidence | per-job artifacts, diffs, test output, denials, redaction metadata | the operator needs proof, not a confident summary |
-| revocation | cancel jobs, disable tickets, hosts, approvals, and keys | the operator must be able to stop the system quickly |
+| evidence | per-task artifacts, diffs, test output, denials, redaction metadata | the operator needs proof, not a confident summary |
+| revocation | cancel tasks, disable tickets, hosts, authorizations, and keys | the operator must be able to stop the system quickly |
 
 ### Adapter Responsibilities
 
@@ -814,7 +814,7 @@ Adapters own execution details only:
 - return schema-versioned artifacts;
 - clean up or leave reviewable state.
 
-An adapter that needs extra authority must request a capability or approval. It must never create a private bypass around signed jobs, workspace locks, redaction, approval, or audit.
+An adapter that needs extra authority must request a capability or authorization. It must never create a private bypass around signed tasks, workspace locks, redaction, authorization, or audit.
 
 ## Ultimate End-State Solution
 
@@ -822,11 +822,11 @@ The final product is a universal remote-work safety layer for agents. It lets an
 
 The end state is made of five cooperating products:
 
-1. **Skillkit**: small Agent Skills that teach Hermes, Codex, Claude Code, OpenCode, Cursor Agent, and similar systems to create tickets, request jobs, ask for approvals, read evidence, and revoke sessions.
-2. **MCP/API Gateway**: a control plane that exposes typed tools, owns tickets, host registry, policies, approvals, signing, artifacts, audit, and revocation.
+1. **Skillkit**: small Agent Skills that teach Hermes, Codex, Claude Code, OpenCode, Cursor Agent, and similar systems to create tickets, request tasks, ask for authorizations, read evidence, and revoke sessions.
+2. **MCP/API Gateway**: a control plane that exposes typed tools, owns tickets, host registry, policies, authorizations, signing, artifacts, audit, and revocation.
 3. **Host Runtime**: a cross-platform binary that runs on Mac, Windows, and Linux in either visible temporary mode or explicit managed service mode.
 4. **Adapter SDK**: a stable way to plug in shell, PowerShell, Git, Codex, Claude Code, ACP, browser, mesh, SSH, GUI, Coder, DevPod, or future coding environments without weakening the core safety model.
-5. **Evidence System**: hash-chained audit plus per-job evidence bundles that make remote work reviewable by a human or another agent.
+5. **Evidence System**: hash-chained audit plus per-task session evidence that make remote work reviewable by a human or another agent.
 
 The "perfect ending" is not that rdev controls every machine in every possible way. The perfect ending is that every supported path is consented, bounded, replay-safe, revocable, and reviewable.
 
@@ -838,11 +838,11 @@ The system is complete only when all of these statements are true:
 2. A Windows user can join from one visible command that verifies signed bootstrap and release artifacts before running the host.
 3. Temporary hosts connect outbound only, run in the foreground, have a visible stop path, and leave no service or autorun persistence.
 4. Managed hosts install through a separate explicit command, persist host identity and trust safely, reconnect after reboot, and have health/stop/uninstall commands.
-5. Every executable action is represented as a canonical signed job envelope with host binding, nonce, expiry, capabilities, workspace scope, limits, and approvals.
-6. The gateway refuses unsafe jobs before signing, and the host independently refuses unsafe jobs before execution.
-7. Dangerous operations become approval requests, not side effects. Agents may request and explain approvals but cannot grant them.
-8. Coding jobs run through a locked workspace or worktree and return diff, test output, logs, artifacts, and residual risk before push, merge, deploy, or publish.
-9. Audit export proves ticket, host, policy, approval, job, artifact, trust update, revocation, and release-verification events without trusting mutable logs.
+5. Every executable action is represented as a canonical signed session task with host binding, nonce, expiry, capabilities, workspace scope, limits, and authorizations.
+6. The gateway refuses unsafe tasks before routing, and the host independently refuses unsafe tasks before execution.
+7. Dangerous operations become session interrupt requests, not side effects. Agents may request and explain authorizations but cannot grant them.
+8. Coding tasks run through a locked workspace or worktree and return diff, test output, logs, artifacts, and residual risk before push, merge, deploy, or publish.
+9. Audit export proves ticket, host, policy, interrupt, task, artifact, trust update, revocation, and release-verification events without trusting mutable logs.
 10. Other users can self-host the same stack with safe defaults, stable MCP schemas, installable skills, signed releases, and documented threat boundaries.
 
 ### Personal Perfect Ending For An Operator
@@ -852,14 +852,14 @@ an operator's personal system should work like this:
 ```text
 an agent on Hermes
   -> rdev MCP tools at https://api.example.com/v1
-  -> rdev-gateway signs bounded jobs
-  -> the operator approves scoped host/session/workspace policy
+  -> rdev-gateway signs bounded tasks
+  -> the operator authorizes scoped host/session/workspace policy
   -> target host connects outbound to https://agent.example.com
   -> rdev-host executes through a typed adapter
   -> an agent reads evidence and summarizes next decisions
 ```
 
-For operator-owned machines, an agent should be able to select a managed Mac, Windows host, or Linux host by capability, repository root, current load, and last heartbeat. For third-party machines, an agent should create a short-lived join link and wait for explicit operator approval before the first job.
+For operator-owned machines, an agent should be able to select a managed Mac, Windows host, or Linux host by capability, repository root, current load, and last heartbeat. For third-party machines, an agent should create a short-lived join link and wait for explicit operator authorization before the first task.
 
 The personal deployment should optimize for one operator first, not premature multi-tenant complexity:
 
@@ -868,7 +868,7 @@ The personal deployment should optimize for one operator first, not premature mu
 3. Hermes holds an agent-client identity with tool permissions, not host credentials.
 4. Managed operator devices keep durable host identity and trust bundles.
 5. Third-party devices use temporary session-scoped identity and no persistence.
-6. Every remote coding session ends in an evidence bundle an agent can summarize before an operator decides whether to continue, push, merge, deploy, or revoke.
+6. Every remote coding session ends in session evidence an agent can summarize before an operator decides whether to continue, push, merge, deploy, or revoke.
 
 ### Public Perfect Ending For The Open-Source Project
 
@@ -886,15 +886,15 @@ The public package should not require adopting Hermes. Hermes is the first-class
 
 The perfect ending is not a single feature. It is a stable operating model:
 
-1. the operator can ask Hermes to work on any approved Mac, Windows, or Linux host.
+1. the operator can ask Hermes to work on any authorized Mac, Windows, or Linux host.
 2. an agent can discover or enroll a host through MCP tools without receiving raw machine ownership.
 3. A temporary third-party Windows machine can join from one visible command, verify the host binary before running it, connect outbound only, and leave no persistence behind.
-4. A managed Mac can reconnect after reboot, receive a Codex coding job, work inside a locked Git worktree, and return diff/test evidence before any push or merge.
+4. A managed Mac can reconnect after reboot, receive a Codex coding task, work inside a locked Git worktree, and return diff/test evidence before any push or merge.
 5. Every executable action is a signed, host-bound, time-bound, policy-bound envelope.
-6. The gateway refuses unsafe jobs, and the host independently refuses unsafe jobs.
-7. Dangerous actions become explicit approval requests with evidence and scope, not hidden side effects.
+6. The gateway refuses unsafe tasks, and the host independently refuses unsafe tasks.
+7. Dangerous actions become explicit session interrupt requests with evidence and scope, not hidden side effects.
 8. Revocation stops future work and cancels outstanding work.
-9. Audit export can reconstruct who requested what, which host ran it, which policy allowed or denied it, which artifacts were produced, and which human approvals were used.
+9. Audit export can reconstruct who requested what, which host ran it, which policy allowed or denied it, which artifacts were produced, and which human authorizations were used.
 10. Other agent users can install the same skills, MCP server, gateway, and host runtime as an open-source toolkit without inheriting operator-specific assumptions.
 
 If a shortcut makes any of those statements false, it is outside the final design.
@@ -905,9 +905,9 @@ If a shortcut makes any of those statements false, it is outside the final desig
 
 - an installable skillkit for agents;
 - an MCP and CLI tool surface for remote development work;
-- a gateway/host protocol for typed jobs;
+- a gateway/host protocol for typed tasks;
 - a cross-platform bootstrap and host runtime;
-- an auditable approval, policy, and evidence system.
+- an auditable authorization, policy, and evidence system.
 
 ### This Project Is Not
 
@@ -927,12 +927,12 @@ The final design intentionally aligns with public platform behavior instead of i
 |---|---|---|
 | Agent tool surface | MCP tools are model-invoked external actions with explicit schemas | expose typed `rdev.*` tools, not a generic remote shell |
 | Windows bootstrap | PowerShell execution policy and Authenticode are part of the platform security model | do not weaken execution policy; verify signatures and hashes before running binaries |
-| Mesh transport | Tailscale/headscale auth keys, ephemeral devices, tags, ACLs, and revocation | use mesh only as optional connectivity, never as job authorization |
+| Mesh transport | Tailscale/headscale auth keys, ephemeral devices, tags, ACLs, and revocation | use mesh only as optional connectivity, never as task authorization |
 | Linux managed service | systemd restart and watchdog behavior | only managed mode may use restart-on-failure semantics |
 | macOS managed service | launchd LaunchAgents/LaunchDaemons | install only after explicit managed enrollment with uninstall instructions |
 | SSH fallback | OpenSSH certificates and principals can scope access | SSH is an adapter/transport for owned hosts, not the primary temporary path |
 | Cloud dev environments | Coder and DevPod solve governed or reproducible workspaces | integrate as workspace/adapters instead of rebuilding cloud IDE platforms |
-| Remote tunnels | VS Code Remote Tunnels shows the value of outbound tunnel UX | rdev keeps the outbound shape but adds agent policy, signing, approvals, and audit |
+| Remote tunnels | VS Code Remote Tunnels shows the value of outbound tunnel UX | rdev keeps the outbound shape but adds agent policy, signing, authorizations, and audit |
 | GUI remote support | RustDesk/MeshCentral can provide screen-level control | use as explicit GUI adapters, never as default agent authority |
 | Supply-chain signing | Sigstore/Cosign-style verification and platform code signing | signed manifests, checksums, Authenticode/notarization policy, and release roots |
 
@@ -950,7 +950,7 @@ Useful references:
 - VS Code Remote Tunnels: https://code.visualstudio.com/docs/remote/tunnels
 - RustDesk self-host: https://rustdesk.com/docs/en/self-host/
 - systemd service units: https://www.freedesktop.org/software/systemd/man/systemd.service.html
-- Apple launchd jobs: https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html
+- Apple launchd tasks: https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdTasks.html
 - OpenSSH sshd_config: https://man.openbsd.org/sshd_config
 
 ## Buy Versus Build Boundary
@@ -962,10 +962,10 @@ The project should reuse mature transport, workspace, GUI, and signing ecosystem
 | Area | Why rdev owns it |
 |---|---|
 | ticket and enrollment model | agents need consented, scoped, revocable sessions rather than ambient access |
-| canonical signed job envelopes | existing remote tools do not bind agent intent, host identity, policy, nonce, expiry, and approvals into one execution contract |
-| host-side policy engine | gateway approval alone is not enough when prompts, clients, or transports fail |
-| approval gates | dangerous operations need human decisions that agents cannot self-grant |
-| evidence bundles | remote coding needs diff/test/artifact/audit evidence, not only terminal output |
+| canonical signed session tasks | existing remote tools do not bind agent intent, host identity, policy, nonce, expiry, and authorizations into one execution contract |
+| host-side policy engine | gateway authorization alone is not enough when prompts, clients, or transports fail |
+| session interrupts | dangerous operations need human decisions that agents cannot self-grant |
+| session evidence | remote coding needs diff/test/artifact/audit evidence, not only terminal output |
 | adapter contract | Codex, Claude Code, shell, PowerShell, Git, GUI, and workspace platforms need one safety wrapper |
 | audit hash chain | users need independent verification of what happened after a remote session |
 | safe bootstrap | one-command convenience must still verify release trust and avoid hidden persistence |
@@ -975,14 +975,14 @@ The project should reuse mature transport, workspace, GUI, and signing ecosystem
 | Existing layer | Use it for | Do not use it as |
 |---|---|---|
 | MCP | agent-facing tool invocation and schema contracts | the authorization model for host execution |
-| OAuth/OIDC | HTTP MCP and operator/client authentication | a substitute for host-bound job signatures |
-| Tailscale/headscale | managed-device reachability and inventory hints | job authorization |
+| OAuth/OIDC | HTTP MCP and operator/client authentication | a substitute for session task authorization |
+| Tailscale/headscale | managed-device reachability and inventory hints | task authorization |
 | SSH/OpenSSH certs | owned-host fallback and admin diagnostics | temporary third-party default |
-| Coder | governed cloud workspaces and agent workspaces | the entire rdev control/audit/approval model |
-| DevPod/devcontainers | reproducible disposable workspaces | host enrollment or approvals |
-| VS Code Remote Tunnels | inspiration for outbound tunnel UX | an agent job protocol |
+| Coder | governed cloud workspaces and agent workspaces | the entire rdev control/audit/authorization model |
+| DevPod/devcontainers | reproducible disposable workspaces | host enrollment or authorizations |
+| VS Code Remote Tunnels | inspiration for outbound tunnel UX | an agent task protocol |
 | RustDesk/MeshCentral | explicit GUI view/control adapter | hidden default control channel |
-| Sigstore/Cosign/platform signing | release verification and supply-chain trust | runtime job approval |
+| Sigstore/Cosign/platform signing | release verification and supply-chain trust | runtime task authorization |
 
 This boundary prevents the project from rebuilding every remote development product while still solving the part those products do not solve: safe delegation from autonomous agents to real machines.
 
@@ -994,13 +994,13 @@ For an operator's deployment:
 Hermes / an agent
   - installs Remote Dev Skillkit Agent Skills
   - calls rdev MCP tools
-  - summarizes evidence and asks for approvals
+  - summarizes evidence and asks for authorizations
 
 https://api.example.com
   - authenticated rdev API
   - MCP HTTP endpoint
-  - tickets, hosts, jobs, artifacts, audit
-  - policy, approval, signing, revocation
+  - tickets, hosts, tasks, artifacts, audit
+  - policy, authorization, signing, revocation
 
 https://agent.example.com
   - human join page
@@ -1059,11 +1059,11 @@ Surfaces:
 - MCP HTTP for production deployments;
 - `rdev` CLI for operators and debugging.
 
-Design rule: agents request typed jobs, not raw machine access.
+Design rule: agents request typed tasks, not raw machine access.
 
 ### 2. Governance Plane
 
-Purpose: decide what is allowed, what requires approval, and what must be denied.
+Purpose: decide what is allowed, what requires authorization, and what must be denied.
 
 Owns:
 
@@ -1073,7 +1073,7 @@ Owns:
 - host identities;
 - release trust roots;
 - policy bundles;
-- approval tokens;
+- session interrupts;
 - revocation;
 - audit;
 - redaction.
@@ -1089,7 +1089,7 @@ Owns:
 - tickets;
 - host registry;
 - capability inventory;
-- job queue;
+- task queue;
 - leases;
 - artifacts;
 - event stream;
@@ -1099,7 +1099,7 @@ State transitions must be idempotent and auditable.
 
 ### 4. Transport Plane
 
-Purpose: move signed jobs and evidence without exposing temporary hosts to the public internet.
+Purpose: move signed tasks and evidence without exposing temporary hosts to the public internet.
 
 Default:
 
@@ -1117,7 +1117,7 @@ Optional managed-device transports:
 - SSH over private network;
 - future relay providers.
 
-Transport identity is never enough to authorize execution. Every job still needs a signed envelope and host-side policy validation.
+Transport identity is never enough to authorize execution. Every task still needs a signed envelope and host-side policy validation.
 
 ### 5. Execution Plane
 
@@ -1144,21 +1144,21 @@ The implementation should keep these objects explicit instead of hiding them ins
 | Object | Owner | Purpose | Must be auditable |
 |---|---|---|---|
 | `Owner` | gateway | tenant/operator boundary; starts as `default` for single-user installs | yes |
-| `Operator` | gateway/auth provider | human who approves hosts and dangerous actions | yes |
+| `Operator` | gateway/auth provider | human who authorizes hosts and dangerous actions | yes |
 | `AgentClient` | MCP/API auth layer | agent runtime calling rdev tools | yes |
 | `Ticket` | gateway | temporary invitation, TTL, reason, requested capabilities | yes |
 | `Host` | host/gateway | registered machine identity and capability inventory | yes |
-| `HostPolicy` | gateway and host | approved capabilities, roots, adapters, limits, gates | yes |
-| `TrustBundle` | gateway and host | active/retired/revoked job-signing keys and sequence | yes |
+| `HostPolicy` | gateway and host | authorized capabilities, roots, adapters, limits, gates | yes |
+| `TrustBundle` | gateway and host | active/retired/revoked session-signing keys and sequence | yes |
 | `JoinManifest` | gateway/release trust | signed bootstrap instructions for a ticket/session | yes |
 | `ReleaseManifest` | release trust | signed artifact metadata, digests, sizes, platform policy | yes |
-| `Approval` | operator/local user | scoped decision for one high-risk operation | yes |
-| `JobEnvelope` | gateway | signed executable intent bound to host, policy, nonce, expiry | yes |
-| `JobLease` | gateway/host | bounded claim that one host may run one job | yes |
+| `Authorization` | operator/local user | scoped decision for one high-risk operation | yes |
+| `SessionTask` | gateway | signed executable intent bound to host, policy, nonce, expiry | yes |
+| `TaskLease` | gateway/host | bounded claim that one host may run one task | yes |
 | `AdapterRun` | host | concrete execution attempt through shell, Codex, GUI, etc. | yes |
 | `Artifact` | host/gateway | redacted output, diff, tests, screenshots, files, logs | yes |
 | `Denial` | gateway or host | structured explanation for refused work | yes |
-| `EvidenceBundle` | gateway/exporter | review package for one job/session | yes |
+| `EvidenceBundle` | gateway/exporter | review package for one task/session | yes |
 | `AuditEvent` | gateway and host spool | immutable event in hash chain | yes |
 
 Object relationships:
@@ -1169,8 +1169,8 @@ Owner
   -> AgentClient
   -> Ticket -> Host -> HostPolicy
   -> TrustBundle
-  -> Approval
-  -> JobEnvelope -> JobLease -> AdapterRun -> Artifact
+  -> Authorization
+  -> SessionTask -> TaskLease -> AdapterRun -> Artifact
   -> EvidenceBundle
   -> AuditEvent*
 ```
@@ -1184,15 +1184,15 @@ Remote development should follow the same loop every time, regardless of adapter
 ```text
 1. Discover or invite host
 2. Register host identity
-3. Approve scoped policy
+3. Authorize scoped policy
 4. Dry-run policy decision
-5. Sign job envelope
-6. Lease job to bound host
+5. Sign session task
+6. Lease task to bound host
 7. Validate again locally
 8. Run adapter
 9. Produce evidence
 10. Review result
-11. Approve escalation or finish
+11. Authorize escalation or finish
 12. Revoke or leave managed policy in place
 ```
 
@@ -1200,12 +1200,12 @@ This loop is the core product. A transport, coding CLI, or GUI tool can improve 
 
 ### Denial Is A First-Class Result
 
-A denied job is not an exception to hide in logs. It is a successful safety outcome and must produce a structured result with:
+A denied task is not an exception to hide in logs. It is a successful safety outcome and must produce a structured result with:
 
 - stable denial code;
 - human summary;
 - matched policy rule or validation step;
-- host id, job id, adapter, and capability when known;
+- host id, task id, adapter, and capability when known;
 - retryability;
 - safer next action;
 - audit event id;
@@ -1215,14 +1215,14 @@ Required denial families:
 
 | Family | Example codes |
 |---|---|
-| envelope | `job_envelope_required`, `envelope_invalid`, `envelope_expired`, `envelope_signature_invalid` |
+| envelope | `task_envelope_required`, `envelope_invalid`, `envelope_expired`, `envelope_signature_invalid` |
 | identity | `wrong_host`, `host_identity_mismatch`, `signing_key_mismatch` |
 | trust | `trust_public_key_invalid`, `trust_bundle_revoked`, `nonce_replay` |
-| policy | `unsupported_adapter`, `missing_capability`, `approval_required`, `operation_denied` |
+| policy | `unsupported_adapter`, `missing_capability`, `authorization_required`, `operation_denied` |
 | workspace | `workspace_required`, `workspace_escape`, `symlink_escape`, `workspace_locked` |
 | adapter | `command_not_allowlisted`, `timeout`, `output_limit_exceeded`, `artifact_rejected` |
 
-Agents should be able to recover from denials by asking for a safer job, requesting approval, narrowing scope, or showing the denial to the operator.
+Agents should be able to recover from denials by asking for a safer task, requesting authorization, narrowing scope, or showing the denial to the operator.
 
 ## Canonical State Machines
 
@@ -1238,14 +1238,14 @@ created -> active -> expired
 Rules:
 
 - `created`: ticket exists but has not enrolled a host.
-- `active`: at least one host registration is pending or approved under the ticket.
+- `active`: at least one host registration is pending or authorized under the ticket.
 - `expired`: TTL elapsed; no new host may register.
-- `revoked`: operator or policy stopped the ticket; all related pending hosts and queued jobs are canceled.
+- `revoked`: operator or policy stopped the ticket; all related pending hosts and queued tasks are canceled.
 
 ### Host
 
 ```text
-registered -> pending_approval -> approved -> online -> offline
+registered -> pending_authorization -> authorized -> online -> offline
                          \          \-> revoked
                           \-> rejected
 ```
@@ -1253,16 +1253,16 @@ registered -> pending_approval -> approved -> online -> offline
 Rules:
 
 - `registered`: host identity and capability inventory received.
-- `pending_approval`: host is visible but cannot execute jobs.
-- `approved`: scoped policy has been issued.
+- `pending_authorization`: host is visible but cannot execute tasks.
+- `authorized`: scoped policy has been issued.
 - `online`: active authenticated channel or recent heartbeat.
 - `offline`: no active channel, but managed hosts may reconnect.
-- `rejected`: enrollment denied; no jobs.
-- `revoked`: all future claims denied and queued/running jobs canceled.
+- `rejected`: enrollment denied; no tasks.
+- `revoked`: all future claims denied and queued/running tasks canceled.
 
 Temporary hosts that go offline after stop, expiry, or revoke are not auto-resurrected. Managed hosts may reconnect because service mode was explicit.
 
-### Job
+### Task
 
 ```text
 created -> signed -> queued -> leased -> running -> completed
@@ -1276,14 +1276,14 @@ Rules:
 - `created`: requested by agent or operator.
 - `signed`: gateway policy accepted and signed the envelope.
 - `queued`: waiting for the bound host.
-- `leased`: host claimed the job for a bounded lease.
+- `leased`: host claimed the task for a bounded lease.
 - `running`: adapter started.
 - `completed`: result and artifacts uploaded idempotently.
 - `failed`: adapter or policy failed with an audited reason.
 - `canceled`: operator, ticket, host, or key revocation stopped it.
 - `expired`: no valid lease or envelope remains.
 
-### Approval
+### Authorization
 
 ```text
 requested -> granted -> consumed
@@ -1294,10 +1294,10 @@ requested -> granted -> consumed
 
 Rules:
 
-- approvals are scoped to one host, job, capability, time window, and operation;
-- agents can request and explain approvals but cannot grant them;
-- approval tokens are signed and auditable;
-- one approval must not silently authorize a broader future operation.
+- authorizations are scoped to one host, task, capability, time window, and operation;
+- agents can request and explain authorizations but cannot grant them;
+- session interrupts are signed and auditable;
+- one authorization must not silently authorize a broader future operation.
 
 ## Discovery And Enrollment
 
@@ -1307,13 +1307,13 @@ The product needs "active discovery" without becoming a network scanner or surpr
 
 | Source | Applies to | Behavior |
 |---|---|---|
-| Managed registry | operator-owned devices | gateway lists approved hosts, last heartbeat, capabilities, roots, and health |
+| Managed registry | operator-owned devices | gateway lists authorized hosts, last heartbeat, capabilities, roots, and health |
 | Invitation ticket | temporary support | gateway creates join URL and one-time code |
 | Mesh inventory | owned devices on Tailscale/headscale | import device metadata as hints, then require rdev host enrollment |
 | Local LAN hinting | same-network owned devices | optional mDNS/Bonjour advertisement in managed mode only |
-| Manual host claim | unknown device | user runs bootstrap and host enters pending approval |
+| Manual host claim | unknown device | user runs bootstrap and host enters pending authorization |
 
-Discovery is not authorization. A discovered host cannot receive jobs until it has a host identity, an approved policy, and a valid trust bundle.
+Discovery is not authorization. A discovered host cannot receive tasks until it has a host identity, an authorized policy, and a valid trust bundle.
 
 ### Enrollment Patterns
 
@@ -1326,8 +1326,8 @@ an agent creates ticket
   -> an operator sends the generated target_handoff_envelope.full_text
   -> remote user runs visible bootstrap
   -> host connects outbound
-  -> the operator approves scoped capability set
-  -> jobs run until TTL, stop, revoke, or completion
+  -> the operator authorizes scoped capability set
+  -> tasks run until TTL, stop, revoke, or completion
 ```
 
 This is the safest default for machines an operator does not own.
@@ -1339,9 +1339,9 @@ Best for operator-owned devices:
 ```text
 operator installs rdev-host
   -> host generates durable identity
-  -> gateway approves managed policy
+  -> gateway authorizes managed policy
   -> service starts with watchdog and reconnect
-  -> an agent can later select the host for jobs
+  -> an agent can later select the host for tasks
 ```
 
 This requires explicit local install and an uninstall path.
@@ -1352,12 +1352,12 @@ Best for already owned devices inside a private network:
 
 ```text
 mesh shows device
-  -> rdev invites or installs host over an approved admin channel
+  -> rdev invites or installs host over an authorized admin channel
   -> rdev host still generates its own identity
-  -> gateway still signs jobs
+  -> gateway still signs tasks
 ```
 
-Mesh identity helps reachability and inventory. It does not replace rdev identity, policy, approval, or audit.
+Mesh identity helps reachability and inventory. It does not replace rdev identity, policy, authorization, or audit.
 
 ### Enrollment Anti-Patterns
 
@@ -1366,7 +1366,7 @@ Mesh identity helps reachability and inventory. It does not replace rdev identit
 - no credential reuse from SSH, RDP, SMB, or browser sessions;
 - no hidden persistence on temporary hosts;
 - no "trust this host forever" shortcut for third-party machines;
-- no capability approval based only on hostname or IP address.
+- no capability authorization based only on hostname or IP address.
 
 ## Host Modes
 
@@ -1378,22 +1378,22 @@ Mesh identity helps reachability and inventory. It does not replace rdev identit
 
 The modes must not silently upgrade into each other.
 
-Temporary mode can support powerful repair actions, but each high-risk action requires an operator or local-user approval gate. Managed mode can reconnect after reboot, but only after explicit installation.
+Temporary mode can support powerful repair actions, but each high-risk action requires an operator or local-user session interrupt. Managed mode can reconnect after reboot, but only after explicit installation.
 
 ## Trust Roots And Keys
 
-The final system has separate keys for separate jobs.
+The final system has separate keys for separate tasks.
 
 | Trust Material | Holder | Purpose |
 |---|---|---|
 | Release signing key | maintainer/KMS | signs release manifests and artifacts |
 | Bootstrap manifest key | maintainer/KMS | signs join/bootstrap metadata |
-| Gateway job signing key | gateway | signs executable job envelopes |
-| Host identity key | host | proves host identity and binds jobs |
-| Approval token key | gateway | binds human decisions to exceptions |
+| Gateway session signing key | gateway | signs executable session tasks |
+| Host identity key | host | proves host identity and binds tasks |
+| Authorization token key | gateway | binds human decisions to exceptions |
 | Audit hash chain | gateway and host spool | detects tampering and gaps |
 
-Key separation matters. A release-signing compromise should not automatically authorize jobs, and a gateway job-signing rotation should not invalidate all release artifacts.
+Key separation matters. A release-signing compromise should not automatically authorize tasks, and a gateway task-signing rotation should not invalidate all release artifacts.
 
 Managed hosts receive trust updates through signed trust-bundle rotation. Temporary hosts pin trust through the join manifest and session bootstrap.
 
@@ -1425,26 +1425,26 @@ Required objects:
 - server identity;
 - mode and TTL;
 - requested capabilities;
-- gateway job-signing trust bundle or pin;
+- gateway session-signing trust bundle or pin;
 - release artifact URLs and expected digests;
 - bootstrap manifest signer id and signature.
 
 Temporary hosts should treat the signed join manifest as session-scoped trust. Managed hosts use it only for first enrollment or explicit re-enrollment.
 
-#### Gateway Job Trust
+#### Gateway Session Trust
 
-Gateway job trust answers: "May this gateway issue executable work?"
+Gateway session trust answers: "May this gateway issue executable work?"
 
 Required objects:
 
 - `rdev.trust-bundle.v1`;
-- active, retired, and revoked job-signing keys;
+- active, retired, and revoked session-signing keys;
 - monotonically increasing sequence;
 - previous bundle hash;
 - validity window;
 - signature by an already trusted active key or configured root.
 
-Hosts verify every job envelope against the current active key in the local trust bundle. Revoked keys must reject new jobs even if the signature mathematically verifies.
+Hosts verify every session task against the current active key in the local trust bundle. Revoked keys must reject new tasks even if the signature mathematically verifies.
 
 #### Host Identity Trust
 
@@ -1461,21 +1461,21 @@ Required objects:
 
 Temporary host identities are session-scoped by default. Managed host identities are durable and revocable.
 
-#### Approval Trust
+#### Authorization Trust
 
-Approval trust answers: "Did a human authorize this specific exception?"
+Authorization trust answers: "Did a human authorize this specific exception?"
 
 Required objects:
 
-- approval id;
-- operator id or local-user approval source;
-- job id and host id;
+- authorization id;
+- operator id or local-user authorization source;
+- task id and host id;
 - exact capability or operation;
 - expiration;
-- signed approval token;
+- signed session interrupt;
 - audit event for request and decision.
 
-Approval tokens are not ambient permissions. They are consumed by one bounded action.
+Authorization tokens are not ambient permissions. They are consumed by one bounded action.
 
 ### Trust Update Rules
 
@@ -1495,8 +1495,8 @@ Temporary hosts do not perform background trust updates. They get a fresh join m
 
 | Compromise | Blast radius | Required response |
 |---|---|---|
-| Agent client token | can request jobs until revoked; cannot self-approve dangerous actions | revoke client token, audit requests |
-| Gateway job-signing key | can sign jobs until hosts receive revocation | publish trust-bundle revocation, cancel jobs, rotate key |
+| Agent client token | can request tasks until revoked; cannot self-authorize dangerous actions | revoke client token, audit requests |
+| Gateway session-signing key | can sign tasks until hosts receive revocation | publish trust-bundle revocation, cancel tasks, rotate key |
 | Bootstrap signer | can mint malicious join manifests | revoke active tickets/manifests, rotate signer |
 | Release signer | can bless malicious artifacts | freeze releases, revoke signer, re-issue release |
 | Host identity key | attacker may impersonate that host | revoke host, rotate host identity through re-enrollment |
@@ -1526,7 +1526,7 @@ The one-command path should:
 3. run `rdev-host` in foreground temporary mode;
 4. generate a local host keypair;
 5. connect outbound to `agent.example.com`;
-6. wait in `pending` until the operator approves;
+6. wait in `pending` until the operator authorizes;
 7. leave no service behind.
 
 The bootstrap must not weaken execution policy, disable Defender, bypass UAC, or install persistence in temporary mode.
@@ -1596,14 +1596,14 @@ powershell -NoProfile -File .\rdev-bootstrap.ps1
 
 The inspectable path is mandatory for trust-sensitive use even if the one-command path exists for speed.
 
-## Job Protocol
+## Task Protocol
 
-Every executable action is a signed job envelope.
+Every executable action is a signed session task.
 
-Required job properties:
+Required task properties:
 
 - schema version;
-- job id;
+- task id;
 - host id;
 - ticket id or managed policy id;
 - operator id;
@@ -1615,7 +1615,7 @@ Required job properties:
 - workspace root and write scope;
 - capabilities;
 - limits;
-- approval requirements;
+- authorization requirements;
 - payload;
 - key id and signature.
 
@@ -1630,10 +1630,10 @@ Host validation order:
 7. verify adapter is allowed;
 8. verify capabilities are allowed;
 9. verify workspace boundary and symlink behavior;
-10. verify required approvals;
+10. verify required authorizations;
 11. execute or reject with an audited reason.
 
-The gateway should refuse to sign unsafe jobs. The host should still reject unsafe jobs. Both are required.
+The gateway should refuse unsafe tasks before routing. The host should still reject unsafe tasks. Both are required.
 
 ## Capability Rings
 
@@ -1642,11 +1642,11 @@ Capabilities are deny-by-default and grouped by risk.
 | Ring | Examples | Default |
 |---|---|---|
 | Ring 0: observe | capability scan, git status, read logs, doctor | allowed when ticket permits |
-| Ring 1: scoped workspace | write inside approved repo, run tests, create diff | allowed with workspace policy |
-| Ring 2: system mutation | package install, process kill, service restart, elevation, GUI control | requires approval |
-| Ring 3: external consequence | push, merge, deploy, publish, paid API/job, credential change | requires stronger approval |
+| Ring 1: scoped workspace | write inside authorized repo, run tests, create diff | allowed with workspace policy |
+| Ring 2: system mutation | package install, process kill, service restart, elevation, GUI control | requires authorization |
+| Ring 3: external consequence | push, merge, deploy, publish, paid API/task, credential change | requires stronger authorization |
 
-Agents may request approval and explain the need. Agents cannot approve their own escalation.
+Agents may request authorization and explain the need. Agents cannot authorize their own escalation.
 
 `secrets.read` should not be a normal capability. The host may use local credentials through OS keychains, Git credential managers, or tool-native auth, but raw secret values should not leave the host.
 
@@ -1657,14 +1657,14 @@ The stable vocabulary should stay boring and reviewable.
 | Capability | Ring | Meaning |
 |---|---:|---|
 | `host.inspect` | 0 | read OS/tool/network readiness metadata |
-| `fs.read.scoped` | 0 | read files under approved roots |
-| `logs.read.scoped` | 0 | read approved logs |
+| `fs.read.scoped` | 0 | read files under authorized roots |
+| `logs.read.scoped` | 0 | read authorized logs |
 | `git.status` | 0 | inspect repo state |
 | `git.diff` | 0 | produce diffs and changed-file lists |
-| `fs.write.scoped` | 1 | write only under approved roots |
+| `fs.write.scoped` | 1 | write only under authorized roots |
 | `shell.user` | 1 | run allowlisted argv as the current user |
 | `powershell.user` | 1 | run allowlisted PowerShell commands/scripts |
-| `tests.run` | 1 | run approved verification commands |
+| `tests.run` | 1 | run authorized verification commands |
 | `agent.codex` | 1 | run Codex adapter inside workspace policy |
 | `agent.claude_code` | 1 | run Claude Code adapter inside workspace policy |
 | `pkg.install` | 2 | install or update packages |
@@ -1677,24 +1677,24 @@ The stable vocabulary should stay boring and reviewable.
 | `git.merge` | 3 | merge branches or open merge/pull requests |
 | `deploy.run` | 3 | deploy, publish, release, or change production |
 | `credentials.change` | 3 | modify tokens, keys, passwords, or secret stores |
-| `paid_action` | 3 | start paid API calls, jobs, or purchases |
+| `paid_action` | 3 | start paid API calls, tasks, or purchases |
 
-Every capability must map to one of three default decisions: allow, approval required, or deny. Unknown capabilities default to deny.
+Every capability must map to one of three default decisions: allow, authorization required, or deny. Unknown capabilities default to deny.
 
-### Approval Policy Defaults
+### Authorization Policy Defaults
 
 | Operation | Temporary host | Managed host |
 |---|---|---|
 | observe/triage | ticket-scoped allow | policy-scoped allow |
-| workspace writes | approval or ticket-scoped allow | workspace-policy allow |
-| package install | approval required | approval required |
-| elevation | local user and operator approval | operator approval plus platform prompt |
-| GUI view | local user and operator approval | operator approval, local indicator when possible |
-| GUI control | local user and operator approval | stronger approval |
-| service install/remove | denied in temporary mode | approval required |
-| push/merge/deploy/publish | approval required | approval required |
+| workspace writes | authorization or ticket-scoped allow | workspace-policy allow |
+| package install | authorization required | authorization required |
+| elevation | local user and operator authorization | operator authorization plus platform prompt |
+| GUI view | local user and operator authorization | operator authorization, local indicator when possible |
+| GUI control | local user and operator authorization | stronger authorization |
+| service install/remove | denied in temporary mode | authorization required |
+| push/merge/deploy/publish | authorization required | authorization required |
 | credential read/export | deny | deny |
-| credential use through local tool | approval required when high impact | policy/approval scoped |
+| credential use through local tool | authorization required when high impact | policy/session interrupt scoped |
 
 ## Adapter Model
 
@@ -1704,11 +1704,11 @@ Required contract:
 
 ```text
 detect() -> capability inventory
-prepare(job) -> workspace/session
-run(job, limits) -> event stream
-verify(job) -> evidence
-summarize(job) -> result
-cleanup(job) -> status
+prepare(task) -> workspace/session
+run(task, limits) -> event stream
+verify(task) -> evidence
+summarize(task) -> result
+cleanup(task) -> status
 ```
 
 Adapter priority:
@@ -1725,7 +1725,7 @@ The safe shell adapter is necessary, but it is not the final abstraction. Coding
 
 ### Adapter Taxonomy
 
-Adapters fall into five families. The family determines default approvals, expected evidence, and how much ambient authority the adapter may hold.
+Adapters fall into five families. The family determines default authorizations, expected evidence, and how much ambient authority the adapter may hold.
 
 | Family | Adapters | Primary use | Default authority |
 |---|---|---|---|
@@ -1733,9 +1733,9 @@ Adapters fall into five families. The family determines default approvals, expec
 | workspace | `git`, `filesystem`, `tests`, `browser-e2e` | change and verify project workspaces | scoped write with locks |
 | coding-agent | `codex`, `claude-code`, `opencode`, `acp` | delegate implementation to a local coding CLI/protocol | scoped workspace plus evidence |
 | infrastructure | `coder`, `devpod`, `ssh`, `mesh` | reach or provision owned development environments | transport/workspace only |
-| interactive | `gui`, `rustdesk`, `meshcentral`, native screen APIs | last-resort visual repair and support | explicit view/control approval |
+| interactive | `gui`, `rustdesk`, `meshcentral`, native screen APIs | last-resort visual repair and support | explicit view/control authorization |
 
-Adding an adapter means implementing the adapter contract and mapping its actions to capabilities. It must not add a private side channel around policy, approvals, workspace locks, redaction, or audit.
+Adding an adapter means implementing the adapter contract and mapping its actions to capabilities. It must not add a private side channel around policy, authorizations, workspace locks, redaction, or audit.
 
 ### Adapter Execution Rules
 
@@ -1757,14 +1757,14 @@ Adapter-specific policy:
 |---|---|---|
 | `shell` | portable diagnostics and narrow repairs | argv allowlist, no shell interpolation by default |
 | `powershell` | Windows diagnostics and repairs | signed script blocks or allowlisted commands, no execution-policy weakening |
-| `git` | branch, worktree, diff, commit evidence | push/merge/tag/delete require approval |
+| `git` | branch, worktree, diff, commit evidence | push/merge/tag/delete require authorization |
 | `codex` | primary managed Mac coding flow | run in locked worktree, return diff/tests, no auto-push |
-| `claude-code` | alternate coding CLI | same workspace and approval rules as Codex |
+| `claude-code` | alternate coding CLI | same workspace and authorization rules as Codex |
 | `acp` | protocol-native agent coding | prefer structured messages over raw shell |
 | `browser-e2e` | browser evidence and tests | scoped URLs and artifact redaction |
-| `gui` | last-resort support | visible consent, separate view/control approvals |
+| `gui` | last-resort support | visible consent, separate view/control authorizations |
 | `mesh` | connectivity helper | never authorizes execution by itself |
-| `coder` | governed remote workspace integration | workspace provider only; rdev still signs jobs and audits evidence |
+| `coder` | governed remote workspace integration | workspace provider only; rdev still signs tasks and audits evidence |
 | `devpod` | disposable devcontainer workspace integration | provision/run workspace, not host enrollment authority |
 
 ### Third-Party Runtime Integration
@@ -1778,31 +1778,31 @@ Existing products should be integrated as runtimes behind rdev, not made the sec
 | VS Code Remote Tunnels | optional operator/developer access path for owned hosts | useful tunnel UX, but not an agent execution contract |
 | DesktopCommanderMCP-like tools | local-host adapter for filesystem/process primitives | useful capability backend, but must sit behind rdev policy |
 | SSH MCP tools | managed-host fallback transport | useful for owned hosts; unsafe as temporary third-party default |
-| RustDesk/MeshCentral | GUI adapter | use only with visible consent and separate approvals |
+| RustDesk/MeshCentral | GUI adapter | use only with visible consent and separate authorizations |
 
-The integration rule is simple: rdev can call other systems, but other systems do not get to bypass rdev's signed jobs, capability rings, approval gates, and audit.
+The integration rule is simple: rdev can call other systems, but other systems do not get to bypass rdev's signed tasks, capability rings, session interrupts, and audit.
 
 ### Coding Adapter Contract
 
-Coding adapters should expose a higher-level job than "run this command":
+Coding adapters should expose a higher-level task than "run this command":
 
 ```json
 {
   "task": "fix failing tests",
-  "repo_root": "/approved/repo",
+  "repo_root": "/authorized/repo",
   "base_ref": "main",
-  "worktree": ".rdev/worktrees/job_...",
+  "worktree": ".rdev/worktrees/task_...",
   "allowed_commands": ["go", "npm", "pnpm", "pytest"],
   "verification": ["go test ./...", "npm test"],
   "deliverables": ["diff", "test_results", "risk_summary"]
 }
 ```
 
-The adapter may call Codex, Claude Code, or another CLI internally, but the host policy still owns workspace boundaries, approvals, evidence, and cleanup.
+The adapter may call Codex, Claude Code, or another CLI internally, but the host policy still owns workspace boundaries, authorizations, evidence, and cleanup.
 
 ## Workspace Model
 
-Every write job needs a workspace.
+Every write task needs a workspace.
 
 Rules:
 
@@ -1810,10 +1810,10 @@ Rules:
 - reject symlink escapes;
 - write only inside declared roots;
 - one active writer per workspace;
-- use Git worktrees for parallel jobs;
+- use Git worktrees for parallel tasks;
 - capture changed files and diff summary;
-- require approval before destructive Git operations;
-- require approval before push, merge, deploy, or publish.
+- require authorization before destructive Git operations;
+- require authorization before push, merge, deploy, or publish.
 
 For an operator's managed Mac, the primary golden path is:
 
@@ -1835,7 +1835,7 @@ Required lock fields:
 
 - lock id;
 - host id;
-- job id;
+- task id;
 - canonical repo root;
 - worktree path if used;
 - base ref;
@@ -1850,15 +1850,15 @@ Rules:
 - stale locks can be recovered only after lease expiry or explicit cancel;
 - lock acquisition and release are audit events;
 - failed cleanup leaves a visible diagnostic artifact;
-- a job cannot widen its workspace after signing.
+- a task cannot widen its workspace after signing.
 
 ### Git Worktree Strategy
 
 Managed coding should prefer:
 
 ```text
-repo/.rdev/worktrees/job_<job_id>
-repo/.rdev/branches/rdev/job_<job_id>
+repo/.rdev/worktrees/task_<task_id>
+repo/.rdev/branches/rdev/task_<task_id>
 ```
 
 The adapter should:
@@ -1869,7 +1869,7 @@ The adapter should:
 4. run verification commands;
 5. collect `git status --short`, `git diff --stat`, and full diff artifact;
 6. leave branch/worktree for review unless cleanup is explicitly requested;
-7. require approval before push, merge, rebase of protected branches, tag, or force operation.
+7. require authorization before push, merge, rebase of protected branches, tag, or force operation.
 
 Temporary support sessions may use a scratch workspace when the target machine is not a development host.
 
@@ -1880,10 +1880,10 @@ Audit is a product surface, not debug logging.
 Every meaningful step emits an event:
 
 - ticket creation and expiry;
-- host registration, approval, rejection, revoke;
+- host registration, authorization, rejection, revoke;
 - policy decision;
-- approval request and approval result;
-- job enqueue, lease, run, complete, fail, cancel;
+- authorization request and authorization result;
+- task enqueue, lease, run, complete, fail, cancel;
 - adapter action;
 - artifact creation;
 - redaction decision;
@@ -1914,10 +1914,10 @@ Raw secrets must not be uploaded when redaction can happen host-side.
 
 ### Evidence Bundle
 
-Every completed or failed job should be reviewable through a compact evidence bundle:
+Every completed or failed task should be reviewable through a compact session evidence:
 
 ```text
-job_<id>/
+task_<id>/
   envelope.json
   policy-decision.json
   adapter-result.json
@@ -1926,7 +1926,7 @@ job_<id>/
   files.json
   diff.patch
   tests.json
-  approvals.json
+  authorizations.json
   audit-slice.jsonl
   checksums.txt
 ```
@@ -1938,7 +1938,7 @@ Not every adapter produces every file, but every bundle must include:
 - adapter result;
 - artifact checksums;
 - redaction metadata;
-- audit slice from job creation through terminal state.
+- audit slice from task creation through terminal state.
 
 ### Redaction Rules
 
@@ -1966,7 +1966,7 @@ Host requirements:
 - local inbox/outbox;
 - local audit spool;
 - cooperative cancellation;
-- per-job timeout;
+- per-task timeout;
 - crash recovery in managed mode;
 - visible stop control in temporary mode;
 - idempotent completion upload.
@@ -1977,9 +1977,9 @@ Gateway requirements:
 - leases;
 - idempotent APIs;
 - retry only safe operations;
-- cancel jobs on host revocation;
-- revoke tickets, hosts, policies, approvals, jobs, and keys;
-- exportable diagnostics bundle.
+- cancel tasks on host revocation;
+- revoke tickets, hosts, policies, authorizations, tasks, and keys;
+- exportable diagnostics evidence.
 
 Temporary mode should not auto-recover into hidden persistence. Managed mode may use OS-native service recovery because the user explicitly installed it.
 
@@ -1999,10 +1999,10 @@ Connection behavior:
 - host authenticates the channel with its host identity after registration;
 - gateway authenticates through TLS and pinned trust material;
 - reconnect uses exponential backoff with jitter;
-- heartbeats include host id, policy id, trust bundle hash, adapter health, and current job id;
+- heartbeats include host id, policy id, trust bundle hash, adapter health, and current task id;
 - gateway treats missed heartbeats as offline, not revoked;
-- cancellation and revocation must be checked before each job claim and during long-running jobs;
-- completion upload is idempotent by job id and result hash.
+- cancellation and revocation must be checked before each task claim and during long-running tasks;
+- completion upload is idempotent by task id and result hash.
 
 ### Managed Service Recovery
 
@@ -2024,13 +2024,13 @@ Managed hosts should maintain:
 - local outbox for completion artifacts;
 - local nonce/replay cache;
 - local trust bundle;
-- current job checkpoint when the adapter supports it.
+- current task checkpoint when the adapter supports it.
 
 After restart, the host should:
 
 1. load identity and trust;
 2. upload pending audit/outbox items;
-3. report interrupted jobs;
+3. report interrupted tasks;
 4. refuse expired envelopes;
 5. reacquire or release locks based on gateway state.
 
@@ -2048,15 +2048,15 @@ Default-deny applies to:
 - unknown capabilities;
 - unknown adapters;
 - expired tickets;
-- expired approvals;
+- expired authorizations;
 - wrong host ids;
 - revoked keys;
 - workspace paths outside policy;
 - artifact schemas without known versions.
 
-### Human Approval Gates
+### Human Authorization Gates
 
-The approval UI, CLI, or MCP surface must show:
+The authorization UI, CLI, or MCP surface must show:
 
 - requesting agent;
 - target host;
@@ -2068,17 +2068,17 @@ The approval UI, CLI, or MCP surface must show:
 - expiry;
 - safer alternative if available.
 
-Approvals should be boring, explicit, and narrow.
+Authorizations should be boring, explicit, and narrow.
 
 ### Local User Consent
 
-For third-party temporary support, some actions need both an operator/operator approval and local user visibility:
+For third-party temporary support, some actions need both an operator/operator authorization and local user visibility:
 
 - elevation;
 - GUI view/control;
 - service changes;
 - credential changes;
-- destructive operations outside an approved scratch workspace.
+- destructive operations outside an authorized scratch workspace.
 
 If local user consent cannot be obtained, the host should deny rather than hide the action.
 
@@ -2112,7 +2112,7 @@ Rules:
 | Data | Local/Solo | Hosted/Multi-User |
 |---|---|---|
 | control state | SQLite | Postgres |
-| jobs and leases | SQLite | Postgres or queue-backed leases |
+| tasks and leases | SQLite | Postgres or queue-backed leases |
 | artifacts | filesystem | object storage |
 | audit | JSONL/hash chain | append-only table/log plus export verifier |
 | signing keys | OS keychain or locked file | KMS/HSM/sealed secret |
@@ -2124,10 +2124,10 @@ The current in-memory gateway should remain a development mode only.
 
 The gateway should separate:
 
-- control state: tickets, hosts, jobs, approvals, leases;
+- control state: tickets, hosts, tasks, authorizations, leases;
 - trust state: keys, bundles, revocations, release roots;
 - audit state: append-only events;
-- artifacts: job outputs and evidence bundles;
+- artifacts: task outputs and session evidence;
 - configuration: policies, limits, adapter allowlists.
 
 Backups must include control state, trust state, audit state, and artifact metadata. Artifact blobs may use lifecycle retention, but audit records and checksums must remain.
@@ -2151,18 +2151,14 @@ Core skills:
 - `remote-vibe-coding`: use managed hosts for coding work;
 - `safe-remote-support`: run temporary repair sessions;
 - `host-triage`: inspect host readiness before changes;
-- `remote-job-review`: evaluate evidence before completion;
+- `remote-session-review`: evaluate session task evidence before completion;
 - `adapter-authoring`: add new adapters safely.
 
 Each skill should keep `SKILL.md` small and use references for scenarios such as Windows repair, managed Mac coding, GUI support, and production deployment.
 
 Stable MCP tool groups:
 
-- `rdev.tickets.*`
-- `rdev.hosts.*`
-- `rdev.jobs.*`
-- `rdev.approvals.*`
-- `rdev.artifacts.*`
+- `rdev.sessions.*`
 - `rdev.audit.*`
 - `rdev.policy.*`
 - `rdev.release.*`
@@ -2175,13 +2171,9 @@ The MCP surface should optimize for agent reliability and safety:
 
 | Tool group | Examples | Notes |
 |---|---|---|
-| `rdev.tickets.*` | create, get, revoke | temporary sessions start here |
-| `rdev.hosts.*` | list, inspect, approve, revoke | approval is operator-only |
-| `rdev.jobs.*` | create, get, cancel, tail | creates typed jobs, not shell access |
-| `rdev.approvals.*` | request, list, resolve | agents may request; humans resolve |
-| `rdev.artifacts.*` | list, get, export_bundle | evidence retrieval |
+| `rdev.sessions.*` | create, status, events, task, interrupt, artifacts, close | one session stream covers join, task routing, replay, pause/cancel, and evidence metadata |
 | `rdev.audit.*` | query, export, verify_chain | review and compliance |
-| `rdev.policy.*` | explain, dry_run, list_capabilities | preflight before job creation |
+| `rdev.policy.*` | explain, dry_run, list_capabilities | preflight before task creation |
 | `rdev.release.*` | verify_manifest, list_roots | bootstrap/release validation |
 
 Tool responses should be structured JSON with:
@@ -2207,11 +2199,11 @@ skills/
   safe-remote-support/
     SKILL.md
     references/windows-temporary.md
-    references/approval-gates.md
+    references/authorization-gates.md
   host-triage/
     SKILL.md
     references/capability-inventory.md
-  remote-job-review/
+  remote-session-review/
     SKILL.md
     references/evidence-review.md
   adapter-authoring/
@@ -2228,8 +2220,8 @@ Skills should teach agents to:
 - triage before changing;
 - ask for a temporary ticket rather than SSH credentials;
 - prefer managed hosts for coding;
-- use policy dry-run before job creation;
-- request approvals with concrete reasons;
+- use policy dry-run before task creation;
+- request authorizations with concrete reasons;
 - read artifacts and audit before claiming success;
 - avoid asking users to paste secrets;
 - revoke temporary sessions at the end.
@@ -2252,13 +2244,13 @@ remote-dev-skillkit/
     release/
     adapters/
     audit/
-    approval/
+    authorization/
     transport/
   skills/
     remote-vibe-coding/
     safe-remote-support/
     host-triage/
-    remote-job-review/
+    remote-session-review/
   mcp/
     tools.json
   scripts/
@@ -2278,7 +2270,7 @@ Implementation should follow maturity gates, not feature excitement. Each gate p
 
 | Gate | What it proves | What it must not pretend to prove |
 |---|---|---|
-| `v0.1` local safety kernel | signed jobs, host validation, denials, approval tokens, evidence, audit | production networking or OS service behavior |
+| `v0.1` local safety kernel | signed tasks, host validation, denials, session interrupts, evidence, audit | production networking or OS service behavior |
 | `v0.2` temporary Windows | one-command visible enrollment, release verification, outbound-only repair | unattended managed-device operations |
 | `v0.3` managed Mac coding | durable owned-host workflow with Codex and workspace evidence | general multi-tenant fleet management |
 | `v0.4` managed device generalization | multi-OS service managers, durable storage, adapter SDK, reconnects | public protocol stability |
@@ -2292,32 +2284,32 @@ Goal: local gateway and local host prove the core policy model.
 
 Done or nearly done:
 
-- signed job envelopes;
+- signed session tasks;
 - dev HTTP gateway;
 - host-side trust bundle verification;
 - durable host trust bundle file store;
 - scoped shell adapter;
 - host-side shell artifact redaction;
-- revocation canceling queued/running jobs;
+- revocation canceling queued/running tasks;
 - acceptance-test checklist.
-- host identity storage wired into registration and job binding;
+- host identity storage wired into registration and task binding;
 - nonce replay cache;
 - hash-chained audit export verifier.
 - stronger workspace and symlink escape tests;
-- local evidence bundle export.
+- local session evidence export.
 
 Still required:
 
-- gateway/API evidence bundle export directly from job ids.
+- gateway/API session evidence export directly from task ids.
 
 Exit criteria:
 
 - `./scripts/check.sh` passes;
-- local demo creates ticket, registers host, signs job, executes allowlisted job, stores artifact, exports verifiable audit chain;
-- host rejects tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, and workspace-escaping jobs;
-- host returns structured denials and approval-required artifacts instead of opaque failures;
-- approval tokens are signed, scoped, expiring, and consumed once by the host;
-- evidence can be exported from both local files and gateway job ids;
+- local demo creates ticket, registers host, signs task, executes allowlisted task, stores artifact, exports verifiable audit chain;
+- host rejects tampered, expired, wrong-host, wrong-key, replayed, non-allowlisted, and workspace-escaping tasks;
+- host returns structured denials and host-denial artifacts or session interrupt events instead of opaque failures;
+- session interrupts are signed, scoped, expiring, and consumed once by the host;
+- evidence can be exported from both local files and gateway task ids;
 - README quick start can be followed by a fresh developer.
 
 ### Gate 2: Build the Temporary Windows MVP (`v0.2`)
@@ -2331,14 +2323,14 @@ Exit criteria:
 - local audit spool;
 - E2E temporary repair acceptance test;
 - no-persistence inspection script;
-- local-user approval prompt for elevation/GUI/service requests.
+- local-user authorization prompt for elevation/GUI/service requests.
 
 Exit criteria:
 
 - clean Windows 10/11 VM joins from one visible command;
 - bootstrap verifies verifier and host binary before execution;
 - host connects outbound only over HTTPS/WSS or polling fallback;
-- package install/elevation/GUI/service requests pause for approval;
+- package install/elevation/GUI/service requests pause for authorization;
 - host revoke cancels work;
 - no Windows Service, scheduled task, Run key, startup shortcut, or firewall rule is left by temporary mode.
 - a third-party user can inspect the script and stop the session without understanding rdev internals.
@@ -2351,7 +2343,7 @@ Exit criteria:
 - Codex adapter;
 - optional Claude Code or ACP adapter spike only if it does not delay Codex evidence flow;
 - git diff/test evidence;
-- approval before push/merge;
+- authorization before push/merge;
 - managed host health and uninstall command;
 - artifact bundle review flow.
 
@@ -2361,8 +2353,8 @@ Exit criteria:
 - an agent can select the host through MCP;
 - Codex runs in a locked Git worktree;
 - result includes changed files, diff, tests, adapter artifact, audit slice, and residual risk;
-- push, merge, deploy, credential changes, and service changes require approval.
-- a failed coding job still produces enough evidence for an agent or another reviewer to continue safely.
+- push, merge, deploy, credential changes, and service changes require authorization.
+- a failed coding task still produces enough evidence for an agent or another reviewer to continue safely.
 
 ### Gate 4: Generalize To Multi-Host (`v0.4`)
 
@@ -2413,16 +2405,16 @@ These decisions are now fixed unless a security review proves them wrong:
 2. The default target connection is outbound HTTPS/WSS from host to gateway.
 3. Temporary mode is foreground-only and leaves no persistence.
 4. Managed mode is explicit and uses OS-native service managers.
-5. Every executable job is a signed envelope.
-6. Host-side policy is mandatory even when gateway policy already approved the job.
+5. Every executable task is a signed envelope.
+6. Host-side policy is mandatory even when gateway policy already authorized the task.
 7. Capabilities are deny-by-default and ringed by risk.
-8. Approvals are scoped, signed, expiring, and auditable.
+8. Authorizations are scoped, signed, expiring, and auditable.
 9. Agent Skills and MCP tools are the primary agent surface.
 10. Shell is a constrained adapter, not the product abstraction.
 11. Codex/Claude Code/ACP are coding adapters under workspace policy.
 12. Tailscale/headscale, SSH, RustDesk, and MeshCentral are optional adapters/transports.
-13. Release trust, bootstrap trust, gateway job trust, host identity, and approval trust are separate authorities.
-14. Evidence bundles and audit export are product features, not logs.
+13. Release trust, bootstrap trust, gateway task trust, host identity, and authorization trust are separate authorities.
+14. Session evidence and audit export are product features, not logs.
 15. Open-source distribution must ship safe defaults, not just powerful primitives.
 16. Denials are structured policy results, not opaque errors.
 17. The safety kernel is smaller than the adapter surface and never depends on a single runtime vendor.
@@ -2432,16 +2424,16 @@ These decisions are now fixed unless a security review proves them wrong:
 The project is done when all of these pass:
 
 1. A third-party Windows host joins from one visible command, verifies signed release artifacts, connects outbound only, runs foreground temporary mode, and leaves no service behind.
-2. A managed Mac receives a agent-requested coding job, runs Codex in a locked worktree, returns diff/test evidence, and waits for approval before push or merge.
+2. A managed Mac receives a agent-requested coding task, runs Codex in a locked worktree, returns diff/test evidence, and waits for authorization before push or merge.
 3. Tampered, expired, wrong-host, wrong-key, or replayed envelopes are rejected by the host.
 4. Workspace escapes, symlink escapes, non-allowlisted commands, and missing capabilities are rejected locally with explainable policy output.
-5. Package installation, elevation, GUI control, service changes, push, merge, deploy, publish, paid jobs, and credential changes require approval.
-6. Host revocation cancels queued/running jobs and prevents future claims.
+5. Package installation, elevation, GUI control, service changes, push, merge, deploy, publish, paid tasks, and credential changes require authorization.
+6. Host revocation cancels queued/running tasks and prevents future claims.
 7. Release manifests, host binaries, and verifier binaries are signature and checksum verified before execution.
-8. Audit export can prove the sequence of ticket, host, job, approval, artifact, and revocation events.
+8. Audit export can prove the sequence of ticket, host, task, authorization, artifact, and revocation events.
 9. Host-side redaction prevents common secret patterns from leaving the host in logs or artifacts.
 10. The Agent Skills are small enough for agents to load, but complete enough to prevent unsafe remote execution habits.
 
 ## Final Product Sentence
 
-Remote Dev Skillkit is the universal safety and orchestration layer that lets an AI agent work on real machines through explicit consent, outbound-only connections, signed jobs, local policy enforcement, approval gates, and reviewable evidence.
+Remote Dev Skillkit is the universal safety and orchestration layer that lets an AI agent work on real machines through explicit consent, outbound-only connections, signed tasks, local policy enforcement, session interrupts, and reviewable evidence.

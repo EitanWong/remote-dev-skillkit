@@ -272,7 +272,7 @@ func modeDecision(ownership, sessionMode string) string {
 		return "owned target selected attended-temporary mode because the invite or operator requested a non-persistent session"
 	}
 	if sessionMode == string(model.HostModeBreakGlass) {
-		return "break-glass mode selected only for an explicitly approved emergency session"
+		return "break-glass mode selected only for an explicitly authorized emergency session"
 	}
 	return "third-party or one-off target selected attended-temporary mode with no persistence by default"
 }
@@ -296,7 +296,7 @@ func humanSurface(targetOS, sessionMode string) []string {
 		surface = append(surface, "visible PowerShell launcher generated from the package plan")
 	}
 	if sessionMode == string(model.HostModeManaged) {
-		surface = append(surface, "reviewed managed-service entry package after owned-host approval")
+		surface = append(surface, "reviewed managed-service entry package after owned-host activation")
 	}
 	return surface
 }
@@ -330,7 +330,7 @@ func humanSteps(invite agentinvite.Invite, sessionMode, targetOS string) []strin
 		steps = append(steps, "Run the generated visible connection entry for "+targetOS+": "+command)
 	}
 	if sessionMode == string(model.HostModeManaged) {
-		steps = append(steps, "Approve the reviewed managed service lifecycle only after confirming this is an operator-owned machine.")
+		steps = append(steps, "Authorize the reviewed managed service lifecycle only after confirming this is an operator-owned machine.")
 	} else {
 		steps = append(steps, "Keep the visible temporary session open until the Agent reports completion.")
 	}
@@ -340,8 +340,8 @@ func humanSteps(invite agentinvite.Invite, sessionMode, targetOS string) []strin
 func agentSteps(invite agentinvite.Invite, sessionMode string) []string {
 	steps := []string{
 		"Do not ask the target-side human to assemble ticket, manifest root, gateway, or transport flags.",
-		"Poll rdev.hosts.list until the expected host appears, then approve only the scoped host.",
-		"Create small signed jobs and review evidence before claiming completion.",
+		"Watch rdev.sessions.status/events until the expected endpoint appears.",
+		"Create small scoped rdev.sessions.task requests and review evidence before claiming completion.",
 	}
 	if sessionMode == string(model.HostModeManaged) {
 		steps = append(steps, "Generate a reviewed managed service plan with release gates, renewal, revocation refresh, reconnect proof, and uninstall instructions.")
@@ -757,7 +757,7 @@ func renderHumanMessage(plan Plan) string {
 		builder.WriteString(plan.EntryCommand)
 		builder.WriteString("\n```\n\n")
 	}
-	builder.WriteString("Keep the session visible. The Agent will approve scoped access, run signed jobs, collect evidence, and revoke or stop the session when finished.\n")
+	builder.WriteString("Keep the session visible. The Agent will authorize scoped access, run signed session tasks, collect evidence, and revoke or stop the session when finished.\n")
 	return builder.String()
 }
 

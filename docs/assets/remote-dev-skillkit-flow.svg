@@ -1,6 +1,6 @@
 <svg width="1200" height="430" viewBox="0 0 1200 430" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
   <title id="title">Remote Dev Skillkit flow</title>
-  <desc id="desc">AI agents use Skillkit and MCP tools to send scoped jobs through an rdev gateway to a real host. Policy, approval, audit, and evidence keep the human in control.</desc>
+  <desc id="desc">AI agents use Skillkit and MCP tools to send scoped tasks through an rdev gateway to a real host. Policy, authorization, audit, and evidence keep the human in control.</desc>
   <style>
     .bg { fill: #f8fafc; }
     .card { fill: #ffffff; stroke: #d8dee8; stroke-width: 1.5; }
@@ -60,7 +60,7 @@
   <circle cx="743" cy="138" r="6.5" fill="#ffffff"/>
   <path d="M778 82v76" class="divider"/>
   <text x="798" y="112" class="text label">Gateway</text>
-  <text x="798" y="139" class="muted small">Scoped jobs</text>
+  <text x="798" y="139" class="muted small">Scoped tasks</text>
 
   <path d="M924 122h20" class="arrow"/>
   <path d="M934 111l12 11-12 11" class="arrow"/>
@@ -89,7 +89,7 @@
   <circle cx="376" cy="301" r="19" class="blue"/>
   <path d="M367 301l7 7 13-15" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M410 277v48" class="divider"/>
-  <text x="430" y="296" class="text label">Approval</text>
+  <text x="430" y="296" class="text label">Authorization</text>
   <text x="430" y="322" class="muted tiny">Human says yes</text>
 
   <rect x="610" y="258" width="248" height="86" rx="18" class="soft-slate"/>

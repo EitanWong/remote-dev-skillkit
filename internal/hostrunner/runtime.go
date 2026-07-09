@@ -12,7 +12,6 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/desktopadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/fileadapter"
-	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/powershelladapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
@@ -23,7 +22,7 @@ type adapterExecution struct {
 	RuntimeFixtureContent string
 }
 
-func executeJobAdapter(ctx context.Context, envelope model.JobEnvelope, captureRuntimeFixture bool, releaseWorkspaceLock func()) (adapterExecution, error) {
+func executeJobAdapter(ctx context.Context, envelope taskEnvelope, captureRuntimeFixture bool, releaseWorkspaceLock func()) (adapterExecution, error) {
 	if !captureRuntimeFixture {
 		artifact, err := executeJobAdapterDirect(ctx, envelope)
 		return adapterExecution{ArtifactContent: artifact}, err
@@ -34,7 +33,7 @@ func executeJobAdapter(ctx context.Context, envelope model.JobEnvelope, captureR
 	}
 	fixture, err := adapterkit.RunLifecycle(ctx, runtimeAdapter, adapterkit.RuntimeRequest{
 		Adapter:       envelope.Adapter,
-		JobID:         envelope.JobID,
+		TaskID:        envelope.TaskID,
 		WorkspaceRoot: envelope.Workspace.Root,
 		Intent:        envelope.Intent,
 		Payload:       envelope.Payload,
@@ -42,7 +41,7 @@ func executeJobAdapter(ctx context.Context, envelope model.JobEnvelope, captureR
 			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
 			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
 		},
-		Approvals: envelope.ApprovalsRequired,
+		Authorizations: envelope.InterruptsRequired,
 	})
 	fixtureContent, fixtureErr := fixture.JSON()
 	if fixtureErr != nil {
@@ -59,7 +58,7 @@ func executeJobAdapter(ctx context.Context, envelope model.JobEnvelope, captureR
 }
 
 type hostRuntimeAdapter struct {
-	envelope             model.JobEnvelope
+	envelope             taskEnvelope
 	releaseWorkspaceLock func()
 	artifactContent      string
 	resultSchema         string
@@ -79,10 +78,10 @@ func (a *hostRuntimeAdapter) Plan(context.Context, adapterkit.RuntimeRequest) (a
 	return adapterkit.RuntimePhaseOutput{
 		Evidence: []string{
 			"intent:" + a.envelope.Intent,
-			fmt.Sprintf("approvals_required:%d", len(a.envelope.ApprovalsRequired)),
-			"implicit_approval_preflight:passed",
+			fmt.Sprintf("interrupts_required:%d", len(a.envelope.InterruptsRequired)),
+			"implicit_interrupt_preflight:passed",
 		},
-		Detail: "hostrunner completed explicit and implicit approval checks before adapter execution",
+		Detail: "hostrunner completed explicit and implicit interrupt checks before adapter execution",
 	}, nil
 }
 
@@ -140,7 +139,7 @@ func (a *hostRuntimeAdapter) Cleanup(context.Context, adapterkit.RuntimeRequest)
 	}, nil
 }
 
-func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (string, error) {
+func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string, error) {
 	switch envelope.Adapter {
 	case "acpx":
 		execution, err := acpxadapter.ExecuteContext(ctx, acpxadapter.Spec{
@@ -209,6 +208,8 @@ func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (s
 			Path:               stringValue(envelope.Payload, "path", ""),
 			Content:            stringValue(envelope.Payload, "content", ""),
 			Encoding:           stringValue(envelope.Payload, "encoding", ""),
+			ExpectedBytes:      intValue(envelope.Payload, "expected_bytes", 0),
+			ExpectedSHA256:     stringValue(envelope.Payload, "expected_sha256", ""),
 			MaxBytes:           intValue(envelope.Payload, "max_bytes", envelope.Limits.MaxOutputBytes),
 			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
 			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
@@ -238,18 +239,18 @@ func executeJobAdapterDirect(ctx context.Context, envelope model.JobEnvelope) (s
 	}
 }
 
-func adapterDenial(job model.Job, adapter string, err error) (denialSpec, bool) {
+func adapterDenial(adapter string, err error) (denialSpec, bool) {
 	switch adapter {
 	case "acpx":
-		return acpxDenial(job, err)
+		return acpxDenial(err)
 	case "claude-code":
-		return claudeCodeDenial(job, err)
+		return claudeCodeDenial(err)
 	case "codex":
-		return codexDenial(job, err)
+		return codexDenial(err)
 	case "powershell":
-		return powershellDenial(job, err)
+		return powershellDenial(err)
 	default:
-		return shellDenial(job, err)
+		return shellDenial(err)
 	}
 }
 
