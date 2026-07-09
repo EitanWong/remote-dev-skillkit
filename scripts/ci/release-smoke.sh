@@ -20,14 +20,14 @@ go run ./cmd/rdev acceptance fresh-agent-support-session \
   > "$work_dir/fresh-agent-support-session-output.json"
 
 go test ./internal/cli \
-  -run 'TestGatewayDevMTLSHealthzRequiresClientCertificate|TestHostServeRegistersWithLocalMTLSGateway|TestHostServeMTLSGatewayRejectsMissingClientCertificate|TestHostServePollsAndCompletesDevJobWithLocalMTLSGateway' \
+  -run 'TestGatewayDevMTLSHealthzRequiresClientCertificate|TestHostServeMTLSGatewayRejectsMissingClientCertificate|TestHostServeSessionCompletesTask' \
   -count=1 \
   > "$work_dir/dev-mtls-host-smoke.txt"
 
-go test ./internal/wsproto ./internal/cli \
-  -run 'TestHTTPToWebSocketURL|TestUpgradeAndDialExchangeJSON|TestHostServeWSSCompletesDevJob|TestHostServeWSSCompletesDevJobWithLocalMTLSGateway' \
+go test ./internal/controlplane ./internal/gateway ./internal/httpapi ./internal/hostcmd ./internal/mcpstdio \
+  -run 'TestNewSessionUsesV1SchemaAndFastSnapshotFields|TestGatewaySwitchEventUpdatesSelectedGatewayAndRenewedLease|TestGatewaySessionCreateJoinReplay|TestHTTPSessionCreateJoinEventsAndSnapshot|TestHTTPSessionEventsPersistsRenewedLeaseForGatewayRestart|TestHostServeSessionCompletesTask|TestSessionsMCPCreateStatusTaskEventsAndClose|TestSessionsMCPRejectsOldHostJobArtifactTools' \
   -count=1 \
-  > "$work_dir/wss-mtls-host-smoke.txt"
+  > "$work_dir/session-control-plane-smoke.txt"
 
 go test ./internal/gateway ./internal/httpapi ./internal/operatorauth ./internal/cli \
   -run 'TestFileStateStoreRoundTrip|TestPostgresStateStoreRoundTripThroughPSQL|TestPostgresStateStoreVerifyRuntime|TestRedisStreamStateStoreRoundTripThroughRedisCLI|TestRedisStreamStateStoreVerifyRuntime|TestS3CompatibleStateStoreRoundTripThroughAWSCLI|TestS3CompatibleStateStoreVerifyRuntime|TestServerStateStorePersistsGatewayMutations|TestGatewayStorageVerifyFileProvider|TestGatewayStorageVerifyPostgresRejectsInlinePassword|TestGatewayStorageVerifyRedisRejectsInlineCredentials|TestGatewayStorageVerifyS3CompatibleRejectsUnsafeLocation|TestHostedIssuerAuthorizesSignedJWTByRole|TestCombinedAuthorizerAcceptsLocalAndHostedSources|TestOIDCJWKSVerifierAuthorizesRS256TokenByRole|TestOIDCJWKSVerifierRejectsUnsafeJWKSURL|TestOperatorAuthVerifyHosted|TestOperatorAuthVerifyOIDCJWKSWithToken' \
@@ -977,7 +977,9 @@ assert "rdev mcp tools" in skillkit_manifest["adaptive_configuration"]["probe_be
 assert "available connection modes" in skillkit_manifest["adaptive_configuration"]["probe_before_acting"], skillkit_manifest
 assert "framework install path" in skillkit_manifest["adaptive_configuration"]["ask_if_unclear"], skillkit_manifest
 assert "https://api.example.com/v1" in skillkit_manifest["adaptive_configuration"]["placeholders"], skillkit_manifest
-assert skillkit_mcp_tools["tools"][0]["name"] == "rdev.support_session.connect", skillkit_mcp_tools["tools"][:3]
+skillkit_tool_names = [tool["name"] for tool in skillkit_mcp_tools["tools"]]
+assert skillkit_tool_names[:3] == ["rdev.sessions.create", "rdev.sessions.status", "rdev.sessions.events"], skillkit_tool_names[:5]
+assert all(name.startswith("rdev.sessions.") for name in skillkit_tool_names), skillkit_tool_names
 assert skillkit_install_plan_output["adaptive_configuration_schema"] == "rdev.adaptive-configuration-contract.v1", skillkit_install_plan_output
 assert skillkit_install_plan_verification["schema"] == "rdev.skillkit-install-plan-verification.v1", skillkit_install_plan_verification
 assert skillkit_install_plan_verification["ok"] is True, skillkit_install_plan_verification
