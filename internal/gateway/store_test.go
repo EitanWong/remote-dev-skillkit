@@ -5,11 +5,94 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
+
+type blockingSnapshotStore struct {
+	captured chan struct{}
+	release  chan struct{}
+	once     sync.Once
+	mu       sync.Mutex
+	durable  []Snapshot
+}
+
+func (s *blockingSnapshotStore) LoadInto(*MemoryGateway) (Snapshot, bool, error) {
+	return Snapshot{}, false, nil
+}
+
+func (s *blockingSnapshotStore) SaveFrom(gw *MemoryGateway) (Snapshot, error) {
+	snapshot := gw.Snapshot()
+	blocked := false
+	s.once.Do(func() {
+		blocked = true
+		close(s.captured)
+	})
+	if blocked {
+		<-s.release
+	}
+	s.mu.Lock()
+	s.durable = append(s.durable, snapshot)
+	s.mu.Unlock()
+	return snapshot, nil
+}
+
+func (*blockingSnapshotStore) Describe() string { return "blocking" }
+
+func TestSerializedStateStoreMakesRollbackTheLastDurableSave(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "serialized rollback", map[string]string{"auto_activate": "attended-temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "racing-host", OS: "windows", Arch: "amd64"}); err != nil {
+		t.Fatal(err)
+	}
+	underlying := &blockingSnapshotStore{captured: make(chan struct{}), release: make(chan struct{})}
+	store, err := NewSerializedStateStore(underlying)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeDone := make(chan error, 1)
+	go func() {
+		_, saveErr := store.SaveFrom(gw)
+		activeDone <- saveErr
+	}()
+	<-underlying.captured
+	if _, _, err := gw.RollbackTicket(ticket.ID, "publication failed"); err != nil {
+		t.Fatal(err)
+	}
+	rollbackDone := make(chan error, 1)
+	go func() {
+		_, saveErr := store.SaveFrom(gw)
+		rollbackDone <- saveErr
+	}()
+	select {
+	case err := <-rollbackDone:
+		t.Fatalf("rollback save bypassed serialized active save: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(underlying.release)
+	if err := <-activeDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-rollbackDone; err != nil {
+		t.Fatal(err)
+	}
+	underlying.mu.Lock()
+	durable := append([]Snapshot(nil), underlying.durable...)
+	underlying.mu.Unlock()
+	if len(durable) != 2 {
+		t.Fatalf("durable saves = %d, want active then revoked", len(durable))
+	}
+	last := durable[len(durable)-1]
+	if len(last.Tickets) != 1 || last.Tickets[0].Status != model.TicketStatusRevoked || len(last.Hosts) != 1 || last.Hosts[0].Status != model.HostStatusRevoked {
+		t.Fatalf("last durable snapshot can revive ticket or host: %#v", last)
+	}
+}
 
 func TestFileStateStoreRoundTrip(t *testing.T) {
 	publicKey, privateKey := gatewaySnapshotKeyPair(t)

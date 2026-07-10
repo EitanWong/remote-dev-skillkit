@@ -22,12 +22,18 @@ const (
 	windowsFileWriteEA        uint32 = 0x00000010
 	windowsFileDeleteChild    uint32 = 0x00000040
 	windowsFileWriteAttribute uint32 = 0x00000100
+	windowsFileReadEA         uint32 = 0x00000008
+	windowsFileExecute        uint32 = 0x00000020
+	windowsFileReadAttribute  uint32 = 0x00000080
+	windowsReadControl        uint32 = 0x00020000
 	windowsDelete             uint32 = 0x00010000
 	windowsWriteDAC           uint32 = 0x00040000
 	windowsWriteOwner         uint32 = 0x00080000
 	windowsMaximumAllowed     uint32 = 0x02000000
 	windowsGenericAll         uint32 = 0x10000000
 	windowsGenericWrite       uint32 = 0x40000000
+	windowsGenericExecute     uint32 = 0x20000000
+	windowsGenericRead        uint32 = 0x80000000
 )
 
 const windowsProtectedWriteMask = windowsFileWriteData |
@@ -42,11 +48,37 @@ const windowsProtectedWriteMask = windowsFileWriteData |
 	windowsGenericAll |
 	windowsGenericWrite
 
+const windowsProtectedReadMask = windowsFileReadData |
+	windowsFileReadEA |
+	windowsFileExecute |
+	windowsFileReadAttribute |
+	windowsReadControl |
+	windowsMaximumAllowed |
+	windowsGenericAll |
+	windowsGenericExecute |
+	windowsGenericRead
+
 type windowsProtectedFileACE struct {
 	Type  windowsACEType
 	Flags uint8
 	SID   string
 	Mask  uint32
+}
+
+func validateWindowsConfidentialPathACL(acl windowsProtectedFileACL) error {
+	if err := validateWindowsProtectedFileACL(acl); err != nil {
+		return err
+	}
+	trusted := map[string]struct{}{acl.CurrentUserSID: {}, acl.AdministratorSID: {}, acl.SystemSID: {}}
+	for _, ace := range acl.ACEs {
+		if ace.Flags&windowsACEInheritOnly != 0 || ace.Type != windowsACEAllowed || ace.Mask&windowsProtectedReadMask == 0 {
+			continue
+		}
+		if _, ok := trusted[ace.SID]; !ok {
+			return fmt.Errorf("protected path Windows DACL grants read access to an untrusted SID")
+		}
+	}
+	return nil
 }
 
 type windowsProtectedFileACL struct {

@@ -53,6 +53,82 @@ type synchronizedBuffer struct {
 	buffer bytes.Buffer
 }
 
+type recordingStateStore struct {
+	mu             sync.Mutex
+	snapshots      []gateway.Snapshot
+	failSaves      int
+	failAfterWrite int
+}
+
+func (s *recordingStateStore) LoadInto(gw *gateway.MemoryGateway) (gateway.Snapshot, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.snapshots) == 0 {
+		return gateway.Snapshot{}, false, nil
+	}
+	snapshot := s.snapshots[len(s.snapshots)-1]
+	if err := gw.RestoreSnapshot(snapshot); err != nil {
+		return gateway.Snapshot{}, false, err
+	}
+	return snapshot, true, nil
+}
+
+func (s *recordingStateStore) SaveFrom(gw *gateway.MemoryGateway) (gateway.Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot := gw.Snapshot()
+	if s.failSaves > 0 {
+		s.failSaves--
+		return gateway.Snapshot{}, errors.New("injected state save failure")
+	}
+	s.snapshots = append(s.snapshots, snapshot)
+	if s.failAfterWrite > 0 {
+		s.failAfterWrite--
+		return gateway.Snapshot{}, errors.New("injected ambiguous state save failure")
+	}
+	return snapshot, nil
+}
+
+func (s *recordingStateStore) Describe() string { return "recording" }
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+type panicWriter struct{}
+
+func (panicWriter) Write([]byte) (int, error) { panic("injected stdout panic") }
+
+type ambiguousRollbackStore struct {
+	calls   int
+	durable []gateway.Snapshot
+}
+
+func (s *ambiguousRollbackStore) LoadInto(gw *gateway.MemoryGateway) (gateway.Snapshot, bool, error) {
+	if len(s.durable) == 0 {
+		return gateway.Snapshot{}, false, nil
+	}
+	snapshot := s.durable[len(s.durable)-1]
+	return snapshot, true, gw.RestoreSnapshot(snapshot)
+}
+
+func (s *ambiguousRollbackStore) SaveFrom(gw *gateway.MemoryGateway) (gateway.Snapshot, error) {
+	s.calls++
+	snapshot := gw.Snapshot()
+	switch s.calls {
+	case 1:
+		s.durable = append(s.durable, snapshot)
+		return gateway.Snapshot{}, errors.New("ambiguous active save")
+	case 2:
+		return gateway.Snapshot{}, errors.New("rollback save unavailable")
+	default:
+		s.durable = append(s.durable, snapshot)
+		return snapshot, nil
+	}
+}
+
+func (*ambiguousRollbackStore) Describe() string { return "ambiguous-rollback" }
+
 func (b *synchronizedBuffer) Write(data []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -2945,7 +3021,11 @@ func TestSupportSessionStartMarkerMismatchCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	addr := supportSessionTestAddr(t)
-	statusFile := filepath.Join(t.TempDir(), "status.json")
+	statusDir := t.TempDir()
+	if err := os.Chmod(statusDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	statusFile := filepath.Join(statusDir, "status.json")
 	workDir := filepath.Join(t.TempDir(), "support")
 	app := NewApp(io.Discard, io.Discard)
 	app.supportSessionStartDeps = &supportSessionStartDeps{

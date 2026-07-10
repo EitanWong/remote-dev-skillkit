@@ -81,6 +81,7 @@ type supportSessionStartDeps struct {
 	RecordEvent          func(string)
 	WaitForLocalHealth   func(context.Context, gatewayServerHandle, string, time.Duration) error
 	WaitForGatewayServer func(context.Context, gatewayServerHandle) error
+	StateStore           gateway.StateStore
 }
 
 func NewApp(stdout, stderr io.Writer) App {
@@ -4220,42 +4221,77 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 			workDir = filepath.Join(".", "work", "rdev-support-session")
 		}
 	}
-	if absWorkDir, err := filepath.Abs(workDir); err == nil {
-		workDir = absWorkDir
+	canonicalWorkDir, err := canonicalPathThroughExistingAncestor(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session work directory: %w", err)
 	}
+	workDir = canonicalWorkDir
 	readyFile := strings.TrimSpace(opts.ReadyFile)
 	if readyFile == "" {
 		readyFile = filepath.Join(workDir, "support-session-ready.json")
 	}
-	if absReadyFile, err := filepath.Abs(readyFile); err == nil {
-		readyFile = absReadyFile
+	canonicalReadyFile, err := canonicalPathThroughExistingAncestor(readyFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session ready file: %w", err)
 	}
+	readyFile = canonicalReadyFile
 	statusFile := strings.TrimSpace(opts.StatusFile)
 	if statusFile == "" {
 		statusFile = filepath.Join(workDir, "support-session-status.json")
 	}
-	if absStatusFile, err := filepath.Abs(statusFile); err == nil {
-		statusFile = absStatusFile
+	canonicalStatusFile, err := canonicalPathThroughExistingAncestor(statusFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session status file: %w", err)
 	}
+	statusFile = canonicalStatusFile
 	handoffTextFile := strings.TrimSpace(opts.HandoffTextFile)
 	if handoffTextFile == "" {
 		handoffTextFile = filepath.Join(workDir, "target-handoff.txt")
 	}
-	if absHandoffTextFile, err := filepath.Abs(handoffTextFile); err == nil {
-		handoffTextFile = absHandoffTextFile
+	canonicalHandoffTextFile, err := canonicalPathThroughExistingAncestor(handoffTextFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session handoff file: %w", err)
 	}
+	handoffTextFile = canonicalHandoffTextFile
 	connectedReportFile := strings.TrimSpace(opts.ConnectedReportFile)
 	if connectedReportFile == "" {
 		connectedReportFile = filepath.Join(workDir, "connected-report.txt")
 	}
-	if absConnectedReportFile, err := filepath.Abs(connectedReportFile); err == nil {
-		connectedReportFile = absConnectedReportFile
+	canonicalConnectedReportFile, err := canonicalPathThroughExistingAncestor(connectedReportFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session connected report file: %w", err)
 	}
+	connectedReportFile = canonicalConnectedReportFile
 	repoRoot := strings.TrimSpace(opts.RepoRoot)
 	if repoRoot == "" {
 		repoRoot = "."
 	}
 	repoRoot = resolveSupportSessionRepoRoot(repoRoot)
+	signingKeyPath := filepath.Join(workDir, ".rdev", "keys", "gateway-signing-key.json")
+	manifestKeyPath := filepath.Join(workDir, ".rdev", "keys", "manifest-root-key.json")
+	statePath := filepath.Join(workDir, ".rdev", "gateway", "state.json")
+	auditLogPath := filepath.Join(workDir, ".rdev", "audit", "events.jsonl")
+	publicationJournalPath := filepath.Join(workDir, ".rdev", "gateway", "publication-journal.json")
+	for _, protectedDir := range []string{
+		workDir,
+		filepath.Join(workDir, ".rdev"),
+		filepath.Join(workDir, ".rdev", "keys"),
+		filepath.Join(workDir, ".rdev", "gateway"),
+		filepath.Join(workDir, ".rdev", "audit"),
+	} {
+		if err := os.MkdirAll(protectedDir, 0o700); err != nil {
+			return err
+		}
+		if err := tunnel.ValidateProtectedDirectory(protectedDir); err != nil {
+			return fmt.Errorf("unsafe support-session work directory %q: %w", protectedDir, err)
+		}
+	}
+	if err := prepareAndValidateSupportSessionPublicationPaths([]string{
+		readyFile, handoffTextFile, statusFile, connectedReportFile, statePath,
+		auditLogPath, signingKeyPath, manifestKeyPath, publicationJournalPath,
+	}); err != nil {
+		return err
+	}
 	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
 		RepoRoot:    repoRoot,
 		WorkDir:     workDir,
@@ -4320,21 +4356,30 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "audit"), 0o700); err != nil {
 		return err
 	}
-	signingKeyPath := filepath.Join(workDir, ".rdev", "keys", "gateway-signing-key.json")
-	manifestKeyPath := filepath.Join(workDir, ".rdev", "keys", "manifest-root-key.json")
-	statePath := filepath.Join(workDir, ".rdev", "gateway", "state.json")
-	auditLogPath := filepath.Join(workDir, ".rdev", "audit", "events.jsonl")
 	key, _, err := signing.LoadOrCreate(signingKeyPath, signing.DefaultKeyID)
 	if err != nil {
 		return err
 	}
 	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
-	store, err := gateway.NewFileStateStore(statePath)
+	var store gateway.StateStore
+	if deps.StateStore != nil {
+		store = deps.StateStore
+	} else {
+		fileStore, storeErr := gateway.NewFileStateStore(statePath)
+		if storeErr != nil {
+			return storeErr
+		}
+		store = fileStore
+	}
+	store, err = gateway.NewSerializedStateStore(store)
 	if err != nil {
 		return err
 	}
 	if _, _, err := store.LoadInto(gw); err != nil {
 		return err
+	}
+	if err := recoverSupportSessionPublication(gw, store, publicationJournalPath, []string{readyFile, handoffTextFile}); err != nil {
+		return fmt.Errorf("recover interrupted support-session publication: %w", err)
 	}
 	manifestKey, _, err := signing.LoadOrCreate(manifestKeyPath, "manifest-dev")
 	if err != nil {
@@ -4488,35 +4533,23 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		}
 		return addGatewayCandidateTicketMetadata(metadata, candidates)
 	}
-	ticket, err := gw.CreateTicketWithMetadata(
-		model.HostModeAttendedTemporary,
-		opts.TTLSeconds,
-		cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
-		opts.Reason,
-		ticketMetadata(gatewayCandidates),
-	)
+	ticket, availability, err := createFinalProbedSupportTicket(ctx, gw, store, availability, opts.TTLSeconds, opts.Reason, ticketMetadata, finalProbe, server.GatewayInstance())
 	if err != nil {
 		return err
 	}
 	a.recordSupportSessionStartEvent("ticket_created")
-	if _, err := store.SaveFrom(gw); err != nil {
-		return err
-	}
-	for _, candidate := range availability.Candidates {
-		if err := finalProbe(ctx, candidate, ticket.Code, server.GatewayInstance()); err != nil {
-			_, _ = gw.RevokeTicket(ticket.ID, "final ticket bootstrap probe failed")
-			_, _ = store.SaveFrom(gw)
-			return fmt.Errorf("final ticket bootstrap probe failed for provider %q: %w", candidate.ProviderID, err)
-		}
-	}
+	gatewayURL = availability.Candidates[0].URL
+	gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
 	readiness := supportsession.DirectAvailability(availability, opts.AllowDegradedDirectHandoff)
 	if len(availability.Candidates) > 0 {
 		a.recordSupportSessionStartEvent("bootstrap_probe_passed")
 	}
+	publishedTicket := ticket
+	publishedTicket.Status = model.TicketStatusActive
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
 		GatewayURLCandidates:  gatewayCandidates,
-		Ticket:                ticket,
+		Ticket:                publishedTicket,
 		ManifestRootPublicKey: rootPublicKeyString(gw.ManifestRoot()),
 		Target:                opts.Target,
 		Locale:                opts.Locale,
@@ -4540,14 +4573,14 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		AvailabilityReadiness:     readiness,
 	})
 	if readiness.ReadyToSend {
-		if err := writeJSONFile0600(readyFile, started); err != nil {
-			return err
-		}
-		if err := writeSupportSessionHandoffTextFile0600(handoffTextFile, started); err != nil {
+		if err := publishSupportSessionHandoff(gw, store, ticket.ID, a.Stdout, a.Stderr, readyFile, handoffTextFile, publicationJournalPath, started); err != nil {
 			return err
 		}
 		a.recordSupportSessionStartEvent("handoff_written")
 	} else {
+		if err := rollbackSupportTicket(gw, store, ticket.ID, "direct handoff readiness was not satisfied"); err != nil {
+			return err
+		}
 		diagnostic := map[string]any{
 			"schema_version":         "rdev.support-session-start-diagnostic.v1",
 			"ready_to_send":          false,
@@ -4557,9 +4590,10 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		if err := writeJSONFile0600(statusFile, diagnostic); err != nil {
 			return err
 		}
-	}
-	if err := writeJSON(a.Stdout, started); err != nil {
-		return err
+		if err := writeJSON(a.Stdout, diagnostic); err != nil {
+			return err
+		}
+		return errors.New("public gateway candidates did not satisfy direct handoff readiness policy")
 	}
 	if readiness.ReadyToSend {
 		_, _ = fmt.Fprintf(a.Stderr, "rdev support session ready payload written to %s\n", readyFile)
@@ -4661,6 +4695,7 @@ func bootstrapProbeAvailability(ctx context.Context, set tunnel.AvailabilitySet,
 		for index := range final.Attempts {
 			if final.Attempts[index].ProviderID == candidate.ProviderID {
 				final.Attempts[index].Probe.BootstrapOK = true
+				final.Attempts[index].Probe.StaticBootstrapOK = true
 				final.Attempts[index].Probe.SmallAssetOK = true
 			}
 		}
@@ -12878,6 +12913,10 @@ func atomicWriteFile0600(path string, data []byte) error {
 		_ = tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
@@ -12885,10 +12924,21 @@ func atomicWriteFile0600(path string, data []byte) error {
 		return err
 	}
 	cleanup = false
-	return os.Chmod(path, 0o600)
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	return syncSupportSessionArtifactDirectory(path)
 }
 
 func writeSupportSessionHandoffTextFile0600(path string, started map[string]any) error {
+	text, err := supportSessionHandoffText(started)
+	if err != nil {
+		return err
+	}
+	return writeTextFile0600(path, text)
+}
+
+func supportSessionHandoffText(started map[string]any) (string, error) {
 	envelope, _ := started["target_handoff_envelope"].(map[string]any)
 	text, _ := envelope["full_text"].(string)
 	if strings.TrimSpace(text) == "" {
@@ -12905,9 +12955,9 @@ func writeSupportSessionHandoffTextFile0600(path string, started map[string]any)
 		}
 	}
 	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("support session handoff text is empty")
+		return "", fmt.Errorf("support session handoff text is empty")
 	}
-	return writeTextFile0600(path, text)
+	return strings.TrimRight(text, "\n"), nil
 }
 
 func writeSupportSessionConnectedReportFile0600(path string, status map[string]any) error {

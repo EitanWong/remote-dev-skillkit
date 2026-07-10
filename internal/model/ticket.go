@@ -16,6 +16,7 @@ const (
 	HostModeBreakGlass        HostMode = "break-glass"
 
 	TicketStatusActive  TicketStatus = "active"
+	TicketStatusProbing TicketStatus = "probing"
 	TicketStatusRevoked TicketStatus = "revoked"
 )
 

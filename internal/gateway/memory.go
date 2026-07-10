@@ -233,6 +233,14 @@ func (g *MemoryGateway) CreateTicket(mode model.HostMode, ttlSeconds int, capabi
 }
 
 func (g *MemoryGateway) CreateTicketWithMetadata(mode model.HostMode, ttlSeconds int, capabilities []string, reason string, metadata map[string]string) (model.Ticket, error) {
+	return g.createTicketWithStatus(mode, ttlSeconds, capabilities, reason, metadata, model.TicketStatusActive)
+}
+
+func (g *MemoryGateway) CreateProbingTicketWithMetadata(mode model.HostMode, ttlSeconds int, capabilities []string, reason string, metadata map[string]string) (model.Ticket, error) {
+	return g.createTicketWithStatus(mode, ttlSeconds, capabilities, reason, metadata, model.TicketStatusProbing)
+}
+
+func (g *MemoryGateway) createTicketWithStatus(mode model.HostMode, ttlSeconds int, capabilities []string, reason string, metadata map[string]string, status model.TicketStatus) (model.Ticket, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -250,6 +258,7 @@ func (g *MemoryGateway) CreateTicketWithMetadata(mode model.HostMode, ttlSeconds
 	if err != nil {
 		return model.Ticket{}, err
 	}
+	ticket.Status = status
 	if len(metadata) > 0 {
 		ticket.Metadata = map[string]string{}
 		for key, value := range metadata {
@@ -262,8 +271,44 @@ func (g *MemoryGateway) CreateTicketWithMetadata(mode model.HostMode, ttlSeconds
 	}
 	g.tickets[ticket.ID] = ticket
 	g.codeIndex[ticket.Code] = ticket.ID
-	g.appendAuditLocked("operator", "ticket.create", ticket.ID, "created short-lived ticket")
+	g.appendAuditLocked("operator", "ticket.create", ticket.ID, "created short-lived "+string(status)+" ticket")
 	return ticket, nil
+}
+
+func (g *MemoryGateway) PublishTicket(ticketID string) (model.Ticket, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ticket, ok := g.tickets[ticketID]
+	if !ok {
+		return model.Ticket{}, fmt.Errorf("%w: ticket", ErrNotFound)
+	}
+	if ticket.Status != model.TicketStatusProbing {
+		return model.Ticket{}, fmt.Errorf("%w: ticket must be probing", ErrInvalidState)
+	}
+	if !g.now().Before(ticket.ExpiresAt) {
+		return model.Ticket{}, ErrTicketExpired
+	}
+	ticket.Status = model.TicketStatusActive
+	g.tickets[ticket.ID] = ticket
+	g.appendAuditLocked("operator", "ticket.publish", ticket.ID, "published probed ticket")
+	return ticket, nil
+}
+
+func (g *MemoryGateway) ValidatePowerShellBootstrapTicket(ticketCode string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ticketID, ok := g.codeIndex[strings.TrimSpace(ticketCode)]
+	if !ok {
+		return fmt.Errorf("%w: ticket code", ErrNotFound)
+	}
+	ticket := g.tickets[ticketID]
+	if ticket.Status != model.TicketStatusProbing && ticket.Status != model.TicketStatusActive {
+		return fmt.Errorf("%w: ticket cannot serve bootstrap", ErrInvalidState)
+	}
+	if !g.now().Before(ticket.ExpiresAt) {
+		return ErrTicketExpired
+	}
+	return nil
 }
 
 func (g *MemoryGateway) IssueEnrollmentCertificate(req EnrollmentCertificateRequest) (model.HostEnrollmentCertificate, error) {
@@ -517,6 +562,53 @@ func (g *MemoryGateway) RevokeTicket(ticketID, reason string) (model.Ticket, err
 	return ticket, nil
 }
 
+// RollbackTicket invalidates a ticket transaction and every host authorization
+// derived from it. It is intentionally idempotent so callers can install a
+// rollback guard immediately after ticket creation and invoke it on every
+// publication error without racing a concurrent host registration.
+func (g *MemoryGateway) RollbackTicket(ticketID, reason string) (model.Ticket, []model.Host, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	ticket, ok := g.tickets[ticketID]
+	if !ok {
+		return model.Ticket{}, nil, fmt.Errorf("%w: ticket", ErrNotFound)
+	}
+	if ticket.Status != model.TicketStatusRevoked {
+		ticket.Status = model.TicketStatusRevoked
+		g.tickets[ticket.ID] = ticket
+		g.appendAuditLocked("operator", "ticket.rollback", ticket.ID, reasonOrDefault(reason, "rolled back unpublished ticket"))
+	}
+
+	affected := make([]model.Host, 0)
+	for hostID, host := range g.hosts {
+		if host.TicketID != ticketID {
+			continue
+		}
+		if host.Status != model.HostStatusRevoked {
+			host.Status = model.HostStatusRevoked
+			host.LastSeenAt = g.now().UTC()
+			g.hosts[hostID] = host
+			g.appendAuditLocked("operator", "host.rollback", host.ID, "revoked host created by unpublished ticket")
+		}
+		delete(g.hostSecrets, hostID)
+		delete(g.hostHeartbeats, hostID)
+		affected = append(affected, host)
+	}
+	for key, record := range g.hostRegistrationID {
+		if host, exists := g.hosts[record.HostID]; exists && host.TicketID == ticketID {
+			delete(g.hostRegistrationID, key)
+		}
+	}
+	for key, event := range g.preconnects {
+		if event.TicketCode == ticket.Code {
+			delete(g.preconnects, key)
+		}
+	}
+	sort.Slice(affected, func(i, j int) bool { return affected[i].ID < affected[j].ID })
+	return ticket, affected, nil
+}
+
 func (g *MemoryGateway) ActivateHost(hostID string, capabilities []string) (model.Host, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -699,6 +791,13 @@ func (g *MemoryGateway) TicketForCode(ticketCode string) (model.Ticket, bool) {
 	return ticket, ok
 }
 
+func (g *MemoryGateway) Ticket(ticketID string) (model.Ticket, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ticket, ok := g.tickets[strings.TrimSpace(ticketID)]
+	return ticket, ok
+}
+
 // GenerateHostSecret creates a random 32-byte hex secret for a host and stores
 // it internally. The secret is returned once at registration and must be
 // presented by the host process on subsequent host-side requests that still
@@ -711,8 +810,12 @@ func (g *MemoryGateway) GenerateHostSecret(hostID string) (string, error) {
 }
 
 func (g *MemoryGateway) generateHostSecretLocked(hostID string) (string, error) {
-	if _, ok := g.hosts[hostID]; !ok {
+	host, ok := g.hosts[hostID]
+	if !ok {
 		return "", fmt.Errorf("%w: host", ErrNotFound)
+	}
+	if host.Status == model.HostStatusRevoked {
+		return "", fmt.Errorf("%w: host is revoked", ErrInvalidState)
 	}
 	secret, err := generateSecret()
 	if err != nil {

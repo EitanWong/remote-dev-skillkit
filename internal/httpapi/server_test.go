@@ -336,6 +336,16 @@ func TestBootstrapHelperDownloadsUseRetryBackoff(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected PowerShell bootstrap 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("PowerShell bootstrap Cache-Control = %q, want no-store", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("PowerShell bootstrap X-Content-Type-Options = %q, want nosniff", got)
+	}
+	expectedTicketHash := tunnel.TicketCodeSHA256(ticket.Code)
+	if got := rec.Header().Get(tunnel.TicketCodeSHA256Header); got != expectedTicketHash || strings.Contains(got, ticket.Code) {
+		t.Fatalf("PowerShell bootstrap ticket hash header = %q, want opaque hash %q", got, expectedTicketHash)
+	}
 	powerShellBody := rec.Body.String()
 	for _, want := range []string{
 		"function Invoke-RdevWebRequestWithRetry",

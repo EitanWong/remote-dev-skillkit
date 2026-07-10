@@ -3,7 +3,9 @@ package tunnel
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -23,11 +25,18 @@ const (
 	maxProbeBody             = 256 << 10
 	bootstrapScriptMarker    = "$ErrorActionPreference = 'Stop'"
 	BootstrapProbeMarker     = "rdev-bootstrap-probe-v1"
+	TicketCodeSHA256Header   = "X-Rdev-Ticket-Code-SHA256"
 	BootstrapProbePowerShell = `$ErrorActionPreference = 'Stop'
 # rdev-bootstrap-probe-v1
 Write-Output 'rdev-bootstrap-probe-v1'
 `
 )
+
+func TicketCodeSHA256(ticketCode string) string {
+	canonical := strings.ToUpper(strings.TrimSpace(ticketCode))
+	digest := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(digest[:])
+}
 
 type probeResolver interface {
 	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
@@ -70,7 +79,7 @@ func probeGatewayHealthWithOptions(ctx context.Context, candidate Candidate, exp
 	healthURL.RawQuery = ""
 	healthURL.Fragment = ""
 	stages := &probeStages{}
-	body, marker, err := probeResponse(ctx, newProbeHTTPClient(nil, optionsWithStages(options, stages)), healthURL.String(), expectedInstance, false, stages)
+	body, marker, err := probeResponse(ctx, newProbeHTTPClient(nil, optionsWithStages(options, stages)), healthURL.String(), expectedInstance, false, stages, "")
 	evidence := stages.evidence(time.Since(started))
 	if err != nil {
 		return evidence, err
@@ -98,7 +107,7 @@ func probeBootstrapAssetWithOptions(ctx context.Context, candidate Candidate, ti
 	assetURL.RawPath = strings.TrimRight(base.EscapedPath(), "/") + "/join/" + url.PathEscape(ticketCode) + "/bootstrap.ps1"
 	assetURL.RawQuery = ""
 	assetURL.Fragment = ""
-	body, _, err := probeResponse(ctx, newProbeHTTPClient(nil, options), assetURL.String(), expectedInstance, true, nil)
+	body, _, err := probeResponse(ctx, newProbeHTTPClient(nil, options), assetURL.String(), expectedInstance, true, nil, TicketCodeSHA256(ticketCode))
 	if err != nil {
 		return evidence, err
 	}
@@ -106,6 +115,7 @@ func probeBootstrapAssetWithOptions(ctx context.Context, candidate Candidate, ti
 		return evidence, errors.New("bootstrap script marker missing")
 	}
 	evidence.BootstrapOK = true
+	evidence.TicketBoundBootstrapOK = true
 	evidence.SmallAssetOK = true
 	return evidence, nil
 }
@@ -122,7 +132,7 @@ func probeBootstrapTemplateWithOptions(ctx context.Context, candidate Candidate,
 	probeURL.RawQuery = ""
 	probeURL.Fragment = ""
 	stages := &probeStages{}
-	body, marker, err := probeResponse(ctx, newProbeHTTPClient(nil, optionsWithStages(options, stages)), probeURL.String(), expectedInstance, true, stages)
+	body, marker, err := probeResponse(ctx, newProbeHTTPClient(nil, optionsWithStages(options, stages)), probeURL.String(), expectedInstance, true, stages, "")
 	evidence := stages.evidence(time.Since(started))
 	if err != nil {
 		return evidence, err
@@ -136,6 +146,7 @@ func probeBootstrapTemplateWithOptions(ctx context.Context, candidate Candidate,
 	evidence.HealthOK = true
 	evidence.InstanceMarker = marker
 	evidence.BootstrapOK = true
+	evidence.StaticBootstrapOK = true
 	evidence.SmallAssetOK = true
 	return evidence, nil
 }
@@ -326,7 +337,7 @@ func validPublicHostname(hostname string) bool {
 	return true
 }
 
-func probeResponse(ctx context.Context, client *http.Client, rawURL, expectedInstance string, bootstrap bool, stages *probeStages) ([]byte, string, error) {
+func probeResponse(ctx context.Context, client *http.Client, rawURL, expectedInstance string, bootstrap bool, stages *probeStages, expectedTicketHash string) ([]byte, string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("build probe request: %w", err)
@@ -353,6 +364,17 @@ func probeResponse(ctx context.Context, client *http.Client, rawURL, expectedIns
 	}
 	if expectedInstance != "" && marker != expectedInstance {
 		return nil, "", errors.New("gateway instance marker mismatch")
+	}
+	if expectedTicketHash != "" {
+		if response.Header.Get(TicketCodeSHA256Header) != expectedTicketHash {
+			return nil, "", errors.New("bootstrap response ticket hash mismatch")
+		}
+		if !strings.Contains(strings.ToLower(response.Header.Get("Cache-Control")), "no-store") {
+			return nil, "", errors.New("bootstrap response is cacheable")
+		}
+		if !strings.EqualFold(strings.TrimSpace(response.Header.Get("X-Content-Type-Options")), "nosniff") {
+			return nil, "", errors.New("bootstrap response is missing nosniff protection")
+		}
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxProbeBody+1))
 	if err != nil {

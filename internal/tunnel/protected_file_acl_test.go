@@ -76,6 +76,21 @@ func TestValidateWindowsProtectedFileACLRejectsUnsafeMetadata(t *testing.T) {
 	}
 }
 
+func TestValidateWindowsConfidentialPathACLRejectsUntrustedReaders(t *testing.T) {
+	acl := windowsProtectedFileACL{
+		OwnerSID: "S-1-5-21-1000", CurrentUserSID: "S-1-5-21-1000",
+		AdministratorSID: "S-1-5-32-544", SystemSID: "S-1-5-18", DACLPresent: true,
+		ACEs: []windowsProtectedFileACE{{Type: windowsACEAllowed, SID: "S-1-1-0", Mask: windowsGenericRead}},
+	}
+	if err := validateWindowsConfidentialPathACL(acl); err == nil {
+		t.Fatal("confidential path ACL accepted untrusted reader")
+	}
+	acl.ACEs[0].SID = acl.CurrentUserSID
+	if err := validateWindowsConfidentialPathACL(acl); err != nil {
+		t.Fatalf("confidential path ACL rejected trusted reader: %v", err)
+	}
+}
+
 func TestWindowsFinalPathRemoteClassification(t *testing.T) {
 	tests := []struct {
 		path string

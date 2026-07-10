@@ -477,6 +477,9 @@ func TestProbeBootstrapAssetRequiresTicketAndRejectsInterstitial(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set(TicketCodeSHA256Header, TicketCodeSHA256("ticket/code"))
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write([]byte("<!doctype html><html><title>Access denied</title></html>"))
 	}))
 	defer server.Close()
@@ -511,6 +514,9 @@ func TestProbeBootstrapAssetRequiresPowerShellContentAndMarker(t *testing.T) {
 					w.WriteHeader(http.StatusOK)
 					return
 				}
+				w.Header().Set(TicketCodeSHA256Header, TicketCodeSHA256("ticket"))
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
 				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer server.Close()
@@ -518,8 +524,49 @@ func TestProbeBootstrapAssetRequiresPowerShellContentAndMarker(t *testing.T) {
 			if tt.wantOK && (err != nil || !evidence.BootstrapOK || !evidence.SmallAssetOK) {
 				t.Fatalf("valid bootstrap rejected: evidence=%#v err=%v", evidence, err)
 			}
+			if tt.wantOK && (!evidence.TicketBoundBootstrapOK || evidence.StaticBootstrapOK) {
+				t.Fatalf("ticket-bound bootstrap evidence is ambiguous: %#v", evidence)
+			}
 			if !tt.wantOK && err == nil {
 				t.Fatal("invalid bootstrap accepted")
+			}
+		})
+	}
+}
+
+func TestProbeBootstrapAssetRejectsMissingWrongAndReplayedTicketHash(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		headerHash string
+		cache      string
+		wantOK     bool
+	}{
+		{name: "missing hash", cache: "no-store"},
+		{name: "wrong hash", headerHash: TicketCodeSHA256("ticket-b"), cache: "no-store"},
+		{name: "replayed other ticket", headerHash: TicketCodeSHA256("ticket-b"), cache: "no-store"},
+		{name: "cacheable response", headerHash: TicketCodeSHA256("ticket-a"), cache: "public, max-age=300"},
+		{name: "correct current ticket", headerHash: TicketCodeSHA256("ticket-a"), cache: "no-store", wantOK: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Rdev-Gateway-Instance", "instance")
+				if r.URL.Path == "/healthz" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				w.Header().Set(TicketCodeSHA256Header, testCase.headerHash)
+				w.Header().Set("Cache-Control", testCase.cache)
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				_, _ = w.Write([]byte("$ErrorActionPreference = 'Stop'\nWrite-Host '[rdev]'"))
+			}))
+			defer server.Close()
+			_, err := probeBootstrapAssetWithOptions(context.Background(), Candidate{ProviderID: "provider", URL: "https://public.example.test"}, "ticket-a", "instance", publicTestProbeOptions(t, server))
+			if testCase.wantOK && err != nil {
+				t.Fatalf("current ticket response rejected: %v", err)
+			}
+			if !testCase.wantOK && err == nil {
+				t.Fatal("unbound or cacheable ticket response accepted")
 			}
 		})
 	}
@@ -549,6 +596,9 @@ func TestProbeBootstrapTemplateRequiresStaticMarkerAndExactInstance(t *testing.T
 			evidence, err := probeBootstrapTemplateWithOptions(context.Background(), Candidate{ProviderID: "provider", URL: "https://public.example.test"}, "instance", publicTestProbeOptions(t, server))
 			if tt.wantOK && (err != nil || !evidence.BootstrapOK || !evidence.SmallAssetOK) {
 				t.Fatalf("valid template rejected: evidence=%#v err=%v", evidence, err)
+			}
+			if tt.wantOK && (!evidence.StaticBootstrapOK || evidence.TicketBoundBootstrapOK) {
+				t.Fatalf("static bootstrap evidence is ambiguous: %#v", evidence)
 			}
 			if !tt.wantOK && err == nil {
 				t.Fatal("invalid template accepted")

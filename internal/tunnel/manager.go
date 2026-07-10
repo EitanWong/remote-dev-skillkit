@@ -26,14 +26,16 @@ const (
 )
 
 type ProbeEvidence struct {
-	DNSOK          bool          `json:"dns_ok"`
-	TCPConnectOK   bool          `json:"tcp_connect_ok"`
-	TLSOK          bool          `json:"tls_ok"`
-	HealthOK       bool          `json:"health_ok"`
-	BootstrapOK    bool          `json:"bootstrap_ok"`
-	SmallAssetOK   bool          `json:"small_asset_ok"`
-	Latency        time.Duration `json:"latency"`
-	InstanceMarker string        `json:"instance_marker,omitempty"`
+	DNSOK                  bool          `json:"dns_ok"`
+	TCPConnectOK           bool          `json:"tcp_connect_ok"`
+	TLSOK                  bool          `json:"tls_ok"`
+	HealthOK               bool          `json:"health_ok"`
+	BootstrapOK            bool          `json:"bootstrap_ok"`
+	StaticBootstrapOK      bool          `json:"static_bootstrap_ok"`
+	TicketBoundBootstrapOK bool          `json:"ticket_bound_bootstrap_ok"`
+	SmallAssetOK           bool          `json:"small_asset_ok"`
+	Latency                time.Duration `json:"latency"`
+	InstanceMarker         string        `json:"instance_marker,omitempty"`
 }
 
 type Attempt struct {

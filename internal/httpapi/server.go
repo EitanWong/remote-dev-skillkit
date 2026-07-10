@@ -647,6 +647,14 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 	}
 	manifestURL := manifestURLForJoinRequest(r, code)
 	manifestRoot := manifestRootPublicKey(s.Gateway.ManifestRoot())
+	if resource == "bootstrap.ps1" {
+		if err := s.Gateway.ValidatePowerShellBootstrapTicket(code); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.writePowerShellBootstrap(w, r, code, manifestURL, manifestRoot)
+		return
+	}
 	if _, err := s.Gateway.JoinManifest(code, requestBaseURL(r), requestBaseURL(r)+"/join/"+code); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -656,8 +664,6 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 		s.joinPage(w, r, code, manifestURL)
 	case "bootstrap.sh":
 		s.writeShellBootstrap(w, r, code, manifestURL, manifestRoot)
-	case "bootstrap.ps1":
-		s.writePowerShellBootstrap(w, r, code, manifestURL, manifestRoot)
 	default:
 		writeError(w, http.StatusNotFound, "unknown join resource")
 	}
@@ -1036,6 +1042,7 @@ func supportedJoinLocale(tag string) string {
 }
 
 func (s Server) writeShellBootstrap(w http.ResponseWriter, r *http.Request, ticketCode, manifestURL, manifestRootPublicKey string) {
+	setTicketBootstrapHeaders(w, ticketCode)
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
@@ -1191,6 +1198,7 @@ exit $rdev_exit
 }
 
 func (s Server) writePowerShellBootstrap(w http.ResponseWriter, r *http.Request, ticketCode, manifestURL, manifestRootPublicKey string) {
+	setTicketBootstrapHeaders(w, ticketCode)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
@@ -1758,6 +1766,12 @@ func extractBearerToken(r *http.Request) string {
 		return strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
 	}
 	return r.URL.Query().Get("host_secret")
+}
+
+func setTicketBootstrapHeaders(w http.ResponseWriter, ticketCode string) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set(tunnel.TicketCodeSHA256Header, tunnel.TicketCodeSHA256(ticketCode))
 }
 
 func requestBaseURL(r *http.Request) string {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,49 @@ type StateStore interface {
 	LoadInto(*MemoryGateway) (Snapshot, bool, error)
 	SaveFrom(*MemoryGateway) (Snapshot, error)
 	Describe() string
+}
+
+// SerializedStateStore ensures every snapshot capture and durable write runs
+// in one shared critical section. The same wrapper instance must be shared by
+// HTTP handlers and local orchestration code that mutate the same gateway.
+type SerializedStateStore struct {
+	store StateStore
+	mu    sync.Mutex
+}
+
+func NewSerializedStateStore(store StateStore) (*SerializedStateStore, error) {
+	if store == nil {
+		return nil, fmt.Errorf("state store is required")
+	}
+	if serialized, ok := store.(*SerializedStateStore); ok {
+		return serialized, nil
+	}
+	return &SerializedStateStore{store: store}, nil
+}
+
+func (s *SerializedStateStore) LoadInto(gw *MemoryGateway) (Snapshot, bool, error) {
+	if s == nil || s.store == nil {
+		return Snapshot{}, false, fmt.Errorf("serialized state store is not configured")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.LoadInto(gw)
+}
+
+func (s *SerializedStateStore) SaveFrom(gw *MemoryGateway) (Snapshot, error) {
+	if s == nil || s.store == nil {
+		return Snapshot{}, fmt.Errorf("serialized state store is not configured")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.SaveFrom(gw)
+}
+
+func (s *SerializedStateStore) Describe() string {
+	if s == nil || s.store == nil {
+		return "serialized:unconfigured"
+	}
+	return "serialized:" + s.store.Describe()
 }
 
 type FileStateStore struct {
