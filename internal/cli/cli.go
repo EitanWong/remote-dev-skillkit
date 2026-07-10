@@ -4639,32 +4639,13 @@ func gatewayURLCandidatesFromTunnelCandidates(candidates []tunnel.Candidate) []s
 	return result
 }
 
-func finalProbeAvailability(ctx context.Context, set tunnel.AvailabilitySet, ticketCode, instance string, probe func(context.Context, tunnel.Candidate, string, string) error) tunnel.AvailabilitySet {
-	final := set
-	final.Candidates = make([]tunnel.Candidate, 0, len(set.Candidates))
-	for _, candidate := range set.Candidates {
-		if err := probe(ctx, candidate, ticketCode, instance); err != nil {
-			for index := range final.Attempts {
-				if final.Attempts[index].ProviderID == candidate.ProviderID {
-					final.Attempts[index].Status = tunnel.AttemptDegraded
-					final.Attempts[index].ErrorClass = "bootstrap-probe-failed"
-				}
-			}
-			continue
-		}
-		final.Candidates = append(final.Candidates, candidate)
-		for index := range final.Attempts {
-			if final.Attempts[index].ProviderID == candidate.ProviderID {
-				final.Attempts[index].Probe.BootstrapOK = true
-				final.Attempts[index].Probe.SmallAssetOK = true
-			}
-		}
-	}
-	return final
-}
-
 func bootstrapProbeAvailability(ctx context.Context, set tunnel.AvailabilitySet, instance string, probe func(context.Context, tunnel.Candidate, string) error) tunnel.AvailabilitySet {
-	final := set
+	final := tunnel.AvailabilitySet{
+		SchemaVersion: set.SchemaVersion,
+		Region:        set.Region,
+		Candidates:    append([]tunnel.Candidate(nil), set.Candidates...),
+		Attempts:      append([]tunnel.Attempt(nil), set.Attempts...),
+	}
 	final.Candidates = make([]tunnel.Candidate, 0, len(set.Candidates))
 	for _, candidate := range set.Candidates {
 		if err := probe(ctx, candidate, instance); err != nil {

@@ -2427,7 +2427,7 @@ func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
 	}
 }
 
-func TestSupportSessionStartServesGatewayAndBlocksLANHandoff(t *testing.T) {
+func TestSupportSessionStartLANFailsImmediatelyWithoutTicketAndCleansServer(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -2436,70 +2436,40 @@ func TestSupportSessionStartServesGatewayAndBlocksLANHandoff(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	gatewayURL := "http://" + addr
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := NewApp(&stdout, &stderr)
-	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	registry, err := tunnel.NewRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
-	app.supportSessionStartDeps = &supportSessionStartDeps{
-		Registry: registry,
-		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
-			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
-		}},
-		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return nil },
-		FinalProbe:     func(context.Context, tunnel.Candidate, string, string) error { return nil },
-	}
+	app.supportSessionStartDeps = &supportSessionStartDeps{Registry: registry}
 	workDir := filepath.Join(t.TempDir(), "support")
 	readyFile := filepath.Join(workDir, "ready", "support-session-ready.json")
 	statusFile := filepath.Join(workDir, "status", "support-session-status.json")
 	handoffTextFile := filepath.Join(workDir, "handoff", "target-handoff.txt")
-	connectedReportFile := filepath.Join(workDir, "status", "connected-report.txt")
-	rdevCommand := filepath.Join(t.TempDir(), "bin", "rdev")
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- app.Run(ctx, []string{
-			"support-session", "start",
-			"--addr", addr,
-			"--gateway-url", gatewayURL,
-			"--work-dir", workDir,
-			"--ready-file", readyFile,
-			"--status-file", statusFile,
-			"--handoff-text-file", handoffTextFile,
-			"--connected-report-file", connectedReportFile,
-			"--target", "windows",
-			"--locale", "zh-CN",
-			"--rdev-command", rdevCommand,
-		})
-	}()
-	waitForHTTP(t, gatewayURL+"/healthz")
-	resp, err := http.Get(gatewayURL + "/assets/rdev-windows-amd64.exe.sha256")
-	if err != nil {
-		t.Fatal(err)
+
+	started := time.Now()
+	err = app.Run(ctx, []string{
+		"support-session", "start",
+		"--addr", addr,
+		"--gateway-url", "http://" + addr,
+		"--work-dir", workDir,
+		"--ready-file", readyFile,
+		"--status-file", statusFile,
+		"--handoff-text-file", handoffTextFile,
+		"--target", "windows",
+		"--locale", "zh-CN",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no public gateway candidate") {
+		t.Fatalf("expected immediate LAN fail-closed error, got %v", err)
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("support-session start should serve Windows helper hash, got %s", resp.Status)
+	if time.Since(started) > 25*time.Second {
+		t.Fatalf("LAN fail-closed path returned too slowly: %v", time.Since(started))
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, statErr := os.Stat(statusFile); statErr == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for diagnostic status file %s", statusFile)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	cancel()
-	err = <-errCh
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected canceled foreground server, got %v", err)
-	}
+
 	var diagnostic struct {
 		SchemaVersion string `json:"schema_version"`
 		ReadyToSend   bool   `json:"ready_to_send"`
@@ -2519,248 +2489,25 @@ func TestSupportSessionStartServesGatewayAndBlocksLANHandoff(t *testing.T) {
 			t.Fatalf("LAN-only foreground start must not write %s", blockedPath)
 		}
 	}
-	if !diagnostic.ReadyToSend {
-		return
-	}
-
-	var payload struct {
-		SchemaVersion string `json:"schema_version"`
-		Gateway       struct {
-			Addr       string `json:"addr"`
-			GatewayURL string `json:"gateway_url"`
-			Lifecycle  string `json:"lifecycle"`
-		} `json:"gateway"`
-		AssetReport struct {
-			SchemaVersion string `json:"schema_version"`
-			AllReady      bool   `json:"all_ready"`
-		} `json:"asset_report"`
-		ConnectionReadiness struct {
-			Ready                     bool `json:"ready"`
-			TargetBootstrapSelfRepair bool `json:"target_bootstrap_self_repair"`
-			AgentConnectionRunbook    struct {
-				StandardEntryTool struct {
-					CLICommand []string `json:"cli_command"`
-				} `json:"standard_entry_tool"`
-			} `json:"agent_connection_runbook"`
-		} `json:"connection_readiness"`
-		ConnectivityStrategy struct {
-			SchemaVersion  string   `json:"schema_version"`
-			SelectionOrder []string `json:"selection_order"`
-		} `json:"connectivity_strategy"`
-		GatewayCandidatePreflight struct {
-			SchemaVersion  string `json:"schema_version"`
-			CandidateCount int    `json:"candidate_count"`
-			AgentRule      string `json:"agent_rule"`
-		} `json:"gateway_candidate_preflight"`
-		AgentConnectionRunbook struct {
-			SchemaVersion     string `json:"schema_version"`
-			Phase             string `json:"phase"`
-			StandardEntryTool struct {
-				CLICommand []string `json:"cli_command"`
-			} `json:"standard_entry_tool"`
-			Watch struct {
-				MCPTool string `json:"mcp_tool"`
-			} `json:"watch"`
-		} `json:"agent_connection_runbook"`
-		ReadyFile struct {
-			SchemaVersion string `json:"schema_version"`
-			Path          string `json:"path"`
-			Contains      string `json:"contains"`
-			AgentRule     string `json:"agent_rule"`
-		} `json:"ready_file"`
-		StatusFile struct {
-			SchemaVersion       string `json:"schema_version"`
-			Path                string `json:"path"`
-			Contains            string `json:"contains"`
-			StatusSchemaVersion string `json:"status_schema_version"`
-			AgentRule           string `json:"agent_rule"`
-		} `json:"status_file"`
-		HandoffTextFile struct {
-			SchemaVersion string `json:"schema_version"`
-			Path          string `json:"path"`
-			Contains      string `json:"contains"`
-			AgentRule     string `json:"agent_rule"`
-		} `json:"handoff_text_file"`
-		ConnectedReportFile struct {
-			SchemaVersion string `json:"schema_version"`
-			Path          string `json:"path"`
-			Contains      string `json:"contains"`
-			AgentRule     string `json:"agent_rule"`
-		} `json:"connected_report_file"`
-		ReadyToSendHuman bool   `json:"ready_to_send_to_human"`
-		ReadyToSend      bool   `json:"ready_to_send"`
-		ReadyToActivate  bool   `json:"ready_to_activate"`
-		ReadyToExecute   bool   `json:"ready_to_execute"`
-		TargetCommand    string `json:"target_command"`
-		JoinURL          string `json:"join_url"`
-		UserHandoff      struct {
-			SchemaVersion string `json:"schema_version"`
-			CopyPaste     string `json:"copy_paste"`
-		} `json:"user_handoff"`
-		WatchConnectionStatus []string `json:"watch_connection_status"`
-		Session               struct {
-			SchemaVersion         string   `json:"schema_version"`
-			TicketCode            string   `json:"ticket_code"`
-			TargetCommand         string   `json:"target_command"`
-			WatchConnectionStatus []string `json:"watch_connection_status"`
-			AutoActivate          bool     `json:"auto_activate"`
-		} `json:"session"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-		t.Fatalf("invalid start JSON: %v\n%s", err, stdout.String())
-	}
-	if payload.SchemaVersion != "rdev.support-session-started.v1" ||
-		payload.Gateway.Addr != addr ||
-		payload.Gateway.GatewayURL != gatewayURL ||
-		payload.Gateway.Lifecycle != "foreground-visible-process" {
-		t.Fatalf("unexpected started payload: %#v", payload)
-	}
-	if payload.AssetReport.SchemaVersion != "rdev.support-session-assets.v1" ||
-		!payload.AssetReport.AllReady ||
-		!payload.ConnectionReadiness.Ready ||
-		!payload.ConnectionReadiness.TargetBootstrapSelfRepair ||
-		payload.ConnectivityStrategy.SchemaVersion != "rdev.support-session-connectivity-strategy.v1" ||
-		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "existing-wireguard-vpn") {
-		t.Fatalf("expected support-session start to prepare helper assets, got %#v", payload)
-	}
-	if payload.GatewayCandidatePreflight.SchemaVersion != "rdev.support-session-gateway-candidate-preflight.v1" ||
-		payload.GatewayCandidatePreflight.CandidateCount == 0 ||
-		!strings.Contains(payload.GatewayCandidatePreflight.AgentRule, "candidate table") {
-		t.Fatalf("expected started payload gateway preflight, got %#v", payload.GatewayCandidatePreflight)
-	}
-	if payload.AgentConnectionRunbook.SchemaVersion != "rdev.support-session-agent-runbook.v1" ||
-		len(payload.AgentConnectionRunbook.StandardEntryTool.CLICommand) == 0 ||
-		payload.AgentConnectionRunbook.StandardEntryTool.CLICommand[0] != rdevCommand ||
-		len(payload.ConnectionReadiness.AgentConnectionRunbook.StandardEntryTool.CLICommand) == 0 ||
-		payload.ConnectionReadiness.AgentConnectionRunbook.StandardEntryTool.CLICommand[0] != rdevCommand ||
-		payload.AgentConnectionRunbook.Watch.MCPTool != "rdev.support_session.status" {
-		t.Fatalf("expected started payload Agent runbook, got %#v", payload.AgentConnectionRunbook)
-	}
-	if payload.ReadyFile.SchemaVersion != "rdev.support-session-ready-file.v1" ||
-		payload.ReadyFile.Path != readyFile ||
-		payload.ReadyFile.Contains != "rdev.support-session-started.v1" ||
-		!strings.Contains(payload.ReadyFile.AgentRule, "target_handoff_envelope.full_text") {
-		t.Fatalf("expected ready-file metadata, got %#v", payload.ReadyFile)
-	}
-	if payload.StatusFile.SchemaVersion != "rdev.support-session-status-file.v1" ||
-		payload.StatusFile.Path != statusFile ||
-		payload.StatusFile.Contains != "rdev.support-session-foreground-event.v1" ||
-		payload.StatusFile.StatusSchemaVersion != "rdev.support-session-status.v1" ||
-		!strings.Contains(payload.StatusFile.AgentRule, "connected_next_steps.user_report") {
-		t.Fatalf("expected status-file metadata, got %#v", payload.StatusFile)
-	}
-	if payload.HandoffTextFile.SchemaVersion != "rdev.support-session-handoff-text-file.v1" ||
-		payload.HandoffTextFile.Path != handoffTextFile ||
-		payload.HandoffTextFile.Contains != "target_handoff_envelope.full_text" ||
-		!strings.Contains(strings.ToLower(payload.HandoffTextFile.AgentRule), "do not send") {
-		t.Fatalf("expected handoff text-file metadata, got %#v", payload.HandoffTextFile)
-	}
-	if payload.ConnectedReportFile.SchemaVersion != "rdev.support-session-connected-report-file.v1" ||
-		payload.ConnectedReportFile.Path != connectedReportFile ||
-		payload.ConnectedReportFile.Contains != "connected_next_steps.user_report" ||
-		!strings.Contains(payload.ConnectedReportFile.AgentRule, "plain text") {
-		t.Fatalf("expected connected report-file metadata, got %#v", payload.ConnectedReportFile)
-	}
-	if payload.ReadyToSendHuman ||
-		payload.ReadyToSend ||
-		payload.ReadyToActivate ||
-		payload.ReadyToExecute ||
-		payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
-		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
-		payload.TargetCommand != payload.Session.TargetCommand ||
-		payload.JoinURL == "" {
-		t.Fatalf("expected top-level started handoff fields, got %#v", payload)
-	}
-	if payload.Session.SchemaVersion != "rdev.support-session-created.v1" ||
-		payload.Session.TicketCode == "" ||
-		!payload.Session.AutoActivate ||
-		!strings.Contains(payload.Session.TargetCommand, payload.Session.TicketCode) ||
-		strings.Contains(payload.Session.TargetCommand, "<ticket-code>") ||
-		strings.Contains(payload.Session.TargetCommand, "ExecutionPolicy Bypass") {
-		t.Fatalf("expected ready embedded session, got %#v", payload.Session)
-	}
-	watch := strings.Join(payload.Session.WatchConnectionStatus, "\x00")
-	if !strings.Contains(watch, payload.Session.TicketCode) || !strings.Contains(watch, "--wait") {
-		t.Fatalf("expected ready watcher, got %#v", payload.Session.WatchConnectionStatus)
-	}
-	topLevelWatch := strings.Join(payload.WatchConnectionStatus, "\x00")
-	if !strings.Contains(topLevelWatch, payload.Session.TicketCode) || !strings.Contains(topLevelWatch, "--wait") {
-		t.Fatalf("expected top-level ready watcher, got %#v", payload.WatchConnectionStatus)
-	}
-	readyInfo, err := os.Stat(readyFile)
-	if err != nil {
+	stateBytes, err := os.ReadFile(filepath.Join(workDir, ".rdev", "gateway", "state.json"))
+	if err == nil {
+		var snapshot gateway.Snapshot
+		if err := json.Unmarshal(stateBytes, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Tickets) != 0 {
+			t.Fatalf("LAN fail-closed path created tickets: %#v", snapshot.Tickets)
+		}
+	} else if !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	if readyInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("expected ready file permissions 0600, got %v", readyInfo.Mode().Perm())
-	}
-	statusInfo, err := os.Stat(statusFile)
+	listener, err = net.Listen("tcp", addr)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("LAN fail-closed path did not clean server: %v", err)
 	}
-	if statusInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("expected status file permissions 0600, got %v", statusInfo.Mode().Perm())
-	}
-	handoffBytes, err := os.ReadFile(handoffTextFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(handoffBytes), payload.Session.TicketCode) ||
-		!strings.Contains(string(handoffBytes), payload.TargetCommand) {
-		t.Fatalf("expected handoff text file to contain final target command, got %q", string(handoffBytes))
-	}
-	var readyPayload struct {
-		SchemaVersion string `json:"schema_version"`
-		ReadyFile     struct {
-			Path string `json:"path"`
-		} `json:"ready_file"`
-		Session struct {
-			TicketCode  string `json:"ticket_code"`
-			UserHandoff struct {
-				CopyPaste string `json:"copy_paste"`
-			} `json:"user_handoff"`
-		} `json:"session"`
-	}
-	readyBytes, err := os.ReadFile(readyFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(readyBytes, &readyPayload); err != nil {
-		t.Fatalf("invalid ready file JSON: %v\n%s", err, string(readyBytes))
-	}
-	if readyPayload.SchemaVersion != "rdev.support-session-started.v1" ||
-		readyPayload.ReadyFile.Path != readyFile ||
-		readyPayload.Session.TicketCode != payload.Session.TicketCode ||
-		!strings.Contains(readyPayload.Session.UserHandoff.CopyPaste, payload.Session.TicketCode) {
-		t.Fatalf("expected ready file to mirror started payload, got %#v", readyPayload)
-	}
-	var statusPayload struct {
-		SchemaVersion string `json:"schema_version"`
-		Event         string `json:"event"`
-		Status        struct {
-			SchemaVersion string `json:"schema_version"`
-			TicketCode    string `json:"ticket_code"`
-			Status        string `json:"status"`
-		} `json:"status"`
-		AgentRule string `json:"agent_rule"`
-	}
-	statusBytes, err := os.ReadFile(statusFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(statusBytes, &statusPayload); err != nil {
-		t.Fatalf("invalid status file JSON: %v\n%s", err, string(statusBytes))
-	}
-	if statusPayload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
-		statusPayload.Event != "waiting" ||
-		statusPayload.Status.SchemaVersion != "rdev.support-session-status.v1" ||
-		statusPayload.Status.TicketCode != payload.Session.TicketCode ||
-		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
-		t.Fatalf("expected status file to mirror foreground event, got %#v", statusPayload)
-	}
+	_ = listener.Close()
 }
-
-func TestSupportSessionStartOrdersGatewayBeforePublicTunnels(t *testing.T) {
+func TestSupportSessionStartFakePublicLifecycleOrdersGatewayBeforePublicTunnels(t *testing.T) {
 	for _, name := range []string{
 		"RDEV_HOSTED_GATEWAY_URL",
 		"RDEV_CLOUDFLARED_GATEWAY_URL",
@@ -2842,6 +2589,28 @@ func TestSupportSessionStartOrdersGatewayBeforePublicTunnels(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("support-session startup events = %v, want %v", got, want)
+	}
+}
+
+func TestBootstrapProbeAvailabilityDoesNotMutateInput(t *testing.T) {
+	original := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "failed", URL: "https://failed.example.test"}},
+		Attempts: []tunnel.Attempt{{
+			ProviderID: "failed",
+			Status:     tunnel.AttemptHealthy,
+			Probe:      tunnel.ProbeEvidence{HealthOK: true, InstanceMarker: "instance"},
+		}},
+	}
+	filtered := bootstrapProbeAvailability(context.Background(), original, "instance", func(context.Context, tunnel.Candidate, string) error {
+		return errors.New("rejected")
+	})
+	if len(filtered.Candidates) != 0 || filtered.Attempts[0].Status != tunnel.AttemptDegraded {
+		t.Fatalf("unexpected filtered set: %#v", filtered)
+	}
+	if len(original.Candidates) != 1 || original.Attempts[0].Status != tunnel.AttemptHealthy || original.Attempts[0].ErrorClass != "" || !original.Attempts[0].Probe.HealthOK {
+		t.Fatalf("bootstrap filtering mutated input: %#v", original)
 	}
 }
 

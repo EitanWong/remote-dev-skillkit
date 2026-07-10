@@ -130,7 +130,16 @@ func (s Server) Handler() http.Handler {
 	return mux
 }
 
-func (s Server) bootstrapProbeTemplate(w http.ResponseWriter, _ *http.Request) {
+func (s Server) bootstrapProbeTemplate(w http.ResponseWriter, r *http.Request) {
+	if r.URL.RawQuery != "" {
+		writeError(w, http.StatusBadRequest, "bootstrap probe query parameters are not allowed")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1))
+	if err != nil || len(body) != 0 {
+		writeError(w, http.StatusBadRequest, "bootstrap probe request body is not allowed")
+		return
+	}
 	w.Header().Set("X-Rdev-Gateway-Instance", s.gatewayInstance)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

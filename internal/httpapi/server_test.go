@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -97,7 +98,7 @@ func TestBootstrapProbeTemplateIsStaticAndDoesNotMutateGateway(t *testing.T) {
 	before := gw.Snapshot()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/support-session/bootstrap-probe.ps1?ignored=value", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/support-session/bootstrap-probe.ps1", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -128,13 +129,30 @@ func TestBootstrapProbeTemplateIsStaticAndDoesNotMutateGateway(t *testing.T) {
 		t.Fatalf("probe template size = %d", rec.Body.Len())
 	}
 
+	for _, rawURL := range []string{
+		"/v1/support-session/bootstrap-probe.ps1?ticket_code=SENSITIVE",
+		"/v1/support-session/bootstrap-probe.ps1?code=SENSITIVE",
+	} {
+		invalid := httptest.NewRecorder()
+		handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, rawURL, nil))
+		if invalid.Code != http.StatusBadRequest {
+			t.Fatalf("expected query rejection for %s, got %d: %s", rawURL, invalid.Code, invalid.Body.String())
+		}
+	}
+	withBody := httptest.NewRecorder()
+	handler.ServeHTTP(withBody, httptest.NewRequest(http.MethodGet, "/v1/support-session/bootstrap-probe.ps1", strings.NewReader("SENSITIVE")))
+	if withBody.Code != http.StatusBadRequest {
+		t.Fatalf("expected GET body rejection, got %d: %s", withBody.Code, withBody.Body.String())
+	}
+
 	post := httptest.NewRecorder()
-	handler.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/v1/support-session/bootstrap-probe.ps1?ticket_code=ignored", strings.NewReader(`{"ticket_code":"ignored"}`)))
+	handler.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/v1/support-session/bootstrap-probe.ps1", strings.NewReader(`{"ticket_code":"ignored"}`)))
 	if post.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected POST 405, got %d: %s", post.Code, post.Body.String())
 	}
 	after := gw.Snapshot()
-	if len(after.Tickets) != len(before.Tickets) || len(after.Hosts) != len(before.Hosts) || len(after.Audit) != len(before.Audit) {
+	after.GeneratedAt = before.GeneratedAt
+	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("probe requests mutated gateway: before=%#v after=%#v", before, after)
 	}
 }
