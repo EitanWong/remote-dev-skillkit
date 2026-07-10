@@ -22,6 +22,7 @@ const (
 	AttemptDegraded AttemptStatus = "degraded"
 	AttemptExited   AttemptStatus = "exited"
 	AttemptStopped  AttemptStatus = "stopped"
+	AttemptSkipped  AttemptStatus = "skipped"
 )
 
 type ProbeEvidence struct {
@@ -63,8 +64,11 @@ type Manager struct {
 type runtimeHandle struct {
 	handle       Handle
 	attemptIndex int
+	wait         <-chan error
 	waitDone     chan struct{}
 	waitErr      error
+	waitComplete atomic.Bool
+	waitStart    sync.Once
 	stopping     atomic.Bool
 	stopOnce     sync.Once
 	stopErr      error
@@ -128,6 +132,7 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 		}()
 	}
 	workers.Wait()
+	runtime.markUnattemptedSkipped()
 	runtime.finalizeCandidates()
 
 	go func() {
@@ -170,6 +175,7 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 			attempt.Status = AttemptDegraded
 			attempt.ErrorClass = "provider-id-mismatch"
 		})
+		item.startWaiter()
 		item.stopAndReap()
 		return true
 	}
@@ -181,13 +187,10 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 	runtime.snapshot.Attempts[index].CandidateID = candidateID
 	runtime.handles = append(runtime.handles, item)
 	runtime.mu.Unlock()
-	go runtime.observeExit(item)
 
-	select {
-	case <-item.waitDone:
+	if item.captureWaitNonBlocking() {
 		runtime.markExited(index, item.waitErr)
 		return true
-	default:
 	}
 
 	probe := m.Probe
@@ -199,20 +202,17 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 	probeCtx, cancelProbe := withOptionalTimeout(ctx, m.ProbeTimeout)
 	evidence, probeErr := probe(probeCtx, candidate)
 	cancelProbe()
-	runtime.updateAttempt(index, func(attempt *Attempt) {
-		attempt.Probe = evidence
-		if probeErr != nil {
-			attempt.Status = AttemptDegraded
-			attempt.ErrorClass = classifyError(probeErr, "probe-failed")
-			return
-		}
-		attempt.Status = AttemptHealthy
-		attempt.ErrorClass = ""
-	})
+	item.captureWaitNonBlocking()
+	if runtime.completeProbe(index, item, evidence, probeErr) {
+		return true
+	}
 	if probeErr != nil {
+		item.startWaiter()
 		item.stopAndReap()
 		return true
 	}
+	item.startWaiter()
+	go runtime.observeExit(item)
 	return false
 }
 
@@ -239,18 +239,29 @@ func (r *Runtime) cleanup() {
 	r.mu.RLock()
 	handles := append([]*runtimeHandle(nil), r.handles...)
 	r.mu.RUnlock()
-	errs := make([]error, 0, len(handles))
+	errResults := make(chan error, len(handles))
+	var cleanupWorkers sync.WaitGroup
 	for _, item := range handles {
-		item.stopAndReap()
-		if item.stopErr != nil {
-			errs = append(errs, item.stopErr)
+		cleanupWorkers.Add(1)
+		go func(item *runtimeHandle) {
+			defer cleanupWorkers.Done()
+			item.stopAndReap()
+			errResults <- item.stopErr
+			r.updateAttempt(item.attemptIndex, func(attempt *Attempt) {
+				if attempt.Status != AttemptExited {
+					attempt.Status = AttemptStopped
+					attempt.ErrorClass = ""
+				}
+			})
+		}(item)
+	}
+	cleanupWorkers.Wait()
+	close(errResults)
+	errs := make([]error, 0, len(handles))
+	for err := range errResults {
+		if err != nil {
+			errs = append(errs, err)
 		}
-		r.updateAttempt(item.attemptIndex, func(attempt *Attempt) {
-			if attempt.Status != AttemptExited {
-				attempt.Status = AttemptStopped
-				attempt.ErrorClass = ""
-			}
-		})
 	}
 	close(r.done)
 	r.cleanupErr = errors.Join(errs...)
@@ -280,6 +291,37 @@ func (r *Runtime) updateAttempt(index int, update func(*Attempt)) {
 	update(&r.snapshot.Attempts[index])
 }
 
+func (r *Runtime) completeProbe(index int, item *runtimeHandle, evidence ProbeEvidence, probeErr error) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	attempt := &r.snapshot.Attempts[index]
+	attempt.Probe = evidence
+	if item.waitComplete.Load() {
+		attempt.Status = AttemptExited
+		attempt.ErrorClass = classifyError(item.waitErr, "process-exited")
+		return true
+	}
+	if probeErr != nil {
+		attempt.Status = AttemptDegraded
+		attempt.ErrorClass = classifyError(probeErr, "probe-failed")
+		return false
+	}
+	attempt.Status = AttemptHealthy
+	attempt.ErrorClass = ""
+	return false
+}
+
+func (r *Runtime) markUnattemptedSkipped() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.snapshot.Attempts {
+		if r.snapshot.Attempts[i].Status == AttemptStarting {
+			r.snapshot.Attempts[i].Status = AttemptSkipped
+			r.snapshot.Attempts[i].ErrorClass = "max-active"
+		}
+	}
+}
+
 func (r *Runtime) finalizeCandidates() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -298,19 +340,34 @@ func (r *Runtime) addHandle(item *runtimeHandle) {
 }
 
 func newRuntimeHandle(handle Handle, attemptIndex int) *runtimeHandle {
-	item := &runtimeHandle{handle: handle, attemptIndex: attemptIndex, waitDone: make(chan struct{})}
-	wait := handle.Wait()
-	select {
-	case item.waitErr = <-wait:
-		close(item.waitDone)
-		return item
-	default:
+	return &runtimeHandle{handle: handle, attemptIndex: attemptIndex, wait: handle.Wait(), waitDone: make(chan struct{})}
+}
+
+func (h *runtimeHandle) captureWaitNonBlocking() bool {
+	if h.waitComplete.Load() {
+		return true
 	}
-	go func() {
-		item.waitErr = <-wait
-		close(item.waitDone)
-	}()
-	return item
+	select {
+	case h.waitErr = <-h.wait:
+		h.waitComplete.Store(true)
+		close(h.waitDone)
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *runtimeHandle) startWaiter() {
+	if h.waitComplete.Load() {
+		return
+	}
+	h.waitStart.Do(func() {
+		go func() {
+			h.waitErr = <-h.wait
+			h.waitComplete.Store(true)
+			close(h.waitDone)
+		}()
+	})
 }
 
 func (h *runtimeHandle) stopAndReap() {
@@ -359,12 +416,66 @@ func normalizeCandidateURL(rawURL string) string {
 	}
 	parsed.Fragment = ""
 	parsed.RawQuery = ""
-	parsed.Path = path.Clean("/" + parsed.Path)
-	if parsed.Path == "/" {
+	escapedPath := canonicalEscapedPath(parsed.EscapedPath())
+	parsed.Path, _ = url.PathUnescape(escapedPath)
+	parsed.RawPath = escapedPath
+	if escapedPath == "" {
 		parsed.Path = ""
+		parsed.RawPath = ""
 	}
-	parsed.RawPath = ""
 	return parsed.String()
+}
+
+func canonicalEscapedPath(escaped string) string {
+	normalized := normalizePercentEscapes(escaped)
+	cleaned := path.Clean("/" + normalized)
+	if cleaned == "/" {
+		return ""
+	}
+	return cleaned
+}
+
+func normalizePercentEscapes(value string) string {
+	var normalized strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != '%' || i+2 >= len(value) {
+			normalized.WriteByte(value[i])
+			continue
+		}
+		high, highOK := hexNibble(value[i+1])
+		low, lowOK := hexNibble(value[i+2])
+		if !highOK || !lowOK {
+			normalized.WriteByte(value[i])
+			continue
+		}
+		decoded := high<<4 | low
+		if isURLUnreserved(decoded) {
+			normalized.WriteByte(decoded)
+		} else {
+			normalized.WriteByte('%')
+			normalized.WriteByte("0123456789ABCDEF"[high])
+			normalized.WriteByte("0123456789ABCDEF"[low])
+		}
+		i += 2
+	}
+	return normalized.String()
+}
+
+func hexNibble(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func isURLUnreserved(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9' || strings.ContainsRune("-._~", rune(value))
 }
 
 func classifyError(err error, fallback string) string {

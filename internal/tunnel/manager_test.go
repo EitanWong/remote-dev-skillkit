@@ -196,6 +196,47 @@ func TestManagerObservesSpontaneousHealthyExit(t *testing.T) {
 	}
 }
 
+func TestManagerExitDuringProbeCannotBecomeHealthyAndStartsFallback(t *testing.T) {
+	probeStarted := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	firstHandle := &managerFakeHandle{candidate: Candidate{ProviderID: "first", URL: "https://first.example.test"}, wait: make(chan error, 1)}
+	secondStarted := make(chan struct{})
+	secondHandle := &managerFakeHandle{candidate: Candidate{ProviderID: "second", URL: "https://second.example.test"}, wait: make(chan error, 1)}
+	result := make(chan *Runtime, 1)
+	errResult := make(chan error, 1)
+	go func() {
+		runtime, err := (Manager{MaxActive: 1, Probe: func(_ context.Context, candidate Candidate) (ProbeEvidence, error) {
+			if candidate.ProviderID == "first" {
+				close(probeStarted)
+				<-releaseProbe
+			}
+			return ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}}).Start(context.Background(), []Selection{
+			managerSelection(&managerFakeProvider{id: "first", handle: firstHandle}, RegionGlobal),
+			managerSelection(&managerFakeProvider{id: "second", handle: secondHandle, started: secondStarted}, RegionGlobal),
+		}, StartRequest{})
+		result <- runtime
+		errResult <- err
+	}()
+	<-probeStarted
+	firstHandle.wait <- errors.New("exited during probe")
+	close(releaseProbe)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("fallback provider did not start after mid-probe exit")
+	}
+	runtime := <-result
+	if err := <-errResult; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Stop(context.Background()) })
+	snapshot := runtime.Snapshot()
+	if snapshot.Attempts[0].Status != AttemptExited || snapshot.Attempts[1].Status != AttemptHealthy {
+		t.Fatalf("unexpected attempts after mid-probe exit: %#v", snapshot.Attempts)
+	}
+}
+
 func TestManagerMarksExitBeforeReadiness(t *testing.T) {
 	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "early", URL: "https://early.example.test"}, wait: make(chan error, 1)}
 	handle.wait <- errors.New("early exit")
@@ -272,6 +313,51 @@ func TestRuntimeStopCleanupOutlivesFirstCallerContext(t *testing.T) {
 	}
 }
 
+func TestRuntimeStopSignalsAllHandlesConcurrently(t *testing.T) {
+	releaseFirst := make(chan struct{})
+	first := &managerFakeHandle{candidate: Candidate{ProviderID: "first", URL: "https://first.example.test"}, wait: make(chan error, 1), stopBlock: releaseFirst}
+	second := &managerFakeHandle{candidate: Candidate{ProviderID: "second", URL: "https://second.example.test"}, wait: make(chan error, 1)}
+	runtime, err := (Manager{MaxActive: 2, Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+		return ProbeEvidence{HealthOK: true}, nil
+	}}).Start(context.Background(), []Selection{
+		managerSelection(&managerFakeProvider{id: "first", handle: first}, RegionGlobal),
+		managerSelection(&managerFakeProvider{id: "second", handle: second}, RegionGlobal),
+	}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := runtime.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop error = %v, want deadline exceeded", err)
+	}
+	eventually(t, time.Second, func() bool { return second.stops.Load() == 1 })
+	close(releaseFirst)
+	if err := runtime.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagerMarksSelectionsBeyondLiveCapacitySkipped(t *testing.T) {
+	selections := make([]Selection, 3)
+	for i := range selections {
+		id := fmt.Sprintf("healthy-%d", i)
+		handle := &managerFakeHandle{candidate: Candidate{ProviderID: id, URL: "https://" + id + ".example.test"}, wait: make(chan error, 1)}
+		selections[i] = managerSelection(&managerFakeProvider{id: id, handle: handle}, RegionGlobal)
+	}
+	runtime, err := (Manager{MaxActive: 2, Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+		return ProbeEvidence{HealthOK: true}, nil
+	}}).Start(context.Background(), selections, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Stop(context.Background()) })
+	snapshot := runtime.Snapshot()
+	if snapshot.Attempts[2].Status != AttemptSkipped {
+		t.Fatalf("third attempt status = %q, want skipped; attempts=%#v", snapshot.Attempts[2].Status, snapshot.Attempts)
+	}
+}
+
 func TestManagerRegionDefaultsGlobalDespiteSelectionEvidence(t *testing.T) {
 	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "one", URL: "https://one.example.test"}, wait: make(chan error, 1)}
 	selection := managerSelection(&managerFakeProvider{id: "one", handle: handle}, RegionCNMainland)
@@ -293,6 +379,14 @@ func TestManagerCandidateIDsNormalizeEquivalentURLs(t *testing.T) {
 	}
 	if len(first) != 16 {
 		t.Fatalf("candidate ID length = %d, want 16 hex characters", len(first))
+	}
+}
+
+func TestManagerCandidateIDsPreserveReservedEscapes(t *testing.T) {
+	escapedSlash := candidateID("provider", "https://example.com/a%2Fb")
+	pathSlash := candidateID("provider", "https://example.com/a/b")
+	if escapedSlash == pathSlash {
+		t.Fatalf("reserved escaped slash collapsed into path separator: %q", escapedSlash)
 	}
 }
 
