@@ -98,3 +98,30 @@ func TestCreateFinalProbedSupportTicketFailsAfterEverySurvivorIsRejected(t *test
 		}
 	}
 }
+
+func TestIntersectAvailabilityPreservesTicketBoundProbeEvidence(t *testing.T) {
+	current := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "provider", URL: "https://provider.example.test"}},
+		Attempts: []tunnel.Attempt{{
+			ProviderID: "provider", Status: tunnel.AttemptHealthy,
+			Probe: tunnel.ProbeEvidence{StaticBootstrapOK: true, TicketBoundBootstrapOK: true},
+		}},
+	}
+	live := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    append([]tunnel.Candidate(nil), current.Candidates...),
+		Attempts: []tunnel.Attempt{{
+			ProviderID: "provider", Status: tunnel.AttemptHealthy,
+			Probe: tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true},
+		}},
+	}
+
+	merged := intersectAvailabilityWithRuntime(current, live)
+	if len(merged.Attempts) != 1 || !merged.Attempts[0].Probe.HealthOK ||
+		!merged.Attempts[0].Probe.StaticBootstrapOK || !merged.Attempts[0].Probe.TicketBoundBootstrapOK {
+		t.Fatalf("runtime intersection lost probe evidence: %#v", merged.Attempts)
+	}
+}

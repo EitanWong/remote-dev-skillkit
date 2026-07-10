@@ -68,6 +68,8 @@ type runtimeHandle struct {
 	attemptIndex int
 	wait         <-chan error
 	waitDone     chan struct{}
+	waitStarted  chan struct{}
+	waitChecks   chan chan struct{}
 	waitErr      error
 	waitComplete atomic.Bool
 	waitStart    sync.Once
@@ -86,6 +88,7 @@ type Runtime struct {
 	cleanupOnce  sync.Once
 	cleanupDone  chan struct{}
 	cleanupErr   error
+	updates      chan struct{}
 }
 
 func (m Manager) Start(ctx context.Context, selections []Selection, request StartRequest) (*Runtime, error) {
@@ -104,6 +107,7 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 		},
 		done:         make(chan struct{}),
 		cleanupDone:  make(chan struct{}),
+		updates:      make(chan struct{}, 1),
 		candidates:   make([]Candidate, len(selections)),
 		hasCandidate: make([]bool, len(selections)),
 	}
@@ -172,17 +176,18 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 	authoritativeID := selection.Provider.ID()
 	if candidate.ProviderID != authoritativeID {
 		item := newRuntimeHandle(handle, index)
+		item.startWaiter()
 		runtime.addHandle(item)
 		runtime.updateAttempt(index, func(attempt *Attempt) {
 			attempt.Status = AttemptDegraded
 			attempt.ErrorClass = "provider-id-mismatch"
 		})
-		item.startWaiter()
 		item.stopAndReap()
 		return true
 	}
 	candidateID := candidateID(authoritativeID, candidate.URL)
 	item := newRuntimeHandle(handle, index)
+	item.startWaiter()
 	runtime.mu.Lock()
 	runtime.candidates[index] = candidate
 	runtime.hasCandidate[index] = true
@@ -190,7 +195,7 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 	runtime.handles = append(runtime.handles, item)
 	runtime.mu.Unlock()
 
-	if item.captureWaitNonBlocking() {
+	if item.syncWaitCompleted() {
 		runtime.markExited(index, item.waitErr)
 		return true
 	}
@@ -204,16 +209,13 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 	probeCtx, cancelProbe := withOptionalTimeout(ctx, m.ProbeTimeout)
 	evidence, probeErr := probe(probeCtx, candidate)
 	cancelProbe()
-	item.captureWaitNonBlocking()
 	if runtime.completeProbe(index, item, evidence, probeErr) {
 		return true
 	}
 	if probeErr != nil {
-		item.startWaiter()
 		item.stopAndReap()
 		return true
 	}
-	item.startWaiter()
 	go runtime.observeExit(item)
 	return false
 }
@@ -223,6 +225,8 @@ func (r *Runtime) Snapshot() AvailabilitySet {
 	defer r.mu.RUnlock()
 	return cloneAvailabilitySet(r.snapshot)
 }
+
+func (r *Runtime) Changes() <-chan struct{} { return r.updates }
 
 func (r *Runtime) Stop(ctx context.Context) error {
 	if ctx == nil {
@@ -249,7 +253,7 @@ func (r *Runtime) cleanup() {
 			defer cleanupWorkers.Done()
 			item.stopAndReap()
 			errResults <- item.stopErr
-			r.updateAttempt(item.attemptIndex, func(attempt *Attempt) {
+			r.updateAttemptAndCandidate(item.attemptIndex, false, func(attempt *Attempt) {
 				if attempt.Status != AttemptExited {
 					attempt.Status = AttemptStopped
 					attempt.ErrorClass = ""
@@ -278,7 +282,7 @@ func (r *Runtime) observeExit(item *runtimeHandle) {
 }
 
 func (r *Runtime) markExited(index int, err error) {
-	r.updateAttempt(index, func(attempt *Attempt) {
+	r.updateAttemptAndCandidate(index, false, func(attempt *Attempt) {
 		if attempt.Status == AttemptStopped {
 			return
 		}
@@ -291,6 +295,17 @@ func (r *Runtime) updateAttempt(index int, update func(*Attempt)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	update(&r.snapshot.Attempts[index])
+	r.refreshCandidatesLocked()
+	r.notifyLocked()
+}
+
+func (r *Runtime) updateAttemptAndCandidate(index int, live bool, update func(*Attempt)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	update(&r.snapshot.Attempts[index])
+	r.hasCandidate[index] = live
+	r.refreshCandidatesLocked()
+	r.notifyLocked()
 }
 
 func (r *Runtime) completeProbe(index int, item *runtimeHandle, evidence ProbeEvidence, probeErr error) bool {
@@ -298,18 +313,27 @@ func (r *Runtime) completeProbe(index int, item *runtimeHandle, evidence ProbeEv
 	defer r.mu.Unlock()
 	attempt := &r.snapshot.Attempts[index]
 	attempt.Probe = evidence
-	if item.waitComplete.Load() {
+	if item.syncWaitCompleted() {
 		attempt.Status = AttemptExited
 		attempt.ErrorClass = classifyError(item.waitErr, "process-exited")
+		r.hasCandidate[index] = false
+		r.refreshCandidatesLocked()
+		r.notifyLocked()
 		return true
 	}
 	if probeErr != nil {
 		attempt.Status = AttemptDegraded
 		attempt.ErrorClass = classifyError(probeErr, "probe-failed")
+		r.hasCandidate[index] = false
+		r.refreshCandidatesLocked()
+		r.notifyLocked()
 		return false
 	}
 	attempt.Status = AttemptHealthy
 	attempt.ErrorClass = ""
+	r.hasCandidate[index] = true
+	r.refreshCandidatesLocked()
+	r.notifyLocked()
 	return false
 }
 
@@ -327,11 +351,23 @@ func (r *Runtime) markUnattemptedSkipped() {
 func (r *Runtime) finalizeCandidates() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.refreshCandidatesLocked()
+	r.notifyLocked()
+}
+
+func (r *Runtime) refreshCandidatesLocked() {
 	r.snapshot.Candidates = make([]Candidate, 0, len(r.candidates))
 	for i, candidate := range r.candidates {
-		if r.hasCandidate[i] {
+		if r.hasCandidate[i] && r.snapshot.Attempts[i].Status == AttemptHealthy {
 			r.snapshot.Candidates = append(r.snapshot.Candidates, candidate)
 		}
+	}
+}
+
+func (r *Runtime) notifyLocked() {
+	select {
+	case r.updates <- struct{}{}:
+	default:
 	}
 }
 
@@ -342,21 +378,34 @@ func (r *Runtime) addHandle(item *runtimeHandle) {
 }
 
 func newRuntimeHandle(handle Handle, attemptIndex int) *runtimeHandle {
-	return &runtimeHandle{handle: handle, attemptIndex: attemptIndex, wait: handle.Wait(), waitDone: make(chan struct{})}
+	return &runtimeHandle{
+		handle: handle, attemptIndex: attemptIndex, wait: handle.Wait(),
+		waitDone: make(chan struct{}), waitStarted: make(chan struct{}), waitChecks: make(chan chan struct{}),
+	}
 }
 
-func (h *runtimeHandle) captureWaitNonBlocking() bool {
-	if h.waitComplete.Load() {
-		return true
-	}
+func (h *runtimeHandle) waitCompleted() bool {
 	select {
-	case h.waitErr = <-h.wait:
-		h.waitComplete.Store(true)
-		close(h.waitDone)
+	case <-h.waitDone:
 		return true
 	default:
 		return false
 	}
+}
+
+// syncWaitCompleted asks the sole Wait receiver to check the provider channel
+// before acknowledging, avoiding a second receiver and the probe-end race.
+func (h *runtimeHandle) syncWaitCompleted() bool {
+	if h.waitCompleted() {
+		return true
+	}
+	checked := make(chan struct{})
+	select {
+	case h.waitChecks <- checked:
+		<-checked
+	case <-h.waitDone:
+	}
+	return h.waitCompleted()
 }
 
 func (h *runtimeHandle) startWaiter() {
@@ -365,15 +414,34 @@ func (h *runtimeHandle) startWaiter() {
 	}
 	h.waitStart.Do(func() {
 		go func() {
-			h.waitErr = <-h.wait
-			h.waitComplete.Store(true)
-			close(h.waitDone)
+			close(h.waitStarted)
+			for {
+				select {
+				case h.waitErr = <-h.wait:
+					h.waitComplete.Store(true)
+					close(h.waitDone)
+					return
+				case checked := <-h.waitChecks:
+					select {
+					case h.waitErr = <-h.wait:
+						h.waitComplete.Store(true)
+						close(h.waitDone)
+					default:
+					}
+					close(checked)
+					if h.waitComplete.Load() {
+						return
+					}
+				}
+			}
 		}()
+		<-h.waitStarted
 	})
 }
 
 func (h *runtimeHandle) stopAndReap() {
 	h.stopping.Store(true)
+	h.startWaiter()
 	h.stopOnce.Do(func() {
 		h.stopErr = h.handle.Stop(context.Background())
 	})

@@ -7,6 +7,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 func TestRecoverSupportSessionPublicationRestoresEveryUncommittedPhase(t *testing.T) {
@@ -211,5 +212,55 @@ func TestRecoverCommittedSupportSessionPublicationRestoresOldFilesForRevokedTick
 	handoff, _ := os.ReadFile(handoffFile)
 	if string(ready) != "old-ready\n" || string(handoff) != "old-handoff\n" {
 		t.Fatalf("revoked committed recovery retained new artifacts: ready=%q handoff=%q", ready, handoff)
+	}
+}
+
+func TestRecoverMonitoringPublicationRevokesTicketAndCleansSensitiveArtifacts(t *testing.T) {
+	root := t.TempDir()
+	readyFile := filepath.Join(root, "ready.json")
+	handoffFile := filepath.Join(root, "handoff.txt")
+	statusFile := filepath.Join(root, "status.json")
+	journalPath := filepath.Join(root, "journal.json")
+	readyBackup := filepath.Join(root, ".ready.json.backup-test")
+	handoffBackup := filepath.Join(root, ".handoff.txt.backup-test")
+	readyTemp := filepath.Join(root, ".ready.json.stage-test")
+	handoffTemp := filepath.Join(root, ".handoff.txt.stage-test")
+	for path, content := range map[string]string{
+		readyFile: "new-ready\n", handoffFile: "new-handoff\n",
+		readyBackup: "old-ready-secret\n", handoffBackup: "old-handoff-secret\n",
+		readyTemp: "staged-ready-secret\n", handoffTemp: "staged-handoff-secret\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "monitoring recovery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &recordingStateStore{}
+	journal := supportSessionPublicationJournal{
+		SchemaVersion: supportSessionPublicationJournalSchema, TicketID: ticket.ID, Phase: "monitoring", StatusPath: statusFile,
+		Availability: tunnel.AvailabilitySet{SchemaVersion: tunnel.AvailabilitySchemaVersion, Region: tunnel.RegionGlobal},
+		Artifacts: []supportSessionPublicationJournalArtifact{
+			{Path: readyFile, TempPath: readyTemp, BackupPath: readyBackup, HadOriginal: true},
+			{Path: handoffFile, TempPath: handoffTemp, BackupPath: handoffBackup, HadOriginal: true},
+		},
+	}
+	if err := writeSupportSessionPublicationJournal(journalPath, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := recoverSupportSessionPublication(gw, store, journalPath, []string{readyFile, handoffFile}, statusFile); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := gw.TicketForCode(ticket.Code)
+	if current.Status != model.TicketStatusRevoked {
+		t.Fatalf("monitoring recovery left ticket active: %#v", current)
+	}
+	for _, path := range []string{readyBackup, handoffBackup, readyTemp, handoffTemp, journalPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("sensitive recovery artifact remains at %s: %v", path, err)
+		}
 	}
 }

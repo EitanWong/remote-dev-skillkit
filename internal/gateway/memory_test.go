@@ -560,6 +560,69 @@ func TestMemoryGatewayProbingTicketOnlyAllowsPowerShellBootstrapUntilPublished(t
 	}
 }
 
+func TestMemoryGatewayRollbackTicketIfNoConnectedHostPreservesActiveHost(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "availability race", map[string]string{"auto_activate": "attended-temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "connected", OS: "windows", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, _, rolledBack, err := gw.RollbackTicketIfNoConnectedHost(ticket.ID, "route lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rolledBack || current.Status != model.TicketStatusActive {
+		t.Fatalf("connected ticket was rolled back: ticket=%#v rolledBack=%v", current, rolledBack)
+	}
+	currentHost, err := gw.Host(host.ID)
+	if err != nil || currentHost.Status != model.HostStatusActive {
+		t.Fatalf("connected host changed: host=%#v err=%v", currentHost, err)
+	}
+}
+
+func TestMemoryGatewayRollbackTicketIfNoConnectedHostRevokesPendingHost(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "pending route loss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "pending", OS: "windows", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, affected, rolledBack, err := gw.RollbackTicketIfNoConnectedHost(ticket.ID, "route lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rolledBack || current.Status != model.TicketStatusRevoked || len(affected) != 1 || affected[0].ID != host.ID {
+		t.Fatalf("pending host blocked rollback: ticket=%#v affected=%#v rolledBack=%v", current, affected, rolledBack)
+	}
+}
+
+func TestMemoryGatewayRollbackTicketIfNoConnectedHostRevokesStaleActiveHost(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "stale route loss", map[string]string{"auto_activate": "attended-temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "stale", OS: "windows", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(hostHeartbeatStaleAfter + time.Second)
+	current, affected, rolledBack, err := gw.RollbackTicketIfNoConnectedHost(ticket.ID, "route lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rolledBack || current.Status != model.TicketStatusRevoked || len(affected) != 1 || affected[0].ID != host.ID {
+		t.Fatalf("stale active host blocked rollback: ticket=%#v affected=%#v rolledBack=%v", current, affected, rolledBack)
+	}
+}
+
 func TestMemoryGatewayProjectsStaleHosts(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

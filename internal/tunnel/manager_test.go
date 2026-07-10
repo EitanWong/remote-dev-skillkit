@@ -190,9 +190,67 @@ func TestManagerObservesSpontaneousHealthyExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	handle.wait <- errors.New("process exited unexpectedly")
-	eventually(t, time.Second, func() bool { return runtime.Snapshot().Attempts[0].Status == AttemptExited })
+	eventually(t, time.Second, func() bool {
+		snapshot := runtime.Snapshot()
+		return snapshot.Attempts[0].Status == AttemptExited && len(snapshot.Candidates) == 0
+	})
 	if err := runtime.Stop(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRuntimeExitRacingStopNeverRetainsCandidate(t *testing.T) {
+	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "racing", URL: "https://racing.example.test"}, wait: make(chan error, 1)}
+	runtime, err := (Manager{Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+		return ProbeEvidence{DNSOK: true, TLSOK: true, HealthOK: true}, nil
+	}}).Start(context.Background(), []Selection{managerSelection(&managerFakeProvider{id: "racing", handle: handle}, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	done := make(chan struct{}, 2)
+	go func() { <-start; handle.wait <- errors.New("racing exit"); done <- struct{}{} }()
+	go func() { <-start; _ = runtime.Stop(context.Background()); done <- struct{}{} }()
+	close(start)
+	<-done
+	<-done
+	snapshot := runtime.Snapshot()
+	if len(snapshot.Candidates) != 0 || (snapshot.Attempts[0].Status != AttemptExited && snapshot.Attempts[0].Status != AttemptStopped) {
+		t.Fatalf("exit/stop race retained candidate: %#v", snapshot)
+	}
+	if handle.stops.Load() != 1 {
+		t.Fatalf("Stop called %d times, want once", handle.stops.Load())
+	}
+}
+
+func TestRuntimeStopReturnsWhileProviderProbeIsBlocked(t *testing.T) {
+	probeStarted := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "blocked", URL: "https://blocked.example.test"}, wait: make(chan error, 1)}
+	runtime := &Runtime{
+		snapshot: AvailabilitySet{SchemaVersion: AvailabilitySchemaVersion, Region: RegionGlobal, Attempts: []Attempt{{ProviderID: "blocked", Status: AttemptStarting}}},
+		done:     make(chan struct{}), cleanupDone: make(chan struct{}), updates: make(chan struct{}, 1),
+		candidates: make([]Candidate, 1), hasCandidate: make([]bool, 1),
+	}
+	startDone := make(chan struct{})
+	go func() {
+		_ = (Manager{Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+			close(probeStarted)
+			<-releaseProbe
+			return ProbeEvidence{HealthOK: true}, nil
+		}}).startOne(context.Background(), runtime, 0, managerSelection(&managerFakeProvider{id: "blocked", handle: handle}, RegionGlobal), StartRequest{})
+		close(startDone)
+	}()
+	<-probeStarted
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := runtime.Stop(stopCtx); err != nil {
+		t.Fatalf("Stop blocked behind provider probe: %v", err)
+	}
+	close(releaseProbe)
+	<-startDone
+	if snapshot := runtime.Snapshot(); len(snapshot.Candidates) != 0 {
+		t.Fatalf("blocked probe stop retained candidate: %#v", snapshot)
 	}
 }
 

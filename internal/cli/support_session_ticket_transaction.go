@@ -88,3 +88,58 @@ func rollbackSupportTicket(gw *gateway.MemoryGateway, store gateway.StateStore, 
 	}
 	return nil
 }
+
+func intersectAvailabilityWithRuntime(current, live tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+	liveCandidates := make(map[string]bool, len(live.Candidates))
+	for _, candidate := range live.Candidates {
+		liveCandidates[candidate.ProviderID+"\x00"+candidate.URL] = true
+	}
+	result := current
+	result.Candidates = make([]tunnel.Candidate, 0, len(current.Candidates))
+	for _, candidate := range current.Candidates {
+		if liveCandidates[candidate.ProviderID+"\x00"+candidate.URL] {
+			result.Candidates = append(result.Candidates, candidate)
+		}
+	}
+	result.Attempts = append([]tunnel.Attempt(nil), live.Attempts...)
+	currentAttempts := make(map[string]tunnel.Attempt, len(current.Attempts))
+	for _, attempt := range current.Attempts {
+		currentAttempts[attempt.ProviderID] = attempt
+	}
+	for index := range result.Attempts {
+		if previous, ok := currentAttempts[result.Attempts[index].ProviderID]; ok {
+			result.Attempts[index].Probe = mergeProbeEvidence(result.Attempts[index].Probe, previous.Probe)
+		}
+	}
+	return result
+}
+
+func mergeProbeEvidence(live, previous tunnel.ProbeEvidence) tunnel.ProbeEvidence {
+	live.DNSOK = live.DNSOK || previous.DNSOK
+	live.TCPConnectOK = live.TCPConnectOK || previous.TCPConnectOK
+	live.TLSOK = live.TLSOK || previous.TLSOK
+	live.HealthOK = live.HealthOK || previous.HealthOK
+	live.BootstrapOK = live.BootstrapOK || previous.BootstrapOK
+	live.StaticBootstrapOK = live.StaticBootstrapOK || previous.StaticBootstrapOK
+	live.TicketBoundBootstrapOK = live.TicketBoundBootstrapOK || previous.TicketBoundBootstrapOK
+	live.SmallAssetOK = live.SmallAssetOK || previous.SmallAssetOK
+	if live.InstanceMarker == "" {
+		live.InstanceMarker = previous.InstanceMarker
+	}
+	if live.Latency == 0 {
+		live.Latency = previous.Latency
+	}
+	return live
+}
+
+func sameAvailabilityCandidates(left, right tunnel.AvailabilitySet) bool {
+	if len(left.Candidates) != len(right.Candidates) {
+		return false
+	}
+	for index := range left.Candidates {
+		if left.Candidates[index].ProviderID != right.Candidates[index].ProviderID || left.Candidates[index].URL != right.Candidates[index].URL {
+			return false
+		}
+	}
+	return true
+}

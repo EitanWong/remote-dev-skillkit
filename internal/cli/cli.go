@@ -4378,7 +4378,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if _, _, err := store.LoadInto(gw); err != nil {
 		return err
 	}
-	if err := recoverSupportSessionPublication(gw, store, publicationJournalPath, []string{readyFile, handoffTextFile}); err != nil {
+	if err := recoverSupportSessionPublication(gw, store, publicationJournalPath, []string{readyFile, handoffTextFile}, statusFile); err != nil {
 		return fmt.Errorf("recover interrupted support-session publication: %w", err)
 	}
 	manifestKey, _, err := signing.LoadOrCreate(manifestKeyPath, "manifest-dev")
@@ -4513,6 +4513,12 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		}
 		return errors.New("no public gateway candidate passed the static bootstrap probe")
 	}
+	if availabilityRuntime != nil {
+		availability = intersectAvailabilityWithRuntime(availability, availabilityRuntime.Snapshot())
+		if len(availability.Candidates) == 0 {
+			return errors.New("all public gateway candidates exited before ticket probing")
+		}
+	}
 	gatewayURL = availability.Candidates[0].URL
 	gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
 
@@ -4536,6 +4542,14 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	ticket, availability, err := createFinalProbedSupportTicket(ctx, gw, store, availability, opts.TTLSeconds, opts.Reason, ticketMetadata, finalProbe, server.GatewayInstance())
 	if err != nil {
 		return err
+	}
+	if availabilityRuntime != nil {
+		liveAvailability := intersectAvailabilityWithRuntime(availability, availabilityRuntime.Snapshot())
+		if !sameAvailabilityCandidates(availability, liveAvailability) {
+			rollbackErr := rollbackSupportTicket(gw, store, ticket.ID, "tunnel availability changed before handoff publication")
+			return errors.Join(errors.New("tunnel availability changed before handoff publication"), rollbackErr)
+		}
+		availability = liveAvailability
 	}
 	a.recordSupportSessionStartEvent("ticket_created")
 	gatewayURL = availability.Candidates[0].URL
@@ -4573,7 +4587,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		AvailabilityReadiness:     readiness,
 	})
 	if readiness.ReadyToSend {
-		if err := publishSupportSessionHandoff(gw, store, ticket.ID, a.Stdout, a.Stderr, readyFile, handoffTextFile, publicationJournalPath, started); err != nil {
+		if err := publishSupportSessionHandoff(gw, store, ticket.ID, a.Stdout, a.Stderr, readyFile, handoffTextFile, publicationJournalPath, started, supportSessionMonitoring{StatusPath: statusFile, Availability: availability}); err != nil {
 			return err
 		}
 		a.recordSupportSessionStartEvent("handoff_written")
@@ -4604,10 +4618,23 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
+	availabilityFailure := make(chan error, 1)
 	if readiness.ReadyToSend {
 		go func() {
 			defer close(watchDone)
-			watchForegroundSupportSession(sessionCtx, a.Stderr, statusFile, connectedReportFile, gw, ticket.Code, opts.Locale, gatewayURL)
+			watchForegroundSupportSessionAvailability(sessionCtx, foregroundSupportSessionOptions{
+				Out: a.Stderr, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffTextFile,
+				ConnectedReportFile: connectedReportFile, JournalPath: publicationJournalPath,
+				Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
+				Locale: opts.Locale, GatewayURL: gatewayURL, Runtime: availabilityRuntime, Published: availability,
+				OnInvalidated: func(err error) {
+					select {
+					case availabilityFailure <- err:
+					default:
+					}
+					_ = shutdownGatewayServer(gatewayServer)
+				},
+			})
 		}()
 	} else {
 		close(watchDone)
@@ -4620,7 +4647,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if deps.WaitForGatewayServer != nil {
 		waitForServer = deps.WaitForGatewayServer
 	}
-	return waitForServer(ctx, gatewayServer)
+	serverErr := waitForServer(ctx, gatewayServer)
+	select {
+	case availabilityErr := <-availabilityFailure:
+		return availabilityErr
+	default:
+		return serverErr
+	}
 }
 
 func retainHealthyAvailabilityCandidates(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
@@ -4704,39 +4737,10 @@ func bootstrapProbeAvailability(ctx context.Context, set tunnel.AvailabilitySet,
 }
 
 func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFile, connectedReportFile string, gw *gateway.MemoryGateway, ticketCode, locale, gatewayURL string) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	seenPending := false
-	writeSupportSessionEvent(out, statusFile, "waiting", supportsession.BuildStatus(supportsession.StatusOptions{
-		TicketCode:  ticketCode,
-		Hosts:       gw.HostsForTicketCode(ticketCode, ""),
-		Locale:      locale,
-		GatewayURL:  gatewayURL,
-		Preconnects: gw.SupportSessionPreconnects(ticketCode),
-	}))
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			status := supportsession.BuildStatus(supportsession.StatusOptions{
-				TicketCode:  ticketCode,
-				Hosts:       gw.HostsForTicketCode(ticketCode, ""),
-				Locale:      locale,
-				GatewayURL:  gatewayURL,
-				Preconnects: gw.SupportSessionPreconnects(ticketCode),
-			})
-			if status["connected"] == true {
-				_ = writeSupportSessionConnectedReportFile0600(connectedReportFile, status)
-				writeSupportSessionEvent(out, statusFile, "connected", status)
-				return
-			}
-			if status["status"] == "pending-activation" && !seenPending {
-				seenPending = true
-				writeSupportSessionEvent(out, statusFile, "pending-activation", status)
-			}
-		}
-	}
+	watchForegroundSupportSessionAvailability(ctx, foregroundSupportSessionOptions{
+		Out: out, StatusFile: statusFile, ConnectedReportFile: connectedReportFile,
+		Gateway: gw, TicketCode: ticketCode, Locale: locale, GatewayURL: gatewayURL,
+	})
 }
 
 func writeSupportSessionEvent(out io.Writer, statusFile, event string, status map[string]any) {

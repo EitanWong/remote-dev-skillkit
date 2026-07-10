@@ -20,6 +20,8 @@ type supportSessionPublicationJournal struct {
 	TicketID      string                                     `json:"ticket_id"`
 	Phase         string                                     `json:"phase"`
 	Artifacts     []supportSessionPublicationJournalArtifact `json:"artifacts"`
+	StatusPath    string                                     `json:"status_path,omitempty"`
+	Availability  tunnel.AvailabilitySet                     `json:"availability,omitempty"`
 }
 
 type supportSessionPublicationJournalArtifact struct {
@@ -55,7 +57,7 @@ func cleanupFailedSupportSessionPublicationJournal(path string, restoreErr, roll
 	return removeSupportSessionPublicationJournal(path)
 }
 
-func recoverSupportSessionPublication(gw *gateway.MemoryGateway, store gateway.StateStore, journalPath string, expectedPaths []string) error {
+func recoverSupportSessionPublication(gw *gateway.MemoryGateway, store gateway.StateStore, journalPath string, expectedPaths []string, expectedStatusPath ...string) error {
 	var journal supportSessionPublicationJournal
 	if err := tunnel.ReadProtectedJSONFile(journalPath, &journal); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -75,6 +77,35 @@ func recoverSupportSessionPublication(gw *gateway.MemoryGateway, store gateway.S
 			return fmt.Errorf("publication journal artifact paths must be absolute")
 		}
 		artifacts = append(artifacts, &stagedSupportSessionArtifact{path: record.Path, tempPath: record.TempPath, backupPath: record.BackupPath, hadOriginal: record.HadOriginal})
+	}
+	if journal.Phase == "invalidating" {
+		if len(expectedStatusPath) != 1 || publicationPathKey(journal.StatusPath) != publicationPathKey(expectedStatusPath[0]) {
+			return fmt.Errorf("invalidation journal status path does not match expected output")
+		}
+		_, err := completeSupportSessionInvalidation(gw, store, journal.TicketID, expectedPaths[0], expectedPaths[1], journal.StatusPath, journal.Availability)
+		if err != nil {
+			return err
+		}
+		return errors.Join(finalizeSupportSessionArtifacts(artifacts), cleanupStagedSupportSessionArtifacts(artifacts), removeSupportSessionPublicationJournal(journalPath))
+	}
+	if journal.Phase == "monitoring" {
+		if len(expectedStatusPath) != 1 || publicationPathKey(journal.StatusPath) != publicationPathKey(expectedStatusPath[0]) {
+			return fmt.Errorf("monitoring journal status path does not match expected output")
+		}
+		if gw.TicketHasConnectedHost(journal.TicketID) {
+			return errors.Join(finalizeSupportSessionArtifacts(artifacts), cleanupStagedSupportSessionArtifacts(artifacts), removeSupportSessionPublicationJournal(journalPath))
+		}
+		lost := journal.Availability
+		lost.Candidates = nil
+		for index := range lost.Attempts {
+			lost.Attempts[index].Status = tunnel.AttemptExited
+			lost.Attempts[index].ErrorClass = "runtime-not-recovered"
+		}
+		_, err := completeSupportSessionInvalidation(gw, store, journal.TicketID, expectedPaths[0], expectedPaths[1], journal.StatusPath, lost)
+		if err != nil {
+			return err
+		}
+		return errors.Join(finalizeSupportSessionArtifacts(artifacts), cleanupStagedSupportSessionArtifacts(artifacts), removeSupportSessionPublicationJournal(journalPath))
 	}
 	if journal.Phase == "committed" {
 		if ticket, ok := gw.Ticket(journal.TicketID); ok && ticket.Status == model.TicketStatusActive {

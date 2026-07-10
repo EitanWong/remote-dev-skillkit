@@ -569,6 +569,30 @@ func (g *MemoryGateway) RevokeTicket(ticketID, reason string) (model.Ticket, err
 func (g *MemoryGateway) RollbackTicket(ticketID, reason string) (model.Ticket, []model.Host, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	return g.rollbackTicketLocked(ticketID, reason)
+}
+
+func (g *MemoryGateway) RollbackTicketIfNoConnectedHost(ticketID, reason string) (model.Ticket, []model.Host, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.ticketHasActiveRecentHostLocked(ticketID, hostHeartbeatStaleAfter) {
+		ticket, ok := g.tickets[ticketID]
+		if !ok {
+			return model.Ticket{}, nil, false, fmt.Errorf("%w: ticket", ErrNotFound)
+		}
+		return ticket, nil, false, nil
+	}
+	ticket, hosts, err := g.rollbackTicketLocked(ticketID, reason)
+	return ticket, hosts, err == nil, err
+}
+
+func (g *MemoryGateway) TicketHasConnectedHost(ticketID string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.ticketHasActiveRecentHostLocked(ticketID, hostHeartbeatStaleAfter)
+}
+
+func (g *MemoryGateway) rollbackTicketLocked(ticketID, reason string) (model.Ticket, []model.Host, error) {
 
 	ticket, ok := g.tickets[ticketID]
 	if !ok {

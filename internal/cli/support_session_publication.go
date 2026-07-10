@@ -7,7 +7,13 @@ import (
 	"io"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
+
+type supportSessionMonitoring struct {
+	StatusPath   string
+	Availability tunnel.AvailabilitySet
+}
 
 func publishSupportSessionHandoff(
 	gw *gateway.MemoryGateway,
@@ -19,6 +25,7 @@ func publishSupportSessionHandoff(
 	handoffTextFile string,
 	journalPath string,
 	started map[string]any,
+	monitoring ...supportSessionMonitoring,
 ) (returnErr error) {
 	var artifacts []*stagedSupportSessionArtifact
 	committed := false
@@ -85,16 +92,28 @@ func publishSupportSessionHandoff(
 		journalErr := cleanupFailedSupportSessionPublicationJournal(journalPath, restoreErr, rollbackErr)
 		return errors.Join(fmt.Errorf("write support-session stdout payload: %w", err), restoreErr, rollbackErr, journalErr)
 	}
-	if err := writeSupportSessionPublicationJournal(journalPath, publicationJournalFromArtifacts(ticketID, "committed", artifacts)); err != nil {
+	finalJournal := publicationJournalFromArtifacts(ticketID, "committed", artifacts)
+	if len(monitoring) == 1 {
+		finalJournal.Phase = "monitoring"
+		finalJournal.StatusPath = monitoring[0].StatusPath
+		finalJournal.Availability = monitoring[0].Availability
+	}
+	if err := writeSupportSessionPublicationJournal(journalPath, finalJournal); err != nil {
 		restoreErr := restoreSupportSessionArtifacts(artifacts)
 		rollbackErr := rollbackSupportTicket(gw, store, ticketID, "support-session publication commit journal failed")
 		return errors.Join(fmt.Errorf("commit support-session publication journal: %w", err), restoreErr, rollbackErr)
 	}
 	committed = true
 	if err := finalizeSupportSessionArtifacts(artifacts); err != nil {
+		if len(monitoring) == 1 {
+			return fmt.Errorf("finalize monitored support-session artifacts: %w", err)
+		}
 		if warnings != nil {
 			_, _ = fmt.Fprintf(warnings, "[rdev] warning: support-session handoff committed, but previous artifact backup cleanup needs attention: %v\n", err)
 		}
+		return nil
+	}
+	if len(monitoring) == 1 {
 		return nil
 	}
 	if err := removeSupportSessionPublicationJournal(journalPath); err != nil && warnings != nil {
