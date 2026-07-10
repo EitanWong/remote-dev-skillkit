@@ -51,7 +51,10 @@ an attended operator must explicitly set `allow_degraded_direct_handoff=true`
 to make the handoff sendable, and the response remains
 `ready_to_activate=false` and `ready_to_execute=false`. The response includes
 `availability_set`, `regional_evidence`, `degraded_single_entry`, and the
-readiness compatibility aliases. The older
+readiness compatibility aliases `ready_to_send_to_human` and
+`ready_to_send_human`. When `provider_policy` references validated evidence,
+`regional_evidence` contains only provider, region, status, timestamps, and
+freshness; issuer, samples, policy paths, and credentials are omitted. The older
 `user_handoff.message` and `user_handoff.copy_paste` fields remain for
 compatibility. If no gateway is present, it returns
 `ready_to_send_to_human=false` with `cli_start_now_command`, the standard foreground

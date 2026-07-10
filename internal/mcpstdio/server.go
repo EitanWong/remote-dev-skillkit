@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -33,6 +35,24 @@ import (
 )
 
 const protocolVersion = "2025-11-25"
+
+const maxMCPProviderPolicyBytes = 1 << 20
+
+type mcpTunnelProviderPolicyFile struct {
+	AllowedProviderIDs    []string          `json:"allowed_provider_ids"`
+	DisabledProviderIDs   []string          `json:"disabled_provider_ids"`
+	RegionalEvidencePaths []string          `json:"regional_evidence_paths"`
+	SSHKnownHostsPaths    map[string]string `json:"ssh_known_hosts_paths"`
+}
+
+type mcpRegionalEvidenceSummary struct {
+	ProviderID string                `json:"provider_id"`
+	Region     tunnel.RegionProfile  `json:"region"`
+	Status     tunnel.EvidenceStatus `json:"status"`
+	ObservedAt time.Time             `json:"observed_at"`
+	ExpiresAt  time.Time             `json:"expires_at"`
+	Fresh      bool                  `json:"fresh"`
+}
 
 type Server struct {
 	Gateway *gateway.MemoryGateway
@@ -692,6 +712,10 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 	}
 	providerPolicy := strings.TrimSpace(stringArg(args, "provider_policy", ""))
 	allowDegraded := boolArg(args, "allow_degraded_direct_handoff", false)
+	regionalEvidence, err := loadMCPRegionalEvidence(providerPolicy, region, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
 	if gatewayURL == "" {
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
@@ -723,13 +747,13 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 			SchemaVersion: tunnel.AvailabilitySchemaVersion,
 			Region:        region,
 		}, false)
-		return addTunnelReadinessAliases(supportsession.BuildConnectFromHandoff(handoff), readiness), nil
+		return addTunnelReadinessAliases(supportsession.BuildConnectFromHandoff(handoff), readiness, regionalEvidence, providerPolicy != ""), nil
 	}
 	created, err := s.createSupportSessionPayload(args, gatewayURL, ttl)
 	if err != nil {
 		return nil, err
 	}
-	return addTunnelReadinessAliases(supportsession.BuildConnectFromCreated(created), availabilityReadinessFromCreated(created)), nil
+	return addTunnelReadinessAliases(supportsession.BuildConnectFromCreated(created), availabilityReadinessFromCreated(created), regionalEvidence, providerPolicy != ""), nil
 }
 
 func tunnelRegionArg(args map[string]any) (tunnel.RegionProfile, error) {
@@ -743,16 +767,171 @@ func tunnelRegionArg(args map[string]any) (tunnel.RegionProfile, error) {
 	return region, nil
 }
 
-func addTunnelReadinessAliases(payload map[string]any, readiness supportsession.AvailabilityReadiness) map[string]any {
+func addTunnelReadinessAliases(payload map[string]any, readiness supportsession.AvailabilityReadiness, evidence []mcpRegionalEvidenceSummary, providerPolicyApplied bool) map[string]any {
 	payload["availability_readiness"] = readiness
 	payload["availability_set"] = readiness.AvailabilitySet
-	payload["regional_evidence"] = []tunnel.RegionalEvidence{}
+	payload["regional_evidence"] = evidence
+	payload["provider_policy_applied"] = providerPolicyApplied
 	payload["ready_to_send"] = readiness.ReadyToSend
+	payload["ready_to_send_human"] = readiness.ReadyToSend
 	payload["ready_to_send_to_human"] = readiness.ReadyToSend
 	payload["ready_to_activate"] = readiness.ReadyToActivate
 	payload["ready_to_execute"] = readiness.ReadyToExecute
 	payload["degraded_single_entry"] = readiness.DegradedSingleEntry
 	return payload
+}
+
+func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now time.Time) ([]mcpRegionalEvidenceSummary, error) {
+	policyPath = strings.TrimSpace(policyPath)
+	if policyPath == "" {
+		return []mcpRegionalEvidenceSummary{}, nil
+	}
+	data, err := readProtectedMCPFile(policyPath, "provider policy")
+	if err != nil {
+		return nil, err
+	}
+	var policy mcpTunnelProviderPolicyFile
+	if err := decodeStrictMCPJSON(data, &policy); err != nil {
+		return nil, fmt.Errorf("decode provider policy: %w", err)
+	}
+	allowed, disabled, err := validateMCPProviderPolicy(policy)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]mcpRegionalEvidenceSummary, 0)
+	for _, evidencePath := range policy.RegionalEvidencePaths {
+		evidencePath = strings.TrimSpace(evidencePath)
+		if evidencePath == "" {
+			return nil, fmt.Errorf("provider policy contains an empty regional evidence path")
+		}
+		evidenceData, err := readProtectedMCPFile(evidencePath, "regional evidence")
+		if err != nil {
+			return nil, err
+		}
+		values, err := decodeMCPRegionalEvidence(evidenceData)
+		if err != nil {
+			return nil, fmt.Errorf("decode regional evidence: %w", err)
+		}
+		for _, item := range values {
+			if err := item.Validate(); err != nil {
+				return nil, fmt.Errorf("validate regional evidence: %w", err)
+			}
+			if item.Region != region || !mcpPolicyAllowsProvider(item.ProviderID, allowed, disabled) {
+				continue
+			}
+			summaries = append(summaries, mcpRegionalEvidenceSummary{
+				ProviderID: item.ProviderID,
+				Region:     item.Region,
+				Status:     item.Status,
+				ObservedAt: item.ObservedAt,
+				ExpiresAt:  item.ExpiresAt,
+				Fresh:      !item.ObservedAt.After(now) && item.ExpiresAt.After(now),
+			})
+		}
+	}
+	return summaries, nil
+}
+
+func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile) (map[string]bool, map[string]bool, error) {
+	allowed := make(map[string]bool, len(policy.AllowedProviderIDs))
+	disabled := make(map[string]bool, len(policy.DisabledProviderIDs))
+	for label, values := range map[string][]string{
+		"allowed_provider_ids":  policy.AllowedProviderIDs,
+		"disabled_provider_ids": policy.DisabledProviderIDs,
+	} {
+		target := allowed
+		if label == "disabled_provider_ids" {
+			target = disabled
+		}
+		for _, value := range values {
+			id := strings.TrimSpace(value)
+			if id == "" {
+				return nil, nil, fmt.Errorf("provider policy %s contains an empty provider ID", label)
+			}
+			if target[id] {
+				return nil, nil, fmt.Errorf("provider policy %s contains duplicate provider %q", label, id)
+			}
+			target[id] = true
+		}
+	}
+	for id := range allowed {
+		if disabled[id] {
+			return nil, nil, fmt.Errorf("provider policy lists provider %q as both allowed and disabled", id)
+		}
+	}
+	for id, path := range policy.SSHKnownHostsPaths {
+		if strings.TrimSpace(id) == "" || strings.TrimSpace(path) == "" {
+			return nil, nil, fmt.Errorf("provider policy ssh_known_hosts_paths requires non-empty provider IDs and paths")
+		}
+	}
+	return allowed, disabled, nil
+}
+
+func mcpPolicyAllowsProvider(providerID string, allowed, disabled map[string]bool) bool {
+	if disabled[providerID] {
+		return false
+	}
+	return len(allowed) == 0 || allowed[providerID]
+}
+
+func readProtectedMCPFile(path, kind string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", kind, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a regular file", kind)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&^os.FileMode(0o600) != 0 {
+		return nil, fmt.Errorf("%s permissions must be 0600 or narrower", kind)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", kind, err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxMCPProviderPolicyBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", kind, err)
+	}
+	if len(data) > maxMCPProviderPolicyBytes {
+		return nil, fmt.Errorf("%s exceeds 1 MiB", kind)
+	}
+	return data, nil
+}
+
+func decodeMCPRegionalEvidence(data []byte) ([]tunnel.RegionalEvidence, error) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("regional evidence is empty")
+	}
+	if bytes.TrimSpace(data)[0] == '[' {
+		var values []tunnel.RegionalEvidence
+		if err := decodeStrictMCPJSON(data, &values); err != nil {
+			return nil, err
+		}
+		return values, nil
+	}
+	var value tunnel.RegionalEvidence
+	if err := decodeStrictMCPJSON(data, &value); err != nil {
+		return nil, err
+	}
+	return []tunnel.RegionalEvidence{value}, nil
+}
+
+func decodeStrictMCPJSON(data []byte, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("trailing JSON value is not allowed")
+		}
+		return err
+	}
+	return nil
 }
 
 func availabilityReadinessFromCreated(created map[string]any) supportsession.AvailabilityReadiness {

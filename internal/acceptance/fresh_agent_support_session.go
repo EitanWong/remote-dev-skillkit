@@ -397,15 +397,25 @@ func regionalTunnelAcceptanceChecks(report FreshAgentSupportSessionReport) []Che
 }
 
 func redactShareableTunnelAttempt(attempt map[string]any) map[string]any {
-	failureDomains := map[string]bool{}
+	allowedFailureDomains := []string{
+		"authoritative_dns",
+		"edge_network",
+		"origin_network",
+		"control_plane",
+		"certificate_dependency",
+	}
+	failureDomains := make(map[string]bool, len(allowedFailureDomains))
+	for _, name := range allowedFailureDomains {
+		failureDomains[name] = false
+	}
 	switch domains := attempt["failure_domains"].(type) {
 	case map[string]bool:
-		for name, configured := range domains {
-			failureDomains[name] = configured
+		for _, name := range allowedFailureDomains {
+			failureDomains[name] = domains[name]
 		}
 	case map[string]any:
-		for name, configured := range domains {
-			failureDomains[name] = boolFromAny(configured)
+		for _, name := range allowedFailureDomains {
+			failureDomains[name] = boolFromAny(domains[name])
 		}
 	}
 	return map[string]any{

@@ -187,26 +187,45 @@ func TestRunFreshAgentSupportSessionCapturesRegionalTunnelReadinessContracts(t *
 
 func TestRedactShareableTunnelAttemptKeepsOnlySafeSummary(t *testing.T) {
 	got := redactShareableTunnelAttempt(map[string]any{
-		"provider_id":     "managed-direct",
-		"status":          "degraded",
-		"error_class":     "provider-health-check-failed",
-		"known_hosts":     "AAAAC3NzaKnownHostsSecret",
-		"token":           "super-secret-token",
-		"target_ip":       "198.51.100.77",
-		"provider_url":    "https://raw-provider.example.test/session/secret",
-		"failure_domains": map[string]bool{"edge_network": true},
+		"provider_id":  "managed-direct",
+		"status":       "degraded",
+		"error_class":  "provider-health-check-failed",
+		"known_hosts":  "AAAAC3NzaKnownHostsSecret",
+		"token":        "super-secret-token",
+		"target_ip":    "198.51.100.77",
+		"provider_url": "https://raw-provider.example.test/session/secret",
+		"failure_domains": map[string]any{
+			"edge_network":            true,
+			"authoritative_dns":       true,
+			"token":                   "nested-super-secret-token",
+			"target_ip":               "203.0.113.99",
+			"provider_url":            "https://nested-provider.example.test/secret",
+			"unexpected_failure_blob": "opaque-sensitive-value",
+		},
 	})
 	encoded, err := json.Marshal(got)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"AAAAC3NzaKnownHostsSecret", "super-secret-token", "198.51.100.77", "https://raw-provider.example.test/session/secret"} {
+	for _, forbidden := range []string{
+		"AAAAC3NzaKnownHostsSecret", "super-secret-token", "198.51.100.77", "https://raw-provider.example.test/session/secret",
+		"nested-super-secret-token", "203.0.113.99", "https://nested-provider.example.test/secret", "opaque-sensitive-value",
+	} {
 		if bytes.Contains(encoded, []byte(forbidden)) {
 			t.Fatalf("redacted attempt leaked %q: %s", forbidden, encoded)
 		}
 	}
 	if got["provider_id"] != "managed-direct" || got["status"] != "degraded" || got["credentials"] != "redacted" || got["target"] != "redacted" {
 		t.Fatalf("unexpected redacted summary: %#v", got)
+	}
+	domains := got["failure_domains"].(map[string]bool)
+	if len(domains) != 5 || !domains["edge_network"] || !domains["authoritative_dns"] {
+		t.Fatalf("failure domains must use the fixed safe allowlist: %#v", domains)
+	}
+	for _, forbiddenKey := range []string{"token", "target_ip", "provider_url", "unexpected_failure_blob"} {
+		if _, ok := domains[forbiddenKey]; ok {
+			t.Fatalf("failure domain redactor retained unsafe key %q: %#v", forbiddenKey, domains)
+		}
 	}
 }
 

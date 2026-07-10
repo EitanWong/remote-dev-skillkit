@@ -26,6 +26,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -470,6 +471,9 @@ func TestServerToolCallSupportSessionConnectWithoutGatewayReturnsStart(t *testin
 
 func TestServerToolCallSupportSessionConnectPropagatesTunnelPolicy(t *testing.T) {
 	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	if err := os.WriteFile(policyPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
 		"target":                        "auto",
 		"region":                        "cn-mainland",
@@ -495,6 +499,8 @@ func TestServerToolCallSupportSessionConnectPropagatesTunnelPolicy(t *testing.T)
 	if availability["region"] != "cn-mainland" ||
 		structured["regional_evidence"] == nil ||
 		structured["ready_to_send"] != false ||
+		structured["ready_to_send_human"] != false ||
+		structured["ready_to_send_to_human"] != false ||
 		structured["ready_to_activate"] != false ||
 		structured["ready_to_execute"] != false ||
 		structured["degraded_single_entry"] != false {
@@ -503,10 +509,31 @@ func TestServerToolCallSupportSessionConnectPropagatesTunnelPolicy(t *testing.T)
 }
 
 func TestServerToolCallSupportSessionConnectExplicitOverrideIsSendableButDegraded(t *testing.T) {
+	now := time.Now().UTC()
+	policyDir := t.TempDir()
+	evidencePath := filepath.Join(policyDir, "evidence.json")
+	evidence := tunnel.RegionalEvidence{
+		ProviderID: "configured-gateway", Region: tunnel.RegionCNMainland, Status: tunnel.EvidenceVerified,
+		Issuer: "super-secret-token", ObservedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		Samples: validMCPMainlandSamples(),
+	}
+	encodedEvidence, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(evidencePath, encodedEvidence, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(policyDir, "providers.json")
+	policyBody := fmt.Sprintf(`{"allowed_provider_ids":["configured-gateway"],"regional_evidence_paths":[%q]}`, evidencePath)
+	if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
 		"gateway_url":                   "https://gateway.example.test",
 		"target":                        "windows",
-		"region":                        "global",
+		"region":                        "cn-mainland",
+		"provider_policy":               policyPath,
 		"allow_degraded_direct_handoff": true,
 	})
 	var out bytes.Buffer
@@ -521,6 +548,7 @@ func TestServerToolCallSupportSessionConnectExplicitOverrideIsSendableButDegrade
 	availability := structured["availability_set"].(map[string]any)
 	candidates := availability["candidates"].([]any)
 	if structured["ready_to_send"] != true ||
+		structured["ready_to_send_human"] != true ||
 		structured["ready_to_send_to_human"] != true ||
 		structured["ready_to_activate"] != false ||
 		structured["ready_to_execute"] != false ||
@@ -528,13 +556,52 @@ func TestServerToolCallSupportSessionConnectExplicitOverrideIsSendableButDegrade
 		len(candidates) != 1 {
 		t.Fatalf("explicit override must remain degraded single-entry: %#v", structured)
 	}
+	regionalEvidence := structured["regional_evidence"].([]any)
+	if structured["provider_policy_applied"] != true || len(regionalEvidence) != 1 {
+		t.Fatalf("explicit gateway dropped validated provider policy evidence: %#v", structured)
+	}
+	summary := regionalEvidence[0].(map[string]any)
+	if summary["provider_id"] != "configured-gateway" || summary["status"] != "verified" || summary["expires_at"] == nil {
+		t.Fatalf("unexpected safe evidence summary: %#v", summary)
+	}
 	encoded, err := json.Marshal(structured)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), "super-secret-token") || strings.Contains(string(encoded), "AAAAC3NzaKnownHostsSecret") {
+	if strings.Contains(string(encoded), "super-secret-token") || strings.Contains(string(encoded), "china-telecom") || strings.Contains(string(encoded), policyPath) || strings.Contains(string(encoded), evidencePath) {
 		t.Fatalf("MCP response leaked protected tunnel material: %s", encoded)
 	}
+}
+
+func TestSupportSessionConnectRejectsInvalidProviderPolicy(t *testing.T) {
+	for _, body := range []string{
+		`{"token":"super-secret-token"}`,
+		`{"allowed_provider_ids":[""]}`,
+		`{"ssh_known_hosts_paths":{"configured-gateway":""}}`,
+	} {
+		policyPath := filepath.Join(t.TempDir(), "providers.json")
+		if err := os.WriteFile(policyPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		server := NewServer(gateway.NewMemoryGateway())
+		if _, err := server.supportSessionConnect(map[string]any{
+			"gateway_url":     "https://gateway.example.test",
+			"region":          "cn-mainland",
+			"provider_policy": policyPath,
+		}); err == nil || !strings.Contains(err.Error(), "provider policy") {
+			t.Fatalf("invalid provider policy %s must be rejected, got %v", body, err)
+		}
+	}
+}
+
+func validMCPMainlandSamples() []tunnel.NetworkSample {
+	var samples []tunnel.NetworkSample
+	for _, carrier := range []string{"china-telecom", "china-unicom", "china-mobile"} {
+		for _, region := range []string{"north", "south"} {
+			samples = append(samples, tunnel.NetworkSample{Carrier: carrier, Region: region, Success: true})
+		}
+	}
+	return samples
 }
 
 func TestServerToolCallSupportSessionConnectAutoDetectsStableRdevCommand(t *testing.T) {
