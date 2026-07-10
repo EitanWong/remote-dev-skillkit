@@ -4,11 +4,14 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const MaxRegionalEvidenceTTL = 7 * 24 * time.Hour
+
+var coarseRegionTokenPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 type NetworkSample struct {
 	Carrier      string `json:"carrier"`
@@ -56,6 +59,9 @@ func (e RegionalEvidence) Validate() error {
 		}
 		if isIPLiteral(sample.Region) {
 			return errors.New("sample region must not be an IP literal")
+		}
+		if _, ok := canonicalCoarseRegion(sample.Region); !ok {
+			return errors.New("sample region must be a canonical coarse-region token")
 		}
 	}
 	if e.Region == RegionCNMainland && e.Status == EvidenceVerified && !hasMainlandCarrierCoverage(e.Samples) {
@@ -172,7 +178,11 @@ func hasMainlandCarrierCoverage(samples []NetworkSample) bool {
 		if regionsByCarrier[carrier] == nil {
 			regionsByCarrier[carrier] = make(map[string]struct{})
 		}
-		regionsByCarrier[carrier][strings.TrimSpace(sample.Region)] = struct{}{}
+		region, ok := canonicalCoarseRegion(sample.Region)
+		if !ok {
+			continue
+		}
+		regionsByCarrier[carrier][region] = struct{}{}
 	}
 	for carrier := range required {
 		if len(regionsByCarrier[carrier]) < 2 {
@@ -180,6 +190,13 @@ func hasMainlandCarrierCoverage(samples []NetworkSample) bool {
 		}
 	}
 	return true
+}
+
+func canonicalCoarseRegion(value string) (string, bool) {
+	if strings.TrimSpace(value) != value || !coarseRegionTokenPattern.MatchString(value) {
+		return "", false
+	}
+	return value, true
 }
 
 func isIPLiteral(value string) bool {

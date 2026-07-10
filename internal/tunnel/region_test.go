@@ -145,6 +145,28 @@ func TestRegionalEvidenceValidateDoesNotCountWhitespaceVariantsAsDistinctRegions
 	}
 }
 
+func TestRegionalEvidenceValidateRejectsNonCanonicalCoarseRegions(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	for _, region := range []string{
+		"EAST-CN",
+		"east\u200b-cn",
+		"ｅast-cn",
+		" east-cn",
+		"east-cn ",
+	} {
+		t.Run(region, func(t *testing.T) {
+			evidence := RegionalEvidence{
+				ProviderID: "provider-a", Region: RegionGlobal, Status: EvidenceVerified,
+				Issuer: "project-probe", ObservedAt: now, ExpiresAt: now.Add(time.Hour),
+				Samples: []NetworkSample{{Carrier: "probe-network", Region: region, Success: true}},
+			}
+			if err := evidence.Validate(); err == nil {
+				t.Fatalf("expected non-canonical coarse region %q to be rejected", region)
+			}
+		})
+	}
+}
+
 func TestRegionalEvidenceValidateRejectsIPLiteralVariants(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	for _, region := range []string{"[2001:db8::1]", "fe80::1%en0", "203.0.113.4:443", "[2001:db8::1]:443"} {
