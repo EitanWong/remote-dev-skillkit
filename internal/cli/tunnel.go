@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,7 +21,7 @@ import (
 const sshTunnelStartupTimeout = 20 * time.Second
 
 type tunnelProviderPolicyFile struct {
-	AllowedProviderIDs    []string          `json:"allowed_provider_ids"`
+	AllowedProviderIDs    *[]string         `json:"allowed_provider_ids"`
 	DisabledProviderIDs   []string          `json:"disabled_provider_ids"`
 	RegionalEvidencePaths []string          `json:"regional_evidence_paths"`
 	SSHKnownHostsPaths    map[string]string `json:"ssh_known_hosts_paths"`
@@ -31,6 +30,7 @@ type tunnelProviderPolicyFile struct {
 type tunnelRuntimeConfig struct {
 	Region             tunnel.RegionProfile
 	AllowedProviderIDs []string
+	RestrictProviders  bool
 	Evidence           []tunnel.RegionalEvidence
 	SSHKnownHostsPaths map[string]string
 }
@@ -72,56 +72,53 @@ func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Reg
 	if strings.TrimSpace(policyPath) == "" {
 		return config, nil
 	}
-	info, err := os.Stat(policyPath)
-	if err != nil {
-		return tunnelRuntimeConfig{}, fmt.Errorf("read provider policy: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return tunnelRuntimeConfig{}, fmt.Errorf("provider policy must be a regular file")
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&^os.FileMode(0o600) != 0 {
-		return tunnelRuntimeConfig{}, fmt.Errorf("provider policy permissions must be 0600 or narrower")
-	}
-	file, err := os.Open(policyPath)
-	if err != nil {
-		return tunnelRuntimeConfig{}, fmt.Errorf("open provider policy: %w", err)
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
-	decoder.DisallowUnknownFields()
 	var policy tunnelProviderPolicyFile
-	if err := decoder.Decode(&policy); err != nil {
+	if err := tunnel.ReadProtectedJSONFile(policyPath, &policy); err != nil {
 		return tunnelRuntimeConfig{}, fmt.Errorf("decode provider policy: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return tunnelRuntimeConfig{}, fmt.Errorf("decode provider policy: trailing JSON value is not allowed")
-		}
-		return tunnelRuntimeConfig{}, fmt.Errorf("decode provider policy trailing data: %w", err)
 	}
 	known := make(map[string]bool)
 	for _, metadata := range registry.Providers() {
 		known[metadata.ID] = true
 	}
 	disabled := make(map[string]bool)
-	for _, id := range policy.DisabledProviderIDs {
-		id = strings.TrimSpace(id)
+	for _, value := range policy.DisabledProviderIDs {
+		id := strings.TrimSpace(value)
+		if id != value {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy disabled_provider_ids contains non-canonical provider %q", value)
+		}
 		if !known[id] {
 			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy references unknown provider %q", id)
+		}
+		if disabled[id] {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy disabled_provider_ids contains duplicate provider %q", id)
 		}
 		disabled[id] = true
 	}
-	for _, id := range policy.AllowedProviderIDs {
-		id = strings.TrimSpace(id)
+	allowed := []string(nil)
+	if policy.AllowedProviderIDs != nil {
+		config.RestrictProviders = true
+		allowed = *policy.AllowedProviderIDs
+	}
+	allowedSeen := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		id := strings.TrimSpace(value)
+		if id != value {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy allowed_provider_ids contains non-canonical provider %q", value)
+		}
 		if !known[id] {
 			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy references unknown provider %q", id)
 		}
-		if !disabled[id] {
-			config.AllowedProviderIDs = append(config.AllowedProviderIDs, id)
+		if allowedSeen[id] {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy allowed_provider_ids contains duplicate provider %q", id)
 		}
+		if disabled[id] {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy lists provider %q as both allowed and disabled", id)
+		}
+		allowedSeen[id] = true
+		config.AllowedProviderIDs = append(config.AllowedProviderIDs, id)
 	}
-	if len(policy.AllowedProviderIDs) == 0 && len(disabled) > 0 {
+	if policy.AllowedProviderIDs == nil && len(disabled) > 0 {
+		config.RestrictProviders = true
 		for id := range known {
 			if !disabled[id] {
 				config.AllowedProviderIDs = append(config.AllowedProviderIDs, id)
@@ -154,14 +151,14 @@ func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Reg
 }
 
 func loadRegionalEvidenceFile(path string) ([]tunnel.RegionalEvidence, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
+	var data json.RawMessage
+	if err := tunnel.ReadProtectedJSONFile(path, &data); err != nil {
 		return nil, fmt.Errorf("read regional evidence %q: %w", path, err)
 	}
 	var values []tunnel.RegionalEvidence
-	if err := json.Unmarshal(data, &values); err != nil {
+	if err := decodeStrictTunnelJSON(data, &values); err != nil {
 		var single tunnel.RegionalEvidence
-		if singleErr := json.Unmarshal(data, &single); singleErr != nil {
+		if singleErr := decodeStrictTunnelJSON(data, &single); singleErr != nil {
 			return nil, fmt.Errorf("decode regional evidence %q: %w", path, err)
 		}
 		values = []tunnel.RegionalEvidence{single}
@@ -172,6 +169,22 @@ func loadRegionalEvidenceFile(path string) ([]tunnel.RegionalEvidence, error) {
 		}
 	}
 	return values, nil
+}
+
+func decodeStrictTunnelJSON(data []byte, destination any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("trailing JSON value is not allowed")
+		}
+		return err
+	}
+	return nil
 }
 
 type sshTunnelSpec struct {

@@ -1502,7 +1502,7 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var out bytes.Buffer
+	var out synchronizedBuffer
 	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
 	connectedReportFile := filepath.Join(t.TempDir(), "connected-report.txt")
 	gatewayURL := "http://127.0.0.1:9876"
@@ -3197,6 +3197,105 @@ func TestTunnelRuntimePolicyValidation(t *testing.T) {
 	}
 	if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
 		t.Fatal("trailing JSON data should fail")
+	}
+
+	overlapPath := filepath.Join(t.TempDir(), "overlap.json")
+	if err := os.WriteFile(overlapPath, []byte(`{"allowed_provider_ids":["ordered-test"],"disabled_provider_ids":["ordered-test"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadTunnelRuntimeConfig("global", overlapPath, registry); err == nil {
+		t.Fatal("allowed/disabled provider overlap must fail closed")
+	}
+
+	allDisabledPath := filepath.Join(t.TempDir(), "all-disabled.json")
+	if err := os.WriteFile(allDisabledPath, []byte(`{"disabled_provider_ids":["ordered-test"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadTunnelRuntimeConfig("global", allDisabledPath, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := registry.Select(tunnel.Policy{
+		Region: config.Region, AllowedProviderIDs: config.AllowedProviderIDs,
+		RestrictProviders: config.RestrictProviders, AllowNonDefault: true,
+	}, config.Evidence)
+	if len(selected) != 0 {
+		t.Fatalf("all-disabled policy failed open: %#v", selected)
+	}
+
+	emptyAllowedPath := filepath.Join(t.TempDir(), "empty-allowed.json")
+	if err := os.WriteFile(emptyAllowedPath, []byte(`{"allowed_provider_ids":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err = loadTunnelRuntimeConfig("global", emptyAllowedPath, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.RestrictProviders || len(config.AllowedProviderIDs) != 0 {
+		t.Fatalf("explicit empty allowlist must mean allow none: %#v", config)
+	}
+
+	for name, body := range map[string]string{
+		"duplicate allowed":     `{"allowed_provider_ids":["ordered-test","ordered-test"]}`,
+		"duplicate disabled":    `{"disabled_provider_ids":["ordered-test","ordered-test"]}`,
+		"noncanonical allowed":  `{"allowed_provider_ids":[" ordered-test"]}`,
+		"noncanonical disabled": `{"disabled_provider_ids":["ordered-test "]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "duplicates.json")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+				t.Fatal("duplicate provider ID must fail closed")
+			}
+		})
+	}
+}
+
+func TestTunnelRuntimePolicyProtectsRegionalEvidenceFiles(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	valid := fmt.Sprintf(`{"provider_id":"ordered-test","region":"global","status":"verified","issuer":"reviewed-probe","observed_at":%q,"expires_at":%q,"samples":[{"carrier":"probe-network","region":"global","success":true}]}`,
+		now.Add(-time.Hour).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	tests := []struct {
+		name string
+		body string
+		mode os.FileMode
+	}{
+		{name: "trailing JSON", body: valid + `\n{}`, mode: 0o600},
+		{name: "unknown field", body: strings.TrimSuffix(valid, "}") + `,"unexpected":"secret"}`, mode: 0o600},
+		{name: "oversize", body: valid + strings.Repeat(" ", (1<<20)+1), mode: 0o600},
+	}
+	if runtime.GOOS != "windows" {
+		tests = append(tests, struct {
+			name string
+			body string
+			mode os.FileMode
+		}{name: "writable by group or others", body: valid, mode: 0o666})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			evidencePath := filepath.Join(dir, "evidence.json")
+			if err := os.WriteFile(evidencePath, []byte(tt.body), tt.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(evidencePath, tt.mode); err != nil {
+				t.Fatal(err)
+			}
+			policyPath := filepath.Join(dir, "policy.json")
+			policyBody := fmt.Sprintf(`{"regional_evidence_paths":[%q]}`, evidencePath)
+			if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadTunnelRuntimeConfig("global", policyPath, registry); err == nil {
+				t.Fatalf("protected evidence case %q must fail", tt.name)
+			}
+		})
 	}
 }
 

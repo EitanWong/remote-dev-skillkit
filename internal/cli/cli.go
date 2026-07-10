@@ -247,6 +247,7 @@ func (a App) tunnel(_ context.Context, args []string) error {
 			Region:             config.Region,
 			Now:                time.Now().UTC(),
 			AllowedProviderIDs: config.AllowedProviderIDs,
+			RestrictProviders:  config.RestrictProviders,
 			AllowNonDefault:    true,
 		}
 		providers := make([]tunnelProviderInspection, 0, len(registry.Providers()))
@@ -292,7 +293,7 @@ func (a App) tunnel(_ context.Context, args []string) error {
 			return err
 		}
 		policy := tunnel.Policy{
-			Region: config.Region, Now: time.Now().UTC(), AllowedProviderIDs: config.AllowedProviderIDs, AllowNonDefault: true,
+			Region: config.Region, Now: time.Now().UTC(), AllowedProviderIDs: config.AllowedProviderIDs, RestrictProviders: config.RestrictProviders, AllowNonDefault: true,
 		}
 		probes := make([]tunnelProbeInspection, 0, len(registry.Providers()))
 		for _, metadata := range registry.Providers() {
@@ -4419,6 +4420,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 			Region:             runtimeConfig.Region,
 			Now:                time.Now(),
 			AllowedProviderIDs: runtimeConfig.AllowedProviderIDs,
+			RestrictProviders:  runtimeConfig.RestrictProviders,
 			AllowNonDefault:    true,
 		}, deps.Evidence)
 		availabilityRuntime, err = manager.Start(ctx, selections, tunnel.StartRequest{

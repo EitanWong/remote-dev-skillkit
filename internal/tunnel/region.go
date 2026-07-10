@@ -71,7 +71,7 @@ func (e RegionalEvidence) Validate() error {
 }
 
 func EvaluateEligibility(meta ProviderMetadata, policy Policy, evidence []RegionalEvidence) Eligibility {
-	if !providerAllowed(meta.ID, policy.AllowedProviderIDs) {
+	if !providerAllowed(meta.ID, policy.AllowedProviderIDs, policy.RestrictProviders) {
 		return Eligibility{Reason: "provider-not-allowed"}
 	}
 
@@ -135,8 +135,8 @@ func newestEvidence(providerID string, region RegionProfile, evidence []Regional
 	return selected, found
 }
 
-func providerAllowed(providerID string, allowed []string) bool {
-	if len(allowed) == 0 {
+func providerAllowed(providerID string, allowed []string, restricted bool) bool {
+	if !restricted && len(allowed) == 0 {
 		return true
 	}
 	for _, allowedID := range allowed {

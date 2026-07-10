@@ -271,6 +271,7 @@ func TestEvaluateEligibilityGlobalPolicy(t *testing.T) {
 		{name: "non default denied", meta: ProviderMetadata{ID: "provider-a"}, policy: Policy{Region: RegionGlobal, Now: now}, reason: "provider-not-default"},
 		{name: "non default allowed", meta: ProviderMetadata{ID: "provider-a"}, policy: Policy{Region: RegionGlobal, Now: now, AllowNonDefault: true}, want: true},
 		{name: "not in allowlist", meta: ProviderMetadata{ID: "provider-a", DefaultAutomatic: true}, policy: Policy{Region: RegionGlobal, Now: now, AllowedProviderIDs: []string{"provider-b"}}, reason: "provider-not-allowed"},
+		{name: "explicitly restricted empty allowlist", meta: ProviderMetadata{ID: "provider-a", DefaultAutomatic: true}, policy: Policy{Region: RegionGlobal, Now: now, RestrictProviders: true}, reason: "provider-not-allowed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

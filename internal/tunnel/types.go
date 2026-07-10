@@ -75,6 +75,7 @@ type Policy struct {
 	Region                RegionProfile
 	Now                   time.Time
 	AllowedProviderIDs    []string
+	RestrictProviders     bool
 	AllowNonDefault       bool
 	AllowUnverifiedGlobal bool
 }

@@ -99,6 +99,7 @@ type HandoffOptions struct {
 	Region                     string
 	ProviderPolicyPath         string
 	AllowDegradedDirectHandoff bool
+	RequireForeground          bool
 }
 
 type RemoteControlEntryOptions struct {
@@ -173,7 +174,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	if resolvedCreateGatewayURL == "" {
 		resolvedCreateGatewayURL, _ = ConfiguredGatewayURLCandidate()
 	}
-	if resolvedCreateGatewayURL != "" {
+	if resolvedCreateGatewayURL != "" && !opts.RequireForeground {
 		gatewayURL = resolvedCreateGatewayURL
 		selectedPath = "create-with-reachable-gateway"
 		agentNextStep = "call rdev.support_session.create with mcp_next_arguments, then send the returned target_handoff_envelope.full_text"

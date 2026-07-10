@@ -10,8 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -36,11 +34,12 @@ import (
 
 const protocolVersion = "2025-11-25"
 
-const maxMCPProviderPolicyBytes = 1 << 20
 const configuredGatewayProviderID = "configured-gateway"
 
+const mcpProviderPolicyRestrictedKey = "\x00restricted"
+
 type mcpTunnelProviderPolicyFile struct {
-	AllowedProviderIDs    []string          `json:"allowed_provider_ids"`
+	AllowedProviderIDs    *[]string         `json:"allowed_provider_ids"`
 	DisabledProviderIDs   []string          `json:"disabled_provider_ids"`
 	RegionalEvidencePaths []string          `json:"regional_evidence_paths"`
 	SSHKnownHostsPaths    map[string]string `json:"ssh_known_hosts_paths"`
@@ -721,40 +720,43 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if gatewayURL == "" {
-		rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
-		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-			RepoRoot:                   stringArg(args, "repo_root", "."),
-			WorkDir:                    stringArg(args, "work_dir", ""),
-			Addr:                       stringArg(args, "addr", "0.0.0.0:8787"),
-			Target:                     stringArg(args, "target", "auto"),
-			Reason:                     stringArg(args, "reason", "visible temporary remote support"),
-			TTLSeconds:                 ttl,
-			AutoActivate:               boolArg(args, "auto_activate", true),
-			Locale:                     stringArg(args, "locale", "auto"),
-			RdevCommand:                rdevCommand,
-			Region:                     string(region),
-			ProviderPolicyPath:         providerPolicy,
-			AllowDegradedDirectHandoff: allowDegraded,
-		})
-		if nextArgs, ok := handoff["mcp_next_arguments"].(map[string]any); ok {
-			nextArgs["region"] = string(region)
-			if providerPolicy != "" {
-				nextArgs["provider_policy"] = providerPolicy
-			}
-			nextArgs["allow_degraded_direct_handoff"] = allowDegraded
+	foregroundPolicyPath := providerPolicy
+	if gatewayURL != "" {
+		foregroundPolicyPath = ""
+	}
+	rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
+	handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
+		RepoRoot:                   stringArg(args, "repo_root", "."),
+		WorkDir:                    stringArg(args, "work_dir", ""),
+		Addr:                       stringArg(args, "addr", "0.0.0.0:8787"),
+		GatewayURL:                 gatewayURL,
+		Target:                     stringArg(args, "target", "auto"),
+		Reason:                     stringArg(args, "reason", "visible temporary remote support"),
+		TTLSeconds:                 ttl,
+		AutoActivate:               boolArg(args, "auto_activate", true),
+		Locale:                     stringArg(args, "locale", "auto"),
+		RdevCommand:                rdevCommand,
+		Region:                     string(region),
+		ProviderPolicyPath:         foregroundPolicyPath,
+		AllowDegradedDirectHandoff: allowDegraded,
+		RequireForeground:          gatewayURL != "",
+	})
+	if nextArgs, ok := handoff["mcp_next_arguments"].(map[string]any); ok {
+		nextArgs["region"] = string(region)
+		if foregroundPolicyPath != "" {
+			nextArgs["provider_policy"] = foregroundPolicyPath
 		}
-		readiness := supportsession.DirectAvailability(tunnel.AvailabilitySet{
-			SchemaVersion: tunnel.AvailabilitySchemaVersion,
-			Region:        region,
-		}, false)
-		return addTunnelReadinessAliases(supportsession.BuildConnectFromHandoff(handoff), readiness, regionalEvidence, providerPolicy != ""), nil
+		nextArgs["allow_degraded_direct_handoff"] = allowDegraded
 	}
-	created, err := s.createSupportSessionPayload(args, gatewayURL, ttl)
-	if err != nil {
-		return nil, err
+	readiness := supportsession.DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        region,
+	}, false)
+	payload := addTunnelReadinessAliases(supportsession.BuildConnectFromHandoff(handoff), readiness, regionalEvidence, providerPolicy != "")
+	if gatewayURL != "" {
+		payload["reason"] = "remote_ticket_and_probe_required"
 	}
-	return addTunnelReadinessAliases(supportsession.BuildConnectFromCreated(created), availabilityReadinessFromCreated(created), regionalEvidence, providerPolicy != ""), nil
+	return payload, nil
 }
 
 func tunnelRegionArg(args map[string]any) (tunnel.RegionProfile, error) {
@@ -787,12 +789,8 @@ func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now
 	if policyPath == "" {
 		return []mcpRegionalEvidenceSummary{}, nil
 	}
-	data, err := readProtectedMCPFile(policyPath, "provider policy")
-	if err != nil {
-		return nil, err
-	}
 	var policy mcpTunnelProviderPolicyFile
-	if err := decodeStrictMCPJSON(data, &policy); err != nil {
+	if err := tunnel.ReadProtectedJSONFile(policyPath, &policy); err != nil {
 		return nil, fmt.Errorf("decode provider policy: %w", err)
 	}
 	knownProviders := knownMCPProviderIDs(allowConfiguredGateway)
@@ -806,9 +804,9 @@ func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now
 		if evidencePath == "" {
 			return nil, fmt.Errorf("provider policy contains an empty regional evidence path")
 		}
-		evidenceData, err := readProtectedMCPFile(evidencePath, "regional evidence")
-		if err != nil {
-			return nil, err
+		var evidenceData json.RawMessage
+		if err := tunnel.ReadProtectedJSONFile(evidencePath, &evidenceData); err != nil {
+			return nil, fmt.Errorf("read regional evidence: %w", err)
 		}
 		values, err := decodeMCPRegionalEvidence(evidenceData)
 		if err != nil {
@@ -849,10 +847,19 @@ func knownMCPProviderIDs(allowConfiguredGateway bool) map[string]bool {
 }
 
 func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile, known map[string]bool) (map[string]bool, map[string]bool, error) {
-	allowed := make(map[string]bool, len(policy.AllowedProviderIDs))
+	allowedCount := 0
+	if policy.AllowedProviderIDs != nil {
+		allowedCount = len(*policy.AllowedProviderIDs)
+	}
+	allowed := make(map[string]bool, allowedCount+1)
 	disabled := make(map[string]bool, len(policy.DisabledProviderIDs))
+	allowedValues := []string(nil)
+	if policy.AllowedProviderIDs != nil {
+		allowed[mcpProviderPolicyRestrictedKey] = true
+		allowedValues = *policy.AllowedProviderIDs
+	}
 	for label, values := range map[string][]string{
-		"allowed_provider_ids":  policy.AllowedProviderIDs,
+		"allowed_provider_ids":  allowedValues,
 		"disabled_provider_ids": policy.DisabledProviderIDs,
 	} {
 		target := allowed
@@ -861,6 +868,9 @@ func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile, known map[str
 		}
 		for _, value := range values {
 			id := strings.TrimSpace(value)
+			if id != value {
+				return nil, nil, fmt.Errorf("provider policy %s contains non-canonical provider %q", label, value)
+			}
 			if id == "" {
 				return nil, nil, fmt.Errorf("provider policy %s contains an empty provider ID", label)
 			}
@@ -893,33 +903,10 @@ func mcpPolicyAllowsProvider(providerID string, allowed, disabled map[string]boo
 	if disabled[providerID] {
 		return false
 	}
+	if allowed[mcpProviderPolicyRestrictedKey] {
+		return allowed[providerID]
+	}
 	return len(allowed) == 0 || allowed[providerID]
-}
-
-func readProtectedMCPFile(path, kind string) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", kind, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s must be a regular file", kind)
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&^os.FileMode(0o600) != 0 {
-		return nil, fmt.Errorf("%s permissions must be 0600 or narrower", kind)
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", kind, err)
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, maxMCPProviderPolicyBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", kind, err)
-	}
-	if len(data) > maxMCPProviderPolicyBytes {
-		return nil, fmt.Errorf("%s exceeds 1 MiB", kind)
-	}
-	return data, nil
 }
 
 func decodeMCPRegionalEvidence(data []byte) ([]tunnel.RegionalEvidence, error) {
