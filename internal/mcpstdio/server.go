@@ -37,6 +37,7 @@ import (
 const protocolVersion = "2025-11-25"
 
 const maxMCPProviderPolicyBytes = 1 << 20
+const configuredGatewayProviderID = "configured-gateway"
 
 type mcpTunnelProviderPolicyFile struct {
 	AllowedProviderIDs    []string          `json:"allowed_provider_ids"`
@@ -712,13 +713,13 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 	}
 	providerPolicy := strings.TrimSpace(stringArg(args, "provider_policy", ""))
 	allowDegraded := boolArg(args, "allow_degraded_direct_handoff", false)
-	regionalEvidence, err := loadMCPRegionalEvidence(providerPolicy, region, time.Now().UTC())
-	if err != nil {
-		return nil, err
-	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
 	if gatewayURL == "" {
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
+	}
+	regionalEvidence, err := loadMCPRegionalEvidence(providerPolicy, region, time.Now().UTC(), gatewayURL != "")
+	if err != nil {
+		return nil, err
 	}
 	if gatewayURL == "" {
 		rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
@@ -781,7 +782,7 @@ func addTunnelReadinessAliases(payload map[string]any, readiness supportsession.
 	return payload
 }
 
-func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now time.Time) ([]mcpRegionalEvidenceSummary, error) {
+func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now time.Time, allowConfiguredGateway bool) ([]mcpRegionalEvidenceSummary, error) {
 	policyPath = strings.TrimSpace(policyPath)
 	if policyPath == "" {
 		return []mcpRegionalEvidenceSummary{}, nil
@@ -794,7 +795,8 @@ func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now
 	if err := decodeStrictMCPJSON(data, &policy); err != nil {
 		return nil, fmt.Errorf("decode provider policy: %w", err)
 	}
-	allowed, disabled, err := validateMCPProviderPolicy(policy)
+	knownProviders := knownMCPProviderIDs(allowConfiguredGateway)
+	allowed, disabled, err := validateMCPProviderPolicy(policy, knownProviders)
 	if err != nil {
 		return nil, err
 	}
@@ -813,6 +815,9 @@ func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now
 			return nil, fmt.Errorf("decode regional evidence: %w", err)
 		}
 		for _, item := range values {
+			if !knownProviders[item.ProviderID] {
+				return nil, fmt.Errorf("regional evidence references unknown provider %q", item.ProviderID)
+			}
 			if err := item.Validate(); err != nil {
 				return nil, fmt.Errorf("validate regional evidence: %w", err)
 			}
@@ -832,7 +837,18 @@ func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now
 	return summaries, nil
 }
 
-func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile) (map[string]bool, map[string]bool, error) {
+func knownMCPProviderIDs(allowConfiguredGateway bool) map[string]bool {
+	known := make(map[string]bool, len(tunnel.CanonicalProviderIDs())+1)
+	for _, id := range tunnel.CanonicalProviderIDs() {
+		known[id] = true
+	}
+	if allowConfiguredGateway {
+		known[configuredGatewayProviderID] = true
+	}
+	return known
+}
+
+func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile, known map[string]bool) (map[string]bool, map[string]bool, error) {
 	allowed := make(map[string]bool, len(policy.AllowedProviderIDs))
 	disabled := make(map[string]bool, len(policy.DisabledProviderIDs))
 	for label, values := range map[string][]string{
@@ -851,6 +867,9 @@ func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile) (map[string]b
 			if target[id] {
 				return nil, nil, fmt.Errorf("provider policy %s contains duplicate provider %q", label, id)
 			}
+			if !known[id] {
+				return nil, nil, fmt.Errorf("provider policy %s references unknown provider %q", label, id)
+			}
 			target[id] = true
 		}
 	}
@@ -862,6 +881,9 @@ func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile) (map[string]b
 	for id, path := range policy.SSHKnownHostsPaths {
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(path) == "" {
 			return nil, nil, fmt.Errorf("provider policy ssh_known_hosts_paths requires non-empty provider IDs and paths")
+		}
+		if !known[strings.TrimSpace(id)] {
+			return nil, nil, fmt.Errorf("provider policy ssh_known_hosts_paths references unknown provider %q", id)
 		}
 	}
 	return allowed, disabled, nil
@@ -1052,7 +1074,7 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 		SchemaVersion: tunnel.AvailabilitySchemaVersion,
 		Region:        region,
 		Candidates: []tunnel.Candidate{{
-			ProviderID: "configured-gateway",
+			ProviderID: configuredGatewayProviderID,
 			URL:        gatewayURL,
 		}},
 	}

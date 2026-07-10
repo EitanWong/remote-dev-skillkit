@@ -44,8 +44,8 @@ func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]strin
 	}
 	registry, err := tunnel.NewRegistry(
 		newCloudflareQuickProvider(stderr),
-		newLocalhostRunProvider(stderr, knownHosts("localhost-run")),
-		newPinggyProvider(stderr, knownHosts("pinggy")),
+		newLocalhostRunProvider(stderr, knownHosts(tunnel.ProviderLocalhostRun)),
+		newPinggyProvider(stderr, knownHosts(tunnel.ProviderPinggy)),
 	)
 	if err != nil {
 		return supportSessionStartDeps{}, err
@@ -256,7 +256,7 @@ func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort, k
 	if err != nil {
 		return runningTunnel{}, err
 	}
-	return startSSHTunnel(ctx, stderr, "localhost-run", spec, knownHostsFile)
+	return startSSHTunnel(ctx, stderr, tunnel.ProviderLocalhostRun, spec, knownHostsFile)
 }
 
 func startPinggyTunnel(ctx context.Context, stderr io.Writer, localPort, knownHostsFile string) (runningTunnel, error) {
@@ -264,7 +264,7 @@ func startPinggyTunnel(ctx context.Context, stderr io.Writer, localPort, knownHo
 	if err != nil {
 		return runningTunnel{}, err
 	}
-	return startSSHTunnel(ctx, stderr, "pinggy", spec, knownHostsFile)
+	return startSSHTunnel(ctx, stderr, tunnel.ProviderPinggy, spec, knownHostsFile)
 }
 
 func startSSHTunnel(ctx context.Context, stderr io.Writer, providerID string, spec sshTunnelSpec, knownHostsFile string) (runningTunnel, error) {
@@ -280,7 +280,7 @@ func startSSHTunnel(ctx context.Context, stderr io.Writer, providerID string, sp
 }
 
 func localhostRunTunnelURLFromLine(line string) string {
-	return providerURLFromLine("localhost-run", line)
+	return providerURLFromLine(tunnel.ProviderLocalhostRun, line)
 }
 
 func providerURLFromLine(providerID, line string) string {
@@ -312,11 +312,11 @@ func validProviderURL(providerID, candidate string) bool {
 	}
 	host := strings.ToLower(u.Hostname())
 	switch providerID {
-	case "cloudflare-quick":
+	case tunnel.ProviderCloudflareQuick:
 		return strictSubdomain(host, "trycloudflare.com")
-	case "localhost-run":
+	case tunnel.ProviderLocalhostRun:
 		return strictSubdomain(host, "lhr.life") || (strictSubdomain(host, "localhost.run") && host != "admin.localhost.run")
-	case "pinggy":
+	case tunnel.ProviderPinggy:
 		return strictSubdomain(host, "pinggy.link") || strictSubdomain(host, "pinggy-free.link")
 	default:
 		return false
@@ -347,7 +347,7 @@ func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.
 		args = append(args, "--protocol", protocol)
 	}
 	args = append(args, "--url", localURL)
-	return startTunnelCommand(ctx, stderr, "cloudflare-quick", append([]string{cfPath}, args...), timeout)
+	return startTunnelCommand(ctx, stderr, tunnel.ProviderCloudflareQuick, append([]string{cfPath}, args...), timeout)
 }
 
 type runningTunnel struct {
@@ -436,7 +436,7 @@ type cliTunnelProvider struct {
 func newCloudflareQuickProvider(stderr io.Writer) tunnel.Provider {
 	return cliTunnelProvider{
 		metadata: tunnel.ProviderMetadata{
-			ID: "cloudflare-quick", DisplayName: "Cloudflare Quick Tunnel", Protocols: []string{"https"},
+			ID: tunnel.ProviderCloudflareQuick, DisplayName: "Cloudflare Quick Tunnel", Protocols: []string{"https"},
 			Anonymous: true, Executable: "cloudflared", DocumentationURL: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/", DefaultAutomatic: true,
 		},
 		stderr: stderr,
@@ -449,7 +449,7 @@ func newCloudflareQuickProvider(stderr io.Writer) tunnel.Provider {
 func newLocalhostRunProvider(stderr io.Writer, knownHostsFile string) tunnel.Provider {
 	return cliTunnelProvider{
 		metadata: tunnel.ProviderMetadata{
-			ID: "localhost-run", DisplayName: "localhost.run", Protocols: []string{"https", "ssh"},
+			ID: tunnel.ProviderLocalhostRun, DisplayName: "localhost.run", Protocols: []string{"https", "ssh"},
 			Anonymous: true, Executable: "ssh", DocumentationURL: "https://localhost.run/docs/", RequiresSSHPin: true,
 		},
 		stderr: stderr, knownHostsFile: knownHostsFile,
@@ -462,7 +462,7 @@ func newLocalhostRunProvider(stderr io.Writer, knownHostsFile string) tunnel.Pro
 func newPinggyProvider(stderr io.Writer, knownHostsFile string) tunnel.Provider {
 	return cliTunnelProvider{
 		metadata: tunnel.ProviderMetadata{
-			ID: "pinggy", DisplayName: "Pinggy", Protocols: []string{"https", "ssh"},
+			ID: tunnel.ProviderPinggy, DisplayName: "Pinggy", Protocols: []string{"https", "ssh"},
 			Anonymous: true, Executable: "ssh", DocumentationURL: "https://pinggy.io/docs/", RequiresSSHPin: true,
 		},
 		stderr: stderr, knownHostsFile: knownHostsFile,

@@ -594,6 +594,90 @@ func TestSupportSessionConnectRejectsInvalidProviderPolicy(t *testing.T) {
 	}
 }
 
+func TestSupportSessionConnectRejectsUnknownProviderIDs(t *testing.T) {
+	tests := []struct {
+		name string
+		body func(t *testing.T, dir string) string
+	}{
+		{
+			name: "allowed URL",
+			body: func(*testing.T, string) string {
+				return `{"allowed_provider_ids":["https://provider.example.test/credential"]}`
+			},
+		},
+		{
+			name: "disabled IP",
+			body: func(*testing.T, string) string {
+				return `{"disabled_provider_ids":["198.51.100.42"]}`
+			},
+		},
+		{
+			name: "evidence credential-like ID",
+			body: func(t *testing.T, dir string) string {
+				now := time.Now().UTC()
+				evidence := tunnel.RegionalEvidence{
+					ProviderID: "super-secret-token", Region: tunnel.RegionGlobal, Status: tunnel.EvidenceVerified,
+					Issuer: "reviewed-probe", ObservedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+					Samples: []tunnel.NetworkSample{{Carrier: "probe-network", Region: "global", Success: true}},
+				}
+				encoded, err := json.Marshal(evidence)
+				if err != nil {
+					t.Fatal(err)
+				}
+				evidencePath := filepath.Join(dir, "evidence.json")
+				if err := os.WriteFile(evidencePath, encoded, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return fmt.Sprintf(`{"regional_evidence_paths":[%q]}`, evidencePath)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			policyPath := filepath.Join(dir, "providers.json")
+			if err := os.WriteFile(policyPath, []byte(tt.body(t, dir)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			server := NewServer(gateway.NewMemoryGateway())
+			if _, err := server.supportSessionConnect(map[string]any{
+				"gateway_url":     "https://gateway.example.test",
+				"region":          "global",
+				"provider_policy": policyPath,
+			}); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+				t.Fatalf("unknown provider ID must be rejected, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSupportSessionConnectAllowsConfiguredGatewayIDOnlyWithResolvedGateway(t *testing.T) {
+	for _, name := range []string{
+		"RDEV_HOSTED_GATEWAY_URL", "RDEV_RELAY_GATEWAY_URL", "RDEV_MESH_GATEWAY_URL",
+		"RDEV_VPN_GATEWAY_URL", "RDEV_SSH_GATEWAY_URL", "RDEV_CLOUDFLARED_GATEWAY_URL",
+	} {
+		t.Setenv(name, "")
+	}
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	if err := os.WriteFile(policyPath, []byte(`{"allowed_provider_ids":["configured-gateway"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(gateway.NewMemoryGateway())
+	if _, err := server.supportSessionConnect(map[string]any{
+		"region":          "global",
+		"provider_policy": policyPath,
+	}); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("configured-gateway must be rejected without a resolved gateway, got %v", err)
+	}
+	if _, err := server.supportSessionConnect(map[string]any{
+		"gateway_url":     "https://gateway.example.test",
+		"region":          "global",
+		"provider_policy": policyPath,
+	}); err != nil {
+		t.Fatalf("configured-gateway must be allowed with an explicit gateway: %v", err)
+	}
+}
+
 func validMCPMainlandSamples() []tunnel.NetworkSample {
 	var samples []tunnel.NetworkSample
 	for _, carrier := range []string{"china-telecom", "china-unicom", "china-mobile"} {

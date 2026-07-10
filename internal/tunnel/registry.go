@@ -7,6 +7,31 @@ import (
 	"strings"
 )
 
+const (
+	ProviderCloudflareQuick = "cloudflare-quick"
+	ProviderLocalhostRun    = "localhost-run"
+	ProviderPinggy          = "pinggy"
+)
+
+var canonicalProviderIDs = []string{
+	ProviderCloudflareQuick,
+	ProviderLocalhostRun,
+	ProviderPinggy,
+}
+
+func CanonicalProviderIDs() []string {
+	return append([]string(nil), canonicalProviderIDs...)
+}
+
+func IsCanonicalProviderID(id string) bool {
+	for _, candidate := range canonicalProviderIDs {
+		if id == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 type Selection struct {
 	Provider    Provider
 	Metadata    ProviderMetadata

@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -139,5 +140,27 @@ func TestRegistryReturnedSlicesAreIndependent(t *testing.T) {
 	selectedAgain := r.Select(Policy{Region: RegionCNMainland, Now: now}, evidence)
 	if selectedAgain[0].Metadata.Protocols[0] != "https" || selectedAgain[0].Eligibility.Evidence.Samples[0].Carrier != "china-telecom" {
 		t.Fatalf("Select retained returned data: %#v", selectedAgain)
+	}
+}
+
+func TestCanonicalProviderIDsAreFixedAndReturnedAsCopy(t *testing.T) {
+	got := CanonicalProviderIDs()
+	want := []string{"cloudflare-quick", "localhost-run", "pinggy"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("CanonicalProviderIDs() = %v, want %v", got, want)
+	}
+	got[0] = "mutated"
+	if CanonicalProviderIDs()[0] != "cloudflare-quick" {
+		t.Fatal("CanonicalProviderIDs returned mutable shared storage")
+	}
+	for _, id := range want {
+		if !IsCanonicalProviderID(id) {
+			t.Fatalf("expected canonical provider %q", id)
+		}
+	}
+	for _, id := range []string{"", "configured-gateway", "https://provider.example", "198.51.100.9", "super-secret-token"} {
+		if IsCanonicalProviderID(id) {
+			t.Fatalf("unexpected canonical provider %q", id)
+		}
 	}
 }
