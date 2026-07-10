@@ -6,16 +6,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 )
 
 const MaxProtectedJSONBytes = 1 << 20
 
 // ReadProtectedJSONFile opens path before validating and strictly decoding it.
-// POSIX permissions are verified locally. Windows callers provide an explicit
-// path, but ACL verification is intentionally not claimed by this helper.
+// Platform-specific permission checks inspect the same opened file handle that
+// is later decoded.
 func ReadProtectedJSONFile(path string, destination any) error {
-	file, err := os.Open(path)
+	file, err := openProtectedJSONFile(path)
 	if err != nil {
 		return fmt.Errorf("open protected JSON file: %w", err)
 	}
@@ -35,7 +34,7 @@ func ReadProtectedJSONFile(path string, destination any) error {
 	if pathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, pathInfo) {
 		return fmt.Errorf("protected JSON input must not be a symlink or replaced path")
 	}
-	if err := validateProtectedJSONPermissions(runtime.GOOS, info.Mode().Perm()); err != nil {
+	if err := validateProtectedJSONPermissions(file, info); err != nil {
 		return err
 	}
 
@@ -57,16 +56,6 @@ func ReadProtectedJSONFile(path string, destination any) error {
 			return fmt.Errorf("decode protected JSON: trailing JSON value is not allowed")
 		}
 		return fmt.Errorf("decode protected JSON trailing data: %w", err)
-	}
-	return nil
-}
-
-func validateProtectedJSONPermissions(goos string, permissions os.FileMode) error {
-	if goos == "windows" {
-		return fmt.Errorf("protected JSON ACL validation unavailable on Windows")
-	}
-	if permissions&^os.FileMode(0o600) != 0 {
-		return fmt.Errorf("protected JSON permissions must be 0600 or narrower")
 	}
 	return nil
 }

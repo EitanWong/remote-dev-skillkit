@@ -6,6 +6,7 @@ require (
 	github.com/beevik/etree v1.6.0
 	github.com/russellhaering/gosaml2 v0.11.0
 	github.com/russellhaering/goxmldsig v1.6.0
+	golang.org/x/sys v0.47.0
 )
 
 require (

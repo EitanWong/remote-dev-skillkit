@@ -57,6 +57,9 @@ func TestReadProtectedJSONFileRejectsUnsafeOrInvalidInputs(t *testing.T) {
 }
 
 func TestReadProtectedJSONFileAcceptsStrictProtectedJSON(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows acceptance uses an explicitly controlled DACL")
+	}
 	path := protectedJSONPath(`{"name":"safe"}`, 0o600)(t)
 	var got protectedJSONFixture
 	if err := ReadProtectedJSONFile(path, &got); err != nil {
@@ -64,15 +67,6 @@ func TestReadProtectedJSONFileAcceptsStrictProtectedJSON(t *testing.T) {
 	}
 	if got.Name != "safe" {
 		t.Fatalf("unexpected decoded value: %#v", got)
-	}
-}
-
-func TestProtectedJSONPermissionsFailClosedWithoutWindowsACLValidation(t *testing.T) {
-	if err := validateProtectedJSONPermissions("windows", 0o600); err == nil || !strings.Contains(err.Error(), "ACL validation unavailable") {
-		t.Fatalf("Windows must fail closed until ACL validation exists, got %v", err)
-	}
-	if err := validateProtectedJSONPermissions("linux", 0o600); err != nil {
-		t.Fatalf("protected POSIX mode rejected: %v", err)
 	}
 }
 
