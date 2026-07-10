@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -59,6 +58,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tasktemplate"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
@@ -3780,32 +3780,35 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	return writeJSON(a.Stdout, supportsession.BuildConnectFromCreated(created))
 }
 
-// startBestAvailableTunnel tries ephemeral public tunnel providers in order
-// until one succeeds. The order is:
-//
-//  1. cloudflared quick-tunnel (zero-auth, ephemeral fallback)
-//  2. localhost.run via SSH (fallback, needs only openssh client)
-//
-// If none succeed it logs a warning and returns ("", noop) — the caller
-// falls back to LAN-only connectivity.
+// startBestAvailableTunnel tries policy-eligible ephemeral public tunnel
+// providers in deterministic registry order. SSH providers remain unavailable
+// until an operator supplies a reviewed known-hosts file.
 func startBestAvailableTunnel(ctx context.Context, stderr io.Writer, localListenURL, localPort string) (string, context.CancelFunc) {
-	// --- Provider 1: cloudflared ---
-	_, _ = fmt.Fprintf(stderr, "[rdev] trying cloudflared quick-tunnel for %s ...\n", localListenURL)
-	tunnelURL, cancel, err := startCloudflaredQuickTunnel(ctx, stderr, localListenURL)
-	if err == nil {
-		_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared quick-tunnel active: %s\n", tunnelURL)
-		return tunnelURL, cancel
+	knownHostsFile := strings.TrimSpace(os.Getenv("RDEV_SSH_KNOWN_HOSTS_FILE"))
+	registry, err := tunnel.NewRegistry(
+		newCloudflareQuickProvider(stderr),
+		newLocalhostRunProvider(stderr, knownHostsFile),
+		newPinggyProvider(stderr, knownHostsFile),
+	)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "[rdev] public tunnel provider registry failed: %v\n", err)
+		return "", func() {}
 	}
-	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared failed: %v\n", err)
-
-	// --- Provider 2: localhost.run (SSH reverse tunnel) ---
-	_, _ = fmt.Fprintf(stderr, "[rdev] trying localhost.run SSH tunnel for port %s ...\n", localPort)
-	tunnelURL, cancel, err = startLocalhostRunTunnel(ctx, stderr, localPort)
-	if err == nil {
-		_, _ = fmt.Fprintf(stderr, "[rdev] localhost.run tunnel active: %s\n", tunnelURL)
-		return tunnelURL, cancel
+	request := tunnel.StartRequest{LocalURL: localListenURL, LocalPort: localPort, KnownHostsFile: knownHostsFile}
+	for _, selection := range registry.Select(tunnel.Policy{Region: tunnel.RegionGlobal, AllowNonDefault: true}, nil) {
+		providerID := selection.Provider.ID()
+		_, _ = fmt.Fprintf(stderr, "[rdev] trying %s public tunnel ...\n", providerID)
+		handle, startErr := selection.Provider.Start(ctx, request)
+		if startErr != nil {
+			_, _ = fmt.Fprintf(stderr, "[rdev] %s failed: %v\n", providerID, startErr)
+			continue
+		}
+		candidate := handle.Candidate()
+		_, _ = fmt.Fprintf(stderr, "[rdev] %s public tunnel active: %s\n", providerID, candidate.URL)
+		return candidate.URL, func() {
+			_ = handle.Stop(context.Background())
+		}
 	}
-	_, _ = fmt.Fprintf(stderr, "[rdev] localhost.run failed: %v\n", err)
 
 	_, _ = fmt.Fprintf(stderr, "[rdev] all public tunnel providers failed; falling back to LAN gateway\n")
 	return "", func() {}
@@ -3994,181 +3997,6 @@ func startConfiguredCloudflaredStableTunnel(ctx context.Context, stderr io.Write
 				}
 			}
 		}, nil
-	}
-}
-
-// startLocalhostRunTunnel creates a public HTTPS tunnel through localhost.run
-// using only an OpenSSH client (available on macOS, Linux, and Windows 10+).
-// It runs: ssh -o StrictHostKeyChecking=no -R 80:localhost:PORT nokey@localhost.run
-// and scans stdout/stderr for the assigned https://*.localhost.run URL.
-func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort string) (string, context.CancelFunc, error) {
-	sshPath, err := exec.LookPath("ssh")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("ssh not found in PATH: %w", err)
-	}
-	tunnelCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(tunnelCtx, sshPath,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=3",
-		"-o", "ExitOnForwardFailure=yes",
-		"-R", "80:localhost:"+localPort,
-		"nokey@localhost.run",
-	)
-	pr, pw := io.Pipe()
-	combined := io.MultiWriter(pw, stderr)
-	cmd.Stdout = combined
-	cmd.Stderr = combined
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = pw.Close()
-		return "", func() {}, fmt.Errorf("localhost.run ssh start failed: %w", err)
-	}
-	urlCh := make(chan string, 1)
-	go func() {
-		defer pw.Close()
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			if candidate := localhostRunTunnelURLFromLine(scanner.Text()); candidate != "" {
-				select {
-				case urlCh <- candidate:
-				default:
-				}
-			}
-		}
-	}()
-	select {
-	case tunnelURL := <-urlCh:
-		return tunnelURL, cancel, nil
-	case <-time.After(20 * time.Second):
-		cancel()
-		_ = pr.Close()
-		return "", func() {}, fmt.Errorf("localhost.run did not print a tunnel URL within 20s")
-	}
-}
-
-func localhostRunTunnelURLFromLine(line string) string {
-	for remaining := line; ; {
-		idx := strings.Index(remaining, "https://")
-		if idx < 0 {
-			return ""
-		}
-		rest := remaining[idx:]
-		end := strings.IndexAny(rest, " \t\n\r")
-		if end < 0 {
-			end = len(rest)
-		}
-		candidate := strings.Trim(strings.TrimRight(rest[:end], "/"), "\"'()[]{}<>,;|")
-		u, err := url.Parse(candidate)
-		if err == nil && strings.EqualFold(u.Scheme, "https") && u.Host != "" && u.User == nil {
-			host := strings.ToLower(u.Hostname())
-			if strings.HasSuffix(host, ".lhr.life") ||
-				(strings.HasSuffix(host, ".localhost.run") && host != "admin.localhost.run") {
-				return candidate
-			}
-		}
-		remaining = rest[end:]
-	}
-}
-
-// in the background and waits up to 30 seconds for it to print a public HTTPS tunnel URL.
-//
-// It always uses --protocol http2 first because many networks (particularly those behind
-// corporate firewalls or in China) block UDP/QUIC. If http2 fails to produce a URL within
-// the timeout the function returns an error; the caller can retry or fall back to another
-// tunnel provider.
-//
-// The returned cancel function must be called when the session ends to clean up the
-// cloudflared process.
-//
-// On success it returns (tunnelURL, cancel, nil).
-// On failure it returns ("", noop, err).
-func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (string, context.CancelFunc, error) {
-	cfPath, err := exec.LookPath("cloudflared")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("cloudflared not found in PATH: %w", err)
-	}
-
-	// Attempt 1: force HTTP/2 (TCP-based, works in networks that block QUIC/UDP).
-	tunnelURL, cancel, err := startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "http2", 25*time.Second)
-	if err == nil {
-		return tunnelURL, cancel, nil
-	}
-	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared http2 attempt failed (%v); retrying without protocol flag\n", err)
-
-	// Attempt 2: let cloudflared choose the protocol (QUIC, then http2 fallback).
-	// Some older cloudflared versions do not accept --protocol http2, so this
-	// second attempt keeps backward compatibility.
-	return startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "", 20*time.Second)
-}
-
-// startCloudflaredWithProtocol is the inner helper that launches a single cloudflared
-// process with an optional --protocol flag and scans its stderr for a trycloudflare.com URL.
-func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.Writer, localURL, protocol string, timeout time.Duration) (string, context.CancelFunc, error) {
-	tunnelCtx, cancel := context.WithCancel(ctx)
-
-	args := []string{"tunnel"}
-	if protocol != "" {
-		args = append(args, "--protocol", protocol)
-	}
-	args = append(args, "--url", localURL)
-
-	cmd := exec.CommandContext(tunnelCtx, cfPath, args...)
-	// cloudflared prints the tunnel URL to stderr
-	pr, pw := io.Pipe()
-	cmd.Stderr = io.MultiWriter(pw, stderr)
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = pw.Close()
-		return "", func() {}, fmt.Errorf("cloudflared start failed (protocol=%q): %w", protocol, err)
-	}
-
-	// Scan stderr for the tunnel URL (looks like https://*.trycloudflare.com).
-	// Candidates must pass URL parsing to prevent garbled error lines from being
-	// accepted as tunnel addresses (cloudflared occasionally writes error text on
-	// the same line as a partial URL when the tunnel fails to establish).
-	urlCh := make(chan string, 1)
-	go func() {
-		defer pw.Close()
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if idx := strings.Index(line, "https://"); idx >= 0 {
-				rest := line[idx:]
-				end := strings.IndexAny(rest, " \t\n\r|")
-				if end < 0 {
-					end = len(rest)
-				}
-				candidate := strings.TrimRight(rest[:end], "/")
-				if !strings.Contains(candidate, ".trycloudflare.com") {
-					continue
-				}
-				// Strict validation: must parse as a URL with https scheme and
-				// a non-empty host that does not contain whitespace or error
-				// keywords that indicate cloudflared wrote a diagnostic line
-				// rather than an actual tunnel address.
-				u, err := url.Parse(candidate)
-				if err != nil || u.Scheme != "https" || u.Host == "" {
-					continue
-				}
-				if strings.ContainsAny(u.Host, " \t\n\r") {
-					continue
-				}
-				select {
-				case urlCh <- candidate:
-				default:
-				}
-			}
-		}
-	}()
-
-	select {
-	case tunnelURL := <-urlCh:
-		return tunnelURL, cancel, nil
-	case <-time.After(timeout):
-		cancel()
-		_ = pr.Close()
-		return "", func() {}, fmt.Errorf("cloudflared (protocol=%q) did not print a tunnel URL within %v", protocol, timeout)
 	}
 }
 
