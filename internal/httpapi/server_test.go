@@ -23,6 +23,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 func TestCreateTicketAndAudit(t *testing.T) {
@@ -86,6 +87,55 @@ func TestHealthzIncludesGatewayInstanceMarker(t *testing.T) {
 	}
 	if secondMarker := readMarker(t, second); secondMarker == firstMarker {
 		t.Fatalf("expected distinct per-server markers, both were %q", firstMarker)
+	}
+}
+
+func TestBootstrapProbeTemplateIsStaticAndDoesNotMutateGateway(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	before := gw.Snapshot()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/support-session/bootstrap-probe.ps1?ignored=value", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Rdev-Gateway-Instance"); got != server.GatewayInstance() {
+		t.Fatalf("gateway instance header = %q, want %q", got, server.GatewayInstance())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("content type = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("cache control = %q", got)
+	}
+	body := rec.Body.String()
+	if body != tunnel.BootstrapProbePowerShell {
+		t.Fatalf("probe template mismatch: %q", body)
+	}
+	for _, want := range []string{"$ErrorActionPreference = 'Stop'", "rdev-bootstrap-probe-v1"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("probe template missing %q: %s", want, body)
+		}
+	}
+	for _, forbidden := range []string{"ticket_code", "/v1/hosts/register", "host serve", "Invoke-RestMethod"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("probe template contains enrollment capability %q: %s", forbidden, body)
+		}
+	}
+	if rec.Body.Len() == 0 || rec.Body.Len() > 4096 {
+		t.Fatalf("probe template size = %d", rec.Body.Len())
+	}
+
+	post := httptest.NewRecorder()
+	handler.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/v1/support-session/bootstrap-probe.ps1?ticket_code=ignored", strings.NewReader(`{"ticket_code":"ignored"}`)))
+	if post.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected POST 405, got %d: %s", post.Code, post.Body.String())
+	}
+	after := gw.Snapshot()
+	if len(after.Tickets) != len(before.Tickets) || len(after.Hosts) != len(before.Hosts) || len(after.Audit) != len(before.Audit) {
+		t.Fatalf("probe requests mutated gateway: before=%#v after=%#v", before, after)
 	}
 }
 

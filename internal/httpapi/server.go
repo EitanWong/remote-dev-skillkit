@@ -25,6 +25,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 type Server struct {
@@ -108,6 +109,7 @@ func (s *Server) GatewayInstance() string {
 func (s Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /v1/support-session/bootstrap-probe.ps1", s.bootstrapProbeTemplate)
 	mux.HandleFunc("GET /v1/trust", s.trust)
 	mux.HandleFunc("GET /v1/trust-bundle", s.getTrustBundle)
 	mux.HandleFunc("GET /v1/enrollment/revocations", s.getEnrollmentRevocations)
@@ -126,6 +128,16 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/support-session/status", s.supportSessionStatus)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
 	return mux
+}
+
+func (s Server) bootstrapProbeTemplate(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("X-Rdev-Gateway-Instance", s.gatewayInstance)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Length", strconv.Itoa(len(tunnel.BootstrapProbePowerShell)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, tunnel.BootstrapProbePowerShell)
 }
 
 func (s Server) health(w http.ResponseWriter, r *http.Request) {

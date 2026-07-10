@@ -76,6 +76,7 @@ type supportSessionStartDeps struct {
 	Registry             tunnel.Registry
 	Evidence             []tunnel.RegionalEvidence
 	Manager              tunnel.Manager
+	BootstrapProbe       func(context.Context, tunnel.Candidate, string) error
 	FinalProbe           func(context.Context, tunnel.Candidate, string, string) error
 	RecordEvent          func(string)
 	WaitForLocalHealth   func(context.Context, gatewayServerHandle, string, time.Duration) error
@@ -4444,6 +4445,32 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		gatewayURL = availability.Candidates[0].URL
 		gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
 	}
+	bootstrapProbe := deps.BootstrapProbe
+	if bootstrapProbe == nil {
+		bootstrapProbe = func(probeCtx context.Context, candidate tunnel.Candidate, instance string) error {
+			_, err := tunnel.ProbeBootstrapTemplate(probeCtx, nil, candidate, instance)
+			return err
+		}
+	}
+	availability = bootstrapProbeAvailability(ctx, availability, server.GatewayInstance(), bootstrapProbe)
+	if len(availability.Candidates) == 0 {
+		diagnostic := map[string]any{
+			"schema_version": "rdev.support-session-start-diagnostic.v1",
+			"ready_to_send":  false,
+			"reason":         "no_public_gateway_candidate_passed_static_bootstrap_probe",
+			"availability":   availability,
+		}
+		if err := writeJSONFile0600(statusFile, diagnostic); err != nil {
+			return err
+		}
+		if err := writeJSON(a.Stdout, diagnostic); err != nil {
+			return err
+		}
+		return errors.New("no public gateway candidate passed the static bootstrap probe")
+	}
+	gatewayURL = availability.Candidates[0].URL
+	gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
+
 	finalProbe := deps.FinalProbe
 	if finalProbe == nil {
 		finalProbe = func(probeCtx context.Context, candidate tunnel.Candidate, ticketCode, instance string) error {
@@ -4461,27 +4488,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		}
 		return addGatewayCandidateTicketMetadata(metadata, candidates)
 	}
-	var ticket model.Ticket
-	if len(availability.Candidates) > 0 {
-		provisional, createErr := gw.CreateTicketWithMetadata(
-			model.HostModeAttendedTemporary,
-			opts.TTLSeconds,
-			cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
-			opts.Reason,
-			ticketMetadata(gatewayCandidates),
-		)
-		if createErr != nil {
-			return createErr
-		}
-		availability = finalProbeAvailability(ctx, availability, provisional.Code, server.GatewayInstance(), finalProbe)
-		_, _ = gw.RevokeTicket(provisional.ID, "provisional bootstrap candidate filtering complete")
-		if len(availability.Candidates) == 0 {
-			return fmt.Errorf("provisional ticket bootstrap probe rejected every public gateway candidate")
-		}
-		gatewayURL = availability.Candidates[0].URL
-		gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
-	}
-	ticket, err = gw.CreateTicketWithMetadata(
+	ticket, err := gw.CreateTicketWithMetadata(
 		model.HostModeAttendedTemporary,
 		opts.TTLSeconds,
 		cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
@@ -4641,6 +4648,30 @@ func finalProbeAvailability(ctx context.Context, set tunnel.AvailabilitySet, tic
 				if final.Attempts[index].ProviderID == candidate.ProviderID {
 					final.Attempts[index].Status = tunnel.AttemptDegraded
 					final.Attempts[index].ErrorClass = "bootstrap-probe-failed"
+				}
+			}
+			continue
+		}
+		final.Candidates = append(final.Candidates, candidate)
+		for index := range final.Attempts {
+			if final.Attempts[index].ProviderID == candidate.ProviderID {
+				final.Attempts[index].Probe.BootstrapOK = true
+				final.Attempts[index].Probe.SmallAssetOK = true
+			}
+		}
+	}
+	return final
+}
+
+func bootstrapProbeAvailability(ctx context.Context, set tunnel.AvailabilitySet, instance string, probe func(context.Context, tunnel.Candidate, string) error) tunnel.AvailabilitySet {
+	final := set
+	final.Candidates = make([]tunnel.Candidate, 0, len(set.Candidates))
+	for _, candidate := range set.Candidates {
+		if err := probe(ctx, candidate, instance); err != nil {
+			for index := range final.Attempts {
+				if final.Attempts[index].ProviderID == candidate.ProviderID {
+					final.Attempts[index].Status = tunnel.AttemptDegraded
+					final.Attempts[index].ErrorClass = "bootstrap-template-probe-failed"
 				}
 			}
 			continue

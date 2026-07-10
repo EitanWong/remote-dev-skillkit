@@ -525,6 +525,38 @@ func TestProbeBootstrapAssetRequiresPowerShellContentAndMarker(t *testing.T) {
 	}
 }
 
+func TestProbeBootstrapTemplateRequiresStaticMarkerAndExactInstance(t *testing.T) {
+	tests := []struct {
+		name, instance, contentType, body string
+		wantOK                            bool
+	}{
+		{name: "valid", instance: "instance", contentType: "text/plain; charset=utf-8", body: BootstrapProbePowerShell, wantOK: true},
+		{name: "wrong instance", instance: "other", contentType: "text/plain", body: "$ErrorActionPreference = 'Stop'\n# rdev-bootstrap-probe-v1\n"},
+		{name: "missing marker", instance: "instance", contentType: "text/plain", body: "$ErrorActionPreference = 'Stop'\n"},
+		{name: "ticket bootstrap", instance: "instance", contentType: "text/plain", body: "$ErrorActionPreference = 'Stop'\n# rdev-bootstrap-probe-v1\n$TicketCode = 'ABCD-EFGH'\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Rdev-Gateway-Instance", tt.instance)
+				w.Header().Set("Content-Type", tt.contentType)
+				if r.URL.Path != "/v1/support-session/bootstrap-probe.ps1" {
+					t.Fatalf("probe path = %q", r.URL.Path)
+				}
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			evidence, err := probeBootstrapTemplateWithOptions(context.Background(), Candidate{ProviderID: "provider", URL: "https://public.example.test"}, "instance", publicTestProbeOptions(t, server))
+			if tt.wantOK && (err != nil || !evidence.BootstrapOK || !evidence.SmallAssetOK) {
+				t.Fatalf("valid template rejected: evidence=%#v err=%v", evidence, err)
+			}
+			if !tt.wantOK && err == nil {
+				t.Fatal("invalid template accepted")
+			}
+		})
+	}
+}
+
 func publicTestProbeOptions(t *testing.T, server *httptest.Server) probeOptions {
 	t.Helper()
 	target, err := url.Parse(server.URL)

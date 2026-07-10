@@ -20,8 +20,13 @@ import (
 )
 
 const (
-	maxProbeBody          = 256 << 10
-	bootstrapScriptMarker = "$ErrorActionPreference = 'Stop'"
+	maxProbeBody             = 256 << 10
+	bootstrapScriptMarker    = "$ErrorActionPreference = 'Stop'"
+	BootstrapProbeMarker     = "rdev-bootstrap-probe-v1"
+	BootstrapProbePowerShell = `$ErrorActionPreference = 'Stop'
+# rdev-bootstrap-probe-v1
+Write-Output 'rdev-bootstrap-probe-v1'
+`
 )
 
 type probeResolver interface {
@@ -47,6 +52,10 @@ func ProbeGatewayHealth(ctx context.Context, client *http.Client, candidate Cand
 
 func ProbeBootstrapAsset(ctx context.Context, client *http.Client, candidate Candidate, ticketCode, expectedInstance string) (ProbeEvidence, error) {
 	return probeBootstrapAssetWithOptions(ctx, candidate, ticketCode, expectedInstance, probeOptionsFromClient(client))
+}
+
+func ProbeBootstrapTemplate(ctx context.Context, client *http.Client, candidate Candidate, expectedInstance string) (ProbeEvidence, error) {
+	return probeBootstrapTemplateWithOptions(ctx, candidate, expectedInstance, probeOptionsFromClient(client))
 }
 
 func probeGatewayHealthWithOptions(ctx context.Context, candidate Candidate, expectedInstance string, options probeOptions) (ProbeEvidence, error) {
@@ -96,6 +105,36 @@ func probeBootstrapAssetWithOptions(ctx context.Context, candidate Candidate, ti
 	if !bytes.Contains(body, []byte(bootstrapScriptMarker)) {
 		return evidence, errors.New("bootstrap script marker missing")
 	}
+	evidence.BootstrapOK = true
+	evidence.SmallAssetOK = true
+	return evidence, nil
+}
+
+func probeBootstrapTemplateWithOptions(ctx context.Context, candidate Candidate, expectedInstance string, options probeOptions) (ProbeEvidence, error) {
+	started := time.Now()
+	base, err := validatePublicCandidate(candidate)
+	if err != nil {
+		return ProbeEvidence{}, err
+	}
+	probeURL := *base
+	probeURL.Path = strings.TrimRight(base.Path, "/") + "/v1/support-session/bootstrap-probe.ps1"
+	probeURL.RawPath = ""
+	probeURL.RawQuery = ""
+	probeURL.Fragment = ""
+	stages := &probeStages{}
+	body, marker, err := probeResponse(ctx, newProbeHTTPClient(nil, optionsWithStages(options, stages)), probeURL.String(), expectedInstance, true, stages)
+	evidence := stages.evidence(time.Since(started))
+	if err != nil {
+		return evidence, err
+	}
+	if expectedInstance == "" || marker != expectedInstance {
+		return evidence, errors.New("gateway instance marker mismatch")
+	}
+	if !bytes.Equal(body, []byte(BootstrapProbePowerShell)) {
+		return evidence, errors.New("bootstrap probe template mismatch")
+	}
+	evidence.HealthOK = true
+	evidence.InstanceMarker = marker
 	evidence.BootstrapOK = true
 	evidence.SmallAssetOK = true
 	return evidence, nil

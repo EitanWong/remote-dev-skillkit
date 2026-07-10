@@ -53,6 +53,10 @@ func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]strin
 	return supportSessionStartDeps{
 		Registry: registry,
 		Manager:  tunnel.Manager{MaxActive: 2, StartTimeout: 25 * time.Second, ProbeTimeout: 15 * time.Second},
+		BootstrapProbe: func(ctx context.Context, candidate tunnel.Candidate, instance string) error {
+			_, err := tunnel.ProbeBootstrapTemplate(ctx, nil, candidate, instance)
+			return err
+		},
 		FinalProbe: func(ctx context.Context, candidate tunnel.Candidate, ticketCode, instance string) error {
 			_, err := tunnel.ProbeBootstrapAsset(ctx, nil, candidate, ticketCode, instance)
 			return err
