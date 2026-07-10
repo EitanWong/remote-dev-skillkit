@@ -82,6 +82,8 @@ type supportSessionStartDeps struct {
 	WaitForLocalHealth   func(context.Context, gatewayServerHandle, string, time.Duration) error
 	WaitForGatewayServer func(context.Context, gatewayServerHandle) error
 	StateStore           gateway.StateStore
+	LivenessInterval     time.Duration
+	LivenessFailures     int
 }
 
 func NewApp(stdout, stderr io.Writer) App {
@@ -4539,15 +4541,29 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		}
 		return addGatewayCandidateTicketMetadata(metadata, candidates)
 	}
-	ticket, availability, err := createFinalProbedSupportTicket(ctx, gw, store, availability, opts.TTLSeconds, opts.Reason, ticketMetadata, finalProbe, server.GatewayInstance())
-	if err != nil {
-		return err
-	}
-	if availabilityRuntime != nil {
+	var ticket model.Ticket
+	for retries := len(availability.Candidates); ; retries-- {
+		ticket, availability, err = createFinalProbedSupportTicket(ctx, gw, store, availability, opts.TTLSeconds, opts.Reason, ticketMetadata, finalProbe, server.GatewayInstance())
+		if err != nil {
+			return err
+		}
+		if availabilityRuntime == nil {
+			break
+		}
 		liveAvailability := intersectAvailabilityWithRuntime(availability, availabilityRuntime.Snapshot())
-		if !sameAvailabilityCandidates(availability, liveAvailability) {
-			rollbackErr := rollbackSupportTicket(gw, store, ticket.ID, "tunnel availability changed before handoff publication")
-			return errors.Join(errors.New("tunnel availability changed before handoff publication"), rollbackErr)
+		if sameAvailabilityCandidates(availability, liveAvailability) {
+			availability = liveAvailability
+			break
+		}
+		rollbackErr := rollbackSupportTicket(gw, store, ticket.ID, "tunnel availability changed before handoff publication")
+		if rollbackErr != nil {
+			return fmt.Errorf("rollback changed tunnel availability: %w", rollbackErr)
+		}
+		if len(liveAvailability.Candidates) == 0 {
+			return errors.New("all public gateway candidates exited before handoff publication")
+		}
+		if retries <= 1 {
+			return errors.New("tunnel availability did not stabilize before handoff publication")
 		}
 		availability = liveAvailability
 	}
@@ -4619,6 +4635,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
 	availabilityFailure := make(chan error, 1)
+	var livenessProbe func(context.Context) error
+	if availabilityRuntime == nil && len(availability.Candidates) > 0 {
+		candidate := availability.Candidates[0]
+		livenessProbe = func(probeCtx context.Context) error {
+			return finalProbe(probeCtx, candidate, ticket.Code, server.GatewayInstance())
+		}
+	}
 	if readiness.ReadyToSend {
 		go func() {
 			defer close(watchDone)
@@ -4627,6 +4650,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 				ConnectedReportFile: connectedReportFile, JournalPath: publicationJournalPath,
 				Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
 				Locale: opts.Locale, GatewayURL: gatewayURL, Runtime: availabilityRuntime, Published: availability,
+				LivenessProbe: livenessProbe, LivenessInterval: deps.LivenessInterval, LivenessFailures: deps.LivenessFailures,
 				OnInvalidated: func(err error) {
 					select {
 					case availabilityFailure <- err:

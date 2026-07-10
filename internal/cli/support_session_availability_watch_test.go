@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -53,7 +54,7 @@ func TestForegroundAvailabilityLossRevokesTicketAndInvalidatesHandoff(t *testing
 	}
 }
 
-func TestForegroundOneOfTwoRouteDeathFailsClosedWithoutDeadCandidate(t *testing.T) {
+func TestForegroundSecondaryRouteDeathKeepsPrimaryHandoffUntilLastRouteDies(t *testing.T) {
 	runtime, handles := supportSessionAvailabilityRuntime(t, "first", "second")
 	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
 	root := t.TempDir()
@@ -68,20 +69,155 @@ func TestForegroundOneOfTwoRouteDeathFailsClosedWithoutDeadCandidate(t *testing.
 			TicketID: ticket.ID, TicketCode: ticket.Code, Runtime: runtime, Published: published,
 		})
 	}()
-	handles[0].wait <- errors.New("first exited")
+	handles[1].wait <- errors.New("secondary exited")
+	select {
+	case <-done:
+		t.Fatal("secondary route loss revoked a still-usable primary handoff")
+	case <-time.After(150 * time.Millisecond):
+	}
+	current, ok := gw.TicketForCode(ticket.Code)
+	if !ok || current.Status != model.TicketStatusActive {
+		t.Fatalf("secondary route loss changed ticket state: %#v, found=%v", current, ok)
+	}
+	ready, err := os.ReadFile(readyFile)
+	if err != nil || bytes.Contains(ready, []byte("tunnel_availability_lost")) {
+		t.Fatalf("secondary route loss invalidated ready file: %s err=%v", ready, err)
+	}
+
+	handles[0].wait <- errors.New("primary exited")
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("watcher retained stale multi-route handoff")
-	}
-	content, err := os.ReadFile(statusFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(content, []byte("first.example.test")) || !bytes.Contains(content, []byte("second.example.test")) {
-		t.Fatalf("invalidation status retained dead route: %s", content)
+		t.Fatal("last route loss did not invalidate the handoff")
 	}
 	assertAvailabilityInvalidated(t, gw, ticket, readyFile, handoffFile, statusFile)
+}
+
+func TestForegroundPrimaryRouteDeathInvalidatesWhileSecondaryRemainsLive(t *testing.T) {
+	runtime, handles := supportSessionAvailabilityRuntime(t, "primary", "secondary")
+	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
+	root := t.TempDir()
+	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
+	published := runtime.Snapshot()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watchForegroundSupportSessionAvailability(context.Background(), foregroundSupportSessionOptions{
+			Out: &bytes.Buffer{}, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
+			JournalPath: filepath.Join(root, "journal.json"), Gateway: gw, Store: store,
+			TicketID: ticket.ID, TicketCode: ticket.Code, Runtime: runtime, Published: published,
+		})
+	}()
+
+	handles[0].wait <- errors.New("primary exited")
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("primary route loss did not invalidate the handoff while secondary remained live")
+	}
+	assertAvailabilityInvalidated(t, gw, ticket, readyFile, handoffFile, statusFile)
+}
+
+func TestForegroundExplicitGatewayLivenessFailureInvalidatesHandoff(t *testing.T) {
+	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
+	root := t.TempDir()
+	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watchForegroundSupportSessionAvailability(context.Background(), foregroundSupportSessionOptions{
+			Out: &bytes.Buffer{}, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
+			JournalPath: filepath.Join(root, "journal.json"), Gateway: gw, Store: store,
+			TicketID: ticket.ID, TicketCode: ticket.Code,
+			Published: tunnel.AvailabilitySet{
+				SchemaVersion: tunnel.AvailabilitySchemaVersion,
+				Region:        tunnel.RegionGlobal,
+				Candidates:    []tunnel.Candidate{{ProviderID: "explicit", URL: "https://explicit.example.test"}},
+			},
+			LivenessInterval: 10 * time.Millisecond,
+			LivenessProbe: func(context.Context) error {
+				return errors.New("explicit gateway unavailable")
+			},
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("explicit gateway liveness failure did not invalidate handoff")
+	}
+	assertAvailabilityInvalidated(t, gw, ticket, readyFile, handoffFile, statusFile)
+}
+
+func TestForegroundConnectedHostStopsExplicitGatewayLivenessProbe(t *testing.T) {
+	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
+	if _, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "connected-explicit", OS: "windows", Arch: "amd64"}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
+	probeCalls := 0
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watchForegroundSupportSessionAvailability(context.Background(), foregroundSupportSessionOptions{
+			Out: &bytes.Buffer{}, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
+			ConnectedReportFile: filepath.Join(root, "connected.txt"), JournalPath: filepath.Join(root, "journal.json"),
+			Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
+			Published:        tunnel.AvailabilitySet{SchemaVersion: tunnel.AvailabilitySchemaVersion, Region: tunnel.RegionGlobal},
+			LivenessInterval: time.Millisecond,
+			LivenessProbe: func(context.Context) error {
+				probeCalls++
+				return nil
+			},
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("connected explicit host did not stop liveness watcher")
+	}
+	if probeCalls != 0 {
+		t.Fatalf("liveness probe ran %d times after host connected", probeCalls)
+	}
+}
+
+func TestForegroundCancellationRevokesOnlyBeforeConnection(t *testing.T) {
+	for _, connected := range []bool{false, true} {
+		t.Run(fmt.Sprintf("connected=%t", connected), func(t *testing.T) {
+			gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
+			if connected {
+				if _, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "connected-host", OS: "windows", Arch: "amd64"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root := t.TempDir()
+			readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				watchForegroundSupportSessionAvailability(ctx, foregroundSupportSessionOptions{
+					Out: &bytes.Buffer{}, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
+					ConnectedReportFile: filepath.Join(root, "connected.txt"), JournalPath: filepath.Join(root, "journal.json"),
+					Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
+					Published: tunnel.AvailabilitySet{SchemaVersion: tunnel.AvailabilitySchemaVersion, Region: tunnel.RegionGlobal},
+				})
+			}()
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("availability watcher did not stop after cancellation")
+			}
+			current, _ := gw.TicketForCode(ticket.Code)
+			if connected && current.Status != model.TicketStatusActive {
+				t.Fatalf("cancellation after connection revoked ticket: %#v", current)
+			}
+			if !connected && current.Status != model.TicketStatusRevoked {
+				t.Fatalf("cancellation before connection left ticket active: %#v", current)
+			}
+		})
+	}
 }
 
 func TestForegroundConnectedHostStopsAvailabilityWatcher(t *testing.T) {
@@ -305,7 +441,12 @@ func assertAvailabilityInvalidated(t *testing.T, gw *gateway.MemoryGateway, tick
 	}
 	var diagnostic map[string]any
 	content, err := os.ReadFile(readyFile)
-	if err != nil || json.Unmarshal(content, &diagnostic) != nil || diagnostic["ready_to_send"] != false || diagnostic["reason"] != "tunnel_availability_lost" {
+	if err == nil {
+		err = json.Unmarshal(content, &diagnostic)
+	}
+	reason, _ := diagnostic["reason"].(string)
+	if err != nil || diagnostic["ready_to_send"] != false ||
+		(reason != "tunnel_availability_lost" && reason != "explicit_gateway_liveness_lost") {
 		t.Fatalf("ready file was not invalidated: content=%s err=%v", content, err)
 	}
 	handoff, err := os.ReadFile(handoffFile)

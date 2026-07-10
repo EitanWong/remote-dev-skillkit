@@ -21,6 +21,7 @@ type supportSessionPublicationJournal struct {
 	Phase         string                                     `json:"phase"`
 	Artifacts     []supportSessionPublicationJournalArtifact `json:"artifacts"`
 	StatusPath    string                                     `json:"status_path,omitempty"`
+	Reason        string                                     `json:"reason,omitempty"`
 	Availability  tunnel.AvailabilitySet                     `json:"availability,omitempty"`
 }
 
@@ -82,7 +83,7 @@ func recoverSupportSessionPublication(gw *gateway.MemoryGateway, store gateway.S
 		if len(expectedStatusPath) != 1 || publicationPathKey(journal.StatusPath) != publicationPathKey(expectedStatusPath[0]) {
 			return fmt.Errorf("invalidation journal status path does not match expected output")
 		}
-		_, err := completeSupportSessionInvalidation(gw, store, journal.TicketID, expectedPaths[0], expectedPaths[1], journal.StatusPath, journal.Availability)
+		_, err := completeSupportSessionInvalidation(gw, store, journal.TicketID, expectedPaths[0], expectedPaths[1], journal.StatusPath, journal.Availability, journal.Reason)
 		if err != nil {
 			return err
 		}
@@ -101,7 +102,7 @@ func recoverSupportSessionPublication(gw *gateway.MemoryGateway, store gateway.S
 			lost.Attempts[index].Status = tunnel.AttemptExited
 			lost.Attempts[index].ErrorClass = "runtime-not-recovered"
 		}
-		_, err := completeSupportSessionInvalidation(gw, store, journal.TicketID, expectedPaths[0], expectedPaths[1], journal.StatusPath, lost)
+		_, err := completeSupportSessionInvalidation(gw, store, journal.TicketID, expectedPaths[0], expectedPaths[1], journal.StatusPath, lost, "runtime_not_recovered")
 		if err != nil {
 			return err
 		}
