@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,12 +43,83 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type supportSessionTestTunnelProvider struct{}
+
+func (supportSessionTestTunnelProvider) ID() string { return "ordered-test" }
+
+func (supportSessionTestTunnelProvider) Metadata() tunnel.ProviderMetadata {
+	return tunnel.ProviderMetadata{
+		ID: "ordered-test", DisplayName: "ordered test", Protocols: []string{"https"},
+		Anonymous: true, Executable: "test", DocumentationURL: "https://example.test/docs", DefaultAutomatic: true,
+	}
+}
+
+func (supportSessionTestTunnelProvider) Start(context.Context, tunnel.StartRequest) (tunnel.Handle, error) {
+	return newSupportSessionTestTunnelHandle(tunnel.Candidate{ProviderID: "ordered-test", URL: "https://ordered.example.test"}), nil
+}
+
+type supportSessionTestTunnelHandle struct {
+	candidate tunnel.Candidate
+	wait      chan error
+	stopOnce  sync.Once
+}
+
+func newSupportSessionTestTunnelHandle(candidate tunnel.Candidate) *supportSessionTestTunnelHandle {
+	return &supportSessionTestTunnelHandle{candidate: candidate, wait: make(chan error, 1)}
+}
+
+func (h *supportSessionTestTunnelHandle) Candidate() tunnel.Candidate { return h.candidate }
+func (h *supportSessionTestTunnelHandle) Wait() <-chan error          { return h.wait }
+func (h *supportSessionTestTunnelHandle) Stop(context.Context) error {
+	h.stopOnce.Do(func() { close(h.wait) })
+	return nil
+}
+
+type supportSessionFuncTunnelProvider struct {
+	id    string
+	url   string
+	start func() error
+	stop  func()
+}
+
+func (p supportSessionFuncTunnelProvider) ID() string { return p.id }
+func (p supportSessionFuncTunnelProvider) Metadata() tunnel.ProviderMetadata {
+	return tunnel.ProviderMetadata{
+		ID: p.id, DisplayName: p.id, Protocols: []string{"https"}, Anonymous: true,
+		Executable: "test", DocumentationURL: "https://example.test/docs", DefaultAutomatic: true,
+	}
+}
+func (p supportSessionFuncTunnelProvider) Start(context.Context, tunnel.StartRequest) (tunnel.Handle, error) {
+	if p.start != nil {
+		if err := p.start(); err != nil {
+			return nil, err
+		}
+	}
+	handle := newSupportSessionTestTunnelHandle(tunnel.Candidate{ProviderID: p.id, URL: p.url})
+	if p.stop == nil {
+		return handle, nil
+	}
+	return &supportSessionStopCallbackHandle{supportSessionTestTunnelHandle: handle, stop: p.stop}, nil
+}
+
+type supportSessionStopCallbackHandle struct {
+	*supportSessionTestTunnelHandle
+	stop     func()
+	callback sync.Once
+}
+
+func (h *supportSessionStopCallbackHandle) Stop(ctx context.Context) error {
+	h.callback.Do(h.stop)
+	return h.supportSessionTestTunnelHandle.Stop(ctx)
 }
 
 func TestVersion(t *testing.T) {
@@ -2338,7 +2410,7 @@ func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
 	}
 }
 
-func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
+func TestSupportSessionStartServesGatewayAndBlocksLANHandoff(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -2384,11 +2456,42 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("support-session start should serve Windows helper hash, got %s", resp.Status)
 	}
-	waitForStatusFileEvent(t, statusFile, "waiting")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, statErr := os.Stat(statusFile); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for diagnostic status file %s", statusFile)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	cancel()
 	err = <-errCh
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
+	var diagnostic struct {
+		SchemaVersion string `json:"schema_version"`
+		ReadyToSend   bool   `json:"ready_to_send"`
+	}
+	diagnosticBytes, err := os.ReadFile(statusFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(diagnosticBytes, &diagnostic); err != nil {
+		t.Fatalf("invalid diagnostic JSON: %v", err)
+	}
+	if diagnostic.SchemaVersion != "rdev.support-session-start-diagnostic.v1" || diagnostic.ReadyToSend {
+		t.Fatalf("LAN-only foreground start must fail closed, got %#v", diagnostic)
+	}
+	for _, blockedPath := range []string{readyFile, handoffTextFile} {
+		if _, err := os.Stat(blockedPath); !os.IsNotExist(err) {
+			t.Fatalf("LAN-only foreground start must not write %s", blockedPath)
+		}
+	}
+	if !diagnostic.ReadyToSend {
+		return
 	}
 
 	var payload struct {
@@ -2625,6 +2728,247 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		statusPayload.Status.TicketCode != payload.Session.TicketCode ||
 		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
 		t.Fatalf("expected status file to mirror foreground event, got %#v", statusPayload)
+	}
+}
+
+func TestSupportSessionStartOrdersGatewayBeforePublicTunnels(t *testing.T) {
+	for _, name := range []string{
+		"RDEV_HOSTED_GATEWAY_URL",
+		"RDEV_CLOUDFLARED_GATEWAY_URL",
+		"RDEV_RELAY_GATEWAY_URL",
+		"RDEV_MESH_GATEWAY_URL",
+		"RDEV_VPN_GATEWAY_URL",
+		"RDEV_SSH_GATEWAY_URL",
+	} {
+		t.Setenv(name, "")
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	events := make([]string, 0, 7)
+	record := func(event string) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+		if event == "handoff_written" {
+			cancel()
+		}
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		RecordEvent: record,
+		Registry:    registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error {
+			return nil
+		},
+	}
+	workDir := filepath.Join(t.TempDir(), "support")
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot:                   ".",
+		Addr:                       addr,
+		WorkDir:                    workDir,
+		Target:                     "windows",
+		Reason:                     "test ordered foreground startup",
+		TTLSeconds:                 60,
+		AutoActivate:               true,
+		Locale:                     "en",
+		RdevCommand:                filepath.Join(t.TempDir(), "bin", "rdev"),
+		AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
+
+	mu.Lock()
+	got := append([]string(nil), events...)
+	mu.Unlock()
+	want := []string{
+		"local_gateway_started",
+		"local_health_passed",
+		"providers_started",
+		"provider_health_passed",
+		"ticket_created",
+		"bootstrap_probe_passed",
+		"handoff_written",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("support-session startup events = %v, want %v", got, want)
+	}
+}
+
+func TestSupportSessionStartMainlandFailureCleanup(t *testing.T) {
+	var starts atomic.Int32
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{
+		id: "mainland-unverified", url: "https://mainland-unverified.example.test",
+		start: func() error { starts.Add(1); return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	workDir := filepath.Join(t.TempDir(), "support")
+	statusFile := filepath.Join(workDir, "status.json")
+	readyFile := filepath.Join(workDir, "ready.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{Registry: registry, Manager: tunnel.Manager{}}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- app.supportSessionStart(ctx, supportSessionStartOptions{
+			RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile, ReadyFile: readyFile,
+			Target: "windows", Reason: "mainland evidence test", TTLSeconds: 60, Locale: "en", Region: string(tunnel.RegionCNMainland),
+		})
+	}()
+	waitForSupportSessionDiagnostic(t, statusFile)
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
+	if starts.Load() != 0 {
+		t.Fatalf("unverified mainland provider started %d times", starts.Load())
+	}
+	if _, err := os.Stat(readyFile); !os.IsNotExist(err) {
+		t.Fatalf("mainland failure must not write ready file")
+	}
+}
+
+func TestSupportSessionStartFinalBootstrapFailureCleanup(t *testing.T) {
+	var stops atomic.Int32
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{
+		id: "bootstrap-failure", url: "https://bootstrap-failure.example.test", stop: func() { stops.Add(1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	workDir := filepath.Join(t.TempDir(), "support")
+	statusFile := filepath.Join(workDir, "status.json")
+	readyFile := filepath.Join(workDir, "ready.json")
+	handoffFile := filepath.Join(workDir, "handoff.txt")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error { return errors.New("bootstrap failed") },
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- app.supportSessionStart(ctx, supportSessionStartOptions{
+			RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile, ReadyFile: readyFile,
+			HandoffTextFile: handoffFile, Target: "windows", Reason: "final bootstrap failure", TTLSeconds: 60, Locale: "en",
+			AllowDegradedDirectHandoff: true,
+		})
+	}()
+	waitForSupportSessionDiagnostic(t, statusFile)
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
+	if stops.Load() != 1 {
+		t.Fatalf("provider handle stopped %d times, want 1", stops.Load())
+	}
+	for _, path := range []string{readyFile, handoffFile} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("final bootstrap failure must not write %s", path)
+		}
+	}
+}
+
+func waitForSupportSessionDiagnostic(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var payload struct {
+				SchemaVersion string `json:"schema_version"`
+			}
+			if json.Unmarshal(data, &payload) == nil && payload.SchemaVersion == "rdev.support-session-start-diagnostic.v1" {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for support-session diagnostic %s", path)
+}
+
+func supportSessionTestAddr(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return addr
+}
+
+func TestTunnelRuntimePolicyValidation(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadTunnelRuntimeConfig("unknown", "", registry); err == nil {
+		t.Fatal("unknown region should fail")
+	}
+	if _, err := loadTunnelRuntimeConfig("global", filepath.Join(t.TempDir(), "missing.json"), registry); err == nil {
+		t.Fatal("unreadable policy should fail")
+	}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "unknown provider", body: `{"allowed_provider_ids":["unknown"]}`},
+		{name: "inline credential", body: `{"allowed_provider_ids":["ordered-test"],"token":"secret"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "policy.json")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+				t.Fatal("invalid provider policy should fail")
+			}
+		})
+	}
+	if runtime.GOOS != "windows" {
+		path := filepath.Join(t.TempDir(), "policy.json")
+		if err := os.WriteFile(path, []byte(`{"allowed_provider_ids":["ordered-test"]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+			t.Fatal("broad provider policy permissions should fail")
+		}
 	}
 }
 

@@ -3,10 +3,14 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"os/exec"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +20,152 @@ import (
 )
 
 const sshTunnelStartupTimeout = 20 * time.Second
+
+type tunnelProviderPolicyFile struct {
+	AllowedProviderIDs    []string          `json:"allowed_provider_ids"`
+	DisabledProviderIDs   []string          `json:"disabled_provider_ids"`
+	RegionalEvidencePaths []string          `json:"regional_evidence_paths"`
+	SSHKnownHostsPaths    map[string]string `json:"ssh_known_hosts_paths"`
+}
+
+type tunnelRuntimeConfig struct {
+	Region             tunnel.RegionProfile
+	AllowedProviderIDs []string
+	Evidence           []tunnel.RegionalEvidence
+	SSHKnownHostsPaths map[string]string
+}
+
+func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]string) (supportSessionStartDeps, error) {
+	knownHosts := func(providerID string) string {
+		if path := strings.TrimSpace(knownHostsPaths[providerID]); path != "" {
+			return path
+		}
+		return strings.TrimSpace(os.Getenv("RDEV_SSH_KNOWN_HOSTS_FILE"))
+	}
+	registry, err := tunnel.NewRegistry(
+		newCloudflareQuickProvider(stderr),
+		newLocalhostRunProvider(stderr, knownHosts("localhost-run")),
+		newPinggyProvider(stderr, knownHosts("pinggy")),
+	)
+	if err != nil {
+		return supportSessionStartDeps{}, err
+	}
+	return supportSessionStartDeps{
+		Registry: registry,
+		Manager:  tunnel.Manager{MaxActive: 2, StartTimeout: 25 * time.Second, ProbeTimeout: 15 * time.Second},
+		FinalProbe: func(ctx context.Context, candidate tunnel.Candidate, ticketCode, instance string) error {
+			_, err := tunnel.ProbeBootstrapAsset(ctx, nil, candidate, ticketCode, instance)
+			return err
+		},
+	}, nil
+}
+
+func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Registry) (tunnelRuntimeConfig, error) {
+	region := tunnel.RegionProfile(strings.TrimSpace(regionValue))
+	if region == "" {
+		region = tunnel.RegionGlobal
+	}
+	if region != tunnel.RegionGlobal && region != tunnel.RegionCNMainland {
+		return tunnelRuntimeConfig{}, fmt.Errorf("unsupported tunnel region %q; use global or cn-mainland", regionValue)
+	}
+	config := tunnelRuntimeConfig{Region: region, SSHKnownHostsPaths: map[string]string{}}
+	if strings.TrimSpace(policyPath) == "" {
+		return config, nil
+	}
+	info, err := os.Stat(policyPath)
+	if err != nil {
+		return tunnelRuntimeConfig{}, fmt.Errorf("read provider policy: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return tunnelRuntimeConfig{}, fmt.Errorf("provider policy must be a regular file")
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		return tunnelRuntimeConfig{}, fmt.Errorf("provider policy permissions must be 0600 or narrower")
+	}
+	file, err := os.Open(policyPath)
+	if err != nil {
+		return tunnelRuntimeConfig{}, fmt.Errorf("open provider policy: %w", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	decoder.DisallowUnknownFields()
+	var policy tunnelProviderPolicyFile
+	if err := decoder.Decode(&policy); err != nil {
+		return tunnelRuntimeConfig{}, fmt.Errorf("decode provider policy: %w", err)
+	}
+	known := make(map[string]bool)
+	for _, metadata := range registry.Providers() {
+		known[metadata.ID] = true
+	}
+	disabled := make(map[string]bool)
+	for _, id := range policy.DisabledProviderIDs {
+		id = strings.TrimSpace(id)
+		if !known[id] {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy references unknown provider %q", id)
+		}
+		disabled[id] = true
+	}
+	for _, id := range policy.AllowedProviderIDs {
+		id = strings.TrimSpace(id)
+		if !known[id] {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy references unknown provider %q", id)
+		}
+		if !disabled[id] {
+			config.AllowedProviderIDs = append(config.AllowedProviderIDs, id)
+		}
+	}
+	if len(policy.AllowedProviderIDs) == 0 && len(disabled) > 0 {
+		for id := range known {
+			if !disabled[id] {
+				config.AllowedProviderIDs = append(config.AllowedProviderIDs, id)
+			}
+		}
+		slices.Sort(config.AllowedProviderIDs)
+	}
+	for id, path := range policy.SSHKnownHostsPaths {
+		if !known[id] {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider policy references unknown provider %q", id)
+		}
+		if strings.TrimSpace(path) == "" {
+			return tunnelRuntimeConfig{}, fmt.Errorf("provider %q known-hosts path is empty", id)
+		}
+		config.SSHKnownHostsPaths[id] = path
+	}
+	for _, evidencePath := range policy.RegionalEvidencePaths {
+		evidence, err := loadRegionalEvidenceFile(evidencePath)
+		if err != nil {
+			return tunnelRuntimeConfig{}, err
+		}
+		for _, item := range evidence {
+			if !known[item.ProviderID] {
+				return tunnelRuntimeConfig{}, fmt.Errorf("regional evidence references unknown provider %q", item.ProviderID)
+			}
+		}
+		config.Evidence = append(config.Evidence, evidence...)
+	}
+	return config, nil
+}
+
+func loadRegionalEvidenceFile(path string) ([]tunnel.RegionalEvidence, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read regional evidence %q: %w", path, err)
+	}
+	var values []tunnel.RegionalEvidence
+	if err := json.Unmarshal(data, &values); err != nil {
+		var single tunnel.RegionalEvidence
+		if singleErr := json.Unmarshal(data, &single); singleErr != nil {
+			return nil, fmt.Errorf("decode regional evidence %q: %w", path, err)
+		}
+		values = []tunnel.RegionalEvidence{single}
+	}
+	for _, value := range values {
+		if err := value.Validate(); err != nil {
+			return nil, fmt.Errorf("validate regional evidence %q: %w", path, err)
+		}
+	}
+	return values, nil
+}
 
 type sshTunnelSpec struct {
 	Destination   string
