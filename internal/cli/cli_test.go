@@ -1262,13 +1262,13 @@ echo 'abc123.lhr.life tunneled with tls termination, https://abc123.lhr.life'
 	}
 	t.Setenv("PATH", binDir)
 
-	tunnelURL, cancel, err := startLocalhostRunTunnel(context.Background(), io.Discard, "8787", filepath.Join(t.TempDir(), "known_hosts"))
-	defer cancel()
+	started, err := startLocalhostRunTunnel(context.Background(), io.Discard, "8787", filepath.Join(t.TempDir(), "known_hosts"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tunnelURL != "https://abc123.lhr.life" {
-		t.Fatalf("expected assigned tunnel URL, got %q", tunnelURL)
+	defer started.cancel()
+	if started.URL != "https://abc123.lhr.life" {
+		t.Fatalf("expected assigned tunnel URL, got %q", started.URL)
 	}
 }
 

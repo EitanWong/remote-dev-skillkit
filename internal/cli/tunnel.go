@@ -94,64 +94,32 @@ func validatedLocalPort(value string) (int, error) {
 	return port, nil
 }
 
-func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort, knownHostsFile string) (string, context.CancelFunc, error) {
+func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort, knownHostsFile string) (runningTunnel, error) {
 	spec, err := localhostRunTunnelSpec(localPort)
 	if err != nil {
-		return "", func() {}, err
+		return runningTunnel{}, err
 	}
 	return startSSHTunnel(ctx, stderr, "localhost-run", spec, knownHostsFile)
 }
 
-func startPinggyTunnel(ctx context.Context, stderr io.Writer, localPort, knownHostsFile string) (string, context.CancelFunc, error) {
+func startPinggyTunnel(ctx context.Context, stderr io.Writer, localPort, knownHostsFile string) (runningTunnel, error) {
 	spec, err := pinggyTunnelSpec(localPort)
 	if err != nil {
-		return "", func() {}, err
+		return runningTunnel{}, err
 	}
 	return startSSHTunnel(ctx, stderr, "pinggy", spec, knownHostsFile)
 }
 
-func startSSHTunnel(ctx context.Context, stderr io.Writer, providerID string, spec sshTunnelSpec, knownHostsFile string) (string, context.CancelFunc, error) {
+func startSSHTunnel(ctx context.Context, stderr io.Writer, providerID string, spec sshTunnelSpec, knownHostsFile string) (runningTunnel, error) {
 	sshPath, err := exec.LookPath("ssh")
 	if err != nil {
-		return "", func() {}, fmt.Errorf("ssh not found in PATH: %w", err)
+		return runningTunnel{}, fmt.Errorf("ssh not found in PATH: %w", err)
 	}
 	argv, err := sshTunnelArgs(sshPath, spec, knownHostsFile)
 	if err != nil {
-		return "", func() {}, fmt.Errorf("%s SSH configuration: %w", providerID, err)
+		return runningTunnel{}, fmt.Errorf("%s SSH configuration: %w", providerID, err)
 	}
-
-	tunnelCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(tunnelCtx, argv[0], argv[1:]...)
-	pr, pw := io.Pipe()
-	combined := io.MultiWriter(pw, stderr)
-	cmd.Stdout = combined
-	cmd.Stderr = combined
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = pw.Close()
-		return "", func() {}, fmt.Errorf("%s SSH start failed: %w", providerID, err)
-	}
-	urlCh := make(chan string, 1)
-	go func() {
-		defer pw.Close()
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			if candidate := providerURLFromLine(providerID, scanner.Text()); candidate != "" {
-				select {
-				case urlCh <- candidate:
-				default:
-				}
-			}
-		}
-	}()
-	select {
-	case tunnelURL := <-urlCh:
-		return tunnelURL, cancel, nil
-	case <-time.After(sshTunnelStartupTimeout):
-		cancel()
-		_ = pr.Close()
-		return "", func() {}, fmt.Errorf("%s did not print a tunnel URL within %v", providerID, sshTunnelStartupTimeout)
-	}
+	return startTunnelCommand(ctx, stderr, providerID, argv, sshTunnelStartupTimeout)
 }
 
 func localhostRunTunnelURLFromLine(line string) string {
@@ -202,42 +170,65 @@ func strictSubdomain(host, suffix string) bool {
 	return host != suffix && strings.HasSuffix(host, "."+suffix)
 }
 
-func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (string, context.CancelFunc, error) {
+func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (runningTunnel, error) {
 	cfPath, err := exec.LookPath("cloudflared")
 	if err != nil {
-		return "", func() {}, fmt.Errorf("cloudflared not found in PATH: %w", err)
+		return runningTunnel{}, fmt.Errorf("cloudflared not found in PATH: %w", err)
 	}
 
-	tunnelURL, cancel, err := startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "http2", 25*time.Second)
+	started, err := startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "http2", 25*time.Second)
 	if err == nil {
-		return tunnelURL, cancel, nil
+		return started, nil
 	}
 	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared http2 attempt failed (%v); retrying without protocol flag\n", err)
 	return startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "", 20*time.Second)
 }
 
-func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.Writer, localURL, protocol string, timeout time.Duration) (string, context.CancelFunc, error) {
-	tunnelCtx, cancel := context.WithCancel(ctx)
+func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.Writer, localURL, protocol string, timeout time.Duration) (runningTunnel, error) {
 	args := []string{"tunnel"}
 	if protocol != "" {
 		args = append(args, "--protocol", protocol)
 	}
 	args = append(args, "--url", localURL)
+	return startTunnelCommand(ctx, stderr, "cloudflare-quick", append([]string{cfPath}, args...), timeout)
+}
 
-	cmd := exec.CommandContext(tunnelCtx, cfPath, args...)
+type runningTunnel struct {
+	URL       string
+	cancel    context.CancelFunc
+	lifecycle *processLifecycle
+}
+
+func startTunnelCommand(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration) (runningTunnel, error) {
+	if len(argv) == 0 {
+		return runningTunnel{}, fmt.Errorf("%s command argv is empty", providerID)
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	tunnelCtx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(tunnelCtx, argv[0], argv[1:]...)
 	pr, pw := io.Pipe()
-	cmd.Stderr = io.MultiWriter(pw, stderr)
+	combined := io.MultiWriter(pw, stderr)
+	cmd.Stdout = combined
+	cmd.Stderr = combined
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = pw.Close()
-		return "", func() {}, fmt.Errorf("cloudflared start failed (protocol=%q): %w", protocol, err)
+		_ = pr.Close()
+		return runningTunnel{}, fmt.Errorf("%s start failed: %w", providerID, err)
 	}
+	lifecycle := newProcessLifecycle(func() error {
+		err := cmd.Wait()
+		_ = pw.Close()
+		return err
+	})
 	urlCh := make(chan string, 1)
 	go func() {
-		defer pw.Close()
+		defer pr.Close()
 		scanner := bufio.NewScanner(pr)
 		for scanner.Scan() {
-			if candidate := providerURLFromLine("cloudflare-quick", scanner.Text()); candidate != "" {
+			if candidate := providerURLFromLine(providerID, scanner.Text()); candidate != "" {
 				select {
 				case urlCh <- candidate:
 				default:
@@ -246,13 +237,35 @@ func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.
 		}
 	}()
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case tunnelURL := <-urlCh:
-		return tunnelURL, cancel, nil
-	case <-time.After(timeout):
+		return runningTunnel{URL: tunnelURL, cancel: cancel, lifecycle: lifecycle}, nil
+	case <-lifecycle.reaped:
+		select {
+		case tunnelURL := <-urlCh:
+			return runningTunnel{URL: tunnelURL, cancel: cancel, lifecycle: lifecycle}, nil
+		default:
+		}
+		cancel()
+		if err := lifecycle.err(); err != nil {
+			return runningTunnel{}, fmt.Errorf("%s exited during startup: %w", providerID, err)
+		}
+		return runningTunnel{}, fmt.Errorf("%s exited during startup", providerID)
+	case <-timer.C:
 		cancel()
 		_ = pr.Close()
-		return "", func() {}, fmt.Errorf("cloudflared (protocol=%q) did not print a tunnel URL within %v", protocol, timeout)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cleanupCancel()
+		select {
+		case <-lifecycle.reaped:
+		case <-cleanupCtx.Done():
+		}
+		return runningTunnel{}, fmt.Errorf("%s did not print a tunnel URL within %v", providerID, timeout)
+	case <-ctx.Done():
+		cancel()
+		return runningTunnel{}, ctx.Err()
 	}
 }
 
@@ -260,7 +273,7 @@ type cliTunnelProvider struct {
 	metadata       tunnel.ProviderMetadata
 	stderr         io.Writer
 	knownHostsFile string
-	start          func(context.Context, io.Writer, tunnel.StartRequest, string) (string, context.CancelFunc, error)
+	start          func(context.Context, io.Writer, tunnel.StartRequest, string) (runningTunnel, error)
 }
 
 func newCloudflareQuickProvider(stderr io.Writer) tunnel.Provider {
@@ -270,7 +283,7 @@ func newCloudflareQuickProvider(stderr io.Writer) tunnel.Provider {
 			Anonymous: true, Executable: "cloudflared", DocumentationURL: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/", DefaultAutomatic: true,
 		},
 		stderr: stderr,
-		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, _ string) (string, context.CancelFunc, error) {
+		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, _ string) (runningTunnel, error) {
 			return startCloudflaredQuickTunnel(ctx, stderr, request.LocalURL)
 		},
 	}
@@ -283,7 +296,7 @@ func newLocalhostRunProvider(stderr io.Writer, knownHostsFile string) tunnel.Pro
 			Anonymous: true, Executable: "ssh", DocumentationURL: "https://localhost.run/docs/", RequiresSSHPin: true,
 		},
 		stderr: stderr, knownHostsFile: knownHostsFile,
-		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, pin string) (string, context.CancelFunc, error) {
+		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, pin string) (runningTunnel, error) {
 			return startLocalhostRunTunnel(ctx, stderr, request.LocalPort, pin)
 		},
 	}
@@ -296,7 +309,7 @@ func newPinggyProvider(stderr io.Writer, knownHostsFile string) tunnel.Provider 
 			Anonymous: true, Executable: "ssh", DocumentationURL: "https://pinggy.io/docs/", RequiresSSHPin: true,
 		},
 		stderr: stderr, knownHostsFile: knownHostsFile,
-		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, pin string) (string, context.CancelFunc, error) {
+		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, pin string) (runningTunnel, error) {
 			return startPinggyTunnel(ctx, stderr, request.LocalPort, pin)
 		},
 	}
@@ -318,37 +331,65 @@ func (p cliTunnelProvider) Start(ctx context.Context, request tunnel.StartReques
 	if p.metadata.RequiresSSHPin && knownHostsFile == "" {
 		return nil, fmt.Errorf("provider %q requires a reviewed known-hosts file", p.metadata.ID)
 	}
-	publicURL, cancel, err := p.start(ctx, p.stderr, request, knownHostsFile)
+	started, err := p.start(ctx, p.stderr, request, knownHostsFile)
 	if err != nil {
 		return nil, err
 	}
 	return newCLITunnelHandle(tunnel.Candidate{
 		ProviderID:     p.metadata.ID,
-		URL:            publicURL,
+		URL:            started.URL,
 		FailureDomains: p.metadata.FailureDomains,
-	}, cancel), nil
+	}, started.cancel, started.lifecycle), nil
 }
 
 type cliTunnelHandle struct {
 	candidate tunnel.Candidate
 	cancel    context.CancelFunc
-	done      chan error
+	lifecycle *processLifecycle
 	stopOnce  sync.Once
 }
 
-func newCLITunnelHandle(candidate tunnel.Candidate, cancel context.CancelFunc) *cliTunnelHandle {
-	return &cliTunnelHandle{candidate: candidate, cancel: cancel, done: make(chan error, 1)}
+type processLifecycle struct {
+	wait   chan error
+	reaped chan struct{}
+	mu     sync.RWMutex
+	result error
+}
+
+func newProcessLifecycle(wait func() error) *processLifecycle {
+	lifecycle := &processLifecycle{wait: make(chan error, 1), reaped: make(chan struct{})}
+	go func() {
+		err := wait()
+		lifecycle.mu.Lock()
+		lifecycle.result = err
+		lifecycle.mu.Unlock()
+		lifecycle.wait <- err
+		close(lifecycle.wait)
+		close(lifecycle.reaped)
+	}()
+	return lifecycle
+}
+
+func (l *processLifecycle) err() error {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.result
+}
+
+func newCLITunnelHandle(candidate tunnel.Candidate, cancel context.CancelFunc, lifecycle *processLifecycle) *cliTunnelHandle {
+	return &cliTunnelHandle{candidate: candidate, cancel: cancel, lifecycle: lifecycle}
 }
 
 func (h *cliTunnelHandle) Candidate() tunnel.Candidate { return h.candidate }
 
-func (h *cliTunnelHandle) Wait() <-chan error { return h.done }
+func (h *cliTunnelHandle) Wait() <-chan error { return h.lifecycle.wait }
 
-func (h *cliTunnelHandle) Stop(context.Context) error {
-	h.stopOnce.Do(func() {
-		h.cancel()
-		h.done <- nil
-		close(h.done)
-	})
-	return nil
+func (h *cliTunnelHandle) Stop(ctx context.Context) error {
+	h.stopOnce.Do(h.cancel)
+	select {
+	case <-h.lifecycle.reaped:
+		return h.lifecycle.err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

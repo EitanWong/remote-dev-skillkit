@@ -2,12 +2,102 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
+
+func TestTunnelHelperProcess(t *testing.T) {
+	mode := os.Getenv("RDEV_TEST_TUNNEL_HELPER")
+	if mode == "" {
+		return
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "ready https://abc.trycloudflare.com")
+	switch mode {
+	case "exit":
+		os.Exit(23)
+	case "block":
+		time.Sleep(time.Hour)
+	default:
+		os.Exit(24)
+	}
+}
+
+func TestTunnelProviderWaitReportsSpontaneousProcessExit(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "exit")
+	provider := cliTunnelProvider{
+		metadata: tunnel.ProviderMetadata{ID: "cloudflare-quick"},
+		stderr:   io.Discard,
+		start: func(ctx context.Context, stderr io.Writer, _ tunnel.StartRequest, _ string) (runningTunnel, error) {
+			return startTunnelCommand(ctx, stderr, "cloudflare-quick", []string{os.Args[0], "-test.run=TestTunnelHelperProcess"}, time.Second)
+		},
+	}
+	handle, err := provider.Start(context.Background(), tunnel.StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case waitErr := <-handle.Wait():
+		if waitErr == nil {
+			t.Fatal("expected spontaneous process exit error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider Wait did not report spontaneous process exit")
+	}
+}
+
+func TestCLITunnelHandleStopCancelsAndReapsExactlyOnce(t *testing.T) {
+	var cancelCalls atomic.Int32
+	var waitCalls atomic.Int32
+	released := make(chan struct{})
+	waitErr := errors.New("process wait result")
+	lifecycle := newProcessLifecycle(func() error {
+		waitCalls.Add(1)
+		<-released
+		return waitErr
+	})
+	handle := newCLITunnelHandle(tunnel.Candidate{}, func() {
+		if cancelCalls.Add(1) == 1 {
+			close(released)
+		}
+	}, lifecycle)
+
+	if err := handle.Stop(context.Background()); !errors.Is(err, waitErr) {
+		t.Fatalf("first Stop error = %v, want %v", err, waitErr)
+	}
+	if err := handle.Stop(context.Background()); !errors.Is(err, waitErr) {
+		t.Fatalf("second Stop error = %v, want %v", err, waitErr)
+	}
+	if cancelCalls.Load() != 1 || waitCalls.Load() != 1 {
+		t.Fatalf("cancel calls = %d, wait calls = %d; want one each", cancelCalls.Load(), waitCalls.Load())
+	}
+	if got := <-handle.Wait(); !errors.Is(got, waitErr) {
+		t.Fatalf("Wait error = %v, want %v", got, waitErr)
+	}
+}
+
+func TestCLITunnelHandleStopHonorsContextWhileReaping(t *testing.T) {
+	released := make(chan struct{})
+	lifecycle := newProcessLifecycle(func() error {
+		<-released
+		return nil
+	})
+	handle := newCLITunnelHandle(tunnel.Candidate{}, func() {}, lifecycle)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := handle.Stop(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop error = %v, want deadline exceeded", err)
+	}
+	close(released)
+	<-handle.Wait()
+}
 
 func TestSSHProviderArgsRequireKnownHosts(t *testing.T) {
 	spec := sshTunnelSpec{Destination: "nokey@localhost.run", Port: 22, RemoteForward: "80:localhost:8787"}
