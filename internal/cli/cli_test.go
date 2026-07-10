@@ -3200,6 +3200,159 @@ func TestTunnelRuntimePolicyValidation(t *testing.T) {
 	}
 }
 
+func TestTunnelProvidersReportsReadOnlyMainlandEligibility(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{
+		"tunnel", "providers", "--region", "cn-mainland", "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		Region        string `json:"region"`
+		ReadOnly      bool   `json:"read_only"`
+		Providers     []struct {
+			ID             string             `json:"id"`
+			Executable     string             `json:"executable"`
+			Eligibility    tunnel.Eligibility `json:"eligibility"`
+			EvidenceStatus string             `json:"evidence_status"`
+			FailureDomains map[string]bool    `json:"failure_domains"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode providers output: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+	if payload.SchemaVersion != "rdev.tunnel-providers.v1" || payload.Region != "cn-mainland" || !payload.ReadOnly {
+		t.Fatalf("unexpected providers envelope: %#v", payload)
+	}
+	if len(payload.Providers) != 3 {
+		t.Fatalf("expected all registered providers, got %#v", payload.Providers)
+	}
+	for _, provider := range payload.Providers {
+		if provider.ID == "" || provider.Executable == "" {
+			t.Fatalf("provider metadata is incomplete: %#v", provider)
+		}
+		if provider.Eligibility.Eligible || provider.Eligibility.Reason != "regional-evidence-missing" || provider.EvidenceStatus != "missing" {
+			t.Fatalf("mainland provider without evidence must be ineligible: %#v", provider)
+		}
+		for domain, configured := range provider.FailureDomains {
+			if strings.Contains(domain, "://") || strings.Contains(domain, "192.0.2.") {
+				t.Fatalf("failure-domain output leaked a raw endpoint: %#v", provider.FailureDomains)
+			}
+			_ = configured
+		}
+	}
+}
+
+func TestTunnelProvidersRedactsRegionalEvidenceDetails(t *testing.T) {
+	now := time.Now().UTC()
+	evidencePath := filepath.Join(t.TempDir(), "evidence.json")
+	evidence := tunnel.RegionalEvidence{
+		ProviderID: "cloudflare-quick", Region: tunnel.RegionCNMainland, Status: tunnel.EvidenceVerified,
+		Issuer: "super-secret-token", ObservedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		Samples: validCLIMainlandSamples(),
+	}
+	evidenceJSON, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(evidencePath, evidenceJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	policyBody := fmt.Sprintf(`{"allowed_provider_ids":["cloudflare-quick"],"regional_evidence_paths":[%q]}`, evidencePath)
+	if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	if err := app.Run(context.Background(), []string{
+		"tunnel", "providers", "--region", "cn-mainland", "--provider-policy", policyPath, "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), evidence.Issuer) || strings.Contains(stdout.String(), "china-telecom") {
+		t.Fatalf("providers output leaked evidence internals: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"evidence_status": "verified"`) || !strings.Contains(stdout.String(), `"evidence_expires_at"`) {
+		t.Fatalf("providers output omitted safe evidence summary: %s", stdout.String())
+	}
+}
+
+func validCLIMainlandSamples() []tunnel.NetworkSample {
+	var samples []tunnel.NetworkSample
+	for _, carrier := range []string{"china-telecom", "china-unicom", "china-mobile"} {
+		for _, region := range []string{"north", "south"} {
+			samples = append(samples, tunnel.NetworkSample{Carrier: carrier, Region: region, Success: true})
+		}
+	}
+	return samples
+}
+
+func TestTunnelProbeChecksConfigurationWithoutStartingTunnel(t *testing.T) {
+	policyDir := t.TempDir()
+	knownHostsPath := filepath.Join(policyDir, "known_hosts")
+	knownHostsContent := "localhost.run ssh-ed25519 AAAAC3NzaKnownHostsSecret\n"
+	if err := os.WriteFile(knownHostsPath, []byte(knownHostsContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(policyDir, "providers.json")
+	policyBody := fmt.Sprintf(`{"allowed_provider_ids":["localhost-run"],"ssh_known_hosts_paths":{"localhost-run":%q}}`, knownHostsPath)
+	if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{
+		"tunnel", "probe", "--region", "cn-mainland", "--provider-policy", policyPath, "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SchemaVersion           string `json:"schema_version"`
+		ReadOnly                bool   `json:"read_only"`
+		PersistentTunnelStarted bool   `json:"persistent_tunnel_started"`
+		Providers               []struct {
+			ID                   string `json:"id"`
+			ExecutableConfigured bool   `json:"executable_configured"`
+			KnownHostsConfigured bool   `json:"known_hosts_configured"`
+			Eligible             bool   `json:"eligible"`
+			EligibilityReason    string `json:"eligibility_reason"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode probe output: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+	if payload.SchemaVersion != "rdev.tunnel-probe.v1" || !payload.ReadOnly || payload.PersistentTunnelStarted {
+		t.Fatalf("probe must be explicitly read-only: %#v", payload)
+	}
+	if len(payload.Providers) != 3 {
+		t.Fatalf("expected probe result for every provider, got %#v", payload.Providers)
+	}
+	var localhostRun map[string]any
+	encoded, _ := json.Marshal(payload.Providers)
+	var rows []map[string]any
+	if err := json.Unmarshal(encoded, &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row["id"] == "localhost-run" {
+			localhostRun = row
+		}
+	}
+	if localhostRun == nil || localhostRun["known_hosts_configured"] != true || localhostRun["eligible"] != false || localhostRun["eligibility_reason"] != "regional-evidence-missing" {
+		t.Fatalf("unexpected localhost.run probe: %#v", localhostRun)
+	}
+	if strings.Contains(stdout.String(), knownHostsContent) || strings.Contains(stdout.String(), knownHostsPath) || strings.Contains(stdout.String(), policyPath) {
+		t.Fatalf("probe output leaked protected policy material: %q", stdout.String())
+	}
+}
+
 func TestSupportSessionConnectPropagatesTunnelPolicyFlags(t *testing.T) {
 	for _, name := range []string{"RDEV_HOSTED_GATEWAY_URL", "RDEV_RELAY_GATEWAY_URL", "RDEV_MESH_GATEWAY_URL", "RDEV_VPN_GATEWAY_URL", "RDEV_SSH_GATEWAY_URL"} {
 		t.Setenv(name, "")

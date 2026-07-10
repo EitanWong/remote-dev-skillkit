@@ -18,6 +18,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 const FreshAgentSupportSessionReportSchemaVersion = "rdev.acceptance.fresh-agent-support-session.v1"
@@ -42,6 +43,10 @@ type FreshAgentSupportSessionReport struct {
 	CreatedSession          map[string]any   `json:"created_session"`
 	StartedSession          map[string]any   `json:"started_session"`
 	StableFallbackSession   map[string]any   `json:"stable_fallback_session"`
+	DegradedOverrideSession map[string]any   `json:"degraded_override_session"`
+	MainlandEvidence        map[string]any   `json:"mainland_evidence"`
+	ShareableAttempts       []map[string]any `json:"shareable_attempts"`
+	LifecycleTransitions    map[string]any   `json:"lifecycle_transitions"`
 	ConnectedStatus         map[string]any   `json:"connected_status"`
 	WaitingRecovery         map[string]any   `json:"waiting_recovery"`
 	BootstrapSelfRepair     map[string]any   `json:"bootstrap_self_repair"`
@@ -101,6 +106,52 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		RdevCommand:  rdevCommand,
 	})
 	connectNoGateway := supportsession.BuildConnectFromHandoff(handoffNoGateway)
+	managedDirectSet := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates: []tunnel.Candidate{{
+			ProviderID: "managed-direct",
+			URL:        "https://managed-direct.example.test",
+		}},
+	}
+	managedDirectReadiness := supportsession.DirectAvailability(managedDirectSet, false)
+	degradedOverrideReadiness := supportsession.DirectAvailability(managedDirectSet, true)
+	mainlandEligibility := tunnel.EvaluateEligibility(
+		tunnel.ProviderMetadata{ID: "managed-direct", DefaultAutomatic: true},
+		tunnel.Policy{Region: tunnel.RegionCNMainland, Now: now},
+		nil,
+	)
+	mainlandEvidence := map[string]any{
+		"region":             tunnel.RegionCNMainland,
+		"verified":           mainlandEligibility.Evidence != nil && mainlandEligibility.Evidence.Status == tunnel.EvidenceVerified,
+		"eligible":           mainlandEligibility.Eligible,
+		"eligibility_reason": mainlandEligibility.Reason,
+	}
+	rawAttempt := map[string]any{
+		"provider_id": "managed-direct",
+		"status":      "degraded",
+		"error_class": "provider-health-check-failed",
+		"failure_domains": map[string]bool{
+			"authoritative_dns": true,
+			"edge_network":      true,
+			"control_plane":     true,
+		},
+		"known_hosts":  "AAAAC3NzaKnownHostsSecret",
+		"token":        "super-secret-token",
+		"target_ip":    "198.51.100.77",
+		"provider_url": "https://raw-provider.example.test/session/secret",
+	}
+	shareableAttempts := []map[string]any{redactShareableTunnelAttempt(rawAttempt)}
+	lifecycleTransitions := map[string]any{
+		"readiness": map[string]any{
+			"state":       managedDirectReadiness.State,
+			"transitions": []string{"unavailable", "degraded-single-entry"},
+		},
+		"cleanup": map[string]any{
+			"state":       "pending-explicit-stop",
+			"transitions": []string{"not-requested", "stop-requested", "cleaned"},
+		},
+	}
 
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
 	ticket, err := gw.CreateTicketWithMetadata(
@@ -126,17 +177,19 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		Locale:                locale,
 		RdevCommand:           rdevCommand,
 		AutoActivate:          true,
+		AvailabilityReadiness: managedDirectReadiness,
 	})
 	connectReachableGateway := supportsession.BuildConnectFromCreated(created)
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
-		Addr:                "0.0.0.0:8787",
-		GatewayURL:          gatewayURL,
-		WorkDir:             filepath.Join(outDir, "support-session"),
-		ReadyFile:           filepath.Join(outDir, "support-session", "support-session-ready.json"),
-		StatusFile:          filepath.Join(outDir, "support-session", "support-session-status.json"),
-		HandoffTextFile:     filepath.Join(outDir, "support-session", "target-handoff.txt"),
-		ConnectedReportFile: filepath.Join(outDir, "support-session", "connected-report.txt"),
-		Created:             created,
+		Addr:                  "0.0.0.0:8787",
+		GatewayURL:            gatewayURL,
+		WorkDir:               filepath.Join(outDir, "support-session"),
+		ReadyFile:             filepath.Join(outDir, "support-session", "support-session-ready.json"),
+		StatusFile:            filepath.Join(outDir, "support-session", "support-session-status.json"),
+		HandoffTextFile:       filepath.Join(outDir, "support-session", "target-handoff.txt"),
+		ConnectedReportFile:   filepath.Join(outDir, "support-session", "connected-report.txt"),
+		Created:               created,
+		AvailabilityReadiness: managedDirectReadiness,
 	})
 	stableFallback := withFreshAgentGatewayEnv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev", func() map[string]any {
 		stableURL, stableCandidates := supportsession.ConfiguredGatewayURLCandidate()
@@ -172,6 +225,14 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 			Locale:                locale,
 			RdevCommand:           rdevCommand,
 			AutoActivate:          true,
+			AvailabilityReadiness: supportsession.DirectAvailability(tunnel.AvailabilitySet{
+				SchemaVersion: tunnel.AvailabilitySchemaVersion,
+				Region:        tunnel.RegionGlobal,
+				Candidates: []tunnel.Candidate{{
+					ProviderID: "configured-relay",
+					URL:        stableURL,
+				}},
+			}, false),
 		})
 		return map[string]any{
 			"schema_version": "rdev.acceptance.stable-fallback-session.v1",
@@ -219,10 +280,18 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		CreatedSession:          created,
 		StartedSession:          started,
 		StableFallbackSession:   stableFallback,
-		ConnectedStatus:         connectedStatus,
-		WaitingRecovery:         waitingRecovery,
-		BootstrapSelfRepair:     bootstrapSelfRepair,
-		LiveRemoteE2EGates:      liveRemoteE2EGates(gatewayURL, rdevCommand),
+		DegradedOverrideSession: map[string]any{
+			"schema_version":         "rdev.acceptance.degraded-override-session.v1",
+			"availability_readiness": degradedOverrideReadiness,
+			"prebootstrap_failover":  false,
+		},
+		MainlandEvidence:     mainlandEvidence,
+		ShareableAttempts:    shareableAttempts,
+		LifecycleTransitions: lifecycleTransitions,
+		ConnectedStatus:      connectedStatus,
+		WaitingRecovery:      waitingRecovery,
+		BootstrapSelfRepair:  bootstrapSelfRepair,
+		LiveRemoteE2EGates:   liveRemoteE2EGates(gatewayURL, rdevCommand),
 		Checks: freshAgentSupportSessionChecks(freshAgentSupportSessionCheckInput{
 			HandoffNoGateway:        handoffNoGateway,
 			HandoffReachableGateway: handoffReachableGateway,
@@ -251,6 +320,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		},
 	}
 	report.Checks = append(report.Checks, bootstrapChecks...)
+	report.Checks = append(report.Checks, regionalTunnelAcceptanceChecks(report)...)
 	if err := writeFreshAgentSupportSessionReport(filepath.Join(outDir, "report.json"), report); err != nil {
 		return FreshAgentSupportSessionReport{}, err
 	}
@@ -265,6 +335,102 @@ func liveRemoteE2EGates(gatewayURL, rdevCommand string) []map[string]any {
 	})
 	gates, _ := plan["gates"].([]map[string]any)
 	return gates
+}
+
+func regionalTunnelAcceptanceChecks(report FreshAgentSupportSessionReport) []Check {
+	stableCreated := mapFromAny(report.StableFallbackSession["created"])
+	stable := availabilityReadinessForAcceptance(stableCreated["availability_readiness"])
+	managedDirect := availabilityReadinessForAcceptance(report.StartedSession["availability_readiness"])
+	override := availabilityReadinessForAcceptance(report.DegradedOverrideSession["availability_readiness"])
+	mainlandVerified := boolFromAny(report.MainlandEvidence["verified"])
+	mainlandReason := stringFromAny(report.MainlandEvidence["eligibility_reason"])
+	shareable, _ := json.Marshal(report.ShareableAttempts)
+	shareableText := string(shareable)
+	redacted := true
+	for _, forbidden := range []string{
+		"AAAAC3NzaKnownHostsSecret",
+		"super-secret-token",
+		"198.51.100.77",
+		"https://raw-provider.example.test/session/secret",
+	} {
+		redacted = redacted && !strings.Contains(shareableText, forbidden)
+	}
+	readinessTransition := mapFromAny(report.LifecycleTransitions["readiness"])
+	cleanupTransition := mapFromAny(report.LifecycleTransitions["cleanup"])
+	return []Check{
+		{
+			Name:   "stable_gateway_is_degraded_without_override",
+			Passed: stable.State == "degraded-single-entry" && !stable.ReadyToSend,
+			Detail: stable.State,
+		},
+		{
+			Name:   "managed_direct_tunnel_is_degraded_without_override",
+			Passed: managedDirect.State == "degraded-single-entry" && !managedDirect.ReadyToSend,
+			Detail: managedDirect.State,
+		},
+		{
+			Name:   "explicit_override_is_sendable_but_degraded",
+			Passed: override.State == "degraded-single-entry" && override.ReadyToSend && !override.ReadyToActivate && !override.ReadyToExecute,
+			Detail: override.State,
+		},
+		{
+			Name:   "cn_mainland_missing_evidence_is_not_verified",
+			Passed: !mainlandVerified && mainlandReason == "regional-evidence-missing",
+			Detail: mainlandReason,
+		},
+		{
+			Name:   "direct_mode_cannot_claim_prebootstrap_failover",
+			Passed: report.DegradedOverrideSession["prebootstrap_failover"] == false && len(override.AvailabilitySet.Candidates) == 1,
+			Detail: fmt.Sprintf("candidates=%d", len(override.AvailabilitySet.Candidates)),
+		},
+		{
+			Name:   "shareable_attempts_redact_protected_material",
+			Passed: redacted,
+			Detail: shareableText,
+		},
+		{
+			Name:   "cleanup_and_readiness_transitions_are_independent",
+			Passed: stringFromAny(readinessTransition["state"]) == "degraded-single-entry" && stringFromAny(cleanupTransition["state"]) == "pending-explicit-stop",
+			Detail: fmt.Sprintf("readiness=%s cleanup=%s", stringFromAny(readinessTransition["state"]), stringFromAny(cleanupTransition["state"])),
+		},
+	}
+}
+
+func redactShareableTunnelAttempt(attempt map[string]any) map[string]any {
+	failureDomains := map[string]bool{}
+	switch domains := attempt["failure_domains"].(type) {
+	case map[string]bool:
+		for name, configured := range domains {
+			failureDomains[name] = configured
+		}
+	case map[string]any:
+		for name, configured := range domains {
+			failureDomains[name] = boolFromAny(configured)
+		}
+	}
+	return map[string]any{
+		"provider_id":     stringFromAny(attempt["provider_id"]),
+		"status":          stringFromAny(attempt["status"]),
+		"error_class":     stringFromAny(attempt["error_class"]),
+		"failure_domains": failureDomains,
+		"credentials":     "redacted",
+		"target":          "redacted",
+	}
+}
+
+func availabilityReadinessForAcceptance(value any) supportsession.AvailabilityReadiness {
+	if readiness, ok := value.(supportsession.AvailabilityReadiness); ok {
+		return readiness
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	var readiness supportsession.AvailabilityReadiness
+	if err := json.Unmarshal(encoded, &readiness); err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	return readiness
 }
 
 type freshAgentSupportSessionCheckInput struct {
@@ -668,7 +834,15 @@ func mapFromAny(value any) map[string]any {
 	if typed, ok := value.(map[string]any); ok {
 		return typed
 	}
-	return nil
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return nil
+	}
+	return result
 }
 
 func stringSliceFromAny(value any) []string {

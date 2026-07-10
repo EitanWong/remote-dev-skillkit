@@ -1,6 +1,8 @@
 package acceptance
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,6 +121,92 @@ func TestRunFreshAgentSupportSessionGatesBootstrapFirstConnectEvidence(t *testin
 		nativeBootstrap["published_by_support_session_assets"] != false ||
 		nativeBootstrap["default_first_connect_surface"] != "script-preconnect" {
 		t.Fatalf("expected bootstrap first-connect evidence, got %#v", bootstrap)
+	}
+}
+
+func TestRunFreshAgentSupportSessionCapturesRegionalTunnelReadinessContracts(t *testing.T) {
+	report, err := RunFreshAgentSupportSession(FreshAgentSupportSessionOptions{
+		OutDir:      filepath.Join(t.TempDir(), "fresh-agent"),
+		GatewayURL:  "https://gateway.example.test",
+		RdevCommand: "rdev",
+		Locale:      "en",
+		Now:         time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stable := mapFromAny(mapFromAny(report.StableFallbackSession["created"])["availability_readiness"])
+	managedDirect := mapFromAny(report.StartedSession["availability_readiness"])
+	override := mapFromAny(report.DegradedOverrideSession["availability_readiness"])
+	if stable["state"] != "degraded-single-entry" || boolFromAny(stable["ready_to_send"]) {
+		t.Fatalf("stable gateway must be degraded and non-sendable by default: %#v", stable)
+	}
+	if managedDirect["state"] != "degraded-single-entry" || boolFromAny(managedDirect["ready_to_send"]) {
+		t.Fatalf("managed direct tunnel must be degraded and non-sendable by default: %#v", managedDirect)
+	}
+	if override["state"] != "degraded-single-entry" || !boolFromAny(override["ready_to_send"]) || boolFromAny(override["ready_to_activate"]) || boolFromAny(override["ready_to_execute"]) {
+		t.Fatalf("explicit override must be sendable but remain degraded: %#v", override)
+	}
+
+	mainland := mapFromAny(report.MainlandEvidence)
+	if boolFromAny(mainland["verified"]) || mainland["eligibility_reason"] != "regional-evidence-missing" {
+		t.Fatalf("missing mainland evidence must never be inferred as verified: %#v", mainland)
+	}
+	transitions := mapFromAny(report.LifecycleTransitions)
+	if mapFromAny(transitions["readiness"])["state"] == nil || mapFromAny(transitions["cleanup"])["state"] == nil {
+		t.Fatalf("cleanup and readiness transitions must be represented independently: %#v", transitions)
+	}
+
+	encoded, err := json.Marshal(report.ShareableAttempts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{
+		"AAAAC3NzaKnownHostsSecret",
+		"super-secret-token",
+		"198.51.100.77",
+		"https://raw-provider.example.test/session/secret",
+	} {
+		if bytes.Contains(encoded, []byte(secret)) {
+			t.Fatalf("shareable attempts leaked %q: %s", secret, encoded)
+		}
+	}
+	for _, name := range []string{
+		"cn_mainland_missing_evidence_is_not_verified",
+		"direct_mode_cannot_claim_prebootstrap_failover",
+		"shareable_attempts_redact_protected_material",
+		"cleanup_and_readiness_transitions_are_independent",
+	} {
+		check, ok := checkByName(report.Checks, name)
+		if !ok || !check.Passed {
+			t.Fatalf("expected passing check %q, got %#v", name, check)
+		}
+	}
+}
+
+func TestRedactShareableTunnelAttemptKeepsOnlySafeSummary(t *testing.T) {
+	got := redactShareableTunnelAttempt(map[string]any{
+		"provider_id":     "managed-direct",
+		"status":          "degraded",
+		"error_class":     "provider-health-check-failed",
+		"known_hosts":     "AAAAC3NzaKnownHostsSecret",
+		"token":           "super-secret-token",
+		"target_ip":       "198.51.100.77",
+		"provider_url":    "https://raw-provider.example.test/session/secret",
+		"failure_domains": map[string]bool{"edge_network": true},
+	})
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"AAAAC3NzaKnownHostsSecret", "super-secret-token", "198.51.100.77", "https://raw-provider.example.test/session/secret"} {
+		if bytes.Contains(encoded, []byte(forbidden)) {
+			t.Fatalf("redacted attempt leaked %q: %s", forbidden, encoded)
+		}
+	}
+	if got["provider_id"] != "managed-direct" || got["status"] != "degraded" || got["credentials"] != "redacted" || got["target"] != "redacted" {
+		t.Fatalf("unexpected redacted summary: %#v", got)
 	}
 }
 

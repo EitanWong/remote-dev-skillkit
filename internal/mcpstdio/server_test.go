@@ -468,6 +468,75 @@ func TestServerToolCallSupportSessionConnectWithoutGatewayReturnsStart(t *testin
 	}
 }
 
+func TestServerToolCallSupportSessionConnectPropagatesTunnelPolicy(t *testing.T) {
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+		"target":                        "auto",
+		"region":                        "cn-mainland",
+		"provider_policy":               policyPath,
+		"allow_degraded_direct_handoff": false,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	startCommand := strings.Join(anyStrings(structured["cli_start_now_command"].([]any)), "\x00")
+	if !strings.Contains(startCommand, "--region\x00cn-mainland") ||
+		!strings.Contains(startCommand, "--provider-policy\x00"+policyPath) ||
+		strings.Contains(startCommand, "--allow-degraded-direct-handoff") {
+		t.Fatalf("MCP connect dropped or changed tunnel policy: %#v", structured)
+	}
+	availability := structured["availability_set"].(map[string]any)
+	if availability["region"] != "cn-mainland" ||
+		structured["regional_evidence"] == nil ||
+		structured["ready_to_send"] != false ||
+		structured["ready_to_activate"] != false ||
+		structured["ready_to_execute"] != false ||
+		structured["degraded_single_entry"] != false {
+		t.Fatalf("MCP connect omitted readiness aliases: %#v", structured)
+	}
+}
+
+func TestServerToolCallSupportSessionConnectExplicitOverrideIsSendableButDegraded(t *testing.T) {
+	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+		"gateway_url":                   "https://gateway.example.test",
+		"target":                        "windows",
+		"region":                        "global",
+		"allow_degraded_direct_handoff": true,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	availability := structured["availability_set"].(map[string]any)
+	candidates := availability["candidates"].([]any)
+	if structured["ready_to_send"] != true ||
+		structured["ready_to_send_to_human"] != true ||
+		structured["ready_to_activate"] != false ||
+		structured["ready_to_execute"] != false ||
+		structured["degraded_single_entry"] != true ||
+		len(candidates) != 1 {
+		t.Fatalf("explicit override must remain degraded single-entry: %#v", structured)
+	}
+	encoded, err := json.Marshal(structured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "super-secret-token") || strings.Contains(string(encoded), "AAAAC3NzaKnownHostsSecret") {
+		t.Fatalf("MCP response leaked protected tunnel material: %s", encoded)
+	}
+}
+
 func TestServerToolCallSupportSessionConnectAutoDetectsStableRdevCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX executable bits for the fallback binary fixture")

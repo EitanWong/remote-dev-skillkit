@@ -114,6 +114,26 @@ func Tools() []Tool {
 				"idempotency_key": stringField(),
 			}, []string{"session_id"}),
 		},
+		{
+			Name:        "rdev.support_session.connect",
+			Description: "Create or route the standard visible support-session entry, including region-aware tunnel availability, readiness, and the single human handoff contract.",
+			Safety:      "Does not bypass local controls or accept provider terms. Without an explicit start action it returns bounded commands/contracts; direct single-entry handoffs remain non-sendable unless the caller explicitly enables the degraded override.",
+			InputSchema: object(map[string]any{
+				"repo_root":                     stringField(),
+				"work_dir":                      stringField(),
+				"addr":                          stringField(),
+				"gateway_url":                   gatewayURL,
+				"target":                        enum("auto", "windows", "macos", "linux"),
+				"reason":                        stringField(),
+				"ttl_seconds":                   integer(60, 86400),
+				"auto_activate":                 boolField(),
+				"locale":                        stringField(),
+				"rdev_command":                  stringField(),
+				"region":                        enum("global", "cn-mainland"),
+				"provider_policy":               stringField(),
+				"allow_degraded_direct_handoff": boolField(),
+			}, nil),
+		},
 	}
 }
 

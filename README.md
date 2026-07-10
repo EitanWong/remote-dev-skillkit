@@ -83,6 +83,21 @@ The agent should use `rdev.support_session.connect` or:
 rdev support-session connect --start
 ```
 
+Inspect provider eligibility before starting a tunnel, especially on mainland
+China networks:
+
+```bash
+rdev tunnel providers --region cn-mainland --json
+rdev tunnel probe --region cn-mainland --provider-policy /protected/path/providers.json --json
+```
+
+These inspection commands are read-only: they do not start a tunnel, accept
+terms, register an account, change configuration, or print credentials. A
+direct gateway or managed tunnel is reported as `degraded-single-entry` and is
+not ready to send by default. For an attended session, an operator may
+explicitly pass `--allow-degraded-direct-handoff`; the result remains degraded,
+is not ready to activate or execute, and still requires explicit stop/cleanup.
+
 ### 2. Run Scoped Work
 
 The agent creates signed tasks for specific capabilities: shell, PowerShell,

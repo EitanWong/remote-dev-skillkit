@@ -27,6 +27,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
@@ -685,6 +686,12 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 	if ttl < 60 || ttl > 86400 {
 		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
 	}
+	region, err := tunnelRegionArg(args)
+	if err != nil {
+		return nil, err
+	}
+	providerPolicy := strings.TrimSpace(stringArg(args, "provider_policy", ""))
+	allowDegraded := boolArg(args, "allow_degraded_direct_handoff", false)
 	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
 	if gatewayURL == "" {
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
@@ -692,23 +699,72 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 	if gatewayURL == "" {
 		rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
 		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-			RepoRoot:     stringArg(args, "repo_root", "."),
-			WorkDir:      stringArg(args, "work_dir", ""),
-			Addr:         stringArg(args, "addr", "0.0.0.0:8787"),
-			Target:       stringArg(args, "target", "auto"),
-			Reason:       stringArg(args, "reason", "visible temporary remote support"),
-			TTLSeconds:   ttl,
-			AutoActivate: boolArg(args, "auto_activate", true),
-			Locale:       stringArg(args, "locale", "auto"),
-			RdevCommand:  rdevCommand,
+			RepoRoot:                   stringArg(args, "repo_root", "."),
+			WorkDir:                    stringArg(args, "work_dir", ""),
+			Addr:                       stringArg(args, "addr", "0.0.0.0:8787"),
+			Target:                     stringArg(args, "target", "auto"),
+			Reason:                     stringArg(args, "reason", "visible temporary remote support"),
+			TTLSeconds:                 ttl,
+			AutoActivate:               boolArg(args, "auto_activate", true),
+			Locale:                     stringArg(args, "locale", "auto"),
+			RdevCommand:                rdevCommand,
+			Region:                     string(region),
+			ProviderPolicyPath:         providerPolicy,
+			AllowDegradedDirectHandoff: allowDegraded,
 		})
-		return supportsession.BuildConnectFromHandoff(handoff), nil
+		if nextArgs, ok := handoff["mcp_next_arguments"].(map[string]any); ok {
+			nextArgs["region"] = string(region)
+			if providerPolicy != "" {
+				nextArgs["provider_policy"] = providerPolicy
+			}
+			nextArgs["allow_degraded_direct_handoff"] = allowDegraded
+		}
+		readiness := supportsession.DirectAvailability(tunnel.AvailabilitySet{
+			SchemaVersion: tunnel.AvailabilitySchemaVersion,
+			Region:        region,
+		}, false)
+		return addTunnelReadinessAliases(supportsession.BuildConnectFromHandoff(handoff), readiness), nil
 	}
 	created, err := s.createSupportSessionPayload(args, gatewayURL, ttl)
 	if err != nil {
 		return nil, err
 	}
-	return supportsession.BuildConnectFromCreated(created), nil
+	return addTunnelReadinessAliases(supportsession.BuildConnectFromCreated(created), availabilityReadinessFromCreated(created)), nil
+}
+
+func tunnelRegionArg(args map[string]any) (tunnel.RegionProfile, error) {
+	region := tunnel.RegionProfile(strings.TrimSpace(stringArg(args, "region", string(tunnel.RegionGlobal))))
+	if region == "" {
+		region = tunnel.RegionGlobal
+	}
+	if region != tunnel.RegionGlobal && region != tunnel.RegionCNMainland {
+		return "", fmt.Errorf("unsupported tunnel region %q; use global or cn-mainland", region)
+	}
+	return region, nil
+}
+
+func addTunnelReadinessAliases(payload map[string]any, readiness supportsession.AvailabilityReadiness) map[string]any {
+	payload["availability_readiness"] = readiness
+	payload["availability_set"] = readiness.AvailabilitySet
+	payload["regional_evidence"] = []tunnel.RegionalEvidence{}
+	payload["ready_to_send"] = readiness.ReadyToSend
+	payload["ready_to_send_to_human"] = readiness.ReadyToSend
+	payload["ready_to_activate"] = readiness.ReadyToActivate
+	payload["ready_to_execute"] = readiness.ReadyToExecute
+	payload["degraded_single_entry"] = readiness.DegradedSingleEntry
+	return payload
+}
+
+func availabilityReadinessFromCreated(created map[string]any) supportsession.AvailabilityReadiness {
+	encoded, err := json.Marshal(created["availability_readiness"])
+	if err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	var readiness supportsession.AvailabilityReadiness
+	if err := json.Unmarshal(encoded, &readiness); err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	return readiness
 }
 
 func (s Server) updateCheck(args map[string]any) (any, error) {
@@ -788,6 +844,10 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 
 func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL string, ttl int) (map[string]any, error) {
 	autoActivate := boolArg(args, "auto_activate", true)
+	region, err := tunnelRegionArg(args)
+	if err != nil {
+		return nil, err
+	}
 	gatewayCandidates := supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", gatewayURL, nil)
 	metadata := map[string]string{
 		"connection_entry":    "standard-visible",
@@ -809,6 +869,15 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 	}
 	joinURL := strings.TrimRight(gatewayURL, "/") + "/join/" + ticket.Code
 	manifestURL := strings.TrimRight(gatewayURL, "/") + "/v1/tickets/" + ticket.Code + "/manifest"
+	availabilitySet := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        region,
+		Candidates: []tunnel.Candidate{{
+			ProviderID: "configured-gateway",
+			URL:        gatewayURL,
+		}},
+	}
+	readiness := supportsession.DirectAvailability(availabilitySet, boolArg(args, "allow_degraded_direct_handoff", false))
 	return supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
 		GatewayURLCandidates:  gatewayCandidates,
@@ -820,6 +889,7 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 		Locale:                stringArg(args, "locale", "auto"),
 		RdevCommand:           agentRdevCommand(stringArg(args, "rdev_command", "")),
 		AutoActivate:          autoActivate,
+		AvailabilityReadiness: readiness,
 	}), nil
 }
 

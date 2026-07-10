@@ -45,9 +45,13 @@ endpoint, credential, key, private IP, local path, or secret.
 `RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
 `RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
 `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is configured, it creates
-the attended-temporary support session and returns
-`ready_to_send_to_human=true` with `target_handoff_envelope.full_text`, the
-complete plain-text message/link/command Agents can forward verbatim. The older
+the attended-temporary support session. Direct gateways and managed direct
+tunnels are `degraded-single-entry` and return `ready_to_send=false` by default;
+an attended operator must explicitly set `allow_degraded_direct_handoff=true`
+to make the handoff sendable, and the response remains
+`ready_to_activate=false` and `ready_to_execute=false`. The response includes
+`availability_set`, `regional_evidence`, `degraded_single_entry`, and the
+readiness compatibility aliases. The older
 `user_handoff.message` and `user_handoff.copy_paste` fields remain for
 compatibility. If no gateway is present, it returns
 `ready_to_send_to_human=false` with `cli_start_now_command`, the standard foreground
@@ -59,6 +63,14 @@ machine-readable standard path for a newly installed Agent: recover missing
 `rdev`, forward `target_handoff_envelope.full_text` when present, wait through the standard status
 surfaces, and do not ask humans for ticket/root/gateway values or generate
 custom PowerShell, shell, tunnel, interrupt, or polling scripts.
+
+The connect schema accepts `region` (`global` or `cn-mainland`),
+`provider_policy`, and `allow_degraded_direct_handoff`. Use `rdev tunnel
+providers --region cn-mainland --json` and `rdev tunnel probe --region
+cn-mainland --provider-policy /protected/path/providers.json --json` for
+read-only inspection. Missing mainland evidence is never treated as verified.
+Probe output redacts protected policy material and does not start persistent
+tunnels or change provider configuration.
 
 `rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
 `structuredContent`. It remains available for review/debug routing details and

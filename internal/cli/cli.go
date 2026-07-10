@@ -110,6 +110,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.bootstrap(ctx, args[1:])
 	case "support-session":
 		return a.supportSession(ctx, args[1:])
+	case "tunnel":
+		return a.tunnel(ctx, args[1:])
 	case "mcp":
 		return a.mcp(args[1:])
 	case "host":
@@ -186,6 +188,163 @@ func (a App) Run(ctx context.Context, args []string) error {
 
 func isHelpArg(arg string) bool {
 	return arg == "help" || arg == "-h" || arg == "--help"
+}
+
+type tunnelProviderInspection struct {
+	ID                    string                      `json:"id"`
+	DisplayName           string                      `json:"display_name"`
+	Protocols             []string                    `json:"protocols"`
+	Anonymous             bool                        `json:"anonymous"`
+	CredentialRequirement string                      `json:"credential_requirement,omitempty"`
+	Executable            string                      `json:"executable"`
+	DocumentationURL      string                      `json:"documentation_url"`
+	TermsURL              string                      `json:"terms_url,omitempty"`
+	DefaultAutomatic      bool                        `json:"default_automatic"`
+	RequiresSSHPin        bool                        `json:"requires_ssh_pin"`
+	FailureDomains        map[string]bool             `json:"failure_domains"`
+	Eligibility           tunnelEligibilityInspection `json:"eligibility"`
+	EvidenceStatus        string                      `json:"evidence_status"`
+	EvidenceExpiresAt     *time.Time                  `json:"evidence_expires_at,omitempty"`
+}
+
+type tunnelEligibilityInspection struct {
+	Eligible bool   `json:"eligible"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type tunnelProbeInspection struct {
+	ID                   string `json:"id"`
+	Executable           string `json:"executable"`
+	ExecutableConfigured bool   `json:"executable_configured"`
+	KnownHostsConfigured bool   `json:"known_hosts_configured"`
+	ConfigurationReady   bool   `json:"configuration_ready"`
+	Eligible             bool   `json:"eligible"`
+	EligibilityReason    string `json:"eligibility_reason,omitempty"`
+}
+
+func (a App) tunnel(_ context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing tunnel subcommand")
+	}
+	switch args[0] {
+	case "providers":
+		fs := flag.NewFlagSet("tunnel providers", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
+		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
+		_ = fs.Bool("json", false, "emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return err
+		}
+		registry, config, err := inspectTunnelRuntime(*region, *providerPolicyPath, a.Stderr)
+		if err != nil {
+			return err
+		}
+		policy := tunnel.Policy{
+			Region:             config.Region,
+			Now:                time.Now().UTC(),
+			AllowedProviderIDs: config.AllowedProviderIDs,
+			AllowNonDefault:    true,
+		}
+		providers := make([]tunnelProviderInspection, 0, len(registry.Providers()))
+		for _, metadata := range registry.Providers() {
+			eligibility := tunnel.EvaluateEligibility(metadata, policy, config.Evidence)
+			status := "missing"
+			var expiresAt *time.Time
+			if eligibility.Evidence != nil {
+				status = string(eligibility.Evidence.Status)
+				expiry := eligibility.Evidence.ExpiresAt
+				expiresAt = &expiry
+			}
+			providers = append(providers, tunnelProviderInspection{
+				ID: metadata.ID, DisplayName: metadata.DisplayName, Protocols: metadata.Protocols,
+				Anonymous: metadata.Anonymous, CredentialRequirement: metadata.CredentialRequirement,
+				Executable: metadata.Executable, DocumentationURL: metadata.DocumentationURL,
+				TermsURL: metadata.TermsURL, DefaultAutomatic: metadata.DefaultAutomatic,
+				RequiresSSHPin: metadata.RequiresSSHPin, FailureDomains: redactedFailureDomains(metadata.FailureDomains),
+				Eligibility:    tunnelEligibilityInspection{Eligible: eligibility.Eligible, Reason: eligibility.Reason},
+				EvidenceStatus: status, EvidenceExpiresAt: expiresAt,
+			})
+		}
+		return writeJSON(a.Stdout, map[string]any{
+			"schema_version": "rdev.tunnel-providers.v1",
+			"region":         config.Region,
+			"read_only":      true,
+			"providers":      providers,
+		})
+	case "probe":
+		fs := flag.NewFlagSet("tunnel probe", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
+		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
+		_ = fs.Bool("json", false, "emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return err
+		}
+		registry, config, err := inspectTunnelRuntime(*region, *providerPolicyPath, a.Stderr)
+		if err != nil {
+			return err
+		}
+		policy := tunnel.Policy{
+			Region: config.Region, Now: time.Now().UTC(), AllowedProviderIDs: config.AllowedProviderIDs, AllowNonDefault: true,
+		}
+		probes := make([]tunnelProbeInspection, 0, len(registry.Providers()))
+		for _, metadata := range registry.Providers() {
+			_, executableErr := exec.LookPath(metadata.Executable)
+			executableConfigured := executableErr == nil
+			knownHostsConfigured := false
+			if path := strings.TrimSpace(config.SSHKnownHostsPaths[metadata.ID]); path != "" {
+				if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
+					knownHostsConfigured = true
+				}
+			}
+			eligibility := tunnel.EvaluateEligibility(metadata, policy, config.Evidence)
+			probes = append(probes, tunnelProbeInspection{
+				ID: metadata.ID, Executable: metadata.Executable, ExecutableConfigured: executableConfigured,
+				KnownHostsConfigured: knownHostsConfigured,
+				ConfigurationReady:   executableConfigured && (!metadata.RequiresSSHPin || knownHostsConfigured),
+				Eligible:             eligibility.Eligible, EligibilityReason: eligibility.Reason,
+			})
+		}
+		return writeJSON(a.Stdout, map[string]any{
+			"schema_version":            "rdev.tunnel-probe.v1",
+			"region":                    config.Region,
+			"read_only":                 true,
+			"persistent_tunnel_started": false,
+			"network_probe_performed":   false,
+			"providers":                 probes,
+		})
+	default:
+		return fmt.Errorf("unknown tunnel subcommand %q", args[0])
+	}
+}
+
+func inspectTunnelRuntime(region, providerPolicyPath string, stderr io.Writer) (tunnel.Registry, tunnelRuntimeConfig, error) {
+	deps, err := defaultTunnelRuntimeDeps(stderr, nil)
+	if err != nil {
+		return tunnel.Registry{}, tunnelRuntimeConfig{}, err
+	}
+	config, err := loadTunnelRuntimeConfig(region, providerPolicyPath, deps.Registry)
+	if err != nil {
+		return tunnel.Registry{}, tunnelRuntimeConfig{}, err
+	}
+	return deps.Registry, config, nil
+}
+
+func redactedFailureDomains(domains tunnel.FailureDomains) map[string]bool {
+	return map[string]bool{
+		"authoritative_dns":      strings.TrimSpace(domains.AuthoritativeDNS) != "",
+		"edge_network":           strings.TrimSpace(domains.EdgeNetwork) != "",
+		"origin_network":         strings.TrimSpace(domains.OriginNetwork) != "",
+		"control_plane":          strings.TrimSpace(domains.ControlPlane) != "",
+		"certificate_dependency": strings.TrimSpace(domains.CertificateDependency) != "",
+	}
 }
 
 func (a App) update(ctx context.Context, args []string) error {
@@ -11471,6 +11630,8 @@ Usage:
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
   rdev support-session report --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234
   rdev support-session --help
+  rdev tunnel providers --region cn-mainland --json
+  rdev tunnel probe --region cn-mainland --provider-policy /protected/path/providers.json --json
   rdev ticket create --mode attended-temporary --ttl-seconds 7200
   rdev policy explain --mode attended-temporary --capability shell.user
   rdev policy explain-shell --policy-json '{"workspace_root":"~","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}'
@@ -11634,6 +11795,7 @@ func (a App) printCommandGroupUsage(command string) bool {
 		"relay-adapter":    "package, verify",
 		"skillkit":         "export, verify, plan-install, verify-install-plan, install",
 		"ticket":           "create",
+		"tunnel":           "providers, probe",
 		"trust":            "init, rotate, revoke, verify",
 		"update":           "check, plan",
 		"workspace":        "lock, status, unlock, prepare-worktree",
