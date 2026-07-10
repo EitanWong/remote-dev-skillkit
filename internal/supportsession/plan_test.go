@@ -410,6 +410,27 @@ func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 	}
 }
 
+func TestBuildHandoffExplicitGatewayPreservesTunnelPolicyFlags(t *testing.T) {
+	handoff := BuildHandoff(HandoffOptions{
+		GatewayURL:                 "https://gateway.example.test",
+		Target:                     "windows",
+		RdevCommand:                "rdev",
+		Region:                     "cn-mainland",
+		ProviderPolicyPath:         "/secure/providers.json",
+		AllowDegradedDirectHandoff: true,
+	})
+	for _, key := range []string{"cli_start_now_command", "foreground_start_command"} {
+		command := handoff[key].([]string)
+		joined := strings.Join(command, "\x00")
+		if !strings.Contains(joined, "--gateway-url\x00https://gateway.example.test") ||
+			!strings.Contains(joined, "--region\x00cn-mainland") ||
+			!strings.Contains(joined, "--provider-policy\x00/secure/providers.json") ||
+			!slices.Contains(command, "--allow-degraded-direct-handoff") {
+			t.Fatalf("%s dropped explicit tunnel policy: %v", key, command)
+		}
+	}
+}
+
 func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 	handoff := BuildHandoff(HandoffOptions{
 		Addr:         "0.0.0.0:8787",

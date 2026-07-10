@@ -79,7 +79,7 @@ func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Reg
 	if !info.Mode().IsRegular() {
 		return tunnelRuntimeConfig{}, fmt.Errorf("provider policy must be a regular file")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&^os.FileMode(0o600) != 0 {
 		return tunnelRuntimeConfig{}, fmt.Errorf("provider policy permissions must be 0600 or narrower")
 	}
 	file, err := os.Open(policyPath)
@@ -92,6 +92,13 @@ func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Reg
 	var policy tunnelProviderPolicyFile
 	if err := decoder.Decode(&policy); err != nil {
 		return tunnelRuntimeConfig{}, fmt.Errorf("decode provider policy: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return tunnelRuntimeConfig{}, fmt.Errorf("decode provider policy: trailing JSON value is not allowed")
+		}
+		return tunnelRuntimeConfig{}, fmt.Errorf("decode provider policy trailing data: %w", err)
 	}
 	known := make(map[string]bool)
 	for _, metadata := range registry.Providers() {

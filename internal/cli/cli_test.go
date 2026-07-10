@@ -48,6 +48,23 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+type synchronizedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(data)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
@@ -1414,7 +1431,7 @@ func TestCloudflaredStableTunnelStartRequestedRequiresURLAndStartConfig(t *testi
 }
 
 func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
-	var out bytes.Buffer
+	var out synchronizedBuffer
 	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
 	writeSupportSessionEvent(&out, statusFile, "connected", map[string]any{
 		"schema_version": "rdev.support-session-status.v1",
@@ -1614,7 +1631,7 @@ func waitForStatusFileEvent(t *testing.T, path, event string) supportSessionStat
 	return supportSessionStatusFileEvent{}
 }
 
-func waitForBufferContains(buf *bytes.Buffer, needle string, timeout time.Duration) bool {
+func waitForBufferContains(buf interface{ String() string }, needle string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if strings.Contains(buf.String(), needle) {
@@ -2861,7 +2878,7 @@ func TestSupportSessionStartFinalBootstrapFailureCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	addr := supportSessionTestAddr(t)
 	workDir := filepath.Join(t.TempDir(), "support")
@@ -2870,25 +2887,30 @@ func TestSupportSessionStartFinalBootstrapFailureCleanup(t *testing.T) {
 	handoffFile := filepath.Join(workDir, "handoff.txt")
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, io.Discard)
+	var provisionalTicket string
 	app.supportSessionStartDeps = &supportSessionStartDeps{
 		Registry: registry,
 		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
 			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
 		}},
-		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error { return errors.New("bootstrap failed") },
+		FinalProbe: func(_ context.Context, _ tunnel.Candidate, ticketCode, _ string) error {
+			if provisionalTicket == "" {
+				provisionalTicket = ticketCode
+				return nil
+			}
+			if ticketCode != provisionalTicket {
+				return errors.New("bootstrap failed")
+			}
+			return nil
+		},
 	}
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- app.supportSessionStart(ctx, supportSessionStartOptions{
-			RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile, ReadyFile: readyFile,
-			HandoffTextFile: handoffFile, Target: "windows", Reason: "final bootstrap failure", TTLSeconds: 60, Locale: "en",
-			AllowDegradedDirectHandoff: true,
-		})
-	}()
-	waitForSupportSessionDiagnostic(t, statusFile)
-	cancel()
-	if err := <-errCh; !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected canceled foreground server, got %v", err)
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile, ReadyFile: readyFile,
+		HandoffTextFile: handoffFile, Target: "windows", Reason: "final bootstrap failure", TTLSeconds: 60, Locale: "en",
+		AllowDegradedDirectHandoff: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "final ticket bootstrap") {
+		t.Fatalf("expected final-ticket bootstrap failure, got %v", err)
 	}
 	if stops.Load() != 1 {
 		t.Fatalf("provider handle stopped %d times, want 1", stops.Load())
@@ -2900,9 +2922,208 @@ func TestSupportSessionStartFinalBootstrapFailureCleanup(t *testing.T) {
 	}
 }
 
+func TestSupportSessionStartFinalTicketMetadataExcludesFailedCandidates(t *testing.T) {
+	registry, err := tunnel.NewRegistry(
+		supportSessionFuncTunnelProvider{id: "a-failed", url: "https://a-failed.example.test"},
+		supportSessionFuncTunnelProvider{id: "b-healthy", url: "https://b-healthy.example.test"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var firstTicket string
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		FinalProbe: func(_ context.Context, candidate tunnel.Candidate, ticketCode, _ string) error {
+			if firstTicket == "" {
+				firstTicket = ticketCode
+			}
+			if ticketCode == firstTicket && candidate.ProviderID == "a-failed" {
+				return errors.New("candidate failed provisional bootstrap")
+			}
+			return nil
+		},
+		RecordEvent: func(event string) {
+			if event == "handoff_written" {
+				cancel()
+			}
+		},
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "final ticket metadata", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
+	var payload struct {
+		Session struct {
+			Ticket struct {
+				Code     string            `json:"code"`
+				Metadata map[string]string `json:"metadata"`
+			} `json:"ticket"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	metadata := payload.Session.Ticket.Metadata[gateway.TicketMetadataGatewayCandidates]
+	if payload.Session.Ticket.Code == firstTicket || strings.Contains(metadata, "a-failed") || !strings.Contains(metadata, "b-healthy") {
+		t.Fatalf("final ticket must be distinct and contain only retained candidates: code=%s provisional=%s metadata=%s", payload.Session.Ticket.Code, firstTicket, metadata)
+	}
+}
+
+func TestSupportSessionStartServerFailureCleansWatcherAndHandle(t *testing.T) {
+	var stops atomic.Int32
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{id: "server-error", url: "https://server-error.example.test", stop: func() { stops.Add(1) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentinel := errors.New("simulated gateway server failure")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	app := NewApp(io.Discard, io.Discard)
+	addr := supportSessionTestAddr(t)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		FinalProbe:           func(context.Context, tunnel.Candidate, string, string) error { return nil },
+		WaitForGatewayServer: func(context.Context, gatewayServerHandle) error { return sentinel },
+	}
+	started := time.Now()
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "server failure cleanup", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, sentinel) || time.Since(started) > 25*time.Second {
+		t.Fatalf("server failure should return promptly, got %v after %v", err, time.Since(started))
+	}
+	if stops.Load() != 1 {
+		t.Fatalf("provider handle stopped %d times, want 1", stops.Load())
+	}
+	listener, listenErr := net.Listen("tcp", addr)
+	if listenErr != nil {
+		t.Fatalf("gateway server was not cleaned up: %v", listenErr)
+	}
+	_ = listener.Close()
+}
+
+func TestSupportSessionStartLocalHealthFailureCleanup(t *testing.T) {
+	sentinel := errors.New("simulated local health failure")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	app := NewApp(io.Discard, io.Discard)
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry:           registry,
+		WaitForLocalHealth: func(context.Context, gatewayServerHandle, string, time.Duration) error { return sentinel },
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, GatewayURL: "http://" + addr, WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "local health failure", TTLSeconds: 60, Locale: "en",
+	})
+	if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
+		t.Fatalf("expected local health failure, got %v", err)
+	}
+}
+
+func TestSupportSessionStartNXDOMAINFallbackCleanup(t *testing.T) {
+	var starts atomic.Int32
+	registry, err := tunnel.NewRegistry(
+		supportSessionFuncTunnelProvider{id: "a-nxdomain", url: "https://a-nxdomain.example.test", start: func() error { starts.Add(1); return nil }},
+		supportSessionFuncTunnelProvider{id: "b-healthy", url: "https://b-healthy.example.test", start: func() error { starts.Add(1); return nil }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	app := NewApp(io.Discard, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(_ context.Context, candidate tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			if candidate.ProviderID == "a-nxdomain" {
+				return tunnel.ProbeEvidence{}, &net.DNSError{Err: "no such host", Name: "a-nxdomain.example.test", IsNotFound: true}
+			}
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error { return nil },
+		RecordEvent: func(event string) {
+			if event == "handoff_written" {
+				cancel()
+			}
+		},
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "nxdomain fallback", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, context.Canceled) || starts.Load() != 2 {
+		t.Fatalf("expected healthy fallback after NXDOMAIN, err=%v starts=%d", err, starts.Load())
+	}
+}
+
+func TestSupportSessionStartMarkerMismatchCleanup(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{id: "marker-mismatch", url: "https://marker-mismatch.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	statusFile := filepath.Join(t.TempDir(), "status.json")
+	workDir := filepath.Join(t.TempDir(), "support")
+	app := NewApp(io.Discard, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true}, errors.New("gateway instance marker mismatch")
+		}},
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- app.supportSessionStart(ctx, supportSessionStartOptions{
+			RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile,
+			Target: "windows", Reason: "marker mismatch", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+		})
+	}()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		select {
+		case earlyErr := <-errCh:
+			t.Fatalf("marker mismatch start returned before diagnostic: %v", earlyErr)
+		default:
+		}
+		data, readErr := os.ReadFile(statusFile)
+		if readErr == nil && bytes.Contains(data, []byte("rdev.support-session-start-diagnostic.v1")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for marker mismatch diagnostic")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled diagnostic server, got %v", err)
+	}
+}
+
 func waitForSupportSessionDiagnostic(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err == nil {
@@ -2963,11 +3184,50 @@ func TestTunnelRuntimePolicyValidation(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" {
 		path := filepath.Join(t.TempDir(), "policy.json")
-		if err := os.WriteFile(path, []byte(`{"allowed_provider_ids":["ordered-test"]}`), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(`{"allowed_provider_ids":["ordered-test"]}`), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
-			t.Fatal("broad provider policy permissions should fail")
+			t.Fatal("execute permission on provider policy should fail")
+		}
+	}
+	path := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(path, []byte("{\"allowed_provider_ids\":[\"ordered-test\"]}\n{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+		t.Fatal("trailing JSON data should fail")
+	}
+}
+
+func TestSupportSessionConnectPropagatesTunnelPolicyFlags(t *testing.T) {
+	for _, name := range []string{"RDEV_HOSTED_GATEWAY_URL", "RDEV_RELAY_GATEWAY_URL", "RDEV_MESH_GATEWAY_URL", "RDEV_VPN_GATEWAY_URL", "RDEV_SSH_GATEWAY_URL"} {
+		t.Setenv(name, "")
+	}
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	if err := app.Run(context.Background(), []string{
+		"support-session", "connect",
+		"--region", "cn-mainland",
+		"--provider-policy", policyPath,
+		"--allow-degraded-direct-handoff",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		CLIStartNowCommand     []string `json:"cli_start_now_command"`
+		ForegroundStartCommand []string `json:"foreground_start_command"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range [][]string{payload.CLIStartNowCommand, payload.ForegroundStartCommand} {
+		joined := strings.Join(command, "\x00")
+		if !strings.Contains(joined, "--region\x00cn-mainland") ||
+			!strings.Contains(joined, "--provider-policy\x00"+policyPath) ||
+			!slices.Contains(command, "--allow-degraded-direct-handoff") {
+			t.Fatalf("generated start command dropped tunnel policy flags: %v", command)
 		}
 	}
 }

@@ -86,16 +86,19 @@ type PrepareOptions struct {
 }
 
 type HandoffOptions struct {
-	RepoRoot     string
-	WorkDir      string
-	Addr         string
-	GatewayURL   string
-	Target       string
-	Reason       string
-	TTLSeconds   int
-	AutoActivate bool
-	Locale       string
-	RdevCommand  string
+	RepoRoot                   string
+	WorkDir                    string
+	Addr                       string
+	GatewayURL                 string
+	Target                     string
+	Reason                     string
+	TTLSeconds                 int
+	AutoActivate               bool
+	Locale                     string
+	RdevCommand                string
+	Region                     string
+	ProviderPolicyPath         string
+	AllowDegradedDirectHandoff bool
 }
 
 type RemoteControlEntryOptions struct {
@@ -211,6 +214,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	} else {
 		startCommand = append(startCommand, "--auto-activate=false")
 	}
+	startCommand = appendTunnelPolicyFlags(startCommand, opts.Region, opts.ProviderPolicyPath, opts.AllowDegradedDirectHandoff)
 	connectStartCommand := []string{
 		rdevCommand, "support-session", "connect",
 		"--start",
@@ -232,6 +236,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	} else {
 		connectStartCommand = append(connectStartCommand, "--auto-activate=false")
 	}
+	connectStartCommand = appendTunnelPolicyFlags(connectStartCommand, opts.Region, opts.ProviderPolicyPath, opts.AllowDegradedDirectHandoff)
 	return map[string]any{
 		"schema_version":           HandoffSchemaVersion,
 		"ok":                       true,
@@ -275,6 +280,21 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 			"service, firewall, DNS, route, credential, paid relay, or cloud changes without explicit authorization",
 		},
 	}
+}
+
+func appendTunnelPolicyFlags(command []string, region, policyPath string, allowDegraded bool) []string {
+	region = strings.TrimSpace(region)
+	if region != "" {
+		command = append(command, "--region", region)
+	}
+	policyPath = strings.TrimSpace(policyPath)
+	if policyPath != "" {
+		command = append(command, "--provider-policy", policyPath)
+	}
+	if allowDegraded {
+		command = append(command, "--allow-degraded-direct-handoff")
+	}
+	return command
 }
 
 func BuildConnectFromHandoff(handoff map[string]any) map[string]any {

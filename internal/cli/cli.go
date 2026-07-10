@@ -73,11 +73,13 @@ type App struct {
 }
 
 type supportSessionStartDeps struct {
-	Registry    tunnel.Registry
-	Evidence    []tunnel.RegionalEvidence
-	Manager     tunnel.Manager
-	FinalProbe  func(context.Context, tunnel.Candidate, string, string) error
-	RecordEvent func(string)
+	Registry             tunnel.Registry
+	Evidence             []tunnel.RegionalEvidence
+	Manager              tunnel.Manager
+	FinalProbe           func(context.Context, tunnel.Candidate, string, string) error
+	RecordEvent          func(string)
+	WaitForLocalHealth   func(context.Context, gatewayServerHandle, string, time.Duration) error
+	WaitForGatewayServer func(context.Context, gatewayServerHandle) error
 }
 
 func NewApp(stdout, stderr io.Writer) App {
@@ -3788,15 +3790,18 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	}
 	if gatewayURL == "" {
 		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-			RepoRoot:     opts.RepoRoot,
-			WorkDir:      opts.WorkDir,
-			Addr:         opts.Addr,
-			Target:       opts.Target,
-			Reason:       opts.Reason,
-			TTLSeconds:   opts.TTLSeconds,
-			AutoActivate: opts.AutoActivate,
-			Locale:       opts.Locale,
-			RdevCommand:  opts.RdevCommand,
+			RepoRoot:                   opts.RepoRoot,
+			WorkDir:                    opts.WorkDir,
+			Addr:                       opts.Addr,
+			Target:                     opts.Target,
+			Reason:                     opts.Reason,
+			TTLSeconds:                 opts.TTLSeconds,
+			AutoActivate:               opts.AutoActivate,
+			Locale:                     opts.Locale,
+			RdevCommand:                opts.RdevCommand,
+			Region:                     opts.Region,
+			ProviderPolicyPath:         opts.ProviderPolicyPath,
+			AllowDegradedDirectHandoff: opts.AllowDegradedDirectHandoff,
 		})
 		return writeJSON(a.Stdout, supportsession.BuildConnectFromHandoff(handoff))
 	}
@@ -4188,7 +4193,11 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	gatewayServer := startGatewayServer(addr, server.Handler(), nil)
 	defer func() { _ = shutdownGatewayServer(gatewayServer) }()
 	a.recordSupportSessionStartEvent("local_gateway_started")
-	if err := waitForGatewayHealthOrServerExit(ctx, gatewayServer, localListenURL, 15*time.Second); err != nil {
+	waitForLocalHealth := waitForGatewayHealthOrServerExit
+	if deps.WaitForLocalHealth != nil {
+		waitForLocalHealth = deps.WaitForLocalHealth
+	}
+	if err := waitForLocalHealth(ctx, gatewayServer, localListenURL, 15*time.Second); err != nil {
 		return fmt.Errorf("local gateway health check failed for %s: %w", localListenURL, err)
 	}
 	a.recordSupportSessionStartEvent("local_health_passed")
@@ -4265,7 +4274,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 			defer cancel()
 			_ = availabilityRuntime.Stop(cleanupCtx)
 		}()
-		availability = availabilityRuntime.Snapshot()
+		availability = retainHealthyAvailabilityCandidates(availabilityRuntime.Snapshot())
 		if len(availability.Candidates) > 0 {
 			a.recordSupportSessionStartEvent("provider_health_passed")
 		}
@@ -4274,21 +4283,49 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		gatewayURL = availability.Candidates[0].URL
 		gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
 	}
-	readiness := supportsession.DirectAvailability(availability, opts.AllowDegradedDirectHandoff)
-	metadata := map[string]string{
-		"connection_entry":    "standard-visible",
-		"activation_contract": "target-consent-scoped-ticket",
+	finalProbe := deps.FinalProbe
+	if finalProbe == nil {
+		finalProbe = func(probeCtx context.Context, candidate tunnel.Candidate, ticketCode, instance string) error {
+			_, err := tunnel.ProbeBootstrapAsset(probeCtx, nil, candidate, ticketCode, instance)
+			return err
+		}
 	}
-	if opts.AutoActivate {
-		metadata["auto_activate"] = "attended-temporary"
+	ticketMetadata := func(candidates []supportsession.GatewayURLCandidate) map[string]string {
+		metadata := map[string]string{
+			"connection_entry":    "standard-visible",
+			"activation_contract": "target-consent-scoped-ticket",
+		}
+		if opts.AutoActivate {
+			metadata["auto_activate"] = "attended-temporary"
+		}
+		return addGatewayCandidateTicketMetadata(metadata, candidates)
 	}
-	metadata = addGatewayCandidateTicketMetadata(metadata, gatewayCandidates)
-	ticket, err := gw.CreateTicketWithMetadata(
+	var ticket model.Ticket
+	if len(availability.Candidates) > 0 {
+		provisional, createErr := gw.CreateTicketWithMetadata(
+			model.HostModeAttendedTemporary,
+			opts.TTLSeconds,
+			cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
+			opts.Reason,
+			ticketMetadata(gatewayCandidates),
+		)
+		if createErr != nil {
+			return createErr
+		}
+		availability = finalProbeAvailability(ctx, availability, provisional.Code, server.GatewayInstance(), finalProbe)
+		_, _ = gw.RevokeTicket(provisional.ID, "provisional bootstrap candidate filtering complete")
+		if len(availability.Candidates) == 0 {
+			return fmt.Errorf("provisional ticket bootstrap probe rejected every public gateway candidate")
+		}
+		gatewayURL = availability.Candidates[0].URL
+		gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
+	}
+	ticket, err = gw.CreateTicketWithMetadata(
 		model.HostModeAttendedTemporary,
 		opts.TTLSeconds,
 		cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
 		opts.Reason,
-		metadata,
+		ticketMetadata(gatewayCandidates),
 	)
 	if err != nil {
 		return err
@@ -4297,20 +4334,16 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if _, err := store.SaveFrom(gw); err != nil {
 		return err
 	}
-
-	finalProbe := deps.FinalProbe
-	if finalProbe == nil {
-		finalProbe = func(probeCtx context.Context, candidate tunnel.Candidate, ticketCode, instance string) error {
-			_, err := tunnel.ProbeBootstrapAsset(probeCtx, nil, candidate, ticketCode, instance)
-			return err
+	for _, candidate := range availability.Candidates {
+		if err := finalProbe(ctx, candidate, ticket.Code, server.GatewayInstance()); err != nil {
+			_, _ = gw.RevokeTicket(ticket.ID, "final ticket bootstrap probe failed")
+			_, _ = store.SaveFrom(gw)
+			return fmt.Errorf("final ticket bootstrap probe failed for provider %q: %w", candidate.ProviderID, err)
 		}
 	}
-	availability = finalProbeAvailability(ctx, availability, ticket.Code, server.GatewayInstance(), finalProbe)
-	readiness = supportsession.DirectAvailability(availability, opts.AllowDegradedDirectHandoff)
+	readiness := supportsession.DirectAvailability(availability, opts.AllowDegradedDirectHandoff)
 	if len(availability.Candidates) > 0 {
 		a.recordSupportSessionStartEvent("bootstrap_probe_passed")
-		gatewayURL = availability.Candidates[0].URL
-		gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
 	}
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
@@ -4367,17 +4400,42 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session status file writing to %s\n", statusFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session connected report will be written to %s\n", connectedReportFile)
 	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
+	sessionCtx, cancelSession := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
 	if readiness.ReadyToSend {
 		go func() {
 			defer close(watchDone)
-			watchForegroundSupportSession(ctx, a.Stderr, statusFile, connectedReportFile, gw, ticket.Code, opts.Locale, gatewayURL)
+			watchForegroundSupportSession(sessionCtx, a.Stderr, statusFile, connectedReportFile, gw, ticket.Code, opts.Locale, gatewayURL)
 		}()
 	} else {
 		close(watchDone)
 	}
-	defer func() { <-watchDone }()
-	return waitForGatewayServer(ctx, gatewayServer)
+	defer func() {
+		cancelSession()
+		<-watchDone
+	}()
+	waitForServer := waitForGatewayServer
+	if deps.WaitForGatewayServer != nil {
+		waitForServer = deps.WaitForGatewayServer
+	}
+	return waitForServer(ctx, gatewayServer)
+}
+
+func retainHealthyAvailabilityCandidates(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+	healthy := make(map[string]bool, len(set.Attempts))
+	for _, attempt := range set.Attempts {
+		if attempt.Status == tunnel.AttemptHealthy {
+			healthy[attempt.ProviderID] = true
+		}
+	}
+	filtered := set
+	filtered.Candidates = make([]tunnel.Candidate, 0, len(set.Candidates))
+	for _, candidate := range set.Candidates {
+		if healthy[candidate.ProviderID] {
+			filtered.Candidates = append(filtered.Candidates, candidate)
+		}
+	}
+	return filtered
 }
 
 func gatewayProviderID(candidates []supportsession.GatewayURLCandidate, rawURL string) string {
