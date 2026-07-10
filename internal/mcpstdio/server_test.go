@@ -529,7 +529,10 @@ func TestServerToolCallSupportSessionConnectWithGatewayCreatesReadyHandoff(t *te
 	handoff := structured["user_handoff"].(map[string]any)
 	if structured["schema_version"] != "rdev.support-session-connect.v1" ||
 		structured["selected_path"] != "created-with-reachable-gateway" ||
-		structured["ready_to_send_to_human"] != true ||
+		structured["ready_to_send_to_human"] != false ||
+		structured["ready_to_send"] != false ||
+		structured["ready_to_activate"] != false ||
+		structured["ready_to_execute"] != false ||
 		handoff["schema_version"] != "rdev.support-session-user-handoff.v1" ||
 		handoff["copy_paste_kind"] != "windows" ||
 		!strings.Contains(handoff["copy_paste"].(string), "powershell -NoProfile -Command") ||

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"compress/gzip"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
@@ -26,13 +28,16 @@ import (
 )
 
 type Server struct {
-	Gateway      *gateway.MemoryGateway
-	StatePath    string
-	StateStore   gateway.StateStore
-	OperatorAuth *operatorauth.Authorizer
-	Assets       AssetConfig
-	stateMu      *sync.Mutex
+	Gateway         *gateway.MemoryGateway
+	StatePath       string
+	StateStore      gateway.StateStore
+	OperatorAuth    *operatorauth.Authorizer
+	Assets          AssetConfig
+	stateMu         *sync.Mutex
+	gatewayInstance string
 }
+
+var gatewayInstanceFallbackCounter atomic.Uint64
 
 type AssetConfig struct {
 	RdevWindowsAMD64Path string
@@ -43,7 +48,7 @@ type AssetConfig struct {
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
-	return Server{Gateway: gw, stateMu: &sync.Mutex{}}
+	return newServer(gw, nil, nil)
 }
 
 func NewServerWithState(gw *gateway.MemoryGateway, statePath string) Server {
@@ -57,7 +62,7 @@ func NewServerWithState(gw *gateway.MemoryGateway, statePath string) Server {
 }
 
 func NewServerWithStateStore(gw *gateway.MemoryGateway, store gateway.StateStore) Server {
-	return Server{Gateway: gw, StateStore: store, stateMu: &sync.Mutex{}}
+	return newServer(gw, store, nil)
 }
 
 func NewServerWithOperatorAuth(gw *gateway.MemoryGateway, statePath string, auth *operatorauth.Authorizer) Server {
@@ -71,7 +76,33 @@ func NewServerWithOperatorAuth(gw *gateway.MemoryGateway, statePath string, auth
 }
 
 func NewServerWithOperatorAuthAndStateStore(gw *gateway.MemoryGateway, store gateway.StateStore, auth *operatorauth.Authorizer) Server {
-	return Server{Gateway: gw, StateStore: store, OperatorAuth: auth, stateMu: &sync.Mutex{}}
+	return newServer(gw, store, auth)
+}
+
+func newServer(gw *gateway.MemoryGateway, store gateway.StateStore, auth *operatorauth.Authorizer) Server {
+	return Server{
+		Gateway:         gw,
+		StateStore:      store,
+		OperatorAuth:    auth,
+		stateMu:         &sync.Mutex{},
+		gatewayInstance: newGatewayInstance(),
+	}
+}
+
+func newGatewayInstance() string {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err == nil {
+		return hex.EncodeToString(id[:])
+	}
+	fallback := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", time.Now().UnixNano(), gatewayInstanceFallbackCounter.Add(1))))
+	return hex.EncodeToString(fallback[:len(id)])
+}
+
+func (s *Server) GatewayInstance() string {
+	if s == nil {
+		return ""
+	}
+	return s.gatewayInstance
 }
 
 func (s Server) Handler() http.Handler {
@@ -98,6 +129,7 @@ func (s Server) Handler() http.Handler {
 }
 
 func (s Server) health(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Rdev-Gateway-Instance", s.gatewayInstance)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

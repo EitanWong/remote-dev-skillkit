@@ -8,12 +8,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 func TestGatewayURLCandidatesPreferPrivateAddressForWildcardListen(t *testing.T) {
@@ -441,7 +443,7 @@ func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 	}
 }
 
-func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
+func TestBuildConnectFromCreatedFailsClosedWithoutAvailabilityReadiness(t *testing.T) {
 	created := BuildCreated(CreatedOptions{
 		GatewayURL:            "http://192.0.2.10:8787",
 		ManifestRootPublicKey: "manifest-root:abc",
@@ -455,7 +457,7 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 
 	if connect["schema_version"] != ConnectSchemaVersion ||
 		connect["selected_path"] != "created-with-reachable-gateway" ||
-		connect["ready_to_send_to_human"] != true ||
+		connect["ready_to_send_to_human"] != false ||
 		connect["user_handoff"] == nil ||
 		connect["target_handoff_envelope"] == nil ||
 		connect["connection_supervision"] == nil ||
@@ -466,12 +468,12 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["fresh_agent_connect_contract"] == nil ||
 		connect["target_command"] != created["target_command"] ||
 		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
-		t.Fatalf("expected ready connect payload, got %#v", connect)
+		t.Fatalf("expected fail-closed connect payload with compatibility fields, got %#v", connect)
 	}
 	contract := connect["fresh_agent_connect_contract"].(map[string]any)
 	autoActivate := contract["auto_activate"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
-		contract["ready_to_send_human"] != true ||
+		contract["ready_to_send_human"] != false ||
 		contract["ticket_code"] != "ABCD-1234" ||
 		autoActivate["enabled"] != true ||
 		!strings.Contains(contract["human_surface"].(string), "target_handoff_envelope.full_text") ||
@@ -511,6 +513,58 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		!strings.Contains(runbook["agent_rule"].(string), "runbook before choosing lower-level") {
 		t.Fatalf("expected connect runbook, got %#v", runbook)
+	}
+}
+
+func TestBuildConnectMapsAvailabilityReadinessAliases(t *testing.T) {
+	readiness := DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates: []tunnel.Candidate{
+			{ProviderID: "stable", URL: "https://gateway.example"},
+		},
+	}, true)
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "https://gateway.example",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "auto",
+		AvailabilityReadiness: readiness,
+	})
+	connect := BuildConnectFromCreated(created)
+
+	for name, payload := range map[string]map[string]any{"created": created, "connect": connect} {
+		got, ok := payload["availability_readiness"].(AvailabilityReadiness)
+		if !ok || !reflect.DeepEqual(got, readiness) {
+			t.Fatalf("%s readiness mismatch: %#v", name, payload["availability_readiness"])
+		}
+		if payload["ready_to_send_to_human"] != readiness.ReadyToSend {
+			t.Fatalf("%s compatibility alias must derive from readiness: %#v", name, payload)
+		}
+		if payload["ready_to_send"] != readiness.ReadyToSend ||
+			payload["ready_to_activate"] != readiness.ReadyToActivate ||
+			payload["ready_to_execute"] != readiness.ReadyToExecute {
+			t.Fatalf("%s readiness states must derive from readiness: %#v", name, payload)
+		}
+		contract := payload["fresh_agent_connect_contract"].(map[string]any)
+		if contract["ready_to_send_human"] != readiness.ReadyToSend ||
+			contract["ready_to_send"] != readiness.ReadyToSend ||
+			contract["ready_to_activate"] != readiness.ReadyToActivate ||
+			contract["ready_to_execute"] != readiness.ReadyToExecute {
+			t.Fatalf("%s fresh-agent alias must derive from readiness: %#v", name, contract)
+		}
+	}
+
+	started := BuildStarted(StartedOptions{
+		Created:               created,
+		AvailabilityReadiness: readiness,
+	})
+	got, ok := started["availability_readiness"].(AvailabilityReadiness)
+	if !ok || !reflect.DeepEqual(got, readiness) ||
+		started["ready_to_send_to_human"] != readiness.ReadyToSend ||
+		started["ready_to_send"] != readiness.ReadyToSend ||
+		started["ready_to_activate"] != readiness.ReadyToActivate ||
+		started["ready_to_execute"] != readiness.ReadyToExecute {
+		t.Fatalf("started readiness mapping mismatch: %#v", started)
 	}
 }
 
@@ -616,7 +670,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 	contract := created["fresh_agent_connect_contract"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
-		contract["ready_to_send_human"] != true ||
+		contract["ready_to_send_human"] != false ||
 		contract["first_tool"] != "rdev.support_session.connect" ||
 		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "gateway URL") ||
 		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "relay, mesh, VPN, SSH, or polling scripts") {
@@ -899,7 +953,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		t.Fatalf("expected embedded created session, got %#v", session)
 	}
 	handoff := started["user_handoff"].(map[string]any)
-	if started["ready_to_send_to_human"] != true ||
+	if started["ready_to_send_to_human"] != false ||
 		handoff["schema_version"] != UserHandoffSchemaVersion ||
 		handoff["copy_paste"] != started["target_command"] ||
 		started["target_command"] != session["target_command"] ||
@@ -993,7 +1047,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	}
 	contract := started["fresh_agent_connect_contract"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
-		contract["ready_to_send_human"] != true ||
+		contract["ready_to_send_human"] != false ||
 		contract["ready_file_path"] != "work/rdev-support-session/support-session-ready.json" ||
 		contract["status_file_path"] != "work/rdev-support-session/support-session-status.json" ||
 		contract["handoff_text_file_path"] != "work/rdev-support-session/target-handoff.txt" ||

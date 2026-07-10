@@ -295,7 +295,6 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	}
 	payload["fresh_agent_connect_contract"] = freshAgentConnectContract(freshAgentConnectContractOptions{
 		Phase:        selectedPath,
-		Ready:        false,
 		RdevCommand:  rdevCommandFromHandoff(handoff),
 		AutoActivate: autoActivateFromHandoff(handoff),
 	})
@@ -347,12 +346,17 @@ func supportSessionStartCommand(rdevCommand, addr, gatewayURL, target string) []
 }
 
 func BuildConnectFromCreated(created map[string]any) map[string]any {
+	readiness := availabilityReadinessFromMap(created)
 	return map[string]any{
 		"schema_version":          ConnectSchemaVersion,
 		"ok":                      true,
 		"intent":                  "single-call-agent-entry-for-one-command-visible-support-session",
 		"selected_path":           "created-with-reachable-gateway",
-		"ready_to_send_to_human":  true,
+		"availability_readiness":  readiness,
+		"ready_to_send":           readiness.ReadyToSend,
+		"ready_to_activate":       readiness.ReadyToActivate,
+		"ready_to_execute":        readiness.ReadyToExecute,
+		"ready_to_send_to_human":  readiness.ReadyToSend,
 		"created_session":         created,
 		"user_handoff":            created["user_handoff"],
 		"target_handoff_envelope": created["target_handoff_envelope"],
@@ -367,12 +371,11 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"agent_connection_runbook":                   created["agent_connection_runbook"],
 		"rdev_bootstrap_connector":                   created["rdev_bootstrap_connector"],
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
-			Phase:              "created-with-reachable-gateway",
-			Ready:              true,
-			TicketCode:         stringFromMap(created, "ticket_code"),
-			RdevCommand:        rdevCommandFromRunbook(created["agent_connection_runbook"]),
-			UserHandoffPresent: created["user_handoff"] != nil,
-			AutoActivate:       boolFromMap(created, "auto_activate"),
+			Phase:                 "created-with-reachable-gateway",
+			AvailabilityReadiness: readiness,
+			TicketCode:            stringFromMap(created, "ticket_code"),
+			RdevCommand:           rdevCommandFromRunbook(created["agent_connection_runbook"]),
+			AutoActivate:          boolFromMap(created, "auto_activate"),
 		}),
 		"mcp_follow_up":      created["mcp_follow_up"],
 		"agent_next_step":    "send target_handoff_envelope.full_text to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
@@ -410,6 +413,7 @@ type CreatedOptions struct {
 	RdevCommand              string
 	AutoActivate             bool
 	TargetBootstrapReadiness any
+	AvailabilityReadiness    AvailabilityReadiness
 }
 
 type StartedOptions struct {
@@ -426,6 +430,7 @@ type StartedOptions struct {
 	ConnectivityStrategy      any
 	GatewayCandidatePreflight any
 	StandardRecoveryActions   []string
+	AvailabilityReadiness     AvailabilityReadiness
 }
 
 func BuildStarted(opts StartedOptions) map[string]any {
@@ -438,6 +443,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	connectedReportFile := strings.TrimSpace(opts.ConnectedReportFile)
 	session := opts.Created
 	assetsReady := assetReportAllReady(opts.AssetReport)
+	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
 	payload := map[string]any{
 		"schema_version": StartedSchemaVersion,
 		"ok":             true,
@@ -449,7 +455,11 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"lifecycle":   "foreground-visible-process",
 			"stop":        "interrupt this rdev support-session start process",
 		},
-		"ready_to_send_to_human":                     assetsReady,
+		"availability_readiness":                     readiness,
+		"ready_to_send":                              readiness.ReadyToSend,
+		"ready_to_activate":                          readiness.ReadyToActivate,
+		"ready_to_execute":                           readiness.ReadyToExecute,
+		"ready_to_send_to_human":                     readiness.ReadyToSend,
 		"user_handoff":                               session["user_handoff"],
 		"target_handoff_envelope":                    session["target_handoff_envelope"],
 		"target_command":                             session["target_command"],
@@ -478,16 +488,15 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"connection_entry_runner_recommendation": session["connection_entry_runner_recommendation"],
 		"rdev_bootstrap_connector":               session["rdev_bootstrap_connector"],
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
-			Phase:               "foreground-started",
-			Ready:               true,
-			TicketCode:          stringFromMap(session, "ticket_code"),
-			RdevCommand:         rdevCommandFromRunbook(session["agent_connection_runbook"]),
-			UserHandoffPresent:  session["user_handoff"] != nil,
-			AutoActivate:        boolFromMap(session, "auto_activate"),
-			ReadyFile:           readyFile,
-			StatusFile:          statusFile,
-			HandoffTextFile:     handoffTextFile,
-			ConnectedReportFile: connectedReportFile,
+			Phase:                 "foreground-started",
+			AvailabilityReadiness: readiness,
+			TicketCode:            stringFromMap(session, "ticket_code"),
+			RdevCommand:           rdevCommandFromRunbook(session["agent_connection_runbook"]),
+			AutoActivate:          boolFromMap(session, "auto_activate"),
+			ReadyFile:             readyFile,
+			StatusFile:            statusFile,
+			HandoffTextFile:       handoffTextFile,
+			ConnectedReportFile:   connectedReportFile,
 		}),
 		"agent_connection_runbook": firstNonNil(
 			session["agent_connection_runbook"],
@@ -516,6 +525,8 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	}
 	if !assetsReady {
 		payload["handoff_blocked_reason"] = "helper assets are not ready; do not send target_handoff_envelope.full_text until rdev support-session connect --start or prepare --build-assets reports asset_report.all_ready=true"
+	} else if !readiness.ReadyToSend {
+		payload["handoff_blocked_reason"] = readiness.DegradedReason
 	}
 	if readyFile != "" {
 		payload["ready_file"] = map[string]any{
@@ -1106,17 +1117,16 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 }
 
 type freshAgentConnectContractOptions struct {
-	Phase               string
-	Ready               bool
-	TicketCode          string
-	GatewayURL          string
-	RdevCommand         string
-	UserHandoffPresent  bool
-	AutoActivate        bool
-	ReadyFile           string
-	StatusFile          string
-	HandoffTextFile     string
-	ConnectedReportFile string
+	Phase                 string
+	TicketCode            string
+	GatewayURL            string
+	RdevCommand           string
+	AutoActivate          bool
+	ReadyFile             string
+	StatusFile            string
+	HandoffTextFile       string
+	ConnectedReportFile   string
+	AvailabilityReadiness AvailabilityReadiness
 }
 
 func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string]any {
@@ -1125,14 +1135,19 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 		rdevCommand = "rdev"
 	}
 	ticketCode := strings.TrimSpace(opts.TicketCode)
+	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
 	contract := map[string]any{
-		"schema_version":      FreshAgentConnectContractSchemaVersion,
-		"intent":              "model-independent-standard-path-for-a-fresh-agent-to-connect-one-target-machine",
-		"phase":               strings.TrimSpace(opts.Phase),
-		"ready_to_send_human": opts.Ready && opts.UserHandoffPresent,
-		"human_surface":       "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads",
-		"first_tool":          "rdev.support_session.connect",
-		"first_cli":           []string{rdevCommand, "support-session", "connect"},
+		"schema_version":         FreshAgentConnectContractSchemaVersion,
+		"intent":                 "model-independent-standard-path-for-a-fresh-agent-to-connect-one-target-machine",
+		"phase":                  strings.TrimSpace(opts.Phase),
+		"availability_readiness": readiness,
+		"ready_to_send":          readiness.ReadyToSend,
+		"ready_to_activate":      readiness.ReadyToActivate,
+		"ready_to_execute":       readiness.ReadyToExecute,
+		"ready_to_send_human":    readiness.ReadyToSend,
+		"human_surface":          "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads",
+		"first_tool":             "rdev.support_session.connect",
+		"first_cli":              []string{rdevCommand, "support-session", "connect"},
 		"recovery_if_rdev_missing": []string{
 			"do not stop at rdev not found",
 			"if inside a remote-dev-skillkit checkout, run go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
@@ -2189,6 +2204,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		Ticket:     &opts.Ticket,
 		Locale:     locale,
 	})
+	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
 	return map[string]any{
 		"schema_version":                         CreatedSchemaVersion,
 		"ok":                                     true,
@@ -2204,6 +2220,11 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"target":                                 target,
 		"locale":                                 locale,
 		"auto_activate":                          opts.AutoActivate,
+		"availability_readiness":                 readiness,
+		"ready_to_send":                          readiness.ReadyToSend,
+		"ready_to_activate":                      readiness.ReadyToActivate,
+		"ready_to_execute":                       readiness.ReadyToExecute,
+		"ready_to_send_to_human":                 readiness.ReadyToSend,
 		"recommended_surface":                    recommendedSurface,
 		"target_command":                         recommended,
 		"target_commands":                        targetCommands,
@@ -2218,13 +2239,12 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"connection_entry_runner_recommendation": runnerRecommendation,
 		"rdev_bootstrap_connector":               rdevBootstrapConnectorContract(),
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
-			Phase:              "created",
-			Ready:              true,
-			TicketCode:         opts.Ticket.Code,
-			GatewayURL:         gatewayURL,
-			RdevCommand:        rdevCommand,
-			UserHandoffPresent: true,
-			AutoActivate:       opts.AutoActivate,
+			Phase:                 "created",
+			AvailabilityReadiness: readiness,
+			TicketCode:            opts.Ticket.Code,
+			GatewayURL:            gatewayURL,
+			RdevCommand:           rdevCommand,
+			AutoActivate:          opts.AutoActivate,
 		}),
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
 			Phase:        "created",

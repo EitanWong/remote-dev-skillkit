@@ -55,6 +55,40 @@ func TestCreateTicketAndAudit(t *testing.T) {
 	}
 }
 
+func TestHealthzIncludesGatewayInstanceMarker(t *testing.T) {
+	first := NewServer(gateway.NewMemoryGateway())
+	second := NewServer(gateway.NewMemoryGateway())
+
+	readMarker := func(t *testing.T, server Server) string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		marker := rec.Header().Get("X-Rdev-Gateway-Instance")
+		decoded, err := hex.DecodeString(marker)
+		if err != nil || len(decoded) != 16 {
+			t.Fatalf("expected a 128-bit hex gateway instance marker, got %q", marker)
+		}
+		if strings.Contains(strings.ToLower(marker), "ticket") || strings.Contains(strings.ToLower(marker), "key") {
+			t.Fatalf("gateway instance marker must not expose ticket or key material: %q", marker)
+		}
+		return marker
+	}
+
+	firstMarker := readMarker(t, first)
+	if repeated := readMarker(t, first); repeated != firstMarker {
+		t.Fatalf("expected stable marker %q, got %q", firstMarker, repeated)
+	}
+	if first.GatewayInstance() != firstMarker {
+		t.Fatalf("GatewayInstance returned %q, health returned %q", first.GatewayInstance(), firstMarker)
+	}
+	if secondMarker := readMarker(t, second); secondMarker == firstMarker {
+		t.Fatalf("expected distinct per-server markers, both were %q", firstMarker)
+	}
+}
+
 func TestJoinPageAndBootstrapScripts(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()

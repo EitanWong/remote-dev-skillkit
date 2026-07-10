@@ -2456,6 +2456,9 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 			AgentRule     string `json:"agent_rule"`
 		} `json:"connected_report_file"`
 		ReadyToSendHuman bool   `json:"ready_to_send_to_human"`
+		ReadyToSend      bool   `json:"ready_to_send"`
+		ReadyToActivate  bool   `json:"ready_to_activate"`
+		ReadyToExecute   bool   `json:"ready_to_execute"`
 		TargetCommand    string `json:"target_command"`
 		JoinURL          string `json:"join_url"`
 		UserHandoff      struct {
@@ -2526,7 +2529,10 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 		!strings.Contains(payload.ConnectedReportFile.AgentRule, "plain text") {
 		t.Fatalf("expected connected report-file metadata, got %#v", payload.ConnectedReportFile)
 	}
-	if !payload.ReadyToSendHuman ||
+	if payload.ReadyToSendHuman ||
+		payload.ReadyToSend ||
+		payload.ReadyToActivate ||
+		payload.ReadyToExecute ||
 		payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
 		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
 		payload.TargetCommand != payload.Session.TargetCommand ||
