@@ -7,8 +7,10 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -61,17 +63,23 @@ type Manager struct {
 type runtimeHandle struct {
 	handle       Handle
 	attemptIndex int
+	waitDone     chan struct{}
+	waitErr      error
+	stopping     atomic.Bool
+	stopOnce     sync.Once
+	stopErr      error
 }
 
 type Runtime struct {
 	mu           sync.RWMutex
 	snapshot     AvailabilitySet
-	handles      []runtimeHandle
+	handles      []*runtimeHandle
 	candidates   []Candidate
 	hasCandidate []bool
 	done         chan struct{}
-	stopOnce     sync.Once
-	stopErr      error
+	cleanupOnce  sync.Once
+	cleanupDone  chan struct{}
+	cleanupErr   error
 }
 
 func (m Manager) Start(ctx context.Context, selections []Selection, request StartRequest) (*Runtime, error) {
@@ -89,6 +97,7 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 			Attempts:      make([]Attempt, len(selections)),
 		},
 		done:         make(chan struct{}),
+		cleanupDone:  make(chan struct{}),
 		candidates:   make([]Candidate, len(selections)),
 		hasCandidate: make([]bool, len(selections)),
 	}
@@ -100,7 +109,11 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 		runtime.snapshot.Attempts[i] = Attempt{ProviderID: providerID, Status: AttemptStarting}
 	}
 
-	jobs := make(chan int)
+	jobs := make(chan int, len(selections))
+	for i := range selections {
+		jobs <- i
+	}
+	close(jobs)
 	var workers sync.WaitGroup
 	workerCount := min(maxActive, len(selections))
 	for range workerCount {
@@ -108,14 +121,12 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 		go func() {
 			defer workers.Done()
 			for index := range jobs {
-				m.startOne(ctx, runtime, index, selections[index], request)
+				if !m.startOne(ctx, runtime, index, selections[index], request) {
+					return
+				}
 			}
 		}()
 	}
-	for i := range selections {
-		jobs <- i
-	}
-	close(jobs)
 	workers.Wait()
 	runtime.finalizeCandidates()
 
@@ -129,13 +140,15 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 	return runtime, nil
 }
 
-func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, selection Selection, request StartRequest) {
+// startOne returns whether its worker may start another provider without
+// exceeding the live-handle bound.
+func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, selection Selection, request StartRequest) bool {
 	if selection.Provider == nil {
 		runtime.updateAttempt(index, func(attempt *Attempt) {
 			attempt.Status = AttemptDegraded
 			attempt.ErrorClass = "provider-invalid"
 		})
-		return
+		return true
 	}
 	startCtx, cancelStart := withOptionalTimeout(ctx, m.StartTimeout)
 	handle, err := selection.Provider.Start(startCtx, request)
@@ -145,25 +158,35 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 			attempt.Status = AttemptDegraded
 			attempt.ErrorClass = classifyError(err, "start-failed")
 		})
-		return
+		return true
 	}
 
 	candidate := handle.Candidate()
-	if candidate.ProviderID == "" {
-		candidate.ProviderID = selection.Provider.ID()
+	authoritativeID := selection.Provider.ID()
+	if candidate.ProviderID != authoritativeID {
+		item := newRuntimeHandle(handle, index)
+		runtime.addHandle(item)
+		runtime.updateAttempt(index, func(attempt *Attempt) {
+			attempt.Status = AttemptDegraded
+			attempt.ErrorClass = "provider-id-mismatch"
+		})
+		item.stopAndReap()
+		return true
 	}
-	candidateID := candidateID(candidate.ProviderID, candidate.URL)
+	candidateID := candidateID(authoritativeID, candidate.URL)
+	item := newRuntimeHandle(handle, index)
 	runtime.mu.Lock()
 	runtime.candidates[index] = candidate
 	runtime.hasCandidate[index] = true
 	runtime.snapshot.Attempts[index].CandidateID = candidateID
-	runtime.handles = append(runtime.handles, runtimeHandle{handle: handle, attemptIndex: index})
+	runtime.handles = append(runtime.handles, item)
 	runtime.mu.Unlock()
+	go runtime.observeExit(item)
 
 	select {
-	case waitErr := <-handle.Wait():
-		runtime.markExited(index, waitErr)
-		return
+	case <-item.waitDone:
+		runtime.markExited(index, item.waitErr)
+		return true
 	default:
 	}
 
@@ -186,7 +209,11 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 		attempt.Status = AttemptHealthy
 		attempt.ErrorClass = ""
 	})
-	go runtime.observeExit(index, handle)
+	if probeErr != nil {
+		item.stopAndReap()
+		return true
+	}
+	return false
 }
 
 func (r *Runtime) Snapshot() AvailabilitySet {
@@ -199,33 +226,41 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	r.stopOnce.Do(func() {
-		r.mu.RLock()
-		handles := append([]runtimeHandle(nil), r.handles...)
-		r.mu.RUnlock()
-		errs := make([]error, 0, len(handles))
-		for _, item := range handles {
-			if err := item.handle.Stop(ctx); err != nil {
-				errs = append(errs, err)
-			}
-			r.updateAttempt(item.attemptIndex, func(attempt *Attempt) {
-				if attempt.Status != AttemptExited {
-					attempt.Status = AttemptStopped
-					attempt.ErrorClass = ""
-				}
-			})
-		}
-		close(r.done)
-		r.stopErr = errors.Join(errs...)
-	})
-	return r.stopErr
+	r.cleanupOnce.Do(func() { go r.cleanup() })
+	select {
+	case <-r.cleanupDone:
+		return r.cleanupErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
-func (r *Runtime) observeExit(index int, handle Handle) {
-	select {
-	case err := <-handle.Wait():
-		r.markExited(index, err)
-	case <-r.done:
+func (r *Runtime) cleanup() {
+	r.mu.RLock()
+	handles := append([]*runtimeHandle(nil), r.handles...)
+	r.mu.RUnlock()
+	errs := make([]error, 0, len(handles))
+	for _, item := range handles {
+		item.stopAndReap()
+		if item.stopErr != nil {
+			errs = append(errs, item.stopErr)
+		}
+		r.updateAttempt(item.attemptIndex, func(attempt *Attempt) {
+			if attempt.Status != AttemptExited {
+				attempt.Status = AttemptStopped
+				attempt.ErrorClass = ""
+			}
+		})
+	}
+	close(r.done)
+	r.cleanupErr = errors.Join(errs...)
+	close(r.cleanupDone)
+}
+
+func (r *Runtime) observeExit(item *runtimeHandle) {
+	<-item.waitDone
+	if !item.stopping.Load() {
+		r.markExited(item.attemptIndex, item.waitErr)
 	}
 }
 
@@ -256,6 +291,36 @@ func (r *Runtime) finalizeCandidates() {
 	}
 }
 
+func (r *Runtime) addHandle(item *runtimeHandle) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.handles = append(r.handles, item)
+}
+
+func newRuntimeHandle(handle Handle, attemptIndex int) *runtimeHandle {
+	item := &runtimeHandle{handle: handle, attemptIndex: attemptIndex, waitDone: make(chan struct{})}
+	wait := handle.Wait()
+	select {
+	case item.waitErr = <-wait:
+		close(item.waitDone)
+		return item
+	default:
+	}
+	go func() {
+		item.waitErr = <-wait
+		close(item.waitDone)
+	}()
+	return item
+}
+
+func (h *runtimeHandle) stopAndReap() {
+	h.stopping.Store(true)
+	h.stopOnce.Do(func() {
+		h.stopErr = h.handle.Stop(context.Background())
+	})
+	<-h.waitDone
+}
+
 func normalizedManagerRegion(region RegionProfile) RegionProfile {
 	if supportedRegion(region) {
 		return region
@@ -281,7 +346,7 @@ func normalizeCandidateURL(rawURL string) string {
 		return strings.TrimSpace(rawURL)
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	hostname := strings.ToLower(parsed.Hostname())
+	hostname := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
 	port := parsed.Port()
 	if (parsed.Scheme == "https" && port == "443") || (parsed.Scheme == "http" && port == "80") {
 		port = ""
@@ -294,7 +359,10 @@ func normalizeCandidateURL(rawURL string) string {
 	}
 	parsed.Fragment = ""
 	parsed.RawQuery = ""
-	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.Path = path.Clean("/" + parsed.Path)
+	if parsed.Path == "/" {
+		parsed.Path = ""
+	}
 	parsed.RawPath = ""
 	return parsed.String()
 }

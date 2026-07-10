@@ -7,47 +7,76 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
-const maxProbeBody = 256 << 10
+const (
+	maxProbeBody          = 256 << 10
+	bootstrapScriptMarker = "$ErrorActionPreference = 'Stop'"
+)
+
+type probeResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
+type probeOptions struct {
+	Resolver    probeResolver
+	DialContext func(context.Context, string, string) (net.Conn, error)
+	TLSConfig   *tls.Config
+	Timeout     time.Duration
+	stages      *probeStages
+}
+
+type probeStages struct {
+	mu            sync.Mutex
+	dns, tcp, tls bool
+}
 
 func ProbeGatewayHealth(ctx context.Context, client *http.Client, candidate Candidate, expectedInstance string) (ProbeEvidence, error) {
+	return probeGatewayHealthWithOptions(ctx, candidate, expectedInstance, probeOptionsFromClient(client))
+}
+
+func ProbeBootstrapAsset(ctx context.Context, client *http.Client, candidate Candidate, ticketCode, expectedInstance string) (ProbeEvidence, error) {
+	return probeBootstrapAssetWithOptions(ctx, candidate, ticketCode, expectedInstance, probeOptionsFromClient(client))
+}
+
+func probeGatewayHealthWithOptions(ctx context.Context, candidate Candidate, expectedInstance string, options probeOptions) (ProbeEvidence, error) {
 	started := time.Now()
 	base, err := validatePublicCandidate(candidate)
 	if err != nil {
 		return ProbeEvidence{}, err
 	}
-	probeClient := safeProbeClient(client)
 	healthURL := *base
 	healthURL.Path = path.Join(base.Path, "healthz")
+	healthURL.RawPath = ""
 	healthURL.RawQuery = ""
 	healthURL.Fragment = ""
-	body, marker, err := probeResponse(ctx, probeClient, healthURL.String(), expectedInstance, false)
-	evidence := ProbeEvidence{Latency: time.Since(started)}
+	stages := &probeStages{}
+	body, marker, err := probeResponse(ctx, newProbeHTTPClient(nil, optionsWithStages(options, stages)), healthURL.String(), expectedInstance, false, stages)
+	evidence := stages.evidence(time.Since(started))
 	if err != nil {
 		return evidence, err
 	}
 	_ = body
-	evidence.DNSOK = true
-	evidence.TCPConnectOK = true
-	evidence.TLSOK = true
 	evidence.HealthOK = true
 	evidence.InstanceMarker = marker
 	return evidence, nil
 }
 
-func ProbeBootstrapAsset(ctx context.Context, client *http.Client, candidate Candidate, ticketCode, expectedInstance string) (ProbeEvidence, error) {
+func probeBootstrapAssetWithOptions(ctx context.Context, candidate Candidate, ticketCode, expectedInstance string, options probeOptions) (ProbeEvidence, error) {
 	if strings.TrimSpace(ticketCode) == "" {
 		return ProbeEvidence{}, errors.New("ticket code is required")
 	}
-	evidence, err := ProbeGatewayHealth(ctx, client, candidate, expectedInstance)
+	evidence, err := probeGatewayHealthWithOptions(ctx, candidate, expectedInstance, options)
 	if err != nil {
 		return evidence, err
 	}
@@ -60,57 +89,177 @@ func ProbeBootstrapAsset(ctx context.Context, client *http.Client, candidate Can
 	assetURL.RawPath = strings.TrimRight(base.EscapedPath(), "/") + "/join/" + url.PathEscape(ticketCode) + "/bootstrap.ps1"
 	assetURL.RawQuery = ""
 	assetURL.Fragment = ""
-	if _, _, err := probeResponse(ctx, safeProbeClient(client), assetURL.String(), expectedInstance, true); err != nil {
+	body, _, err := probeResponse(ctx, newProbeHTTPClient(nil, options), assetURL.String(), expectedInstance, true, nil)
+	if err != nil {
 		return evidence, err
+	}
+	if !bytes.Contains(body, []byte(bootstrapScriptMarker)) {
+		return evidence, errors.New("bootstrap script marker missing")
 	}
 	evidence.BootstrapOK = true
 	evidence.SmallAssetOK = true
 	return evidence, nil
 }
 
-func safeProbeClient(client *http.Client) *http.Client {
-	copyClient := &http.Client{Timeout: 10 * time.Second}
+func probeOptionsFromClient(client *http.Client) probeOptions {
+	options := probeOptions{}
 	if client != nil {
-		*copyClient = *client
-		if copyClient.Timeout <= 0 || copyClient.Timeout > 10*time.Second {
-			copyClient.Timeout = 10 * time.Second
+		options.Timeout = client.Timeout
+	}
+	return options
+}
+
+func optionsWithStages(options probeOptions, stages *probeStages) probeOptions {
+	options.stages = stages
+	return options
+}
+
+func newProbeHTTPClient(_ *http.Client, options probeOptions) *http.Client {
+	timeout := options.Timeout
+	if timeout <= 0 || timeout > 10*time.Second {
+		timeout = 10 * time.Second
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if options.TLSConfig != nil {
+		tlsConfig = options.TLSConfig.Clone()
+		if tlsConfig.MinVersion < tls.VersionTLS12 {
+			tlsConfig.MinVersion = tls.VersionTLS12
 		}
 	}
-	if copyClient.Transport == nil {
-		copyClient.Transport = &http.Transport{
+	dialContext := secureProbeDial(options, options.stages)
+	return &http.Client{
+		Timeout: timeout,
+		Jar:     nil,
+		Transport: &http.Transport{
 			Proxy:               nil,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+			DialContext:         dialContext,
+			TLSClientConfig:     tlsConfig,
 			TLSHandshakeTimeout: 5 * time.Second,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errors.New("redirect rejected")
+		},
+	}
+}
+
+func secureProbeDial(options probeOptions, stages *probeStages) func(context.Context, string, string) (net.Conn, error) {
+	resolver := options.Resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	baseDial := options.DialContext
+	if baseDial == nil {
+		baseDial = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	}
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("parse probe address: %w", err)
+		}
+		ips, err := resolvePublicIPs(ctx, resolver, host)
+		if err != nil {
+			return nil, err
+		}
+		if stages != nil {
+			stages.setDNS()
+		}
+		var dialErrs []error
+		for _, ip := range ips {
+			conn, dialErr := baseDial(ctx, network, net.JoinHostPort(ip.String(), port))
+			if dialErr == nil {
+				if stages != nil {
+					stages.setTCP()
+				}
+				return conn, nil
+			}
+			dialErrs = append(dialErrs, dialErr)
+		}
+		return nil, fmt.Errorf("connect public candidate: %w", errors.Join(dialErrs...))
+	}
+}
+
+func resolvePublicIPs(ctx context.Context, resolver probeResolver, hostname string) ([]netip.Addr, error) {
+	hostname = strings.TrimSuffix(strings.TrimSpace(hostname), ".")
+	if literal, err := netip.ParseAddr(hostname); err == nil {
+		literal = literal.Unmap()
+		if err := validatePublicIP(literal); err != nil {
+			return nil, err
+		}
+		return []netip.Addr{literal}, nil
+	}
+	ips, err := resolver.LookupNetIP(ctx, "ip", hostname)
+	if err != nil {
+		return nil, fmt.Errorf("resolve public candidate: %w", err)
+	}
+	if len(ips) == 0 {
+		return nil, errors.New("public candidate resolved no addresses")
+	}
+	validated := make([]netip.Addr, 0, len(ips))
+	for _, ip := range ips {
+		ip = ip.Unmap()
+		if err := validatePublicIP(ip); err != nil {
+			return nil, err
+		}
+		validated = append(validated, ip)
+	}
+	return validated, nil
+}
+
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"), netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"), netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("224.0.0.0/4"), netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/128"), netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("2001:db8::/32"), netip.MustParsePrefix("ff00::/8"),
+}
+
+func validatePublicIP(ip netip.Addr) error {
+	if !ip.IsValid() || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return errors.New("public candidate resolved a non-public address")
+	}
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(ip) {
+			return errors.New("public candidate resolved a non-public address")
 		}
 	}
-	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return errors.New("redirect rejected")
-	}
-	return copyClient
+	return nil
 }
 
 func validatePublicCandidate(candidate Candidate) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(candidate.URL))
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil {
 		return nil, errors.New("public candidate must be an HTTPS URL without userinfo")
 	}
+	parsed.Scheme = "https"
 	hostname := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
 	if hostname == "localhost" || strings.HasSuffix(hostname, ".localhost") {
 		return nil, errors.New("public candidate must not use a private or local address")
 	}
-	if ip, err := netip.ParseAddr(parsed.Hostname()); err == nil {
-		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-			return nil, errors.New("public candidate must not use a private or local address")
+	if ip, err := netip.ParseAddr(hostname); err == nil {
+		if err := validatePublicIP(ip.Unmap()); err != nil {
+			return nil, err
 		}
 	}
 	return parsed, nil
 }
 
-func probeResponse(ctx context.Context, client *http.Client, rawURL, expectedInstance string, bootstrap bool) ([]byte, string, error) {
+func probeResponse(ctx context.Context, client *http.Client, rawURL, expectedInstance string, bootstrap bool, stages *probeStages) ([]byte, string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("build probe request: %w", err)
+	}
+	if stages != nil {
+		trace := &httptrace.ClientTrace{TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			if err == nil {
+				stages.setTLS()
+			}
+		}}
+		request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -127,21 +276,50 @@ func probeResponse(ctx context.Context, client *http.Client, rawURL, expectedIns
 	if expectedInstance != "" && marker != expectedInstance {
 		return nil, "", errors.New("gateway instance marker mismatch")
 	}
-	reader := io.LimitReader(response.Body, maxProbeBody+1)
-	body, err := io.ReadAll(reader)
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxProbeBody+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("read probe response: %w", err)
 	}
 	if len(body) > maxProbeBody {
 		return nil, "", errors.New("probe response exceeds 256 KiB")
 	}
-	if bootstrap && looksLikeHTMLInterstitial(response.Header.Get("Content-Type"), body) {
-		return nil, "", errors.New("bootstrap response looks like an HTML interstitial")
+	if bootstrap {
+		if len(bytes.TrimSpace(body)) == 0 {
+			return nil, "", errors.New("bootstrap response is empty")
+		}
+		if !allowedBootstrapContentType(response.Header.Get("Content-Type")) {
+			return nil, "", errors.New("bootstrap response has an unexpected content type")
+		}
+		if looksLikeHTMLInterstitial(response.Header.Get("Content-Type"), body) {
+			return nil, "", errors.New("bootstrap response looks like an HTML interstitial")
+		}
 	}
 	return body, marker, nil
+}
+
+func allowedBootstrapContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(mediaType) {
+	case "text/plain", "text/x-powershell", "application/x-powershell", "application/octet-stream":
+		return true
+	default:
+		return false
+	}
 }
 
 func looksLikeHTMLInterstitial(contentType string, body []byte) bool {
 	prefix := bytes.ToLower(bytes.TrimSpace(body))
 	return strings.Contains(strings.ToLower(contentType), "text/html") || bytes.HasPrefix(prefix, []byte("<!doctype html")) || bytes.HasPrefix(prefix, []byte("<html"))
+}
+
+func (s *probeStages) setDNS() { s.mu.Lock(); s.dns = true; s.mu.Unlock() }
+func (s *probeStages) setTCP() { s.mu.Lock(); s.tcp = true; s.mu.Unlock() }
+func (s *probeStages) setTLS() { s.mu.Lock(); s.tls = true; s.mu.Unlock() }
+func (s *probeStages) evidence(latency time.Duration) ProbeEvidence {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return ProbeEvidence{DNSOK: s.dns, TCPConnectOK: s.tcp, TLSOK: s.tls, Latency: latency}
 }

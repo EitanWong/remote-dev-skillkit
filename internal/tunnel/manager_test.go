@@ -2,12 +2,14 @@ package tunnel
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -19,11 +21,27 @@ type managerFakeHandle struct {
 	candidate Candidate
 	wait      chan error
 	stops     atomic.Int32
+	stopBlock <-chan struct{}
+	live      *atomic.Int32
 }
 
-func (h *managerFakeHandle) Candidate() Candidate       { return h.candidate }
-func (h *managerFakeHandle) Wait() <-chan error         { return h.wait }
-func (h *managerFakeHandle) Stop(context.Context) error { h.stops.Add(1); return nil }
+func (h *managerFakeHandle) Candidate() Candidate { return h.candidate }
+func (h *managerFakeHandle) Wait() <-chan error   { return h.wait }
+func (h *managerFakeHandle) Stop(context.Context) error {
+	if h.stops.Add(1) == 1 {
+		if h.stopBlock != nil {
+			<-h.stopBlock
+		}
+		if h.live != nil {
+			h.live.Add(-1)
+		}
+		select {
+		case h.wait <- nil:
+		default:
+		}
+	}
+	return nil
+}
 
 type managerFakeProvider struct {
 	id      string
@@ -55,6 +73,11 @@ func (p *managerFakeProvider) Start(ctx context.Context, _ StartRequest) (Handle
 			return nil, ctx.Err()
 		}
 	}
+	if p.handle.live != nil {
+		current := p.handle.live.Add(1)
+		for peak := p.peak.Load(); current > peak && !p.peak.CompareAndSwap(peak, current); peak = p.peak.Load() {
+		}
+	}
 	return p.handle, nil
 }
 
@@ -67,7 +90,7 @@ func managerSelection(provider Provider, region RegionProfile) Selection {
 }
 
 func TestManagerBoundsConcurrentStartsAndRecordsProbeResults(t *testing.T) {
-	var active, peak atomic.Int32
+	var active, live, peak atomic.Int32
 	release := make(chan struct{})
 	providers := make([]*managerFakeProvider, 3)
 	selections := make([]Selection, 3)
@@ -75,7 +98,7 @@ func TestManagerBoundsConcurrentStartsAndRecordsProbeResults(t *testing.T) {
 		id := fmt.Sprintf("provider-%d", i)
 		providers[i] = &managerFakeProvider{
 			id: id, release: release, active: &active, peak: &peak,
-			handle: &managerFakeHandle{candidate: Candidate{ProviderID: id, URL: "https://" + id + ".example.test"}, wait: make(chan error, 1)},
+			handle: &managerFakeHandle{candidate: Candidate{ProviderID: id, URL: "https://" + id + ".example.test"}, wait: make(chan error, 1), live: &live},
 		}
 		selections[i] = managerSelection(providers[i], RegionGlobal)
 	}
@@ -100,7 +123,10 @@ func TestManagerBoundsConcurrentStartsAndRecordsProbeResults(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runtime.Stop(context.Background()) })
 	if got := peak.Load(); got != 2 {
-		t.Fatalf("peak concurrent starts = %d, want 2", got)
+		t.Fatalf("peak live handles = %d, want 2", got)
+	}
+	if got := providers[0].handle.stops.Load(); got != 1 {
+		t.Fatalf("probe-failed handle stops = %d, want 1 before fallback starts", got)
 	}
 	snapshot := runtime.Snapshot()
 	if len(snapshot.Attempts) != 3 || snapshot.Attempts[0].Status != AttemptDegraded || snapshot.Attempts[1].Status != AttemptHealthy {
@@ -115,7 +141,26 @@ func TestManagerBoundsConcurrentStartsAndRecordsProbeResults(t *testing.T) {
 	}
 }
 
-func TestManagerProbesPrintedURLAndObservesSpontaneousExit(t *testing.T) {
+func TestManagerRejectsCandidateProviderIDMismatch(t *testing.T) {
+	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "spoofed", URL: "https://public.example.test"}, wait: make(chan error, 1)}
+	provider := &managerFakeProvider{id: "authoritative", handle: handle}
+	runtime, err := (Manager{Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+		t.Fatal("mismatched candidate must not be probed")
+		return ProbeEvidence{}, nil
+	}}).Start(context.Background(), []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt := runtime.Snapshot().Attempts[0]
+	if attempt.ProviderID != "authoritative" || attempt.CandidateID != "" || attempt.Status != AttemptDegraded || attempt.ErrorClass != "provider-id-mismatch" {
+		t.Fatalf("unexpected mismatch attempt: %#v", attempt)
+	}
+	if handle.stops.Load() != 1 {
+		t.Fatalf("mismatched handle stops = %d, want 1", handle.stops.Load())
+	}
+}
+
+func TestManagerProbesPrintedURLAndReapsMarkerFailure(t *testing.T) {
 	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "printed", URL: "https://printed.example.test"}, wait: make(chan error, 1)}
 	provider := &managerFakeProvider{id: "printed", handle: handle}
 	runtime, err := (Manager{Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
@@ -126,6 +171,23 @@ func TestManagerProbesPrintedURLAndObservesSpontaneousExit(t *testing.T) {
 	}
 	if got := runtime.Snapshot().Attempts[0].Status; got != AttemptDegraded {
 		t.Fatalf("printed URL status = %q, want degraded", got)
+	}
+	if handle.stops.Load() != 1 {
+		t.Fatalf("marker-failed handle stops = %d, want 1", handle.stops.Load())
+	}
+	if err := runtime.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagerObservesSpontaneousHealthyExit(t *testing.T) {
+	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "healthy", URL: "https://healthy.example.test"}, wait: make(chan error, 1)}
+	provider := &managerFakeProvider{id: "healthy", handle: handle}
+	runtime, err := (Manager{Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+		return ProbeEvidence{DNSOK: true, TLSOK: true, HealthOK: true}, nil
+	}}).Start(context.Background(), []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
 	}
 	handle.wait <- errors.New("process exited unexpectedly")
 	eventually(t, time.Second, func() bool { return runtime.Snapshot().Attempts[0].Status == AttemptExited })
@@ -189,6 +251,27 @@ func TestRuntimeStopIsIdempotentReapsAllHandlesAndSnapshotIsDeepCopy(t *testing.
 	}
 }
 
+func TestRuntimeStopCleanupOutlivesFirstCallerContext(t *testing.T) {
+	release := make(chan struct{})
+	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "one", URL: "https://one.example.test"}, wait: make(chan error, 1), stopBlock: release}
+	runtime, err := (Manager{Probe: func(context.Context, Candidate) (ProbeEvidence, error) { return ProbeEvidence{HealthOK: true}, nil }}).Start(context.Background(), []Selection{managerSelection(&managerFakeProvider{id: "one", handle: handle}, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shortCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := runtime.Stop(shortCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first Stop error = %v, want deadline exceeded", err)
+	}
+	close(release)
+	if err := runtime.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop: %v", err)
+	}
+	if handle.stops.Load() != 1 {
+		t.Fatalf("handle stops = %d, want one shared cleanup", handle.stops.Load())
+	}
+}
+
 func TestManagerRegionDefaultsGlobalDespiteSelectionEvidence(t *testing.T) {
 	handle := &managerFakeHandle{candidate: Candidate{ProviderID: "one", URL: "https://one.example.test"}, wait: make(chan error, 1)}
 	selection := managerSelection(&managerFakeProvider{id: "one", handle: handle}, RegionCNMainland)
@@ -203,8 +286,8 @@ func TestManagerRegionDefaultsGlobalDespiteSelectionEvidence(t *testing.T) {
 }
 
 func TestManagerCandidateIDsNormalizeEquivalentURLs(t *testing.T) {
-	first := candidateID("provider", " HTTPS://Example.COM:443/path/?query=secret#fragment ")
-	second := candidateID("provider", "https://example.com/path")
+	first := candidateID("provider", " HTTPS://Example.COM.:443/a/../path/%7Euser/?query=secret#fragment ")
+	second := candidateID("provider", "https://example.com/path/~user")
 	if first != second {
 		t.Fatalf("equivalent URLs produced different candidate IDs: %q != %q", first, second)
 	}
@@ -235,9 +318,12 @@ func TestProbeGatewayHealthRejectsUnsafeOrInvalidResponses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewTLSServer(tt.handler)
 			defer server.Close()
-			_, err := ProbeGatewayHealth(context.Background(), publicTestClient(t, server), Candidate{ProviderID: "provider", URL: "https://public.example.test"}, tt.marker)
+			evidence, err := probeGatewayHealthWithOptions(context.Background(), Candidate{ProviderID: "provider", URL: "https://public.example.test"}, tt.marker, publicTestProbeOptions(t, server))
 			if err == nil {
 				t.Fatal("expected probe rejection")
+			}
+			if tt.name == "marker mismatch" && (!evidence.DNSOK || !evidence.TCPConnectOK || !evidence.TLSOK || evidence.HealthOK) {
+				t.Fatalf("completed stages were not preserved: %#v", evidence)
 			}
 		})
 	}
@@ -247,6 +333,43 @@ func TestProbeGatewayHealthRejectsUnsafeOrInvalidResponses(t *testing.T) {
 				t.Fatal("expected unsafe candidate rejection")
 			}
 		})
+	}
+}
+
+func TestProbeSecureDialRejectsResolvedPrivateAddressesAndTrailingDotLiteral(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		url  string
+		ips  []netip.Addr
+	}{
+		{name: "hostname resolves loopback", url: "https://public.example.test", ips: []netip.Addr{netip.MustParseAddr("127.0.0.1")}},
+		{name: "hostname includes private result", url: "https://public.example.test", ips: []netip.Addr{netip.MustParseAddr("203.0.113.1"), netip.MustParseAddr("10.0.0.1")}},
+		{name: "trailing dot literal", url: "https://127.0.0.1."},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dialed := atomic.Bool{}
+			_, err := probeGatewayHealthWithOptions(context.Background(), Candidate{ProviderID: "provider", URL: tt.url}, "instance", probeOptions{
+				Resolver: staticProbeResolver{IPs: tt.ips},
+				DialContext: func(context.Context, string, string) (net.Conn, error) {
+					dialed.Store(true)
+					return nil, errors.New("unexpected dial")
+				},
+			})
+			if err == nil || dialed.Load() {
+				t.Fatalf("err = %v, dialed = %v; want rejection before dial", err, dialed.Load())
+			}
+		})
+	}
+}
+
+func TestProbeClientDoesNotTrustCallerTransportOrJar(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("caller transport must not be used")
+		return nil, nil
+	}), Jar: panicCookieJar{t: t}}
+	probeClient := newProbeHTTPClient(client, probeOptions{})
+	if probeClient.Jar != nil || probeClient.Transport == client.Transport {
+		t.Fatalf("probe client retained caller-controlled state: %#v", probeClient)
 	}
 }
 
@@ -267,7 +390,7 @@ func TestProbeBootstrapAssetRequiresTicketAndRejectsInterstitial(t *testing.T) {
 	if _, err := ProbeBootstrapAsset(context.Background(), server.Client(), candidate, "", "instance"); err == nil {
 		t.Fatal("expected empty ticket rejection")
 	}
-	if _, err := ProbeBootstrapAsset(context.Background(), publicTestClient(t, server), candidate, "ticket/code", "instance"); err == nil {
+	if _, err := probeBootstrapAssetWithOptions(context.Background(), candidate, "ticket/code", "instance", publicTestProbeOptions(t, server)); err == nil {
 		t.Fatal("expected HTML interstitial rejection")
 	}
 	if requestedPath != "/join/ticket%2Fcode/bootstrap.ps1" {
@@ -275,20 +398,73 @@ func TestProbeBootstrapAssetRequiresTicketAndRejectsInterstitial(t *testing.T) {
 	}
 }
 
-func publicTestClient(t *testing.T, server *httptest.Server) *http.Client {
+func TestProbeBootstrapAssetRequiresPowerShellContentAndMarker(t *testing.T) {
+	tests := []struct {
+		name, contentType, body string
+		wantOK                  bool
+	}{
+		{name: "valid", contentType: "text/plain; charset=utf-8", body: "$ErrorActionPreference = 'Stop'\nWrite-Host '[rdev]'", wantOK: true},
+		{name: "empty", contentType: "text/plain", body: ""},
+		{name: "json", contentType: "application/json", body: `{"ok":true}`},
+		{name: "missing script marker", contentType: "text/plain", body: "Write-Host 'not the bootstrap'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Rdev-Gateway-Instance", "instance")
+				w.Header().Set("Content-Type", tt.contentType)
+				if r.URL.Path == "/healthz" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			evidence, err := probeBootstrapAssetWithOptions(context.Background(), Candidate{ProviderID: "provider", URL: "https://public.example.test"}, "ticket", "instance", publicTestProbeOptions(t, server))
+			if tt.wantOK && (err != nil || !evidence.BootstrapOK || !evidence.SmallAssetOK) {
+				t.Fatalf("valid bootstrap rejected: evidence=%#v err=%v", evidence, err)
+			}
+			if !tt.wantOK && err == nil {
+				t.Fatal("invalid bootstrap accepted")
+			}
+		})
+	}
+}
+
+func publicTestProbeOptions(t *testing.T, server *httptest.Server) probeOptions {
 	t.Helper()
 	target, err := url.Parse(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport := server.Client().Transport.(*http.Transport).Clone()
-	transport.TLSClientConfig = transport.TLSClientConfig.Clone()
-	transport.TLSClientConfig.InsecureSkipVerify = true // test transport routes a public hostname to httptest TLS
 	dialer := &net.Dialer{Timeout: time.Second}
-	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return dialer.DialContext(ctx, network, target.Host)
+	return probeOptions{
+		Resolver: staticProbeResolver{IPs: []netip.Addr{netip.MustParseAddr("8.8.8.8")}},
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, target.Host)
+		},
+		TLSConfig: &tls.Config{InsecureSkipVerify: true}, // test-only certificate for routed public hostname
 	}
-	return &http.Client{Transport: transport}
+}
+
+type staticProbeResolver struct{ IPs []netip.Addr }
+
+func (r staticProbeResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return append([]netip.Addr(nil), r.IPs...), nil
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type panicCookieJar struct{ t *testing.T }
+
+func (j panicCookieJar) SetCookies(*url.URL, []*http.Cookie) {
+	j.t.Fatal("caller jar must not be used")
+}
+func (j panicCookieJar) Cookies(*url.URL) []*http.Cookie {
+	j.t.Fatal("caller jar must not be used")
+	return nil
 }
 
 func eventually(t *testing.T, timeout time.Duration, condition func() bool) {
