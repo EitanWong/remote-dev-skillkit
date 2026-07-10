@@ -647,7 +647,7 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 		handoff["copy_paste_kind"] != "windows" ||
 		handoff["copy_paste"] != targetCommand ||
 		!strings.Contains(handoff["message"].(string), "目标电脑") ||
-		!strings.Contains(handoff["agent_next_step"].(string), "wait=true") {
+		!strings.Contains(strings.ToLower(handoff["agent_next_step"].(string)), "do not send") {
 		t.Fatalf("expected ready user handoff, got %#v", handoff)
 	}
 	if len(gatewayCandidates) == 0 {

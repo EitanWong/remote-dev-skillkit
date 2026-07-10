@@ -467,7 +467,7 @@ func TestBuildConnectFromCreatedFailsClosedWithoutAvailabilityReadiness(t *testi
 		connect["agent_connection_runbook"] == nil ||
 		connect["fresh_agent_connect_contract"] == nil ||
 		connect["target_command"] != created["target_command"] ||
-		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
+		!strings.Contains(strings.ToLower(connect["agent_next_step"].(string)), "do not send") {
 		t.Fatalf("expected fail-closed connect payload with compatibility fields, got %#v", connect)
 	}
 	contract := connect["fresh_agent_connect_contract"].(map[string]any)
@@ -478,14 +478,14 @@ func TestBuildConnectFromCreatedFailsClosedWithoutAvailabilityReadiness(t *testi
 		autoActivate["enabled"] != true ||
 		!strings.Contains(contract["human_surface"].(string), "target_handoff_envelope.full_text") ||
 		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "manifest root public key") ||
-		!strings.Contains(contract["status_rule"].(string), "connected_next_steps.user_report") {
+		!strings.Contains(strings.ToLower(contract["status_rule"].(string)), "do not send") {
 		t.Fatalf("expected ready fresh-Agent connect contract, got %#v", contract)
 	}
 	envelope := connect["target_handoff_envelope"].(map[string]any)
 	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
-		envelope["ready_to_forward"] != true ||
+		envelope["ready_to_forward"] != false ||
 		!strings.Contains(envelope["full_text"].(string), "ABCD-1234") ||
-		!strings.Contains(envelope["agent_rule"].(string), "send full_text verbatim") {
+		!strings.Contains(strings.ToLower(envelope["agent_rule"].(string)), "do not send") {
 		t.Fatalf("expected ready target handoff envelope, got %#v", envelope)
 	}
 	connectHelperPreflight := connect["connectivity_helper_preflight"].(map[string]any)
@@ -556,6 +556,7 @@ func TestBuildConnectMapsAvailabilityReadinessAliases(t *testing.T) {
 
 	started := BuildStarted(StartedOptions{
 		Created:               created,
+		AssetReport:           map[string]any{"all_ready": true},
 		AvailabilityReadiness: readiness,
 	})
 	got, ok := started["availability_readiness"].(AvailabilityReadiness)
@@ -565,6 +566,82 @@ func TestBuildConnectMapsAvailabilityReadinessAliases(t *testing.T) {
 		started["ready_to_activate"] != readiness.ReadyToActivate ||
 		started["ready_to_execute"] != readiness.ReadyToExecute {
 		t.Fatalf("started readiness mapping mismatch: %#v", started)
+	}
+}
+
+func TestBuildPayloadsForbidHandoffWhenNotReadyToSend(t *testing.T) {
+	readiness := DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "provider", URL: "https://gateway.example"}},
+	}, false)
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "https://gateway.example",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "auto",
+		AvailabilityReadiness: readiness,
+	})
+	connect := BuildConnectFromCreated(created)
+	started := BuildStarted(StartedOptions{
+		Created:               created,
+		AssetReport:           map[string]any{"all_ready": true},
+		AvailabilityReadiness: readiness,
+	})
+
+	for name, payload := range map[string]map[string]any{"created": created, "connect": connect, "started": started} {
+		envelope := payload["target_handoff_envelope"].(map[string]any)
+		if envelope["ready_to_forward"] != false ||
+			!strings.Contains(strings.ToLower(envelope["agent_rule"].(string)), "do not send") ||
+			!strings.Contains(strings.ToLower(envelope["after_send"].(string)), "do not send") {
+			t.Fatalf("%s envelope must forbid forwarding: %#v", name, envelope)
+		}
+		handoff := payload["user_handoff"].(map[string]any)
+		if !strings.Contains(strings.ToLower(handoff["agent_next_step"].(string)), "do not send") {
+			t.Fatalf("%s user handoff must forbid sending: %#v", name, handoff)
+		}
+		contract := payload["fresh_agent_connect_contract"].(map[string]any)
+		if !strings.Contains(strings.ToLower(contract["human_surface"].(string)), "do not send") {
+			t.Fatalf("%s human surface must forbid sending: %#v", name, contract)
+		}
+	}
+	if !strings.Contains(strings.ToLower(strings.Join(created["agent_flow"].([]string), "\n")), "do not send") ||
+		!strings.Contains(strings.ToLower(connect["agent_next_step"].(string)), "do not send") ||
+		!strings.Contains(strings.ToLower(connect["human_surface_rule"].(string)), "do not send") ||
+		!strings.Contains(strings.ToLower(strings.Join(started["agent_flow"].([]string), "\n")), "do not send") ||
+		!strings.Contains(strings.ToLower(started["human_surface_rule"].(string)), "do not send") {
+		t.Fatalf("payload instructions must consistently forbid sending: created=%#v connect=%#v started=%#v", created, connect, started)
+	}
+}
+
+func TestBuildStartedRequiresReadyAssetsToSend(t *testing.T) {
+	readiness := DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "provider", URL: "https://gateway.example"}},
+	}, true)
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "https://gateway.example",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		AvailabilityReadiness: readiness,
+	})
+
+	blocked := BuildStarted(StartedOptions{Created: created, AvailabilityReadiness: readiness})
+	blockedReadiness := blocked["availability_readiness"].(AvailabilityReadiness)
+	blockedEnvelope := blocked["target_handoff_envelope"].(map[string]any)
+	if blocked["ready_to_send"] != false || blocked["ready_to_send_to_human"] != false || blockedReadiness.ReadyToSend ||
+		blockedEnvelope["ready_to_forward"] != false ||
+		!strings.Contains(strings.ToLower(blocked["handoff_blocked_reason"].(string)), "helper assets") {
+		t.Fatalf("missing asset report must block sending: %#v", blocked)
+	}
+
+	ready := BuildStarted(StartedOptions{
+		Created:               created,
+		AssetReport:           map[string]any{"all_ready": true},
+		AvailabilityReadiness: readiness,
+	})
+	if ready["ready_to_send"] != true || ready["ready_to_send_to_human"] != true ||
+		ready["target_handoff_envelope"].(map[string]any)["ready_to_forward"] != true {
+		t.Fatalf("ready assets and explicit override should permit sending: %#v", ready)
 	}
 }
 
@@ -610,13 +687,13 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		handoff["copy_paste_kind"] != "windows" ||
 		handoff["copy_paste"] != created["target_command"] ||
 		!strings.Contains(handoff["message"].(string), "目标电脑") ||
-		!strings.Contains(handoff["agent_next_step"].(string), "wait=true") ||
-		!strings.Contains(handoff["agent_rule"].(string), "do not rewrite") {
+		!strings.Contains(strings.ToLower(handoff["agent_next_step"].(string)), "do not send") ||
+		!strings.Contains(strings.ToLower(handoff["agent_rule"].(string)), "do not send") {
 		t.Fatalf("expected ready localized user handoff, got %#v", handoff)
 	}
 	envelope := created["target_handoff_envelope"].(map[string]any)
 	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
-		envelope["ready_to_forward"] != true ||
+		envelope["ready_to_forward"] != false ||
 		envelope["copy_paste"] != created["target_command"] ||
 		!strings.Contains(envelope["full_text"].(string), envelope["message"].(string)) ||
 		!strings.Contains(envelope["full_text"].(string), created["target_command"].(string)) ||
@@ -905,7 +982,7 @@ func TestBuildCreatedAutoTargetReturnsMultiPlatformHandoffWithCommandFallbacks(t
 		!strings.Contains(copyPaste, "Browser fallback") ||
 		!strings.Contains(copyPaste, "bootstrap.ps1") ||
 		!strings.Contains(copyPaste, "bootstrap.sh") ||
-		!strings.Contains(handoff["auto_target_rule"].(string), "target platform is unknown") ||
+		!strings.Contains(strings.ToLower(handoff["auto_target_rule"].(string)), "do not send") ||
 		!strings.Contains(handoff["windows_command"].(string), "bootstrap.ps1") ||
 		!strings.Contains(handoff["macos_linux_command"].(string), "bootstrap.sh") {
 		t.Fatalf("expected auto target handoff with executable command fallbacks, got %#v", handoff)
@@ -966,7 +1043,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	envelope := started["target_handoff_envelope"].(map[string]any)
 	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
 		envelope["copy_paste"] != started["target_command"] ||
-		!strings.Contains(envelope["after_send"].(string), "connected_next_steps.user_report") {
+		!strings.Contains(strings.ToLower(envelope["after_send"].(string)), "do not send") {
 		t.Fatalf("expected started top-level target handoff envelope, got %#v", envelope)
 	}
 	startedHelperPreflight := started["connectivity_helper_preflight"].(map[string]any)
@@ -1035,7 +1112,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	if handoffTextFile["schema_version"] != HandoffTextFileSchemaVersion ||
 		handoffTextFile["path"] != "work/rdev-support-session/target-handoff.txt" ||
 		handoffTextFile["contains"] != "target_handoff_envelope.full_text" ||
-		!strings.Contains(handoffTextFile["agent_rule"].(string), "plain-text") {
+		!strings.Contains(strings.ToLower(handoffTextFile["agent_rule"].(string)), "do not send") {
 		t.Fatalf("expected handoff text file metadata, got %#v", handoffTextFile)
 	}
 	connectedReportFile := started["connected_report_file"].(map[string]any)

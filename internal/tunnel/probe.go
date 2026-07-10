@@ -232,8 +232,8 @@ func validatePublicIP(ip netip.Addr) error {
 
 func validatePublicCandidate(candidate Candidate) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(candidate.URL))
-	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil {
-		return nil, errors.New("public candidate must be an HTTPS URL without userinfo")
+	if err != nil || strings.TrimSpace(candidate.ProviderID) == "" || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.Port() != "" {
+		return nil, errors.New("public candidate must include a provider ID and an HTTPS URL without userinfo or an explicit port")
 	}
 	parsed.Scheme = "https"
 	hostname := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
@@ -244,8 +244,47 @@ func validatePublicCandidate(candidate Candidate) (*url.URL, error) {
 		if err := validatePublicIP(ip.Unmap()); err != nil {
 			return nil, err
 		}
+	} else if !validPublicHostname(hostname) {
+		return nil, errors.New("public candidate must use a valid public hostname or address")
 	}
 	return parsed, nil
+}
+
+func ValidatePublicCandidate(candidate Candidate) error {
+	_, err := validatePublicCandidate(candidate)
+	return err
+}
+
+func ValidateAvailabilitySet(set AvailabilitySet) error {
+	if set.SchemaVersion != AvailabilitySchemaVersion {
+		return errors.New("unsupported tunnel availability schema")
+	}
+	if !supportedRegion(set.Region) {
+		return errors.New("unsupported tunnel availability region")
+	}
+	for _, candidate := range set.Candidates {
+		if err := ValidatePublicCandidate(candidate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validPublicHostname(hostname string) bool {
+	if len(hostname) > 253 || !strings.Contains(hostname, ".") {
+		return false
+	}
+	for _, label := range strings.Split(hostname, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, ch := range label {
+			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func probeResponse(ctx context.Context, client *http.Client, rawURL, expectedInstance string, bootstrap bool, stages *probeStages) ([]byte, string, error) {

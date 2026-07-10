@@ -90,3 +90,47 @@ func TestNormalizeAvailabilityReadinessRejectsSendableStateWithoutValidAvailabil
 		t.Fatalf("expected malformed readiness to fail closed, got %#v", got)
 	}
 }
+
+func TestDirectAvailabilityRejectsMalformedAvailabilitySet(t *testing.T) {
+	valid := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "provider", URL: "https://gateway.example"}},
+	}
+	tests := []struct {
+		name   string
+		mutate func(tunnel.AvailabilitySet) tunnel.AvailabilitySet
+	}{
+		{name: "unknown region", mutate: func(set tunnel.AvailabilitySet) tunnel.AvailabilitySet { set.Region = "unknown"; return set }},
+		{name: "empty provider", mutate: func(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+			set.Candidates[0].ProviderID = " "
+			return set
+		}},
+		{name: "ftp URL", mutate: func(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+			set.Candidates[0].URL = "ftp://gateway.example"
+			return set
+		}},
+		{name: "userinfo", mutate: func(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+			set.Candidates[0].URL = "https://user@gateway.example"
+			return set
+		}},
+		{name: "explicit port", mutate: func(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+			set.Candidates[0].URL = "https://gateway.example:444"
+			return set
+		}},
+		{name: "private candidate", mutate: func(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+			set.Candidates[0].URL = "https://10.0.0.1"
+			return set
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := cloneAvailabilitySet(valid)
+			got := DirectAvailability(tt.mutate(set), true)
+			if got.ReadyToSend || got.State != "unavailable" {
+				t.Fatalf("expected malformed availability set to fail closed, got %#v", got)
+			}
+		})
+	}
+}

@@ -347,6 +347,14 @@ func supportSessionStartCommand(rdevCommand, addr, gatewayURL, target string) []
 
 func BuildConnectFromCreated(created map[string]any) map[string]any {
 	readiness := availabilityReadinessFromMap(created)
+	userHandoff := userHandoffWithReadiness(created["user_handoff"], readiness)
+	envelope := targetHandoffEnvelopeWithReadiness(created["target_handoff_envelope"], readiness)
+	agentNextStep := "send target_handoff_envelope.full_text to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true"
+	humanSurfaceRule := "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback"
+	if !readiness.ReadyToSend {
+		agentNextStep = blockedHandoffInstruction(readiness.DegradedReason)
+		humanSurfaceRule = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":          ConnectSchemaVersion,
 		"ok":                      true,
@@ -358,8 +366,8 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"ready_to_execute":        readiness.ReadyToExecute,
 		"ready_to_send_to_human":  readiness.ReadyToSend,
 		"created_session":         created,
-		"user_handoff":            created["user_handoff"],
-		"target_handoff_envelope": created["target_handoff_envelope"],
+		"user_handoff":            userHandoff,
+		"target_handoff_envelope": envelope,
 		"target_command":          created["target_command"],
 		"join_url":                created["join_url"],
 		"watch_connection_status": created["watch_connection_status"],
@@ -378,8 +386,8 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 			AutoActivate:          boolFromMap(created, "auto_activate"),
 		}),
 		"mcp_follow_up":      created["mcp_follow_up"],
-		"agent_next_step":    "send target_handoff_envelope.full_text to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
-		"human_surface_rule": "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback",
+		"agent_next_step":    agentNextStep,
+		"human_surface_rule": humanSurfaceRule,
 		"agent_rule":         "Agents should call rdev.support_session.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
@@ -444,6 +452,25 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	session := opts.Created
 	assetsReady := assetReportAllReady(opts.AssetReport)
 	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
+	readiness.ReadyToSend = readiness.ReadyToSend && assetsReady
+	blockedReason := readiness.DegradedReason
+	if !assetsReady {
+		blockedReason = "helper assets are not ready; do not send target_handoff_envelope.full_text until rdev support-session connect --start or prepare --build-assets reports asset_report.all_ready=true"
+	}
+	userHandoff := userHandoffWithReadiness(session["user_handoff"], readinessWithReason(readiness, blockedReason))
+	envelope := targetHandoffEnvelopeWithReadiness(session["target_handoff_envelope"], readinessWithReason(readiness, blockedReason))
+	agentFlow := []string{
+		"keep this process running while the target host connects",
+		"give the target-side human only target_handoff_envelope.full_text",
+		"watch connection status with status_file.path, foreground_feedback, watch_connection_status, or rdev.support_session.status",
+		"when connected=true, proactively report that the connection is established",
+		"if connection_readiness.ready is false, follow standard_recovery_actions instead of writing ad hoc bootstrap or relay code",
+	}
+	humanSurfaceRule := "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback"
+	if !readiness.ReadyToSend {
+		agentFlow[1] = blockedHandoffInstruction(blockedReason)
+		humanSurfaceRule = blockedHandoffInstruction(blockedReason)
+	}
 	payload := map[string]any{
 		"schema_version": StartedSchemaVersion,
 		"ok":             true,
@@ -460,8 +487,8 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"ready_to_activate":                          readiness.ReadyToActivate,
 		"ready_to_execute":                           readiness.ReadyToExecute,
 		"ready_to_send_to_human":                     readiness.ReadyToSend,
-		"user_handoff":                               session["user_handoff"],
-		"target_handoff_envelope":                    session["target_handoff_envelope"],
+		"user_handoff":                               userHandoff,
+		"target_handoff_envelope":                    envelope,
 		"target_command":                             session["target_command"],
 		"join_url":                                   session["join_url"],
 		"watch_connection_status":                    session["watch_connection_status"],
@@ -507,15 +534,9 @@ func BuildStarted(opts StartedOptions) map[string]any {
 				RdevCommand: "rdev",
 			}),
 		),
-		"agent_flow": []string{
-			"keep this process running while the target host connects",
-			"give the target-side human only target_handoff_envelope.full_text",
-			"watch connection status with status_file.path, foreground_feedback, watch_connection_status, or rdev.support_session.status",
-			"when connected=true, proactively report that the connection is established",
-			"if connection_readiness.ready is false, follow standard_recovery_actions instead of writing ad hoc bootstrap or relay code",
-		},
+		"agent_flow":                agentFlow,
 		"standard_recovery_actions": standardRecoveryActions(opts.StandardRecoveryActions),
-		"human_surface_rule":        "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback",
+		"human_surface_rule":        humanSurfaceRule,
 		"forbidden": []string{
 			"background hidden gateway",
 			"ExecutionPolicy Bypass",
@@ -523,17 +544,15 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"ad hoc bootstrap script generated by the Agent",
 		},
 	}
-	if !assetsReady {
-		payload["handoff_blocked_reason"] = "helper assets are not ready; do not send target_handoff_envelope.full_text until rdev support-session connect --start or prepare --build-assets reports asset_report.all_ready=true"
-	} else if !readiness.ReadyToSend {
-		payload["handoff_blocked_reason"] = readiness.DegradedReason
+	if !readiness.ReadyToSend {
+		payload["handoff_blocked_reason"] = blockedReason
 	}
 	if readyFile != "" {
 		payload["ready_file"] = map[string]any{
 			"schema_version": "rdev.support-session-ready-file.v1",
 			"path":           readyFile,
 			"contains":       StartedSchemaVersion,
-			"agent_rule":     "read this file after starting the foreground gateway when terminal stdout is hard to parse; send target_handoff_envelope.full_text to the human",
+			"agent_rule":     handoffFileInstruction(readiness.ReadyToSend, blockedReason, "read this file after starting the foreground gateway when terminal stdout is hard to parse; send target_handoff_envelope.full_text to the human"),
 		}
 	}
 	if statusFile != "" {
@@ -550,7 +569,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"schema_version": HandoffTextFileSchemaVersion,
 			"path":           handoffTextFile,
 			"contains":       "target_handoff_envelope.full_text",
-			"agent_rule":     "read and forward this plain-text file verbatim to the target-side human; do not rewrite commands or extract ticket/root/gateway fields",
+			"agent_rule":     handoffFileInstruction(readiness.ReadyToSend, blockedReason, "read and forward this plain-text file verbatim to the target-side human; do not rewrite commands or extract ticket/root/gateway fields"),
 		}
 	}
 	if connectedReportFile != "" {
@@ -566,7 +585,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 
 func assetReportAllReady(report any) bool {
 	if report == nil {
-		return true
+		return false
 	}
 	if typed, ok := report.(map[string]any); ok {
 		ready, ok := typed["all_ready"].(bool)
@@ -1136,6 +1155,12 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 	}
 	ticketCode := strings.TrimSpace(opts.TicketCode)
 	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
+	humanSurface := "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads"
+	statusRule := "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, connected_report_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately"
+	if !readiness.ReadyToSend {
+		humanSurface = blockedHandoffInstruction(readiness.DegradedReason)
+		statusRule = blockedHandoffInstruction(readiness.DegradedReason) + "; wait for a new payload whose ready_to_send=true before beginning status supervision"
+	}
 	contract := map[string]any{
 		"schema_version":         FreshAgentConnectContractSchemaVersion,
 		"intent":                 "model-independent-standard-path-for-a-fresh-agent-to-connect-one-target-machine",
@@ -1145,7 +1170,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 		"ready_to_activate":      readiness.ReadyToActivate,
 		"ready_to_execute":       readiness.ReadyToExecute,
 		"ready_to_send_human":    readiness.ReadyToSend,
-		"human_surface":          "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads",
+		"human_surface":          humanSurface,
 		"first_tool":             "rdev.support_session.connect",
 		"first_cli":              []string{rdevCommand, "support-session", "connect"},
 		"recovery_if_rdev_missing": []string{
@@ -1175,7 +1200,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
 		},
-		"status_rule": "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, connected_report_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately",
+		"status_rule": statusRule,
 		"auto_activate": map[string]any{
 			"enabled": opts.AutoActivate,
 			"scope":   "first attended-temporary host for the standard visible support-session ticket only",
@@ -2205,6 +2230,20 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		Locale:     locale,
 	})
 	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
+	agentFlow := []string{
+		"give the target-side human only target_handoff_envelope.full_text when present; use target_command or join_url only as compatibility fallback fields",
+		"target_command is the human-safe primary command; signed join-manifest gateway candidates are embedded for rdev runtime failover after bootstrap; do not write your own fallback script",
+		"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
+		"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
+		"watch connection status with watch_connection_status or rdev.support_session.status",
+		"read rdev_bootstrap_connector before interpreting target_preconnects; preconnect means the target command started before the full helper finished downloading, not that session tasks can run yet",
+		"when connected=true, proactively report that the connection is established",
+		"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
+	}
+	if !readiness.ReadyToSend {
+		agentFlow[0] = blockedHandoffInstruction(readiness.DegradedReason)
+		agentFlow[3] = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":                         CreatedSchemaVersion,
 		"ok":                                     true,
@@ -2228,8 +2267,8 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"recommended_surface":                    recommendedSurface,
 		"target_command":                         recommended,
 		"target_commands":                        targetCommands,
-		"user_handoff":                           userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
-		"target_handoff_envelope":                targetHandoffEnvelope(locale, target, recommendedSurface, recommended, joinURL, targetCommands, remoteControlEntry),
+		"user_handoff":                           userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands, readiness),
+		"target_handoff_envelope":                targetHandoffEnvelope(locale, target, recommendedSurface, recommended, joinURL, targetCommands, remoteControlEntry, readiness),
 		"remote_control_entry":                   remoteControlEntry,
 		"connection_attempt_policy":              attemptPolicy,
 		"connection_continuity_policy":           continuityPolicy,
@@ -2283,16 +2322,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 			},
 		},
 		"human_message": localizedCreatedMessage(locale),
-		"agent_flow": []string{
-			"give the target-side human only target_handoff_envelope.full_text when present; use target_command or join_url only as compatibility fallback fields",
-			"target_command is the human-safe primary command; signed join-manifest gateway candidates are embedded for rdev runtime failover after bootstrap; do not write your own fallback script",
-			"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
-			"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
-			"watch connection status with watch_connection_status or rdev.support_session.status",
-			"read rdev_bootstrap_connector before interpreting target_preconnects; preconnect means the target command started before the full helper finished downloading, not that session tasks can run yet",
-			"when connected=true, proactively report that the connection is established",
-			"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
-		},
+		"agent_flow":    agentFlow,
 		"forbidden": []string{
 			"ExecutionPolicy Bypass",
 			"hidden install",
@@ -2359,7 +2389,15 @@ func cdnDownloadOptimizerContract() map[string]any {
 	}
 }
 
-func userHandoff(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string) map[string]any {
+func userHandoff(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, readiness AvailabilityReadiness) map[string]any {
+	agentNextStep := "send message plus copy_paste to the user, then call rdev.support_session.status with wait=true"
+	agentRule := "do not rewrite copy_paste, do not ask the user to assemble ticket/root/gateway/transport, and do not add custom polling"
+	autoTargetRule := autoTargetHandoffRule(target)
+	if !readiness.ReadyToSend {
+		agentNextStep = blockedHandoffInstruction(readiness.DegradedReason)
+		agentRule = blockedHandoffInstruction(readiness.DegradedReason)
+		autoTargetRule = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":      UserHandoffSchemaVersion,
 		"locale":              locale,
@@ -2370,23 +2408,32 @@ func userHandoff(locale, target, surface, copyPaste, joinURL string, targetComma
 		"message":             localizedUserHandoffMessage(locale, surface),
 		"windows_command":     targetCommands["windows"],
 		"macos_linux_command": targetCommands["macos_linux"],
-		"auto_target_rule":    autoTargetHandoffRule(target),
-		"agent_next_step":     "send message plus copy_paste to the user, then call rdev.support_session.status with wait=true",
-		"agent_rule":          "do not rewrite copy_paste, do not ask the user to assemble ticket/root/gateway/transport, and do not add custom polling",
+		"auto_target_rule":    autoTargetRule,
+		"ready_to_send":       readiness.ReadyToSend,
+		"agent_next_step":     agentNextStep,
+		"agent_rule":          agentRule,
 	}
 }
 
-func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, remoteControlEntry map[string]any) map[string]any {
+func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, remoteControlEntry map[string]any, readiness AvailabilityReadiness) map[string]any {
 	message := localizedUserHandoffMessage(locale, surface)
 	fullText := message + "\n\n" + copyPaste
 	if card := remoteControlEntryText(remoteControlEntry); card != "" {
 		fullText += "\n\n" + card
 	}
+	agentRule := "send full_text verbatim to the target-side human; do not rewrite copy_paste, append ticket/root/gateway details, or generate custom setup scripts"
+	afterSend := "wait with connection_supervision, status_file.path, foreground_feedback, or rdev.support_session.status wait=true and report connected_next_steps.user_report when connected=true"
+	autoTargetRule := autoTargetHandoffRule(target)
+	if !readiness.ReadyToSend {
+		agentRule = blockedHandoffInstruction(readiness.DegradedReason)
+		afterSend = blockedHandoffInstruction(readiness.DegradedReason)
+		autoTargetRule = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":       TargetHandoffEnvelopeSchemaVersion,
 		"locale":               locale,
 		"target":               target,
-		"ready_to_forward":     true,
+		"ready_to_forward":     readiness.ReadyToSend,
 		"format":               "plain-text",
 		"message":              message,
 		"copy_paste":           copyPaste,
@@ -2399,9 +2446,9 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 			"macos_linux_command": targetCommands["macos_linux"],
 			"join_url":            targetCommands["join_url"],
 		},
-		"auto_target_rule": autoTargetHandoffRule(target),
-		"agent_rule":       "send full_text verbatim to the target-side human; do not rewrite copy_paste, append ticket/root/gateway details, or generate custom setup scripts",
-		"after_send":       "wait with connection_supervision, status_file.path, foreground_feedback, or rdev.support_session.status wait=true and report connected_next_steps.user_report when connected=true",
+		"auto_target_rule": autoTargetRule,
+		"agent_rule":       agentRule,
+		"after_send":       afterSend,
 		"forbidden": []string{
 			"rewriting copy_paste",
 			"manual ticket/root/gateway/transport assembly",
@@ -2411,6 +2458,57 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 			"hidden install or persistence",
 		},
 	}
+}
+
+func blockedHandoffInstruction(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "availability readiness is not sendable"
+	}
+	return "do not send target_handoff_envelope.full_text, handoff_text_file.path, user_handoff.message, or user_handoff.copy_paste to the target human while ready_to_send=false: " + reason
+}
+
+func readinessWithReason(readiness AvailabilityReadiness, reason string) AvailabilityReadiness {
+	readiness.DegradedReason = strings.TrimSpace(reason)
+	return readiness
+}
+
+func userHandoffWithReadiness(value any, readiness AvailabilityReadiness) map[string]any {
+	handoff := cloneAnyMap(value)
+	handoff["ready_to_send"] = readiness.ReadyToSend
+	if !readiness.ReadyToSend {
+		handoff["agent_next_step"] = blockedHandoffInstruction(readiness.DegradedReason)
+		handoff["agent_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+		handoff["auto_target_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+	}
+	return handoff
+}
+
+func targetHandoffEnvelopeWithReadiness(value any, readiness AvailabilityReadiness) map[string]any {
+	envelope := cloneAnyMap(value)
+	envelope["ready_to_forward"] = readiness.ReadyToSend
+	if !readiness.ReadyToSend {
+		envelope["agent_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+		envelope["after_send"] = blockedHandoffInstruction(readiness.DegradedReason)
+		envelope["auto_target_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+	}
+	return envelope
+}
+
+func cloneAnyMap(value any) map[string]any {
+	source, _ := value.(map[string]any)
+	cloned := make(map[string]any, len(source))
+	for key, item := range source {
+		cloned[key] = item
+	}
+	return cloned
+}
+
+func handoffFileInstruction(ready bool, reason, allowed string) string {
+	if ready {
+		return allowed
+	}
+	return blockedHandoffInstruction(reason)
 }
 
 func remoteControlEntryText(entry map[string]any) string {

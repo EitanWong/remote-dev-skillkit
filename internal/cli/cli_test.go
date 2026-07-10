@@ -2273,7 +2273,7 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.UserHandoff.CopyPasteKind != "windows" ||
 		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
 		!strings.Contains(payload.UserHandoff.Message, "目标电脑") ||
-		!strings.Contains(payload.UserHandoff.AgentNextStep, "wait=true") {
+		!strings.Contains(strings.ToLower(payload.UserHandoff.AgentNextStep), "do not send") {
 		t.Fatalf("expected ready user handoff, got %#v", payload.UserHandoff)
 	}
 	watch := strings.Join(payload.WatchConnectionStatus, "\x00")
@@ -2520,7 +2520,7 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	if payload.HandoffTextFile.SchemaVersion != "rdev.support-session-handoff-text-file.v1" ||
 		payload.HandoffTextFile.Path != handoffTextFile ||
 		payload.HandoffTextFile.Contains != "target_handoff_envelope.full_text" ||
-		!strings.Contains(payload.HandoffTextFile.AgentRule, "plain-text") {
+		!strings.Contains(strings.ToLower(payload.HandoffTextFile.AgentRule), "do not send") {
 		t.Fatalf("expected handoff text-file metadata, got %#v", payload.HandoffTextFile)
 	}
 	if payload.ConnectedReportFile.SchemaVersion != "rdev.support-session-connected-report-file.v1" ||

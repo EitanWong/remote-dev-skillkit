@@ -2,9 +2,6 @@ package supportsession
 
 import (
 	"encoding/json"
-	"net"
-	"net/url"
-	"strings"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
@@ -32,7 +29,7 @@ func DirectAvailability(set tunnel.AvailabilitySet, allowOverride bool) Availabi
 		StandardNextAction: "start or configure a policy-approved public tunnel and verify its gateway instance marker",
 		AvailabilitySet:    cloned,
 	}
-	if set.SchemaVersion != tunnel.AvailabilitySchemaVersion || !hasPublicCandidate(set.Candidates) {
+	if tunnel.ValidateAvailabilitySet(set) != nil || len(set.Candidates) == 0 {
 		return readiness
 	}
 
@@ -50,24 +47,6 @@ func normalizeAvailabilityReadiness(readiness AvailabilityReadiness) Availabilit
 		return DirectAvailability(readiness.AvailabilitySet, false)
 	}
 	return derived
-}
-
-func hasPublicCandidate(candidates []tunnel.Candidate) bool {
-	for _, candidate := range candidates {
-		parsed, err := url.Parse(strings.TrimSpace(candidate.URL))
-		if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
-			continue
-		}
-		host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
-		if host == "localhost" {
-			continue
-		}
-		if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()) {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 func cloneAvailabilitySet(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
