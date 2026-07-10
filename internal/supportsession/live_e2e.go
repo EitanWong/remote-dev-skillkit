@@ -8,11 +8,13 @@ import (
 const LiveE2EPlanSchemaVersion = "rdev.support-session-live-e2e-plan.v1"
 
 type LiveE2EPlanOptions struct {
-	GatewayURL     string
-	TicketCode     string
-	HostID         string
-	RdevCommand    string
-	TimeoutSeconds int
+	GatewayURL       string
+	TicketCode       string
+	HostID           string
+	SessionID        string
+	TargetEndpointID string
+	RdevCommand      string
+	TimeoutSeconds   int
 }
 
 func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
@@ -22,15 +24,11 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 	}
 	ticketCodeInput := strings.TrimSpace(opts.TicketCode)
 	hostIDInput := strings.TrimSpace(opts.HostID)
-	genericSelectorPlan := ticketCodeInput == "" && hostIDInput == ""
-	smokeTicketCode := ticketCodeInput
-	if smokeTicketCode == "" && genericSelectorPlan {
-		smokeTicketCode = "<ticket-code>"
+	sessionIDInput := strings.TrimSpace(opts.SessionID)
+	if sessionIDInput == "" {
+		sessionIDInput = "<session-id>"
 	}
-	smokeHostID := hostIDInput
-	if smokeHostID == "" && genericSelectorPlan {
-		smokeHostID = "<host-id>"
-	}
+	targetEndpointIDInput := strings.TrimSpace(opts.TargetEndpointID)
 	hostIDForHostOnlyGates := hostIDInput
 	if hostIDForHostOnlyGates == "" {
 		hostIDForHostOnlyGates = "<host-id>"
@@ -47,12 +45,13 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 	smokeCommand := []string{
 		rdevCommand, "support-session", "smoke-test",
 		"--gateway-url", gatewayURL,
+		"--session-id", sessionIDInput,
 	}
-	if smokeTicketCode != "" {
-		smokeCommand = append(smokeCommand, "--ticket-code", smokeTicketCode)
+	if targetEndpointIDInput != "" {
+		smokeCommand = append(smokeCommand, "--target-endpoint-id", targetEndpointIDInput)
 	}
-	if smokeHostID != "" {
-		smokeCommand = append(smokeCommand, "--host-id", smokeHostID)
+	if ticketCodeInput != "" {
+		smokeCommand = append(smokeCommand, "--ticket-code", ticketCodeInput)
 	}
 	smokeCommand = append(smokeCommand,
 		"--remote-control",
@@ -60,14 +59,15 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 	)
 	smokeMCPArguments := map[string]any{
 		"gateway_url":     gatewayURL,
+		"session_id":      sessionIDInput,
 		"remote_control":  true,
 		"timeout_seconds": timeoutSeconds,
 	}
-	if smokeTicketCode != "" {
-		smokeMCPArguments["ticket_code"] = smokeTicketCode
+	if targetEndpointIDInput != "" {
+		smokeMCPArguments["target_endpoint_id"] = targetEndpointIDInput
 	}
-	if smokeHostID != "" {
-		smokeMCPArguments["host_id"] = smokeHostID
+	if ticketCodeInput != "" {
+		smokeMCPArguments["ticket_code"] = ticketCodeInput
 	}
 	uploadCommand := []string{
 		rdevCommand, "files", "upload",
@@ -90,14 +90,16 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 		rdevCommand, "mcp", "serve",
 	}
 	return map[string]any{
-		"schema_version":  LiveE2EPlanSchemaVersion,
-		"dry_run":         true,
-		"execute":         false,
-		"gateway_url":     gatewayURL,
-		"ticket_code":     ticketCodeInput,
-		"host_id":         hostIDInput,
-		"target_os":       "windows",
-		"timeout_seconds": timeoutSeconds,
+		"schema_version":     LiveE2EPlanSchemaVersion,
+		"dry_run":            true,
+		"execute":            false,
+		"gateway_url":        gatewayURL,
+		"ticket_code":        ticketCodeInput,
+		"host_id":            hostIDInput,
+		"session_id":         sessionIDInput,
+		"target_endpoint_id": targetEndpointIDInput,
+		"target_os":          "windows",
+		"timeout_seconds":    timeoutSeconds,
 		"gates": []map[string]any{
 			{
 				"name":           "windows_support_session_smoke_remote_control",
@@ -106,14 +108,15 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 				"remote_control": true,
 				"required_inputs": []string{
 					"reachable gateway_url",
-					"ticket_code with exactly one active Windows host, or explicit host_id",
+					"active Control Plane session_id",
+					"optional target_endpoint_id when the session has multiple Windows targets",
 				},
 				"proof_command": smokeCommand,
 				"mcp_tool":      "rdev.support_session.smoke_test",
 				"mcp_arguments": smokeMCPArguments,
 				"required_evidence": []string{
 					"ok=true",
-					"Windows host selected from ticket_code or host_id",
+					"Windows target selected from session_id and optional target_endpoint_id",
 					"identity, fs.read, fs.write.scoped, process.inspect pass",
 					"remote_control file list and window.inspect probes pass",
 				},
@@ -154,7 +157,7 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 					"reachable gateway_url",
 					"active Control Plane session_id",
 					"Windows endpoint_id",
-					"task_id for a bounded pause/cancel probe",
+					"task_id for a bounded interrupt event probe",
 				},
 				"proof_commands": map[string]any{
 					"mcp_server": createSessionTaskCommand,
@@ -173,15 +176,16 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 					"create a bounded session task with rdev.sessions.task",
 					"read session_id, endpoint_id, and task_id from rdev.sessions.status or rdev.sessions.events",
 					"call rdev.sessions.interrupt with an idempotency key",
-					"verify the interrupt event is replayable and the task or endpoint reports the expected paused/canceled state",
+					"verify the interrupt event is replayable and duplicate delivery remains idempotent",
+					"record that the current host runtime does not consume interrupt events to cancel an already running adapter process",
 				},
 				"required_evidence": []string{
 					"rdev.sessions.interrupt returns a Control Plane event",
 					"rdev.sessions.events replays the interrupt after reconnect",
 					"duplicate idempotency_key does not create duplicate interrupt effects",
-					"task or endpoint state explains the pause/cancel outcome",
+					"process_cancellation_proven=false",
 				},
-				"agent_rule": "interrupt is the only session-level pause/cancel primitive; do not resurrect the retired task-authorization contract",
+				"agent_rule": "interrupt records a replayable session-level stop intent but currently does not prove process cancellation; do not report a running Windows task as canceled until the target runtime consumes and enforces the interrupt event",
 			},
 		},
 		"safety": []string{

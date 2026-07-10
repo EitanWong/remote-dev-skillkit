@@ -3591,7 +3591,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		fs.SetOutput(a.Stderr)
 		gatewayURL := fs.String("gateway-url", "", "gateway URL that owns the connected support session")
 		hostID := fs.String("host-id", "", "active Windows host ID to test")
-		ticketCode := fs.String("ticket-code", "", "support-session ticket code; used by smoke-test to select the Windows host")
+		ticketCode := fs.String("ticket-code", "", "support-session ticket code included in smoke-test report context")
+		sessionID := fs.String("session-id", "", "active Control Plane session ID required by smoke-test")
+		targetEndpointID := fs.String("target-endpoint-id", "", "optional Windows target endpoint ID when the session has multiple targets")
 		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default rdev")
 		timeoutSeconds := fs.Int("timeout-seconds", 180, "max seconds for live smoke-test proof commands")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -3601,11 +3603,13 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return writeJSON(a.Stdout, supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{
-			GatewayURL:     *gatewayURL,
-			TicketCode:     *ticketCode,
-			HostID:         *hostID,
-			RdevCommand:    *rdevCommand,
-			TimeoutSeconds: *timeoutSeconds,
+			GatewayURL:       *gatewayURL,
+			TicketCode:       *ticketCode,
+			HostID:           *hostID,
+			SessionID:        *sessionID,
+			TargetEndpointID: *targetEndpointID,
+			RdevCommand:      *rdevCommand,
+			TimeoutSeconds:   *timeoutSeconds,
 		}))
 	case "cleanup":
 		fs := flag.NewFlagSet("support-session cleanup", flag.ContinueOnError)
@@ -4025,19 +4029,10 @@ func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort st
 		defer pw.Close()
 		scanner := bufio.NewScanner(pr)
 		for scanner.Scan() {
-			line := scanner.Text()
-			if idx := strings.Index(line, "https://"); idx >= 0 {
-				rest := line[idx:]
-				end := strings.IndexAny(rest, " \t\n\r")
-				if end < 0 {
-					end = len(rest)
-				}
-				candidate := strings.TrimRight(rest[:end], "/")
-				if strings.Contains(candidate, ".localhost.run") || strings.Contains(candidate, ".lhr.life") {
-					select {
-					case urlCh <- candidate:
-					default:
-					}
+			if candidate := localhostRunTunnelURLFromLine(scanner.Text()); candidate != "" {
+				select {
+				case urlCh <- candidate:
+				default:
 				}
 			}
 		}
@@ -4049,6 +4044,30 @@ func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort st
 		cancel()
 		_ = pr.Close()
 		return "", func() {}, fmt.Errorf("localhost.run did not print a tunnel URL within 20s")
+	}
+}
+
+func localhostRunTunnelURLFromLine(line string) string {
+	for remaining := line; ; {
+		idx := strings.Index(remaining, "https://")
+		if idx < 0 {
+			return ""
+		}
+		rest := remaining[idx:]
+		end := strings.IndexAny(rest, " \t\n\r")
+		if end < 0 {
+			end = len(rest)
+		}
+		candidate := strings.Trim(strings.TrimRight(rest[:end], "/"), "\"'()[]{}<>,;|")
+		u, err := url.Parse(candidate)
+		if err == nil && strings.EqualFold(u.Scheme, "https") && u.Host != "" && u.User == nil {
+			host := strings.ToLower(u.Hostname())
+			if strings.HasSuffix(host, ".lhr.life") ||
+				(strings.HasSuffix(host, ".localhost.run") && host != "admin.localhost.run") {
+				return candidate
+			}
+		}
+		remaining = rest[end:]
 	}
 }
 
@@ -4985,7 +5004,7 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
 		"remote_control_entry":  remoteControlEntry,
 		"managed_upgrade":       supportSessionManagedUpgradeRecommendation(host),
-		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID}),
+		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID, SessionID: sessionID}),
 		"ticket_code":           ticketCode,
 		"host_id":               hostID,
 		"session_id":            sessionID,
@@ -11533,9 +11552,9 @@ Usage:
   rdev support-session status --gateway-url <active-gateway-url> --ticket-code ABCD-1234 --wait
   rdev support-session report --gateway-url <active-gateway-url> --ticket-code ABCD-1234
   rdev support-session recover --gateway-url <active-gateway-url> --ticket-code ABCD-1234
-  rdev support-session audit-capabilities --gateway-url <active-gateway-url> --host-id hst_...
-  rdev support-session smoke-test --gateway-url <active-gateway-url> --host-id hst_... --remote-control
-  rdev support-session live-e2e --gateway-url <active-gateway-url> --ticket-code ABCD-1234 --host-id hst_...
+  rdev support-session audit-capabilities --gateway-url <active-gateway-url> --session-id ses_... --target-endpoint-id ep_...
+  rdev support-session smoke-test --gateway-url <active-gateway-url> --session-id ses_... --target-endpoint-id ep_... --remote-control
+  rdev support-session live-e2e --gateway-url <active-gateway-url> --session-id ses_... --target-endpoint-id ep_... --ticket-code ABCD-1234 --host-id hst_...
   rdev support-session cleanup --path rdev-audit/remote-control-upload.txt
 
 Fresh-Agent path:

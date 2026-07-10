@@ -872,11 +872,13 @@ func (s Server) supportSessionPlan(args map[string]any) (any, error) {
 
 func (s Server) supportSessionLiveE2EPlan(args map[string]any) (any, error) {
 	return supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{
-		GatewayURL:     stringArg(args, "gateway_url", ""),
-		TicketCode:     stringArg(args, "ticket_code", ""),
-		HostID:         stringArg(args, "host_id", ""),
-		RdevCommand:    agentRdevCommand(stringArg(args, "rdev_command", "")),
-		TimeoutSeconds: intArg(args, "timeout_seconds", 180),
+		GatewayURL:       stringArg(args, "gateway_url", ""),
+		TicketCode:       stringArg(args, "ticket_code", ""),
+		HostID:           stringArg(args, "host_id", ""),
+		SessionID:        stringArg(args, "session_id", ""),
+		TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+		RdevCommand:      agentRdevCommand(stringArg(args, "rdev_command", "")),
+		TimeoutSeconds:   intArg(args, "timeout_seconds", 180),
 	}), nil
 }
 
@@ -1029,16 +1031,22 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
 		"remote_control_entry":  supportSessionRemoteControlEntryMap(gatewayURL, ticketCode, status, host),
 		"managed_upgrade":       supportSessionManagedUpgradeRecommendationMap(host),
-		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID}),
-		"ticket_code":           ticketCode,
-		"host_id":               hostID,
-		"session_id":            sessionID,
-		"host":                  host,
-		"session":               snapshot,
-		"tasks":                 tasks,
-		"human_report":          supportSessionHumanReportMap(host, tasks),
-		"next_action":           "Use rdev.sessions.task/events/artifacts for scoped work; keep the connection alive until the operator explicitly requests disconnect or revocation.",
-		"stale_host_rule":       "Do not send new session tasks to stale endpoints; run recovery or create a fresh session if no target endpoint is online.",
+		"live_remote_e2e_plan": supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{
+			GatewayURL:       gatewayURL,
+			TicketCode:       ticketCode,
+			HostID:           hostID,
+			SessionID:        sessionID,
+			TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+		}),
+		"ticket_code":     ticketCode,
+		"host_id":         hostID,
+		"session_id":      sessionID,
+		"host":            host,
+		"session":         snapshot,
+		"tasks":           tasks,
+		"human_report":    supportSessionHumanReportMap(host, tasks),
+		"next_action":     "Use rdev.sessions.task/events/artifacts for scoped work; keep the connection alive until the operator explicitly requests disconnect or revocation.",
+		"stale_host_rule": "Do not send new session tasks to stale endpoints; run recovery or create a fresh session if no target endpoint is online.",
 	}
 	if status != nil {
 		report["status"] = status

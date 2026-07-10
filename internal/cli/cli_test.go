@@ -102,8 +102,8 @@ func TestSupportSessionHelpIsAgentFriendly(t *testing.T) {
 	}
 	if got := stdout.String(); !strings.Contains(got, "rdev support-session connect --start") ||
 		!strings.Contains(got, "Do not add --public-tunnel") ||
-		!strings.Contains(got, "rdev support-session smoke-test") ||
-		!strings.Contains(got, "rdev support-session audit-capabilities") ||
+		!strings.Contains(got, "rdev support-session smoke-test --gateway-url <active-gateway-url> --session-id ses_...") ||
+		!strings.Contains(got, "rdev support-session audit-capabilities --gateway-url <active-gateway-url> --session-id ses_...") ||
 		!strings.Contains(got, "rdev support-session cleanup") {
 		t.Fatalf("expected support-session help to guide fresh Agents, got stdout=%q stderr=%q", got, stderr.String())
 	}
@@ -1246,6 +1246,53 @@ func TestManagedPublicTunnelRespectsExplicitGatewayURL(t *testing.T) {
 	}
 }
 
+func TestLocalhostRunTunnelIgnoresWelcomePageURLs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake ssh executable uses a POSIX shell script")
+	}
+
+	binDir := t.TempDir()
+	sshPath := filepath.Join(binDir, "ssh")
+	sshOutput := `#!/bin/sh
+echo 'To manage custom domains visit https://admin.localhost.run/'
+echo 'abc123.lhr.life tunneled with tls termination, https://abc123.lhr.life'
+`
+	if err := os.WriteFile(sshPath, []byte(sshOutput), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	tunnelURL, cancel, err := startLocalhostRunTunnel(context.Background(), io.Discard, "8787")
+	defer cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tunnelURL != "https://abc123.lhr.life" {
+		t.Fatalf("expected assigned tunnel URL, got %q", tunnelURL)
+	}
+}
+
+func TestLocalhostRunTunnelURLFromLine(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "admin page", line: "manage domains at https://admin.localhost.run/", want: ""},
+		{name: "assigned lhr", line: "abc123.lhr.life tunneled with tls termination, https://abc123.lhr.life", want: "https://abc123.lhr.life"},
+		{name: "assigned localhost run", line: "tunnel ready: https://abc123.localhost.run", want: "https://abc123.localhost.run"},
+		{name: "malicious suffix", line: "https://abc123.localhost.run.attacker.example", want: ""},
+		{name: "later assigned URL", line: "docs https://admin.localhost.run then tunnel https://abc123.lhr.life", want: "https://abc123.lhr.life"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := localhostRunTunnelURLFromLine(tt.line); got != tt.want {
+				t.Fatalf("localhostRunTunnelURLFromLine(%q) = %q, want %q", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfiguredCloudflaredStableTunnelConfigUsesNamedURLAndRedactsToken(t *testing.T) {
 	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
 	t.Setenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN", "secret-token")
@@ -1823,6 +1870,8 @@ func TestSupportSessionLiveE2EDefaultsToDryRunPlan(t *testing.T) {
 		"--gateway-url", "https://gateway.example.test/rdev/",
 		"--ticket-code", "ABCD-1234",
 		"--host-id", "hst_1",
+		"--session-id", "ses_1",
+		"--target-endpoint-id", "ep_1",
 		"--rdev-command", "rdev-test",
 		"--timeout-seconds", "180",
 	}); err != nil {
@@ -1836,6 +1885,8 @@ func TestSupportSessionLiveE2EDefaultsToDryRunPlan(t *testing.T) {
 		GatewayURL    string `json:"gateway_url"`
 		TicketCode    string `json:"ticket_code"`
 		HostID        string `json:"host_id"`
+		SessionID     string `json:"session_id"`
+		EndpointID    string `json:"target_endpoint_id"`
 		TargetOS      string `json:"target_os"`
 		TimeoutSec    int    `json:"timeout_seconds"`
 		Gates         []struct {
@@ -1859,6 +1910,8 @@ func TestSupportSessionLiveE2EDefaultsToDryRunPlan(t *testing.T) {
 		payload.GatewayURL != "https://gateway.example.test/rdev" ||
 		payload.TicketCode != "ABCD-1234" ||
 		payload.HostID != "hst_1" ||
+		payload.SessionID != "ses_1" ||
+		payload.EndpointID != "ep_1" ||
 		payload.TargetOS != "windows" ||
 		payload.TimeoutSec != 180 ||
 		len(payload.Gates) != 3 {
@@ -1896,12 +1949,14 @@ func TestSupportSessionLiveE2EDefaultsToDryRunPlan(t *testing.T) {
 	if !slices.Equal(smoke.proofCommand, []string{
 		"rdev-test", "support-session", "smoke-test",
 		"--gateway-url", "https://gateway.example.test/rdev",
+		"--session-id", "ses_1",
+		"--target-endpoint-id", "ep_1",
 		"--ticket-code", "ABCD-1234",
-		"--host-id", "hst_1",
 		"--remote-control",
 		"--timeout-seconds", "180",
 	}) || smoke.mcpTool != "rdev.support_session.smoke_test" ||
-		smoke.mcpArguments["host_id"] != "hst_1" ||
+		smoke.mcpArguments["session_id"] != "ses_1" ||
+		smoke.mcpArguments["target_endpoint_id"] != "ep_1" ||
 		smoke.mcpArguments["remote_control"] != true {
 		t.Fatalf("unexpected smoke gate: %#v", smoke)
 	}

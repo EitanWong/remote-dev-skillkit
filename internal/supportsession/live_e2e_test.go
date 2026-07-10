@@ -6,7 +6,24 @@ import (
 	"testing"
 )
 
-func TestBuildLiveE2EPlanHostIDOnlyOmitsTicketCodePlaceholder(t *testing.T) {
+func TestBuildLiveE2EPlanUsesSmokeTestSupportedSelectors(t *testing.T) {
+	plan := BuildLiveE2EPlan(LiveE2EPlanOptions{
+		GatewayURL: "https://gateway.example.test/rdev",
+		TicketCode: "TICKET-1",
+		HostID:     "hst_1",
+	})
+	smoke := liveE2EGateByName(t, plan, "windows_support_session_smoke_remote_control")
+	command := liveE2EStringSlice(t, smoke["proof_command"])
+
+	if slices.Contains(command, "--host-id") {
+		t.Fatalf("smoke-test does not accept --host-id: %#v", command)
+	}
+	if !slices.Contains(command, "--session-id") || !slices.Contains(command, "<session-id>") {
+		t.Fatalf("expected required session-id selector in smoke proof command, got %#v", command)
+	}
+}
+
+func TestBuildLiveE2EPlanHostIDOnlyUsesSessionPlaceholderForSmoke(t *testing.T) {
 	plan := BuildLiveE2EPlan(LiveE2EPlanOptions{
 		GatewayURL:  "https://gateway.example.test/rdev",
 		HostID:      "hst_1",
@@ -16,18 +33,21 @@ func TestBuildLiveE2EPlanHostIDOnlyOmitsTicketCodePlaceholder(t *testing.T) {
 	command := liveE2EStringSlice(t, smoke["proof_command"])
 	joined := strings.Join(command, " ")
 
-	if !slices.Contains(command, "--host-id") || !slices.Contains(command, "hst_1") {
-		t.Fatalf("expected host-id selector in smoke proof command, got %#v", command)
+	if slices.Contains(command, "--host-id") || slices.Contains(command, "hst_1") {
+		t.Fatalf("host ID is not a valid smoke-test selector: %#v", command)
 	}
 	if slices.Contains(command, "--ticket-code") || strings.Contains(joined, "<ticket-code>") {
 		t.Fatalf("host-id-only smoke proof command should not include ticket-code placeholders: %#v", command)
 	}
-	mcpArgs := liveE2EMap(t, smoke["mcp_arguments"])
-	if mcpArgs["host_id"] != "hst_1" {
-		t.Fatalf("expected host_id MCP argument, got %#v", mcpArgs)
+	if !slices.Contains(command, "--session-id") || !slices.Contains(command, "<session-id>") {
+		t.Fatalf("host-id-only plan should require a Control Plane session for smoke-test: %#v", command)
 	}
-	if _, ok := mcpArgs["ticket_code"]; ok {
-		t.Fatalf("host-id-only MCP arguments should omit ticket_code, got %#v", mcpArgs)
+	mcpArgs := liveE2EMap(t, smoke["mcp_arguments"])
+	if mcpArgs["session_id"] != "<session-id>" {
+		t.Fatalf("expected session_id MCP placeholder, got %#v", mcpArgs)
+	}
+	if _, ok := mcpArgs["host_id"]; ok {
+		t.Fatalf("smoke-test MCP arguments should omit unsupported host_id, got %#v", mcpArgs)
 	}
 }
 
@@ -47,12 +67,29 @@ func TestBuildLiveE2EPlanTicketCodeOnlyOmitsHostIDPlaceholder(t *testing.T) {
 	if slices.Contains(command, "--host-id") || strings.Contains(joined, "<host-id>") {
 		t.Fatalf("ticket-code-only smoke proof command should not include host-id placeholders: %#v", command)
 	}
+	if !slices.Contains(command, "--session-id") || !slices.Contains(command, "<session-id>") {
+		t.Fatalf("ticket-code-only plan should require a Control Plane session for smoke-test: %#v", command)
+	}
 	mcpArgs := liveE2EMap(t, smoke["mcp_arguments"])
 	if mcpArgs["ticket_code"] != "TICKET-1" {
 		t.Fatalf("expected ticket_code MCP argument, got %#v", mcpArgs)
 	}
-	if _, ok := mcpArgs["host_id"]; ok {
-		t.Fatalf("ticket-code-only MCP arguments should omit host_id, got %#v", mcpArgs)
+	if mcpArgs["session_id"] != "<session-id>" {
+		t.Fatalf("expected session_id MCP placeholder, got %#v", mcpArgs)
+	}
+}
+
+func TestBuildLiveE2EPlanDoesNotOverclaimInterruptCancellation(t *testing.T) {
+	plan := BuildLiveE2EPlan(LiveE2EPlanOptions{})
+	interrupt := liveE2EGateByName(t, plan, "windows_session_interrupt_flow")
+	agentRule, _ := interrupt["agent_rule"].(string)
+	evidence := liveE2EStringSlice(t, interrupt["required_evidence"])
+
+	if !strings.Contains(agentRule, "does not prove process cancellation") {
+		t.Fatalf("interrupt gate must state the current cancellation limitation: %#v", interrupt)
+	}
+	if !slices.Contains(evidence, "process_cancellation_proven=false") {
+		t.Fatalf("interrupt gate must require an explicit non-cancellation result: %#v", evidence)
 	}
 }
 

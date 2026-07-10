@@ -301,11 +301,13 @@ func TestServerToolCallSupportSessionPlan(t *testing.T) {
 
 func TestServerToolCallSupportSessionLiveE2EPlan(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.live_e2e_plan", map[string]any{
-		"gateway_url":     "https://gateway.example.test/rdev/",
-		"ticket_code":     "ABCD-1234",
-		"host_id":         "hst_1",
-		"rdev_command":    "rdev-test",
-		"timeout_seconds": 180,
+		"gateway_url":        "https://gateway.example.test/rdev/",
+		"ticket_code":        "ABCD-1234",
+		"host_id":            "hst_1",
+		"session_id":         "ses_1",
+		"target_endpoint_id": "ep_1",
+		"rdev_command":       "rdev-test",
+		"timeout_seconds":    180,
 	})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -324,6 +326,8 @@ func TestServerToolCallSupportSessionLiveE2EPlan(t *testing.T) {
 		structured["execute"] != false ||
 		structured["gateway_url"] != "https://gateway.example.test/rdev" ||
 		structured["host_id"] != "hst_1" ||
+		structured["session_id"] != "ses_1" ||
+		structured["target_endpoint_id"] != "ep_1" ||
 		structured["target_os"] != "windows" {
 		t.Fatalf("unexpected live E2E plan header: %#v", structured)
 	}
@@ -331,12 +335,30 @@ func TestServerToolCallSupportSessionLiveE2EPlan(t *testing.T) {
 	if len(gates) != 3 {
 		t.Fatalf("expected three live E2E gates, got %#v", gates)
 	}
+	var smokeGate map[string]any
 	var interruptGate map[string]any
 	for _, value := range gates {
 		gate := value.(map[string]any)
+		if gate["name"] == "windows_support_session_smoke_remote_control" {
+			smokeGate = gate
+		}
 		if gate["name"] == "windows_session_interrupt_flow" {
 			interruptGate = gate
 		}
+	}
+	if smokeGate == nil {
+		t.Fatalf("expected smoke proof gate, got %#v", gates)
+	}
+	smokeCommand := anyStrings(smokeGate["proof_command"].([]any))
+	smokeArgs := smokeGate["mcp_arguments"].(map[string]any)
+	if !slices.Contains(smokeCommand, "--session-id") ||
+		!slices.Contains(smokeCommand, "ses_1") ||
+		!slices.Contains(smokeCommand, "--target-endpoint-id") ||
+		!slices.Contains(smokeCommand, "ep_1") ||
+		slices.Contains(smokeCommand, "--host-id") ||
+		smokeArgs["session_id"] != "ses_1" ||
+		smokeArgs["target_endpoint_id"] != "ep_1" {
+		t.Fatalf("unexpected MCP smoke selectors: command=%#v args=%#v", smokeCommand, smokeArgs)
 	}
 	if interruptGate == nil ||
 		interruptGate["mcp_tool"] != "rdev.sessions.interrupt" ||
