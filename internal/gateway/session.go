@@ -29,7 +29,7 @@ func (g *MemoryGateway) JoinSessionByCode(joinCode string, spec controlplane.End
 		return store.JoinByCode(joinCode, spec)
 	}
 	ticket, ok := g.tickets[ticketID]
-	if !ok || ticket.Status != model.TicketStatusActive || !g.now().Before(ticket.ExpiresAt) || g.validateTicketSessionBindingLocked(ticket) != nil {
+	if !ok || ticket.Status != model.TicketStatusActive || !g.now().Before(ticket.ExpiresAt) || !g.ticketSessionJoinableLocked(ticket) {
 		g.mu.Unlock()
 		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, invalidTicketJoinCodeError()
 	}
@@ -51,20 +51,28 @@ func (g *MemoryGateway) JoinSession(sessionID string, spec controlplane.Endpoint
 	session, err := store.Session(sessionID)
 	if err != nil {
 		g.mu.Unlock()
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, err
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, invalidTicketJoinCodeError()
 	}
 	if session.SourceTicketID == "" {
 		g.mu.Unlock()
 		return store.JoinSession(sessionID, spec)
 	}
 	ticket, ok := g.tickets[session.SourceTicketID]
-	if !ok || ticket.SessionID != session.ID || ticket.Code != session.JoinCode || ticket.Status != model.TicketStatusActive || !g.now().Before(ticket.ExpiresAt) {
+	if !ok || ticket.Status != model.TicketStatusActive || !g.now().Before(ticket.ExpiresAt) || !g.ticketSessionJoinableLocked(ticket) {
 		g.mu.Unlock()
 		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, invalidTicketJoinCodeError()
 	}
 	joined, endpoint, lease, err := store.JoinSession(sessionID, spec)
 	g.mu.Unlock()
 	return joined, endpoint, lease, err
+}
+
+func (g *MemoryGateway) ticketSessionJoinableLocked(ticket model.Ticket) bool {
+	if g.validateTicketSessionBindingLocked(ticket) != nil {
+		return false
+	}
+	session, err := g.sessionStore.Session(ticket.SessionID)
+	return err == nil && !sessionTerminalStatus(session.Status)
 }
 
 func (g *MemoryGateway) AppendSessionEvent(sessionID string, event controlplane.Event) (controlplane.Event, error) {

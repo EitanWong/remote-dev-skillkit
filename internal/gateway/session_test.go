@@ -257,6 +257,62 @@ func TestTicketJoinGateReturnsCanonicalPermanentInvalidJoinCode(t *testing.T) {
 	}
 }
 
+func TestTicketJoinGateHidesTerminalAndUnknownSessionState(t *testing.T) {
+	baselineGateway := NewMemoryGateway()
+	_, _, _, _, baselineErr := baselineGateway.JoinSessionByCode("UNKNOWN-STANDALONE-CODE", controlplane.EndpointSpec{Role: controlplane.EndpointRoleTarget})
+	var canonical controlplane.ProtocolError
+	if !errors.As(baselineErr, &canonical) {
+		t.Fatal("unknown join code did not return a structured protocol error")
+	}
+
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "terminal join gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CloseSession(ticket.SessionID); err != nil {
+		t.Fatal(err)
+	}
+
+	joinAttempts := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "ticket code",
+			run: func() error {
+				_, _, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{Role: controlplane.EndpointRoleTarget})
+				return err
+			},
+		},
+		{
+			name: "bound session id",
+			run: func() error {
+				_, _, _, err := gw.JoinSession(ticket.SessionID, controlplane.EndpointSpec{Role: controlplane.EndpointRoleTarget})
+				return err
+			},
+		},
+		{
+			name: "unknown session id",
+			run: func() error {
+				_, _, _, err := gw.JoinSession("ses_unknown", controlplane.EndpointSpec{Role: controlplane.EndpointRoleTarget})
+				return err
+			},
+		},
+	}
+	for _, attempt := range joinAttempts {
+		t.Run(attempt.name, func(t *testing.T) {
+			var protocolErr controlplane.ProtocolError
+			if err := attempt.run(); !errors.As(err, &protocolErr) {
+				t.Fatalf("join error was not structured: %v", err)
+			}
+			if !reflect.DeepEqual(protocolErr, canonical) {
+				t.Fatalf("join exposed session state: got %#v, want %#v", protocolErr, canonical)
+			}
+		})
+	}
+}
+
 func TestTicketPublishCodeCollisionDoesNotOverwriteSessionNamespace(t *testing.T) {
 	gw := NewMemoryGateway()
 	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "collision", nil)
