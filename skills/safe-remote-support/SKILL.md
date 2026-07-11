@@ -215,8 +215,8 @@ asking the user to edit bootstrap scripts.
 Completing a task is not a signal to disconnect. Keep the host/session alive
 until the operator explicitly asks to disconnect, revoke, stop the gateway, or
 uninstall a managed service. Final reports should state connection continuity:
-ephemeral Quick Tunnel vs stable configured gateway, and whether managed
-reconnect is ready.
+ephemeral managed foreground provider vs stable configured gateway, and whether
+managed reconnect is ready.
 
 After smoke testing or reporting, the required positive output contract is:
 

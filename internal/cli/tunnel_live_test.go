@@ -115,28 +115,69 @@ func liveTunn3lStartupStage(err error) string {
 	}
 }
 
-func stopLiveTunnelHandle(t *testing.T, handle tunnel.Handle, cancelProvider context.CancelFunc) {
-	t.Helper()
+type liveTunnelCleanupFakeHandle struct {
+	wait    chan error
+	stopErr error
+	stops   int
+}
+
+func (h *liveTunnelCleanupFakeHandle) Candidate() tunnel.Candidate { return tunnel.Candidate{} }
+func (h *liveTunnelCleanupFakeHandle) Wait() <-chan error          { return h.wait }
+func (h *liveTunnelCleanupFakeHandle) Stop(context.Context) error {
+	h.stops++
+	return h.stopErr
+}
+
+func TestStopLiveTunnelHandleStopsAlreadyExitedHandle(t *testing.T) {
+	exitErr := &exec.ExitError{}
+	wait := make(chan error, 1)
+	wait <- exitErr
+	handle := &liveTunnelCleanupFakeHandle{wait: wait, stopErr: exitErr}
+	canceled := false
+
+	stopLiveTunnelHandle(t, handle, func() { canceled = true })
+
+	if handle.stops != 1 {
+		t.Fatalf("Stop calls = %d, want 1", handle.stops)
+	}
+	if !canceled {
+		t.Fatal("provider context was not canceled")
+	}
 	select {
-	case <-handle.Wait():
-		cancelProvider()
-		t.Error("attempts=0 stage=cleanup")
-		return
+	case <-wait:
+		t.Fatal("already-exited handle was not reaped")
 	default:
 	}
+}
+
+func stopLiveTunnelHandle(t *testing.T, handle tunnel.Handle, cancelProvider context.CancelFunc) {
+	t.Helper()
 	stopCtx, cancelStop := context.WithTimeout(context.Background(), 10*time.Second)
 	stopErr := handle.Stop(stopCtx)
 	cancelStop()
 	cancelProvider()
-	var exitErr *exec.ExitError
-	if stopErr != nil && !errors.Is(stopErr, context.Canceled) && !errors.As(stopErr, &exitErr) {
-		t.Error("attempts=0 stage=cleanup")
-	}
+	cleanupFailed := !expectedLiveTunnelCleanupError(stopErr)
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
 	select {
-	case <-handle.Wait():
-	case <-time.After(10 * time.Second):
+	case waitErr, ok := <-handle.Wait():
+		if ok && !expectedLiveTunnelCleanupError(waitErr) {
+			cleanupFailed = true
+		}
+	case <-timer.C:
+		cleanupFailed = true
+	}
+	if cleanupFailed {
 		t.Error("attempts=0 stage=cleanup")
 	}
+}
+
+func expectedLiveTunnelCleanupError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr)
 }
 
 func liveProbeStage(evidence tunnel.ProbeEvidence) string {
