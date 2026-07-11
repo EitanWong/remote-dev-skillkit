@@ -665,10 +665,10 @@ func joinSessionByCode(ctx context.Context, client *http.Client, gatewayURL, joi
 		Events   []controlplane.Event  `json:"events"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, err))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, nil))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, nil)
 	}
 	if payload.Session.ID == "" || payload.Endpoint.ID == "" || payload.Lease.Secret == "" {
 		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: incomplete session join response")

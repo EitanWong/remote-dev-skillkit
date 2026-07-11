@@ -40,6 +40,8 @@ type Server struct {
 
 var gatewayInstanceFallbackCounter atomic.Uint64
 
+const permanentHostFailureExitCode = 78
+
 type AssetConfig struct {
 	RdevWindowsAMD64Path string
 	RdevDarwinARM64Path  string
@@ -1271,6 +1273,7 @@ elif [ "$os" = "linux" ] && command -v systemd-inhibit >/dev/null 2>&1; then
 else
   echo "[rdev] Sleep prevention unavailable — keep this visible session active to avoid disconnection"
 fi
+rdev_permanent_exit=`+strconv.Itoa(permanentHostFailureExitCode)+`
 rdev_max_retries=5
 	rdev_retry_delay=5
 	rdev_attempt=0
@@ -1282,7 +1285,7 @@ rdev_max_retries=5
 	  fi
 	  rdev_attempt=$((rdev_attempt + 1))
 	  echo "[rdev] host process exited with code $rdev_exit"
-  if [ $rdev_exit -eq 0 ] || [ $rdev_attempt -gt $rdev_max_retries ]; then
+  if [ "$rdev_exit" -eq 0 ] || [ "$rdev_exit" -eq "$rdev_permanent_exit" ] || [ "$rdev_attempt" -gt "$rdev_max_retries" ]; then
     break
   fi
   echo "[rdev] Retrying (attempt $rdev_attempt of $rdev_max_retries) after ${rdev_retry_delay}s..."
@@ -1443,6 +1446,7 @@ public static class RdevSleepPrevention {
 } catch {
   Write-Host "[rdev] Sleep prevention unavailable — keep this window active to avoid disconnection"
 }
+$rdevPermanentExitCode = `+strconv.Itoa(permanentHostFailureExitCode)+`
 $rdevMaxRetries = 5
 $rdevRetryDelaySec = 5
 $rdevAttempt = 0
@@ -1455,7 +1459,7 @@ do {
   $rdevExitCode = $LASTEXITCODE
   $rdevAttempt++
   Write-Host "[rdev] host process exited with code $rdevExitCode"
-} while ($rdevExitCode -ne 0 -and $rdevAttempt -le $rdevMaxRetries)
+} while ($rdevExitCode -ne 0 -and $rdevExitCode -ne $rdevPermanentExitCode -and $rdevAttempt -le $rdevMaxRetries)
 # Restore normal sleep policy before exiting.
 try { [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS) } catch { }
 exit $rdevExitCode

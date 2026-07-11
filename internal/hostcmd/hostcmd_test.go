@@ -172,6 +172,67 @@ func TestJoinSessionRetriesTransientEOFWithIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestJoinSessionResponseErrorExitCodeRequiresCompletePermanentProtocolEnvelope(t *testing.T) {
+	completePermanent := `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The support-session entry is invalid or no longer active.","agent_next_action":"create a fresh support-session entry"}}`
+	completeRecoverable := `{"error":{"schema_version":"rdev.error.v1","code":"gateway_unavailable","message":"gateway is unavailable","recoverable":true,"retry_after_ms":500,"user_summary":"The gateway is temporarily unavailable.","agent_next_action":"retry after the requested delay"}}`
+
+	tests := []struct {
+		name       string
+		statusCode int
+		status     string
+		body       string
+		cause      error
+		want       int
+	}{
+		{name: "complete permanent protocol error", statusCode: http.StatusNotFound, status: "404 Not Found", body: completePermanent, want: PermanentJoinFailureExitCode},
+		{name: "recoverable protocol error", statusCode: http.StatusServiceUnavailable, status: "503 Service Unavailable", body: completeRecoverable, want: 1},
+		{name: "missing recoverable field", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","retry_after_ms":0,"user_summary":"invalid entry","agent_next_action":"create a fresh entry"}}`, want: 1},
+		{name: "missing required summary", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"agent_next_action":"create a fresh entry"}}`, want: 1},
+		{name: "wrong schema", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"error":{"schema_version":"other.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"invalid entry","agent_next_action":"create a fresh entry"}}`, want: 1},
+		{name: "malformed json", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"error":`, want: 1},
+		{name: "legacy string error", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"error":"join code is invalid"}`, want: 1},
+		{name: "protocol body with success status", statusCode: http.StatusOK, status: "200 OK", body: completePermanent, want: 1},
+		{name: "network error", cause: io.ErrUnexpectedEOF, want: 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := NewJoinSessionResponseError(tc.statusCode, tc.status, []byte(tc.body), tc.cause)
+			if got := ExitCode(err); got != tc.want {
+				t.Fatalf("ExitCode() = %d, want %d for %v", got, tc.want, err)
+			}
+		})
+	}
+}
+
+func TestJoinSessionByCodeReturnsPermanentFailureForProtocolRejection(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Status:     "404 Not Found",
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(
+				`{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The support-session entry is invalid or no longer active.","agent_next_action":"create a fresh support-session entry"}}`,
+			)),
+			Request: req,
+		}, nil
+	})}
+
+	_, _, _, _, err := joinSessionByCode(context.Background(), client, "https://gateway.example.test", "TEST-CODE", controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "test-target",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "test-fingerprint",
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err == nil {
+		t.Fatal("expected join rejection")
+	}
+	if got := ExitCode(err); got != PermanentJoinFailureExitCode {
+		t.Fatalf("ExitCode() = %d, want %d for %v", got, PermanentJoinFailureExitCode, err)
+	}
+}
+
 func TestCompleteSessionTaskRetriesTransientEOFWithIdempotencyKey(t *testing.T) {
 	attempts := 0
 	var firstKey string

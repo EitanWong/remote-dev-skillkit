@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
@@ -538,6 +539,57 @@ func TestShellBootstrapRetryLoopSurvivesSetE(t *testing.T) {
 	}
 	if strings.Contains(body, "\n  \"$rdev_cmd\" host serve ") {
 		t.Fatalf("bootstrap must not run host serve as a bare command under set -e:\n%s", body)
+	}
+}
+
+func TestBootstrapRetryLoopsStopOnPermanentHostFailureAndKeepSixAttemptLimit(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+	permanentCode := strconv.Itoa(hostcmd.PermanentJoinFailureExitCode)
+
+	tests := []struct {
+		name     string
+		path     string
+		contains []string
+	}{
+		{
+			name: "shell",
+			path: "/join/" + ticket.Code + "/bootstrap.sh",
+			contains: []string{
+				"rdev_permanent_exit=" + permanentCode,
+				"rdev_max_retries=5",
+				`[ "$rdev_exit" -eq "$rdev_permanent_exit" ]`,
+				`[ "$rdev_attempt" -gt "$rdev_max_retries" ]`,
+			},
+		},
+		{
+			name: "powershell",
+			path: "/join/" + ticket.Code + "/bootstrap.ps1",
+			contains: []string{
+				"$rdevPermanentExitCode = " + permanentCode,
+				"$rdevMaxRetries = 5",
+				"$rdevExitCode -ne $rdevPermanentExitCode",
+				"$rdevAttempt -le $rdevMaxRetries",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, want := range tc.contains {
+				if !strings.Contains(body, want) {
+					t.Fatalf("bootstrap must contain %q:\n%s", want, body)
+				}
+			}
+		})
 	}
 }
 
