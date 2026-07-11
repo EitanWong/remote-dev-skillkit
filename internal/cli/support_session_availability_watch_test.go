@@ -54,6 +54,73 @@ func TestForegroundAvailabilityLossRevokesTicketAndInvalidatesHandoff(t *testing
 	}
 }
 
+func TestAvailabilityInvalidationCallbackDoesNotExposeArtifactPaths(t *testing.T) {
+	runtime, handles := supportSessionAvailabilityRuntime(t, "only")
+	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
+	root := t.TempDir()
+	readyFile, handoffFile, _ := availabilityTestFiles(t, root, ticket.Code)
+	privateStatusPath := filepath.Join(root, "operator-secret", "status.json")
+	callback := make(chan error, 1)
+	go watchForegroundSupportSessionAvailability(context.Background(), foregroundSupportSessionOptions{
+		Out: &bytes.Buffer{}, StatusFile: privateStatusPath, ReadyFile: readyFile, HandoffTextFile: handoffFile,
+		JournalPath: filepath.Join(root, "journal.json"), Gateway: gw, Store: store,
+		TicketID: ticket.ID, TicketCode: ticket.Code, Runtime: runtime, Published: runtime.Snapshot(),
+		OnInvalidated: func(err error) { callback <- err },
+	})
+	handles[0].wait <- errors.New("provider exited")
+	select {
+	case err := <-callback:
+		if err == nil || !strings.Contains(err.Error(), "tunnel availability lost before target connection") {
+			t.Fatalf("unexpected invalidation callback error: %v", err)
+		}
+		for _, forbidden := range []string{privateStatusPath, "operator-secret", root} {
+			if strings.Contains(err.Error(), forbidden) {
+				t.Fatalf("invalidation callback leaked %q: %v", forbidden, err)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("availability invalidation callback did not run")
+	}
+}
+
+func TestTunnelAvailabilityLogRejectsUnsafeAttemptFields(t *testing.T) {
+	var out bytes.Buffer
+	logTunnelAvailabilityLoss(&out, tunnel.AvailabilitySet{Attempts: []tunnel.Attempt{{
+		ProviderID: "unsafe provider secret", CandidateID: "NOT-A-CANDIDATE", ErrorClass: "secret-attempt-error",
+	}}}, "secret-log-error")
+	logged := out.String()
+	for _, forbidden := range []string{"unsafe provider secret", "NOT-A-CANDIDATE", "secret-attempt-error", "secret-log-error"} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("availability log leaked %q: %q", forbidden, logged)
+		}
+	}
+	if !strings.Contains(logged, `"error_class":"availability-changed"`) {
+		t.Fatalf("availability log did not fail closed: %q", logged)
+	}
+}
+
+func TestTunnelAvailabilityLogIncludesOnlySafeCorrelationFields(t *testing.T) {
+	var out bytes.Buffer
+	logTunnelAvailabilityLoss(&out, tunnel.AvailabilitySet{Attempts: []tunnel.Attempt{{
+		ProviderID: "safe-provider", CandidateID: "0123456789abcdef", ErrorClass: "probe-failed",
+	}}}, "tunnel-availability-lost")
+	if !strings.Contains(out.String(), `"provider_ids":["safe-provider"]`) ||
+		!strings.Contains(out.String(), `"candidate_ids":["0123456789abcdef"]`) ||
+		!strings.Contains(out.String(), `"error_class":"tunnel-availability-lost"`) {
+		t.Fatalf("safe availability log missing fields: %q", out.String())
+	}
+	logTunnelAvailabilityLoss(nil, tunnel.AvailabilitySet{}, "ignored")
+}
+
+func TestPublicSupportSessionInvalidationErrorUsesFixedText(t *testing.T) {
+	for _, detail := range []error{nil, errors.New("private /Users/alice/status.json failure")} {
+		err := publicSupportSessionInvalidationError("tunnel availability lost before target connection", detail)
+		if err == nil || strings.Contains(err.Error(), "/Users/alice") || strings.Contains(err.Error(), "private") {
+			t.Fatalf("public invalidation error = %v", err)
+		}
+	}
+}
+
 func TestForegroundSecondaryRouteDeathKeepsPrimaryHandoffUntilLastRouteDies(t *testing.T) {
 	runtime, handles := supportSessionAvailabilityRuntime(t, "first", "second")
 	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
@@ -229,11 +296,12 @@ func TestForegroundConnectedHostStopsAvailabilityWatcher(t *testing.T) {
 	root := t.TempDir()
 	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
 	published := runtime.Snapshot()
+	var output bytes.Buffer
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		watchForegroundSupportSessionAvailability(context.Background(), foregroundSupportSessionOptions{
-			Out: &bytes.Buffer{}, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
+			Out: &output, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
 			ConnectedReportFile: filepath.Join(root, "connected.txt"), JournalPath: filepath.Join(root, "journal.json"),
 			Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
 			Runtime: runtime, Published: published,
@@ -243,6 +311,9 @@ func TestForegroundConnectedHostStopsAvailabilityWatcher(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("connected host did not stop availability watcher")
+	}
+	if !strings.Contains(output.String(), `"event":"connected"`) || strings.Contains(output.String(), `"event":"waiting"`) {
+		t.Fatalf("already-connected watcher emitted contradictory lifecycle event: %q", output.String())
 	}
 	handles[0].wait <- errors.New("exit after connection")
 	time.Sleep(50 * time.Millisecond)

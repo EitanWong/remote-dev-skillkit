@@ -169,6 +169,13 @@ the Agent runs on a cloud/VPS machine with its own reachable DNS/IP, prefer
 configure `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` plus a reviewed named-tunnel
 token, token file, tunnel name, or start argv; `connect --start` can then reuse
 that address and only fall back to Quick Tunnel if needed.
+Custom Cloudflare start argv is not an unrestricted command escape hatch. It
+must be a direct foreground invocation shaped like
+`cloudflared tunnel ... --url <current-local-gateway> run ...`, with exactly
+one tunnel name, token, or token file.
+Service installation, delete/administrative subcommands, shell wrappers,
+unknown options, and URLs for other local services are rejected before
+execution.
 
 When no suitable gateway is running yet, Agents should run
 `rdev support-session connect --start` as a visible foreground CLI process. It starts the
@@ -191,7 +198,27 @@ The payload also includes `foreground_feedback`: while the foreground command
 is kept open, it emits machine-readable stderr lines prefixed with
 `rdev support session event: `. Agents should report connection success as soon
 as they see `event=connected`; the MCP/CLI status watcher remains the fallback
-source of truth.
+source of truth. These stderr records use
+`rdev.support-session-foreground-log-event.v1` and intentionally contain only
+`event`, `status_class`, `connected`, and `action_class`. Ticket codes, gateway
+URLs, host details, paths, and recovery arguments remain only in the protected
+0600 status artifact.
+
+Tunnel-provider stdout and stderr are private process streams. `rdev` drains
+them internally to discover a validated canonical HTTPS origin, but never
+forwards raw provider lines into CLI stderr, status diagnostics, or shareable
+logs. Provider lifecycle logs contain only a provider ID, deterministic
+candidate ID, lifecycle phase/status, and fixed error class. Configured
+cloudflared argv previews are structural allowlists: credential values, URLs,
+IP addresses, tunnel names, and POSIX/Windows paths are replaced by typed
+placeholders.
+
+When foreground startup or a published handoff fails closed, the emitted
+`rdev.support-session-start-diagnostic.v2` object is also a shareable summary.
+It contains only the lifecycle phase, fixed reason/next-action classes, and
+redacted attempts (`provider_id`, deterministic `candidate_id`, status, and
+fixed `error_class`). It never embeds the created/started handoff, ticket,
+candidate URL, probe marker, argv, arbitrary error text, or local path.
 The CLI also writes the same started payload to `ready_file.path`
 (`support-session-ready.json` in the session work directory by default), so
 Agents can read top-level `target_handoff_envelope.full_text` from a stable file when a long-running
@@ -202,7 +229,10 @@ forward this file verbatim when it is present, instead of parsing JSON or
 rebuilding the command from ticket/root/gateway fields. It also writes the latest
 foreground status event to `status_file.path` (`support-session-status.json` by
 default), so Agents can report `event=connected` without inventing a polling
-loop. When the target connects, it writes `connected_report_file.path`
+loop. The ready, handoff, status, and connected-report files are sensitive
+operational artifacts and must not be attached as shareable diagnostics or
+copied into public issue logs. When the target connects, it writes
+`connected_report_file.path`
 (`connected-report.txt` by default), a plain-text success report Agents can send
 to the user before creating session tasks.
 This is a CLI foreground process rather than an MCP tool because MCP calls

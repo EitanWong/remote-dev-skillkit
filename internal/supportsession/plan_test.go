@@ -1111,6 +1111,8 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	feedback := started["foreground_feedback"].(map[string]any)
 	if feedback["schema_version"] != "rdev.support-session-foreground-feedback.v1" ||
 		feedback["stream"] != "stderr" ||
+		feedback["log_event_schema_version"] != "rdev.support-session-foreground-log-event.v1" ||
+		feedback["protected_status_schema_version"] != "rdev.support-session-foreground-event.v1" ||
 		!strings.Contains(feedback["connected_rule"].(string), "connection has been established") {
 		t.Fatalf("expected foreground feedback contract, got %#v", feedback)
 	}

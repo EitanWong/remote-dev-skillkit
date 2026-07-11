@@ -39,6 +39,12 @@ server, prefer:
   `RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON` when a reusable Cloudflare
   Named Tunnel has been configured.
 
+The custom Cloudflare argv remains policy constrained: use only a direct
+foreground `cloudflared tunnel ... --url {local_url} run ...` command with one
+tunnel name, token, or token file. Do not use it for `service install`, delete
+or administrative subcommands, shell wrappers, or a different local origin;
+`rdev` rejects those forms before execution.
+
 If no stable URL is configured, connect first with the managed Quick Tunnel
 fallback, then tell the operator how to configure a stable URL for the next
 session.

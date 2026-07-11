@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -236,14 +237,266 @@ func TestTunnelHelperProcess(t *testing.T) {
 	if mode == "" {
 		return
 	}
-	_, _ = fmt.Fprintln(os.Stderr, "ready https://abc.trycloudflare.com")
 	switch mode {
 	case "exit":
+		_, _ = fmt.Fprintln(os.Stderr, "ready https://abc.trycloudflare.com")
 		os.Exit(23)
 	case "block":
+		_, _ = fmt.Fprintln(os.Stderr, "ready https://abc.trycloudflare.com")
+		time.Sleep(time.Hour)
+	case "secret-block":
+		_, _ = fmt.Fprintln(os.Stdout, "token=cf-secret ticket=ABCD-1234 peer=203.0.113.9")
+		_, _ = fmt.Fprintln(os.Stderr, "peer6=2001:db8::9 path=/Users/alice/private/creds.json rejected=https://abc.trycloudflare.com/?token=query-secret")
+		time.Sleep(50 * time.Millisecond)
+		_, _ = fmt.Fprintln(os.Stdout, "assigned=https://abc.trycloudflare.com")
+		time.Sleep(time.Hour)
+	case "oversized-block":
+		_, _ = fmt.Fprintln(os.Stdout, strings.Repeat("x", 70<<10)+" assigned=https://oversized.trycloudflare.com")
+		time.Sleep(time.Hour)
+	case "no-url-block":
 		time.Sleep(time.Hour)
 	default:
 		os.Exit(24)
+	}
+}
+
+func TestTunnelProviderOutputIsPrivate(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "secret-block")
+	var stderr synchronizedBuffer
+	started, err := startTunnelCommand(context.Background(), &stderr, tunnel.ProviderCloudflareQuick, []string{
+		os.Args[0], "-test.run=TestTunnelHelperProcess",
+	}, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopTunnelTestProcess(t, started)
+	if started.URL != "https://abc.trycloudflare.com" {
+		t.Fatalf("assigned URL = %q", started.URL)
+	}
+	logged := stderr.String()
+	expectedCandidateID := tunnel.CandidateID(tunnel.ProviderCloudflareQuick, started.URL)
+	if !strings.Contains(logged, `"candidate_id":"`+expectedCandidateID+`"`) ||
+		expectedCandidateID == tunnel.CandidateID(tunnel.ProviderCloudflareQuick, "https://different.trycloudflare.com") {
+		t.Fatalf("provider lifecycle log did not use stable candidate correlation IDs: %q", logged)
+	}
+	for _, forbidden := range []string{
+		"cf-secret", "ABCD-1234", "203.0.113.9", "2001:db8::9", "/Users/alice/private/creds.json",
+		"query-secret", "https://abc.trycloudflare.com",
+	} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("provider output sentinel %q leaked to stderr: %q", forbidden, logged)
+		}
+	}
+}
+
+func TestTunnelProviderOversizedLineStillDrainsAndDiscoversURL(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "oversized-block")
+	started, err := startTunnelCommand(context.Background(), io.Discard, tunnel.ProviderCloudflareQuick, []string{
+		os.Args[0], "-test.run=TestTunnelHelperProcess",
+	}, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopTunnelTestProcess(t, started)
+	if started.URL != "https://oversized.trycloudflare.com" {
+		t.Fatalf("assigned URL = %q", started.URL)
+	}
+}
+
+func TestProviderOutputSinkDiscoversSplitCanonicalURL(t *testing.T) {
+	if got := providerURLFromLine(tunnel.ProviderCloudflareQuick, "noise https://ABC.TRYCLOUDFLARE.COM/\rprogress"); got != "https://abc.trycloudflare.com" {
+		t.Fatalf("direct split-window URL = %q", got)
+	}
+	var candidates []string
+	sink := &providerOutputSink{
+		providerID: tunnel.ProviderCloudflareQuick,
+		onCandidate: func(candidate string) {
+			candidates = append(candidates, candidate)
+		},
+	}
+	for _, chunk := range [][]byte{
+		{0xff, 0xfe, 'n', 'o', 'i', 's', 'e', ' '},
+		[]byte("htt"),
+		[]byte("ps://ABC.TRYCLOUDFLARE.COM/\rprogress"),
+		[]byte(strings.Repeat("x", 70<<10) + " https://later.trycloudflare.com"),
+	} {
+		if written, err := sink.Write(chunk); err != nil || written != len(chunk) {
+			t.Fatalf("providerOutputSink.Write() = %d, %v", written, err)
+		}
+	}
+	if !slices.Equal(candidates, []string{"https://abc.trycloudflare.com"}) {
+		t.Fatalf("split output candidates = %#v", candidates)
+	}
+}
+
+func TestProviderOutputSinkWaitsForDelimiterOrEOF(t *testing.T) {
+	var candidates []string
+	sink := &providerOutputSink{
+		providerID: tunnel.ProviderCloudflareQuick,
+		onCandidate: func(candidate string) {
+			candidates = append(candidates, candidate)
+		},
+	}
+	for _, chunk := range []string{
+		"assigned=https://prefix.trycloudflare.com",
+		"/?token=secret\nassigned=https://suffix.trycloudflare.com",
+		".evil.example\n",
+		"assigned=https://final.trycloudflare.com",
+	} {
+		if _, err := sink.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+		if len(candidates) != 0 {
+			t.Fatalf("accepted a URL before a real delimiter or EOF: %#v", candidates)
+		}
+	}
+	sink.Finalize()
+	if !slices.Equal(candidates, []string{"https://final.trycloudflare.com"}) {
+		t.Fatalf("EOF-finalized candidates = %#v", candidates)
+	}
+}
+
+type blockAfterFirstProviderEventWriter struct {
+	writes  atomic.Int32
+	release <-chan struct{}
+}
+
+func (w *blockAfterFirstProviderEventWriter) Write(data []byte) (int, error) {
+	if w.writes.Add(1) > 1 {
+		<-w.release
+	}
+	return len(data), nil
+}
+
+func TestProviderOutputDrainDoesNotBlockOnLifecycleLogWriter(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "block")
+	release := make(chan struct{})
+	log := &blockAfterFirstProviderEventWriter{release: release}
+	process, err := startProviderProcess(context.Background(), log, tunnel.ProviderCloudflareQuick, []string{
+		os.Args[0], "-test.run=TestTunnelHelperProcess",
+	}, "", tunnel.ProviderCloudflareQuick)
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	defer func() {
+		close(release)
+		cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout)
+	}()
+	select {
+	case candidate := <-process.candidates:
+		if candidate != "https://abc.trycloudflare.com" {
+			t.Fatalf("candidate = %q", candidate)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("provider output drain blocked on lifecycle log writer")
+	}
+}
+
+func TestProviderProcessCleanupDeadlineExceedsWaitDelay(t *testing.T) {
+	if providerProcessCleanupTimeout <= providerProcessWaitDelay {
+		t.Fatalf("cleanup timeout %s must exceed WaitDelay %s", providerProcessCleanupTimeout, providerProcessWaitDelay)
+	}
+	closed := make(chan struct{})
+	close(closed)
+	if !cancelAndWaitProviderProcess(providerProcess{
+		cancel: func() {}, lifecycle: &processLifecycle{reaped: closed},
+	}, time.Millisecond) {
+		t.Fatal("already-reaped process was reported as unreaped")
+	}
+	if cancelAndWaitProviderProcess(providerProcess{
+		cancel: func() {}, lifecycle: &processLifecycle{reaped: make(chan struct{})},
+	}, time.Millisecond) {
+		t.Fatal("unreaped process was reported as reaped")
+	}
+	if cancelAndWaitProviderProcess(providerProcess{}, 0) {
+		t.Fatal("process without lifecycle was reported as reaped")
+	}
+	if !cancelAndWaitProviderProcess(providerProcess{
+		cancel: func() {}, lifecycle: &processLifecycle{reaped: closed},
+	}, 0) {
+		t.Fatal("zero-timeout check missed an already-reaped process")
+	}
+	if cancelAndWaitProviderProcess(providerProcess{
+		cancel: func() {}, lifecycle: &processLifecycle{reaped: make(chan struct{})},
+	}, 0) {
+		t.Fatal("zero-timeout check reported a live process as reaped")
+	}
+}
+
+func TestTunnelProviderStartupTimeoutReapsWithoutRawOutput(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "no-url-block")
+	var stderr synchronizedBuffer
+	_, err := startTunnelCommand(context.Background(), &stderr, tunnel.ProviderCloudflareQuick, []string{
+		os.Args[0], "-test.run=TestTunnelHelperProcess",
+	}, 20*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "startup timed out") {
+		t.Fatalf("startup timeout error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), `"error_class":"timeout"`) {
+		t.Fatalf("startup timeout log = %q", stderr.String())
+	}
+}
+
+func TestProviderProcessStartFailureDoesNotExposeExecutablePath(t *testing.T) {
+	secretPath := filepath.Join(t.TempDir(), "alice-private-secret-binary")
+	var stderr synchronizedBuffer
+	_, err := startTunnelCommand(context.Background(), &stderr, tunnel.ProviderCloudflareQuick, []string{secretPath}, time.Second)
+	if err == nil {
+		t.Fatal("expected provider start failure")
+	}
+	for surface, value := range map[string]string{"error": err.Error(), "stderr": stderr.String()} {
+		if strings.Contains(value, secretPath) || strings.Contains(value, "alice-private-secret-binary") {
+			t.Fatalf("%s leaked executable path: %q", surface, value)
+		}
+	}
+	if !strings.Contains(stderr.String(), `"error_class":"start-failed"`) {
+		t.Fatalf("start failure did not emit fixed error class: %q", stderr.String())
+	}
+}
+
+func TestConfiguredStableTunnelStartRejectsInvalidURLAndEarlyExit(t *testing.T) {
+	if _, _, err := startConfiguredCloudflaredStableTunnelWithGrace(context.Background(), io.Discard, cloudflaredStableTunnelConfig{}, 10*time.Millisecond); err == nil {
+		t.Fatal("empty stable argv accepted")
+	}
+	if _, _, err := startConfiguredCloudflaredStableTunnelWithGrace(context.Background(), io.Discard, cloudflaredStableTunnelConfig{
+		GatewayURL: "https://user:password@stable.example.test",
+		Argv:       []string{os.Args[0], "-test.run=TestTunnelHelperProcess"},
+	}, 10*time.Millisecond); err == nil {
+		t.Fatal("credential-bearing stable URL accepted")
+	}
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "exit")
+	_, _, err := startConfiguredCloudflaredStableTunnelWithGrace(context.Background(), io.Discard, cloudflaredStableTunnelConfig{
+		GatewayURL: "https://stable.example.test",
+		Argv:       []string{os.Args[0], "-test.run=TestTunnelHelperProcess"},
+	}, 100*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "exited during startup") {
+		t.Fatalf("early stable process exit error = %v", err)
+	}
+}
+
+func TestTunnelProviderEventRejectsArbitraryFields(t *testing.T) {
+	var out strings.Builder
+	writeTunnelProviderEvent(&out, "unsafe provider secret", "secret-phase", "secret-status", "https://secret.example.test/?token=query", "secret-error")
+	logged := out.String()
+	for _, forbidden := range []string{"unsafe provider secret", "secret-phase", "secret-status", "secret.example.test", "query", "secret-error"} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("provider event leaked %q: %q", forbidden, logged)
+		}
+	}
+	if !strings.Contains(logged, `"provider_id":"unknown"`) || !strings.Contains(logged, `"phase":"unknown"`) ||
+		!strings.Contains(logged, `"status":"unknown"`) || !strings.Contains(logged, `"error_class":"failed"`) {
+		t.Fatalf("provider event did not fail closed: %q", logged)
+	}
+}
+
+func stopTunnelTestProcess(t *testing.T, started runningTunnel) {
+	t.Helper()
+	started.cancel()
+	select {
+	case <-started.lifecycle.reaped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tunnel helper was not reaped")
 	}
 }
 
@@ -413,13 +666,23 @@ func TestProviderURLParsersRejectMisleadingURLs(t *testing.T) {
 		want     string
 	}{
 		{"cloudflare valid", "cloudflare-quick", "ready https://abc.trycloudflare.com", "https://abc.trycloudflare.com"},
+		{"cloudflare canonical", "cloudflare-quick", "ready HTTPS://ABC.TRYCLOUDFLARE.COM/", "https://abc.trycloudflare.com"},
 		{"cloudflare bare", "cloudflare-quick", "https://trycloudflare.com", ""},
 		{"cloudflare suffix", "cloudflare-quick", "https://abc.trycloudflare.com.attacker.test", ""},
 		{"cloudflare port", "cloudflare-quick", "https://abc.trycloudflare.com:8443", ""},
 		{"cloudflare empty port", "cloudflare-quick", "https://abc.trycloudflare.com:", ""},
+		{"cloudflare query", "cloudflare-quick", "https://abc.trycloudflare.com/?token=query-secret", ""},
+		{"cloudflare fragment", "cloudflare-quick", "https://abc.trycloudflare.com/#secret", ""},
+		{"cloudflare path", "cloudflare-quick", "https://abc.trycloudflare.com/private", ""},
+		{"cloudflare encoded path delimiter", "cloudflare-quick", "https://abc.trycloudflare.com/%3Ftoken", ""},
+		{"cloudflare wildcard label", "cloudflare-quick", "https://*.trycloudflare.com", ""},
+		{"cloudflare empty label", "cloudflare-quick", "https://a..trycloudflare.com", ""},
+		{"cloudflare oversized label", "cloudflare-quick", "https://" + strings.Repeat("a", 64) + ".trycloudflare.com", ""},
+		{"cloudflare skips invalid label", "cloudflare-quick", "https://*.trycloudflare.com https://valid.trycloudflare.com", "https://valid.trycloudflare.com"},
 		{"localhost admin", "localhost-run", "https://admin.localhost.run", ""},
 		{"localhost valid", "localhost-run", "https://abc.lhr.life", "https://abc.lhr.life"},
 		{"userinfo", "localhost-run", "https://user@abc.lhr.life", ""},
+		{"userinfo password", "localhost-run", "https://user:password@abc.lhr.life", ""},
 		{"localhost port", "localhost-run", "https://abc.lhr.life:443", ""},
 		{"localhost empty port", "localhost-run", "https://abc.lhr.life:", ""},
 		{"pinggy valid", "pinggy", "tunnel https://abc.pinggy.link", "https://abc.pinggy.link"},

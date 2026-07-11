@@ -463,6 +463,12 @@ func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Co
 }
 
 func candidateID(providerID, rawURL string) string {
+	return CandidateID(providerID, rawURL)
+}
+
+// CandidateID returns the deterministic, redaction-safe correlation ID used
+// for a provider candidate throughout availability diagnostics.
+func CandidateID(providerID, rawURL string) string {
 	sum := sha256.Sum256([]byte(providerID + "\x00" + normalizeCandidateURL(rawURL)))
 	return hex.EncodeToString(sum[:8])
 }

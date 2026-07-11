@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/acceptance"
@@ -3987,6 +3988,7 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 
 type cloudflaredStableTunnelConfig struct {
 	GatewayURL string
+	ProviderID string
 	Argv       []string
 	Preview    []string
 	Source     string
@@ -3994,15 +3996,22 @@ type cloudflaredStableTunnelConfig struct {
 }
 
 func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflaredStableTunnelConfig, bool, error) {
-	gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL")), "/")
+	gatewayURL := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"))
 	gatewaySource := "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"
+	providerID := "cloudflared-named"
 	if gatewayURL == "" {
-		gatewayURL = strings.TrimRight(strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_GATEWAY_URL")), "/")
+		gatewayURL = strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_GATEWAY_URL"))
 		gatewaySource = "RDEV_CLOUDFLARED_GATEWAY_URL"
+		providerID = "cloudflared"
 	}
 	if gatewayURL == "" {
 		return cloudflaredStableTunnelConfig{}, false, nil
 	}
+	canonicalGatewayURL, err := canonicalCloudflaredStableGatewayURL(gatewayURL)
+	if err != nil {
+		return cloudflaredStableTunnelConfig{}, true, err
+	}
+	gatewayURL = canonicalGatewayURL
 	rawArgv := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON"))
 	argvSource := "RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON"
 	if rawArgv == "" {
@@ -4016,6 +4025,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+" + argvSource,
@@ -4027,6 +4037,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", "--token-file", tokenFile}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE",
@@ -4038,6 +4049,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", "--token", token}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_TOKEN",
@@ -4049,6 +4061,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", tunnelName}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_NAME",
@@ -4096,78 +4109,232 @@ func parseCloudflaredStableStartArgv(raw, envName, localURL string) ([]string, e
 		}
 		argv[i] = expandCloudflaredStartArg(arg, localURL)
 	}
-	if base := strings.ToLower(filepath.Base(argv[0])); base != "cloudflared" && base != "cloudflared.exe" {
-		return nil, fmt.Errorf("%s must start with a cloudflared executable, got %q", envName, filepath.Base(argv[0]))
+	if base := strings.ToLower(portablePathBase(argv[0])); base != "cloudflared" && base != "cloudflared.exe" {
+		return nil, fmt.Errorf("%s must start with a cloudflared executable", envName)
 	}
-	joined := strings.ToLower(strings.Join(argv, "\x00"))
-	for _, forbidden := range []string{"executionpolicy", "encodedcommand", "bypass", "powershell", "cmd.exe", "bash", " zsh", " sh ", "nohup"} {
-		if strings.Contains(joined, forbidden) {
-			return nil, fmt.Errorf("%s contains unsafe shell or policy token %q", envName, forbidden)
-		}
+	if err := validateCloudflaredStableRunArgv(argv, envName, localURL); err != nil {
+		return nil, err
 	}
 	return argv, nil
 }
 
+func validateCloudflaredStableRunArgv(argv []string, envName, localURL string) error {
+	if len(argv) < 5 || argv[1] != "tunnel" {
+		return fmt.Errorf("%s must run a foreground cloudflared tunnel command", envName)
+	}
+	seenRun, seenURL, seenProtocol := false, false, false
+	identityCount := 0
+	for index := 2; index < len(argv); index++ {
+		arg := argv[index]
+		if !strings.HasPrefix(arg, "--") {
+			if !seenRun && arg == "run" {
+				seenRun = true
+				continue
+			}
+			if !seenRun || identityCount > 0 {
+				return fmt.Errorf("%s contains an unsupported cloudflared tunnel argument", envName)
+			}
+			identityCount++
+			continue
+		}
+		key, _, _ := strings.Cut(strings.ToLower(arg), "=")
+		value, consumedIndex, err := cloudflaredStableOptionValue(argv, index, arg, envName)
+		if err != nil {
+			return err
+		}
+		index = consumedIndex
+		switch key {
+		case "--protocol":
+			if seenRun || seenProtocol || !isCloudflaredStableProtocol(value) {
+				return fmt.Errorf("%s contains an unsupported cloudflared protocol option", envName)
+			}
+			seenProtocol = true
+		case "--url":
+			if seenRun || seenURL || value != localURL {
+				return fmt.Errorf("%s must route only to the current local gateway", envName)
+			}
+			seenURL = true
+		case "--token", "--token-file":
+			if !seenRun || identityCount > 0 {
+				return fmt.Errorf("%s contains conflicting cloudflared tunnel identity options", envName)
+			}
+			identityCount++
+		default:
+			return fmt.Errorf("%s contains an unsupported cloudflared tunnel option", envName)
+		}
+	}
+	if !seenRun || !seenURL || identityCount != 1 {
+		return fmt.Errorf("%s must contain one foreground tunnel identity and the current local gateway URL", envName)
+	}
+	return nil
+}
+
+func cloudflaredStableOptionValue(argv []string, index int, arg, envName string) (string, int, error) {
+	if _, value, hasValue := strings.Cut(arg, "="); hasValue {
+		if value == "" {
+			return "", index, fmt.Errorf("%s contains an empty cloudflared option value", envName)
+		}
+		return value, index, nil
+	}
+	if index+1 >= len(argv) || strings.HasPrefix(argv[index+1], "--") {
+		return "", index, fmt.Errorf("%s contains a cloudflared option without a value", envName)
+	}
+	return argv[index+1], index + 1, nil
+}
+
+func isCloudflaredStableProtocol(value string) bool {
+	switch strings.ToLower(value) {
+	case "auto", "http2", "quic":
+		return true
+	default:
+		return false
+	}
+}
+
 func expandCloudflaredStartArg(arg, localURL string) string {
-	replacements := map[string]string{
-		"{local_url}":       localURL,
-		"{{local_url}}":     localURL,
-		"$RDEV_LOCAL_URL":   localURL,
-		"${RDEV_LOCAL_URL}": localURL,
-	}
-	for marker, value := range replacements {
-		arg = strings.ReplaceAll(arg, marker, value)
-	}
-	return arg
+	return strings.NewReplacer(
+		"{{local_url}}", localURL,
+		"${RDEV_LOCAL_URL}", localURL,
+		"{local_url}", localURL,
+		"$RDEV_LOCAL_URL", localURL,
+	).Replace(arg)
 }
 
 func redactCloudflaredArgv(argv []string) []string {
-	out := append([]string(nil), argv...)
-	for i, arg := range out {
-		switch arg {
-		case "--token", "--credentials-contents":
-			if i+1 < len(out) {
-				out[i+1] = "<redacted>"
+	if len(argv) == 0 {
+		return nil
+	}
+	executable := strings.ToLower(portablePathBase(argv[0]))
+	if executable != "cloudflared" && executable != "cloudflared.exe" {
+		executable = "<executable>"
+	}
+	out := []string{executable}
+	for index := 1; index < len(argv); index++ {
+		arg := argv[index]
+		lower := strings.ToLower(arg)
+		if lower == "tunnel" || lower == "run" {
+			out = append(out, lower)
+			continue
+		}
+		if !strings.HasPrefix(lower, "--") {
+			out = append(out, "<argument>")
+			continue
+		}
+		key, value, hasValue := strings.Cut(lower, "=")
+		nextValue := func() string {
+			if hasValue {
+				return value
 			}
+			if index+1 < len(argv) {
+				index++
+				return argv[index]
+			}
+			return ""
+		}
+		switch key {
+		case "--protocol":
+			protocol := strings.ToLower(strings.TrimSpace(nextValue()))
+			if protocol != "auto" && protocol != "http2" && protocol != "quic" {
+				protocol = "<redacted>"
+			}
+			out = append(out, "--protocol", protocol)
+		case "--url":
+			_ = nextValue()
+			out = append(out, "--url", "<local-url>")
+		case "--token", "--credentials-contents":
+			_ = nextValue()
+			out = append(out, key, "<redacted>")
+		case "--token-file", "--credentials-file", "--config", "--origincert":
+			_ = nextValue()
+			out = append(out, key, "<path>")
+		default:
+			out = append(out, "<option>")
 		}
 	}
 	return out
 }
 
+func portablePathBase(value string) string {
+	value = strings.TrimRight(value, "/\\")
+	if index := strings.LastIndexAny(value, "/\\"); index >= 0 {
+		return value[index+1:]
+	}
+	return value
+}
+
+func canonicalCloudflaredStableGatewayURL(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.User != nil ||
+		parsed.Port() != "" || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	if !strings.EqualFold(parsed.Host, parsed.Hostname()) {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	if escapedPath := parsed.EscapedPath(); escapedPath != "" && escapedPath != "/" {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if !validDNSHostname(host) || strings.ContainsAny(host, "\x00\r\n\t ") {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	return "https://" + host, nil
+}
+
 func startConfiguredCloudflaredStableTunnel(ctx context.Context, stderr io.Writer, cfg cloudflaredStableTunnelConfig) (string, context.CancelFunc, error) {
+	return startConfiguredCloudflaredStableTunnelWithGrace(ctx, stderr, cfg, 3*time.Second)
+}
+
+func startConfiguredCloudflaredStableTunnelWithGrace(ctx context.Context, stderr io.Writer, cfg cloudflaredStableTunnelConfig, startupGrace time.Duration) (string, context.CancelFunc, error) {
 	if len(cfg.Argv) == 0 {
 		return "", func() {}, fmt.Errorf("cloudflared stable tunnel argv is empty")
 	}
-	tunnelCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(tunnelCtx, cfg.Argv[0], cfg.Argv[1:]...)
-	cmd.Stdout = stderr
-	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return "", func() {}, fmt.Errorf("cloudflared stable tunnel start failed: %w", err)
+	gatewayURL, err := canonicalCloudflaredStableGatewayURL(cfg.GatewayURL)
+	if err != nil {
+		return "", func() {}, err
 	}
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
+	providerID := normalizedCloudflaredStableProviderID(cfg.ProviderID)
+	process, err := startProviderProcess(ctx, stderr, providerID, cfg.Argv, "", "")
+	if err != nil {
+		return "", func() {}, err
+	}
+	timer := time.NewTimer(startupGrace)
+	defer timer.Stop()
 	select {
-	case err := <-done:
-		cancel()
-		if err != nil {
-			return "", func() {}, fmt.Errorf("cloudflared stable tunnel exited during startup: %w", err)
-		}
-		return "", func() {}, fmt.Errorf("cloudflared stable tunnel exited during startup")
-	case <-time.After(3 * time.Second):
-		return cfg.GatewayURL, func() {
-			cancel()
-			select {
-			case <-done:
-			case <-time.After(2 * time.Second):
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
+	case <-process.lifecycle.reaped:
+		cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout)
+		writeTunnelProviderEvent(stderr, providerID, "startup", "failed", "", "process-exited")
+		return "", func() {}, fmt.Errorf("%s provider process exited during startup", providerID)
+	case <-timer.C:
+		writeTunnelProviderEvent(stderr, providerID, "startup", "ready", gatewayURL, "")
+		var stopOnce sync.Once
+		return gatewayURL, func() {
+			stopOnce.Do(func() {
+				if cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout) {
+					writeTunnelProviderEvent(stderr, providerID, "stop", "stopped", gatewayURL, "")
+				} else {
+					writeTunnelProviderEvent(stderr, providerID, "stop", "failed", gatewayURL, "reap-timeout")
 				}
-			}
+			})
 		}, nil
+	case <-ctx.Done():
+		if cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout) {
+			writeTunnelProviderEvent(stderr, providerID, "startup", "stopped", "", "canceled")
+		} else {
+			writeTunnelProviderEvent(stderr, providerID, "startup", "failed", "", "reap-timeout")
+		}
+		return "", func() {}, ctx.Err()
+	}
+}
+
+func normalizedCloudflaredStableProviderID(value string) string {
+	switch strings.TrimSpace(value) {
+	case "cloudflared-named":
+		return "cloudflared-named"
+	case "cloudflared":
+		return "cloudflared"
+	default:
+		return "cloudflared"
 	}
 }
 
@@ -4187,7 +4354,9 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	localPort := extractPort(addr, "8787")
 	localListenURL := "http://127.0.0.1:" + localPort
 	gatewayURL, candidates := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
-	if stableGatewayURL := firstStableGatewayURL(candidates); stableGatewayURL != "" {
+	stableGatewayURL := firstStableGatewayURL(candidates)
+	stableProviderID := gatewayProviderID(candidates, stableGatewayURL)
+	if stableGatewayURL != "" {
 		gatewayURL = stableGatewayURL
 	}
 	deps := supportSessionStartDeps{}
@@ -4307,7 +4476,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		return err
 	}
 	if warning := stringFromMap(prepared, "repo_root_warning"); warning != "" {
-		_, _ = fmt.Fprintf(a.Stderr, "[rdev] warning: %s\n", warning)
+		_, _ = io.WriteString(a.Stderr, "[rdev] support session warning: repository assets require review\n")
 	}
 	gatewayCandidates, _ := prepared["gateway_url_candidates"].([]supportsession.GatewayURLCandidate)
 
@@ -4406,30 +4575,34 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		waitForLocalHealth = deps.WaitForLocalHealth
 	}
 	if err := waitForLocalHealth(ctx, gatewayServer, localListenURL, 15*time.Second); err != nil {
-		return fmt.Errorf("local gateway health check failed for %s: %w", localListenURL, err)
+		return errors.New("local gateway health check failed")
 	}
 	a.recordSupportSessionStartEvent("local_health_passed")
 
 	availability := tunnel.AvailabilitySet{SchemaVersion: tunnel.AvailabilitySchemaVersion, Region: runtimeConfig.Region}
 	var availabilityRuntime *tunnel.Runtime
-	explicitStableURL := firstStableGatewayURL(candidates)
+	explicitStableURL := stableGatewayURL
+	explicitStableProviderID := stableProviderID
 	if strings.TrimSpace(opts.GatewayURL) != "" {
 		explicitStableURL = strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+		explicitStableProviderID = "explicit"
 	}
 	if strings.TrimSpace(opts.GatewayURL) == "" && cloudflaredStableTunnelStartRequested() {
 		a.recordSupportSessionStartEvent("providers_started")
+		configuredProviderID := configuredCloudflaredStableProviderID()
 		cfPath, lookupErr := exec.LookPath("cloudflared")
 		if lookupErr != nil {
-			_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel requested but cloudflared is not in PATH: %v\n", lookupErr)
+			writeTunnelProviderEvent(a.Stderr, configuredProviderID, "configuration", "failed", "", "executable-not-found")
 			explicitStableURL = ""
 		} else if cfg, ok, configErr := configuredCloudflaredStableTunnelConfig(cfPath, localListenURL); configErr != nil {
-			_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel is invalid: %v\n", configErr)
+			writeTunnelProviderEvent(a.Stderr, configuredProviderID, "configuration", "failed", "", "invalid-config")
 			explicitStableURL = ""
 		} else if ok {
-			_, _ = fmt.Fprintf(a.Stderr, "[rdev] starting configured Cloudflare stable tunnel for %s with %s (%s)\n", cfg.GatewayURL, cfg.Mode, strings.Join(cfg.Preview, " "))
+			explicitStableProviderID = cfg.ProviderID
+			writeTunnelProviderEvent(a.Stderr, cfg.ProviderID, "configuration", "ready", cfg.GatewayURL, "")
 			startedURL, stopTunnel, startErr := startConfiguredCloudflaredStableTunnel(ctx, a.Stderr, cfg)
 			if startErr != nil {
-				_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel failed: %v\n", startErr)
+				writeTunnelProviderEvent(a.Stderr, cfg.ProviderID, "startup", "failed", "", "start-failed")
 				explicitStableURL = ""
 			} else {
 				defer stopTunnel()
@@ -4438,7 +4611,10 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		}
 	}
 	if explicitStableURL != "" {
-		candidate := tunnel.Candidate{ProviderID: gatewayProviderID(gatewayCandidates, explicitStableURL), URL: explicitStableURL}
+		if explicitStableProviderID == "" || explicitStableProviderID == "explicit" && strings.TrimSpace(opts.GatewayURL) == "" {
+			explicitStableProviderID = gatewayProviderID(candidates, explicitStableURL)
+		}
+		candidate := tunnel.Candidate{ProviderID: explicitStableProviderID, URL: explicitStableURL}
 		probe := deps.Manager.Probe
 		if probe == nil {
 			probe = func(probeCtx context.Context, candidate tunnel.Candidate) (tunnel.ProbeEvidence, error) {
@@ -4446,7 +4622,10 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 			}
 		}
 		evidence, probeErr := probe(ctx, candidate)
-		attempt := tunnel.Attempt{ProviderID: candidate.ProviderID, Status: tunnel.AttemptHealthy, Probe: evidence}
+		attempt := tunnel.Attempt{
+			ProviderID: candidate.ProviderID, CandidateID: tunnel.CandidateID(candidate.ProviderID, candidate.URL),
+			Status: tunnel.AttemptHealthy, Probe: evidence,
+		}
 		if probeErr != nil {
 			attempt.Status = tunnel.AttemptDegraded
 			attempt.ErrorClass = "probe-failed"
@@ -4501,16 +4680,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	availability = bootstrapProbeAvailability(ctx, availability, server.GatewayInstance(), bootstrapProbe)
 	if len(availability.Candidates) == 0 {
-		diagnostic := map[string]any{
-			"schema_version": "rdev.support-session-start-diagnostic.v1",
-			"ready_to_send":  false,
-			"reason":         "no_public_gateway_candidate_passed_static_bootstrap_probe",
-			"availability":   availability,
-		}
-		if err := writeJSONFile0600(statusFile, diagnostic); err != nil {
-			return err
-		}
-		if err := writeJSON(a.Stdout, diagnostic); err != nil {
+		diagnostic := newSupportSessionStartDiagnostic(
+			"static-bootstrap-probe",
+			"no_public_gateway_candidate_passed_static_bootstrap_probe",
+			"review-provider-availability",
+			availability,
+		)
+		if err := writeSupportSessionDiagnostic(statusFile, a.Stdout, diagnostic); err != nil {
 			return err
 		}
 		return errors.New("no public gateway candidate passed the static bootstrap probe")
@@ -4557,7 +4733,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		}
 		rollbackErr := rollbackSupportTicket(gw, store, ticket.ID, "tunnel availability changed before handoff publication")
 		if rollbackErr != nil {
-			return fmt.Errorf("rollback changed tunnel availability: %w", rollbackErr)
+			return errors.New("support-session availability rollback failed")
 		}
 		if len(liveAvailability.Candidates) == 0 {
 			return errors.New("all public gateway candidates exited before handoff publication")
@@ -4604,34 +4780,29 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	})
 	if readiness.ReadyToSend {
 		if err := publishSupportSessionHandoff(gw, store, ticket.ID, a.Stdout, a.Stderr, readyFile, handoffTextFile, publicationJournalPath, started, supportSessionMonitoring{StatusPath: statusFile, Availability: availability}); err != nil {
-			return err
+			return errors.New("support-session handoff publication failed")
 		}
 		a.recordSupportSessionStartEvent("handoff_written")
 	} else {
 		if err := rollbackSupportTicket(gw, store, ticket.ID, "direct handoff readiness was not satisfied"); err != nil {
-			return err
+			return errors.New("support-session readiness rollback failed")
 		}
-		diagnostic := map[string]any{
-			"schema_version":         "rdev.support-session-start-diagnostic.v1",
-			"ready_to_send":          false,
-			"availability_readiness": readiness,
-			"started":                started,
-		}
-		if err := writeJSONFile0600(statusFile, diagnostic); err != nil {
-			return err
-		}
-		if err := writeJSON(a.Stdout, diagnostic); err != nil {
+		diagnostic := newSupportSessionStartDiagnostic(
+			"readiness-policy",
+			"direct_handoff_readiness_not_satisfied",
+			"configure-redundant-public-gateway",
+			availability,
+		)
+		if err := writeSupportSessionDiagnostic(statusFile, a.Stdout, diagnostic); err != nil {
 			return err
 		}
 		return errors.New("public gateway candidates did not satisfy direct handoff readiness policy")
 	}
 	if readiness.ReadyToSend {
-		_, _ = fmt.Fprintf(a.Stderr, "rdev support session ready payload written to %s\n", readyFile)
-		_, _ = fmt.Fprintf(a.Stderr, "rdev support session target handoff written to %s\n", handoffTextFile)
+		_, _ = io.WriteString(a.Stderr, "rdev support session state: handoff-ready\n")
 	}
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session status file writing to %s\n", statusFile)
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session connected report will be written to %s\n", connectedReportFile)
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
+	_, _ = io.WriteString(a.Stderr, "rdev support session state: status-monitoring\n")
+	_, _ = io.WriteString(a.Stderr, "rdev support session state: gateway-ready\n")
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	watchDone := make(chan struct{})
 	availabilityFailure := make(chan error, 1)
@@ -4699,7 +4870,15 @@ func retainHealthyAvailabilityCandidates(set tunnel.AvailabilitySet) tunnel.Avai
 
 func gatewayProviderID(candidates []supportsession.GatewayURLCandidate, rawURL string) string {
 	for _, candidate := range candidates {
-		if strings.TrimRight(strings.TrimSpace(candidate.URL), "/") != strings.TrimRight(strings.TrimSpace(rawURL), "/") {
+		candidateURL := strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		comparedURL := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+		if strings.HasPrefix(strings.TrimSpace(candidate.Kind), "cloudflared") {
+			canonicalCandidate, candidateErr := canonicalCloudflaredStableGatewayURL(candidate.URL)
+			canonicalCompared, comparedErr := canonicalCloudflaredStableGatewayURL(rawURL)
+			if candidateErr != nil || comparedErr != nil || canonicalCandidate != canonicalCompared {
+				continue
+			}
+		} else if candidateURL != comparedURL {
 			continue
 		}
 		if kind := strings.TrimSpace(candidate.Kind); kind != "" {
@@ -4707,6 +4886,13 @@ func gatewayProviderID(candidates []supportsession.GatewayURLCandidate, rawURL s
 		}
 	}
 	return "explicit"
+}
+
+func configuredCloudflaredStableProviderID() string {
+	if strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL")) != "" {
+		return "cloudflared-named"
+	}
+	return "cloudflared"
 }
 
 func gatewayURLCandidatesFromTunnelCandidates(candidates []tunnel.Candidate) []supportsession.GatewayURLCandidate {
@@ -4768,18 +4954,21 @@ func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFil
 }
 
 func writeSupportSessionEvent(out io.Writer, statusFile, event string, status map[string]any) {
-	payload := map[string]any{
+	protectedPayload := map[string]any{
 		"schema_version": "rdev.support-session-foreground-event.v1",
 		"event":          event,
 		"status":         status,
 		"agent_rule":     "when event=connected or status.connected=true, immediately report status.connected_next_steps.user_report before creating session tasks",
 	}
-	content, err := json.Marshal(payload)
+	if strings.TrimSpace(statusFile) != "" {
+		_ = writeJSONFile0600(statusFile, protectedPayload)
+	}
+	content, err := json.Marshal(newSupportSessionStderrEvent(event, status))
 	if err != nil {
 		return
 	}
-	if strings.TrimSpace(statusFile) != "" {
-		_ = writeJSONFile0600(statusFile, payload)
+	if out == nil {
+		return
 	}
 	_, _ = fmt.Fprintf(out, "rdev support session event: %s\n", string(content))
 }
@@ -12881,8 +13070,15 @@ func firstStableGatewayURL(candidates []supportsession.GatewayURLCandidate) stri
 	for _, candidate := range candidates {
 		switch strings.TrimSpace(candidate.Kind) {
 		case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared", "cloudflared-named":
-			if url := strings.TrimRight(strings.TrimSpace(candidate.URL), "/"); url != "" {
-				return url
+			if rawURL := strings.TrimSpace(candidate.URL); rawURL != "" {
+				if strings.HasPrefix(strings.TrimSpace(candidate.Kind), "cloudflared") {
+					canonical, err := canonicalCloudflaredStableGatewayURL(rawURL)
+					if err != nil {
+						continue
+					}
+					return canonical
+				}
+				return strings.TrimRight(rawURL, "/")
 			}
 		}
 	}

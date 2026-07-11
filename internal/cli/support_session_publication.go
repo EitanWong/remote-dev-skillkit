@@ -105,19 +105,27 @@ func publishSupportSessionHandoff(
 	}
 	committed = true
 	if err := finalizeSupportSessionArtifacts(artifacts); err != nil {
-		if len(monitoring) == 1 {
-			return fmt.Errorf("finalize monitored support-session artifacts: %w", err)
-		}
-		if warnings != nil {
-			_, _ = fmt.Fprintf(warnings, "[rdev] warning: support-session handoff committed, but previous artifact backup cleanup needs attention: %v\n", err)
-		}
-		return nil
+		return reportSupportSessionArtifactCleanupFailure(warnings, len(monitoring) == 1, err)
 	}
 	if len(monitoring) == 1 {
 		return nil
 	}
 	if err := removeSupportSessionPublicationJournal(journalPath); err != nil && warnings != nil {
-		_, _ = fmt.Fprintf(warnings, "[rdev] warning: support-session handoff committed, but publication journal cleanup needs attention: %v\n", err)
+		reportSupportSessionJournalCleanupFailure(warnings, err)
 	}
 	return nil
+}
+
+func reportSupportSessionArtifactCleanupFailure(warnings io.Writer, monitored bool, _ error) error {
+	_ = monitored
+	if warnings != nil {
+		_, _ = io.WriteString(warnings, "[rdev] support session warning: committed artifact cleanup requires review\n")
+	}
+	return nil
+}
+
+func reportSupportSessionJournalCleanupFailure(warnings io.Writer, _ error) {
+	if warnings != nil {
+		_, _ = io.WriteString(warnings, "[rdev] support session warning: publication journal cleanup requires review\n")
+	}
 }

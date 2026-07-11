@@ -246,6 +246,8 @@ Steps:
     `foreground_feedback`: the foreground command emits machine-readable stderr
     lines prefixed with `rdev support session event: `, and `event=connected`
     means you should immediately tell me the connection has been established.
+    Stderr carries only the minimal shareable event class; read the protected
+    `status_file.path` for ticket, gateway, host, or next-step details.
     It also writes the
     same JSON payload to
     `ready_file.path`

@@ -36,6 +36,28 @@ func TestPublishSupportSessionHandoffRollsBackWhenActiveStateSaveFails(t *testin
 	}
 }
 
+func TestSupportSessionPublicationCleanupReportsDoNotExposePaths(t *testing.T) {
+	privatePath := filepath.Join(t.TempDir(), "operator-secret", "previous-ready.backup")
+	detail := &os.PathError{Op: "remove", Path: privatePath, Err: errors.New("access denied")}
+
+	var monitoredWarnings strings.Builder
+	if err := reportSupportSessionArtifactCleanupFailure(&monitoredWarnings, true, detail); err != nil {
+		t.Fatalf("monitored cleanup report returned error: %v", err)
+	}
+	var warnings strings.Builder
+	if err := reportSupportSessionArtifactCleanupFailure(&warnings, false, detail); err != nil {
+		t.Fatalf("non-monitored cleanup report returned error: %v", err)
+	}
+	reportSupportSessionJournalCleanupFailure(&warnings, detail)
+	for _, output := range []string{monitoredWarnings.String(), warnings.String()} {
+		for _, forbidden := range []string{privatePath, "operator-secret", "access denied"} {
+			if strings.Contains(output, forbidden) {
+				t.Fatalf("cleanup warning leaked %q: %q", forbidden, output)
+			}
+		}
+	}
+}
+
 func TestPublishSupportSessionHandoffRollbackSaveFailureLeavesNoDurableActiveTicket(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	store := &recordingStateStore{failSaves: 2}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -40,7 +41,12 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	seenPending := false
-	writeSupportSessionEvent(opts.Out, opts.StatusFile, "waiting", foregroundSupportStatus(opts))
+	initialStatus := foregroundSupportStatus(opts)
+	if initialStatus["connected"] == true {
+		writeConnectedSupportSession(opts, initialStatus)
+		return
+	}
+	writeSupportSessionEvent(opts.Out, opts.StatusFile, "waiting", initialStatus)
 	published := opts.Published
 	var runtimeChanges <-chan struct{}
 	if opts.Runtime != nil {
@@ -104,7 +110,7 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 				logTunnelAvailabilityLoss(opts.Out, live, "tunnel-availability-lost")
 			}
 			if opts.OnInvalidated != nil {
-				opts.OnInvalidated(errors.Join(errors.New("tunnel availability lost before target connection"), err))
+				opts.OnInvalidated(publicSupportSessionInvalidationError("tunnel availability lost before target connection", err))
 			}
 			return
 		case <-liveness:
@@ -129,7 +135,7 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			}
 			logTunnelAvailabilityLoss(opts.Out, live, "liveness-probe-failed")
 			if opts.OnInvalidated != nil {
-				opts.OnInvalidated(errors.Join(errors.New("explicit gateway liveness lost before target connection"), err))
+				opts.OnInvalidated(publicSupportSessionInvalidationError("explicit gateway liveness lost before target connection", err))
 			}
 			return
 		case <-ticker.C:
@@ -144,6 +150,13 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			}
 		}
 	}
+}
+
+func publicSupportSessionInvalidationError(message string, detail error) error {
+	if detail != nil {
+		return errors.New(message + "; support-session invalidation cleanup failed")
+	}
+	return errors.New(message)
 }
 
 func canInvalidatePublishedSupportSession(opts foregroundSupportSessionOptions) bool {
@@ -227,10 +240,9 @@ func completeSupportSessionInvalidation(gw *gateway.MemoryGateway, store gateway
 	if _, err := store.SaveFrom(gw); err != nil {
 		return false, fmt.Errorf("persist tunnel availability rollback: %w", err)
 	}
-	diagnostic := map[string]any{
-		"schema_version": "rdev.support-session-start-diagnostic.v1", "ready_to_send": false,
-		"reason": reason, "availability": live,
-	}
+	diagnostic := newSupportSessionStartDiagnostic(
+		"published-handoff-invalidation", reason, "generate-new-handoff", live,
+	)
 	if err := writeJSONFile0600(readyFile, diagnostic); err != nil {
 		return false, err
 	}
@@ -241,17 +253,48 @@ func completeSupportSessionInvalidation(gw *gateway.MemoryGateway, store gateway
 }
 
 func logTunnelAvailabilityLoss(out io.Writer, live tunnel.AvailabilitySet, errorClass string) {
+	if out == nil {
+		return
+	}
 	providerIDs := make([]string, 0, len(live.Attempts))
 	candidateIDs := make([]string, 0, len(live.Attempts))
 	for _, attempt := range live.Attempts {
-		if attempt.ProviderID != "" {
-			providerIDs = append(providerIDs, attempt.ProviderID)
+		if providerID := safeTunnelProviderID(attempt.ProviderID); providerID != "unknown" {
+			providerIDs = append(providerIDs, providerID)
 		}
-		if attempt.CandidateID != "" {
-			candidateIDs = append(candidateIDs, attempt.CandidateID)
+		if candidateID := safeTunnelCandidateID(attempt.CandidateID); candidateID != "" {
+			candidateIDs = append(candidateIDs, candidateID)
 		}
 	}
 	sort.Strings(providerIDs)
 	sort.Strings(candidateIDs)
-	_, _ = fmt.Fprintf(out, "[rdev] tunnel availability changed providers=%s candidates=%s error_class=%s\n", strings.Join(providerIDs, ","), strings.Join(candidateIDs, ","), errorClass)
+	payload := struct {
+		SchemaVersion string   `json:"schema_version"`
+		Phase         string   `json:"phase"`
+		Status        string   `json:"status"`
+		ProviderIDs   []string `json:"provider_ids,omitempty"`
+		CandidateIDs  []string `json:"candidate_ids,omitempty"`
+		ErrorClass    string   `json:"error_class"`
+	}{
+		SchemaVersion: "rdev.tunnel-availability-log-event.v1",
+		Phase:         "availability",
+		Status:        "changed",
+		ProviderIDs:   providerIDs,
+		CandidateIDs:  candidateIDs,
+		ErrorClass:    safeTunnelAvailabilityErrorClass(errorClass),
+	}
+	content, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	_, _ = io.WriteString(out, "[rdev] tunnel availability changed "+string(content)+"\n")
+}
+
+func safeTunnelAvailabilityErrorClass(value string) string {
+	switch value {
+	case "tunnel-redundancy-reduced", "invalidation-failed", "tunnel-availability-lost", "liveness-probe-failed":
+		return value
+	default:
+		return "availability-changed"
+	}
 }

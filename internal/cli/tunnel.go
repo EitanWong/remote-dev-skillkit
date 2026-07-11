@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -24,6 +25,8 @@ import (
 
 const sshTunnelStartupTimeout = 20 * time.Second
 const maxKnownHostsBytes = 1 << 20
+const providerProcessWaitDelay = 2 * time.Second
+const providerProcessCleanupTimeout = 3 * time.Second
 
 type tunnelProviderPolicyFile struct {
 	AllowedProviderIDs    *[]string         `json:"allowed_provider_ids"`
@@ -468,11 +471,11 @@ func startSSHTunnel(ctx context.Context, stderr io.Writer, providerID string, sp
 	}
 	sshPath, err := exec.LookPath("ssh")
 	if err != nil {
-		return runningTunnel{}, fmt.Errorf("ssh not found in PATH: %w", err)
+		return runningTunnel{}, fmt.Errorf("ssh executable not found")
 	}
 	sshPath, err = filepath.Abs(sshPath)
 	if err != nil {
-		return runningTunnel{}, fmt.Errorf("resolve ssh executable path: %w", err)
+		return runningTunnel{}, fmt.Errorf("resolve ssh executable path failed")
 	}
 	argv, err := sshTunnelArgs(sshPath, spec, prepared.name)
 	if err != nil {
@@ -487,7 +490,7 @@ func localhostRunTunnelURLFromLine(line string) string {
 
 func providerURLFromLine(providerID, line string) string {
 	for remaining := line; ; {
-		idx := strings.Index(strings.ToLower(remaining), "https://")
+		idx := indexASCIIFold(remaining, "https://")
 		if idx < 0 {
 			return ""
 		}
@@ -497,32 +500,90 @@ func providerURLFromLine(providerID, line string) string {
 			end = len(rest)
 		}
 		candidate := strings.Trim(strings.TrimRight(rest[:end], "/"), "\"'()[]{}<>,;")
-		if validProviderURL(providerID, candidate) {
-			return candidate
+		if canonical, ok := canonicalProviderURL(providerID, candidate); ok {
+			return canonical
 		}
 		remaining = rest[end:]
 	}
 }
 
-func validProviderURL(providerID, candidate string) bool {
+func indexASCIIFold(value, needle string) int {
+	if needle == "" {
+		return 0
+	}
+	for start := 0; start+len(needle) <= len(value); start++ {
+		matched := true
+		for index := range needle {
+			if asciiLower(value[start+index]) != asciiLower(needle[index]) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return start
+		}
+	}
+	return -1
+}
+
+func asciiLower(value byte) byte {
+	if value >= 'A' && value <= 'Z' {
+		return value + ('a' - 'A')
+	}
+	return value
+}
+
+func canonicalProviderURL(providerID, candidate string) (string, bool) {
 	u, err := url.Parse(candidate)
-	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" || u.User != nil || u.Port() != "" {
-		return false
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" || u.User != nil || u.Port() != "" ||
+		u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", false
 	}
 	if !strings.EqualFold(u.Host, u.Hostname()) {
-		return false
+		return "", false
+	}
+	if escapedPath := u.EscapedPath(); escapedPath != "" && escapedPath != "/" {
+		return "", false
 	}
 	host := strings.ToLower(u.Hostname())
+	if !validDNSHostname(host) {
+		return "", false
+	}
+	allowed := false
 	switch providerID {
 	case tunnel.ProviderCloudflareQuick:
-		return strictSubdomain(host, "trycloudflare.com")
+		allowed = strictSubdomain(host, "trycloudflare.com")
 	case tunnel.ProviderLocalhostRun:
-		return strictSubdomain(host, "lhr.life") || (strictSubdomain(host, "localhost.run") && host != "admin.localhost.run")
+		allowed = strictSubdomain(host, "lhr.life") || (strictSubdomain(host, "localhost.run") && host != "admin.localhost.run")
 	case tunnel.ProviderPinggy:
-		return strictSubdomain(host, "pinggy.link") || strictSubdomain(host, "pinggy-free.link")
-	default:
+		allowed = strictSubdomain(host, "pinggy.link") || strictSubdomain(host, "pinggy-free.link")
+	}
+	if !allowed {
+		return "", false
+	}
+	return "https://" + host, true
+}
+
+func validDNSHostname(host string) bool {
+	if len(host) == 0 || len(host) > 253 || strings.HasSuffix(host, ".") {
 		return false
 	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || !isDNSLabelBoundary(label[0]) || !isDNSLabelBoundary(label[len(label)-1]) {
+			return false
+		}
+		for index := 1; index+1 < len(label); index++ {
+			character := label[index]
+			if !isDNSLabelBoundary(character) && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isDNSLabelBoundary(character byte) bool {
+	return character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
 }
 
 func strictSubdomain(host, suffix string) bool {
@@ -532,14 +593,14 @@ func strictSubdomain(host, suffix string) bool {
 func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (runningTunnel, error) {
 	cfPath, err := exec.LookPath("cloudflared")
 	if err != nil {
-		return runningTunnel{}, fmt.Errorf("cloudflared not found in PATH: %w", err)
+		return runningTunnel{}, fmt.Errorf("cloudflared executable not found")
 	}
 
 	started, err := startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "http2", 25*time.Second)
 	if err == nil {
 		return started, nil
 	}
-	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared http2 attempt failed (%v); retrying without protocol flag\n", err)
+	writeTunnelProviderEvent(stderr, tunnel.ProviderCloudflareQuick, "retry", "starting", "", "start-failed")
 	return startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "", 20*time.Second)
 }
 
@@ -558,78 +619,253 @@ type runningTunnel struct {
 	lifecycle *processLifecycle
 }
 
+type providerProcess struct {
+	cancel     context.CancelFunc
+	lifecycle  *processLifecycle
+	candidates <-chan string
+}
+
+type tunnelProviderEvent struct {
+	SchemaVersion string `json:"schema_version"`
+	ProviderID    string `json:"provider_id"`
+	CandidateID   string `json:"candidate_id,omitempty"`
+	Phase         string `json:"phase"`
+	Status        string `json:"status"`
+	ErrorClass    string `json:"error_class,omitempty"`
+}
+
 func startTunnelCommand(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration) (runningTunnel, error) {
 	return startTunnelCommandInDirectory(ctx, stderr, providerID, argv, timeout, "")
 }
 
 func startTunnelCommandInDirectory(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration, workingDirectory string) (runningTunnel, error) {
-	if len(argv) == 0 {
-		return runningTunnel{}, fmt.Errorf("%s command argv is empty", providerID)
+	process, err := startProviderProcess(ctx, stderr, providerID, argv, workingDirectory, providerID)
+	if err != nil {
+		return runningTunnel{}, err
 	}
-	if stderr == nil {
-		stderr = io.Discard
-	}
-	tunnelCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(tunnelCtx, argv[0], argv[1:]...)
-	cmd.Dir = workingDirectory
-	pr, pw := io.Pipe()
-	combined := io.MultiWriter(pw, stderr)
-	cmd.Stdout = combined
-	cmd.Stderr = combined
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = pw.Close()
-		_ = pr.Close()
-		return runningTunnel{}, fmt.Errorf("%s start failed: %w", providerID, err)
-	}
-	lifecycle := newProcessLifecycle(func() error {
-		err := cmd.Wait()
-		_ = pw.Close()
-		return err
-	})
-	urlCh := make(chan string, 1)
-	go func() {
-		defer pr.Close()
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			if candidate := providerURLFromLine(providerID, scanner.Text()); candidate != "" {
-				select {
-				case urlCh <- candidate:
-				default:
-				}
-			}
-		}
-	}()
+	safeProviderID := safeTunnelProviderID(providerID)
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case tunnelURL := <-urlCh:
-		return runningTunnel{URL: tunnelURL, cancel: cancel, lifecycle: lifecycle}, nil
-	case <-lifecycle.reaped:
+	case tunnelURL := <-process.candidates:
+		writeTunnelProviderEvent(stderr, safeProviderID, "candidate-assigned", "ready", tunnelURL, "")
+		return runningTunnel{URL: tunnelURL, cancel: process.cancel, lifecycle: process.lifecycle}, nil
+	case <-process.lifecycle.reaped:
 		select {
-		case tunnelURL := <-urlCh:
-			return runningTunnel{URL: tunnelURL, cancel: cancel, lifecycle: lifecycle}, nil
+		case tunnelURL := <-process.candidates:
+			writeTunnelProviderEvent(stderr, safeProviderID, "candidate-assigned", "ready", tunnelURL, "")
+			return runningTunnel{URL: tunnelURL, cancel: process.cancel, lifecycle: process.lifecycle}, nil
 		default:
 		}
-		cancel()
-		if err := lifecycle.err(); err != nil {
-			return runningTunnel{}, fmt.Errorf("%s exited during startup: %w", providerID, err)
-		}
-		return runningTunnel{}, fmt.Errorf("%s exited during startup", providerID)
+		process.cancel()
+		writeTunnelProviderEvent(stderr, safeProviderID, "startup", "failed", "", "process-exited")
+		return runningTunnel{}, fmt.Errorf("%s provider process exited during startup", safeProviderID)
 	case <-timer.C:
-		cancel()
-		_ = pr.Close()
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cleanupCancel()
-		select {
-		case <-lifecycle.reaped:
-		case <-cleanupCtx.Done():
+		errorClass := "timeout"
+		if !cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout) {
+			errorClass = "reap-timeout"
 		}
-		return runningTunnel{}, fmt.Errorf("%s did not print a tunnel URL within %v", providerID, timeout)
+		writeTunnelProviderEvent(stderr, safeProviderID, "startup", "failed", "", errorClass)
+		return runningTunnel{}, fmt.Errorf("%s provider startup timed out", safeProviderID)
 	case <-ctx.Done():
-		cancel()
+		if cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout) {
+			writeTunnelProviderEvent(stderr, safeProviderID, "startup", "stopped", "", "canceled")
+		} else {
+			writeTunnelProviderEvent(stderr, safeProviderID, "startup", "failed", "", "reap-timeout")
+		}
 		return runningTunnel{}, ctx.Err()
+	}
+}
+
+func startProviderProcess(ctx context.Context, log io.Writer, providerID string, argv []string, workingDirectory, discoverProviderID string) (providerProcess, error) {
+	safeProviderID := safeTunnelProviderID(providerID)
+	if len(argv) == 0 {
+		writeTunnelProviderEvent(log, safeProviderID, "start", "failed", "", "invalid-argv")
+		return providerProcess{}, fmt.Errorf("%s provider command argv is empty", safeProviderID)
+	}
+	if log == nil {
+		log = io.Discard
+	}
+	processCtx, cancel := context.WithCancel(ctx)
+	cmd := exec.CommandContext(processCtx, argv[0], argv[1:]...)
+	cmd.Dir = workingDirectory
+	candidates := make(chan string, 1)
+	var candidateOnce sync.Once
+	onCandidate := func(candidate string) {
+		candidateOnce.Do(func() {
+			candidates <- candidate
+		})
+	}
+	stdoutSink := &providerOutputSink{providerID: discoverProviderID, onCandidate: onCandidate}
+	stderrSink := &providerOutputSink{providerID: discoverProviderID, onCandidate: onCandidate}
+	cmd.Stdout = stdoutSink
+	cmd.Stderr = stderrSink
+	cmd.WaitDelay = providerProcessWaitDelay
+	writeTunnelProviderEvent(log, safeProviderID, "start", "starting", "", "")
+	if err := cmd.Start(); err != nil {
+		cancel()
+		writeTunnelProviderEvent(log, safeProviderID, "start", "failed", "", "start-failed")
+		return providerProcess{}, fmt.Errorf("%s provider process failed to start", safeProviderID)
+	}
+	lifecycle := newProcessLifecycle(func() error {
+		err := cmd.Wait()
+		stdoutSink.Finalize()
+		stderrSink.Finalize()
+		return err
+	})
+	return providerProcess{cancel: cancel, lifecycle: lifecycle, candidates: candidates}, nil
+}
+
+type providerOutputSink struct {
+	mu          sync.Mutex
+	providerID  string
+	onCandidate func(string)
+	carry       []byte
+	found       bool
+}
+
+func (s *providerOutputSink) Write(data []byte) (int, error) {
+	const (
+		chunkLimit = 32 << 10
+	)
+	originalLength := len(data)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.found || s.providerID == "" || s.onCandidate == nil {
+		return originalLength, nil
+	}
+	for len(data) > 0 && !s.found {
+		chunkLength := min(len(data), chunkLimit)
+		s.consumeLocked(data[:chunkLength])
+		data = data[chunkLength:]
+	}
+	return originalLength, nil
+}
+
+func (s *providerOutputSink) Finalize() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.found || s.providerID == "" || s.onCandidate == nil || len(s.carry) == 0 {
+		return
+	}
+	candidate := providerURLFromLine(s.providerID, string(s.carry))
+	s.carry = nil
+	if candidate != "" {
+		s.found = true
+		s.onCandidate(candidate)
+	}
+}
+
+func (s *providerOutputSink) consumeLocked(chunk []byte) {
+	const carryLimit = 4 << 10
+	window := make([]byte, 0, len(s.carry)+len(chunk))
+	window = append(window, s.carry...)
+	window = append(window, chunk...)
+	lastDelimiter := bytes.LastIndexAny(window, " \t\n\r|")
+	if lastDelimiter < 0 {
+		s.carry = retainProviderOutputTail(s.carry, window, carryLimit)
+		return
+	}
+	completed := window[:lastDelimiter+1]
+	s.carry = retainProviderOutputTail(s.carry, window[lastDelimiter+1:], carryLimit)
+	if candidate := providerURLFromLine(s.providerID, string(completed)); candidate != "" {
+		s.found = true
+		s.onCandidate(candidate)
+	}
+}
+
+func retainProviderOutputTail(destination, value []byte, limit int) []byte {
+	if len(value) > limit {
+		value = value[len(value)-limit:]
+	}
+	return append(destination[:0], value...)
+}
+
+func writeTunnelProviderEvent(out io.Writer, providerID, phase, status, candidateURL, errorClass string) {
+	if out == nil {
+		return
+	}
+	providerID = safeTunnelProviderID(providerID)
+	event := tunnelProviderEvent{
+		SchemaVersion: "rdev.tunnel-provider-event.v1",
+		ProviderID:    providerID,
+		Phase:         safeTunnelProviderPhase(phase),
+		Status:        safeTunnelProviderStatus(status),
+		ErrorClass:    safeTunnelProviderErrorClass(errorClass),
+	}
+	if candidateURL != "" {
+		event.CandidateID = tunnel.CandidateID(providerID, candidateURL)
+	}
+	content, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	_, _ = io.WriteString(out, "rdev tunnel provider event: "+string(content)+"\n")
+}
+
+func cancelAndWaitProviderProcess(process providerProcess, timeout time.Duration) bool {
+	if process.cancel != nil {
+		process.cancel()
+	}
+	if process.lifecycle == nil || process.lifecycle.reaped == nil {
+		return false
+	}
+	if timeout <= 0 {
+		select {
+		case <-process.lifecycle.reaped:
+			return true
+		default:
+			return false
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-process.lifecycle.reaped:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func safeTunnelProviderID(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+			return "unknown"
+		}
+	}
+	return value
+}
+
+func safeTunnelProviderPhase(value string) string {
+	switch value {
+	case "start", "retry", "configuration", "candidate-assigned", "startup", "stop":
+		return value
+	default:
+		return "unknown"
+	}
+}
+
+func safeTunnelProviderStatus(value string) string {
+	switch value {
+	case "starting", "ready", "failed", "stopped":
+		return value
+	default:
+		return "unknown"
+	}
+}
+
+func safeTunnelProviderErrorClass(value string) string {
+	switch value {
+	case "", "invalid-argv", "start-failed", "process-exited", "timeout", "canceled",
+		"reap-timeout", "executable-not-found", "invalid-config":
+		return value
+	default:
+		return "failed"
 	}
 }
 
