@@ -1581,18 +1581,25 @@ func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "ticket_code is required")
 		return
 	}
+	gatewayURL := requestBaseURL(r)
+	var statusTicket *model.Ticket
+	if ticket, ok := s.Gateway.TicketForCode(ticketCode); ok {
+		authority, err := ticketGatewayAuthorityFromMetadata(r, ticket.Metadata)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		gatewayURL = authority.BaseURL
+		statusTicket = &ticket
+	}
 	hosts := s.Gateway.HostsForTicketCode(ticketCode, "")
 	opts := supportsession.StatusOptions{
 		TicketCode:  ticketCode,
 		Hosts:       hosts,
 		Locale:      r.URL.Query().Get("locale"),
-		GatewayURL:  requestBaseURL(r),
+		GatewayURL:  gatewayURL,
 		Preconnects: s.Gateway.SupportSessionPreconnects(ticketCode),
-	}
-	// Attach ticket expiry when the ticket is found so the status response
-	// includes ticket_expires_at and ticket_expires_in_seconds.
-	if ticket, ok := s.Gateway.TicketForCode(ticketCode); ok {
-		opts.Ticket = &ticket
+		Ticket:      statusTicket,
 	}
 	status := supportsession.BuildStatus(opts)
 	writeJSON(w, http.StatusOK, status)

@@ -670,6 +670,136 @@ func TestSupportSessionStatusIncludesPreconnectEvents(t *testing.T) {
 	}
 }
 
+func TestSupportSessionStatusUsesAuthoritativePublicCandidate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	const publicBase = "https://status-public.example.com/rdev"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{{
+		URL: publicBase, Kind: "tunn3l", Scope: "public-tunnel", Recommended: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "status public authority", map[string]string{
+		gateway.TicketMetadataGatewayCandidates: string(candidates),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "connected-target",
+		OS:         "windows",
+		Arch:       "amd64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.ActivateHost(host.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for support-session status, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "http://localhost") || strings.Contains(rec.Body.String(), "https://localhost") {
+		t.Fatalf("status embedded request authority instead of stored public authority: %s", rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	remoteEntry := payload["remote_control_entry"].(map[string]any)
+	if remoteEntry["gateway_url"] != publicBase {
+		t.Fatalf("remote control entry gateway = %#v, want %q", remoteEntry["gateway_url"], publicBase)
+	}
+	next := payload["connected_next_steps"].(map[string]any)
+	nextCalls := next["mcp_next_calls"].([]any)
+	nextArgs := nextCalls[0].(map[string]any)["arguments"].(map[string]any)
+	if nextArgs["gateway_url"] != publicBase {
+		t.Fatalf("connected next-step gateway = %#v, want %q", nextArgs["gateway_url"], publicBase)
+	}
+	assertRunbookAuthority := func(name string, value any) {
+		t.Helper()
+		runbook := value.(map[string]any)
+		if runbook["gateway_url"] != publicBase {
+			t.Fatalf("%s gateway = %#v, want %q", name, runbook["gateway_url"], publicBase)
+		}
+		watch := runbook["watch"].(map[string]any)
+		watchArgs := watch["mcp_arguments"].(map[string]any)
+		if watchArgs["gateway_url"] != publicBase {
+			t.Fatalf("%s MCP watch gateway = %#v, want %q", name, watchArgs["gateway_url"], publicBase)
+		}
+		commandValues := watch["cli_command"].([]any)
+		command := make([]string, 0, len(commandValues))
+		for _, value := range commandValues {
+			command = append(command, value.(string))
+		}
+		if !strings.Contains(strings.Join(command, "\x00"), publicBase) {
+			t.Fatalf("%s CLI watch command omitted authoritative base: %#v", name, command)
+		}
+	}
+	recovery := payload["connection_recovery"].(map[string]any)
+	assertRunbookAuthority("recovery runbook", recovery["agent_connection_runbook"])
+	assertRunbookAuthority("status runbook", payload["agent_connection_runbook"])
+}
+
+func TestSupportSessionStatusFailsClosedForInvalidStoredGatewayCandidates(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "empty", raw: ""},
+		{name: "malformed", raw: "{"},
+		{name: "no public HTTPS candidate", raw: `[{"url":"http://localhost"}]`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := gateway.NewMemoryGateway()
+			ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "invalid status authority", map[string]string{
+				gateway.TicketMetadataGatewayCandidates: tt.raw,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+			req.Host = "localhost"
+			rec := httptest.NewRecorder()
+			NewServer(gw).Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected invalid stored authority to return 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestSupportSessionStatusWithoutStoredGatewayCandidatesUsesRequestBase(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "legacy status authority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const legacyBase = "https://legacy-status.example.test"
+	req := httptest.NewRequest(http.MethodGet, legacyBase+"/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+	rec := httptest.NewRecorder()
+	NewServer(gw).Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected legacy status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	remoteEntry := payload["remote_control_entry"].(map[string]any)
+	if remoteEntry["gateway_url"] != legacyBase {
+		t.Fatalf("legacy request base = %#v, want %q", remoteEntry["gateway_url"], legacyBase)
+	}
+}
+
 func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
 	dir := t.TempDir()
 	binaryPath := filepath.Join(dir, "rdev.exe")
