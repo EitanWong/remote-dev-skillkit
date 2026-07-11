@@ -52,6 +52,7 @@ type StartRequest struct {
 	LocalURL       string
 	LocalPort      string
 	KnownHostsFile string
+	ProviderRoot   string
 }
 
 type Candidate struct {

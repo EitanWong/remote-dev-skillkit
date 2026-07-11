@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,6 +26,8 @@ import (
 )
 
 const sshTunnelStartupTimeout = 20 * time.Second
+const tunn3lStartupTimeout = 90 * time.Second
+const tunn3lRelayURL = "wss://tunn3l.sh/ws/connect"
 const maxKnownHostsBytes = 1 << 20
 const providerProcessWaitDelay = 2 * time.Second
 const providerProcessCleanupTimeout = 3 * time.Second
@@ -57,7 +61,7 @@ func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]strin
 	}
 	return supportSessionStartDeps{
 		Registry: registry,
-		Manager:  tunnel.Manager{MaxActive: 2, StartTimeout: 25 * time.Second, ProbeTimeout: 15 * time.Second},
+		Manager:  tunnel.Manager{MaxActive: 2, StartTimeout: 120 * time.Second, ProbeTimeout: 15 * time.Second},
 		BootstrapProbe: func(ctx context.Context, candidate tunnel.Candidate, instance string) error {
 			_, err := tunnel.ProbeBootstrapTemplate(ctx, nil, candidate, instance)
 			return err
@@ -448,6 +452,170 @@ func validatedLocalPort(value string) (int, error) {
 	return port, nil
 }
 
+type tunn3lInstallFunc func(context.Context, string, managedToolAsset) (string, error)
+
+func startTunn3lTunnel(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, goos, goarch string, install tunn3lInstallFunc) (runningTunnel, error) {
+	return startTunn3lTunnelWithTimeout(ctx, stderr, request, goos, goarch, install, tunn3lStartupTimeout)
+}
+
+func startTunn3lTunnelWithTimeout(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, goos, goarch string, install tunn3lInstallFunc, startupTimeout time.Duration) (runningTunnel, error) {
+	if ctx == nil {
+		return runningTunnel{}, fmt.Errorf("tunn3l provider context is required")
+	}
+	if startupTimeout <= 0 {
+		return runningTunnel{}, fmt.Errorf("tunn3l provider startup timeout is invalid")
+	}
+	port, err := validatedLocalPort(request.LocalPort)
+	if err != nil {
+		return runningTunnel{}, err
+	}
+	asset, ok := tunn3lManagedAsset(goos, goarch)
+	if !ok {
+		return runningTunnel{}, fmt.Errorf("tunn3l managed tool is unsupported on this platform")
+	}
+	if install == nil {
+		return runningTunnel{}, fmt.Errorf("tunn3l managed installer is unavailable")
+	}
+	providerRoot, err := prepareTunn3lProviderRoot(request.ProviderRoot)
+	if err != nil {
+		return runningTunnel{}, fmt.Errorf("tunn3l provider root is invalid")
+	}
+
+	startupDeadline := time.Now().Add(startupTimeout)
+	installCtx, cancelInstall := context.WithDeadline(ctx, startupDeadline)
+	toolRoot := filepath.Join(providerRoot, "tools", "tunn3l", tunn3lManagedVersion)
+	executable, err := install(installCtx, toolRoot, asset)
+	cancelInstall()
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return runningTunnel{}, ctxErr
+		}
+		return runningTunnel{}, fmt.Errorf("tunn3l managed tool installation failed")
+	}
+	executable, err = validateTunn3lExecutablePath(executable, toolRoot)
+	if err != nil {
+		return runningTunnel{}, fmt.Errorf("tunn3l managed tool installation failed")
+	}
+	home, err := newTunn3lSessionHome(providerRoot)
+	if err != nil {
+		return runningTunnel{}, fmt.Errorf("tunn3l provider state is invalid")
+	}
+	remaining := time.Until(startupDeadline)
+	if remaining <= 0 {
+		return runningTunnel{}, fmt.Errorf("tunn3l provider startup timed out")
+	}
+	options := providerProcessOptions{
+		WorkingDirectory: home,
+		Env:              tunn3lProviderEnvironment(home, os.Environ()),
+	}
+	argv := []string{executable, "http", strconv.Itoa(port), "--json"}
+	return startTunnelCommandWithOptions(ctx, stderr, tunnel.ProviderTunn3l, argv, remaining, options)
+}
+
+func prepareTunn3lProviderRoot(root string) (string, error) {
+	if root == "" || strings.TrimSpace(root) != root || !filepath.IsAbs(root) || filepath.Clean(root) != root {
+		return "", fmt.Errorf("tunn3l provider root is unsafe")
+	}
+	return prepareManagedToolRoot(root)
+}
+
+func validateTunn3lExecutablePath(path, toolRoot string) (string, error) {
+	if path == "" || strings.TrimSpace(path) != path || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return "", fmt.Errorf("tunn3l executable path is unsafe")
+	}
+	if !sameKnownHostsPath(filepath.Dir(path), toolRoot, runtime.GOOS) {
+		return "", fmt.Errorf("tunn3l executable escapes tool root")
+	}
+	encodedDigest, found := strings.CutPrefix(filepath.Base(path), "tunn3l-")
+	if !found || len(encodedDigest) != sha256.Size*2 {
+		return "", fmt.Errorf("tunn3l executable name is invalid")
+	}
+	decodedDigest, err := hex.DecodeString(encodedDigest)
+	if err != nil || len(decodedDigest) != sha256.Size {
+		return "", fmt.Errorf("tunn3l executable digest name is invalid")
+	}
+	var expected [sha256.Size]byte
+	copy(expected[:], decodedDigest)
+	verified, err := tunnel.OpenVerifiedProtectedExecutableSHA256(path, maxManagedToolExpandedBytes, expected)
+	if err != nil {
+		return "", fmt.Errorf("tunn3l executable verification failed")
+	}
+	if err := verified.Close(); err != nil {
+		return "", fmt.Errorf("tunn3l executable verification failed")
+	}
+	if err := tunnel.ValidateProtectedParentChain(path); err != nil {
+		return "", fmt.Errorf("tunn3l executable parent chain is unsafe")
+	}
+	return path, nil
+}
+
+func newTunn3lSessionHome(providerRoot string) (string, error) {
+	homeRoot, err := prepareManagedToolRoot(filepath.Join(providerRoot, "provider-state", "tunn3l", "home"))
+	if err != nil {
+		return "", err
+	}
+	home, err := os.MkdirTemp(homeRoot, "session-")
+	if err != nil {
+		return "", fmt.Errorf("create tunn3l session home: %w", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(home, 0o700); err != nil {
+			_ = os.Remove(home)
+			return "", fmt.Errorf("protect tunn3l session home: %w", err)
+		}
+	}
+	protectedHome, err := prepareManagedToolRoot(home)
+	if err != nil {
+		_ = os.Remove(home)
+		return "", err
+	}
+	entries, err := os.ReadDir(protectedHome)
+	if err != nil {
+		_ = os.Remove(protectedHome)
+		return "", fmt.Errorf("inspect tunn3l session home: %w", err)
+	}
+	if len(entries) != 0 {
+		return "", fmt.Errorf("tunn3l session home is not empty")
+	}
+	return protectedHome, nil
+}
+
+func tunn3lProviderEnvironment(home string, inherited []string) []string {
+	blocked := map[string]struct{}{
+		"HOME": {}, "USERPROFILE": {}, "XDG_CONFIG_HOME": {},
+		"NODE_OPTIONS": {}, "NODE_PATH": {}, "NODE_TLS_REJECT_UNAUTHORIZED": {}, "NODE_EXTRA_CA_CERTS": {},
+		"SSL_CERT_FILE": {}, "SSL_CERT_DIR": {}, "LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
+	}
+	environment := make([]string, 0, len(inherited)+4)
+	for _, item := range inherited {
+		name, _, ok := strings.Cut(item, "=")
+		if !ok || name == "" {
+			continue
+		}
+		canonicalName := asciiUpperString(name)
+		if _, remove := blocked[canonicalName]; remove || strings.HasPrefix(canonicalName, "TUNN3L_") || strings.HasPrefix(canonicalName, "DYLD_") {
+			continue
+		}
+		environment = append(environment, item)
+	}
+	return append(environment,
+		"HOME="+home,
+		"USERPROFILE="+home,
+		"XDG_CONFIG_HOME="+home,
+		"TUNN3L_RELAY="+tunn3lRelayURL,
+	)
+}
+
+func asciiUpperString(value string) string {
+	buffer := []byte(value)
+	for index, character := range buffer {
+		if character >= 'a' && character <= 'z' {
+			buffer[index] = character - ('a' - 'A')
+		}
+	}
+	return string(buffer)
+}
+
 func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort, knownHostsFile string) (runningTunnel, error) {
 	spec, err := localhostRunTunnelSpec(localPort)
 	if err != nil {
@@ -489,6 +657,9 @@ func localhostRunTunnelURLFromLine(line string) string {
 }
 
 func providerURLFromLine(providerID, line string) string {
+	if providerID == tunnel.ProviderTunn3l {
+		return ""
+	}
 	for remaining := line; ; {
 		idx := indexASCIIFold(remaining, "https://")
 		if idx < 0 {
@@ -534,6 +705,9 @@ func asciiLower(value byte) byte {
 }
 
 func canonicalProviderURL(providerID, candidate string) (string, bool) {
+	if providerID == tunnel.ProviderTunn3l && strings.Contains(candidate, "#") {
+		return "", false
+	}
 	u, err := url.Parse(candidate)
 	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" || u.User != nil || u.Port() != "" ||
 		u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
@@ -542,7 +716,11 @@ func canonicalProviderURL(providerID, candidate string) (string, bool) {
 	if !strings.EqualFold(u.Host, u.Hostname()) {
 		return "", false
 	}
-	if escapedPath := u.EscapedPath(); escapedPath != "" && escapedPath != "/" {
+	if escapedPath := u.EscapedPath(); providerID == tunnel.ProviderTunn3l {
+		if escapedPath != "" {
+			return "", false
+		}
+	} else if escapedPath != "" && escapedPath != "/" {
 		return "", false
 	}
 	host := strings.ToLower(u.Hostname())
@@ -553,6 +731,9 @@ func canonicalProviderURL(providerID, candidate string) (string, bool) {
 	switch providerID {
 	case tunnel.ProviderCloudflareQuick:
 		allowed = strictSubdomain(host, "trycloudflare.com")
+	case tunnel.ProviderTunn3l:
+		label, found := strings.CutSuffix(host, ".tunn3l.sh")
+		allowed = found && label != "" && !strings.Contains(label, ".") && !strings.HasPrefix(label, "xn--")
 	case tunnel.ProviderLocalhostRun:
 		allowed = strictSubdomain(host, "lhr.life") || (strictSubdomain(host, "localhost.run") && host != "admin.localhost.run")
 	case tunnel.ProviderPinggy:
@@ -590,6 +771,53 @@ func strictSubdomain(host, suffix string) bool {
 	return host != suffix && strings.HasSuffix(host, "."+suffix)
 }
 
+func tunn3lURLFromJSONLine(line string) string {
+	decoder := json.NewDecoder(strings.NewReader(line))
+	opening, err := decoder.Token()
+	if err != nil || opening != json.Delim('{') {
+		return ""
+	}
+	values := make(map[string]string, 2)
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return ""
+		}
+		key, ok := keyToken.(string)
+		if !ok || (key != "url" && key != "subdomain") {
+			return ""
+		}
+		if _, duplicate := values[key]; duplicate {
+			return ""
+		}
+		var value string
+		if err := decoder.Decode(&value); err != nil {
+			return ""
+		}
+		values[key] = value
+	}
+	closing, err := decoder.Token()
+	if err != nil || closing != json.Delim('}') {
+		return ""
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return ""
+	}
+	if len(values) != 2 {
+		return ""
+	}
+	subdomain := values["subdomain"]
+	if subdomain == "" || strings.Contains(subdomain, ".") || strings.HasPrefix(subdomain, "xn--") || subdomain != strings.ToLower(subdomain) || !validDNSHostname(subdomain) {
+		return ""
+	}
+	canonical, ok := canonicalProviderURL(tunnel.ProviderTunn3l, values["url"])
+	if !ok || canonical != "https://"+subdomain+".tunn3l.sh" {
+		return ""
+	}
+	return canonical
+}
+
 func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (runningTunnel, error) {
 	cfPath, err := exec.LookPath("cloudflared")
 	if err != nil {
@@ -625,6 +853,11 @@ type providerProcess struct {
 	candidates <-chan string
 }
 
+type providerProcessOptions struct {
+	WorkingDirectory string
+	Env              []string
+}
+
 type tunnelProviderEvent struct {
 	SchemaVersion string `json:"schema_version"`
 	ProviderID    string `json:"provider_id"`
@@ -635,11 +868,15 @@ type tunnelProviderEvent struct {
 }
 
 func startTunnelCommand(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration) (runningTunnel, error) {
-	return startTunnelCommandInDirectory(ctx, stderr, providerID, argv, timeout, "")
+	return startTunnelCommandWithOptions(ctx, stderr, providerID, argv, timeout, providerProcessOptions{})
 }
 
 func startTunnelCommandInDirectory(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration, workingDirectory string) (runningTunnel, error) {
-	process, err := startProviderProcess(ctx, stderr, providerID, argv, workingDirectory, providerID)
+	return startTunnelCommandWithOptions(ctx, stderr, providerID, argv, timeout, providerProcessOptions{WorkingDirectory: workingDirectory})
+}
+
+func startTunnelCommandWithOptions(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration, options providerProcessOptions) (runningTunnel, error) {
+	process, err := startProviderProcessWithOptions(ctx, stderr, providerID, argv, options, providerID)
 	if err != nil {
 		return runningTunnel{}, err
 	}
@@ -679,6 +916,10 @@ func startTunnelCommandInDirectory(ctx context.Context, stderr io.Writer, provid
 }
 
 func startProviderProcess(ctx context.Context, log io.Writer, providerID string, argv []string, workingDirectory, discoverProviderID string) (providerProcess, error) {
+	return startProviderProcessWithOptions(ctx, log, providerID, argv, providerProcessOptions{WorkingDirectory: workingDirectory}, discoverProviderID)
+}
+
+func startProviderProcessWithOptions(ctx context.Context, log io.Writer, providerID string, argv []string, options providerProcessOptions, discoverProviderID string) (providerProcess, error) {
 	safeProviderID := safeTunnelProviderID(providerID)
 	if len(argv) == 0 {
 		writeTunnelProviderEvent(log, safeProviderID, "start", "failed", "", "invalid-argv")
@@ -689,7 +930,10 @@ func startProviderProcess(ctx context.Context, log io.Writer, providerID string,
 	}
 	processCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(processCtx, argv[0], argv[1:]...)
-	cmd.Dir = workingDirectory
+	cmd.Dir = options.WorkingDirectory
+	if options.Env != nil {
+		cmd.Env = append([]string(nil), options.Env...)
+	}
 	candidates := make(chan string, 1)
 	var candidateOnce sync.Once
 	onCandidate := func(candidate string) {
@@ -697,8 +941,7 @@ func startProviderProcess(ctx context.Context, log io.Writer, providerID string,
 			candidates <- candidate
 		})
 	}
-	stdoutSink := &providerOutputSink{providerID: discoverProviderID, onCandidate: onCandidate}
-	stderrSink := &providerOutputSink{providerID: discoverProviderID, onCandidate: onCandidate}
+	stdoutSink, stderrSink := providerProcessOutputSinks(discoverProviderID, onCandidate)
 	cmd.Stdout = stdoutSink
 	cmd.Stderr = stderrSink
 	cmd.WaitDelay = providerProcessWaitDelay
@@ -715,6 +958,67 @@ func startProviderProcess(ctx context.Context, log io.Writer, providerID string,
 		return err
 	})
 	return providerProcess{cancel: cancel, lifecycle: lifecycle, candidates: candidates}, nil
+}
+
+type providerProcessOutputSink interface {
+	io.Writer
+	Finalize()
+}
+
+func providerProcessOutputSinks(providerID string, onCandidate func(string)) (providerProcessOutputSink, providerProcessOutputSink) {
+	if providerID == tunnel.ProviderTunn3l {
+		return &tunn3lJSONOutputSink{onCandidate: onCandidate}, &providerOutputSink{}
+	}
+	return &providerOutputSink{providerID: providerID, onCandidate: onCandidate},
+		&providerOutputSink{providerID: providerID, onCandidate: onCandidate}
+}
+
+type tunn3lJSONOutputSink struct {
+	mu          sync.Mutex
+	onCandidate func(string)
+	carry       []byte
+	done        bool
+}
+
+func (s *tunn3lJSONOutputSink) Write(data []byte) (int, error) {
+	const lineLimit = 4 << 10
+	originalLength := len(data)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.done || s.onCandidate == nil {
+		return originalLength, nil
+	}
+	newline := bytes.IndexByte(data, '\n')
+	if newline >= 0 {
+		data = data[:newline]
+	}
+	if len(s.carry)+len(data) > lineLimit {
+		s.carry = nil
+		s.done = true
+		return originalLength, nil
+	}
+	s.carry = append(s.carry, data...)
+	if newline >= 0 {
+		s.finalizeLocked()
+	}
+	return originalLength, nil
+}
+
+func (s *tunn3lJSONOutputSink) Finalize() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.done {
+		s.finalizeLocked()
+	}
+}
+
+func (s *tunn3lJSONOutputSink) finalizeLocked() {
+	s.done = true
+	candidate := tunn3lURLFromJSONLine(string(s.carry))
+	s.carry = nil
+	if candidate != "" {
+		s.onCandidate(candidate)
+	}
 }
 
 type providerOutputSink struct {
@@ -885,6 +1189,31 @@ func newCloudflareQuickProvider(stderr io.Writer) tunnel.Provider {
 		stderr: stderr,
 		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, _ string) (runningTunnel, error) {
 			return startCloudflaredQuickTunnel(ctx, stderr, request.LocalURL)
+		},
+	}
+}
+
+func newTunn3lProvider(stderr io.Writer, installer managedGzipInstaller) tunnel.Provider {
+	return newTunn3lProviderWithRuntime(stderr, runtime.GOOS, runtime.GOARCH, installer.Ensure)
+}
+
+func newTunn3lProviderWithRuntime(stderr io.Writer, goos, goarch string, install tunn3lInstallFunc) tunnel.Provider {
+	return cliTunnelProvider{
+		metadata: tunnel.ProviderMetadata{
+			ID: tunnel.ProviderTunn3l, DisplayName: "tunn3l.sh", Protocols: []string{"https", "wss"},
+			Anonymous: true, Executable: "rdev-managed:tunn3l-v0.5.1", DocumentationURL: "https://github.com/bdecrem/tunn3l",
+			DefaultAutomatic: true, AutomaticPriority: 20,
+			FailureDomains: tunnel.FailureDomains{
+				AuthoritativeDNS:      "tunn3l.sh-dns",
+				EdgeNetwork:           "tunn3l.sh-public-edge",
+				OriginNetwork:         "rdev-local-gateway",
+				ControlPlane:          "tunn3l.sh-wss-relay",
+				CertificateDependency: "public-web-pki",
+			},
+		},
+		stderr: stderr,
+		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, _ string) (runningTunnel, error) {
+			return startTunn3lTunnel(ctx, stderr, request, goos, goarch, install)
 		},
 	}
 }

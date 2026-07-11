@@ -424,6 +424,16 @@ func TestProviderProcessCleanupDeadlineExceedsWaitDelay(t *testing.T) {
 	}
 }
 
+func TestTunnelProviderManagerStartupCeilingIncludesManagedDownloadBudget(t *testing.T) {
+	deps, err := defaultTunnelRuntimeDeps(io.Discard, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps.Manager.StartTimeout != 120*time.Second {
+		t.Fatalf("manager startup ceiling = %s, want 120s", deps.Manager.StartTimeout)
+	}
+}
+
 func TestTunnelProviderStartupTimeoutReapsWithoutRawOutput(t *testing.T) {
 	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "no-url-block")
 	var stderr synchronizedBuffer
