@@ -1,6 +1,8 @@
 package tunnel
 
 import (
+	"crypto/sha256"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -8,6 +10,98 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestVerifyProtectedRegularFileSHA256(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows acceptance uses an explicitly controlled DACL")
+	}
+	content := []byte("reviewed artifact")
+	want := sha256.Sum256(content)
+	path := filepath.Join(resolvedProtectedTestDir(t), "asset")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyProtectedRegularFileSHA256(path, 1024, want); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := OpenVerifiedProtectedRegularFileSHA256(path, 1024, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, readErr := io.ReadAll(opened)
+	closeErr := opened.Close()
+	if readErr != nil || closeErr != nil || string(got) != string(content) {
+		t.Fatalf("verified handle content = %q, readErr = %v, closeErr = %v", got, readErr, closeErr)
+	}
+	if opened, err := OpenVerifiedProtectedExecutableSHA256(path, 1024, want); err == nil {
+		_ = opened.Close()
+		t.Fatal("executable verifier accepted non-executable permissions")
+	}
+	wrong := sha256.Sum256([]byte("wrong"))
+	if err := VerifyProtectedRegularFileSHA256(path, 1024, wrong); err == nil || !strings.Contains(err.Error(), "digest") {
+		t.Fatalf("digest mismatch error = %v", err)
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyProtectedRegularFileSHA256(path, 1024, want); err == nil {
+		t.Fatal("generic protected-file verifier accepted executable permissions")
+	}
+	executable, err := OpenVerifiedProtectedExecutableSHA256(path, 1024, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, readErr = io.ReadAll(executable)
+	closeErr = executable.Close()
+	if readErr != nil || closeErr != nil || string(got) != string(content) {
+		t.Fatalf("verified executable content = %q, readErr = %v, closeErr = %v", got, readErr, closeErr)
+	}
+}
+
+func TestVerifyProtectedRegularFileSHA256RejectsUnsafeInputs(t *testing.T) {
+	content := []byte("oversize")
+	want := sha256.Sum256(content)
+	t.Run("invalid limit", func(t *testing.T) {
+		if err := VerifyProtectedRegularFileSHA256("unused", math.MaxInt64, want); err == nil || !strings.Contains(err.Error(), "size limit") {
+			t.Fatalf("invalid-limit error = %v", err)
+		}
+	})
+	t.Run("oversize", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows acceptance uses an explicitly controlled DACL")
+		}
+		path := filepath.Join(resolvedProtectedTestDir(t), "asset")
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := VerifyProtectedRegularFileSHA256(path, int64(len(content)-1), want); err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("oversize error = %v", err)
+		}
+	})
+	t.Run("symlink or reparse point", func(t *testing.T) {
+		dir := resolvedProtectedTestDir(t)
+		target := filepath.Join(dir, "target")
+		if err := os.WriteFile(target, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(dir, "link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		if err := VerifyProtectedRegularFileSHA256(link, 1024, want); err == nil {
+			t.Fatal("symlink or reparse point accepted")
+		}
+	})
+}
+
+func resolvedProtectedTestDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
 
 func TestReadProtectedRegularFileRejectsOverflowingLimit(t *testing.T) {
 	if _, err := ReadProtectedRegularFile("unused", math.MaxInt64); err == nil || !strings.Contains(err.Error(), "size limit") {
