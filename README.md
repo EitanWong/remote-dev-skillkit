@@ -98,6 +98,46 @@ not ready to send by default. For an attended session, an operator may
 explicitly pass `--allow-degraded-direct-handoff`; the result remains degraded,
 is not ready to activate or execute, and still requires explicit stop/cleanup.
 
+For `--region global`, the current Agent-side order is: a configured stable
+operator gateway; Cloudflare Quick Tunnel (priority 10); the managed,
+checksum-pinned tunn3l v0.5.1 client (priority 20); and localhost.run with its
+reviewed official host key (priority 30). Pinggy (priority 40) and other SSH
+providers are considered only after an explicit operator allowlist and an exact
+reviewed host pin. The target-side human still receives exactly the newly
+generated `target_handoff_envelope.full_text`: one recommended public hostname
+embedded in one short readable PowerShell command, not a tunnel selection UI.
+
+If the target explicitly reports `trycloudflare.com` DNS failure or NXDOMAIN,
+do not retry Cloudflare as the default and do not manually start a tunnel. In a
+protected absolute work directory, create a protected provider-policy file with
+only:
+
+```json
+{"disabled_provider_ids":["cloudflare-quick"]}
+```
+
+Then keep
+`rdev support-session connect --start --work-dir <ABSOLUTE_PROTECTED_WORK_DIR> --region global --provider-policy <PROTECTED_POLICY_PATH>`
+in the foreground. Let managed tunn3l or localhost.run take over, and send only
+the new generated handoff. Do not build a multi-URL PowerShell loop or mutate
+DNS, hosts, proxy, firewall, or target bootstrap state. One successful sample
+does not become `cn-mainland` evidence.
+
+Anonymous/account-free tunnels are availability candidates, not guaranteed
+mainland-China services. `cn-mainland` remains fail-closed without fresh
+verified China Telecom, China Unicom, and China Mobile evidence. tunn3l's
+`Anonymous=true` means no account or registration is required; it is not a
+privacy or no-telemetry guarantee. In v0.5.1, the upstream client creates a
+`dv_` plus 24-hex device ID ([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L35-L42))
+and sends that ID, the Agent hostname, and Agent OS in relay registration
+metadata ([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L163-L169)).
+`rdev` gives it a fresh empty session `HOME`/`USERPROFILE`/XDG config and clears
+tunn3l credentials, subdomain/password overrides, and runtime preload variables,
+so it does not reuse the user's real `~/.tunn3l` and generates a new
+session-scoped ID. The relay still observes normal network and HTTP tunnel
+traffic. These statements are pinned to that v0.5.1 source commit and must not
+be generalized to other releases.
+
 ### 2. Run Scoped Work
 
 The agent creates signed tasks for specific capabilities: shell, PowerShell,

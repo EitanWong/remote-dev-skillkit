@@ -4,6 +4,7 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,11 +15,23 @@ import (
 
 func protectKnownHostsTestFile(t *testing.T, path string, _ os.FileMode) {
 	t.Helper()
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	pointer, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	handle, err := windows.CreateFile(
+		pointer,
+		windows.WRITE_DAC|windows.READ_CONTROL,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(handle)
 
 	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
@@ -44,7 +57,7 @@ func protectKnownHostsTestFile(t *testing.T, path string, _ os.FileMode) {
 		t.Fatal(err)
 	}
 	if err := windows.SetSecurityInfo(
-		windows.Handle(file.Fd()),
+		handle,
 		windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
 		nil,
@@ -53,6 +66,13 @@ func protectKnownHostsTestFile(t *testing.T, path string, _ os.FileMode) {
 		nil,
 	); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func createWindowsKnownHostsTestJunction(t *testing.T, junction, target string) {
+	t.Helper()
+	if err := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", junction, target).Run(); err != nil {
+		t.Fatalf("Windows junction fixture unavailable; runtime materializer evidence is blocked")
 	}
 }
 
@@ -84,6 +104,20 @@ func TestValidateKnownHostsFileAcceptsWindowsCaseNormalizedPath(t *testing.T) {
 	protectKnownHostsTestFile(t, path, 0o600)
 	if err := validateKnownHostsFile(strings.ToUpper(path), "localhost.run", 22); err != nil {
 		t.Fatalf("Windows case-normalized known_hosts path rejected: %v", err)
+	}
+}
+
+func TestMaterializeProviderKnownHostsRejectsWindowsJunctionRoot(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	junction := filepath.Join(root, "junction")
+	createWindowsKnownHostsTestJunction(t, junction, target)
+
+	if _, err := materializeProviderKnownHosts(junction, localhostRunTrustAnchor); err == nil || !strings.Contains(err.Error(), "symlinked ancestors") {
+		t.Fatalf("Windows junction provider root was not rejected: %v", err)
 	}
 }
 

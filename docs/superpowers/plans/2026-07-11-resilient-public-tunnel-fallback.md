@@ -608,8 +608,8 @@ gateway URL explicitly for status/report calls. After connection run:
 
 ```bash
 rdev support-session report --gateway-url <ACTIVE_GATEWAY_URL> --ticket-code <TICKET>
-rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --host-id <RECOMMENDED_JOB_HOST_ID>
-rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --host-id <RECOMMENDED_JOB_HOST_ID> --remote-control
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID> --target-endpoint-id <ENDPOINT_ID> --ticket-code <TICKET>
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID> --target-endpoint-id <ENDPOINT_ID> --ticket-code <TICKET> --remote-control
 ```
 
 The low-risk remote-control probe may only list files and inspect windows. Do not
