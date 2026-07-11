@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -103,7 +104,7 @@ func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
 	if err := sessionStore.RestoreSnapshot(snapshot.ControlPlane); err != nil {
 		return err
 	}
-	if err := reconcileTicketSessionBindings(tickets, sessionStore); err != nil {
+	if err := reconcileTicketSessionBindings(tickets, sessionStore, g.now()); err != nil {
 		return err
 	}
 
@@ -118,7 +119,7 @@ func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
 	return nil
 }
 
-func reconcileTicketSessionBindings(tickets map[string]model.Ticket, sessionStore *controlplane.MemoryStore) error {
+func reconcileTicketSessionBindings(tickets map[string]model.Ticket, sessionStore *controlplane.MemoryStore, now time.Time) error {
 	controlSnapshot := sessionStore.Snapshot()
 	sessionsByID := make(map[string]controlplane.Session, len(controlSnapshot.Sessions))
 	sessionsByCode := make(map[string]controlplane.Session, len(controlSnapshot.Sessions))
@@ -129,7 +130,7 @@ func reconcileTicketSessionBindings(tickets map[string]model.Ticket, sessionStor
 			continue
 		}
 		ticket, ok := tickets[session.SourceTicketID]
-		if !ok || ticket.SessionID != session.ID || ticket.Code != session.JoinCode {
+		if !ok || validateSnapshotTicketSession(ticket, session, now) != nil {
 			return fmt.Errorf("snapshot contains mismatched ticket/session binding")
 		}
 	}
@@ -140,7 +141,7 @@ func reconcileTicketSessionBindings(tickets map[string]model.Ticket, sessionStor
 		}
 		if ticket.SessionID != "" {
 			session, ok := sessionsByID[ticket.SessionID]
-			if !ok || session.SourceTicketID != ticket.ID || session.JoinCode != ticket.Code {
+			if !ok || validateSnapshotTicketSession(ticket, session, now) != nil {
 				return fmt.Errorf("snapshot contains invalid ticket/session binding")
 			}
 			continue
@@ -159,6 +160,31 @@ func reconcileTicketSessionBindings(tickets map[string]model.Ticket, sessionStor
 		tickets[ticketID] = ticket
 		sessionsByID[session.ID] = session
 		sessionsByCode[session.JoinCode] = session
+	}
+	return nil
+}
+
+func validateSnapshotTicketSession(ticket model.Ticket, session controlplane.Session, now time.Time) error {
+	if ticket.SessionID != session.ID || ticket.Code != session.JoinCode || session.SourceTicketID != ticket.ID {
+		return fmt.Errorf("ticket/session identity mismatch")
+	}
+	if session.Profile != string(ticket.Mode) || session.Reason != ticket.Reason || session.JoinPolicy != "single-target" || !session.ExpiresAt.Equal(ticket.ExpiresAt) || !slices.Equal(session.Capabilities, ticket.Capabilities) {
+		return fmt.Errorf("ticket/session policy mismatch")
+	}
+	terminal := sessionTerminalStatus(session.Status)
+	switch ticket.Status {
+	case model.TicketStatusActive:
+		if !now.Before(ticket.ExpiresAt) && !terminal {
+			return fmt.Errorf("expired active ticket retains a live session")
+		}
+	case model.TicketStatusRevoked:
+		if !terminal {
+			return fmt.Errorf("revoked ticket/session lifecycle mismatch")
+		}
+	case model.TicketStatusProbing:
+		return fmt.Errorf("probing ticket cannot own a session")
+	default:
+		return fmt.Errorf("unknown ticket lifecycle")
 	}
 	return nil
 }

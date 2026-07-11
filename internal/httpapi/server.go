@@ -319,7 +319,17 @@ func (s Server) appendSessionEvent(w http.ResponseWriter, r *http.Request, sessi
 		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
 		return
 	}
-	if event.FromEndpointID != "" && event.FromEndpointID != "agent" && event.FromEndpointID != "gateway" {
+	event.FromEndpointID = strings.TrimSpace(event.FromEndpointID)
+	if event.FromEndpointID == "" {
+		writeProtocolError(w, http.StatusUnauthorized, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "event source endpoint is required", false))
+		return
+	}
+	if event.FromEndpointID == "agent" || event.FromEndpointID == "gateway" || strings.HasPrefix(event.FromEndpointID, "gateway.") {
+		if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+			writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required for reserved event sources", false))
+			return
+		}
+	} else {
 		if err := s.Gateway.ValidateSessionLease(sessionID, event.FromEndpointID, extractBearerToken(r)); err != nil {
 			writeControlPlaneError(w, err)
 			return
@@ -1812,7 +1822,7 @@ func writeControlPlaneError(w http.ResponseWriter, err error) {
 		writeProtocolError(w, protocolHTTPStatus(protocolErr.Code), protocolErr)
 		return
 	}
-	writeProtocolError(w, http.StatusInternalServerError, protocolHTTPError(controlplane.ErrSessionClosed, err.Error(), false))
+	writeProtocolError(w, http.StatusInternalServerError, protocolHTTPError(controlplane.ErrSessionClosed, "internal control plane error", true))
 }
 
 func writeControlPlaneErrorWithReplay(w http.ResponseWriter, err error, replay controlplane.EventReplayState) {

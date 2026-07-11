@@ -6691,6 +6691,8 @@ type hostServeOptions struct {
 	ReleaseRootPublicKey        string
 	ReleaseRequiredArtifacts    []string
 	ManifestGatewayCandidates   []model.JoinManifestGatewayCandidate
+	CapabilityCeiling           []string
+	CapabilityCeilingSet        bool
 }
 
 type hostInstallServiceOptions struct {
@@ -6799,6 +6801,8 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		}
 		opts.TicketCode = manifest.TicketCode
 		opts.TrustPin = manifest.TrustFingerprint
+		opts.CapabilityCeiling = append([]string(nil), manifest.Capabilities...)
+		opts.CapabilityCeilingSet = true
 	}
 	if opts.TicketCode == "" {
 		_, err := fmt.Fprintf(
@@ -6829,7 +6833,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		Name:                inventory.Name,
 		Platform:            inventory.OS + "/" + inventory.Arch,
 		IdentityFingerprint: identity.Fingerprint(),
-		Capabilities:        inventory.TemporaryCapabilities,
+		Capabilities:        hostcmd.ConstrainCapabilities(inventory.TemporaryCapabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet),
 		Transport:           controlplane.TransportLongPoll,
 		LeaseTTLMS:          60_000,
 		RenewAfterMS:        20_000,
@@ -12327,11 +12331,17 @@ func (a App) runSessionTasks(ctx context.Context, opts hostServeOptions, client 
 
 func (a App) runSessionTask(ctx context.Context, opts hostServeOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, task controlplane.Task) error {
 	_ = client
-	result, err := hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
-		IdentityFingerprint:   identityFingerprint,
-		WorkspaceLockStore:    opts.WorkspaceLockStore,
-		CaptureRuntimeFixture: opts.CaptureRuntimeFixture,
-	})
+	result := hostrunner.Result{}
+	var err error
+	if !hostcmd.CapabilitiesAllowed(task.Capabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet) {
+		err = fmt.Errorf("task capabilities exceed the signed join manifest ceiling")
+	} else {
+		result, err = hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
+			IdentityFingerprint:   identityFingerprint,
+			WorkspaceLockStore:    opts.WorkspaceLockStore,
+			CaptureRuntimeFixture: opts.CaptureRuntimeFixture,
+		})
+	}
 	status := string(controlplane.TaskStatusSucceeded)
 	reason := ""
 	if err != nil {

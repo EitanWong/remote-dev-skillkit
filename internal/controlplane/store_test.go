@@ -562,6 +562,58 @@ func TestIdempotencyKeyWithDifferentPayloadReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestConflictingGatewayEventDoesNotChangeSelectedGateway(t *testing.T) {
+	store, _ := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{SelectedGatewayURL: "https://initial.example"})
+	first := Event{
+		Type:           EventTypeGateway,
+		FromEndpointID: "gateway.lifecycle",
+		IdempotencyKey: "gateway-conflict",
+		Payload:        map[string]any{"selected_url": "https://primary.example"},
+	}
+	if _, err := store.AppendEvent(session.ID, first); err != nil {
+		t.Fatal(err)
+	}
+	conflict := first
+	conflict.Payload = map[string]any{"selected_url": "https://attacker.example"}
+	if _, err := store.AppendEvent(session.ID, conflict); !errors.Is(err, ProtocolError{Code: ErrIdempotencyConflict}) {
+		t.Fatalf("gateway event conflict error = %v, want idempotency conflict", err)
+	}
+	current, err := store.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.SelectedGatewayURL != "https://primary.example" {
+		t.Fatalf("conflicting gateway event changed selected URL to %q", current.SelectedGatewayURL)
+	}
+}
+
+func TestAppendEventAssignsServerOwnedUniqueEventIDs(t *testing.T) {
+	store, _ := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{})
+	first, err := store.AppendEvent(session.ID, Event{
+		ID:             "evt_client_supplied",
+		Type:           EventTypeStatus,
+		FromEndpointID: "end_test",
+		IdempotencyKey: "event-id-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.AppendEvent(session.ID, Event{
+		ID:             "evt_client_supplied",
+		Type:           EventTypeStatus,
+		FromEndpointID: "end_test",
+		IdempotencyKey: "event-id-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == "evt_client_supplied" || second.ID == "evt_client_supplied" || first.ID == second.ID {
+		t.Fatalf("event IDs were not server-owned and unique: %q %q", first.ID, second.ID)
+	}
+}
+
 func TestTaskRoutingUsesDefaultTargetAndCapabilityMatch(t *testing.T) {
 	store, _ := newStoreHarness()
 	session, target, _ := mustJoinedTarget(t, store)
@@ -577,6 +629,550 @@ func TestTaskRoutingUsesDefaultTargetAndCapabilityMatch(t *testing.T) {
 	_, _, err = store.SubmitTask(session.ID, TaskSpec{Adapter: "desktop", Capabilities: []string{"desktop"}, IdempotencyKey: "route-miss"})
 	if !errors.Is(err, ProtocolError{Code: ErrCapabilityUnavailable}) {
 		t.Fatalf("capability miss err = %v, want capability_unavailable", err)
+	}
+}
+
+func TestExplicitTaskTargetMustBeOnlineTargetEndpoint(t *testing.T) {
+	store, _ := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{
+		JoinPolicy:   "open",
+		Capabilities: []string{"shell"},
+	})
+	_, agentEndpoint, _, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleAgent,
+		Platform:            "agent/test",
+		IdentityFingerprint: "fp-agent-endpoint",
+		Capabilities:        []string{"shell"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, targetEndpoint, targetLease, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-offline-target",
+		Capabilities:        []string{"shell"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := store.EventsAfter(session.ID, EventCursor{
+		EndpointID:    targetEndpoint.ID,
+		LeaseSecret:   targetLease.Secret,
+		EndpointState: EndpointStateOffline,
+	}, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, endpointID := range []string{agentEndpoint.ID, targetEndpoint.ID} {
+		_, _, err := store.SubmitTask(session.ID, TaskSpec{
+			TargetEndpointID: endpointID,
+			Adapter:          "shell",
+			Capabilities:     []string{"shell"},
+			IdempotencyKey:   "invalid-explicit-target-" + endpointID,
+		})
+		if !errors.Is(err, ProtocolError{Code: ErrEndpointNotFound}) {
+			t.Fatalf("explicit non-target/offline endpoint %q was accepted: %v", endpointID, err)
+		}
+	}
+}
+
+func TestTargetEndpointCapabilitiesAreLimitedBySessionCeiling(t *testing.T) {
+	store, _ := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{
+		JoinPolicy:   "single-target",
+		Capabilities: []string{"shell", "fs"},
+	})
+	_, endpoint, _, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-capability-ceiling",
+		Capabilities:        []string{"shell", "desktop.admin"},
+		Transport:           TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(endpoint.Capabilities, ",") != "shell" {
+		t.Fatalf("endpoint capabilities escaped session ceiling: %#v", endpoint.Capabilities)
+	}
+	if _, _, err := store.SubmitTask(session.ID, TaskSpec{
+		Adapter:        "desktop",
+		Capabilities:   []string{"desktop.admin"},
+		IdempotencyKey: "outside-ceiling",
+	}); !errors.Is(err, ProtocolError{Code: ErrCapabilityUnavailable}) {
+		t.Fatalf("task outside session ceiling was accepted: %v", err)
+	}
+	if _, _, err := store.SubmitTask(session.ID, TaskSpec{
+		Adapter:        "shell",
+		Capabilities:   []string{"shell"},
+		IdempotencyKey: "inside-ceiling",
+	}); err != nil {
+		t.Fatalf("task inside session ceiling was rejected: %v", err)
+	}
+
+	_, resumed, _, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-capability-ceiling",
+		Transport:           TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(resumed.Capabilities, ",") != "shell" {
+		t.Fatalf("reconnect without inventory erased the authorized capabilities: %#v", resumed.Capabilities)
+	}
+}
+
+func TestExpiredSessionCannotRenewLeaseJoinOrReceiveTasks(t *testing.T) {
+	store, clock := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{
+		JoinPolicy:   "single-target",
+		Capabilities: []string{"shell"},
+		ExpiresAt:    clock.now().Add(time.Minute),
+	})
+	_, endpoint, lease, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-expiring-target",
+		Capabilities:        []string{"shell"},
+		Transport:           TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := store.SubmitTask(session.ID, TaskSpec{
+		Adapter:        "shell",
+		Capabilities:   []string{"shell"},
+		IdempotencyKey: "before-expiry",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(time.Minute)
+
+	assertExpired := func(name string, err error) {
+		t.Helper()
+		var protocolErr ProtocolError
+		if !errors.As(err, &protocolErr) || protocolErr.Code != ErrTerminalSession || protocolErr.Recoverable {
+			t.Fatalf("%s error = %#v, want permanent terminal_session", name, err)
+		}
+	}
+
+	_, _, _, err = store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-expiring-target",
+		Capabilities:        []string{"shell"},
+	})
+	assertExpired("join", err)
+	assertExpired("validate lease", store.ValidateLease(session.ID, endpoint.ID, lease.Secret))
+	_, renewed, _, err := store.EventsAfter(session.ID, EventCursor{
+		EndpointID:  endpoint.ID,
+		LeaseSecret: lease.Secret,
+	}, 10)
+	assertExpired("events", err)
+	if renewed.Secret != "" {
+		t.Fatal("expired session renewed its endpoint lease")
+	}
+	_, _, err = store.SubmitTask(session.ID, TaskSpec{
+		Adapter:        "shell",
+		Capabilities:   []string{"shell"},
+		IdempotencyKey: "after-expiry",
+	})
+	assertExpired("submit task", err)
+	_, _, err = store.CancelTask(session.ID, task.ID, "expired session", "after-expiry")
+	assertExpired("cancel task", err)
+	unchanged, err := store.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unchanged.Tasks) != 1 || unchanged.Tasks[0].Status != TaskStatusCanceled {
+		t.Fatalf("session expiry did not terminalize its outstanding task: %#v", unchanged.Tasks)
+	}
+	_, err = store.AppendEvent(session.ID, Event{
+		Type:           EventTypeStatus,
+		FromEndpointID: endpoint.ID,
+		IdempotencyKey: "after-expiry",
+	})
+	assertExpired("append event", err)
+	_, err = store.MarkTaskRunning(session.ID, task.ID)
+	assertExpired("mark task running", err)
+	_, _, err = store.CompleteTask(session.ID, task.ID, map[string]any{
+		"attempt_id":      task.AttemptID,
+		"idempotency_key": "after-expiry",
+		"status":          "succeeded",
+	})
+	assertExpired("complete task", err)
+	_, _, err = store.UpsertArtifact(session.ID, ArtifactRef{
+		ID:           "art_after_expiry",
+		TaskID:       task.ID,
+		Kind:         "stdout",
+		Name:         "stdout.txt",
+		SizeBytes:    1,
+		SHA256:       strings.Repeat("a", 64),
+		UploadOffset: 1,
+		Complete:     true,
+	})
+	assertExpired("upsert artifact", err)
+
+	snapshot := store.Snapshot()
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Status != SessionStatusClosed {
+		t.Fatalf("expired session was not persisted as terminal: %#v", snapshot.Sessions)
+	}
+	if len(snapshot.Sessions[0].Endpoints) != 1 || snapshot.Sessions[0].Endpoints[0].State != EndpointStateRevoked {
+		t.Fatalf("expired endpoint was not revoked: %#v", snapshot.Sessions[0].Endpoints)
+	}
+	if len(snapshot.Leases) != 0 {
+		t.Fatalf("expired session retained renewable lease state: %#v", snapshot.Leases)
+	}
+	events := snapshot.Events[session.ID]
+	if len(events) == 0 || events[len(events)-1].Type != EventTypeClose || stringMapValue(events[len(events)-1].Payload, "reason") != "session expired" {
+		t.Fatalf("expired session did not record a lifecycle close event: %#v", events)
+	}
+}
+
+func TestRestoreSnapshotRejectsInvalidLeaseBindings(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Snapshot, Session, Endpoint)
+	}{
+		{
+			name: "lease session mismatch",
+			mutate: func(snapshot *Snapshot, _ Session, endpoint Endpoint) {
+				record := snapshot.Leases[endpoint.ID]
+				record.Current.SessionID = "ses_other"
+				snapshot.Leases[endpoint.ID] = record
+			},
+		},
+		{
+			name: "lease endpoint key mismatch",
+			mutate: func(snapshot *Snapshot, _ Session, endpoint Endpoint) {
+				record := snapshot.Leases[endpoint.ID]
+				delete(snapshot.Leases, endpoint.ID)
+				snapshot.Leases["end_other"] = record
+			},
+		},
+		{
+			name: "terminal session retains lease",
+			mutate: func(snapshot *Snapshot, session Session, _ Endpoint) {
+				for index := range snapshot.Sessions {
+					if snapshot.Sessions[index].ID == session.ID {
+						snapshot.Sessions[index].Status = SessionStatusRevoked
+					}
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, clock := newStoreHarness()
+			session := mustStoreSession(t, store, SessionSpec{
+				JoinPolicy:   "single-target",
+				Capabilities: []string{"shell"},
+			})
+			_, endpoint, _, err := store.JoinSession(session.ID, EndpointSpec{
+				Role:                EndpointRoleTarget,
+				Platform:            "windows/amd64",
+				IdentityFingerprint: "fp-snapshot-lease",
+				Capabilities:        []string{"shell"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := store.Snapshot()
+			tc.mutate(&snapshot, session, endpoint)
+			restored := NewMemoryStore(clock.now)
+			if err := restored.RestoreSnapshot(snapshot); err == nil {
+				t.Fatal("invalid snapshot lease binding was accepted")
+			}
+		})
+	}
+}
+
+func TestClosedSessionSnapshotRoundTripDropsEndpointLeases(t *testing.T) {
+	store, clock := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{JoinPolicy: "single-target"})
+	_, endpoint, _, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-closed-snapshot",
+		Capabilities:        []string{"shell"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CloseSession(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := store.Snapshot()
+	if len(snapshot.Leases) != 0 || len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Endpoints[0].State != EndpointStateRevoked {
+		t.Fatalf("closed snapshot retained live endpoint authorization: %#v %#v", snapshot.Sessions, snapshot.Leases)
+	}
+	restored := NewMemoryStore(clock.now)
+	if err := restored.RestoreSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := restored.ValidateLease(session.ID, endpoint.ID, "stale-secret"); !errors.Is(err, ProtocolError{Code: ErrTerminalSession}) {
+		t.Fatalf("restored closed session accepted an endpoint lease: %v", err)
+	}
+}
+
+func TestLifecycleEventConflictDoesNotPartiallyTerminateSession(t *testing.T) {
+	for _, action := range []struct {
+		name      string
+		keyPrefix string
+		run       func(*MemoryStore, string) error
+	}{
+		{
+			name:      "close",
+			keyPrefix: "close:",
+			run: func(store *MemoryStore, sessionID string) error {
+				_, _, err := store.CloseSession(sessionID)
+				return err
+			},
+		},
+		{
+			name:      "revoke",
+			keyPrefix: "revoke:",
+			run: func(store *MemoryStore, sessionID string) error {
+				_, _, err := store.RevokeSession(sessionID)
+				return err
+			},
+		},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			store, _ := newStoreHarness()
+			session := mustStoreSession(t, store, SessionSpec{JoinPolicy: "single-target"})
+			_, endpoint, lease, err := store.JoinSession(session.ID, EndpointSpec{
+				Role:                EndpointRoleTarget,
+				Platform:            "windows/amd64",
+				IdentityFingerprint: "fp-lifecycle-conflict",
+				Capabilities:        []string{"shell"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.AppendEvent(session.ID, Event{
+				Type:           EventTypeStatus,
+				FromEndpointID: "gateway.lifecycle",
+				IdempotencyKey: action.keyPrefix + session.ID,
+				Payload:        map[string]any{"poisoned": true},
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			err = action.run(store, session.ID)
+			if !errors.Is(err, ProtocolError{Code: ErrIdempotencyConflict}) {
+				t.Fatalf("lifecycle action error = %v, want idempotency conflict", err)
+			}
+			current, err := store.Session(session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sessionTerminal(current.Status) || len(current.Endpoints) != 1 || current.Endpoints[0].State != EndpointStateOnline {
+				t.Fatalf("failed lifecycle action partially terminalized session: %#v", current)
+			}
+			if err := store.ValidateLease(session.ID, endpoint.ID, lease.Secret); err != nil {
+				t.Fatalf("failed lifecycle action invalidated endpoint lease: %v", err)
+			}
+			if _, exists := store.Snapshot().TerminalAt[session.ID]; exists {
+				t.Fatal("failed lifecycle action wrote terminal timestamp")
+			}
+		})
+	}
+}
+
+func TestTaskEventConflictDoesNotPartiallyMutateSessionState(t *testing.T) {
+	t.Run("submit", func(t *testing.T) {
+		store, _ := newStoreHarness()
+		session, _, _ := mustJoinedTarget(t, store)
+		if _, err := store.AppendEvent(session.ID, Event{
+			Type:           EventTypeStatus,
+			FromEndpointID: "agent",
+			IdempotencyKey: "task:conflicting-submit",
+			Payload:        map[string]any{"poisoned": true},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := store.SubmitTask(session.ID, TaskSpec{
+			Adapter:        "shell",
+			Capabilities:   []string{"shell"},
+			IdempotencyKey: "conflicting-submit",
+		})
+		if !errors.Is(err, ProtocolError{Code: ErrIdempotencyConflict}) {
+			t.Fatalf("submit error = %v, want idempotency conflict", err)
+		}
+		current, err := store.Session(session.ID)
+		if err != nil || len(current.Tasks) != 0 {
+			t.Fatalf("failed submit partially appended task: %#v %v", current.Tasks, err)
+		}
+	})
+
+	t.Run("cancel", func(t *testing.T) {
+		store, _ := newStoreHarness()
+		session, _, _ := mustJoinedTarget(t, store)
+		task, _, err := store.SubmitTask(session.ID, TaskSpec{Adapter: "shell", Capabilities: []string{"shell"}, IdempotencyKey: "cancel-base-atomic"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.AppendEvent(session.ID, Event{
+			Type:           EventTypeStatus,
+			FromEndpointID: "agent",
+			IdempotencyKey: "cancel:" + task.ID + ":conflicting-cancel",
+			Payload:        map[string]any{"poisoned": true},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = store.CancelTask(session.ID, task.ID, "operator canceled", "conflicting-cancel")
+		if !errors.Is(err, ProtocolError{Code: ErrIdempotencyConflict}) {
+			t.Fatalf("cancel error = %v, want idempotency conflict", err)
+		}
+		current, err := store.Session(session.ID)
+		if err != nil || len(current.Tasks) != 1 || current.Tasks[0].Status != TaskStatusOffered {
+			t.Fatalf("failed cancel partially mutated task: %#v %v", current.Tasks, err)
+		}
+	})
+
+	t.Run("complete", func(t *testing.T) {
+		store, _ := newStoreHarness()
+		session, endpoint, _ := mustJoinedTarget(t, store)
+		task, _, err := store.SubmitTask(session.ID, TaskSpec{Adapter: "shell", Capabilities: []string{"shell"}, IdempotencyKey: "complete-base-atomic"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resultKey := "conflicting-result"
+		if _, err := store.AppendEvent(session.ID, Event{
+			Type:           EventTypeStatus,
+			FromEndpointID: endpoint.ID,
+			IdempotencyKey: "result:" + task.ID + ":" + task.AttemptID + ":" + resultKey,
+			Payload:        map[string]any{"poisoned": true},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = store.CompleteTask(session.ID, task.ID, map[string]any{
+			"attempt_id":      task.AttemptID,
+			"idempotency_key": resultKey,
+			"status":          "succeeded",
+		})
+		if !errors.Is(err, ProtocolError{Code: ErrIdempotencyConflict}) {
+			t.Fatalf("complete error = %v, want idempotency conflict", err)
+		}
+		current, err := store.Session(session.ID)
+		if err != nil || len(current.Tasks) != 1 || current.Tasks[0].Status != TaskStatusOffered {
+			t.Fatalf("failed completion partially mutated task: %#v %v", current.Tasks, err)
+		}
+	})
+
+	t.Run("artifact", func(t *testing.T) {
+		store, _ := newStoreHarness()
+		session, _, _ := mustJoinedTarget(t, store)
+		if _, err := store.AppendEvent(session.ID, Event{
+			Type:           EventTypeStatus,
+			FromEndpointID: "artifact",
+			IdempotencyKey: "artifact:art_atomic:1:true",
+			Payload:        map[string]any{"poisoned": true},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := store.UpsertArtifact(session.ID, ArtifactRef{
+			ID:           "art_atomic",
+			Kind:         "stdout",
+			Name:         "stdout.txt",
+			SizeBytes:    1,
+			SHA256:       strings.Repeat("a", 64),
+			UploadOffset: 1,
+			Complete:     true,
+		})
+		if !errors.Is(err, ProtocolError{Code: ErrIdempotencyConflict}) {
+			t.Fatalf("artifact error = %v, want idempotency conflict", err)
+		}
+		current, err := store.Session(session.ID)
+		if err != nil || len(current.Artifacts) != 0 {
+			t.Fatalf("failed artifact upsert partially mutated session: %#v %v", current.Artifacts, err)
+		}
+	})
+}
+
+func TestRestoreSnapshotConstrainsLegacyTargetCapabilities(t *testing.T) {
+	store, clock := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{
+		JoinPolicy:   "single-target",
+		Capabilities: []string{"shell"},
+	})
+	_, endpoint, _, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-legacy-capabilities",
+		Capabilities:        []string{"shell"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := store.Snapshot()
+	for sessionIndex := range snapshot.Sessions {
+		for endpointIndex := range snapshot.Sessions[sessionIndex].Endpoints {
+			if snapshot.Sessions[sessionIndex].Endpoints[endpointIndex].ID == endpoint.ID {
+				snapshot.Sessions[sessionIndex].Endpoints[endpointIndex].Capabilities = []string{"shell", "desktop.admin"}
+			}
+		}
+	}
+
+	restored := NewMemoryStore(clock.now)
+	if err := restored.RestoreSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	restoredSession, err := restored.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restoredSession.Endpoints) != 1 || strings.Join(restoredSession.Endpoints[0].Capabilities, ",") != "shell" {
+		t.Fatalf("legacy target capabilities escaped restored ceiling: %#v", restoredSession.Endpoints)
+	}
+	if _, _, err := restored.SubmitTask(session.ID, TaskSpec{
+		Adapter:        "desktop",
+		Capabilities:   []string{"desktop.admin"},
+		IdempotencyKey: "restored-outside-ceiling",
+	}); !errors.Is(err, ProtocolError{Code: ErrCapabilityUnavailable}) {
+		t.Fatalf("restored legacy endpoint accepted task outside ceiling: %v", err)
+	}
+}
+
+func TestRestoreSnapshotRejectsLegacyTaskOutsideCapabilityCeiling(t *testing.T) {
+	store, clock := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{
+		JoinPolicy:   "single-target",
+		Capabilities: []string{"shell"},
+	})
+	_, _, _, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-legacy-task-capabilities",
+		Capabilities:        []string{"shell"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := store.SubmitTask(session.ID, TaskSpec{
+		Adapter:        "shell",
+		Capabilities:   []string{"shell"},
+		IdempotencyKey: "legacy-task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := store.Snapshot()
+	for sessionIndex := range snapshot.Sessions {
+		for taskIndex := range snapshot.Sessions[sessionIndex].Tasks {
+			if snapshot.Sessions[sessionIndex].Tasks[taskIndex].ID == task.ID {
+				snapshot.Sessions[sessionIndex].Tasks[taskIndex].Capabilities = []string{"desktop.admin"}
+			}
+		}
+	}
+
+	restored := NewMemoryStore(clock.now)
+	if err := restored.RestoreSnapshot(snapshot); err == nil {
+		t.Fatal("snapshot with live task outside restored capability ceiling was accepted")
 	}
 }
 

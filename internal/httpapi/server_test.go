@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -590,6 +592,26 @@ func TestBootstrapRetryLoopsStopOnPermanentHostFailureAndKeepSixAttemptLimit(t *
 				}
 			}
 		})
+	}
+}
+
+func TestUnexpectedControlPlaneErrorIsRecoverableAndDoesNotLeakDetails(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeControlPlaneError(recorder, errors.New("database password secret-detail"))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", recorder.Code)
+	}
+	var payload struct {
+		Error controlplane.ProtocolError `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.Error.Recoverable {
+		t.Fatal("unexpected server error must remain retryable")
+	}
+	if strings.Contains(recorder.Body.String(), "secret-detail") {
+		t.Fatal("unexpected server error leaked internal details")
 	}
 }
 

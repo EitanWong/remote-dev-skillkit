@@ -65,6 +65,49 @@ func TestJoinSessionByCodeRecoverableProtocolRejectionUsesExitCode1(t *testing.T
 	}
 }
 
+func TestFullHostRunSessionTaskRejectsCapabilityOutsideSignedManifestBeforeAdapter(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "must-not-exist")
+	resultPayload := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		resultPayload <- payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"task":{},"event":{}}`)
+	}))
+	defer server.Close()
+
+	app := NewApp(io.Discard, io.Discard)
+	err := app.runSessionTask(context.Background(), hostServeOptions{
+		GatewayURL:           server.URL,
+		CapabilityCeiling:    []string{"fs.read.scoped"},
+		CapabilityCeilingSet: true,
+	}, server.Client(), "ses_test", "end_test", "fp-test", "lease-test", controlplane.Task{
+		ID:               "task_test",
+		AttemptID:        "attempt_test",
+		TargetEndpointID: "end_test",
+		Adapter:          "shell",
+		Capabilities:     []string{"shell.user"},
+		Payload: map[string]any{
+			"workspace_root": filepath.Dir(marker),
+			"argv":           []any{"sh", "-c", "touch " + marker},
+			"allow_commands": []any{"sh"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("full rdev adapter ran outside signed capability ceiling: %v", err)
+	}
+	payload := <-resultPayload
+	if payload["status"] != string(controlplane.TaskStatusFailed) || !strings.Contains(fmt.Sprint(payload["reason"]), "signed join manifest ceiling") {
+		t.Fatalf("full rdev capability denial was not reported as a failed task: %#v", payload)
+	}
+}
+
 func cliJoinSessionResponseError(t *testing.T, statusCode int, body string) error {
 	t.Helper()
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

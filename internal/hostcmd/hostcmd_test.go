@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -185,6 +187,7 @@ func TestJoinSessionResponseErrorExitCodeRequiresCompletePermanentProtocolEnvelo
 		want       int
 	}{
 		{name: "complete permanent protocol error", statusCode: http.StatusNotFound, status: "404 Not Found", body: completePermanent, want: PermanentJoinFailureExitCode},
+		{name: "server error is never permanent", statusCode: http.StatusInternalServerError, status: "500 Internal Server Error", body: completePermanent, want: 1},
 		{name: "recoverable protocol error", statusCode: http.StatusServiceUnavailable, status: "503 Service Unavailable", body: completeRecoverable, want: 1},
 		{name: "missing recoverable field", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","retry_after_ms":0,"user_summary":"invalid entry","agent_next_action":"create a fresh entry"}}`, want: 1},
 		{name: "missing required summary", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"agent_next_action":"create a fresh entry"}}`, want: 1},
@@ -202,6 +205,72 @@ func TestJoinSessionResponseErrorExitCodeRequiresCompletePermanentProtocolEnvelo
 				t.Fatalf("ExitCode() = %d, want %d for %v", got, tc.want, err)
 			}
 		})
+	}
+}
+
+func TestSignedManifestCapabilityCeilingConstrainsInventoryAndTasks(t *testing.T) {
+	got := ConstrainCapabilities(
+		[]string{"shell.user", "desktop.admin", "shell.user"},
+		[]string{"shell.user", "fs.read.scoped"},
+		true,
+	)
+	if strings.Join(got, ",") != "shell.user" {
+		t.Fatalf("constrained capabilities = %#v, want shell.user", got)
+	}
+	if CapabilitiesAllowed([]string{"shell.user"}, []string{"shell.user", "fs.read.scoped"}, true) != true {
+		t.Fatal("task inside signed capability ceiling was rejected")
+	}
+	if CapabilitiesAllowed([]string{"desktop.admin"}, []string{"shell.user", "fs.read.scoped"}, true) {
+		t.Fatal("task outside signed capability ceiling was accepted")
+	}
+	if got := ConstrainCapabilities([]string{"shell.user"}, nil, true); len(got) != 0 {
+		t.Fatalf("signed empty capability ceiling must deny all capabilities: %#v", got)
+	}
+	if !CapabilitiesAllowed([]string{"desktop.admin"}, nil, false) {
+		t.Fatal("local direct mode unexpectedly enforced a missing signed ceiling")
+	}
+}
+
+func TestRunSessionTaskRejectsCapabilityOutsideSignedManifestBeforeAdapter(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "must-not-exist")
+	resultPayload := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		resultPayload <- payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"task":{},"event":{}}`)
+	}))
+	defer server.Close()
+
+	app := New(io.Discard, io.Discard)
+	err := app.runSessionTask(context.Background(), serveOptions{
+		GatewayURL:           server.URL,
+		CapabilityCeiling:    []string{"fs.read.scoped"},
+		CapabilityCeilingSet: true,
+	}, server.Client(), "ses_test", "end_test", "fp-test", "lease-test", controlplane.Task{
+		ID:               "task_test",
+		AttemptID:        "attempt_test",
+		TargetEndpointID: "end_test",
+		Adapter:          "shell",
+		Capabilities:     []string{"shell.user"},
+		Payload: map[string]any{
+			"workspace_root": filepath.Dir(marker),
+			"argv":           []any{"sh", "-c", "touch " + marker},
+			"allow_commands": []any{"sh"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("task adapter ran outside signed capability ceiling: %v", err)
+	}
+	payload := <-resultPayload
+	if payload["status"] != string(controlplane.TaskStatusFailed) || !strings.Contains(fmt.Sprint(payload["reason"]), "signed join manifest ceiling") {
+		t.Fatalf("capability denial was not reported as a failed task: %#v", payload)
 	}
 }
 

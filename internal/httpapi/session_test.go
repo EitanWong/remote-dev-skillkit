@@ -199,6 +199,45 @@ func TestHTTPSessionCreateJoinEventsAndSnapshot(t *testing.T) {
 	}
 }
 
+func TestHTTPAppendSessionEventRequiresLeaseOrOperatorForReservedSource(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{JoinPolicy: "single-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-event-auth",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
+	path := "/v1/sessions/" + url.PathEscape(session.ID) + "/events"
+
+	missingSource := postJSON(t, handler, path, `{"type":"status","idempotency_key":"missing-source"}`, "")
+	if missingSource.Code != http.StatusUnauthorized {
+		t.Fatalf("missing event source status = %d, want 401: %s", missingSource.Code, missingSource.Body.String())
+	}
+	reservedSource := postJSON(t, handler, path, `{"type":"status","from_endpoint_id":"gateway","idempotency_key":"reserved-source"}`, "")
+	if reservedSource.Code != http.StatusForbidden {
+		t.Fatalf("reserved event source status = %d, want 403: %s", reservedSource.Code, reservedSource.Body.String())
+	}
+	agentSource := postJSON(t, handler, path, `{"type":"interrupt","from_endpoint_id":"agent","idempotency_key":"agent-source"}`, "")
+	if agentSource.Code != http.StatusForbidden {
+		t.Fatalf("agent event source status = %d, want 403: %s", agentSource.Code, agentSource.Body.String())
+	}
+	targetSource := postJSON(t, handler, path, `{"type":"status","from_endpoint_id":"`+endpoint.ID+`","idempotency_key":"target-source"}`, lease.Secret)
+	if targetSource.Code != http.StatusAccepted {
+		t.Fatalf("leased target event status = %d, want 202: %s", targetSource.Code, targetSource.Body.String())
+	}
+	operatorSource := postJSON(t, handler, path, `{"type":"status","from_endpoint_id":"gateway","idempotency_key":"operator-source"}`, "operator-secret")
+	if operatorSource.Code != http.StatusAccepted {
+		t.Fatalf("operator gateway event status = %d, want 202: %s", operatorSource.Code, operatorSource.Body.String())
+	}
+}
+
 func TestHTTPSessionLeaseSecretAuthAndStructuredErrors(t *testing.T) {
 	handler := NewServer(gateway.NewMemoryGateway()).Handler()
 	created := createHTTPSession(t, handler)

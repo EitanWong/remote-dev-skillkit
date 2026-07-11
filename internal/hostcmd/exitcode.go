@@ -49,7 +49,7 @@ func NewJoinSessionResponseError(statusCode int, status string, body []byte, cau
 		message = protocolErr.Message
 	}
 	joinErr := fmt.Errorf("join session failed: %s", message)
-	if statusCode >= 400 && statusCode <= 599 && complete && !protocolErr.Recoverable {
+	if statusCode >= 400 && statusCode <= 499 && complete && !protocolErr.Recoverable {
 		return permanentJoinFailure{cause: joinErr}
 	}
 	return joinErr

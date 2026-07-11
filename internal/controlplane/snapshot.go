@@ -41,6 +41,9 @@ type LeaseRecord struct {
 func (s *MemoryStore) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for sessionID := range s.sessions {
+		s.expireSessionLocked(sessionID)
+	}
 
 	sessions := make([]Session, 0, len(s.sessions))
 	for _, session := range s.sessions {
@@ -98,6 +101,7 @@ func (s *MemoryStore) RestoreSnapshot(snapshot Snapshot) error {
 
 	sessions := make(map[string]Session, len(snapshot.Sessions))
 	joinCodes := make(map[string]string, len(snapshot.Sessions))
+	endpoints := make(map[string]Endpoint)
 	for _, session := range snapshot.Sessions {
 		if session.ID == "" || session.JoinCode == "" {
 			return fmt.Errorf("control plane snapshot contains session with missing id or join code")
@@ -108,7 +112,28 @@ func (s *MemoryStore) RestoreSnapshot(snapshot Snapshot) error {
 		if _, exists := joinCodes[session.JoinCode]; exists {
 			return fmt.Errorf("control plane snapshot contains duplicate join code %q", session.JoinCode)
 		}
-		sessions[session.ID] = session.clone()
+		session = session.clone()
+		for index, endpoint := range session.Endpoints {
+			if endpoint.ID == "" || endpoint.SessionID != session.ID {
+				return fmt.Errorf("control plane snapshot contains endpoint with invalid session binding")
+			}
+			if _, exists := endpoints[endpoint.ID]; exists {
+				return fmt.Errorf("control plane snapshot contains duplicate endpoint id %q", endpoint.ID)
+			}
+			endpoint.Capabilities = constrainedEndpointCapabilities(session, endpoint.Role, endpoint.Capabilities, nil)
+			session.Endpoints[index] = endpoint
+			endpoints[endpoint.ID] = endpoint
+		}
+		for _, task := range session.Tasks {
+			if task.Terminal() {
+				continue
+			}
+			target, exists := endpoints[task.TargetEndpointID]
+			if !exists || target.SessionID != session.ID || target.Role != EndpointRoleTarget || !endpointHasCapabilities(target, task.Capabilities) {
+				return fmt.Errorf("control plane snapshot contains live task outside target capability ceiling")
+			}
+		}
+		sessions[session.ID] = session
 		joinCodes[session.JoinCode] = session.ID
 	}
 
@@ -139,6 +164,22 @@ func (s *MemoryStore) RestoreSnapshot(snapshot Snapshot) error {
 		}
 		idempotency[key] = idempotencyRecord{Fingerprint: record.Fingerprint, Event: cloneEvent(record.Event)}
 	}
+	leases := make(map[string]leaseRecord, len(snapshot.Leases))
+	for endpointID, record := range snapshot.Leases {
+		lease := record.Current
+		endpoint, endpointExists := endpoints[endpointID]
+		session, sessionExists := sessions[lease.SessionID]
+		if endpointID == "" || lease.EndpointID != endpointID || !endpointExists || !sessionExists || endpoint.SessionID != lease.SessionID {
+			return fmt.Errorf("control plane snapshot contains invalid lease binding")
+		}
+		if sessionTerminal(session.Status) || endpoint.State == EndpointStateClosed || endpoint.State == EndpointStateRevoked {
+			return fmt.Errorf("control plane snapshot terminal endpoint retains a lease")
+		}
+		leases[endpointID] = leaseRecord{
+			Current:         lease,
+			PreviousSecrets: cloneTimeMap(record.PreviousSecrets),
+		}
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -149,7 +190,7 @@ func (s *MemoryStore) RestoreSnapshot(snapshot Snapshot) error {
 	s.taskIdempotency = taskRecordsFromSnapshot(snapshot.TaskIdempotency)
 	s.cancelIdempotency = taskRecordsFromSnapshot(snapshot.CancelIdempotency)
 	s.resultIdempotency = taskRecordsFromSnapshot(snapshot.ResultIdempotency)
-	s.leases = leaseRecordsFromSnapshot(snapshot.Leases)
+	s.leases = leases
 	s.terminalAt = cloneTimeMap(snapshot.TerminalAt)
 	if s.terminalAt == nil {
 		s.terminalAt = map[string]time.Time{}
@@ -191,17 +232,6 @@ func cloneLeaseRecordMap(records map[string]leaseRecord) map[string]LeaseRecord 
 	out := make(map[string]LeaseRecord, len(records))
 	for key, record := range records {
 		out[key] = LeaseRecord{
-			Current:         record.Current,
-			PreviousSecrets: cloneTimeMap(record.PreviousSecrets),
-		}
-	}
-	return out
-}
-
-func leaseRecordsFromSnapshot(records map[string]LeaseRecord) map[string]leaseRecord {
-	out := make(map[string]leaseRecord, len(records))
-	for key, record := range records {
-		out[key] = leaseRecord{
 			Current:         record.Current,
 			PreviousSecrets: cloneTimeMap(record.PreviousSecrets),
 		}

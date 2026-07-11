@@ -154,6 +154,7 @@ func (s *MemoryStore) Session(sessionID string) (Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.expireSessionLocked(sessionID)
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		return Session{}, s.err(ErrInvalidJoinCode, "session not found", false)
@@ -189,6 +190,10 @@ func (s *MemoryStore) JoinSession(sessionID string, spec EndpointSpec) (Session,
 	if !ok {
 		return Session{}, Endpoint{}, Lease{}, s.err(ErrInvalidJoinCode, "session not found", false)
 	}
+	if s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return Session{}, Endpoint{}, Lease{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
 	if sessionTerminal(session.Status) {
 		return Session{}, Endpoint{}, Lease{}, s.err(ErrTerminalSession, "session is terminal", false)
 	}
@@ -221,6 +226,10 @@ func (s *MemoryStore) JoinSession(sessionID string, spec EndpointSpec) (Session,
 func (s *MemoryStore) AppendEvent(sessionID string, event Event) (Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if session, ok := s.sessions[sessionID]; ok && s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return Event{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
 	return s.appendEventLocked(sessionID, event, true)
 }
 
@@ -231,6 +240,10 @@ func (s *MemoryStore) AppendEventBatch(sessionID string, batch []Event) ([]Event
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		return nil, s.err(ErrInvalidJoinCode, "session not found", false)
+	}
+	if s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return nil, s.err(ErrTerminalSession, "session is expired", false)
 	}
 	if len(batch) > session.Limits.EventBatch {
 		return nil, s.err(ErrTooManyEvents, "event batch is too large", true)
@@ -259,6 +272,10 @@ func (s *MemoryStore) EventsAfter(sessionID string, cursor EventCursor, limit in
 		SnapshotSeq:  session.SnapshotSeq,
 		LastSeq:      session.LastSeq,
 		RetryAfterMS: session.RetryAfterMS,
+	}
+	if s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return nil, Lease{}, replay, s.err(ErrTerminalSession, "session is expired", false)
 	}
 	if sessionTerminal(session.Status) {
 		return nil, Lease{}, replay, s.err(ErrTerminalSession, "session is terminal", false)
@@ -309,6 +326,7 @@ func (s *MemoryStore) EventsAfterForAgent(sessionID string, afterSeq uint64, lim
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.expireSessionLocked(sessionID)
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		return nil, EventReplayState{}, s.err(ErrInvalidJoinCode, "session not found", false)
@@ -337,6 +355,10 @@ func (s *MemoryStore) ValidateLease(sessionID, endpointID, secret string) error 
 	if !ok {
 		return s.err(ErrInvalidJoinCode, "session not found", false)
 	}
+	if s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return s.err(ErrTerminalSession, "session is expired", false)
+	}
 	if sessionTerminal(session.Status) {
 		return s.err(ErrTerminalSession, "session is terminal", false)
 	}
@@ -354,6 +376,10 @@ func (s *MemoryStore) SubmitTask(sessionID string, spec TaskSpec) (Task, Event, 
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		return Task{}, Event{}, s.err(ErrInvalidJoinCode, "session not found", false)
+	}
+	if s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return Task{}, Event{}, s.err(ErrTerminalSession, "session is expired", false)
 	}
 	if sessionTerminal(session.Status) {
 		return Task{}, Event{}, s.err(ErrTerminalSession, "session is terminal", false)
@@ -394,9 +420,6 @@ func (s *MemoryStore) SubmitTask(sessionID string, spec TaskSpec) (Task, Event, 
 		Status:           TaskStatusOffered,
 		CreatedAt:        s.now(),
 	}
-	session.Tasks = append(session.Tasks, task)
-	s.sessions[sessionID] = session
-
 	event, err := s.appendEventLocked(sessionID, Event{
 		Type:           EventTypeTask,
 		FromEndpointID: "agent",
@@ -412,6 +435,9 @@ func (s *MemoryStore) SubmitTask(sessionID string, spec TaskSpec) (Task, Event, 
 	if err != nil {
 		return Task{}, Event{}, err
 	}
+	session = s.sessions[sessionID].clone()
+	session.Tasks = append(session.Tasks, task)
+	s.sessions[sessionID] = session
 	s.taskIdempotency[sessionID+":"+idempotencyKey] = taskRecord{TaskID: task.ID, EventID: event.ID}
 	return task, event, nil
 }
@@ -419,6 +445,10 @@ func (s *MemoryStore) SubmitTask(sessionID string, spec TaskSpec) (Task, Event, 
 func (s *MemoryStore) CancelTask(sessionID, taskID, reason, idempotencyKey string) (Task, Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if session, ok := s.sessions[sessionID]; ok && s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return Task{}, Event{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
 
 	key := sessionID + ":cancel:" + taskID + ":" + idempotencyKey
 	if record, ok := s.cancelIdempotency[key]; ok {
@@ -435,8 +465,6 @@ func (s *MemoryStore) CancelTask(sessionID, taskID, reason, idempotencyKey strin
 	if err != nil {
 		return Task{}, Event{}, err
 	}
-	session.Tasks[index] = canceled
-	s.sessions[sessionID] = session
 	event, err := s.appendEventLocked(sessionID, Event{
 		Type:           EventTypeTask,
 		FromEndpointID: "agent",
@@ -448,6 +476,9 @@ func (s *MemoryStore) CancelTask(sessionID, taskID, reason, idempotencyKey strin
 	if err != nil {
 		return Task{}, Event{}, err
 	}
+	session = s.sessions[sessionID].clone()
+	session.Tasks[index] = canceled
+	s.sessions[sessionID] = session
 	s.cancelIdempotency[key] = taskRecord{TaskID: canceled.ID, EventID: event.ID}
 	return canceled, event, nil
 }
@@ -455,6 +486,10 @@ func (s *MemoryStore) CancelTask(sessionID, taskID, reason, idempotencyKey strin
 func (s *MemoryStore) CompleteTask(sessionID, taskID string, result map[string]any) (Task, Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if session, ok := s.sessions[sessionID]; ok && s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return Task{}, Event{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
 
 	task, index, session, err := s.findTaskLocked(sessionID, taskID)
 	if err != nil {
@@ -496,8 +531,6 @@ func (s *MemoryStore) CompleteTask(sessionID, taskID string, result map[string]a
 	if err != nil {
 		return Task{}, Event{}, err
 	}
-	session.Tasks[index] = completed
-	s.sessions[sessionID] = session
 	event, err := s.appendEventLocked(sessionID, Event{
 		Type:           EventTypeTaskResult,
 		FromEndpointID: completed.TargetEndpointID,
@@ -508,6 +541,9 @@ func (s *MemoryStore) CompleteTask(sessionID, taskID string, result map[string]a
 	if err != nil {
 		return Task{}, Event{}, err
 	}
+	session = s.sessions[sessionID].clone()
+	session.Tasks[index] = completed
+	s.sessions[sessionID] = session
 	s.resultIdempotency[resultKey] = taskRecord{TaskID: completed.ID, EventID: event.ID}
 	return completed, event, nil
 }
@@ -515,6 +551,10 @@ func (s *MemoryStore) CompleteTask(sessionID, taskID string, result map[string]a
 func (s *MemoryStore) UpsertArtifact(sessionID string, ref ArtifactRef) (ArtifactRef, Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if session, ok := s.sessions[sessionID]; ok && s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return ArtifactRef{}, Event{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
 
 	session, ok := s.sessions[sessionID]
 	if !ok {
@@ -533,6 +573,7 @@ func (s *MemoryStore) UpsertArtifact(sessionID string, ref ArtifactRef) (Artifac
 	ref.SchemaVersion = ArtifactRefSchemaVersion
 	ref.SessionID = sessionID
 
+	session = session.clone()
 	replaced := false
 	for i, existing := range session.Artifacts {
 		if existing.ID != ref.ID {
@@ -548,7 +589,6 @@ func (s *MemoryStore) UpsertArtifact(sessionID string, ref ArtifactRef) (Artifac
 	if !replaced {
 		session.Artifacts = append(session.Artifacts, ref)
 	}
-	s.sessions[sessionID] = session
 	event, err := s.appendEventLocked(sessionID, Event{
 		Type:           EventTypeArtifact,
 		FromEndpointID: "artifact",
@@ -565,12 +605,19 @@ func (s *MemoryStore) UpsertArtifact(sessionID string, ref ArtifactRef) (Artifac
 	if err != nil {
 		return ArtifactRef{}, Event{}, err
 	}
+	current := s.sessions[sessionID].clone()
+	current.Artifacts = append([]ArtifactRef(nil), session.Artifacts...)
+	s.sessions[sessionID] = current
 	return ref, event, nil
 }
 
 func (s *MemoryStore) MarkTaskRunning(sessionID, taskID string) (Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if session, ok := s.sessions[sessionID]; ok && s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		return Task{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
 
 	task, index, session, err := s.findTaskLocked(sessionID, taskID)
 	if err != nil {
@@ -588,24 +635,7 @@ func (s *MemoryStore) MarkTaskRunning(sessionID, taskID string) (Task, error) {
 func (s *MemoryStore) CloseSession(sessionID string) (Session, Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	session, ok := s.sessions[sessionID]
-	if !ok {
-		return Session{}, Event{}, s.err(ErrInvalidJoinCode, "session not found", false)
-	}
-	session.Status = SessionStatusClosed
-	session.UpdatedAt = s.now()
-	s.sessions[sessionID] = session
-	s.terminalAt[sessionID] = s.now()
-	event, err := s.appendEventLocked(sessionID, Event{
-		Type:           EventTypeClose,
-		FromEndpointID: "gateway",
-		IdempotencyKey: "close:" + sessionID,
-	}, true)
-	if err != nil {
-		return Session{}, Event{}, err
-	}
-	return s.sessions[sessionID].clone(), event, nil
+	return s.terminateSessionLocked(sessionID, SessionStatusClosed, "close:"+sessionID)
 }
 
 func (s *MemoryStore) RevokeSession(sessionID string) (Session, Event, error) {
@@ -619,25 +649,33 @@ func (s *MemoryStore) RevokeSession(sessionID string) (Session, Event, error) {
 	if session.Status == SessionStatusRevoked {
 		return session.clone(), Event{}, nil
 	}
+	return s.terminateSessionLocked(sessionID, SessionStatusRevoked, "revoke:"+sessionID)
+}
+
+func (s *MemoryStore) terminateSessionLocked(sessionID string, status SessionStatus, idempotencyKey string) (Session, Event, error) {
+	if _, ok := s.sessions[sessionID]; !ok {
+		return Session{}, Event{}, s.err(ErrInvalidJoinCode, "session not found", false)
+	}
+	event, err := s.appendEventLocked(sessionID, Event{
+		Type:           EventTypeClose,
+		FromEndpointID: "gateway.lifecycle",
+		IdempotencyKey: idempotencyKey,
+	}, true)
+	if err != nil {
+		return Session{}, Event{}, err
+	}
+	session := s.sessions[sessionID].clone()
 	now := s.now()
 	for index := range session.Endpoints {
 		session.Endpoints[index].State = EndpointStateRevoked
 		session.Endpoints[index].LastSeenAt = now
 		delete(s.leases, session.Endpoints[index].ID)
 	}
-	session.Status = SessionStatusRevoked
+	session.Status = status
 	session.UpdatedAt = now
 	s.sessions[sessionID] = session
 	s.terminalAt[sessionID] = now
-	event, err := s.appendEventLocked(sessionID, Event{
-		Type:           EventTypeClose,
-		FromEndpointID: "gateway",
-		IdempotencyKey: "revoke:" + sessionID,
-	}, true)
-	if err != nil {
-		return Session{}, Event{}, err
-	}
-	return s.sessions[sessionID].clone(), event, nil
+	return session.clone(), event, nil
 }
 
 func (s *MemoryStore) CompactEvents(sessionID string, snapshotSeq uint64) error {
@@ -675,10 +713,7 @@ func (s *MemoryStore) joinEndpointLocked(session Session, spec EndpointSpec) (En
 	for _, endpoint := range session.Endpoints {
 		if endpointIdentityKey(session.ID, endpoint.Role, endpoint.IdentityFingerprint, endpoint.Platform) == endpointKey && spec.IdentityFingerprint != "" {
 			endpoint.Name = nonEmpty(spec.Name, endpoint.Name)
-			endpoint.Capabilities = append([]string(nil), spec.Capabilities...)
-			if len(endpoint.Capabilities) == 0 {
-				endpoint.Capabilities = append([]string(nil), endpoint.Capabilities...)
-			}
+			endpoint.Capabilities = constrainedEndpointCapabilities(session, role, spec.Capabilities, endpoint.Capabilities)
 			endpoint.Transport = transport
 			endpoint.State = state
 			endpoint.LastSeenAt = s.now()
@@ -713,7 +748,7 @@ func (s *MemoryStore) joinEndpointLocked(session Session, spec EndpointSpec) (En
 		Name:                spec.Name,
 		Platform:            spec.Platform,
 		IdentityFingerprint: spec.IdentityFingerprint,
-		Capabilities:        append([]string(nil), spec.Capabilities...),
+		Capabilities:        constrainedEndpointCapabilities(session, role, spec.Capabilities, nil),
 		State:               state,
 		Transport:           transport,
 		LastSeenAt:          s.now(),
@@ -732,6 +767,9 @@ func (s *MemoryStore) appendEventLocked(sessionID string, event Event, enforceLi
 	if sessionTerminal(session.Status) && event.Type != EventTypeTaskResult && event.Type != EventTypeArtifact && event.Type != EventTypeClose {
 		return Event{}, s.err(ErrTerminalSession, "session is terminal", false)
 	}
+	if s.sessionExpired(session) && event.Type != EventTypeClose {
+		return Event{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
 	if enforceLimits {
 		payloadSize, err := jsonPayloadSize(event.Payload)
 		if err != nil {
@@ -745,40 +783,41 @@ func (s *MemoryStore) appendEventLocked(sessionID string, event Event, enforceLi
 	event.SchemaVersion = EventSchemaVersion
 	event.SessionID = sessionID
 	event.Payload = cloneMap(event.Payload)
-	if event.Type == EventTypeGateway {
-		if selected := selectedGatewayURLFromEvent(event); selected != "" {
-			session.SelectedGatewayURL = selected
-			s.sessions[sessionID] = session
-		}
-	}
+	var eventKey idempotencyKey
+	var fingerprint string
+	hasIdempotencyKey := event.IdempotencyKey != ""
 	if event.IdempotencyKey != "" {
-		key := idempotencyKey{SessionID: sessionID, FromEndpointID: event.FromEndpointID, Key: event.IdempotencyKey}
-		fingerprint, err := eventFingerprint(event)
+		eventKey = idempotencyKey{SessionID: sessionID, FromEndpointID: event.FromEndpointID, Key: event.IdempotencyKey}
+		var err error
+		fingerprint, err = eventFingerprint(event)
 		if err != nil {
 			return Event{}, err
 		}
-		if record, ok := s.idempotency[key]; ok {
+		if record, ok := s.idempotency[eventKey]; ok {
 			if record.Fingerprint != fingerprint {
 				return Event{}, s.err(ErrIdempotencyConflict, "idempotency key was reused with a different payload", true)
 			}
 			return record.Event, nil
 		}
-		defer func() {
-			s.idempotency[key] = idempotencyRecord{Fingerprint: fingerprint, Event: event}
-		}()
 	}
-	if event.ID == "" {
-		id, err := newID("evt")
-		if err != nil {
-			return Event{}, err
-		}
-		event.ID = id
+	id, err := newID("evt")
+	if err != nil {
+		return Event{}, err
 	}
+	event.ID = id
 	event.Seq = session.LastSeq + 1
 	event.CreatedAt = s.now()
 	s.events[sessionID] = append(s.events[sessionID], event)
+	if event.Type == EventTypeGateway {
+		if selected := selectedGatewayURLFromEvent(event); selected != "" {
+			session.SelectedGatewayURL = selected
+		}
+	}
 	session = session.WithEvent(event, s.now())
 	s.sessions[sessionID] = session
+	if hasIdempotencyKey {
+		s.idempotency[eventKey] = idempotencyRecord{Fingerprint: fingerprint, Event: event}
+	}
 	return event, nil
 }
 
@@ -857,6 +896,9 @@ func (s *MemoryStore) routeTaskLocked(session Session, spec TaskSpec) (Endpoint,
 	if spec.TargetEndpointID != "" {
 		for _, endpoint := range session.Endpoints {
 			if endpoint.ID == spec.TargetEndpointID {
+				if endpoint.Role != EndpointRoleTarget || !endpointOnlineState(endpoint.State) {
+					return Endpoint{}, s.err(ErrEndpointNotFound, "target endpoint is not online", true)
+				}
 				if !endpointHasCapabilities(endpoint, spec.Capabilities) {
 					return Endpoint{}, s.err(ErrCapabilityUnavailable, "endpoint lacks required capabilities", true)
 				}
@@ -947,6 +989,43 @@ func (s *MemoryStore) now() time.Time {
 	return s.clock().UTC()
 }
 
+func (s *MemoryStore) sessionExpired(session Session) bool {
+	return !session.ExpiresAt.IsZero() && !s.now().Before(session.ExpiresAt)
+}
+
+func (s *MemoryStore) expireSessionLocked(sessionID string) bool {
+	session, ok := s.sessions[sessionID]
+	if !ok || sessionTerminal(session.Status) || !s.sessionExpired(session) {
+		return false
+	}
+	now := s.now()
+	_, _ = s.appendEventLocked(sessionID, Event{
+		Type:           EventTypeClose,
+		FromEndpointID: "gateway.lifecycle",
+		Payload:        map[string]any{"reason": "session expired"},
+	}, false)
+	session = s.sessions[sessionID].clone()
+	for index := range session.Endpoints {
+		session.Endpoints[index].State = EndpointStateRevoked
+		session.Endpoints[index].LastSeenAt = now
+		delete(s.leases, session.Endpoints[index].ID)
+	}
+	for index, task := range session.Tasks {
+		if task.Terminal() {
+			continue
+		}
+		canceled, err := task.Transition(TaskStatusCanceled, now)
+		if err == nil {
+			session.Tasks[index] = canceled
+		}
+	}
+	session.Status = SessionStatusClosed
+	session.UpdatedAt = now
+	s.sessions[sessionID] = session
+	s.terminalAt[sessionID] = now
+	return true
+}
+
 func eventVisibleToEndpoint(event Event, endpoint Endpoint) bool {
 	if endpoint.Role == EndpointRoleAgent || endpoint.Role == EndpointRoleOperator {
 		return true
@@ -972,6 +1051,36 @@ func endpointHasCapabilities(endpoint Endpoint, required []string) bool {
 		}
 	}
 	return true
+}
+
+func constrainedEndpointCapabilities(session Session, role EndpointRole, advertised, existing []string) []string {
+	requested := advertised
+	if len(requested) == 0 {
+		requested = existing
+	}
+	limited := role == EndpointRoleTarget && len(session.Capabilities) > 0
+	allowed := map[string]bool{}
+	if limited {
+		for _, capability := range session.Capabilities {
+			if capability = strings.TrimSpace(capability); capability != "" {
+				allowed[capability] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := map[string]bool{}
+	for _, capability := range requested {
+		capability = strings.TrimSpace(capability)
+		if capability == "" || seen[capability] {
+			continue
+		}
+		if limited && !allowed[capability] {
+			continue
+		}
+		seen[capability] = true
+		result = append(result, capability)
+	}
+	return result
 }
 
 func endpointIdentityKey(sessionID string, role EndpointRole, fingerprint, platform string) string {
