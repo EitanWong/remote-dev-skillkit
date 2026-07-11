@@ -151,6 +151,9 @@ func (s *MemoryStore) RestoreSnapshot(snapshot Snapshot) error {
 	s.resultIdempotency = taskRecordsFromSnapshot(snapshot.ResultIdempotency)
 	s.leases = leaseRecordsFromSnapshot(snapshot.Leases)
 	s.terminalAt = cloneTimeMap(snapshot.TerminalAt)
+	if s.terminalAt == nil {
+		s.terminalAt = map[string]time.Time{}
+	}
 	return nil
 }
 
