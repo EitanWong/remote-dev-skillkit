@@ -80,6 +80,47 @@ func TestRegistrySelectUsesDeterministicPolicyOrder(t *testing.T) {
 	}
 }
 
+func TestRegistrySelectUsesAutomaticPriorityBeforeProviderID(t *testing.T) {
+	cloudflare := newRegistryFakeProvider("cloudflare-quick", true)
+	cloudflare.meta.AutomaticPriority = 10
+	localhost := newRegistryFakeProvider("localhost-run", true)
+	localhost.meta.AutomaticPriority = 30
+	tunn3l := newRegistryFakeProvider("tunn3l", true)
+	tunn3l.meta.AutomaticPriority = 20
+	r, err := NewRegistry(localhost, tunn3l, cloudflare)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := r.Select(Policy{Region: RegionGlobal}, nil)
+	want := []string{"cloudflare-quick", "tunn3l", "localhost-run"}
+	for i := range want {
+		if got[i].Provider.ID() != want[i] {
+			t.Fatalf("selection=%#v", got)
+		}
+	}
+}
+
+func TestRegistryEvaluateRetainsMainlandIneligibilityReasons(t *testing.T) {
+	r, err := NewRegistry(
+		newRegistryFakeProvider("cloudflare-quick", true),
+		newRegistryFakeProvider("tunn3l", true),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := r.Evaluate(Policy{Region: RegionCNMainland, Now: time.Now()}, nil)
+	if len(got) != 2 {
+		t.Fatalf("evaluations=%#v", got)
+	}
+	for _, item := range got {
+		if item.Eligibility.Eligible || item.Eligibility.Reason != "regional-evidence-missing" {
+			t.Fatalf("evaluation=%#v", item)
+		}
+	}
+}
+
 func TestRegistrySelectPrioritizesFreshVerifiedEvidence(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	r, err := NewRegistry(
@@ -145,7 +186,7 @@ func TestRegistryReturnedSlicesAreIndependent(t *testing.T) {
 
 func TestCanonicalProviderIDsAreFixedAndReturnedAsCopy(t *testing.T) {
 	got := CanonicalProviderIDs()
-	want := []string{"cloudflare-quick", "localhost-run", "pinggy"}
+	want := []string{"cloudflare-quick", "localhost-run", "pinggy", "tunn3l"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("CanonicalProviderIDs() = %v, want %v", got, want)
 	}

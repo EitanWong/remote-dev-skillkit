@@ -43,6 +43,7 @@ type ProviderMetadata struct {
 	DocumentationURL      string         `json:"documentation_url"`
 	TermsURL              string         `json:"terms_url,omitempty"`
 	DefaultAutomatic      bool           `json:"default_automatic"`
+	AutomaticPriority     int            `json:"automatic_priority,omitempty"`
 	RequiresSSHPin        bool           `json:"requires_ssh_pin"`
 	FailureDomains        FailureDomains `json:"failure_domains"`
 }

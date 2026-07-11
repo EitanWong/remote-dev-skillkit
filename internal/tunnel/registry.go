@@ -11,12 +11,14 @@ const (
 	ProviderCloudflareQuick = "cloudflare-quick"
 	ProviderLocalhostRun    = "localhost-run"
 	ProviderPinggy          = "pinggy"
+	ProviderTunn3l          = "tunn3l"
 )
 
 var canonicalProviderIDs = []string{
 	ProviderCloudflareQuick,
 	ProviderLocalhostRun,
 	ProviderPinggy,
+	ProviderTunn3l,
 }
 
 func CanonicalProviderIDs() []string {
@@ -77,32 +79,53 @@ func (r Registry) Providers() []ProviderMetadata {
 	return providers
 }
 
-func (r Registry) Select(policy Policy, evidence []RegionalEvidence) []Selection {
-	selected := make([]Selection, 0, len(r.providers))
+func (r Registry) Evaluate(policy Policy, evidence []RegionalEvidence) []Selection {
+	items := make([]Selection, 0, len(r.providers))
 	for _, provider := range r.providers {
 		metadata := cloneMetadata(provider.Metadata())
-		eligibility := EvaluateEligibility(metadata, policy, evidence)
-		if !eligibility.Eligible {
-			continue
-		}
-		selected = append(selected, Selection{
+		items = append(items, Selection{
 			Provider:    provider,
 			Metadata:    metadata,
-			Eligibility: eligibility,
+			Eligibility: EvaluateEligibility(metadata, policy, evidence),
 		})
 	}
-	sort.Slice(selected, func(i, j int) bool {
-		iVerified := hasVerifiedEvidence(selected[i].Eligibility) || hasFreshVerifiedEvidence(selected[i].Metadata.ID, policy, evidence)
-		jVerified := hasVerifiedEvidence(selected[j].Eligibility) || hasFreshVerifiedEvidence(selected[j].Metadata.ID, policy, evidence)
+	sortSelections(items, policy, evidence)
+	return items
+}
+
+func (r Registry) Select(policy Policy, evidence []RegionalEvidence) []Selection {
+	evaluated := r.Evaluate(policy, evidence)
+	selected := make([]Selection, 0, len(evaluated))
+	for _, item := range evaluated {
+		if item.Eligibility.Eligible {
+			selected = append(selected, item)
+		}
+	}
+	return selected
+}
+
+func sortSelections(items []Selection, policy Policy, evidence []RegionalEvidence) {
+	sort.Slice(items, func(i, j int) bool {
+		iVerified := hasFreshVerifiedEvidence(items[i].Metadata.ID, policy, evidence)
+		jVerified := hasFreshVerifiedEvidence(items[j].Metadata.ID, policy, evidence)
 		if iVerified != jVerified {
 			return iVerified
 		}
-		if selected[i].Metadata.DefaultAutomatic != selected[j].Metadata.DefaultAutomatic {
-			return selected[i].Metadata.DefaultAutomatic
+		if items[i].Metadata.DefaultAutomatic != items[j].Metadata.DefaultAutomatic {
+			return items[i].Metadata.DefaultAutomatic
 		}
-		return selected[i].Metadata.ID < selected[j].Metadata.ID
+		iPriority := items[i].Metadata.AutomaticPriority
+		jPriority := items[j].Metadata.AutomaticPriority
+		iPositive := iPriority > 0
+		jPositive := jPriority > 0
+		if iPositive != jPositive {
+			return iPositive
+		}
+		if iPositive && iPriority != jPriority {
+			return iPriority < jPriority
+		}
+		return items[i].Metadata.ID < items[j].Metadata.ID
 	})
-	return selected
 }
 
 func isNilProvider(provider Provider) bool {
@@ -113,10 +136,6 @@ func isNilProvider(provider Provider) bool {
 	default:
 		return false
 	}
-}
-
-func hasVerifiedEvidence(eligibility Eligibility) bool {
-	return eligibility.Evidence != nil && eligibility.Evidence.Status == EvidenceVerified
 }
 
 func hasFreshVerifiedEvidence(providerID string, policy Policy, evidence []RegionalEvidence) bool {
