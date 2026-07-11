@@ -18,7 +18,15 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
-const localhostRunOfficialKnownHostsLine = "localhost.run ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3lJnhW1oCXuAYV9IBdcJA+Vx7AHL5S/ZQvV2fhceOAPgO2kNQZla6xvUwoE4iw8lYu3zoE1KtieCU9yInWOVI6W/wFaT/ETH1tn55T2FVsK/zaxPiHZVJGLPPdEEid0vS2p1JDfc9onZ0pNSHLl1QusIOeMUyZ2bUMMLLgw46KOT9S3s/LmxgoJ3PocVUn5rVXz/Dng7Y8jYNe4IFrZOAUsi7hNBa+OYja6ceefpDvNDEJ1BdhbYfGolBdNA7f+FNl0kfaWru4Cblr843wBe2ckO/sNqgeAMXO/qH+SSgQxUXF2AgAw+TGp3yCIyYoOPvOgvcPsQziJLmDbUuQpnH"
+const (
+	localhostRunOfficialKnownHostsLine = "localhost.run ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3lJnhW1oCXuAYV9IBdcJA+Vx7AHL5S/ZQvV2fhceOAPgO2kNQZla6xvUwoE4iw8lYu3zoE1KtieCU9yInWOVI6W/wFaT/ETH1tn55T2FVsK/zaxPiHZVJGLPPdEEid0vS2p1JDfc9onZ0pNSHLl1QusIOeMUyZ2bUMMLLgw46KOT9S3s/LmxgoJ3PocVUn5rVXz/Dng7Y8jYNe4IFrZOAUsi7hNBa+OYja6ceefpDvNDEJ1BdhbYfGolBdNA7f+FNl0kfaWru4Cblr843wBe2ckO/sNqgeAMXO/qH+SSgQxUXF2AgAw+TGp3yCIyYoOPvOgvcPsQziJLmDbUuQpnH"
+	localhostRunTrustHost              = "localhost.run"
+	localhostRunTrustPort              = 22
+	localhostRunTrustFingerprint       = "SHA256:FV8IMJ4IYjYUTnd6on7PqbRjaZf4c1EhhEBgeUdE94I"
+	localhostRunTrustSourceCommit      = "9f499be7ece07d59ed927edbcfa6860ee7bcb853"
+	localhostRunTrustSourceURL         = "https://github.com/localhost-run/client-service/blob/9f499be7ece07d59ed927edbcfa6860ee7bcb853/linux/systemd/localhost.run.service"
+	localhostRunTrustReviewedAt        = "2026-07-11"
+)
 
 type providerTrustAnchor struct {
 	ProviderID   string
@@ -33,18 +41,21 @@ type providerTrustAnchor struct {
 
 var localhostRunTrustAnchor = providerTrustAnchor{
 	ProviderID:   tunnel.ProviderLocalhostRun,
-	Host:         "localhost.run",
-	Port:         22,
+	Host:         localhostRunTrustHost,
+	Port:         localhostRunTrustPort,
 	KeyLine:      localhostRunOfficialKnownHostsLine,
-	Fingerprint:  "SHA256:FV8IMJ4IYjYUTnd6on7PqbRjaZf4c1EhhEBgeUdE94I",
-	SourceCommit: "9f499be7ece07d59ed927edbcfa6860ee7bcb853",
-	SourceURL:    "https://github.com/localhost-run/client-service/blob/9f499be7ece07d59ed927edbcfa6860ee7bcb853/linux/systemd/localhost.run.service",
-	ReviewedAt:   "2026-07-11",
+	Fingerprint:  localhostRunTrustFingerprint,
+	SourceCommit: localhostRunTrustSourceCommit,
+	SourceURL:    localhostRunTrustSourceURL,
+	ReviewedAt:   localhostRunTrustReviewedAt,
 }
 
 func validateProviderTrustAnchor(anchor providerTrustAnchor) error {
-	if !isCanonicalProviderID(anchor.ProviderID) {
-		return errors.New("provider trust anchor has an invalid provider ID")
+	if anchor.ProviderID != tunnel.ProviderLocalhostRun || anchor.Host != localhostRunTrustHost || anchor.Port != localhostRunTrustPort ||
+		anchor.KeyLine != localhostRunOfficialKnownHostsLine || anchor.Fingerprint != localhostRunTrustFingerprint ||
+		anchor.SourceCommit != localhostRunTrustSourceCommit || anchor.SourceURL != localhostRunTrustSourceURL ||
+		anchor.ReviewedAt != localhostRunTrustReviewedAt {
+		return errors.New("provider trust anchor is not an approved localhost.run identity")
 	}
 	host, err := canonicalSSHDestinationHost(anchor.Host)
 	if err != nil || host != anchor.Host || strings.Contains(anchor.Host, "@") {
@@ -177,15 +188,6 @@ func validateProviderKnownHostsSnapshot(path string, anchor providerTrustAnchor,
 		return errors.New("provider trust snapshot validation failure")
 	}
 	return nil
-}
-
-func isCanonicalProviderID(value string) bool {
-	for _, providerID := range tunnel.CanonicalProviderIDs() {
-		if value == providerID {
-			return true
-		}
-	}
-	return false
 }
 
 func sshWireKeyType(blob []byte) (string, bool) {

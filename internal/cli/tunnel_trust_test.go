@@ -62,6 +62,12 @@ func TestLocalhostRunTrustAnchorRejectsInvalidConstants(t *testing.T) {
 		mutate func(*providerTrustAnchor)
 	}{
 		{name: "provider ID", mutate: func(anchor *providerTrustAnchor) { anchor.ProviderID = "../localhost-run" }},
+		{name: "other canonical provider and host", mutate: func(anchor *providerTrustAnchor) {
+			anchor.ProviderID = tunnel.ProviderPinggy
+			anchor.Host = "free.pinggy.io"
+			anchor.Port = 443
+			anchor.KeyLine = invalidKeyLine("[free.pinggy.io]:443", fields[1], fields[2])
+		}},
 		{name: "host", mutate: func(anchor *providerTrustAnchor) { anchor.Host = "LOCALHOST.RUN" }},
 		{name: "port", mutate: func(anchor *providerTrustAnchor) { anchor.Port = 443 }},
 		{name: "key host", mutate: func(anchor *providerTrustAnchor) {
@@ -74,11 +80,16 @@ func TestLocalhostRunTrustAnchorRejectsInvalidConstants(t *testing.T) {
 		{name: "key trailing field", mutate: func(anchor *providerTrustAnchor) { anchor.KeyLine += " comment" }},
 		{name: "fingerprint", mutate: func(anchor *providerTrustAnchor) { anchor.Fingerprint = "SHA256:wrong" }},
 		{name: "source commit", mutate: func(anchor *providerTrustAnchor) { anchor.SourceCommit = strings.Repeat("a", 40) }},
+		{name: "coherent alternate source commit", mutate: func(anchor *providerTrustAnchor) {
+			anchor.SourceCommit = strings.Repeat("a", 40)
+			anchor.SourceURL = "https://github.com/localhost-run/client-service/blob/" + anchor.SourceCommit + "/linux/systemd/localhost.run.service"
+		}},
 		{name: "mutable source URL", mutate: func(anchor *providerTrustAnchor) {
 			anchor.SourceURL = "https://github.com/localhost-run/client-service/blob/main/linux/systemd/localhost.run.service"
 		}},
 		{name: "source URL query", mutate: func(anchor *providerTrustAnchor) { anchor.SourceURL += "?download=1" }},
 		{name: "review date", mutate: func(anchor *providerTrustAnchor) { anchor.ReviewedAt = "2026-7-11" }},
+		{name: "alternate canonical review date", mutate: func(anchor *providerTrustAnchor) { anchor.ReviewedAt = "2026-07-10" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
