@@ -68,6 +68,10 @@ type Handle interface {
 type Provider interface {
 	ID() string
 	Metadata() ProviderMetadata
+	// Start must return promptly after ctx cancellation. The context remains
+	// valid for the returned handle's lifetime; Wait signals only after provider
+	// resources are reaped. Manager cancels ctx on startup timeout, parent
+	// cancellation, handle stop, or handle exit.
 	Start(context.Context, StartRequest) (Handle, error)
 }
 

@@ -63,6 +63,11 @@ type Manager struct {
 	Probe        ProbeFunc
 }
 
+type lifetimeBoundHandle struct {
+	inner  Handle
+	cancel context.CancelFunc
+}
+
 type runtimeHandle struct {
 	handle       Handle
 	attemptIndex int
@@ -76,6 +81,7 @@ type runtimeHandle struct {
 	stopping     atomic.Bool
 	stopOnce     sync.Once
 	stopErr      error
+	release      func()
 }
 
 type Runtime struct {
@@ -161,9 +167,7 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 		})
 		return true
 	}
-	startCtx, cancelStart := withOptionalTimeout(ctx, m.StartTimeout)
-	handle, err := selection.Provider.Start(startCtx, request)
-	cancelStart()
+	handle, err := startProviderWithin(ctx, m.StartTimeout, selection.Provider, request)
 	if err != nil || handle == nil {
 		runtime.updateAttempt(index, func(attempt *Attempt) {
 			attempt.Status = AttemptDegraded
@@ -218,6 +222,64 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 	}
 	go runtime.observeExit(item)
 	return false
+}
+
+func startProviderWithin(ctx context.Context, timeout time.Duration, provider Provider, request StartRequest) (Handle, error) {
+	providerCtx, cancelProviderCause := context.WithCancelCause(ctx)
+	cancelProvider := func() { cancelProviderCause(context.Canceled) }
+	var timeoutDone chan struct{}
+	var timer *time.Timer
+	if timeout > 0 {
+		timeoutDone = make(chan struct{})
+		timer = time.AfterFunc(timeout, func() {
+			cancelProviderCause(context.DeadlineExceeded)
+			close(timeoutDone)
+		})
+	}
+	handle, err := provider.Start(providerCtx, request)
+	if timer != nil && !timer.Stop() {
+		<-timeoutDone
+	}
+	if cause := context.Cause(providerCtx); cause != nil {
+		stopRejectedProviderHandle(handle)
+		return nil, cause
+	}
+	if err != nil || handle == nil {
+		cancelProvider()
+		stopRejectedProviderHandle(handle)
+		return nil, err
+	}
+	return newLifetimeBoundHandle(handle, cancelProvider), nil
+}
+
+func newLifetimeBoundHandle(inner Handle, cancel context.CancelFunc) Handle {
+	return &lifetimeBoundHandle{inner: inner, cancel: cancel}
+}
+
+func (h *lifetimeBoundHandle) Candidate() Candidate { return h.inner.Candidate() }
+
+func (h *lifetimeBoundHandle) Wait() <-chan error { return h.inner.Wait() }
+
+func (h *lifetimeBoundHandle) Stop(ctx context.Context) error {
+	h.cancel()
+	return h.inner.Stop(ctx)
+}
+
+func (h *lifetimeBoundHandle) releaseProviderContext() { h.cancel() }
+
+func stopRejectedProviderHandle(handle Handle) {
+	if handle == nil {
+		return
+	}
+	waitDone := make(chan struct{})
+	go func() {
+		if wait := handle.Wait(); wait != nil {
+			<-wait
+		}
+		close(waitDone)
+	}()
+	_ = handle.Stop(context.Background())
+	<-waitDone
 }
 
 func (r *Runtime) Snapshot() AvailabilitySet {
@@ -378,10 +440,15 @@ func (r *Runtime) addHandle(item *runtimeHandle) {
 }
 
 func newRuntimeHandle(handle Handle, attemptIndex int) *runtimeHandle {
-	return &runtimeHandle{
+	item := &runtimeHandle{
 		handle: handle, attemptIndex: attemptIndex, wait: handle.Wait(),
 		waitDone: make(chan struct{}), waitStarted: make(chan struct{}), waitChecks: make(chan chan struct{}),
+		release: func() {},
 	}
+	if releaser, ok := handle.(interface{ releaseProviderContext() }); ok {
+		item.release = releaser.releaseProviderContext
+	}
+	return item
 }
 
 func (h *runtimeHandle) waitCompleted() bool {
@@ -418,12 +485,14 @@ func (h *runtimeHandle) startWaiter() {
 			for {
 				select {
 				case h.waitErr = <-h.wait:
+					h.release()
 					h.waitComplete.Store(true)
 					close(h.waitDone)
 					return
 				case checked := <-h.waitChecks:
 					select {
 					case h.waitErr = <-h.wait:
+						h.release()
 						h.waitComplete.Store(true)
 						close(h.waitDone)
 					default:

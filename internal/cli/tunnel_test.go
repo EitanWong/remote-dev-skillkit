@@ -523,6 +523,39 @@ func TestTunnelProviderWaitReportsSpontaneousProcessExit(t *testing.T) {
 	}
 }
 
+func TestManagerStartupTimeoutDoesNotCancelCLIProviderProcess(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "block")
+	provider := cliTunnelProvider{
+		metadata: tunnel.ProviderMetadata{ID: tunnel.ProviderCloudflareQuick, DefaultAutomatic: true},
+		stderr:   io.Discard,
+		start: func(ctx context.Context, stderr io.Writer, _ tunnel.StartRequest, _ string) (runningTunnel, error) {
+			return startTunnelCommand(ctx, stderr, tunnel.ProviderCloudflareQuick, []string{
+				os.Args[0], "-test.run=TestTunnelHelperProcess",
+			}, time.Second)
+		},
+	}
+	runtime, err := (tunnel.Manager{
+		StartTimeout: 500 * time.Millisecond,
+		Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TLSOK: true, HealthOK: true}, nil
+		},
+	}).Start(context.Background(), []tunnel.Selection{{Provider: provider, Metadata: provider.Metadata()}}, tunnel.StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(650 * time.Millisecond)
+	snapshot := runtime.Snapshot()
+	if len(snapshot.Candidates) != 1 || snapshot.Attempts[0].Status != tunnel.AttemptHealthy {
+		t.Fatalf("manager startup timeout canceled CLI provider process: %#v", snapshot)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = runtime.Stop(stopCtx)
+	if got := runtime.Snapshot().Attempts[0].Status; got != tunnel.AttemptStopped {
+		t.Fatalf("CLI provider process was not reaped on runtime stop: %q", got)
+	}
+}
+
 func TestCLITunnelHandleStopCancelsAndReapsExactlyOnce(t *testing.T) {
 	var cancelCalls atomic.Int32
 	var waitCalls atomic.Int32

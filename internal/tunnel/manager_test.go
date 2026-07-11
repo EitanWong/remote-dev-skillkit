@@ -44,12 +44,16 @@ func (h *managerFakeHandle) Stop(context.Context) error {
 }
 
 type managerFakeProvider struct {
-	id      string
-	handle  *managerFakeHandle
-	started chan struct{}
-	release <-chan struct{}
-	active  *atomic.Int32
-	peak    *atomic.Int32
+	id                    string
+	handle                *managerFakeHandle
+	started               chan struct{}
+	release               <-chan struct{}
+	active                *atomic.Int32
+	peak                  *atomic.Int32
+	bindLifetimeToContext bool
+	returnHandleOnCancel  bool
+	cancelReturnDelay     time.Duration
+	contextDone           chan struct{}
 }
 
 func (p *managerFakeProvider) ID() string { return p.id }
@@ -57,6 +61,12 @@ func (p *managerFakeProvider) Metadata() ProviderMetadata {
 	return ProviderMetadata{ID: p.id, DefaultAutomatic: true}
 }
 func (p *managerFakeProvider) Start(ctx context.Context, _ StartRequest) (Handle, error) {
+	if p.contextDone != nil {
+		go func() {
+			<-ctx.Done()
+			close(p.contextDone)
+		}()
+	}
 	if p.active != nil {
 		current := p.active.Add(1)
 		for peak := p.peak.Load(); current > peak && !p.peak.CompareAndSwap(peak, current); peak = p.peak.Load() {
@@ -70,13 +80,27 @@ func (p *managerFakeProvider) Start(ctx context.Context, _ StartRequest) (Handle
 		select {
 		case <-p.release:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			if p.cancelReturnDelay > 0 {
+				time.Sleep(p.cancelReturnDelay)
+			}
+			if !p.returnHandleOnCancel {
+				return nil, ctx.Err()
+			}
 		}
 	}
 	if p.handle.live != nil {
 		current := p.handle.live.Add(1)
 		for peak := p.peak.Load(); current > peak && !p.peak.CompareAndSwap(peak, current); peak = p.peak.Load() {
 		}
+	}
+	if p.bindLifetimeToContext {
+		go func() {
+			<-ctx.Done()
+			select {
+			case p.handle.wait <- ctx.Err():
+			default:
+			}
+		}()
 	}
 	return p.handle, nil
 }
@@ -138,6 +162,154 @@ func TestManagerBoundsConcurrentStartsAndRecordsProbeResults(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "https://") || strings.Contains(string(encoded), "nxdomain:") {
 		t.Fatalf("shareable attempts leaked URL or raw error: %s", encoded)
+	}
+}
+
+func TestManagerStartupTimeoutDoesNotOwnHealthyHandleLifetime(t *testing.T) {
+	handle := &managerFakeHandle{
+		candidate: Candidate{ProviderID: "context-bound", URL: "https://context-bound.example.test"},
+		wait:      make(chan error, 1),
+	}
+	provider := &managerFakeProvider{id: "context-bound", handle: handle, bindLifetimeToContext: true}
+	runtime, err := (Manager{
+		StartTimeout: 20 * time.Millisecond,
+		Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+			return ProbeEvidence{DNSOK: true, TLSOK: true, HealthOK: true}, nil
+		},
+	}).Start(context.Background(), []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = runtime.Stop(context.Background()) }()
+	time.Sleep(50 * time.Millisecond)
+	snapshot := runtime.Snapshot()
+	if len(snapshot.Candidates) != 1 || snapshot.Attempts[0].Status != AttemptHealthy {
+		t.Fatalf("startup timeout canceled a healthy provider handle: %#v", snapshot)
+	}
+}
+
+func TestManagerStartupTimeoutStillCancelsBlockedStart(t *testing.T) {
+	handle := &managerFakeHandle{
+		candidate: Candidate{ProviderID: "blocked-start", URL: "https://blocked-start.example.test"},
+		wait:      make(chan error, 1),
+	}
+	provider := &managerFakeProvider{
+		id: "blocked-start", handle: handle, release: make(chan struct{}), bindLifetimeToContext: true,
+	}
+	startedAt := time.Now()
+	runtime, err := (Manager{StartTimeout: 20 * time.Millisecond}).Start(
+		context.Background(), []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("blocked provider start ignored timeout: %s", elapsed)
+	}
+	attempt := runtime.Snapshot().Attempts[0]
+	if attempt.Status != AttemptDegraded || attempt.ErrorClass != "timeout" {
+		t.Fatalf("blocked provider timeout attempt = %#v", attempt)
+	}
+}
+
+func TestManagerReapsCanceledLateHandleBeforeStartingFallback(t *testing.T) {
+	stopRelease := make(chan struct{})
+	firstStarted := make(chan struct{})
+	firstHandle := &managerFakeHandle{
+		candidate: Candidate{ProviderID: "late", URL: "https://late.example.test"},
+		wait:      make(chan error, 1), stopBlock: stopRelease,
+	}
+	secondStarted := make(chan struct{})
+	secondHandle := &managerFakeHandle{
+		candidate: Candidate{ProviderID: "fallback", URL: "https://fallback.example.test"},
+		wait:      make(chan error, 1),
+	}
+	result := make(chan *Runtime, 1)
+	errResult := make(chan error, 1)
+	go func() {
+		runtime, err := (Manager{
+			MaxActive: 1, StartTimeout: 20 * time.Millisecond,
+			Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+				return ProbeEvidence{DNSOK: true, TLSOK: true, HealthOK: true}, nil
+			},
+		}).Start(context.Background(), []Selection{
+			managerSelection(&managerFakeProvider{
+				id: "late", handle: firstHandle, started: firstStarted,
+				release: make(chan struct{}), returnHandleOnCancel: true,
+			}, RegionGlobal),
+			managerSelection(&managerFakeProvider{id: "fallback", handle: secondHandle, started: secondStarted}, RegionGlobal),
+		}, StartRequest{})
+		result <- runtime
+		errResult <- err
+	}()
+	<-firstStarted
+	select {
+	case <-secondStarted:
+		t.Fatal("fallback started before timed-out provider handle was reaped")
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(stopRelease)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("fallback did not start after timed-out provider was reaped")
+	}
+	runtime := <-result
+	if err := <-errResult; err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = runtime.Stop(context.Background()) }()
+	snapshot := runtime.Snapshot()
+	if firstHandle.stops.Load() != 1 || snapshot.Attempts[0].ErrorClass != "timeout" || snapshot.Attempts[1].Status != AttemptHealthy {
+		t.Fatalf("late-handle cleanup snapshot = %#v stops=%d", snapshot, firstHandle.stops.Load())
+	}
+}
+
+func TestManagerParentCancellationCauseWinsOverLaterStartupTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	provider := &managerFakeProvider{
+		id: "parent-canceled",
+		handle: &managerFakeHandle{
+			candidate: Candidate{ProviderID: "parent-canceled", URL: "https://parent-canceled.example.test"},
+			wait:      make(chan error, 1),
+		},
+		started: started, release: make(chan struct{}), cancelReturnDelay: 75 * time.Millisecond,
+	}
+	result := make(chan *Runtime, 1)
+	go func() {
+		runtime, _ := (Manager{StartTimeout: 20 * time.Millisecond}).Start(
+			ctx, []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{},
+		)
+		result <- runtime
+	}()
+	<-started
+	cancel()
+	runtime := <-result
+	if attempt := runtime.Snapshot().Attempts[0]; attempt.ErrorClass != "canceled" {
+		t.Fatalf("parent cancellation was misclassified after timeout: %#v", attempt)
+	}
+}
+
+func TestManagerReleasesProviderContextOnSpontaneousExit(t *testing.T) {
+	contextDone := make(chan struct{})
+	handle := &managerFakeHandle{
+		candidate: Candidate{ProviderID: "spontaneous", URL: "https://spontaneous.example.test"},
+		wait:      make(chan error, 1),
+	}
+	provider := &managerFakeProvider{id: "spontaneous", handle: handle, contextDone: contextDone}
+	runtime, err := (Manager{Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+		return ProbeEvidence{HealthOK: true}, nil
+	}}).Start(context.Background(), []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = runtime.Stop(context.Background()) }()
+	handle.wait <- errors.New("provider exited")
+	select {
+	case <-contextDone:
+	case <-time.After(time.Second):
+		t.Fatal("provider context was not released after Wait completed")
 	}
 }
 
