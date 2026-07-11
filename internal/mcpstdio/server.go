@@ -1156,13 +1156,27 @@ func (s Server) supportSessionStatus(args map[string]any) (any, error) {
 	}
 	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
 	for {
-		status := supportsession.BuildStatus(supportsession.StatusOptions{
+		ticket, ticketFound := s.Gateway.TicketForCode(ticketCode)
+		var boundSession *controlplane.Session
+		if ticketFound && ticket.SessionID != "" {
+			session, err := s.Gateway.Session(ticket.SessionID)
+			if err != nil || session.SourceTicketID != ticket.ID || session.JoinCode != ticket.Code {
+				return nil, fmt.Errorf("support session binding is invalid")
+			}
+			boundSession = &session
+		}
+		statusOpts := supportsession.StatusOptions{
 			TicketCode:  ticketCode,
 			Hosts:       s.Gateway.HostsForTicketCode(ticketCode, ""),
+			Session:     boundSession,
 			Locale:      stringArg(args, "locale", "auto"),
 			GatewayURL:  s.effectiveGatewayURL(args),
 			Preconnects: s.Gateway.SupportSessionPreconnects(ticketCode),
-		})
+		}
+		if ticketFound {
+			statusOpts.Ticket = &ticket
+		}
+		status := supportsession.BuildStatus(statusOpts)
 		if !wait || status["connected"] == true || status["status"] == "pending-activation" {
 			return status, nil
 		}
@@ -1202,6 +1216,7 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 	gatewayURL := s.effectiveGatewayURL(args)
 	hostID := strings.TrimSpace(stringArg(args, "host_id", ""))
 	sessionID := strings.TrimSpace(stringArg(args, "session_id", ""))
+	targetEndpointID := strings.TrimSpace(stringArg(args, "target_endpoint_id", ""))
 	ticketCode := strings.TrimSpace(stringArg(args, "ticket_code", ""))
 	var status map[string]any
 	activeHosts := []map[string]any{}
@@ -1219,12 +1234,26 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 			return nil, err
 		}
 		status = nestedMapOrSelfAny(statusAny, "")
+		boundSessionID := strings.TrimSpace(stringMapValue(status, "session_id"))
+		boundTargetEndpointID := strings.TrimSpace(stringMapValue(status, "recommended_target_endpoint_id"))
+		if boundSessionID != "" {
+			if sessionID != "" && sessionID != boundSessionID {
+				return nil, fmt.Errorf("explicit session_id does not match the ticket binding")
+			}
+			sessionID = boundSessionID
+		}
+		if boundTargetEndpointID != "" {
+			if targetEndpointID != "" && targetEndpointID != boundTargetEndpointID {
+				return nil, fmt.Errorf("explicit target_endpoint_id does not match the ticket binding")
+			}
+			targetEndpointID = boundTargetEndpointID
+		}
 		activeHosts = mapSliceFromAny(status["active_hosts"])
 		if hostID == "" {
 			if len(activeHosts) == 1 {
 				hostID = stringMapValue(activeHosts[0], "id")
 				selectedHost = activeHosts[0]
-			} else {
+			} else if sessionID == "" || targetEndpointID == "" {
 				nextAction := "No active target endpoint is ready for this ticket. Wait with rdev.support_session.status or run recovery if stale endpoints are present."
 				if len(activeHosts) > 1 {
 					nextAction = "Multiple active targets are registered for this ticket; choose the intended session_id or target_endpoint_id before sending tasks."
@@ -1279,7 +1308,11 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 			return nil, err
 		}
 		tasks = mcpTaskReportsFromSnapshot(snapshot)
-		host = mcpEnrichHostMapFromEndpoint(host, mcpTargetEndpointFromSnapshot(snapshot, stringArg(args, "target_endpoint_id", "")))
+		endpoint := mcpTargetEndpointFromSnapshot(snapshot, targetEndpointID)
+		if targetEndpointID == "" {
+			targetEndpointID = stringMapValue(endpoint, "id")
+		}
+		host = mcpEnrichHostMapFromEndpoint(host, endpoint)
 	}
 	report := map[string]any{
 		"schema_version":        "rdev.support-session-report.v1",
@@ -1294,17 +1327,18 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 			TicketCode:       ticketCode,
 			HostID:           hostID,
 			SessionID:        sessionID,
-			TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+			TargetEndpointID: targetEndpointID,
 		}),
-		"ticket_code":     ticketCode,
-		"host_id":         hostID,
-		"session_id":      sessionID,
-		"host":            host,
-		"session":         snapshot,
-		"tasks":           tasks,
-		"human_report":    supportSessionHumanReportMap(host, tasks),
-		"next_action":     "Use rdev.sessions.task/events/artifacts for scoped work; keep the connection alive until the operator explicitly requests disconnect or revocation.",
-		"stale_host_rule": "Do not send new session tasks to stale endpoints; run recovery or create a fresh session if no target endpoint is online.",
+		"ticket_code":        ticketCode,
+		"host_id":            hostID,
+		"session_id":         sessionID,
+		"target_endpoint_id": targetEndpointID,
+		"host":               host,
+		"session":            snapshot,
+		"tasks":              tasks,
+		"human_report":       supportSessionHumanReportMap(host, tasks),
+		"next_action":        "Use rdev.sessions.task/events/artifacts for scoped work; keep the connection alive until the operator explicitly requests disconnect or revocation.",
+		"stale_host_rule":    "Do not send new session tasks to stale endpoints; run recovery or create a fresh session if no target endpoint is online.",
 	}
 	if status != nil {
 		report["status"] = status

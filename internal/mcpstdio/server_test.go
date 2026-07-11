@@ -1155,10 +1155,7 @@ func TestServerToolCallSupportSessionReportTicketCodeSelectsSingleActiveHost(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := gw.CreateSession(controlplane.SessionSpec{
-		Reason:       "mcp ticket report",
-		Capabilities: []string{"shell.user"},
-	})
+	session, err := gw.Session(ticket.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1218,6 +1215,37 @@ func TestServerToolCallSupportSessionReportTicketCodeSelectsSingleActiveHost(t *
 		!strings.Contains(structured["human_report"].(string), "identity probe") ||
 		!strings.Contains(structured["stale_host_rule"].(string), "Do not send new session tasks") {
 		t.Fatalf("expected ticket-code support session report, got %#v", structured)
+	}
+}
+
+func TestServerToolCallSupportSessionReportTicketCodeUsesBoundEndpoint(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "endpoint report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "mcp-endpoint-target",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-mcp-endpoint-report",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.support_session.report", map[string]any{"ticket_code": ticket.Code})
+	var out bytes.Buffer
+	if err := NewServer(gw).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	host := structured["host"].(map[string]any)
+	if structured["ok"] != true || structured["session_id"] != ticket.SessionID || structured["target_endpoint_id"] != endpoint.ID || host["id"] != endpoint.ID {
+		t.Fatalf("ticket-only MCP report did not consume the bound endpoint IDs: %#v", structured)
 	}
 }
 

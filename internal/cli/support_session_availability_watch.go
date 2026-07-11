@@ -192,10 +192,22 @@ func availabilityWithoutCandidates(current tunnel.AvailabilitySet, errorClass st
 }
 
 func foregroundSupportStatus(opts foregroundSupportSessionOptions) map[string]any {
-	return supportsession.BuildStatus(supportsession.StatusOptions{
+	statusOpts := supportsession.StatusOptions{
 		TicketCode: opts.TicketCode, Hosts: opts.Gateway.HostsForTicketCode(opts.TicketCode, ""),
 		Locale: opts.Locale, GatewayURL: opts.GatewayURL, Preconnects: opts.Gateway.SupportSessionPreconnects(opts.TicketCode),
-	})
+	}
+	if ticket, ok := opts.Gateway.TicketForCode(opts.TicketCode); ok {
+		statusOpts.Ticket = &ticket
+		if ticket.SessionID != "" {
+			session, err := opts.Gateway.Session(ticket.SessionID)
+			if err == nil && session.SourceTicketID == ticket.ID && session.JoinCode == ticket.Code {
+				statusOpts.Session = &session
+			} else {
+				statusOpts.Hosts = nil
+			}
+		}
+	}
+	return supportsession.BuildStatus(statusOpts)
 }
 
 func writeConnectedSupportSession(opts foregroundSupportSessionOptions, status map[string]any) {

@@ -36,6 +36,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
@@ -49,6 +50,41 @@ import (
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func TestJoinSessionByCodePermanentProtocolRejectionUsesExitCode78(t *testing.T) {
+	err := cliJoinSessionResponseError(t, http.StatusNotFound, `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The support-session entry is invalid or no longer active.","agent_next_action":"create a fresh support-session entry"}}`)
+	if got := hostcmd.ExitCode(err); got != hostcmd.PermanentJoinFailureExitCode {
+		t.Fatalf("ExitCode() = %d, want %d for %v", got, hostcmd.PermanentJoinFailureExitCode, err)
+	}
+}
+
+func TestJoinSessionByCodeRecoverableProtocolRejectionUsesExitCode1(t *testing.T) {
+	err := cliJoinSessionResponseError(t, http.StatusServiceUnavailable, `{"error":{"schema_version":"rdev.error.v1","code":"gateway_unavailable","message":"gateway is temporarily unavailable","recoverable":true,"retry_after_ms":1000,"user_summary":"The gateway is temporarily unavailable.","agent_next_action":"retry after the suggested delay"}}`)
+	if got := hostcmd.ExitCode(err); got != 1 {
+		t.Fatalf("ExitCode() = %d, want 1 for %v", got, err)
+	}
+}
+
+func cliJoinSessionResponseError(t *testing.T, statusCode int, body string) error {
+	t.Helper()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: statusCode,
+			Status:     fmt.Sprintf("%d test response", statusCode),
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})}
+	_, _, _, _, err := joinSessionByCode(context.Background(), client, "https://gateway.example.test", "WAIT-1234", controlplane.EndpointSpec{
+		Role: controlplane.EndpointRoleTarget,
+		Name: "windows-target",
+	})
+	if err == nil {
+		t.Fatal("joinSessionByCode() error = nil, want protocol rejection")
+	}
+	return err
+}
 
 type synchronizedBuffer struct {
 	mu     sync.Mutex
@@ -8026,10 +8062,7 @@ func TestSupportSessionReportTicketCodeSelectsSingleActiveHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := gw.CreateSession(controlplane.SessionSpec{
-		Reason:       "ticket report test",
-		Capabilities: []string{"shell.user"},
-	})
+	session, err := gw.Session(ticket.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8102,6 +8135,86 @@ func TestSupportSessionReportTicketCodeSelectsSingleActiveHost(t *testing.T) {
 		payload.RemoteControlEntry["explicit_disconnect_required"] != true ||
 		!strings.Contains(payload.StaleHostRule, "Do not send new session tasks") {
 		t.Fatalf("expected ticket-code report to select one active host, got %s", stdout.String())
+	}
+}
+
+func TestSupportSessionReportTicketCodeUsesBoundEndpointWithoutLegacyHost(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "endpoint report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "endpoint-report-target",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-endpoint-report",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(ticket.SessionID, controlplane.TaskSpec{
+		TargetEndpointID: endpoint.ID,
+		Adapter:          "shell",
+		Intent:           "endpoint identity probe",
+		Capabilities:     []string{"shell.user"},
+		IdempotencyKey:   "endpoint-report-task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteSessionTask(ticket.SessionID, task.ID, map[string]any{"status": "succeeded"}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"support-session", "report", "--gateway-url", server.URL, "--ticket-code", ticket.Code,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK               bool             `json:"ok"`
+		HostID           string           `json:"host_id"`
+		SessionID        string           `json:"session_id"`
+		TargetEndpointID string           `json:"target_endpoint_id"`
+		Tasks            []map[string]any `json:"tasks"`
+		Host             map[string]any   `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.HostID != "" || payload.SessionID != ticket.SessionID || payload.TargetEndpointID != endpoint.ID || len(payload.Tasks) != 1 || payload.Host["id"] != endpoint.ID {
+		t.Fatalf("ticket-only report did not consume the bound endpoint IDs: %s", stdout.String())
+	}
+}
+
+func TestSupportSessionReportRejectsExplicitSessionOutsideTicketBinding(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "binding mismatch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{Role: controlplane.EndpointRoleTarget}); err != nil {
+		t.Fatal(err)
+	}
+	standalone, err := gw.CreateSession(controlplane.SessionSpec{ExpiresAt: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"support-session", "report", "--gateway-url", server.URL, "--ticket-code", ticket.Code, "--session-id", standalone.ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match the ticket binding") || stdout.Len() != 0 {
+		t.Fatal("report did not fail closed for an explicit session outside the ticket binding")
 	}
 }
 

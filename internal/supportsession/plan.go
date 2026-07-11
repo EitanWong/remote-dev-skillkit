@@ -3224,8 +3224,10 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		sessionID = opts.Session.ID
 	}
 	recommendedTargetEndpointID := ""
+	var recommendedTargetEndpoint *controlplane.Endpoint
 	if len(targetEndpoints) > 0 {
 		recommendedTargetEndpointID = targetEndpoints[0].ID
+		recommendedTargetEndpoint = &targetEndpoints[0]
 	}
 	connected := ticketUsable && (len(active) > 0 || recommendedTargetEndpointID != "")
 	preconnectSummary := targetPreconnectSummary(opts.Preconnects)
@@ -3242,6 +3244,10 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		status = "revoked"
 	} else if preconnectStatus != "" {
 		status = preconnectStatus
+	}
+	connectedSessionID := ""
+	if recommendedTargetEndpointID != "" {
+		connectedSessionID = sessionID
 	}
 	remoteControlEntry := BuildRemoteControlEntry(RemoteControlEntryOptions{
 		GatewayURL:       opts.GatewayURL,
@@ -3269,8 +3275,9 @@ func BuildStatus(opts StatusOptions) map[string]any {
 			Hosts:            active,
 			Locale:           locale,
 			GatewayURL:       opts.GatewayURL,
-			SessionID:        sessionID,
+			SessionID:        connectedSessionID,
 			TargetEndpointID: recommendedTargetEndpointID,
+			TargetEndpoint:   recommendedTargetEndpoint,
 		}),
 		"connection_recovery": BuildConnectionRecovery(ConnectionRecoveryOptions{
 			Status:     status,
@@ -3403,6 +3410,7 @@ type ConnectedNextStepsOptions struct {
 	GatewayURL       string
 	SessionID        string
 	TargetEndpointID string
+	TargetEndpoint   *controlplane.Endpoint
 }
 
 func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
@@ -3416,6 +3424,9 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 		hostID = host.ID
 		hostName = host.Name
 		capabilities = append([]string(nil), host.Capabilities...)
+	} else if opts.TargetEndpoint != nil {
+		hostName = opts.TargetEndpoint.Name
+		capabilities = append([]string(nil), opts.TargetEndpoint.Capabilities...)
 	}
 	connected := opts.Status == "connected" && (hostID != "" || targetEndpointID != "")
 	report := "Connection established. I can see the target host and will keep the connector online until you explicitly ask me to disconnect, revoke, or stop it."

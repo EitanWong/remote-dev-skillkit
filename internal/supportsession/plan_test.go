@@ -1435,13 +1435,14 @@ func TestBuildStatusUsesBoundTargetEndpointAcrossNestedContracts(t *testing.T) {
 		SourceTicketID: ticket.ID,
 		Status:         controlplane.SessionStatusOnline,
 		Endpoints: []controlplane.Endpoint{{
-			ID:         "ep_bound_target",
-			SessionID:  ticket.SessionID,
-			Role:       controlplane.EndpointRoleTarget,
-			Name:       "windows-target",
-			Platform:   "windows/amd64",
-			State:      controlplane.EndpointStateOnline,
-			LastSeenAt: now,
+			ID:           "ep_bound_target",
+			SessionID:    ticket.SessionID,
+			Role:         controlplane.EndpointRoleTarget,
+			Name:         "windows-target",
+			Platform:     "windows/amd64",
+			Capabilities: []string{"shell.user"},
+			State:        controlplane.EndpointStateOnline,
+			LastSeenAt:   now,
 		}},
 	}
 
@@ -1457,7 +1458,8 @@ func TestBuildStatusUsesBoundTargetEndpointAcrossNestedContracts(t *testing.T) {
 	}
 	next := status["connected_next_steps"].(map[string]any)
 	calls, _ := next["mcp_next_calls"].([]map[string]any)
-	if next["connected"] != true || next["session_id"] != session.ID || next["target_endpoint_id"] != session.Endpoints[0].ID || len(calls) != 1 || calls[0]["arguments"].(map[string]any)["session_id"] != session.ID {
+	capabilities, _ := next["capabilities"].([]string)
+	if next["connected"] != true || next["session_id"] != session.ID || next["target_endpoint_id"] != session.Endpoints[0].ID || next["host_name"] != session.Endpoints[0].Name || !slices.Equal(capabilities, session.Endpoints[0].Capabilities) || len(calls) != 1 || calls[0]["arguments"].(map[string]any)["session_id"] != session.ID {
 		t.Fatal("connected next steps did not use the real bound endpoint IDs")
 	}
 	remoteEntry := status["remote_control_entry"].(map[string]any)

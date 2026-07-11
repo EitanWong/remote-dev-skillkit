@@ -42,6 +42,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostawake"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostedprovider"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
@@ -5410,6 +5411,7 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 	hostID := strings.TrimSpace(opts.HostID)
 	sessionID := strings.TrimSpace(opts.SessionID)
 	ticketCode := strings.TrimSpace(opts.TicketCode)
+	targetEndpointID := ""
 	var status map[string]any
 	activeHosts := []map[string]any{}
 	selectedHost := map[string]any{}
@@ -5423,12 +5425,20 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		if statusErr != nil {
 			return statusErr
 		}
+		boundSessionID := strings.TrimSpace(stringFromMap(status, "session_id"))
+		targetEndpointID = strings.TrimSpace(stringFromMap(status, "recommended_target_endpoint_id"))
+		if boundSessionID != "" {
+			if sessionID != "" && sessionID != boundSessionID {
+				return fmt.Errorf("explicit session_id does not match the ticket binding")
+			}
+			sessionID = boundSessionID
+		}
 		activeHosts = mapSlice(status["active_hosts"])
 		if hostID == "" {
 			if len(activeHosts) == 1 {
 				hostID = stringFromMap(activeHosts[0], "id")
 				selectedHost = activeHosts[0]
-			} else {
+			} else if sessionID == "" || targetEndpointID == "" {
 				return writeJSON(a.Stdout, supportSessionTicketReportWithoutSelectedHost(gatewayURL, ticketCode, status, len(activeHosts)))
 			}
 		} else {
@@ -5464,7 +5474,11 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		}
 		sessionSnapshot = snapshot
 		taskReports = taskReportsFromSnapshot(snapshot)
-		host = enrichReportHostFromSessionSnapshot(host, snapshot)
+		endpoint := reportTargetEndpointFromSnapshot(snapshot, targetEndpointID)
+		if targetEndpointID == "" {
+			targetEndpointID = stringFromMap(endpoint, "id")
+		}
+		host = enrichReportHostFromSessionSnapshot(host, endpoint)
 	}
 	remoteControlEntry := supportSessionRemoteControlEntryForReport(gatewayURL, ticketCode, status, host)
 	report := map[string]any{
@@ -5475,10 +5489,11 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
 		"remote_control_entry":  remoteControlEntry,
 		"managed_upgrade":       supportSessionManagedUpgradeRecommendation(host),
-		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID, SessionID: sessionID}),
+		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID, SessionID: sessionID, TargetEndpointID: targetEndpointID}),
 		"ticket_code":           ticketCode,
 		"host_id":               hostID,
 		"session_id":            sessionID,
+		"target_endpoint_id":    targetEndpointID,
 		"host":                  host,
 		"session":               sessionSnapshot,
 		"tasks":                 taskReports,
@@ -5564,17 +5579,21 @@ func taskReportsFromSnapshot(snapshot map[string]any) []map[string]any {
 	return reports
 }
 
-func enrichReportHostFromSessionSnapshot(host, snapshot map[string]any) map[string]any {
+func enrichReportHostFromSessionSnapshot(host, endpoint map[string]any) map[string]any {
 	if host == nil {
 		host = map[string]any{}
 	}
-	endpoint := reportTargetEndpointFromSnapshot(snapshot)
 	if len(endpoint) == 0 {
 		return host
 	}
 	enriched := map[string]any{}
 	for key, value := range host {
 		enriched[key] = value
+	}
+	if _, ok := enriched["id"]; !ok {
+		if id := stringFromMap(endpoint, "id"); id != "" {
+			enriched["id"] = id
+		}
 	}
 	if _, ok := enriched["name"]; !ok {
 		if name := stringFromMap(endpoint, "name"); name != "" {
@@ -5602,10 +5621,10 @@ func enrichReportHostFromSessionSnapshot(host, snapshot map[string]any) map[stri
 	return enriched
 }
 
-func reportTargetEndpointFromSnapshot(snapshot map[string]any) map[string]any {
+func reportTargetEndpointFromSnapshot(snapshot map[string]any, preferredEndpointID string) map[string]any {
 	endpoints := mapSlice(snapshot["endpoints"])
 	tasks := mapSlice(snapshot["tasks"])
-	targetEndpointID := ""
+	targetEndpointID := strings.TrimSpace(preferredEndpointID)
 	for _, task := range tasks {
 		if value := stringFromMap(task, "target_endpoint_id"); value != "" {
 			targetEndpointID = value
@@ -12214,10 +12233,10 @@ func joinSessionByCode(ctx context.Context, client *http.Client, gatewayURL, joi
 		Events   []controlplane.Event  `json:"events"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, err))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, hostcmd.NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, nil))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, hostcmd.NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, nil)
 	}
 	if payload.Session.ID == "" || payload.Endpoint.ID == "" || payload.Lease.Secret == "" {
 		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: incomplete session join response")
@@ -13231,6 +13250,6 @@ func Main() {
 			return
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "rdev: %v\n", err)
-		os.Exit(1)
+		os.Exit(hostcmd.ExitCode(err))
 	}
 }

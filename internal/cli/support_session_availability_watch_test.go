@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
@@ -320,6 +321,26 @@ func TestForegroundConnectedHostStopsAvailabilityWatcher(t *testing.T) {
 	current, _ := gw.TicketForCode(ticket.Code)
 	if current.Status != model.TicketStatusActive {
 		t.Fatalf("route exit after connection revoked ticket: %#v", current)
+	}
+}
+
+func TestForegroundSupportStatusUsesBoundTargetEndpoint(t *testing.T) {
+	gw, _, ticket := publishedSupportSessionForAvailabilityTest(t)
+	_, endpoint, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "endpoint-only-target",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-foreground-endpoint",
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := foregroundSupportStatus(foregroundSupportSessionOptions{
+		Gateway: gw, TicketID: ticket.ID, TicketCode: ticket.Code, GatewayURL: "https://gateway.example.test",
+	})
+	if status["connected"] != true || status["session_id"] != ticket.SessionID || status["recommended_target_endpoint_id"] != endpoint.ID {
+		t.Fatal("foreground status did not consume the bound target endpoint")
 	}
 }
 
