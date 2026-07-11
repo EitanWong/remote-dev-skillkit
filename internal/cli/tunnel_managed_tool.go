@@ -277,18 +277,20 @@ func (installer managedGzipInstaller) ensureCompressed(ctx context.Context, root
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("inspect cached compressed asset: %w", err)
 	}
-	if err := os.Rename(tempPath, cachePath); err != nil {
-		if _, statErr := os.Lstat(cachePath); statErr == nil {
-			winner, verifyErr := tunnel.OpenVerifiedProtectedRegularFileSHA256(cachePath, maxBytes, expected)
-			if verifyErr == nil {
-				return winner, nil
-			}
-		}
+	published, err := publishManagedToolNoReplace(tempPath, cachePath)
+	if err != nil {
 		return nil, fmt.Errorf("publish managed tool download: %w", err)
 	}
 	removeTemp = false
 	if err := syncSupportSessionArtifactDirectory(cachePath); err != nil {
 		return nil, fmt.Errorf("sync managed tool cache: %w", err)
+	}
+	if !published {
+		winner, verifyErr := tunnel.OpenVerifiedProtectedRegularFileSHA256(cachePath, maxBytes, expected)
+		if verifyErr != nil {
+			return nil, fmt.Errorf("competing cached asset failed verification: %w", verifyErr)
+		}
+		return winner, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -440,19 +442,23 @@ func (installer managedGzipInstaller) expandVerifiedGzip(ctx context.Context, ro
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("inspect managed tool executable: %w", err)
 	}
-	if err := os.Rename(tempPath, executablePath); err != nil {
-		if _, statErr := os.Lstat(executablePath); statErr == nil {
-			winner, verifyErr := tunnel.OpenVerifiedProtectedExecutableSHA256(executablePath, maxBytes, bytesToDigest(expandedDigest))
-			if verifyErr == nil {
-				_ = winner.Close()
-				return executablePath, nil
-			}
-		}
+	published, err := publishManagedToolNoReplace(tempPath, executablePath)
+	if err != nil {
 		return "", fmt.Errorf("publish managed tool executable: %w", err)
 	}
 	removeTemp = false
 	if err := syncSupportSessionArtifactDirectory(executablePath); err != nil {
 		return "", fmt.Errorf("sync managed tool executable: %w", err)
+	}
+	if !published {
+		winner, verifyErr := tunnel.OpenVerifiedProtectedExecutableSHA256(executablePath, maxBytes, bytesToDigest(expandedDigest))
+		if verifyErr != nil {
+			return "", fmt.Errorf("competing managed tool executable failed verification: %w", verifyErr)
+		}
+		if err := winner.Close(); err != nil {
+			return "", fmt.Errorf("close competing managed tool executable: %w", err)
+		}
+		return executablePath, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -465,6 +471,44 @@ func (installer managedGzipInstaller) expandVerifiedGzip(ctx context.Context, ro
 		return "", fmt.Errorf("close verified managed tool executable: %w", err)
 	}
 	return executablePath, nil
+}
+
+// publishManagedToolNoReplace atomically gives targetPath a hard link to the
+// complete same-directory temporary file without ever replacing an existing
+// target. A false result means another publisher won the target name.
+func publishManagedToolNoReplace(tempPath, targetPath string) (bool, error) {
+	tempAbsolute, err := filepath.Abs(tempPath)
+	if err != nil {
+		return false, fmt.Errorf("resolve managed tool temporary path: %w", err)
+	}
+	targetAbsolute, err := filepath.Abs(targetPath)
+	if err != nil {
+		return false, fmt.Errorf("resolve managed tool target path: %w", err)
+	}
+	tempDirectory := filepath.Dir(tempAbsolute)
+	targetDirectory := filepath.Dir(targetAbsolute)
+	sameDirectory := filepath.Clean(tempDirectory) == filepath.Clean(targetDirectory)
+	samePath := filepath.Clean(tempAbsolute) == filepath.Clean(targetAbsolute)
+	if runtime.GOOS == "windows" {
+		sameDirectory = strings.EqualFold(filepath.Clean(tempDirectory), filepath.Clean(targetDirectory))
+		samePath = strings.EqualFold(filepath.Clean(tempAbsolute), filepath.Clean(targetAbsolute))
+	}
+	if !sameDirectory || samePath {
+		return false, errors.New("managed tool publication paths must be distinct files in one directory")
+	}
+	if err := os.Link(tempPath, targetPath); err != nil {
+		if !os.IsExist(err) {
+			return false, fmt.Errorf("link managed tool target: %w", err)
+		}
+		if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("remove losing managed tool temporary file: %w", err)
+		}
+		return false, nil
+	}
+	if err := os.Remove(tempPath); err != nil {
+		return true, fmt.Errorf("remove published managed tool temporary file: %w", err)
+	}
+	return true, nil
 }
 
 func verifyManagedExecutableHandle(file *os.File, path string, maxBytes int64, expected []byte) error {

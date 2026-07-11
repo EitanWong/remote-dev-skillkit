@@ -409,6 +409,61 @@ func TestManagedGzipInstallerConcurrentEnsure(t *testing.T) {
 	assertNoManagedToolTemps(t, root)
 }
 
+func TestPublishManagedToolNoReplace(t *testing.T) {
+	t.Run("existing target wins without replacement", func(t *testing.T) {
+		root := managedToolTestRoot(t)
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		tempPath := filepath.Join(root, ".tool.tmp")
+		targetPath := filepath.Join(root, "tool")
+		if err := os.WriteFile(tempPath, []byte("candidate"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(targetPath, []byte("winner"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		published, err := publishManagedToolNoReplace(tempPath, targetPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if published {
+			t.Fatal("existing target was reported as newly published")
+		}
+		if got, err := os.ReadFile(targetPath); err != nil || string(got) != "winner" {
+			t.Fatalf("existing target changed: content=%q err=%v", got, err)
+		}
+		if _, err := os.Lstat(tempPath); !os.IsNotExist(err) {
+			t.Fatalf("temporary candidate remains: %v", err)
+		}
+	})
+
+	t.Run("missing target is atomically published", func(t *testing.T) {
+		root := managedToolTestRoot(t)
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		tempPath := filepath.Join(root, ".tool.tmp")
+		targetPath := filepath.Join(root, "tool")
+		if err := os.WriteFile(tempPath, []byte("candidate"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		published, err := publishManagedToolNoReplace(tempPath, targetPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !published {
+			t.Fatal("missing target was not published")
+		}
+		if got, err := os.ReadFile(targetPath); err != nil || string(got) != "candidate" {
+			t.Fatalf("published target content=%q err=%v", got, err)
+		}
+		if _, err := os.Lstat(tempPath); !os.IsNotExist(err) {
+			t.Fatalf("temporary candidate remains: %v", err)
+		}
+	})
+}
+
 func managedInstallerForServer(t *testing.T, server *httptest.Server) managedGzipInstaller {
 	t.Helper()
 	parsed, err := url.Parse(server.URL)
