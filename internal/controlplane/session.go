@@ -334,6 +334,17 @@ type ProtocolError struct {
 	Details         map[string]any `json:"details,omitempty"`
 }
 
+func InvalidJoinCodeError() ProtocolError {
+	return ProtocolError{
+		SchemaVersion:   ErrorSchemaVersion,
+		Code:            ErrInvalidJoinCode,
+		Message:         "join code is invalid",
+		Recoverable:     false,
+		UserSummary:     "The support-session entry is invalid or no longer active.",
+		AgentNextAction: "create a fresh support-session entry and use its generated handoff",
+	}
+}
+
 func NewSession(spec SessionSpec, now time.Time) (Session, error) {
 	id, err := newID("ses")
 	if err != nil {

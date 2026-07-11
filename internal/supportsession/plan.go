@@ -44,6 +44,7 @@ const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recover
 const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-steps.v1"
 const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1"
 const ConnectionSupervisionSchemaVersion = "rdev.support-session-connection-supervision.v1"
+const supportSessionEndpointFreshAfter = 90 * time.Second
 const GatewayCandidatePreflightSchemaVersion = "rdev.support-session-gateway-candidate-preflight.v1"
 const ConnectivityHelperPreflightSchemaVersion = "rdev.support-session-connectivity-helper-preflight.v1"
 const ConnectionEntryRunnerRecommendationSchemaVersion = "rdev.support-session-connection-entry-runner-recommendation.v1"
@@ -104,11 +105,13 @@ type HandoffOptions struct {
 }
 
 type RemoteControlEntryOptions struct {
-	GatewayURL string
-	TicketCode string
-	Ticket     *model.Ticket
-	Hosts      []model.Host
-	Locale     string
+	GatewayURL       string
+	TicketCode       string
+	Ticket           *model.Ticket
+	Hosts            []model.Host
+	Locale           string
+	SessionID        string
+	TargetEndpointID string
 }
 
 type GatewayURLCandidate struct {
@@ -2671,6 +2674,13 @@ func BuildRemoteControlEntry(opts RemoteControlEntryOptions) map[string]any {
 	if len(activeHosts) == 1 {
 		entry["recommended_task_endpoint_id"] = activeHosts[0].ID
 	}
+	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
+		entry["session_id"] = sessionID
+	}
+	if targetEndpointID := strings.TrimSpace(opts.TargetEndpointID); targetEndpointID != "" {
+		entry["recommended_target_endpoint_id"] = targetEndpointID
+		entry["recommended_task_endpoint_id"] = targetEndpointID
+	}
 	if len(hosts) > 0 {
 		entry["host_count"] = map[string]int{
 			"active":  len(activeHosts),
@@ -3193,6 +3203,7 @@ func localizedUserHandoffMessage(locale, surface string) string {
 
 func BuildStatus(opts StatusOptions) map[string]any {
 	ticketCode := strings.TrimSpace(opts.TicketCode)
+	now := time.Now().UTC()
 	locale := strings.TrimSpace(opts.Locale)
 	if locale == "" {
 		locale = "auto"
@@ -3202,7 +3213,12 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	stale := hostsByStatus(hosts, model.HostStatusStale)
 	pending := hostsByStatus(hosts, model.HostStatusPending)
 	revoked := hostsByStatus(hosts, model.HostStatusRevoked)
-	targetEndpoints := onlineTargetEndpoints(opts.Session)
+	ticketUsable := opts.Ticket == nil || (opts.Ticket.Status == model.TicketStatusActive && now.Before(opts.Ticket.ExpiresAt))
+	bindingValid := opts.Ticket == nil || opts.Session == nil || (opts.Ticket.SessionID == opts.Session.ID && opts.Session.SourceTicketID == opts.Ticket.ID && opts.Session.JoinCode == opts.Ticket.Code)
+	targetEndpoints := onlineTargetEndpoints(opts.Session, now)
+	if !ticketUsable || !bindingValid {
+		targetEndpoints = nil
+	}
 	sessionID := ""
 	if opts.Session != nil {
 		sessionID = opts.Session.ID
@@ -3211,7 +3227,7 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	if len(targetEndpoints) > 0 {
 		recommendedTargetEndpointID = targetEndpoints[0].ID
 	}
-	connected := len(active) > 0 || recommendedTargetEndpointID != ""
+	connected := ticketUsable && (len(active) > 0 || recommendedTargetEndpointID != "")
 	preconnectSummary := targetPreconnectSummary(opts.Preconnects)
 	preconnectStatus, _ := preconnectSummary["status"].(string)
 	waiting := !connected && len(pending) == 0 && len(stale) == 0 && len(revoked) == 0 && preconnectStatus == ""
@@ -3228,11 +3244,13 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		status = preconnectStatus
 	}
 	remoteControlEntry := BuildRemoteControlEntry(RemoteControlEntryOptions{
-		GatewayURL: opts.GatewayURL,
-		TicketCode: ticketCode,
-		Ticket:     opts.Ticket,
-		Hosts:      hosts,
-		Locale:     locale,
+		GatewayURL:       opts.GatewayURL,
+		TicketCode:       ticketCode,
+		Ticket:           opts.Ticket,
+		Hosts:            hosts,
+		Locale:           locale,
+		SessionID:        sessionID,
+		TargetEndpointID: recommendedTargetEndpointID,
 	})
 	out := map[string]any{
 		"schema_version":                 StatusSchemaVersion,
@@ -3247,10 +3265,12 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		"next_action":                    localizedStatusNextAction(status, locale),
 		"remote_control_entry":           remoteControlEntry,
 		"connected_next_steps": BuildConnectedNextSteps(ConnectedNextStepsOptions{
-			Status:     status,
-			Hosts:      active,
-			Locale:     locale,
-			GatewayURL: opts.GatewayURL,
+			Status:           status,
+			Hosts:            active,
+			Locale:           locale,
+			GatewayURL:       opts.GatewayURL,
+			SessionID:        sessionID,
+			TargetEndpointID: recommendedTargetEndpointID,
 		}),
 		"connection_recovery": BuildConnectionRecovery(ConnectionRecoveryOptions{
 			Status:     status,
@@ -3289,7 +3309,6 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	// Attach ticket expiry when the caller provides the ticket so agents and
 	// users can see how much time remains without having to infer it.
 	if opts.Ticket != nil {
-		now := time.Now().UTC()
 		remainingSec := int(opts.Ticket.ExpiresAt.Sub(now).Seconds())
 		if remainingSec < 0 {
 			remainingSec = 0
@@ -3301,13 +3320,16 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	return out
 }
 
-func onlineTargetEndpoints(session *controlplane.Session) []controlplane.Endpoint {
+func onlineTargetEndpoints(session *controlplane.Session, now time.Time) []controlplane.Endpoint {
 	if session == nil || session.Status == controlplane.SessionStatusClosed || session.Status == controlplane.SessionStatusFailed || session.Status == controlplane.SessionStatusRevoked {
 		return nil
 	}
 	endpoints := make([]controlplane.Endpoint, 0, len(session.Endpoints))
 	for _, endpoint := range session.Endpoints {
 		if endpoint.Role != controlplane.EndpointRoleTarget {
+			continue
+		}
+		if endpoint.LastSeenAt.IsZero() || endpoint.LastSeenAt.Before(now.Add(-supportSessionEndpointFreshAfter)) {
 			continue
 		}
 		switch endpoint.State {
@@ -3375,23 +3397,27 @@ func targetPreconnectAgentInterpretation(status string) string {
 }
 
 type ConnectedNextStepsOptions struct {
-	Status     string
-	Hosts      []model.Host
-	Locale     string
-	GatewayURL string
+	Status           string
+	Hosts            []model.Host
+	Locale           string
+	GatewayURL       string
+	SessionID        string
+	TargetEndpointID string
 }
 
 func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
-	connected := opts.Status == "connected" && len(opts.Hosts) > 0
+	sessionID := strings.TrimSpace(opts.SessionID)
+	targetEndpointID := strings.TrimSpace(opts.TargetEndpointID)
 	hostID := ""
 	hostName := ""
 	capabilities := []string{}
-	if connected {
+	if len(opts.Hosts) > 0 {
 		host := opts.Hosts[0]
 		hostID = host.ID
 		hostName = host.Name
 		capabilities = append([]string(nil), host.Capabilities...)
 	}
+	connected := opts.Status == "connected" && (hostID != "" || targetEndpointID != "")
 	report := "Connection established. I can see the target host and will keep the connector online until you explicitly ask me to disconnect, revoke, or stop it."
 	switch opts.Locale {
 	case "zh-CN", "zh":
@@ -3412,14 +3438,20 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	var mcpNextCalls any
 	var cliNextCommands any
 	if connected {
-		mcpNextCalls = connectedNextMCPCalls(hostID, opts.GatewayURL)
-		cliNextCommands = connectedNextCLICommands(hostID)
+		mcpSessionID := sessionID
+		if mcpSessionID == "" && hostID != "" {
+			mcpSessionID = "<session-id>"
+		}
+		mcpNextCalls = connectedNextMCPCalls(mcpSessionID, opts.GatewayURL)
+		cliNextCommands = connectedNextCLICommands(hostID, sessionID, targetEndpointID)
 	}
 	return map[string]any{
 		"schema_version":     ConnectedNextStepsSchemaVersion,
 		"connected":          connected,
 		"host_id":            hostID,
 		"host_name":          hostName,
+		"session_id":         sessionID,
+		"target_endpoint_id": targetEndpointID,
 		"capabilities":       capabilities,
 		"user_report":        report,
 		"agent_next_actions": actions,
@@ -3434,12 +3466,12 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	}
 }
 
-func connectedNextMCPCalls(hostID, gatewayURL string) []map[string]any {
-	if strings.TrimSpace(hostID) == "" {
+func connectedNextMCPCalls(sessionID, gatewayURL string) []map[string]any {
+	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
 	args := map[string]any{
-		"session_id": "<session-id>",
+		"session_id": sessionID,
 	}
 	if gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/"); gatewayURL != "" {
 		args["gateway_url"] = gatewayURL
@@ -3452,8 +3484,14 @@ func connectedNextMCPCalls(hostID, gatewayURL string) []map[string]any {
 	}
 }
 
-func connectedNextCLICommands(hostID string) [][]string {
-	if strings.TrimSpace(hostID) == "" {
+func connectedNextCLICommands(hostID, sessionID, targetEndpointID string) [][]string {
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" && strings.TrimSpace(targetEndpointID) != "" {
+		return [][]string{
+			{"rdev", "support-session", "audit-capabilities", "--gateway-url", "<active-gateway-url>", "--session-id", sessionID, "--target-endpoint-id", targetEndpointID},
+			{"rdev", "mcp", "serve", "--gateway-url", "<active-gateway-url>"},
+		}
+	}
+	if hostID = strings.TrimSpace(hostID); hostID == "" {
 		return nil
 	}
 	return [][]string{

@@ -166,7 +166,7 @@ func (s *MemoryStore) JoinByCode(joinCode string, spec EndpointSpec) (Session, E
 	sessionID, ok := s.joinCodes[joinCode]
 	s.mu.Unlock()
 	if !ok {
-		return Session{}, Endpoint{}, Lease{}, nil, s.err(ErrInvalidJoinCode, "join code is invalid", false)
+		return Session{}, Endpoint{}, Lease{}, nil, InvalidJoinCodeError()
 	}
 
 	session, endpoint, lease, err := s.JoinSession(sessionID, spec)
@@ -260,6 +260,9 @@ func (s *MemoryStore) EventsAfter(sessionID string, cursor EventCursor, limit in
 		LastSeq:      session.LastSeq,
 		RetryAfterMS: session.RetryAfterMS,
 	}
+	if sessionTerminal(session.Status) {
+		return nil, Lease{}, replay, s.err(ErrTerminalSession, "session is terminal", false)
+	}
 	if cursor.AfterSeq < session.SnapshotSeq {
 		replay.SnapshotRequired = true
 		return nil, Lease{}, replay, s.err(ErrSnapshotRequired, "event cursor is older than compacted snapshot", true)
@@ -333,6 +336,9 @@ func (s *MemoryStore) ValidateLease(sessionID, endpointID, secret string) error 
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		return s.err(ErrInvalidJoinCode, "session not found", false)
+	}
+	if sessionTerminal(session.Status) {
+		return s.err(ErrTerminalSession, "session is terminal", false)
 	}
 	if s.endpointIndexLocked(session, endpointID) < 0 {
 		return s.err(ErrEndpointNotFound, "endpoint not found", true)
@@ -595,6 +601,38 @@ func (s *MemoryStore) CloseSession(sessionID string) (Session, Event, error) {
 		Type:           EventTypeClose,
 		FromEndpointID: "gateway",
 		IdempotencyKey: "close:" + sessionID,
+	}, true)
+	if err != nil {
+		return Session{}, Event{}, err
+	}
+	return s.sessions[sessionID].clone(), event, nil
+}
+
+func (s *MemoryStore) RevokeSession(sessionID string) (Session, Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.sessions[sessionID]
+	if !ok {
+		return Session{}, Event{}, s.err(ErrInvalidJoinCode, "session not found", false)
+	}
+	if session.Status == SessionStatusRevoked {
+		return session.clone(), Event{}, nil
+	}
+	now := s.now()
+	for index := range session.Endpoints {
+		session.Endpoints[index].State = EndpointStateRevoked
+		session.Endpoints[index].LastSeenAt = now
+		delete(s.leases, session.Endpoints[index].ID)
+	}
+	session.Status = SessionStatusRevoked
+	session.UpdatedAt = now
+	s.sessions[sessionID] = session
+	s.terminalAt[sessionID] = now
+	event, err := s.appendEventLocked(sessionID, Event{
+		Type:           EventTypeClose,
+		FromEndpointID: "gateway",
+		IdempotencyKey: "revoke:" + sessionID,
 	}, true)
 	if err != nil {
 		return Session{}, Event{}, err

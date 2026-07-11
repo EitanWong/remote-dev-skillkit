@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
@@ -1416,6 +1417,84 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 		!slices.Contains(watchCommand, "https://gateway.example.test") ||
 		!strings.Contains(strings.Join(runbook["on_connected"].([]string), "\n"), "capabilities") {
 		t.Fatalf("expected connected status runbook, got %#v", runbook)
+	}
+}
+
+func TestBuildStatusUsesBoundTargetEndpointAcrossNestedContracts(t *testing.T) {
+	now := time.Now().UTC()
+	ticket := model.Ticket{
+		ID:        "tkt_bound",
+		Code:      "BOUND-1234",
+		SessionID: "ses_bound",
+		Status:    model.TicketStatusActive,
+		ExpiresAt: now.Add(10 * time.Minute),
+	}
+	session := controlplane.Session{
+		ID:             ticket.SessionID,
+		JoinCode:       ticket.Code,
+		SourceTicketID: ticket.ID,
+		Status:         controlplane.SessionStatusOnline,
+		Endpoints: []controlplane.Endpoint{{
+			ID:         "ep_bound_target",
+			SessionID:  ticket.SessionID,
+			Role:       controlplane.EndpointRoleTarget,
+			Name:       "windows-target",
+			Platform:   "windows/amd64",
+			State:      controlplane.EndpointStateOnline,
+			LastSeenAt: now,
+		}},
+	}
+
+	status := BuildStatus(StatusOptions{
+		TicketCode: ticket.Code,
+		Ticket:     &ticket,
+		Session:    &session,
+		Locale:     "en",
+		GatewayURL: "https://gateway.example.test",
+	})
+	if status["connected"] != true || status["session_id"] != session.ID || status["recommended_target_endpoint_id"] != session.Endpoints[0].ID {
+		t.Fatal("endpoint-driven status omitted the bound session or target endpoint")
+	}
+	next := status["connected_next_steps"].(map[string]any)
+	calls, _ := next["mcp_next_calls"].([]map[string]any)
+	if next["connected"] != true || next["session_id"] != session.ID || next["target_endpoint_id"] != session.Endpoints[0].ID || len(calls) != 1 || calls[0]["arguments"].(map[string]any)["session_id"] != session.ID {
+		t.Fatal("connected next steps did not use the real bound endpoint IDs")
+	}
+	remoteEntry := status["remote_control_entry"].(map[string]any)
+	if remoteEntry["session_id"] != session.ID || remoteEntry["recommended_target_endpoint_id"] != session.Endpoints[0].ID {
+		t.Fatal("remote control entry did not use the real bound endpoint IDs")
+	}
+}
+
+func TestBuildStatusRejectsStaleOrTicketInvalidTargetEndpoint(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tt := range []struct {
+		name         string
+		ticketStatus model.TicketStatus
+		expiresAt    time.Time
+		lastSeenAt   time.Time
+	}{
+		{name: "stale endpoint", ticketStatus: model.TicketStatusActive, expiresAt: now.Add(time.Minute), lastSeenAt: now.Add(-91 * time.Second)},
+		{name: "expired ticket", ticketStatus: model.TicketStatusActive, expiresAt: now.Add(-time.Second), lastSeenAt: now},
+		{name: "revoked ticket", ticketStatus: model.TicketStatusRevoked, expiresAt: now.Add(time.Minute), lastSeenAt: now},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ticket := model.Ticket{ID: "tkt_status", Code: "STATE-1234", SessionID: "ses_status", Status: tt.ticketStatus, ExpiresAt: tt.expiresAt}
+			session := controlplane.Session{
+				ID:             ticket.SessionID,
+				JoinCode:       ticket.Code,
+				SourceTicketID: ticket.ID,
+				Status:         controlplane.SessionStatusOnline,
+				Endpoints: []controlplane.Endpoint{{
+					ID: "ep_status", SessionID: ticket.SessionID, Role: controlplane.EndpointRoleTarget,
+					State: controlplane.EndpointStateOnline, LastSeenAt: tt.lastSeenAt,
+				}},
+			}
+			status := BuildStatus(StatusOptions{TicketCode: ticket.Code, Ticket: &ticket, Session: &session})
+			if status["connected"] == true || status["recommended_target_endpoint_id"] != "" {
+				t.Fatal("stale or invalid ticket endpoint was reported connected")
+			}
+		})
 	}
 }
 

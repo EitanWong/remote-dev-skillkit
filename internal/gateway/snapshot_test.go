@@ -127,6 +127,74 @@ func TestMemoryGatewaySnapshotRejectsSigningKeyMismatch(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewaySnapshotMigratesLegacyActiveTicketSessionBinding(t *testing.T) {
+	publicKey, privateKey := gatewaySnapshotKeyPair(t)
+	now := time.Date(2026, 7, 12, 9, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "legacy active ticket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := gw.Snapshot()
+	snapshot.Tickets[0].SessionID = ""
+	snapshot.ControlPlane.Sessions = nil
+	snapshot.ControlPlane.Events = map[string][]controlplane.Event{}
+	snapshot.ControlPlane.Leases = nil
+	snapshot.ControlPlane.TerminalAt = nil
+
+	restored := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+	if err := restored.RestoreSnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	migrated, ok := restored.TicketForCode(ticket.Code)
+	if !ok || migrated.SessionID == "" {
+		t.Fatal("legacy active ticket did not receive a migrated session binding")
+	}
+	session, err := restored.Session(migrated.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.JoinCode != migrated.Code || session.SourceTicketID != migrated.ID {
+		t.Fatal("migrated session did not preserve the exact ticket binding")
+	}
+}
+
+func TestMemoryGatewaySnapshotRejectsCorruptTicketSessionBindings(t *testing.T) {
+	for _, corruption := range []struct {
+		name   string
+		mutate func(*Snapshot)
+	}{
+		{
+			name: "missing bound session",
+			mutate: func(snapshot *Snapshot) {
+				snapshot.Tickets[0].SessionID = "ses_missing"
+			},
+		},
+		{
+			name: "standalone session owns ticket code",
+			mutate: func(snapshot *Snapshot) {
+				snapshot.Tickets[0].SessionID = ""
+				snapshot.ControlPlane.Sessions[0].SourceTicketID = ""
+			},
+		},
+	} {
+		t.Run(corruption.name, func(t *testing.T) {
+			publicKey, privateKey := gatewaySnapshotKeyPair(t)
+			now := time.Date(2026, 7, 12, 9, 0, 0, 0, time.UTC)
+			gw := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+			if _, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "corrupt binding"); err != nil {
+				t.Fatal(err)
+			}
+			snapshot := gw.Snapshot()
+			corruption.mutate(&snapshot)
+			restored := NewMemoryGatewayWithSigningKey(func() time.Time { return now }, "gateway-state", publicKey, privateKey)
+			if err := restored.RestoreSnapshot(snapshot); err == nil {
+				t.Fatal("corrupt ticket/session binding was accepted")
+			}
+		})
+	}
+}
+
 func gatewaySnapshotKeyPair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)

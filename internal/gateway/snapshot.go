@@ -103,6 +103,9 @@ func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
 	if err := sessionStore.RestoreSnapshot(snapshot.ControlPlane); err != nil {
 		return err
 	}
+	if err := reconcileTicketSessionBindings(tickets, sessionStore); err != nil {
+		return err
+	}
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -112,6 +115,51 @@ func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
 	g.sessionStore = sessionStore
 	g.audit = auditEvents
 	g.trustBundle = snapshot.TrustBundle
+	return nil
+}
+
+func reconcileTicketSessionBindings(tickets map[string]model.Ticket, sessionStore *controlplane.MemoryStore) error {
+	controlSnapshot := sessionStore.Snapshot()
+	sessionsByID := make(map[string]controlplane.Session, len(controlSnapshot.Sessions))
+	sessionsByCode := make(map[string]controlplane.Session, len(controlSnapshot.Sessions))
+	for _, session := range controlSnapshot.Sessions {
+		sessionsByID[session.ID] = session
+		sessionsByCode[session.JoinCode] = session
+		if session.SourceTicketID == "" {
+			continue
+		}
+		ticket, ok := tickets[session.SourceTicketID]
+		if !ok || ticket.SessionID != session.ID || ticket.Code != session.JoinCode {
+			return fmt.Errorf("snapshot contains mismatched ticket/session binding")
+		}
+	}
+
+	for ticketID, ticket := range tickets {
+		if ticket.Status == model.TicketStatusProbing && ticket.SessionID != "" {
+			return fmt.Errorf("snapshot probing ticket contains a session binding")
+		}
+		if ticket.SessionID != "" {
+			session, ok := sessionsByID[ticket.SessionID]
+			if !ok || session.SourceTicketID != ticket.ID || session.JoinCode != ticket.Code {
+				return fmt.Errorf("snapshot contains invalid ticket/session binding")
+			}
+			continue
+		}
+		if ticket.Status != model.TicketStatusActive {
+			continue
+		}
+		if _, collision := sessionsByCode[ticket.Code]; collision {
+			return fmt.Errorf("snapshot ticket join code collides with an existing session")
+		}
+		session, err := sessionStore.CreateSessionForTicket(ticketSessionSpec(ticket), ticket.ID, ticket.Code)
+		if err != nil {
+			return fmt.Errorf("migrate legacy ticket session binding: %w", err)
+		}
+		ticket.SessionID = session.ID
+		tickets[ticketID] = ticket
+		sessionsByID[session.ID] = session
+		sessionsByCode[session.JoinCode] = session
+	}
 	return nil
 }
 
