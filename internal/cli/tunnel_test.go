@@ -745,17 +745,10 @@ func TestProviderURLParsersRejectMisleadingURLs(t *testing.T) {
 	}
 }
 
-func TestSSHProvidersRefuseStartWithoutReviewedKnownHosts(t *testing.T) {
-	providers := []tunnel.Provider{
-		newLocalhostRunProvider(io.Discard, ""),
-		newPinggyProvider(io.Discard, ""),
-	}
-	for _, provider := range providers {
-		t.Run(provider.ID(), func(t *testing.T) {
-			if _, err := provider.Start(context.Background(), tunnel.StartRequest{LocalPort: "8787"}); err == nil {
-				t.Fatal("expected provider start to require reviewed known-hosts")
-			}
-		})
+func TestPinggyProviderRefusesStartWithoutReviewedKnownHosts(t *testing.T) {
+	provider := newPinggyProvider(io.Discard, "")
+	if _, err := provider.Start(context.Background(), tunnel.StartRequest{LocalPort: "8787"}); err == nil {
+		t.Fatal("expected Pinggy start to require reviewed known-hosts")
 	}
 }
 

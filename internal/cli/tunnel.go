@@ -1223,7 +1223,7 @@ func newLocalhostRunProvider(stderr io.Writer, knownHostsFile string) tunnel.Pro
 	return cliTunnelProvider{
 		metadata: tunnel.ProviderMetadata{
 			ID: tunnel.ProviderLocalhostRun, DisplayName: "localhost.run", Protocols: []string{"https", "ssh"},
-			Anonymous: true, Executable: "ssh", DocumentationURL: "https://localhost.run/docs/", RequiresSSHPin: true,
+			Anonymous: true, Executable: "ssh", DocumentationURL: "https://localhost.run/docs/", DefaultAutomatic: true, AutomaticPriority: 30,
 		},
 		stderr: stderr, knownHostsFile: knownHostsFile,
 		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, pin string) (runningTunnel, error) {
@@ -1236,7 +1236,7 @@ func newPinggyProvider(stderr io.Writer, knownHostsFile string) tunnel.Provider 
 	return cliTunnelProvider{
 		metadata: tunnel.ProviderMetadata{
 			ID: tunnel.ProviderPinggy, DisplayName: "Pinggy", Protocols: []string{"https", "ssh"},
-			Anonymous: true, Executable: "ssh", DocumentationURL: "https://pinggy.io/docs/", RequiresSSHPin: true,
+			Anonymous: true, Executable: "ssh", DocumentationURL: "https://pinggy.io/docs/", AutomaticPriority: 40, RequiresSSHPin: true,
 		},
 		stderr: stderr, knownHostsFile: knownHostsFile,
 		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, pin string) (runningTunnel, error) {
@@ -1257,6 +1257,13 @@ func (p cliTunnelProvider) Start(ctx context.Context, request tunnel.StartReques
 	knownHostsFile := strings.TrimSpace(request.KnownHostsFile)
 	if knownHostsFile == "" {
 		knownHostsFile = strings.TrimSpace(p.knownHostsFile)
+	}
+	if p.metadata.ID == tunnel.ProviderLocalhostRun && knownHostsFile == "" {
+		var err error
+		knownHostsFile, err = materializeProviderKnownHosts(request.ProviderRoot, localhostRunTrustAnchor)
+		if err != nil {
+			return nil, fmt.Errorf("provider %q built-in host identity is unavailable", p.metadata.ID)
+		}
 	}
 	if p.metadata.RequiresSSHPin && knownHostsFile == "" {
 		return nil, fmt.Errorf("provider %q requires a reviewed known-hosts file", p.metadata.ID)
