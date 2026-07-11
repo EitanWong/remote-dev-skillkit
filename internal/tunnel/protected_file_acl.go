@@ -48,6 +48,16 @@ const windowsProtectedWriteMask = windowsFileWriteData |
 	windowsGenericAll |
 	windowsGenericWrite
 
+const windowsProtectedAncestorReplacementMask = windowsFileWriteEA |
+	windowsFileDeleteChild |
+	windowsFileWriteAttribute |
+	windowsDelete |
+	windowsWriteDAC |
+	windowsWriteOwner |
+	windowsMaximumAllowed |
+	windowsGenericAll |
+	windowsGenericWrite
+
 const windowsProtectedReadMask = windowsFileReadData |
 	windowsFileReadEA |
 	windowsFileExecute |
@@ -81,6 +91,43 @@ func validateWindowsConfidentialPathACL(acl windowsProtectedFileACL) error {
 	return nil
 }
 
+func validateWindowsProtectedAncestorACL(acl windowsProtectedFileACL) error {
+	if !acl.DACLPresent || acl.DACLNull {
+		return fmt.Errorf("protected path ancestor Windows DACL must be present and non-null")
+	}
+	trusted := map[string]struct{}{
+		acl.CurrentUserSID:   {},
+		acl.AdministratorSID: {},
+		acl.SystemSID:        {},
+	}
+	for _, sid := range acl.TrustedOwnerSIDs {
+		if sid != "" {
+			trusted[sid] = struct{}{}
+		}
+	}
+	if acl.CurrentUserSID == "" || acl.AdministratorSID == "" || acl.SystemSID == "" {
+		return fmt.Errorf("protected path ancestor Windows trusted SID is missing")
+	}
+	if _, ok := trusted[acl.OwnerSID]; acl.OwnerSID == "" || !ok {
+		return fmt.Errorf("protected path ancestor Windows owner is not trusted")
+	}
+	for _, ace := range acl.ACEs {
+		if ace.Type != windowsACEAllowed && ace.Type != windowsACEDenied {
+			return fmt.Errorf("protected path ancestor Windows DACL contains an unsupported ACE")
+		}
+		if ace.SID == "" {
+			return fmt.Errorf("protected path ancestor Windows ACE SID is missing")
+		}
+		if ace.Flags&windowsACEInheritOnly != 0 || ace.Type != windowsACEAllowed || ace.Mask&windowsProtectedAncestorReplacementMask == 0 {
+			continue
+		}
+		if _, ok := trusted[ace.SID]; !ok {
+			return fmt.Errorf("protected path ancestor Windows DACL grants replacement access to an untrusted SID")
+		}
+	}
+	return nil
+}
+
 type windowsProtectedFileACL struct {
 	OwnerSID         string
 	CurrentUserSID   string
@@ -89,6 +136,11 @@ type windowsProtectedFileACL struct {
 	DACLPresent      bool
 	DACLNull         bool
 	ACEs             []windowsProtectedFileACE
+	TrustedOwnerSIDs []string
+}
+
+func windowsDriveTypeIsLocal(driveType uint32) bool {
+	return driveType >= 2 && driveType <= 6 && driveType != 4
 }
 
 func validateWindowsProtectedFileACL(acl windowsProtectedFileACL) error {

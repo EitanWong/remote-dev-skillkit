@@ -1427,7 +1427,15 @@ echo 'abc123.lhr.life tunneled with tls termination, https://abc123.lhr.life'
 	}
 	t.Setenv("PATH", binDir)
 
-	started, err := startLocalhostRunTunnel(context.Background(), io.Discard, "8787", filepath.Join(t.TempDir(), "known_hosts"))
+	knownHostsRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath := filepath.Join(knownHostsRoot, "known_hosts")
+	if err := os.WriteFile(knownHostsPath, []byte("localhost.run ssh-ed25519 dGVzdA==\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started, err := startLocalhostRunTunnel(context.Background(), io.Discard, "8787", knownHostsPath)
 	if err != nil {
 		t.Fatal(err)
 	}

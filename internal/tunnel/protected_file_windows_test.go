@@ -32,6 +32,12 @@ func TestReadProtectedJSONFileRejectsUntrustedWindowsWriter(t *testing.T) {
 	}
 }
 
+func TestValidateWindowsLocalVolumePathAcceptsLocalTemp(t *testing.T) {
+	if err := validateWindowsLocalVolumePath(t.TempDir()); err != nil {
+		t.Fatalf("local Windows temp volume rejected: %v", err)
+	}
+}
+
 func writeWindowsProtectedJSON(t *testing.T, grantEveryoneWrite bool) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "input.json")

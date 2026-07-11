@@ -91,6 +91,64 @@ func TestValidateWindowsConfidentialPathACLRejectsUntrustedReaders(t *testing.T)
 	}
 }
 
+func TestValidateWindowsProtectedAncestorACLRejectsReplacementRights(t *testing.T) {
+	base := windowsProtectedFileACL{
+		OwnerSID: "S-1-5-21-1000", CurrentUserSID: "S-1-5-21-1000",
+		AdministratorSID: "S-1-5-32-544", SystemSID: "S-1-5-18", DACLPresent: true,
+		ACEs: []windowsProtectedFileACE{{Type: windowsACEAllowed, SID: "S-1-1-0", Mask: windowsGenericRead}},
+	}
+	if err := validateWindowsProtectedAncestorACL(base); err != nil {
+		t.Fatalf("read-only ancestor ACL rejected: %v", err)
+	}
+	addOnly := base
+	addOnly.ACEs = []windowsProtectedFileACE{{
+		Type: windowsACEAllowed, SID: "S-1-1-0", Mask: windowsFileWriteData | windowsFileAppendData,
+	}}
+	if err := validateWindowsProtectedAncestorACL(addOnly); err != nil {
+		t.Fatalf("add-only ancestor ACL rejected: %v", err)
+	}
+	trustedInstaller := base
+	trustedInstaller.OwnerSID = "S-1-5-80-trusted-installer"
+	trustedInstaller.TrustedOwnerSIDs = []string{"S-1-5-80-trusted-installer"}
+	trustedInstaller.ACEs = []windowsProtectedFileACE{{
+		Type: windowsACEAllowed, SID: "S-1-5-80-trusted-installer", Mask: windowsGenericAll,
+	}}
+	if err := validateWindowsProtectedAncestorACL(trustedInstaller); err != nil {
+		t.Fatalf("TrustedInstaller ancestor ACL rejected: %v", err)
+	}
+	for name, mask := range map[string]uint32{
+		"delete child":  windowsFileDeleteChild,
+		"delete":        windowsDelete,
+		"write DACL":    windowsWriteDAC,
+		"write owner":   windowsWriteOwner,
+		"generic write": windowsGenericWrite,
+	} {
+		t.Run(name, func(t *testing.T) {
+			acl := base
+			acl.ACEs = []windowsProtectedFileACE{{Type: windowsACEAllowed, SID: "S-1-1-0", Mask: mask}}
+			if err := validateWindowsProtectedAncestorACL(acl); err == nil {
+				t.Fatalf("untrusted ancestor right %#x accepted", mask)
+			}
+		})
+	}
+}
+
+func TestWindowsDriveTypeClassification(t *testing.T) {
+	for driveType, want := range map[uint32]bool{
+		0: false, // DRIVE_UNKNOWN
+		1: false, // DRIVE_NO_ROOT_DIR
+		2: true,  // DRIVE_REMOVABLE
+		3: true,  // DRIVE_FIXED
+		4: false, // DRIVE_REMOTE
+		5: true,  // DRIVE_CDROM
+		6: true,  // DRIVE_RAMDISK
+	} {
+		if got := windowsDriveTypeIsLocal(driveType); got != want {
+			t.Errorf("windowsDriveTypeIsLocal(%d) = %t, want %t", driveType, got, want)
+		}
+	}
+}
+
 func TestWindowsFinalPathRemoteClassification(t *testing.T) {
 	tests := []struct {
 		path string

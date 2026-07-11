@@ -1,12 +1,19 @@
 package tunnel
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestReadProtectedRegularFileRejectsOverflowingLimit(t *testing.T) {
+	if _, err := ReadProtectedRegularFile("unused", math.MaxInt64); err == nil || !strings.Contains(err.Error(), "size limit") {
+		t.Fatalf("ReadProtectedRegularFile() error = %v, want size-limit rejection", err)
+	}
+}
 
 type protectedJSONFixture struct {
 	Name string `json:"name"`

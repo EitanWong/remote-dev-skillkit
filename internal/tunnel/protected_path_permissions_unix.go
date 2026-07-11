@@ -8,7 +8,10 @@ import (
 	"syscall"
 )
 
-func validateProtectedPathPermissions(_ *os.File, info os.FileInfo, directory bool) error {
+func validateProtectedPathPermissions(file *os.File, info os.FileInfo, directory bool) error {
+	if err := validateProtectedExtendedACL(file, protectedACLAnyPermit); err != nil {
+		return err
+	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || int(stat.Uid) != os.Geteuid() {
 		return fmt.Errorf("protected path must be owned by the current user")

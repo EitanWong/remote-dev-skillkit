@@ -3,22 +3,27 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 const sshTunnelStartupTimeout = 20 * time.Second
+const maxKnownHostsBytes = 1 << 20
 
 type tunnelProviderPolicyFile struct {
 	AllowedProviderIDs    *[]string         `json:"allowed_provider_ids"`
@@ -37,10 +42,7 @@ type tunnelRuntimeConfig struct {
 
 func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]string) (supportSessionStartDeps, error) {
 	knownHosts := func(providerID string) string {
-		if path := strings.TrimSpace(knownHostsPaths[providerID]); path != "" {
-			return path
-		}
-		return strings.TrimSpace(os.Getenv("RDEV_SSH_KNOWN_HOSTS_FILE"))
+		return selectKnownHostsPath(knownHostsPaths[providerID], os.Getenv("RDEV_SSH_KNOWN_HOSTS_FILE"), runtime.GOOS)
 	}
 	registry, err := tunnel.NewRegistry(
 		newCloudflareQuickProvider(stderr),
@@ -62,6 +64,16 @@ func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]strin
 			return err
 		},
 	}, nil
+}
+
+func selectKnownHostsPath(configuredPath, environmentPath, goos string) string {
+	if path := strings.TrimSpace(configuredPath); path != "" {
+		return path
+	}
+	if goos == "windows" {
+		return ""
+	}
+	return strings.TrimSpace(environmentPath)
 }
 
 func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Registry) (tunnelRuntimeConfig, error) {
@@ -197,15 +209,18 @@ type sshTunnelSpec struct {
 	RemoteForward string
 }
 
-func sshTunnelArgs(sshPath string, spec sshTunnelSpec, knownHostsFile string) ([]string, error) {
-	if strings.TrimSpace(knownHostsFile) == "" {
+func sshTunnelArgs(sshPath string, spec sshTunnelSpec, knownHostsName string) ([]string, error) {
+	if strings.TrimSpace(knownHostsName) == "" {
 		return nil, fmt.Errorf("reviewed known-hosts file is required")
+	}
+	if err := validateSSHKnownHostsName(knownHostsName); err != nil {
+		return nil, err
 	}
 	for name, value := range map[string]string{
 		"ssh path":         sshPath,
 		"destination":      spec.Destination,
 		"remote forward":   spec.RemoteForward,
-		"known-hosts file": knownHostsFile,
+		"known-hosts file": knownHostsName,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return nil, fmt.Errorf("%s is required", name)
@@ -214,26 +229,188 @@ func sshTunnelArgs(sshPath string, spec sshTunnelSpec, knownHostsFile string) ([
 			return nil, fmt.Errorf("%s contains an unsafe control character", name)
 		}
 	}
-	if strings.HasPrefix(spec.Destination, "-") || strings.ContainsAny(spec.Destination, " \t") {
-		return nil, fmt.Errorf("invalid SSH destination")
+	host, err := canonicalSSHDestinationHost(spec.Destination)
+	if err != nil {
+		return nil, err
 	}
 	if spec.Port < 1 || spec.Port > 65535 {
 		return nil, fmt.Errorf("SSH port must be between 1 and 65535")
 	}
 
-	args := []string{sshPath}
-	if spec.Port != 22 {
-		args = append(args, "-p", strconv.Itoa(spec.Port))
-	}
+	args := []string{sshPath, "-F", "none", "-S", "none", "-p", strconv.Itoa(spec.Port)}
 	return append(args,
 		"-T", "-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=yes",
-		"-o", "UserKnownHostsFile="+knownHostsFile,
+		"-o", "UserKnownHostsFile="+knownHostsName,
+		"-o", "GlobalKnownHostsFile=none",
+		"-o", "VerifyHostKeyDNS=no",
+		"-o", "CheckHostIP=no",
+		"-o", "CanonicalizeHostname=no",
+		"-o", "UpdateHostKeys=no",
+		"-o", "Hostname="+host,
+		"-o", "ProxyCommand=none",
+		"-o", "ProxyJump=none",
 		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
 		"-o", "ExitOnForwardFailure=yes",
 		"-R", spec.RemoteForward,
 		spec.Destination,
 	), nil
+}
+
+func validateKnownHostsFile(path, destination string, port int) error {
+	_, err := loadValidatedKnownHostsFile(path, destination, port)
+	return err
+}
+
+type validatedKnownHostsFile struct {
+	directory string
+	name      string
+	path      string
+}
+
+func loadValidatedKnownHostsFile(path, destination string, port int) (validatedKnownHostsFile, error) {
+	prepared, err := prepareSSHKnownHostsFile(path)
+	if err != nil {
+		return validatedKnownHostsFile{}, err
+	}
+	host, err := canonicalSSHDestinationHost(destination)
+	if err != nil {
+		return validatedKnownHostsFile{}, err
+	}
+	if port < 1 || port > 65535 {
+		return validatedKnownHostsFile{}, fmt.Errorf("SSH port must be between 1 and 65535")
+	}
+	content, err := tunnel.ReadProtectedRegularFile(prepared.path, maxKnownHostsBytes)
+	if err != nil {
+		return validatedKnownHostsFile{}, fmt.Errorf("validate known-hosts file: %w", err)
+	}
+	expectedHost := host
+	if port != 22 {
+		expectedHost = "[" + host + "]:" + strconv.Itoa(port)
+	}
+	allowedKeyTypes := map[string]bool{
+		"ssh-ed25519": true, "ssh-rsa": true,
+		"ecdsa-sha2-nistp256": true, "ecdsa-sha2-nistp384": true, "ecdsa-sha2-nistp521": true,
+		"sk-ssh-ed25519@openssh.com": true, "sk-ecdsa-sha2-nistp256@openssh.com": true,
+	}
+	found := false
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	scanner.Buffer(make([]byte, 4096), maxKnownHostsBytes)
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			return validatedKnownHostsFile{}, fmt.Errorf("known-hosts line %d is malformed", lineNumber)
+		}
+		hostField, keyType, encodedKey := fields[0], fields[1], fields[2]
+		if strings.HasPrefix(hostField, "@") || strings.HasPrefix(hostField, "|") ||
+			strings.ContainsAny(hostField, "*,!?") {
+			return validatedKnownHostsFile{}, fmt.Errorf("known-hosts line %d uses an unsupported host pattern or marker", lineNumber)
+		}
+		if !allowedKeyTypes[keyType] {
+			return validatedKnownHostsFile{}, fmt.Errorf("known-hosts line %d uses unsupported key type %q", lineNumber, keyType)
+		}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(encodedKey)
+		if decodeErr != nil || len(decoded) == 0 {
+			return validatedKnownHostsFile{}, fmt.Errorf("known-hosts line %d contains an invalid base64 key", lineNumber)
+		}
+		if hostField == expectedHost {
+			found = true
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return validatedKnownHostsFile{}, fmt.Errorf("scan known-hosts file: %w", err)
+	}
+	if !found {
+		return validatedKnownHostsFile{}, fmt.Errorf("known-hosts file has no exact entry for %q", expectedHost)
+	}
+	return prepared, nil
+}
+
+func prepareSSHKnownHostsFile(path string) (validatedKnownHostsFile, error) {
+	if strings.TrimSpace(path) == "" {
+		return validatedKnownHostsFile{}, fmt.Errorf("reviewed known-hosts file is required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return validatedKnownHostsFile{}, fmt.Errorf("resolve known-hosts file: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return validatedKnownHostsFile{}, fmt.Errorf("resolve known-hosts file: %w", err)
+	}
+	if !sameKnownHostsPath(abs, resolved, runtime.GOOS) {
+		return validatedKnownHostsFile{}, fmt.Errorf("known-hosts file must not traverse symlinks")
+	}
+	name := filepath.Base(resolved)
+	if err := validateSSHKnownHostsName(name); err != nil {
+		return validatedKnownHostsFile{}, err
+	}
+	if err := tunnel.ValidateProtectedParentChain(resolved); err != nil {
+		return validatedKnownHostsFile{}, err
+	}
+	return validatedKnownHostsFile{directory: filepath.Dir(resolved), name: name, path: resolved}, nil
+}
+
+func sameKnownHostsPath(left, right, goos string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	if goos == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
+}
+
+func validateSSHKnownHostsName(name string) error {
+	if name == "" {
+		return fmt.Errorf("reviewed known-hosts file is required")
+	}
+	if name == "." || name == ".." || strings.HasPrefix(name, "-") || strings.EqualFold(name, "none") {
+		return fmt.Errorf("known-hosts file name is unsafe for SSH")
+	}
+	for _, character := range name {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != '.' && character != '_' && character != '-' {
+			return fmt.Errorf("known-hosts file name is unsafe for SSH")
+		}
+	}
+	return nil
+}
+
+func canonicalSSHDestinationHost(destination string) (string, error) {
+	if destination == "" || strings.HasPrefix(destination, "-") || strings.ContainsAny(destination, "/\\:#?[]") ||
+		strings.IndexFunc(destination, func(character rune) bool {
+			return unicode.IsControl(character) || unicode.IsSpace(character)
+		}) >= 0 {
+		return "", fmt.Errorf("invalid SSH destination")
+	}
+	if strings.Count(destination, "@") > 1 {
+		return "", fmt.Errorf("invalid SSH destination")
+	}
+	host := destination
+	if user, value, ok := strings.Cut(destination, "@"); ok {
+		if user == "" || value == "" {
+			return "", fmt.Errorf("invalid SSH destination")
+		}
+		host = value
+	}
+	if host != strings.ToLower(host) || len(host) > 253 || strings.HasPrefix(host, "-") || strings.HasSuffix(host, "-") {
+		return "", fmt.Errorf("SSH destination host is not canonical")
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return "", fmt.Errorf("SSH destination host is not canonical")
+		}
+		for _, character := range label {
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return "", fmt.Errorf("SSH destination host is not canonical")
+			}
+		}
+	}
+	return host, nil
 }
 
 func localhostRunTunnelSpec(localPort string) (sshTunnelSpec, error) {
@@ -285,15 +462,23 @@ func startPinggyTunnel(ctx context.Context, stderr io.Writer, localPort, knownHo
 }
 
 func startSSHTunnel(ctx context.Context, stderr io.Writer, providerID string, spec sshTunnelSpec, knownHostsFile string) (runningTunnel, error) {
+	prepared, err := loadValidatedKnownHostsFile(knownHostsFile, spec.Destination, spec.Port)
+	if err != nil {
+		return runningTunnel{}, fmt.Errorf("%s SSH known-hosts validation: %w", providerID, err)
+	}
 	sshPath, err := exec.LookPath("ssh")
 	if err != nil {
 		return runningTunnel{}, fmt.Errorf("ssh not found in PATH: %w", err)
 	}
-	argv, err := sshTunnelArgs(sshPath, spec, knownHostsFile)
+	sshPath, err = filepath.Abs(sshPath)
+	if err != nil {
+		return runningTunnel{}, fmt.Errorf("resolve ssh executable path: %w", err)
+	}
+	argv, err := sshTunnelArgs(sshPath, spec, prepared.name)
 	if err != nil {
 		return runningTunnel{}, fmt.Errorf("%s SSH configuration: %w", providerID, err)
 	}
-	return startTunnelCommand(ctx, stderr, providerID, argv, sshTunnelStartupTimeout)
+	return startTunnelCommandInDirectory(ctx, stderr, providerID, argv, sshTunnelStartupTimeout, prepared.directory)
 }
 
 func localhostRunTunnelURLFromLine(line string) string {
@@ -374,6 +559,10 @@ type runningTunnel struct {
 }
 
 func startTunnelCommand(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration) (runningTunnel, error) {
+	return startTunnelCommandInDirectory(ctx, stderr, providerID, argv, timeout, "")
+}
+
+func startTunnelCommandInDirectory(ctx context.Context, stderr io.Writer, providerID string, argv []string, timeout time.Duration, workingDirectory string) (runningTunnel, error) {
 	if len(argv) == 0 {
 		return runningTunnel{}, fmt.Errorf("%s command argv is empty", providerID)
 	}
@@ -382,6 +571,7 @@ func startTunnelCommand(ctx context.Context, stderr io.Writer, providerID string
 	}
 	tunnelCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(tunnelCtx, argv[0], argv[1:]...)
+	cmd.Dir = workingDirectory
 	pr, pw := io.Pipe()
 	combined := io.MultiWriter(pw, stderr)
 	cmd.Stdout = combined

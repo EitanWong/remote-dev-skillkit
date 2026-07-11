@@ -43,6 +43,10 @@ func openProtectedPath(path string, directory bool) (*os.File, error) {
 		windows.CloseHandle(handle)
 		return nil, fmt.Errorf("protected path must not traverse a reparse point")
 	}
+	if err := validateWindowsLocalVolumePath(abs); err != nil {
+		windows.CloseHandle(handle)
+		return nil, err
+	}
 	var information windows.ByHandleFileInformation
 	if err := windows.GetFileInformationByHandle(handle, &information); err != nil {
 		windows.CloseHandle(handle)

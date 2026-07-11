@@ -94,3 +94,53 @@ func TestValidateProtectedPathRejectsAncestorSymlink(t *testing.T) {
 		t.Fatal("ancestor symlink file accepted")
 	}
 }
+
+func TestValidateProtectedParentChainRejectsWritableAncestor(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(root, "shared")
+	if err := os.Mkdir(shared, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	protected := filepath.Join(shared, "protected")
+	if err := os.Mkdir(protected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(protected, "known_hosts")
+	if err := os.WriteFile(path, []byte("sentinel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateProtectedParentChain(path); err == nil {
+		t.Fatal("writable ancestor accepted")
+	}
+}
+
+func TestValidateProtectedParentChainAcceptsProtectedAndStickyAncestors(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sticky := filepath.Join(root, "sticky")
+	if err := os.Mkdir(sticky, 0o777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sticky, 0o777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	protected := filepath.Join(sticky, "protected")
+	if err := os.Mkdir(protected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(protected, "known_hosts")
+	if err := os.WriteFile(path, []byte("sentinel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateProtectedParentChain(path); err != nil {
+		t.Fatalf("protected parent chain rejected: %v", err)
+	}
+}

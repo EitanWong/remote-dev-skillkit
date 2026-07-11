@@ -2,10 +2,14 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,6 +17,219 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
+
+func TestValidateKnownHostsFileAcceptsExactDefaultAndNonDefaultPorts(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("test host key"))
+	tests := []struct {
+		name        string
+		destination string
+		port        int
+		hostField   string
+	}{
+		{name: "default port strips user", destination: "nokey@localhost.run", port: 22, hostField: "localhost.run"},
+		{name: "non-default port", destination: "free.pinggy.io", port: 443, hostField: "[free.pinggy.io]:443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeKnownHostsTestFile(t, tt.hostField+" ssh-ed25519 "+key+"\n", 0o600)
+			if err := validateKnownHostsFile(path, tt.destination, tt.port); err != nil {
+				t.Fatalf("valid known_hosts rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestKnownHostsPathSelectionRejectsEnvironmentFallbackOnWindows(t *testing.T) {
+	tests := []struct {
+		name        string
+		configured  string
+		environment string
+		goos        string
+		want        string
+	}{
+		{name: "POSIX environment fallback", environment: " /tmp/reviewed-known-hosts ", goos: "linux", want: "/tmp/reviewed-known-hosts"},
+		{name: "Windows environment fallback", environment: `C:\\Users\\me\\known_hosts`, goos: "windows"},
+		{name: "Windows explicit policy path", configured: ` C:\\Users\\me\\known_hosts `, environment: `C:\\unsafe`, goos: "windows", want: `C:\\Users\\me\\known_hosts`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectKnownHostsPath(tt.configured, tt.environment, tt.goos); got != tt.want {
+				t.Fatalf("selectKnownHostsPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSameKnownHostsPathUsesWindowsCaseFoldingOnly(t *testing.T) {
+	left := `c:\Users\Administrator\Pins\known_hosts`
+	right := `C:\USERS\ADMINISTRATOR\PINS\KNOWN_HOSTS`
+	if !sameKnownHostsPath(left, right, "windows") {
+		t.Fatal("Windows canonical path comparison rejected case-only differences")
+	}
+	if sameKnownHostsPath(left, right, "linux") {
+		t.Fatal("POSIX canonical path comparison accepted case-only differences")
+	}
+}
+
+func TestValidateKnownHostsFileRejectsUnsafeContent(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("test host key"))
+	tests := []struct {
+		name        string
+		destination string
+		port        int
+		content     string
+	}{
+		{name: "empty", destination: "localhost.run", port: 22},
+		{name: "wrong host", destination: "localhost.run", port: 22, content: "other.example ssh-ed25519 " + key + "\n"},
+		{name: "default port bracket form", destination: "localhost.run", port: 22, content: "[localhost.run]:22 ssh-ed25519 " + key + "\n"},
+		{name: "non-default bare host", destination: "free.pinggy.io", port: 443, content: "free.pinggy.io ssh-ed25519 " + key + "\n"},
+		{name: "hashed host", destination: "localhost.run", port: 22, content: "|1|c2FsdA==|aGFzaA== ssh-ed25519 " + key + "\n"},
+		{name: "wildcard host", destination: "localhost.run", port: 22, content: "*.localhost.run ssh-ed25519 " + key + "\n"},
+		{name: "negated host", destination: "localhost.run", port: 22, content: "!localhost.run ssh-ed25519 " + key + "\n"},
+		{name: "host list", destination: "localhost.run", port: 22, content: "localhost.run,other.example ssh-ed25519 " + key + "\n"},
+		{name: "cert authority marker", destination: "localhost.run", port: 22, content: "@cert-authority localhost.run ssh-ed25519 " + key + "\n"},
+		{name: "revoked marker", destination: "localhost.run", port: 22, content: "@revoked localhost.run ssh-ed25519 " + key + "\n"},
+		{name: "malformed", destination: "localhost.run", port: 22, content: "localhost.run ssh-ed25519\n"},
+		{name: "unsupported key", destination: "localhost.run", port: 22, content: "localhost.run ssh-dss " + key + "\n"},
+		{name: "non-base64", destination: "localhost.run", port: 22, content: "localhost.run ssh-ed25519 not-base64!\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeKnownHostsTestFile(t, tt.content, 0o600)
+			if err := validateKnownHostsFile(path, tt.destination, tt.port); err == nil {
+				t.Fatal("unsafe known_hosts content accepted")
+			}
+		})
+	}
+}
+
+func TestValidateKnownHostsFileRejectsUnsafeDestination(t *testing.T) {
+	path := writeKnownHostsTestFile(t, "localhost.run ssh-ed25519 dGVzdA==\n", 0o600)
+	for _, destination := range []string{
+		"", "user@", "user@@localhost.run", "https://localhost.run", "localhost.run/path", "localhost.run:22",
+		"-localhost.run", "-oProxyCommand=x@localhost.run", "user name@localhost.run", "user\tname@localhost.run",
+	} {
+		t.Run(destination, func(t *testing.T) {
+			if err := validateKnownHostsFile(path, destination, 22); err == nil {
+				t.Fatalf("unsafe destination %q accepted", destination)
+			}
+		})
+	}
+}
+
+func TestValidateKnownHostsFileRejectsUnsafePath(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "missing")
+	if err := validateKnownHostsFile(missing, "localhost.run", 22); err == nil {
+		t.Fatal("missing known_hosts accepted")
+	}
+	directory := filepath.Join(root, "directory")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateKnownHostsFile(directory, "localhost.run", 22); err == nil {
+		t.Fatal("directory known_hosts accepted")
+	}
+	if runtime.GOOS != "windows" {
+		for _, mode := range []os.FileMode{0o620, 0o644} {
+			t.Run(fmt.Sprintf("mode %04o", mode), func(t *testing.T) {
+				loose := writeKnownHostsTestFile(t, "localhost.run ssh-ed25519 dGVzdA==\n", mode)
+				if err := validateKnownHostsFile(loose, "localhost.run", 22); err == nil {
+					t.Fatalf("known_hosts mode %04o accepted", mode)
+				}
+			})
+		}
+		if err := validateKnownHostsFile(os.DevNull, "localhost.run", 22); err == nil {
+			t.Fatal("device known_hosts accepted")
+		}
+		fifo := filepath.Join(root, "fifo")
+		if err := exec.Command("mkfifo", fifo).Run(); err != nil {
+			t.Skipf("mkfifo unavailable: %v", err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- validateKnownHostsFile(fifo, "localhost.run", 22) }()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("FIFO known_hosts accepted")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("FIFO validation blocked")
+		}
+	}
+	target := writeKnownHostsTestFile(t, "localhost.run ssh-ed25519 dGVzdA==\n", 0o600)
+	link := filepath.Join(root, "known_hosts-link")
+	if err := os.Symlink(target, link); err == nil {
+		if err := validateKnownHostsFile(link, "localhost.run", 22); err == nil {
+			t.Fatal("symlink known_hosts accepted")
+		}
+	}
+	ancestor := filepath.Join(root, "ancestor-link")
+	if err := os.Symlink(filepath.Dir(target), ancestor); err == nil {
+		if err := validateKnownHostsFile(filepath.Join(ancestor, filepath.Base(target)), "localhost.run", 22); err == nil {
+			t.Fatal("ancestor symlink known_hosts accepted")
+		}
+	}
+}
+
+func TestValidateKnownHostsFileRejectsOversizeInput(t *testing.T) {
+	path := writeKnownHostsTestFile(t, strings.Repeat("#", (1<<20)+1), 0o600)
+	if err := validateKnownHostsFile(path, "localhost.run", 22); err == nil {
+		t.Fatal("oversize known_hosts accepted")
+	}
+}
+
+func TestValidateKnownHostsFileRejectsSSHPathExpansionSyntax(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	for _, path := range []string{
+		"known hosts",
+		"known\u2003hosts",
+		"known%h",
+		"known${HOME}",
+		"~known_hosts",
+		"none",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if err := os.WriteFile(path, []byte("localhost.run ssh-ed25519 dGVzdA==\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			protectKnownHostsTestFile(t, path, 0o600)
+			if err := validateKnownHostsFile(path, "localhost.run", 22); err == nil {
+				t.Fatalf("known_hosts path %q with SSH expansion syntax accepted", path)
+			}
+		})
+	}
+}
+
+func TestStartSSHTunnelValidatesKnownHostsBeforeSSHLookup(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	_, err := startSSHTunnel(context.Background(), io.Discard, tunnel.ProviderLocalhostRun, sshTunnelSpec{
+		Destination:   "nokey@localhost.run",
+		Port:          22,
+		RemoteForward: "80:localhost:8787",
+	}, filepath.Join(t.TempDir(), "missing-known-hosts"))
+	if err == nil || !strings.Contains(err.Error(), "SSH known-hosts validation") {
+		t.Fatalf("startSSHTunnel error = %v, want known-hosts validation before SSH lookup", err)
+	}
+}
+
+func writeKnownHostsTestFile(t *testing.T, content string, mode os.FileMode) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "known_hosts")
+	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+		t.Fatal(err)
+	}
+	protectKnownHostsTestFile(t, path, mode)
+	return path
+}
 
 func TestTunnelHelperProcess(t *testing.T) {
 	mode := os.Getenv("RDEV_TEST_TUNNEL_HELPER")
@@ -104,7 +321,7 @@ func TestSSHProviderArgsRequireKnownHosts(t *testing.T) {
 	if _, err := sshTunnelArgs("ssh", spec, ""); err == nil {
 		t.Fatal("expected missing pin error")
 	}
-	args, err := sshTunnelArgs("ssh", spec, "/tmp/known_hosts")
+	args, err := sshTunnelArgs("ssh", spec, "known_hosts")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +329,49 @@ func TestSSHProviderArgsRequireKnownHosts(t *testing.T) {
 	if strings.Contains(joined, "StrictHostKeyChecking=no") || !strings.Contains(joined, "StrictHostKeyChecking=yes") {
 		t.Fatalf("unsafe args: %v", args)
 	}
-	if args[0] != "ssh" || strings.Contains(joined, "sh -c") || !strings.Contains(joined, "UserKnownHostsFile=/tmp/known_hosts") {
+	if args[0] != "ssh" || strings.Contains(joined, "sh -c") || !strings.Contains(joined, "UserKnownHostsFile=known_hosts") {
 		t.Fatalf("expected direct pinned ssh argv, got %v", args)
+	}
+}
+
+func TestSSHProviderArgsDisableSecondaryHostTrustSources(t *testing.T) {
+	tests := []struct {
+		name string
+		spec sshTunnelSpec
+		host string
+		port string
+	}{
+		{name: "default port", spec: sshTunnelSpec{Destination: "nokey@localhost.run", Port: 22, RemoteForward: "80:localhost:8787"}, host: "localhost.run", port: "22"},
+		{name: "non-default port", spec: sshTunnelSpec{Destination: "free.pinggy.io", Port: 443, RemoteForward: "0:localhost:8787"}, host: "free.pinggy.io", port: "443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := sshTunnelArgs("ssh", tt.spec, "known_hosts")
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(args, "\x00")
+			for _, required := range []string{
+				"-F\x00none",
+				"-S\x00none",
+				"-p\x00" + tt.port,
+				"GlobalKnownHostsFile=none",
+				"VerifyHostKeyDNS=no",
+				"CheckHostIP=no",
+				"CanonicalizeHostname=no",
+				"UpdateHostKeys=no",
+				"Hostname=" + tt.host,
+				"ProxyCommand=none",
+				"ProxyJump=none",
+			} {
+				if !strings.Contains(joined, required) {
+					t.Fatalf("SSH argv missing %q: %v", required, args)
+				}
+			}
+			if strings.Contains(joined, "KnownHostsCommand=") {
+				t.Fatalf("SSH argv must rely on -F none instead of an executable KnownHostsCommand value: %v", args)
+			}
+		})
 	}
 }
 
@@ -124,11 +382,19 @@ func TestSSHProviderArgsRejectUnsafeInputs(t *testing.T) {
 		spec       sshTunnelSpec
 		knownHosts string
 	}{
-		{name: "ssh path control", sshPath: "ssh\n", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known_hosts"},
-		{name: "destination control", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host\r", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known_hosts"},
-		{name: "forward control", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787\x00"}, knownHosts: "/tmp/known_hosts"},
+		{name: "ssh path control", sshPath: "ssh\n", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "known_hosts"},
+		{name: "destination control", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host\r", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "known_hosts"},
+		{name: "forward control", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787\x00"}, knownHosts: "known_hosts"},
 		{name: "known hosts control", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known_hosts\n"},
-		{name: "invalid port", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 0, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known_hosts"},
+		{name: "known hosts list whitespace", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known hosts"},
+		{name: "known hosts Unicode whitespace", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known\u2003hosts"},
+		{name: "known hosts token", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known_%h"},
+		{name: "known hosts environment", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "${HOME}/known_hosts"},
+		{name: "known hosts tilde", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "~/.ssh/known_hosts"},
+		{name: "known hosts none", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "none"},
+		{name: "known hosts absolute path", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "/tmp/known_hosts"},
+		{name: "known hosts parent traversal", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 22, RemoteForward: "80:localhost:8787"}, knownHosts: "../known_hosts"},
+		{name: "invalid port", sshPath: "ssh", spec: sshTunnelSpec{Destination: "host", Port: 0, RemoteForward: "80:localhost:8787"}, knownHosts: "known_hosts"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

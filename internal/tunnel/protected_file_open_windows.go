@@ -35,6 +35,10 @@ func openProtectedJSONFile(path string) (*os.File, error) {
 		windows.CloseHandle(handle)
 		return nil, fmt.Errorf("protected JSON input must be stored on a local Windows volume")
 	}
+	if err := validateWindowsLocalVolumePath(path); err != nil {
+		windows.CloseHandle(handle)
+		return nil, err
+	}
 	var information windows.ByHandleFileInformation
 	if err := windows.GetFileInformationByHandle(handle, &information); err != nil {
 		windows.CloseHandle(handle)
