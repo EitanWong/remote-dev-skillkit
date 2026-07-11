@@ -1591,10 +1591,20 @@ func (s Server) supportSessionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	var boundSession *controlplane.Session
+	if ticket.SessionID != "" {
+		session, sessionErr := s.Gateway.Session(ticket.SessionID)
+		if sessionErr != nil || session.SourceTicketID != ticket.ID || session.JoinCode != ticket.Code {
+			writeError(w, http.StatusBadRequest, "support session binding is invalid")
+			return
+		}
+		boundSession = &session
+	}
 	hosts := s.Gateway.HostsForTicketCode(ticketCode, "")
 	opts := supportsession.StatusOptions{
 		TicketCode:  ticketCode,
 		Hosts:       hosts,
+		Session:     boundSession,
 		Locale:      r.URL.Query().Get("locale"),
 		GatewayURL:  authority.BaseURL,
 		Preconnects: s.Gateway.SupportSessionPreconnects(ticketCode),

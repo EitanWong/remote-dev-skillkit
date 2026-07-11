@@ -1,9 +1,11 @@
 package gateway
 
 import (
+	"strings"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
 func (g *MemoryGateway) CreateSession(spec controlplane.SessionSpec) (controlplane.Session, error) {
@@ -15,7 +17,36 @@ func (g *MemoryGateway) Session(sessionID string) (controlplane.Session, error) 
 }
 
 func (g *MemoryGateway) JoinSessionByCode(joinCode string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, []controlplane.Event, error) {
-	return g.controlPlane().JoinByCode(joinCode, spec)
+	joinCode = strings.TrimSpace(joinCode)
+	g.mu.Lock()
+	if g.sessionStore == nil {
+		g.sessionStore = controlplane.NewMemoryStore(g.now)
+	}
+	store := g.sessionStore
+	ticketID, ticketOwned := g.codeIndex[joinCode]
+	if !ticketOwned {
+		g.mu.Unlock()
+		return store.JoinByCode(joinCode, spec)
+	}
+	ticket, ok := g.tickets[ticketID]
+	if !ok || ticket.Status != model.TicketStatusActive || !g.now().Before(ticket.ExpiresAt) || g.validateTicketSessionBindingLocked(ticket) != nil {
+		g.mu.Unlock()
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, invalidTicketJoinCodeError()
+	}
+	session, endpoint, lease, events, err := store.JoinByCode(joinCode, spec)
+	g.mu.Unlock()
+	return session, endpoint, lease, events, err
+}
+
+func invalidTicketJoinCodeError() controlplane.ProtocolError {
+	return controlplane.ProtocolError{
+		SchemaVersion:   controlplane.ErrorSchemaVersion,
+		Code:            controlplane.ErrInvalidJoinCode,
+		Message:         "join code is invalid",
+		Recoverable:     false,
+		UserSummary:     "The support-session entry is invalid or no longer active.",
+		AgentNextAction: "create a fresh support-session entry and use its generated handoff",
+	}
 }
 
 func (g *MemoryGateway) JoinSession(sessionID string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, error) {

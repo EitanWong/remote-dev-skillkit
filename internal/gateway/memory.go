@@ -271,6 +271,9 @@ func (g *MemoryGateway) createTicketWithStatus(mode model.HostMode, ttlSeconds i
 		}
 	}
 	ticket = cloneTicket(ticket)
+	if _, exists := g.codeIndex[ticket.Code]; exists {
+		return model.Ticket{}, fmt.Errorf("%w: ticket code collision", ErrInvalidState)
+	}
 	g.tickets[ticket.ID] = ticket
 	g.codeIndex[ticket.Code] = ticket.ID
 	g.appendAuditLocked("operator", "ticket.create", ticket.ID, "created short-lived "+string(status)+" ticket")
@@ -290,10 +293,45 @@ func (g *MemoryGateway) PublishTicket(ticketID string) (model.Ticket, error) {
 	if !g.now().Before(ticket.ExpiresAt) {
 		return model.Ticket{}, ErrTicketExpired
 	}
+	if err := g.bindTicketSessionLocked(&ticket); err != nil {
+		return model.Ticket{}, err
+	}
 	ticket.Status = model.TicketStatusActive
 	g.tickets[ticket.ID] = cloneTicket(ticket)
 	g.appendAuditLocked("operator", "ticket.publish", ticket.ID, "published probed ticket")
 	return cloneTicket(ticket), nil
+}
+
+func (g *MemoryGateway) bindTicketSessionLocked(ticket *model.Ticket) error {
+	if strings.TrimSpace(ticket.SessionID) != "" {
+		return g.validateTicketSessionBindingLocked(*ticket)
+	}
+	if g.sessionStore == nil {
+		g.sessionStore = controlplane.NewMemoryStore(g.now)
+	}
+	session, err := g.sessionStore.CreateSessionForTicket(controlplane.SessionSpec{
+		Profile:      string(ticket.Mode),
+		Reason:       ticket.Reason,
+		Capabilities: append([]string(nil), ticket.Capabilities...),
+		JoinPolicy:   "single-target",
+		ExpiresAt:    ticket.ExpiresAt,
+	}, ticket.ID, ticket.Code)
+	if err != nil {
+		return fmt.Errorf("bind ticket session: %w", err)
+	}
+	ticket.SessionID = session.ID
+	return nil
+}
+
+func (g *MemoryGateway) validateTicketSessionBindingLocked(ticket model.Ticket) error {
+	if strings.TrimSpace(ticket.SessionID) == "" || g.sessionStore == nil {
+		return fmt.Errorf("%w: ticket session binding is missing", ErrInvalidState)
+	}
+	session, err := g.sessionStore.Session(ticket.SessionID)
+	if err != nil || session.JoinCode != ticket.Code || session.SourceTicketID != ticket.ID {
+		return fmt.Errorf("%w: ticket session binding is invalid", ErrInvalidState)
+	}
+	return nil
 }
 
 func (g *MemoryGateway) ValidatePowerShellBootstrapTicket(ticketCode string) error {

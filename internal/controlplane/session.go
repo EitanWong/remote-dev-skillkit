@@ -174,6 +174,7 @@ type Session struct {
 	SchemaVersion      string             `json:"schema_version"`
 	ID                 string             `json:"id"`
 	JoinCode           string             `json:"join_code"`
+	SourceTicketID     string             `json:"source_ticket_id,omitempty"`
 	Profile            string             `json:"profile"`
 	Status             SessionStatus      `json:"status"`
 	Reason             string             `json:"reason"`

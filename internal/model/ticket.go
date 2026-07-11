@@ -23,6 +23,7 @@ const (
 type Ticket struct {
 	ID           string            `json:"id"`
 	Code         string            `json:"code"`
+	SessionID    string            `json:"session_id,omitempty"`
 	Mode         HostMode          `json:"mode"`
 	Status       TicketStatus      `json:"status"`
 	TTLSeconds   int               `json:"ttl_seconds"`

@@ -21,6 +21,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/cdnopt"
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
@@ -422,6 +423,7 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 type StatusOptions struct {
 	TicketCode  string
 	Hosts       []model.Host
+	Session     *controlplane.Session
 	Locale      string
 	GatewayURL  string
 	Preconnects []model.SupportSessionPreconnect
@@ -3200,7 +3202,16 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	stale := hostsByStatus(hosts, model.HostStatusStale)
 	pending := hostsByStatus(hosts, model.HostStatusPending)
 	revoked := hostsByStatus(hosts, model.HostStatusRevoked)
-	connected := len(active) > 0
+	targetEndpoints := onlineTargetEndpoints(opts.Session)
+	sessionID := ""
+	if opts.Session != nil {
+		sessionID = opts.Session.ID
+	}
+	recommendedTargetEndpointID := ""
+	if len(targetEndpoints) > 0 {
+		recommendedTargetEndpointID = targetEndpoints[0].ID
+	}
+	connected := len(active) > 0 || recommendedTargetEndpointID != ""
 	preconnectSummary := targetPreconnectSummary(opts.Preconnects)
 	preconnectStatus, _ := preconnectSummary["status"].(string)
 	waiting := !connected && len(pending) == 0 && len(stale) == 0 && len(revoked) == 0 && preconnectStatus == ""
@@ -3224,15 +3235,17 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		Locale:     locale,
 	})
 	out := map[string]any{
-		"schema_version":       StatusSchemaVersion,
-		"ok":                   connected || len(pending) > 0 || waiting || preconnectStatus != "",
-		"ticket_code":          ticketCode,
-		"status":               status,
-		"connected":            connected,
-		"waiting":              waiting,
-		"feedback":             localizedStatusFeedback(status, locale),
-		"next_action":          localizedStatusNextAction(status, locale),
-		"remote_control_entry": remoteControlEntry,
+		"schema_version":                 StatusSchemaVersion,
+		"ok":                             connected || len(pending) > 0 || waiting || preconnectStatus != "",
+		"ticket_code":                    ticketCode,
+		"status":                         status,
+		"connected":                      connected,
+		"session_id":                     sessionID,
+		"recommended_target_endpoint_id": recommendedTargetEndpointID,
+		"waiting":                        waiting,
+		"feedback":                       localizedStatusFeedback(status, locale),
+		"next_action":                    localizedStatusNextAction(status, locale),
+		"remote_control_entry":           remoteControlEntry,
 		"connected_next_steps": BuildConnectedNextSteps(ConnectedNextStepsOptions{
 			Status:     status,
 			Hosts:      active,
@@ -3286,6 +3299,23 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		out["ticket_status"] = string(opts.Ticket.Status)
 	}
 	return out
+}
+
+func onlineTargetEndpoints(session *controlplane.Session) []controlplane.Endpoint {
+	if session == nil || session.Status == controlplane.SessionStatusClosed || session.Status == controlplane.SessionStatusFailed || session.Status == controlplane.SessionStatusRevoked {
+		return nil
+	}
+	endpoints := make([]controlplane.Endpoint, 0, len(session.Endpoints))
+	for _, endpoint := range session.Endpoints {
+		if endpoint.Role != controlplane.EndpointRoleTarget {
+			continue
+		}
+		switch endpoint.State {
+		case controlplane.EndpointStateOnline, controlplane.EndpointStateBusy, controlplane.EndpointStateDegraded:
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	return endpoints
 }
 
 func targetPreconnectSummary(preconnects []model.SupportSessionPreconnect) map[string]any {
