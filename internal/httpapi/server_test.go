@@ -800,6 +800,62 @@ func TestSupportSessionStatusWithoutStoredGatewayCandidatesUsesRequestBase(t *te
 	}
 }
 
+func TestSupportSessionStatusUnknownTicketDoesNotExposeHosts(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	hosts := make([]model.Host, 0, 2)
+	for _, name := range []string{"first-private-target", "second-private-target"} {
+		ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "private status target")
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, err := gw.RegisterHost(model.HostRegistration{
+			TicketCode: ticket.Code,
+			Name:       name,
+			OS:         "windows",
+			Arch:       "amd64",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, err = gw.ActivateHost(host.ID, []string{"shell.user"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		hosts = append(hosts, host)
+	}
+
+	const unknownTicket = "UNKNOWN-NONEMPTY-TICKET"
+	req := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(unknownTicket), nil)
+	rec := httptest.NewRecorder()
+	NewServer(gw).Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown ticket status = %d, want 404", rec.Code)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 || payload["error"] != "support session not found" {
+		t.Fatal("unknown ticket response was not the generic not-found envelope")
+	}
+	for _, forbidden := range []string{
+		unknownTicket,
+		hosts[0].ID,
+		hosts[1].ID,
+		hosts[0].Name,
+		hosts[1].Name,
+		`"connected"`,
+		"remote_control_entry",
+		"recommended_task_endpoint_id",
+		"agent_connection_runbook",
+		"--gateway-url",
+	} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatal("unknown ticket response exposed host state or control parameters")
+		}
+	}
+}
+
 func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
 	dir := t.TempDir()
 	binaryPath := filepath.Join(dir, "rdev.exe")

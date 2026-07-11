@@ -763,6 +763,40 @@ func TestMemoryGatewayProjectsStaleHosts(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayHostsForUnknownTicketCodeReturnsEmpty(t *testing.T) {
+	gw := NewMemoryGateway()
+	wantHostIDs := map[string]bool{}
+	for _, name := range []string{"first-ticket-host", "second-ticket-host"} {
+		ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "ticket-scoped host list")
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, err := gw.RegisterHost(model.HostRegistration{
+			TicketCode: ticket.Code,
+			Name:       name,
+			OS:         "windows",
+			Arch:       "amd64",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantHostIDs[host.ID] = true
+	}
+
+	if hosts := gw.HostsForTicketCode("UNKNOWN-NONEMPTY-TICKET", ""); len(hosts) != 0 {
+		t.Fatalf("unknown nonempty ticket returned %d hosts, want 0", len(hosts))
+	}
+	hosts := gw.HostsForTicketCode("", "")
+	if len(hosts) != len(wantHostIDs) {
+		t.Fatalf("empty ticket code returned %d hosts, want %d", len(hosts), len(wantHostIDs))
+	}
+	for _, host := range hosts {
+		if !wantHostIDs[host.ID] {
+			t.Fatal("empty ticket code returned an unexpected host")
+		}
+	}
+}
+
 func TestMemoryGatewayAutoActivateSupersedesMatchingStaleHost(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

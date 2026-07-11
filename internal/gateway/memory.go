@@ -679,9 +679,14 @@ func (g *MemoryGateway) HostsForTicketCode(ticketCode, status string) []model.Ho
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	trimmedTicketCode := strings.TrimSpace(ticketCode)
 	ticketID := ""
-	if strings.TrimSpace(ticketCode) != "" {
-		ticketID = g.codeIndex[strings.TrimSpace(ticketCode)]
+	if trimmedTicketCode != "" {
+		var ok bool
+		ticketID, ok = g.codeIndex[trimmedTicketCode]
+		if !ok || ticketID == "" {
+			return []model.Host{}
+		}
 	}
 	hosts := make([]model.Host, 0, len(g.hosts))
 	for _, host := range g.hosts {
