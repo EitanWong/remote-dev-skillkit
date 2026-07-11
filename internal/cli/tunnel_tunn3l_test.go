@@ -185,15 +185,22 @@ func TestTunn3lProviderUsesVerifiedArgvSanitizedEnvironmentAndForegroundLifecycl
 	t.Setenv("TUNN3L_FUTURE_OVERRIDE", "unsafe")
 	t.Setenv("TUNN3L_RELAY", "wss://attacker.example/ws")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "old-xdg"))
+	t.Setenv("BUN_OPTIONS", "--preload="+filepath.Join(root, "attacker-bun.js"))
+	t.Setenv("BUN_FUTURE_OVERRIDE", "unsafe")
 	t.Setenv("NODE_OPTIONS", "--require=attacker.js")
 	t.Setenv("NODE_PATH", filepath.Join(root, "attacker-modules"))
+	t.Setenv("NODE_FUTURE_OVERRIDE", "unsafe")
 	t.Setenv("NODE_TLS_REJECT_UNAUTHORIZED", "0")
 	t.Setenv("NODE_EXTRA_CA_CERTS", filepath.Join(root, "attacker-ca.pem"))
 	t.Setenv("SSL_CERT_FILE", filepath.Join(root, "attacker-cert.pem"))
 	t.Setenv("SSL_CERT_DIR", filepath.Join(root, "attacker-certs"))
 	t.Setenv("LD_PRELOAD", filepath.Join(root, "attacker.so"))
 	t.Setenv("LD_LIBRARY_PATH", filepath.Join(root, "attacker-libs"))
+	t.Setenv("LD_AUDIT", filepath.Join(root, "attacker-audit.so"))
+	t.Setenv("LD_FUTURE_OVERRIDE", "unsafe")
 	t.Setenv("DYLD_INSERT_LIBRARIES", filepath.Join(root, "attacker.dylib"))
+	t.Setenv("GODEBUG", "x509sha1=1")
+	t.Setenv("SSLKEYLOGFILE", filepath.Join(root, "tls.keys"))
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:18080")
 
 	var installCalls atomic.Int32
@@ -258,15 +265,22 @@ func TestTunn3lProviderUsesVerifiedArgvSanitizedEnvironmentAndForegroundLifecycl
 		"TUNN3L_SUBDOMAIN=unset",
 		"TUNN3L_PASSWORD=unset",
 		"TUNN3L_FUTURE_OVERRIDE=unset",
+		"BUN_OPTIONS=unset",
+		"BUN_FUTURE_OVERRIDE=unset",
 		"NODE_OPTIONS=unset",
 		"NODE_PATH=unset",
+		"NODE_FUTURE_OVERRIDE=unset",
 		"NODE_TLS_REJECT_UNAUTHORIZED=unset",
 		"NODE_EXTRA_CA_CERTS=unset",
 		"SSL_CERT_FILE=unset",
 		"SSL_CERT_DIR=unset",
 		"LD_PRELOAD=unset",
 		"LD_LIBRARY_PATH=unset",
+		"LD_AUDIT=unset",
+		"LD_FUTURE_OVERRIDE=unset",
 		"DYLD_INSERT_LIBRARIES=unset",
+		"GODEBUG=unset",
+		"SSLKEYLOGFILE=unset",
 		"HTTPS_PROXY=http://127.0.0.1:18080",
 		"config_present=no",
 		"home_empty=yes",
@@ -310,9 +324,11 @@ func TestTunn3lProviderEnvironmentPreservesProxyAndDetachesSanitizedValues(t *te
 		"PATH=/usr/bin", "https_proxy=http://proxy.example:8080", "NO_PROXY=127.0.0.1",
 		"home=/old", "UserProfile=/old-user", "xdg_config_home=/old-xdg",
 		"tunn3l_token=secret", "TUNN3L_RELAY=wss://attacker.example", "TuNn3L_Future=value",
-		"node_options=--require=attacker", "NODE_PATH=/attacker", "node_tls_reject_unauthorized=0", "node_extra_ca_certs=/attacker.pem",
+		"bUn_OpTiOnS=--preload=attacker", "BuN_Future=unsafe",
+		"node_options=--require=attacker", "NODE_PATH=/attacker", "NoDe_Future=unsafe", "node_tls_reject_unauthorized=0", "node_extra_ca_certs=/attacker.pem",
 		"ssl_cert_file=/attacker.pem", "SSL_CERT_DIR=/attacker", "ld_preload=/attacker.so", "LD_LIBRARY_PATH=/attacker",
-		"dyld_insert_libraries=/attacker.dylib", "DYLD_FUTURE_OVERRIDE=unsafe",
+		"Ld_AuDiT=/attacker-audit.so", "lD_Future=unsafe", "dyld_insert_libraries=/attacker.dylib", "DYLD_FUTURE_OVERRIDE=unsafe",
+		"GoDeBuG=x509sha1=1", "sslkeylogfile=/private/tls.keys",
 	}
 	original := append([]string(nil), inherited...)
 	home := "/session/home"
@@ -335,9 +351,10 @@ func TestTunn3lProviderEnvironmentPreservesProxyAndDetachesSanitizedValues(t *te
 			t.Fatalf("malformed environment item %q", item)
 		}
 		canonical := asciiUpperString(name)
-		if strings.HasPrefix(canonical, "DYLD_") ||
+		if strings.HasPrefix(canonical, "BUN_") || strings.HasPrefix(canonical, "NODE_") ||
+			strings.HasPrefix(canonical, "LD_") || strings.HasPrefix(canonical, "DYLD_") ||
 			(strings.HasPrefix(canonical, "TUNN3L_") && canonical != "TUNN3L_RELAY") ||
-			slices.Contains([]string{"NODE_OPTIONS", "NODE_PATH", "NODE_TLS_REJECT_UNAUTHORIZED", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "LD_PRELOAD", "LD_LIBRARY_PATH"}, canonical) {
+			slices.Contains([]string{"SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE", "GODEBUG"}, canonical) {
 			t.Fatalf("unsafe environment survived: %q", item)
 		}
 	}
@@ -517,15 +534,22 @@ func writeTunn3lTestExecutable(t *testing.T, root string) string {
   printf 'TUNN3L_SUBDOMAIN=%s\n' "${TUNN3L_SUBDOMAIN-unset}"
   printf 'TUNN3L_PASSWORD=%s\n' "${TUNN3L_PASSWORD-unset}"
   printf 'TUNN3L_FUTURE_OVERRIDE=%s\n' "${TUNN3L_FUTURE_OVERRIDE-unset}"
+  printf 'BUN_OPTIONS=%s\n' "${BUN_OPTIONS-unset}"
+  printf 'BUN_FUTURE_OVERRIDE=%s\n' "${BUN_FUTURE_OVERRIDE-unset}"
   printf 'NODE_OPTIONS=%s\n' "${NODE_OPTIONS-unset}"
   printf 'NODE_PATH=%s\n' "${NODE_PATH-unset}"
+  printf 'NODE_FUTURE_OVERRIDE=%s\n' "${NODE_FUTURE_OVERRIDE-unset}"
   printf 'NODE_TLS_REJECT_UNAUTHORIZED=%s\n' "${NODE_TLS_REJECT_UNAUTHORIZED-unset}"
   printf 'NODE_EXTRA_CA_CERTS=%s\n' "${NODE_EXTRA_CA_CERTS-unset}"
   printf 'SSL_CERT_FILE=%s\n' "${SSL_CERT_FILE-unset}"
   printf 'SSL_CERT_DIR=%s\n' "${SSL_CERT_DIR-unset}"
   printf 'LD_PRELOAD=%s\n' "${LD_PRELOAD-unset}"
   printf 'LD_LIBRARY_PATH=%s\n' "${LD_LIBRARY_PATH-unset}"
+  printf 'LD_AUDIT=%s\n' "${LD_AUDIT-unset}"
+  printf 'LD_FUTURE_OVERRIDE=%s\n' "${LD_FUTURE_OVERRIDE-unset}"
   printf 'DYLD_INSERT_LIBRARIES=%s\n' "${DYLD_INSERT_LIBRARIES-unset}"
+  printf 'GODEBUG=%s\n' "${GODEBUG-unset}"
+  printf 'SSLKEYLOGFILE=%s\n' "${SSLKEYLOGFILE-unset}"
   printf 'HTTPS_PROXY=%s\n' "${HTTPS_PROXY-unset}"
   if [ -e "$HOME/.tunn3l/config.json" ]; then printf 'config_present=yes\n'; else printf 'config_present=no\n'; fi
   if [ -n "$(ls -A "$HOME")" ]; then printf 'home_empty=no\n'; else printf 'home_empty=yes\n'; fi

@@ -583,8 +583,7 @@ func newTunn3lSessionHome(providerRoot string) (string, error) {
 func tunn3lProviderEnvironment(home string, inherited []string) []string {
 	blocked := map[string]struct{}{
 		"HOME": {}, "USERPROFILE": {}, "XDG_CONFIG_HOME": {},
-		"NODE_OPTIONS": {}, "NODE_PATH": {}, "NODE_TLS_REJECT_UNAUTHORIZED": {}, "NODE_EXTRA_CA_CERTS": {},
-		"SSL_CERT_FILE": {}, "SSL_CERT_DIR": {}, "LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
+		"SSL_CERT_FILE": {}, "SSL_CERT_DIR": {}, "SSLKEYLOGFILE": {}, "GODEBUG": {},
 	}
 	environment := make([]string, 0, len(inherited)+4)
 	for _, item := range inherited {
@@ -593,7 +592,9 @@ func tunn3lProviderEnvironment(home string, inherited []string) []string {
 			continue
 		}
 		canonicalName := asciiUpperString(name)
-		if _, remove := blocked[canonicalName]; remove || strings.HasPrefix(canonicalName, "TUNN3L_") || strings.HasPrefix(canonicalName, "DYLD_") {
+		_, remove := blocked[canonicalName]
+		if remove || strings.HasPrefix(canonicalName, "TUNN3L_") || strings.HasPrefix(canonicalName, "BUN_") ||
+			strings.HasPrefix(canonicalName, "NODE_") || strings.HasPrefix(canonicalName, "LD_") || strings.HasPrefix(canonicalName, "DYLD_") {
 			continue
 		}
 		environment = append(environment, item)
