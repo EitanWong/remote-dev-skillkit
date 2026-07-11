@@ -94,7 +94,7 @@ func newSupportSessionStderrEvent(event string, status map[string]any) supportSe
 
 func safeSupportSessionDiagnosticPhase(value string) string {
 	switch value {
-	case "static-bootstrap-probe", "readiness-policy", "published-handoff-invalidation":
+	case "provider-selection", "static-bootstrap-probe", "readiness-policy", "published-handoff-invalidation":
 		return value
 	default:
 		return "support-session-start"
@@ -103,7 +103,8 @@ func safeSupportSessionDiagnosticPhase(value string) string {
 
 func safeSupportSessionDiagnosticReason(value string) string {
 	switch value {
-	case "no_public_gateway_candidate_passed_static_bootstrap_probe",
+	case "no_public_gateway_provider_eligible",
+		"no_public_gateway_candidate_passed_static_bootstrap_probe",
 		"direct_handoff_readiness_not_satisfied",
 		"tunnel_availability_lost",
 		"support_session_canceled",
@@ -117,7 +118,7 @@ func safeSupportSessionDiagnosticReason(value string) string {
 
 func safeSupportSessionNextAction(value string) string {
 	switch value {
-	case "review-provider-availability", "configure-redundant-public-gateway", "generate-new-handoff":
+	case "review-provider-eligibility", "review-provider-availability", "configure-redundant-public-gateway", "generate-new-handoff":
 		return value
 	default:
 		return "inspect-protected-status"
@@ -152,9 +153,41 @@ func safeTunnelAttemptErrorClass(value string) string {
 	case "", "provider-invalid", "start-failed", "provider-id-mismatch", "process-exited",
 		"probe-failed", "max-active", "timeout", "canceled", "dns-failed", "marker-mismatch",
 		"redirect-rejected", "bootstrap-template-probe-failed", "final-ticket-bootstrap-probe-failed",
-		"support-session-canceled", "liveness-probe-failed", "runtime-not-recovered":
+		"support-session-canceled", "liveness-probe-failed", "runtime-not-recovered",
+		"provider-not-allowed", "provider-not-default", "region-unsupported",
+		"regional-evidence-missing", "regional-evidence-not-yet-valid", "regional-evidence-expired",
+		"regional-evidence-blocked", "regional-evidence-not-verified", "regional-evidence-invalid",
+		"ssh-pin-missing", "ssh-pin-invalid", "tool-unsupported", "failed":
 		return value
 	default:
 		return "failed"
 	}
+}
+
+func safeEligibilityReason(value string) string {
+	value = strings.TrimSpace(value)
+	switch value {
+	case "provider-not-allowed", "provider-not-default", "region-unsupported",
+		"regional-evidence-missing", "regional-evidence-not-yet-valid", "regional-evidence-expired",
+		"regional-evidence-blocked", "regional-evidence-not-verified", "regional-evidence-invalid",
+		"ssh-pin-missing", "ssh-pin-invalid", "tool-unsupported":
+		return value
+	default:
+		return "failed"
+	}
+}
+
+func availabilityFromEligibilityEvaluations(evaluations []tunnel.Selection, region tunnel.RegionProfile) tunnel.AvailabilitySet {
+	availability := tunnel.AvailabilitySet{SchemaVersion: tunnel.AvailabilitySchemaVersion, Region: region}
+	for _, item := range evaluations {
+		if item.Eligibility.Eligible {
+			continue
+		}
+		availability.Attempts = append(availability.Attempts, tunnel.Attempt{
+			ProviderID: item.Metadata.ID,
+			Status:     tunnel.AttemptSkipped,
+			ErrorClass: safeEligibilityReason(item.Eligibility.Reason),
+		})
+	}
+	return availability
 }

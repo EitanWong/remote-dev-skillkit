@@ -205,6 +205,7 @@ type tunnelProviderInspection struct {
 	DocumentationURL      string                      `json:"documentation_url"`
 	TermsURL              string                      `json:"terms_url,omitempty"`
 	DefaultAutomatic      bool                        `json:"default_automatic"`
+	AutomaticPriority     int                         `json:"automatic_priority,omitempty"`
 	RequiresSSHPin        bool                        `json:"requires_ssh_pin"`
 	FailureDomains        map[string]bool             `json:"failure_domains"`
 	Eligibility           tunnelEligibilityInspection `json:"eligibility"`
@@ -248,16 +249,13 @@ func (a App) tunnel(_ context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		policy := tunnel.Policy{
-			Region:             config.Region,
-			Now:                time.Now().UTC(),
-			AllowedProviderIDs: config.AllowedProviderIDs,
-			RestrictProviders:  config.RestrictProviders,
-			AllowNonDefault:    true,
-		}
+		policy := tunnelRuntimePolicy(config, time.Now().UTC())
+		evaluations := registry.Evaluate(policy, config.Evidence)
+		evaluations, _ = preflightTunnelEvaluations(evaluations, config, runtime.GOOS, runtime.GOARCH)
 		providers := make([]tunnelProviderInspection, 0, len(registry.Providers()))
-		for _, metadata := range registry.Providers() {
-			eligibility := tunnel.EvaluateEligibility(metadata, policy, config.Evidence)
+		for _, item := range evaluations {
+			metadata := item.Metadata
+			eligibility := item.Eligibility
 			status := "missing"
 			var expiresAt *time.Time
 			if eligibility.Evidence != nil {
@@ -270,7 +268,8 @@ func (a App) tunnel(_ context.Context, args []string) error {
 				Anonymous: metadata.Anonymous, CredentialRequirement: metadata.CredentialRequirement,
 				Executable: metadata.Executable, DocumentationURL: metadata.DocumentationURL,
 				TermsURL: metadata.TermsURL, DefaultAutomatic: metadata.DefaultAutomatic,
-				RequiresSSHPin: metadata.RequiresSSHPin, FailureDomains: redactedFailureDomains(metadata.FailureDomains),
+				AutomaticPriority: metadata.AutomaticPriority,
+				RequiresSSHPin:    metadata.RequiresSSHPin, FailureDomains: redactedFailureDomains(metadata.FailureDomains),
 				Eligibility:    tunnelEligibilityInspection{Eligible: eligibility.Eligible, Reason: eligibility.Reason},
 				EvidenceStatus: status, EvidenceExpiresAt: expiresAt,
 			})
@@ -297,24 +296,18 @@ func (a App) tunnel(_ context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		policy := tunnel.Policy{
-			Region: config.Region, Now: time.Now().UTC(), AllowedProviderIDs: config.AllowedProviderIDs, RestrictProviders: config.RestrictProviders, AllowNonDefault: true,
-		}
+		policy := tunnelRuntimePolicy(config, time.Now().UTC())
+		evaluations := registry.Evaluate(policy, config.Evidence)
+		evaluations, configurations := preflightTunnelEvaluations(evaluations, config, runtime.GOOS, runtime.GOARCH)
 		probes := make([]tunnelProbeInspection, 0, len(registry.Providers()))
-		for _, metadata := range registry.Providers() {
-			_, executableErr := exec.LookPath(metadata.Executable)
-			executableConfigured := executableErr == nil
-			knownHostsConfigured := false
-			if path := strings.TrimSpace(config.SSHKnownHostsPaths[metadata.ID]); path != "" {
-				if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
-					knownHostsConfigured = true
-				}
-			}
-			eligibility := tunnel.EvaluateEligibility(metadata, policy, config.Evidence)
+		for _, item := range evaluations {
+			metadata := item.Metadata
+			configuration := configurations[metadata.ID]
+			eligibility := item.Eligibility
 			probes = append(probes, tunnelProbeInspection{
-				ID: metadata.ID, Executable: metadata.Executable, ExecutableConfigured: executableConfigured,
-				KnownHostsConfigured: knownHostsConfigured,
-				ConfigurationReady:   executableConfigured && (!metadata.RequiresSSHPin || knownHostsConfigured),
+				ID: metadata.ID, Executable: metadata.Executable, ExecutableConfigured: configuration.ExecutableConfigured,
+				KnownHostsConfigured: configuration.KnownHostsConfigured,
+				ConfigurationReady:   configuration.ConfigurationReady,
 				Eligible:             eligibility.Eligible, EligibilityReason: eligibility.Reason,
 			})
 		}
@@ -4438,17 +4431,18 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		repoRoot = "."
 	}
 	repoRoot = resolveSupportSessionRepoRoot(repoRoot)
-	signingKeyPath := filepath.Join(workDir, ".rdev", "keys", "gateway-signing-key.json")
-	manifestKeyPath := filepath.Join(workDir, ".rdev", "keys", "manifest-root-key.json")
-	statePath := filepath.Join(workDir, ".rdev", "gateway", "state.json")
-	auditLogPath := filepath.Join(workDir, ".rdev", "audit", "events.jsonl")
-	publicationJournalPath := filepath.Join(workDir, ".rdev", "gateway", "publication-journal.json")
+	providerRoot := filepath.Join(workDir, ".rdev")
+	signingKeyPath := filepath.Join(providerRoot, "keys", "gateway-signing-key.json")
+	manifestKeyPath := filepath.Join(providerRoot, "keys", "manifest-root-key.json")
+	statePath := filepath.Join(providerRoot, "gateway", "state.json")
+	auditLogPath := filepath.Join(providerRoot, "audit", "events.jsonl")
+	publicationJournalPath := filepath.Join(providerRoot, "gateway", "publication-journal.json")
 	for _, protectedDir := range []string{
 		workDir,
-		filepath.Join(workDir, ".rdev"),
-		filepath.Join(workDir, ".rdev", "keys"),
-		filepath.Join(workDir, ".rdev", "gateway"),
-		filepath.Join(workDir, ".rdev", "audit"),
+		providerRoot,
+		filepath.Join(providerRoot, "keys"),
+		filepath.Join(providerRoot, "gateway"),
+		filepath.Join(providerRoot, "audit"),
 	} {
 		if err := os.MkdirAll(protectedDir, 0o700); err != nil {
 			return err
@@ -4518,13 +4512,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "keys"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(providerRoot, "keys"), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "gateway"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(providerRoot, "gateway"), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "audit"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(providerRoot, "audit"), 0o700); err != nil {
 		return err
 	}
 	key, _, err := signing.LoadOrCreate(signingKeyPath, signing.DefaultKeyID)
@@ -4635,6 +4629,23 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		}
 		availability.Attempts = []tunnel.Attempt{attempt}
 	} else {
+		policy := tunnelRuntimePolicy(runtimeConfig, time.Now().UTC())
+		evaluations := deps.Registry.Evaluate(policy, deps.Evidence)
+		evaluations, _ = preflightTunnelEvaluations(evaluations, runtimeConfig, runtime.GOOS, runtime.GOARCH)
+		availability = availabilityFromEligibilityEvaluations(evaluations, runtimeConfig.Region)
+		selections := eligibleTunnelSelections(evaluations)
+		if len(selections) == 0 {
+			diagnostic := newSupportSessionStartDiagnostic(
+				"provider-selection",
+				"no_public_gateway_provider_eligible",
+				"review-provider-eligibility",
+				availability,
+			)
+			if err := writeSupportSessionDiagnostic(statusFile, a.Stdout, diagnostic); err != nil {
+				return err
+			}
+			return errors.New("no public gateway provider is eligible for the selected region")
+		}
 		a.recordSupportSessionStartEvent("providers_started")
 		manager := deps.Manager
 		manager.Region = runtimeConfig.Region
@@ -4643,16 +4654,10 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 				return tunnel.ProbeGatewayHealth(probeCtx, nil, candidate, server.GatewayInstance())
 			}
 		}
-		selections := deps.Registry.Select(tunnel.Policy{
-			Region:             runtimeConfig.Region,
-			Now:                time.Now(),
-			AllowedProviderIDs: runtimeConfig.AllowedProviderIDs,
-			RestrictProviders:  runtimeConfig.RestrictProviders,
-			AllowNonDefault:    true,
-		}, deps.Evidence)
 		availabilityRuntime, err = manager.Start(ctx, selections, tunnel.StartRequest{
-			LocalURL:  localListenURL,
-			LocalPort: localPort,
+			LocalURL:     localListenURL,
+			LocalPort:    localPort,
+			ProviderRoot: providerRoot,
 		})
 		if err != nil {
 			return fmt.Errorf("start public tunnel availability: %w", err)
@@ -4662,7 +4667,9 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 			defer cancel()
 			_ = availabilityRuntime.Stop(cleanupCtx)
 		}()
-		availability = retainHealthyAvailabilityCandidates(availabilityRuntime.Snapshot())
+		runtimeAvailability := retainHealthyAvailabilityCandidates(availabilityRuntime.Snapshot())
+		availability.Candidates = append([]tunnel.Candidate(nil), runtimeAvailability.Candidates...)
+		availability.Attempts = append(availability.Attempts, runtimeAvailability.Attempts...)
 		if len(availability.Candidates) > 0 {
 			a.recordSupportSessionStartEvent("provider_health_passed")
 		}

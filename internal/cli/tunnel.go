@@ -43,6 +43,7 @@ type tunnelRuntimeConfig struct {
 	Region             tunnel.RegionProfile
 	AllowedProviderIDs []string
 	RestrictProviders  bool
+	ExplicitAllowlist  bool
 	Evidence           []tunnel.RegionalEvidence
 	SSHKnownHostsPaths map[string]string
 }
@@ -53,6 +54,7 @@ func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]strin
 	}
 	registry, err := tunnel.NewRegistry(
 		newCloudflareQuickProvider(stderr),
+		newTunn3lProvider(stderr, managedGzipInstaller{}),
 		newLocalhostRunProvider(stderr, knownHosts(tunnel.ProviderLocalhostRun)),
 		newPinggyProvider(stderr, knownHosts(tunnel.ProviderPinggy)),
 	)
@@ -120,6 +122,7 @@ func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Reg
 	allowed := []string(nil)
 	if policy.AllowedProviderIDs != nil {
 		config.RestrictProviders = true
+		config.ExplicitAllowlist = true
 		allowed = *policy.AllowedProviderIDs
 	}
 	allowedSeen := make(map[string]bool, len(allowed))
@@ -171,6 +174,130 @@ func loadTunnelRuntimeConfig(regionValue, policyPath string, registry tunnel.Reg
 		config.Evidence = append(config.Evidence, evidence...)
 	}
 	return config, nil
+}
+
+type tunnelProviderConfiguration struct {
+	ExecutableConfigured bool
+	KnownHostsConfigured bool
+	ConfigurationReady   bool
+}
+
+func tunnelRuntimePolicy(config tunnelRuntimeConfig, now time.Time) tunnel.Policy {
+	return tunnel.Policy{
+		Region:             config.Region,
+		Now:                now,
+		AllowedProviderIDs: append([]string(nil), config.AllowedProviderIDs...),
+		RestrictProviders:  config.RestrictProviders,
+		AllowNonDefault:    config.Region == tunnel.RegionGlobal && config.ExplicitAllowlist,
+	}
+}
+
+func preflightTunnelEvaluations(evaluations []tunnel.Selection, config tunnelRuntimeConfig, goos, goarch string) ([]tunnel.Selection, map[string]tunnelProviderConfiguration) {
+	adjusted := make([]tunnel.Selection, 0, len(evaluations))
+	configurations := make(map[string]tunnelProviderConfiguration, len(evaluations))
+	for _, item := range evaluations {
+		metadata := item.Metadata
+		metadata.Protocols = append([]string(nil), item.Metadata.Protocols...)
+		selection := tunnel.Selection{Provider: item.Provider, Metadata: metadata, Eligibility: item.Eligibility}
+		configuration, configurationReason := preflightTunnelProviderConfiguration(item.Provider, metadata, config, goos, goarch)
+		configurations[metadata.ID] = configuration
+		if selection.Eligibility.Eligible && configurationReason != "" {
+			selection.Eligibility.Eligible = false
+			selection.Eligibility.Reason = configurationReason
+		}
+		adjusted = append(adjusted, selection)
+	}
+	return adjusted, configurations
+}
+
+func eligibleTunnelSelections(evaluations []tunnel.Selection) []tunnel.Selection {
+	selections := make([]tunnel.Selection, 0, len(evaluations))
+	for _, item := range evaluations {
+		if item.Eligibility.Eligible {
+			selections = append(selections, item)
+		}
+	}
+	return selections
+}
+
+func preflightTunnelProviderConfiguration(provider tunnel.Provider, metadata tunnel.ProviderMetadata, config tunnelRuntimeConfig, goos, goarch string) (tunnelProviderConfiguration, string) {
+	builtIn := isBuiltInCLITunnelProvider(provider)
+	configuration := tunnelProviderConfiguration{ExecutableConfigured: tunnelProviderExecutableConfigured(metadata, goos, goarch, builtIn)}
+	knownHostsReady, knownHostsConfigured, pinReason := preflightTunnelProviderKnownHosts(metadata, config, goos)
+	configuration.KnownHostsConfigured = knownHostsConfigured
+	configuration.ConfigurationReady = configuration.ExecutableConfigured && knownHostsReady
+	if pinReason != "" {
+		return configuration, pinReason
+	}
+	if builtIn && metadata.ID == tunnel.ProviderTunn3l && !configuration.ExecutableConfigured {
+		return configuration, "tool-unsupported"
+	}
+	return configuration, pinReason
+}
+
+func isBuiltInCLITunnelProvider(provider tunnel.Provider) bool {
+	_, ok := provider.(cliTunnelProvider)
+	return ok
+}
+
+func tunnelProviderExecutableConfigured(metadata tunnel.ProviderMetadata, goos, goarch string, builtIn bool) bool {
+	if !builtIn {
+		return true
+	}
+	if metadata.ID == tunnel.ProviderTunn3l {
+		_, supported := tunn3lManagedAsset(goos, goarch)
+		return supported
+	}
+	if strings.TrimSpace(metadata.Executable) == "" {
+		return false
+	}
+	_, err := exec.LookPath(metadata.Executable)
+	return err == nil
+}
+
+func preflightTunnelProviderKnownHosts(metadata tunnel.ProviderMetadata, config tunnelRuntimeConfig, goos string) (ready, configured bool, reason string) {
+	var destination string
+	var port int
+	switch metadata.ID {
+	case tunnel.ProviderLocalhostRun:
+		spec, err := localhostRunTunnelSpec("1")
+		if err != nil {
+			return false, false, "ssh-pin-invalid"
+		}
+		destination, port = spec.Destination, spec.Port
+	case tunnel.ProviderPinggy:
+		spec, err := pinggyTunnelSpec("1")
+		if err != nil {
+			return false, false, "ssh-pin-invalid"
+		}
+		destination, port = spec.Destination, spec.Port
+	default:
+		if !metadata.RequiresSSHPin {
+			return true, false, ""
+		}
+	}
+
+	configuredPath := ""
+	if config.SSHKnownHostsPaths != nil {
+		configuredPath = config.SSHKnownHostsPaths[metadata.ID]
+	}
+	path := selectKnownHostsPath(configuredPath, os.Getenv("RDEV_SSH_KNOWN_HOSTS_FILE"), goos)
+	if path == "" {
+		if metadata.ID == tunnel.ProviderLocalhostRun {
+			if err := validateProviderTrustAnchor(localhostRunTrustAnchor); err != nil {
+				return false, false, "ssh-pin-invalid"
+			}
+			return true, true, ""
+		}
+		return false, false, "ssh-pin-missing"
+	}
+	if destination == "" || port == 0 {
+		return false, false, "ssh-pin-invalid"
+	}
+	if err := validateKnownHostsFile(path, destination, port); err != nil {
+		return false, false, "ssh-pin-invalid"
+	}
+	return true, true, ""
 }
 
 func loadRegionalEvidenceFile(path string) ([]tunnel.RegionalEvidence, error) {
@@ -1185,7 +1312,7 @@ func newCloudflareQuickProvider(stderr io.Writer) tunnel.Provider {
 	return cliTunnelProvider{
 		metadata: tunnel.ProviderMetadata{
 			ID: tunnel.ProviderCloudflareQuick, DisplayName: "Cloudflare Quick Tunnel", Protocols: []string{"https"},
-			Anonymous: true, Executable: "cloudflared", DocumentationURL: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/", DefaultAutomatic: true,
+			Anonymous: true, Executable: "cloudflared", DocumentationURL: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/", DefaultAutomatic: true, AutomaticPriority: 10,
 		},
 		stderr: stderr,
 		start: func(ctx context.Context, stderr io.Writer, request tunnel.StartRequest, _ string) (runningTunnel, error) {

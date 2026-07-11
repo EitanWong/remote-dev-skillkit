@@ -44,6 +44,45 @@ func TestSupportSessionStartDiagnosticUsesStrictAllowlist(t *testing.T) {
 	}
 }
 
+func TestSupportSessionProviderSelectionDiagnosticUsesFixedEligibilityClasses(t *testing.T) {
+	diagnostic := newSupportSessionStartDiagnostic(
+		"provider-selection",
+		"no_public_gateway_provider_eligible",
+		"review-provider-eligibility",
+		tunnel.AvailabilitySet{Attempts: []tunnel.Attempt{
+			{ProviderID: tunnel.ProviderCloudflareQuick, Status: tunnel.AttemptSkipped, ErrorClass: "regional-evidence-missing"},
+			{ProviderID: tunnel.ProviderPinggy, Status: tunnel.AttemptSkipped, ErrorClass: "ssh-pin-missing"},
+			{ProviderID: tunnel.ProviderLocalhostRun, Status: tunnel.AttemptSkipped, ErrorClass: "ssh-pin-invalid"},
+		}},
+	)
+	if diagnostic.Phase != "provider-selection" || diagnostic.Reason != "no_public_gateway_provider_eligible" ||
+		diagnostic.NextActionClass != "review-provider-eligibility" || len(diagnostic.Attempts) != 3 {
+		t.Fatalf("unexpected provider-selection diagnostic: %#v", diagnostic)
+	}
+	for index, want := range []string{"regional-evidence-missing", "ssh-pin-missing", "ssh-pin-invalid"} {
+		if diagnostic.Attempts[index].Status != string(tunnel.AttemptSkipped) || diagnostic.Attempts[index].ErrorClass != want {
+			t.Fatalf("attempt %d = %#v, want error class %q", index, diagnostic.Attempts[index], want)
+		}
+	}
+}
+
+func TestAvailabilityFromEligibilityEvaluationsProjectsOnlySkippedProviders(t *testing.T) {
+	evaluations := []tunnel.Selection{
+		{Metadata: tunnel.ProviderMetadata{ID: tunnel.ProviderCloudflareQuick}, Eligibility: tunnel.Eligibility{Eligible: true}},
+		{Metadata: tunnel.ProviderMetadata{ID: tunnel.ProviderTunn3l}, Eligibility: tunnel.Eligibility{Reason: "regional-evidence-missing"}},
+		{Metadata: tunnel.ProviderMetadata{ID: tunnel.ProviderPinggy}, Eligibility: tunnel.Eligibility{Reason: "operator/private/path"}},
+	}
+	availability := availabilityFromEligibilityEvaluations(evaluations, tunnel.RegionCNMainland)
+	if availability.SchemaVersion != tunnel.AvailabilitySchemaVersion || availability.Region != tunnel.RegionCNMainland ||
+		len(availability.Candidates) != 0 || len(availability.Attempts) != 2 {
+		t.Fatalf("unexpected eligibility availability: %#v", availability)
+	}
+	if availability.Attempts[0].ProviderID != tunnel.ProviderTunn3l || availability.Attempts[0].Status != tunnel.AttemptSkipped ||
+		availability.Attempts[0].ErrorClass != "regional-evidence-missing" || availability.Attempts[1].ErrorClass != "failed" {
+		t.Fatalf("unexpected eligibility attempts: %#v", availability.Attempts)
+	}
+}
+
 func TestSupportSessionDiagnosticPublicationErrorsArePathSafe(t *testing.T) {
 	diagnostic := newSupportSessionStartDiagnostic("readiness-policy", "direct_handoff_readiness_not_satisfied", "configure-redundant-public-gateway", tunnel.AvailabilitySet{})
 	privatePath := filepath.Join(t.TempDir(), "operator-secret", "status.json")
