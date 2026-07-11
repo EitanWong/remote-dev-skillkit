@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2847,7 +2848,28 @@ func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
 	handler := httpapi.NewServer(gw).Handler()
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	t.Setenv("RDEV_HOSTED_GATEWAY_URL", server.URL)
+	backendURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const publicGatewayURL = "https://gateway.example.test"
+	oldDefaultClient := http.DefaultClient
+	oldDefaultTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultClient = oldDefaultClient
+		http.DefaultTransport = oldDefaultTransport
+	})
+	http.DefaultClient = &http.Client{}
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		forwarded := req.Clone(req.Context())
+		forwardedURL := *req.URL
+		forwardedURL.Scheme = backendURL.Scheme
+		forwardedURL.Host = backendURL.Host
+		forwarded.URL = &forwardedURL
+		forwarded.Host = "gateway.example.test"
+		return oldDefaultTransport.RoundTrip(forwarded)
+	})
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", publicGatewayURL)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -2875,15 +2897,15 @@ func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
 		t.Fatalf("invalid create JSON: %v\n%s", err, stdout.String())
 	}
 	if payload.SchemaVersion != "rdev.support-session-created.v1" ||
-		payload.GatewayURL != server.URL ||
+		payload.GatewayURL != publicGatewayURL ||
 		payload.TicketCode == "" ||
 		!strings.Contains(payload.TargetCommand, "Windows PowerShell") ||
 		!strings.Contains(payload.TargetCommand, "macOS/Linux terminal") ||
-		!strings.Contains(payload.TargetCommand, server.URL+"/join/"+payload.TicketCode) {
+		!strings.Contains(payload.TargetCommand, publicGatewayURL+"/join/"+payload.TicketCode) {
 		t.Fatalf("expected configured gateway create payload, got %#v", payload)
 	}
 	if len(payload.GatewayURLCandidates) == 0 ||
-		payload.GatewayURLCandidates[0].URL != server.URL ||
+		payload.GatewayURLCandidates[0].URL != publicGatewayURL ||
 		!payload.GatewayURLCandidates[0].Recommended {
 		t.Fatalf("expected configured gateway candidate, got %#v", payload.GatewayURLCandidates)
 	}

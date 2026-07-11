@@ -2,9 +2,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -15,6 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
@@ -22,15 +25,9 @@ func TestLiveTunn3lReadiness(t *testing.T) {
 	if os.Getenv("RDEV_LIVE_TUNNEL_TEST") != "1" {
 		t.Skip("set RDEV_LIVE_TUNNEL_TEST=1 to run the external tunnel readiness test")
 	}
-	const instance = "live-tunn3l-readiness"
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/healthz" {
-			http.NotFound(w, request)
-			return
-		}
-		w.Header().Set("X-Rdev-Gateway-Instance", instance)
-		_, _ = io.WriteString(w, "ok\n")
-	}))
+	gw := gateway.NewMemoryGateway()
+	apiServer := httpapi.NewServer(gw)
+	origin := httptest.NewServer(apiServer.Handler())
 	defer origin.Close()
 
 	parsedOrigin, err := url.Parse(origin.URL)
@@ -56,6 +53,19 @@ func TestLiveTunn3lReadiness(t *testing.T) {
 		t.Fatalf("attempts=0 stage=%s", liveTunn3lStartupStage(err))
 	}
 	defer stopLiveTunnelHandle(t, handle, cancelProvider)
+	candidate := handle.Candidate()
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{{
+		URL: candidate.URL, Kind: candidate.ProviderID, Scope: "public-tunnel", Recommended: true,
+	}})
+	if err != nil {
+		t.Fatal("attempts=0 stage=ticket-setup")
+	}
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "live readiness", map[string]string{
+		gateway.TicketMetadataGatewayCandidates: string(candidates),
+	})
+	if err != nil {
+		t.Fatal("attempts=0 stage=ticket-setup")
+	}
 
 	deadline := time.Now().Add(60 * time.Second)
 	attempts := 0
@@ -63,18 +73,18 @@ func TestLiveTunn3lReadiness(t *testing.T) {
 	for time.Now().Before(deadline) {
 		attempts++
 		remaining := time.Until(deadline)
-		probeTimeout := 5 * time.Second
+		probeTimeout := 15 * time.Second
 		if remaining < probeTimeout {
 			probeTimeout = remaining
 		}
 		probeCtx, cancelProbe := context.WithTimeout(context.Background(), probeTimeout)
-		evidence, probeErr := tunnel.ProbeGatewayHealth(probeCtx, nil, handle.Candidate(), instance)
+		stage, ready := probeLiveTunn3lTicket(probeCtx, candidate, apiServer.GatewayInstance(), ticket.Code)
 		cancelProbe()
-		if probeErr == nil {
+		if ready {
 			t.Logf("attempts=%d stage=ready", attempts)
 			return
 		}
-		lastStage = liveProbeStage(evidence)
+		lastStage = stage
 		t.Logf("attempts=%d stage=%s", attempts, lastStage)
 
 		wait := time.Until(deadline)
@@ -95,6 +105,29 @@ func TestLiveTunn3lReadiness(t *testing.T) {
 		}
 	}
 	t.Fatalf("attempts=%d stage=%s", attempts, lastStage)
+}
+
+func probeLiveTunn3lTicket(ctx context.Context, candidate tunnel.Candidate, instance, ticketCode string) (string, bool) {
+	evidence, err := tunnel.ProbeGatewayHealth(ctx, nil, candidate, instance)
+	if err != nil {
+		return liveProbeFailureStage(evidence, "health"), false
+	}
+	evidence, err = tunnel.ProbeBootstrapTemplate(ctx, nil, candidate, instance)
+	if err != nil {
+		return liveProbeFailureStage(evidence, "static-bootstrap"), false
+	}
+	evidence, err = tunnel.ProbeBootstrapAsset(ctx, nil, candidate, ticketCode, instance)
+	if err != nil {
+		return liveProbeFailureStage(evidence, "ticket-bootstrap"), false
+	}
+	return "ready", true
+}
+
+func liveProbeFailureStage(evidence tunnel.ProbeEvidence, fallback string) string {
+	if stage := liveProbeStage(evidence); stage != "ready" {
+		return stage
+	}
+	return fallback
 }
 
 func liveTunn3lStartupStage(err error) string {

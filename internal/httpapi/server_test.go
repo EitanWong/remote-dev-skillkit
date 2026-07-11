@@ -91,6 +91,241 @@ func TestHealthzIncludesGatewayInstanceMarker(t *testing.T) {
 	}
 }
 
+func TestProbingTicketPowerShellBootstrapUsesAuthoritativePublicCandidate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	const publicBase = "https://ticket-public.example.com"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{{
+		URL: publicBase, Kind: "tunn3l", Scope: "public-tunnel", Recommended: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "public bootstrap authority", map[string]string{
+		gateway.TicketMetadataGatewayCandidates: string(candidates),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+"/bootstrap.ps1", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected probing bootstrap 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Rdev-Gateway-Instance"); got != server.GatewayInstance() {
+		t.Errorf("gateway instance header = %q, want server marker", got)
+	}
+	if got := rec.Header().Get(tunnel.TicketCodeSHA256Header); got != tunnel.TicketCodeSHA256(ticket.Code) {
+		t.Errorf("ticket hash header = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		publicBase + "/assets",
+		publicBase + "/v1/support-session/preconnect",
+		publicBase + "/v1/tickets/" + ticket.Code + "/manifest",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("bootstrap omitted authoritative public base fragment %q", want)
+		}
+	}
+	for _, forbidden := range []string{"http://localhost", "https://localhost"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("bootstrap embedded request Host authority %q", forbidden)
+		}
+	}
+}
+
+func TestPublishedTicketResourcesUseAuthoritativePublicCandidate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	const publicBase = "https://published-public.example.com/rdev"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{{
+		URL: publicBase, Kind: "tunn3l", Scope: "public-tunnel", Recommended: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "published public authority", map[string]string{
+		gateway.TicketMetadataGatewayCandidates: string(candidates),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.PublishTicket(ticket.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, resource := range []string{"", "/bootstrap.sh", "/bootstrap.ps1"} {
+		req := httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+resource, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("resource %q expected 200, got %d: %s", resource, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), publicBase) || strings.Contains(rec.Body.String(), "http://localhost") {
+			t.Errorf("resource %q did not preserve authoritative public base", resource)
+		}
+	}
+
+	malicious := url.QueryEscape(`[{"url":"https://query-injection.example.com","recommended":true}]`)
+	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+ticket.Code+"/manifest?gateway_url_candidates="+malicious, nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manifest expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Manifest.GatewayURL != publicBase || payload.Manifest.JoinURL != publicBase+"/join/"+ticket.Code {
+		t.Errorf("manifest authority = gateway %q join %q", payload.Manifest.GatewayURL, payload.Manifest.JoinURL)
+	}
+	for _, candidate := range payload.Manifest.GatewayCandidates {
+		if candidate.URL != publicBase {
+			t.Errorf("signed manifest included non-authoritative candidate %q", candidate.URL)
+		}
+	}
+	for _, candidate := range payload.Manifest.PackageCatalog.Candidates {
+		if !strings.HasPrefix(candidate.FallbackScriptURL, publicBase+"/join/"+ticket.Code+"/") {
+			t.Errorf("package fallback URL = %q", candidate.FallbackScriptURL)
+		}
+		if candidate.HelperAsset.SHA256URL != "" && !strings.HasPrefix(candidate.HelperAsset.SHA256URL, publicBase+"/assets/") {
+			t.Errorf("helper SHA URL = %q", candidate.HelperAsset.SHA256URL)
+		}
+	}
+	if strings.Contains(rec.Body.String(), "query-injection.example.com") || strings.Contains(rec.Body.String(), "http://localhost") {
+		t.Error("manifest response trusted query or request Host authority")
+	}
+}
+
+func TestCreateTicketSelectsAuthoritativePublicCandidate(t *testing.T) {
+	const recommendedBase = "https://recommended.example.com/rdev"
+	const matchingBase = "https://matching.example.com/rdev"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{
+		{URL: recommendedBase, Kind: "stable", Recommended: true},
+		{URL: matchingBase, Kind: "tunn3l"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name     string
+		host     string
+		wantBase string
+	}{
+		{name: "request authority match wins", host: "matching.example.com", wantBase: matchingBase},
+		{name: "recommended wins without match", host: "localhost", wantBase: recommendedBase},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := NewServer(gateway.NewMemoryGateway())
+			body, err := json.Marshal(map[string]any{
+				"mode": "attended-temporary", "ttl_seconds": 600, "reason": "authority selection",
+				"metadata": map[string]string{gateway.TicketMetadataGatewayCandidates: string(candidates)},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewReader(body))
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+			server.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var payload struct {
+				Ticket      model.Ticket `json:"ticket"`
+				JoinURL     string       `json:"joinUrl"`
+				ManifestURL string       `json:"manifestUrl"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.JoinURL != tt.wantBase+"/join/"+payload.Ticket.Code || payload.ManifestURL != tt.wantBase+"/v1/tickets/"+payload.Ticket.Code+"/manifest" {
+				t.Fatalf("create response authority = join %q manifest %q", payload.JoinURL, payload.ManifestURL)
+			}
+		})
+	}
+}
+
+func TestCreateTicketFailsClosedForInvalidAuthoritativeCandidateMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "malformed", raw: "{"},
+		{name: "empty", raw: "[]"},
+		{name: "non HTTPS", raw: `[{"url":"http://public.example.com"}]`},
+		{name: "query", raw: `[{"url":"https://public.example.com?token=value"}]`},
+		{name: "userinfo", raw: `[{"url":"https://user@public.example.com"}]`},
+		{name: "port", raw: `[{"url":"https://public.example.com:8443"}]`},
+		{name: "localhost", raw: `[{"url":"https://localhost"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := gateway.NewMemoryGateway()
+			server := NewServer(gw)
+			body, err := json.Marshal(map[string]any{
+				"mode": "attended-temporary", "ttl_seconds": 600,
+				"metadata": map[string]string{gateway.TicketMetadataGatewayCandidates: tt.raw},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewReader(body))
+			req.Host = "localhost"
+			rec := httptest.NewRecorder()
+			server.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("invalid metadata expected 400, got %d", rec.Code)
+			}
+			snapshot := gw.Snapshot()
+			if len(snapshot.Tickets) != 0 || len(snapshot.Audit) != 0 {
+				t.Fatalf("invalid metadata left ticket or audit state: tickets=%d audit=%d", len(snapshot.Tickets), len(snapshot.Audit))
+			}
+		})
+	}
+
+	server := NewServer(gateway.NewMemoryGateway())
+	mixed := `[{"url":"http://invalid.example.com"},{"url":"https://valid.example.com/rdev","recommended":true}]`
+	body, err := json.Marshal(map[string]any{
+		"mode": "attended-temporary", "ttl_seconds": 600,
+		"metadata": map[string]string{gateway.TicketMetadataGatewayCandidates: mixed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewReader(body))
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "https://valid.example.com/rdev/join/") || strings.Contains(rec.Body.String(), "invalid.example.com") {
+		t.Fatalf("mixed metadata did not select only valid candidate: code=%d", rec.Code)
+	}
+}
+
+func TestRequestBaseURLDoesNotTrustForwardedProto(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Host = "gateway.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	if got := requestBaseURL(req); got != "http://gateway.example.com" {
+		t.Fatalf("request base trusted forwarded proto: %q", got)
+	}
+}
+
 func TestBootstrapProbeTemplateIsStaticAndDoesNotMutateGateway(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
@@ -516,9 +751,7 @@ func TestTicketManifestPackageCatalogIncludesHelperAssetMirrors(t *testing.T) {
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+ticket.Code+"/manifest", nil)
-	req.Host = "gateway.example.test"
-	req.Header.Set("X-Forwarded-Proto", "https")
+	req := httptest.NewRequest(http.MethodGet, "https://gateway.example.test/v1/tickets/"+ticket.Code+"/manifest", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1140,7 +1373,7 @@ func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 	}
 }
 
-func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
+func TestTicketManifestEndpointDoesNotSignQueryGatewayCandidates(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
 	handler := server.Handler()
@@ -1159,8 +1392,11 @@ func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Manifest.GatewayCandidates) < 2 || payload.Manifest.GatewayCandidates[0].Kind != "relay" {
-		t.Fatalf("expected signed relay candidate first, got %#v", payload.Manifest.GatewayCandidates)
+	if payload.Manifest.GatewayURL != "http://example.com" || len(payload.Manifest.GatewayCandidates) != 1 || payload.Manifest.GatewayCandidates[0].URL != "http://example.com" {
+		t.Fatalf("query candidate changed legacy request authority: %#v", payload.Manifest)
+	}
+	if strings.Contains(rec.Body.String(), "relay.example.test") {
+		t.Fatal("unauthenticated query candidate was signed")
 	}
 	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)
@@ -1208,8 +1444,8 @@ func TestTicketManifestEndpointUsesServerSideGatewayCandidateMetadata(t *testing
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Manifest.GatewayCandidates) < 2 || payload.Manifest.GatewayCandidates[0].Kind != "relay" {
-		t.Fatalf("expected server-side metadata gateway candidates, got %#v", payload.Manifest.GatewayCandidates)
+	if len(payload.Manifest.GatewayCandidates) != 1 || payload.Manifest.GatewayCandidates[0].Kind != "relay" || payload.Manifest.GatewayCandidates[0].URL != "https://relay.example.test/rdev" {
+		t.Fatalf("expected only the valid server-side metadata gateway candidate, got %#v", payload.Manifest.GatewayCandidates)
 	}
 	if err := payload.Manifest.Verify(created.Ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)

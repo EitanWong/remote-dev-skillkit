@@ -589,12 +589,27 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	metadata := map[string]string{}
 	for key, value := range req.Metadata {
-		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
-			metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && (value != "" || key == gateway.TicketMetadataGatewayCandidates) {
+			metadata[key] = value
 		}
 	}
 	if req.AutoActivate {
 		metadata["auto_activate"] = "attended-temporary"
+	}
+	authority, err := ticketGatewayAuthorityFromMetadata(r, metadata)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(authority.Candidates) > 0 {
+		content, marshalErr := json.Marshal(authority.Candidates)
+		if marshalErr != nil {
+			writeError(w, http.StatusBadRequest, "ticket gateway candidate metadata is invalid")
+			return
+		}
+		metadata[gateway.TicketMetadataGatewayCandidates] = string(content)
 	}
 	ticket, err := s.Gateway.CreateTicketWithMetadata(req.Mode, req.TTLSeconds, req.Capabilities, req.Reason, metadata)
 	if err != nil {
@@ -607,8 +622,8 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	manifestRoot := manifestRootPublicKey(s.Gateway.ManifestRoot())
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ticket":                ticket,
-		"joinUrl":               requestBaseURL(r) + "/join/" + ticket.Code,
-		"manifestUrl":           requestBaseURL(r) + "/v1/tickets/" + ticket.Code + "/manifest",
+		"joinUrl":               authority.BaseURL + "/join/" + ticket.Code,
+		"manifestUrl":           manifestURLForTicketBase(authority.BaseURL, ticket.Code),
 		"manifestRootPublicKey": manifestRoot,
 	})
 }
@@ -619,10 +634,15 @@ func (s Server) ticketSubresource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown ticket endpoint")
 		return
 	}
-	baseURL := requestBaseURL(r)
+	authority, err := s.storedTicketGatewayAuthority(r, code)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	baseURL := authority.BaseURL
 	joinURL := baseURL + "/join/" + code
 	catalog := s.connectionEntryPackageCatalog(joinURL, baseURL)
-	manifest, err := s.Gateway.JoinManifestWithPackageCatalog(code, baseURL, joinURL, joinManifestGatewayCandidatesFromRequest(r, baseURL), catalog)
+	manifest, err := s.Gateway.JoinManifestWithPackageCatalog(code, baseURL, joinURL, authority.Candidates, catalog)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -645,25 +665,30 @@ func (s Server) join(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown join endpoint")
 		return
 	}
-	manifestURL := manifestURLForJoinRequest(r, code)
+	authority, err := s.storedTicketGatewayAuthority(r, code)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	manifestURL := manifestURLForTicketBase(authority.BaseURL, code)
 	manifestRoot := manifestRootPublicKey(s.Gateway.ManifestRoot())
 	if resource == "bootstrap.ps1" {
 		if err := s.Gateway.ValidatePowerShellBootstrapTicket(code); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		s.writePowerShellBootstrap(w, r, code, manifestURL, manifestRoot)
+		s.writePowerShellBootstrap(w, code, authority.BaseURL, manifestURL, manifestRoot)
 		return
 	}
-	if _, err := s.Gateway.JoinManifest(code, requestBaseURL(r), requestBaseURL(r)+"/join/"+code); err != nil {
+	if _, err := s.Gateway.JoinManifestWithGatewayCandidates(code, authority.BaseURL, authority.BaseURL+"/join/"+code, authority.Candidates); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	switch resource {
 	case "":
-		s.joinPage(w, r, code, manifestURL)
+		s.joinPage(w, r, code, authority.BaseURL, manifestURL)
 	case "bootstrap.sh":
-		s.writeShellBootstrap(w, r, code, manifestURL, manifestRoot)
+		s.writeShellBootstrap(w, code, authority.BaseURL, manifestURL, manifestRoot)
 	default:
 		writeError(w, http.StatusNotFound, "unknown join resource")
 	}
@@ -718,36 +743,112 @@ func helperAssetContract(gatewayURL, assetName, path string) model.HelperAssetCo
 	return contract
 }
 
-func manifestURLForJoinRequest(r *http.Request, code string) string {
-	manifestURL := requestBaseURL(r) + "/v1/tickets/" + code + "/manifest"
-	if raw := strings.TrimSpace(r.URL.Query().Get("gateway_url_candidates")); raw != "" {
-		values := url.Values{}
-		values.Set("gateway_url_candidates", raw)
-		manifestURL += "?" + values.Encode()
-	}
-	return manifestURL
+type ticketGatewayAuthority struct {
+	BaseURL    string
+	Candidates []model.JoinManifestGatewayCandidate
 }
 
-func joinManifestGatewayCandidatesFromRequest(r *http.Request, fallbackGatewayURL string) []model.JoinManifestGatewayCandidate {
-	raw := strings.TrimSpace(r.URL.Query().Get("gateway_url_candidates"))
-	if raw == "" {
-		return nil
+func (s Server) storedTicketGatewayAuthority(r *http.Request, code string) (ticketGatewayAuthority, error) {
+	ticket, ok := s.Gateway.TicketForCode(code)
+	if !ok {
+		return ticketGatewayAuthority{}, errors.New("ticket gateway authority is unavailable")
+	}
+	return ticketGatewayAuthorityFromMetadata(r, ticket.Metadata)
+}
+
+func ticketGatewayAuthorityFromMetadata(r *http.Request, metadata map[string]string) (ticketGatewayAuthority, error) {
+	raw, present := metadata[gateway.TicketMetadataGatewayCandidates]
+	if !present {
+		return ticketGatewayAuthority{BaseURL: strings.TrimRight(requestBaseURL(r), "/")}, nil
 	}
 	var candidates []model.JoinManifestGatewayCandidate
-	if err := json.Unmarshal([]byte(raw), &candidates); err != nil {
-		return nil
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &candidates) != nil {
+		return ticketGatewayAuthority{}, errors.New("ticket gateway candidate metadata is invalid")
 	}
-	for i := range candidates {
-		candidates[i].URL = strings.TrimRight(strings.TrimSpace(candidates[i].URL), "/")
+	validated := make([]model.JoinManifestGatewayCandidate, 0, len(candidates))
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		normalized, ok := normalizePublicHTTPSGatewayBase(candidate.URL)
+		if !ok || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		candidate.URL = normalized
+		validated = append(validated, candidate)
 	}
-	if len(candidates) == 0 && strings.TrimSpace(fallbackGatewayURL) != "" {
-		return []model.JoinManifestGatewayCandidate{{URL: strings.TrimRight(fallbackGatewayURL, "/"), Kind: "manifest-gateway", Scope: "signed-manifest", Recommended: true}}
+	if len(validated) == 0 {
+		return ticketGatewayAuthority{}, errors.New("ticket gateway candidate metadata has no valid public HTTPS candidate")
 	}
-	return candidates
+	selected := validated[0]
+	matchedRequest := false
+	for _, candidate := range validated {
+		if requestAuthorityMatchesGatewayCandidate(r, candidate.URL) {
+			selected = candidate
+			matchedRequest = true
+			break
+		}
+	}
+	if !matchedRequest {
+		for _, candidate := range validated {
+			if candidate.Recommended {
+				selected = candidate
+				break
+			}
+		}
+	}
+	return ticketGatewayAuthority{BaseURL: selected.URL, Candidates: validated}, nil
 }
 
-func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, manifestURL string) {
-	joinBase := strings.TrimRight(requestBaseURL(r), "/") + "/join/" + code
+func normalizePublicHTTPSGatewayBase(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() != "" ||
+		!strings.EqualFold(parsed.Scheme, "https") || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(value, "#") || parsed.RawPath != "" {
+		return "", false
+	}
+	if strings.HasSuffix(parsed.Hostname(), ".") || tunnel.ValidatePublicCandidate(tunnel.Candidate{ProviderID: "ticket-metadata", URL: value}) != nil {
+		return "", false
+	}
+	pathValue := strings.TrimRight(parsed.Path, "/")
+	if pathValue != "" {
+		if !strings.HasPrefix(pathValue, "/") || strings.Contains(pathValue, `\`) || strings.Contains(pathValue, "//") {
+			return "", false
+		}
+		for _, segment := range strings.Split(strings.TrimPrefix(pathValue, "/"), "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return "", false
+			}
+		}
+	}
+	parsed.Scheme = "https"
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Path = pathValue
+	parsed.RawPath = ""
+	return parsed.String(), true
+}
+
+func requestAuthorityMatchesGatewayCandidate(r *http.Request, candidateURL string) bool {
+	host := strings.TrimSpace(r.Host)
+	if host == "" || host != r.Host {
+		return false
+	}
+	requestAuthority, err := url.Parse("https://" + host)
+	if err != nil || requestAuthority.User != nil || requestAuthority.Hostname() == "" || requestAuthority.Path != "" || requestAuthority.RawQuery != "" || requestAuthority.Fragment != "" {
+		return false
+	}
+	if port := requestAuthority.Port(); port != "" && port != "443" {
+		return false
+	}
+	candidate, err := url.Parse(candidateURL)
+	return err == nil && strings.EqualFold(requestAuthority.Hostname(), candidate.Hostname())
+}
+
+func manifestURLForTicketBase(baseURL, code string) string {
+	return strings.TrimRight(baseURL, "/") + "/v1/tickets/" + code + "/manifest"
+}
+
+func (s Server) joinPage(w http.ResponseWriter, r *http.Request, code, baseURL, manifestURL string) {
+	joinBase := strings.TrimRight(baseURL, "/") + "/join/" + code
 	shellCommand := "curl -fsSL " + shellQuote(joinBase+"/bootstrap.sh") + " | sh"
 	powerShellCommand := "powershell -NoProfile -Command \"irm '" + powerShellSingleQuoteValue(joinBase+"/bootstrap.ps1") + "' -UseBasicParsing | iex\""
 	packageCatalog := model.NewConnectionEntryPackageCatalog(joinBase)
@@ -1041,16 +1142,16 @@ func supportedJoinLocale(tag string) string {
 	}
 }
 
-func (s Server) writeShellBootstrap(w http.ResponseWriter, r *http.Request, ticketCode, manifestURL, manifestRootPublicKey string) {
-	setTicketBootstrapHeaders(w, ticketCode)
+func (s Server) writeShellBootstrap(w http.ResponseWriter, ticketCode, baseURL, manifestURL, manifestRootPublicKey string) {
+	s.setTicketBootstrapHeaders(w, ticketCode)
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
 	if strings.TrimSpace(manifestRootPublicKey) != "" {
 		rootArg = " --manifest-root-public-key " + shellQuote(manifestRootPublicKey)
 	}
-	assetBase := shellQuote(strings.TrimRight(requestBaseURL(r), "/") + "/assets")
-	preconnectURL := shellQuote(strings.TrimRight(requestBaseURL(r), "/") + "/v1/support-session/preconnect")
+	assetBase := shellQuote(strings.TrimRight(baseURL, "/") + "/assets")
+	preconnectURL := shellQuote(strings.TrimRight(baseURL, "/") + "/v1/support-session/preconnect")
 	_, _ = fmt.Fprintf(w, `#!/bin/sh
 set -eu
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -1197,16 +1298,16 @@ exit $rdev_exit
 	`, preconnectURL, ticketCode, assetBase, assetBase, assetBase, assetBase, assetBase, shellQuote(manifestURL), rootArg)
 }
 
-func (s Server) writePowerShellBootstrap(w http.ResponseWriter, r *http.Request, ticketCode, manifestURL, manifestRootPublicKey string) {
-	setTicketBootstrapHeaders(w, ticketCode)
+func (s Server) writePowerShellBootstrap(w http.ResponseWriter, ticketCode, baseURL, manifestURL, manifestRootPublicKey string) {
+	s.setTicketBootstrapHeaders(w, ticketCode)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	rootArg := ""
 	if strings.TrimSpace(manifestRootPublicKey) != "" {
 		rootArg = " --manifest-root-public-key '" + powerShellSingleQuoteValue(manifestRootPublicKey) + "'"
 	}
-	assetBase := powerShellSingleQuoteValue(strings.TrimRight(requestBaseURL(r), "/") + "/assets")
-	preconnectURL := powerShellSingleQuoteValue(strings.TrimRight(requestBaseURL(r), "/") + "/v1/support-session/preconnect")
+	assetBase := powerShellSingleQuoteValue(strings.TrimRight(baseURL, "/") + "/assets")
+	preconnectURL := powerShellSingleQuoteValue(strings.TrimRight(baseURL, "/") + "/v1/support-session/preconnect")
 	_, _ = fmt.Fprintf(w, `$ErrorActionPreference = 'Stop'
 $asset = ''
 $preconnectUrl = '%s'
@@ -1768,19 +1869,17 @@ func extractBearerToken(r *http.Request) string {
 	return r.URL.Query().Get("host_secret")
 }
 
-func setTicketBootstrapHeaders(w http.ResponseWriter, ticketCode string) {
+func (s Server) setTicketBootstrapHeaders(w http.ResponseWriter, ticketCode string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set(tunnel.TicketCodeSHA256Header, tunnel.TicketCodeSHA256(ticketCode))
+	w.Header().Set("X-Rdev-Gateway-Instance", s.gatewayInstance)
 }
 
 func requestBaseURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
-	}
-	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded == "http" || forwarded == "https" {
-		scheme = forwarded
 	}
 	return scheme + "://" + r.Host
 }

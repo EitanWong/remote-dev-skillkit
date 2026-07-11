@@ -67,6 +67,109 @@ func TestMemoryGatewayJoinManifestUsesTicketMetadataGatewayCandidates(t *testing
 	}
 }
 
+func TestMemoryGatewayPreservesEmptyGatewayCandidateMetadataForFailClosedValidation(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "invalid authority", map[string]string{
+		TicketMetadataGatewayCandidates: "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := ticket.Metadata[TicketMetadataGatewayCandidates]; !ok || value != "" {
+		t.Fatalf("gateway candidate metadata presence was lost: %#v", ticket.Metadata)
+	}
+}
+
+func TestMemoryGatewayTicketReturnsAreDetachedFromStoredAuthority(t *testing.T) {
+	gw := NewMemoryGateway()
+	const originalMetadata = `[{"url":"https://public.example.test","recommended":true}]`
+	inputCapabilities := []string{"shell.user"}
+	created, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, inputCapabilities, "detached ticket", map[string]string{
+		TicketMetadataGatewayCandidates: originalMetadata,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created.Capabilities[0] = "unattended.access"
+	created.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://mutated.example.test"}]`
+	inputCapabilities[0] = "unattended.access"
+	assertStored := func(stage string, wantStatus model.TicketStatus) {
+		t.Helper()
+		stored, ok := gw.Ticket(created.ID)
+		if !ok {
+			t.Fatalf("%s: stored ticket missing", stage)
+		}
+		if stored.Status != wantStatus || len(stored.Capabilities) != 1 || stored.Capabilities[0] != "shell.user" || stored.Metadata[TicketMetadataGatewayCandidates] != originalMetadata {
+			t.Fatalf("%s: stored ticket was mutated through returned value: %#v", stage, stored)
+		}
+	}
+	assertStored("create", model.TicketStatusProbing)
+
+	published, err := gw.PublishTicket(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://published-mutation.example.test"}]`
+	byCode, ok := gw.TicketForCode(created.Code)
+	if !ok {
+		t.Fatal("published ticket missing by code")
+	}
+	byCode.Capabilities[0] = "unattended.access"
+	byCode.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://lookup-mutation.example.test"}]`
+	assertStored("publish and lookup", model.TicketStatusActive)
+
+	revoked, err := gw.RevokeTicket(created.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoked.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://revoke-mutation.example.test"}]`
+	assertStored("revoke", model.TicketStatusRevoked)
+
+	rollbackTicket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "rollback", map[string]string{
+		TicketMetadataGatewayCandidates: originalMetadata,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, _, err := gw.RollbackTicket(rollbackTicket.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolledBack.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://rollback-mutation.example.test"}]`
+	storedRollback, ok := gw.Ticket(rollbackTicket.ID)
+	if !ok || storedRollback.Metadata[TicketMetadataGatewayCandidates] != originalMetadata {
+		t.Fatalf("rollback return mutated stored ticket: %#v", storedRollback)
+	}
+}
+
+func TestMemoryGatewayJoinManifestFailsClosedForInvalidStoredGatewayCandidates(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "empty", raw: ""},
+		{name: "malformed", raw: "{"},
+		{name: "empty array", raw: "[]"},
+		{name: "empty URL", raw: `[{"url":""}]`},
+		{name: "malformed URL", raw: `[{"url":"not a url"}]`},
+		{name: "empty query marker", raw: `[{"url":"https://public.example.test?"}]`},
+		{name: "empty fragment marker", raw: `[{"url":"https://public.example.test#"}]`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := NewMemoryGateway()
+			ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "invalid authority", map[string]string{
+				TicketMetadataGatewayCandidates: tt.raw,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := gw.JoinManifest(ticket.Code, "http://localhost", "http://localhost/join/"+ticket.Code); err == nil {
+				t.Fatal("invalid stored gateway candidates silently fell back")
+			}
+		})
+	}
+}
+
 func TestMemoryGatewayPreservesHostIdentity(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

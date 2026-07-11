@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -264,15 +265,16 @@ func (g *MemoryGateway) createTicketWithStatus(mode model.HostMode, ttlSeconds i
 		for key, value := range metadata {
 			key = strings.TrimSpace(key)
 			value = strings.TrimSpace(value)
-			if key != "" && value != "" {
+			if key != "" && (value != "" || key == TicketMetadataGatewayCandidates) {
 				ticket.Metadata[key] = value
 			}
 		}
 	}
+	ticket = cloneTicket(ticket)
 	g.tickets[ticket.ID] = ticket
 	g.codeIndex[ticket.Code] = ticket.ID
 	g.appendAuditLocked("operator", "ticket.create", ticket.ID, "created short-lived "+string(status)+" ticket")
-	return ticket, nil
+	return cloneTicket(ticket), nil
 }
 
 func (g *MemoryGateway) PublishTicket(ticketID string) (model.Ticket, error) {
@@ -289,9 +291,9 @@ func (g *MemoryGateway) PublishTicket(ticketID string) (model.Ticket, error) {
 		return model.Ticket{}, ErrTicketExpired
 	}
 	ticket.Status = model.TicketStatusActive
-	g.tickets[ticket.ID] = ticket
+	g.tickets[ticket.ID] = cloneTicket(ticket)
 	g.appendAuditLocked("operator", "ticket.publish", ticket.ID, "published probed ticket")
-	return ticket, nil
+	return cloneTicket(ticket), nil
 }
 
 func (g *MemoryGateway) ValidatePowerShellBootstrapTicket(ticketCode string) error {
@@ -557,9 +559,9 @@ func (g *MemoryGateway) RevokeTicket(ticketID, reason string) (model.Ticket, err
 		return model.Ticket{}, fmt.Errorf("%w: ticket already revoked", ErrInvalidState)
 	}
 	ticket.Status = model.TicketStatusRevoked
-	g.tickets[ticket.ID] = ticket
+	g.tickets[ticket.ID] = cloneTicket(ticket)
 	g.appendAuditLocked("operator", "ticket.revoke", ticket.ID, reasonOrDefault(reason, "revoked ticket"))
-	return ticket, nil
+	return cloneTicket(ticket), nil
 }
 
 // RollbackTicket invalidates a ticket transaction and every host authorization
@@ -580,7 +582,7 @@ func (g *MemoryGateway) RollbackTicketIfNoConnectedHost(ticketID, reason string)
 		if !ok {
 			return model.Ticket{}, nil, false, fmt.Errorf("%w: ticket", ErrNotFound)
 		}
-		return ticket, nil, false, nil
+		return cloneTicket(ticket), nil, false, nil
 	}
 	ticket, hosts, err := g.rollbackTicketLocked(ticketID, reason)
 	return ticket, hosts, err == nil, err
@@ -600,7 +602,7 @@ func (g *MemoryGateway) rollbackTicketLocked(ticketID, reason string) (model.Tic
 	}
 	if ticket.Status != model.TicketStatusRevoked {
 		ticket.Status = model.TicketStatusRevoked
-		g.tickets[ticket.ID] = ticket
+		g.tickets[ticket.ID] = cloneTicket(ticket)
 		g.appendAuditLocked("operator", "ticket.rollback", ticket.ID, reasonOrDefault(reason, "rolled back unpublished ticket"))
 	}
 
@@ -630,7 +632,7 @@ func (g *MemoryGateway) rollbackTicketLocked(ticketID, reason string) (model.Tic
 		}
 	}
 	sort.Slice(affected, func(i, j int) bool { return affected[i].ID < affected[j].ID })
-	return ticket, affected, nil
+	return cloneTicket(ticket), affected, nil
 }
 
 func (g *MemoryGateway) ActivateHost(hostID string, capabilities []string) (model.Host, error) {
@@ -812,14 +814,20 @@ func (g *MemoryGateway) TicketForCode(ticketCode string) (model.Ticket, bool) {
 		return model.Ticket{}, false
 	}
 	ticket, ok := g.tickets[ticketID]
-	return ticket, ok
+	return cloneTicket(ticket), ok
 }
 
 func (g *MemoryGateway) Ticket(ticketID string) (model.Ticket, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	ticket, ok := g.tickets[strings.TrimSpace(ticketID)]
-	return ticket, ok
+	return cloneTicket(ticket), ok
+}
+
+func cloneTicket(ticket model.Ticket) model.Ticket {
+	ticket.Capabilities = append([]string(nil), ticket.Capabilities...)
+	ticket.Metadata = cloneStringMap(ticket.Metadata)
+	return ticket
 }
 
 // GenerateHostSecret creates a random 32-byte hex secret for a host and stores
@@ -1012,7 +1020,13 @@ func (g *MemoryGateway) JoinManifestWithPackageCatalog(ticketCode, gatewayURL, j
 		return model.JoinManifest{}, ErrTicketExpired
 	}
 	if len(candidates) == 0 {
-		candidates = gatewayCandidatesFromTicketMetadata(ticket.Metadata)
+		storedCandidates, present, err := gatewayCandidatesFromTicketMetadata(ticket.Metadata)
+		if err != nil {
+			return model.JoinManifest{}, err
+		}
+		if present {
+			candidates = storedCandidates
+		}
 	}
 	manifest, err := model.NewJoinManifest(ticket, model.JoinManifestSpec{
 		GatewayURL:        gatewayURL,
@@ -1035,27 +1049,33 @@ func (g *MemoryGateway) JoinManifestTimeProof(manifest model.JoinManifest) (mode
 	return model.NewGatewayTimeProof(model.GatewayTimeProofPurposeJoinManifest, manifest, g.manifestSigningID, g.manifestPrivateKey, g.now(), 5*time.Minute)
 }
 
-func gatewayCandidatesFromTicketMetadata(metadata map[string]string) []model.JoinManifestGatewayCandidate {
-	if len(metadata) == 0 {
-		return nil
+func gatewayCandidatesFromTicketMetadata(metadata map[string]string) ([]model.JoinManifestGatewayCandidate, bool, error) {
+	raw, present := metadata[TicketMetadataGatewayCandidates]
+	if !present {
+		return nil, false, nil
 	}
-	raw := strings.TrimSpace(metadata[TicketMetadataGatewayCandidates])
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return nil, true, fmt.Errorf("%w: ticket gateway candidate metadata is empty", ErrInvalidState)
 	}
 	var candidates []model.JoinManifestGatewayCandidate
 	if err := json.Unmarshal([]byte(raw), &candidates); err != nil {
-		return nil
+		return nil, true, fmt.Errorf("%w: ticket gateway candidate metadata is malformed", ErrInvalidState)
 	}
 	out := make([]model.JoinManifestGatewayCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
 		candidate.URL = strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
-		if candidate.URL == "" {
+		parsed, err := url.Parse(candidate.URL)
+		if candidate.URL == "" || err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil || parsed.Hostname() == "" ||
+			(!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(candidate.URL, "#") {
 			continue
 		}
 		out = append(out, candidate)
 	}
-	return out
+	if len(out) == 0 {
+		return nil, true, fmt.Errorf("%w: ticket gateway candidate metadata has no valid candidate", ErrInvalidState)
+	}
+	return out, true, nil
 }
 
 func (g *MemoryGateway) AuditEvents() []model.AuditEvent {
