@@ -412,10 +412,6 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.relayAdapterPackage(params.Arguments)
 	case "rdev.relay_adapter.verify":
 		data, err = s.relayAdapterVerify(params.Arguments)
-	case "rdev.tickets.create":
-		data, err = s.createTicket(params.Arguments)
-	case "rdev.tickets.revoke":
-		data, err = s.revokeTicket(params.Arguments)
 	case "rdev.audit.query":
 		data, err = s.queryAudit(params.Arguments)
 	case "rdev.policy.explain":
@@ -582,6 +578,9 @@ func (s Server) sessionInterrupt(args map[string]any) (any, error) {
 func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
 	if stringArg(args, "id", "") == "" && stringArg(args, "task_id", "") == "" {
+		if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+			return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts")
+		}
 		session, err := s.Gateway.Session(sessionID)
 		if err != nil {
 			return nil, err
@@ -734,6 +733,7 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 		Reason:                     stringArg(args, "reason", "visible temporary remote support"),
 		TTLSeconds:                 ttl,
 		AutoActivate:               boolArg(args, "auto_activate", true),
+		Capabilities:               stringSliceArg(args, "capabilities"),
 		Locale:                     stringArg(args, "locale", "auto"),
 		RdevCommand:                rdevCommand,
 		Region:                     string(region),
@@ -1847,35 +1847,11 @@ func (s Server) relayAdapterVerify(args map[string]any) (any, error) {
 	return relayadapter.Verify(requiredString(args, "package"))
 }
 
-func (s Server) createTicket(args map[string]any) (any, error) {
-	mode := model.HostMode(stringArg(args, "mode", string(model.HostModeAttendedTemporary)))
-	ttl := intArg(args, "ttl_seconds", 7200)
-	reason := stringArg(args, "reason", "remote support")
-	capabilities := stringSliceArg(args, "capabilities")
-	ticket, err := s.Gateway.CreateTicket(mode, ttl, capabilities, reason)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"ticket":                ticket,
-		"joinUrl":               publicExampleJoinURL(ticket.Code),
-		"manifestRootPublicKey": manifestRootPublicKey(s.Gateway.ManifestRoot()),
-	}, nil
-}
-
-func publicExampleJoinURL(ticketCode string) string {
-	return "https://agent.example.com/join/" + ticketCode
-}
-
 func manifestRootPublicKey(root model.TrustBundle) string {
 	if root.SigningKeyID == "" || root.PublicKey == "" {
 		return ""
 	}
 	return root.SigningKeyID + ":" + root.PublicKey
-}
-
-func (s Server) revokeTicket(args map[string]any) (any, error) {
-	return s.Gateway.RevokeTicket(requiredString(args, "ticket_id"), stringArg(args, "reason", ""))
 }
 
 func (s Server) queryAudit(args map[string]any) (any, error) {

@@ -427,6 +427,46 @@ func TestHTTPOldHostJobExperimentalRoutesAreNotMounted(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentEventReplayAndArtifactListing(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	handler := NewServer(gw).Handler()
+	created := createHTTPSession(t, handler)
+	joined := joinHTTPSession(t, handler, created.Session.JoinCode)
+
+	ref := controlplane.ArtifactRef{ID: "art_remote", Kind: "evidence", Name: "result.json", SHA256: strings.Repeat("a", 64), Complete: true}
+	if _, _, err := gw.UpsertSessionArtifact(created.Session.ID, ref); err != nil {
+		t.Fatal(err)
+	}
+
+	eventsRec := httptest.NewRecorder()
+	handler.ServeHTTP(eventsRec, httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/"+url.PathEscape(created.Session.ID)+"/events?after_seq=0&limit=10", nil))
+	if eventsRec.Code != http.StatusOK {
+		t.Fatalf("agent events status = %d body=%s", eventsRec.Code, eventsRec.Body.String())
+	}
+	var eventsPayload struct {
+		Events []controlplane.Event `json:"events"`
+	}
+	decodeHTTP(t, eventsRec, &eventsPayload)
+	if len(eventsPayload.Events) == 0 || eventsPayload.Events[0].ToEndpointID != joined.Endpoint.ID {
+		t.Fatalf("agent replay omitted joined endpoint event: %#v", eventsPayload.Events)
+	}
+
+	artifactsRec := httptest.NewRecorder()
+	handler.ServeHTTP(artifactsRec, httptest.NewRequest(http.MethodGet,
+		"/v1/sessions/"+url.PathEscape(created.Session.ID)+"/artifacts", nil))
+	if artifactsRec.Code != http.StatusOK {
+		t.Fatalf("artifact listing status = %d body=%s", artifactsRec.Code, artifactsRec.Body.String())
+	}
+	var artifactsPayload struct {
+		Artifacts []controlplane.ArtifactRef `json:"artifacts"`
+	}
+	decodeHTTP(t, artifactsRec, &artifactsPayload)
+	if len(artifactsPayload.Artifacts) != 1 || artifactsPayload.Artifacts[0].ID != ref.ID {
+		t.Fatalf("artifact listing = %#v", artifactsPayload.Artifacts)
+	}
+}
+
 func postJSON(t *testing.T, handler http.Handler, path, body, bearer string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))

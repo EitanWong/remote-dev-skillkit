@@ -392,6 +392,19 @@ func TestBuildHandoffRoutesMissingGatewayToForegroundStart(t *testing.T) {
 	}
 }
 
+func TestBuildHandoffPreservesExplicitCapabilities(t *testing.T) {
+	handoff := BuildHandoff(HandoffOptions{
+		Target: "windows", RdevCommand: "rdev",
+		Capabilities: []string{"shell.user", "window.inspect", "screen.screenshot"},
+	})
+	for _, key := range []string{"cli_start_now_command", "foreground_start_command"} {
+		joined := strings.Join(handoff[key].([]string), "\x00")
+		if !strings.Contains(joined, "--capabilities\x00shell.user,window.inspect,screen.screenshot") {
+			t.Fatalf("%s dropped capabilities: %v", key, handoff[key])
+		}
+	}
+}
+
 func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://hosted.example.test/rdev")
 	handoff := BuildHandoff(HandoffOptions{

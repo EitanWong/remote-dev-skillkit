@@ -7,7 +7,6 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
-	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
@@ -19,6 +18,7 @@ func createFinalProbedSupportTicket(
 	initial tunnel.AvailabilitySet,
 	ttlSeconds int,
 	reason string,
+	capabilities []string,
 	metadata func([]supportsession.GatewayURLCandidate) map[string]string,
 	probe func(context.Context, tunnel.Candidate, string, string) error,
 	instance string,
@@ -30,7 +30,7 @@ func createFinalProbedSupportTicket(
 		ticket, err := gw.CreateProbingTicketWithMetadata(
 			model.HostModeAttendedTemporary,
 			ttlSeconds,
-			cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
+			effectiveSupportSessionCapabilities(capabilities),
 			reason,
 			metadata(gatewayURLCandidatesFromTunnelCandidates(survivors.Candidates)),
 		)

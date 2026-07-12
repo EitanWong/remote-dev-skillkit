@@ -117,7 +117,7 @@ func TestCreateFinalProbedSupportTicketRejectsHostRegistrationDuringSuccessfulPr
 	store := &recordingStateStore{}
 	var registrationErr error
 	ticket, _, err := createFinalProbedSupportTicket(
-		context.Background(), gw, store, supportSessionAvailabilityForTests("registering-failure"), 60, "registration race",
+		context.Background(), gw, store, supportSessionAvailabilityForTests("registering-failure"), 60, "registration race", nil,
 		func(candidates []supportsession.GatewayURLCandidate) map[string]string {
 			return addGatewayCandidateTicketMetadata(map[string]string{"auto_activate": "attended-temporary"}, candidates)
 		},

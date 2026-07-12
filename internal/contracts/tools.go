@@ -127,6 +127,7 @@ func Tools() []Tool {
 				"reason":                        stringField(),
 				"ttl_seconds":                   integer(60, 86400),
 				"auto_activate":                 boolField(),
+				"capabilities":                  stringArray(),
 				"locale":                        stringField(),
 				"rdev_command":                  stringField(),
 				"region":                        enum("global", "cn-mainland"),

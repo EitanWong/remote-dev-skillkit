@@ -653,7 +653,7 @@ func newConnectionEntry(joinURL string) ConnectionEntry {
 			"export evidence and revoke the ticket when finished",
 		},
 		RevocationInstructions: []string{
-			"revoke the ticket with rdev.tickets.revoke or the gateway API",
+			"close the bound session with rdev.sessions.close or the gateway API",
 			"stop the visible host process on the target machine",
 			"remove any temporary bootstrap files created by the published installer package",
 		},

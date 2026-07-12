@@ -5003,6 +5003,38 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	}
 }
 
+func TestNormalizeInvitePayloadLoopbackOrigins(t *testing.T) {
+	payload := gatewayInviteTicketPayload{
+		JoinURL:     "http://localhost:8787/join/ABCD-1234?source=test",
+		ManifestURL: "http://127.0.0.1:8787/v1/tickets/ABCD-1234/manifest",
+	}
+	got, err := normalizeInvitePayloadOrigins(payload, "https://public.example.test/rdev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.JoinURL != "https://public.example.test/rdev/join/ABCD-1234?source=test" ||
+		got.ManifestURL != "https://public.example.test/rdev/v1/tickets/ABCD-1234/manifest" {
+		t.Fatalf("unexpected normalized payload: %#v", got)
+	}
+
+	external := gatewayInviteTicketPayload{JoinURL: "https://other.example.test/join/ABCD-1234"}
+	unchanged, err := normalizeInvitePayloadOrigins(external, "https://public.example.test")
+	if err != nil || unchanged.JoinURL != external.JoinURL {
+		t.Fatalf("non-loopback origin must be preserved: %#v err=%v", unchanged, err)
+	}
+}
+
+func TestCreateSupportSessionPayloadUsesExplicitCapabilities(t *testing.T) {
+	explicit := []string{"shell.user", "window.inspect", "screen.screenshot"}
+	if got := effectiveSupportSessionCapabilities(explicit); !slices.Equal(got, explicit) {
+		t.Fatalf("explicit capabilities not preserved: %#v", got)
+	}
+	defaults := effectiveSupportSessionCapabilities(nil)
+	if !slices.Contains(defaults, "shell.user") || slices.Contains(defaults, "screen.screenshot") {
+		t.Fatalf("unexpected temporary defaults: %#v", defaults)
+	}
+}
+
 func TestInviteCreateDefaultsToAutoTransportPlan(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := httptest.NewServer(httpapi.NewServer(gw).Handler())

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestCreateFinalProbedSupportTicketReplacesTicketWithSurvivingCandidate(t *t
 	}
 
 	ticket, final, err := createFinalProbedSupportTicket(
-		context.Background(), gw, store, initial, 60, "survivor retry", metadata,
+		context.Background(), gw, store, initial, 60, "survivor retry", []string{"shell.user", "window.inspect"}, metadata,
 		func(_ context.Context, candidate tunnel.Candidate, ticketCode, _ string) error {
 			probedCodes[candidate.ProviderID] = append(probedCodes[candidate.ProviderID], ticketCode)
 			if candidate.ProviderID == "a-failed" {
@@ -37,6 +38,9 @@ func TestCreateFinalProbedSupportTicketReplacesTicketWithSurvivingCandidate(t *t
 	}
 	if len(final.Candidates) != 1 || final.Candidates[0].ProviderID != "b-healthy" {
 		t.Fatalf("final candidates = %#v", final.Candidates)
+	}
+	if !slices.Equal(ticket.Capabilities, []string{"shell.user", "window.inspect"}) {
+		t.Fatalf("explicit capabilities were not preserved: %#v", ticket.Capabilities)
 	}
 	if len(probedCodes["b-healthy"]) != 2 || probedCodes["b-healthy"][0] == probedCodes["b-healthy"][1] {
 		t.Fatalf("survivor must pass both replaced and final tickets, codes=%v", probedCodes["b-healthy"])
@@ -69,7 +73,7 @@ func TestCreateFinalProbedSupportTicketFailsAfterEverySurvivorIsRejected(t *test
 	initial := supportSessionAvailabilityForTests("a-first", "b-second")
 	bCalls := 0
 	_, _, err := createFinalProbedSupportTicket(
-		context.Background(), gw, store, initial, 60, "reject all",
+		context.Background(), gw, store, initial, 60, "reject all", nil,
 		func(candidates []supportsession.GatewayURLCandidate) map[string]string {
 			return addGatewayCandidateTicketMetadata(nil, candidates)
 		},

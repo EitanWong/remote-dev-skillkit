@@ -3447,6 +3447,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		reason := fs.String("reason", "visible temporary remote support", "support session reason")
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
 		autoActivate := fs.Bool("auto-activate", true, "auto-activate the first attended-temporary host created by this standard session ticket")
+		capabilities := fs.String("capabilities", "", "comma-separated explicit session capabilities; defaults to temporary-mode capabilities")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
@@ -3473,6 +3474,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			Reason:                     *reason,
 			TTLSeconds:                 *ttl,
 			AutoActivate:               *autoActivate,
+			Capabilities:               splitCapabilities(*capabilities),
 			Locale:                     *locale,
 			OperatorTokenFile:          *operatorTokenFile,
 			RdevCommand:                *rdevCommand,
@@ -3555,6 +3557,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		reason := fs.String("reason", "visible temporary remote support", "support session reason")
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
 		autoActivate := fs.Bool("auto-activate", true, "auto-activate the first attended-temporary host created by this standard session ticket")
+		capabilities := fs.String("capabilities", "", "comma-separated explicit session capabilities; defaults to temporary-mode capabilities")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		readyFile := fs.String("ready-file", "", "write the started support-session JSON payload to this file before serving; defaults to the session work dir")
@@ -3579,6 +3582,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			Reason:                     *reason,
 			TTLSeconds:                 *ttl,
 			AutoActivate:               *autoActivate,
+			Capabilities:               splitCapabilities(*capabilities),
 			Locale:                     *locale,
 			RdevCommand:                *rdevCommand,
 			ReadyFile:                  *readyFile,
@@ -3597,6 +3601,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		reason := fs.String("reason", "visible temporary remote support", "support session reason")
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
 		autoActivate := fs.Bool("auto-activate", true, "auto-activate the first attended-temporary host created by this standard session ticket")
+		capabilities := fs.String("capabilities", "", "comma-separated explicit session capabilities; defaults to temporary-mode capabilities")
 		locale := fs.String("locale", "auto", "localized target-user instruction language, for example auto, en, zh-CN, ja, ko, es, fr, de, or pt-BR")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
 		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
@@ -3612,6 +3617,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			Reason:            *reason,
 			TTLSeconds:        *ttl,
 			AutoActivate:      *autoActivate,
+			Capabilities:      splitCapabilities(*capabilities),
 			Locale:            *locale,
 			OperatorTokenFile: *operatorTokenFile,
 			RdevCommand:       *rdevCommand,
@@ -3842,6 +3848,7 @@ type supportSessionStartOptions struct {
 	Reason                     string
 	TTLSeconds                 int
 	AutoActivate               bool
+	Capabilities               []string
 	Locale                     string
 	RdevCommand                string
 	ReadyFile                  string
@@ -3862,6 +3869,7 @@ type supportSessionConnectOptions struct {
 	Reason                     string
 	TTLSeconds                 int
 	AutoActivate               bool
+	Capabilities               []string
 	Locale                     string
 	OperatorTokenFile          string
 	RdevCommand                string
@@ -3891,6 +3899,7 @@ type supportSessionCreateOptions struct {
 	Reason            string
 	TTLSeconds        int
 	AutoActivate      bool
+	Capabilities      []string
 	Locale            string
 	OperatorTokenFile string
 	RdevCommand       string
@@ -3932,6 +3941,7 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 			Reason:                     opts.Reason,
 			TTLSeconds:                 opts.TTLSeconds,
 			AutoActivate:               opts.AutoActivate,
+			Capabilities:               opts.Capabilities,
 			Locale:                     opts.Locale,
 			RdevCommand:                opts.RdevCommand,
 			ReadyFile:                  opts.ReadyFile,
@@ -3956,6 +3966,7 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 			Reason:                     opts.Reason,
 			TTLSeconds:                 opts.TTLSeconds,
 			AutoActivate:               opts.AutoActivate,
+			Capabilities:               opts.Capabilities,
 			Locale:                     opts.Locale,
 			RdevCommand:                opts.RdevCommand,
 			Region:                     opts.Region,
@@ -3970,6 +3981,7 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 		Reason:            opts.Reason,
 		TTLSeconds:        opts.TTLSeconds,
 		AutoActivate:      opts.AutoActivate,
+		Capabilities:      opts.Capabilities,
 		Locale:            opts.Locale,
 		OperatorTokenFile: opts.OperatorTokenFile,
 		RdevCommand:       opts.RdevCommand,
@@ -4727,7 +4739,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	var ticket model.Ticket
 	for retries := len(availability.Candidates); ; retries-- {
-		ticket, availability, err = createFinalProbedSupportTicket(ctx, gw, store, availability, opts.TTLSeconds, opts.Reason, ticketMetadata, finalProbe, server.GatewayInstance())
+		ticket, availability, err = createFinalProbedSupportTicket(ctx, gw, store, availability, opts.TTLSeconds, opts.Reason, opts.Capabilities, ticketMetadata, finalProbe, server.GatewayInstance())
 		if err != nil {
 			return err
 		}
@@ -5008,7 +5020,7 @@ func createSupportSessionPayload(ctx context.Context, opts supportSessionCreateO
 		Mode:              model.HostModeAttendedTemporary,
 		TTLSeconds:        opts.TTLSeconds,
 		Reason:            opts.Reason,
-		Capabilities:      cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
+		Capabilities:      effectiveSupportSessionCapabilities(opts.Capabilities),
 		Transport:         "auto",
 		NetworkScope:      "auto",
 		AuthorityProfile:  "standard",
@@ -5321,6 +5333,46 @@ func fetchSupportSessionStatus(ctx context.Context, client *http.Client, opts su
 			return nil, fmt.Errorf("support-session status failed: %s", message)
 		}
 		return nil, fmt.Errorf("support-session status failed: %s", resp.Status)
+	}
+	return payload, nil
+}
+
+func effectiveSupportSessionCapabilities(explicit []string) []string {
+	if len(explicit) > 0 {
+		return append([]string(nil), explicit...)
+	}
+	return cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults())
+}
+
+func normalizeInvitePayloadOrigins(payload gatewayInviteTicketPayload, gatewayURL string) (gatewayInviteTicketPayload, error) {
+	base, err := url.Parse(strings.TrimRight(strings.TrimSpace(gatewayURL), "/"))
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return gatewayInviteTicketPayload{}, fmt.Errorf("invalid gateway URL")
+	}
+	rewrite := func(raw string) (string, error) {
+		if strings.TrimSpace(raw) == "" {
+			return raw, nil
+		}
+		parsed, err := url.Parse(raw)
+		if err != nil {
+			return "", err
+		}
+		host := strings.ToLower(parsed.Hostname())
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return raw, nil
+		}
+		parsed.Scheme = base.Scheme
+		parsed.Host = base.Host
+		parsed.Path = strings.TrimRight(base.Path, "/") + "/" + strings.TrimLeft(parsed.Path, "/")
+		parsed.RawPath = ""
+		return parsed.String(), nil
+	}
+	if payload.JoinURL, err = rewrite(payload.JoinURL); err != nil {
+		return gatewayInviteTicketPayload{}, err
+	}
+	if payload.ManifestURL, err = rewrite(payload.ManifestURL); err != nil {
+		return gatewayInviteTicketPayload{}, err
 	}
 	return payload, nil
 }
@@ -8263,7 +8315,7 @@ func createGatewayInviteTicket(ctx context.Context, client *http.Client, opts in
 		}
 		return gatewayInviteTicketPayload{}, fmt.Errorf("create invite ticket failed: %s", payload.Error)
 	}
-	return payload, nil
+	return normalizeInvitePayloadOrigins(payload, opts.GatewayURL)
 }
 
 func inviteTicketMetadata(opts inviteCreateOptions) map[string]string {

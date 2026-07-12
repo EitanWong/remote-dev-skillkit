@@ -217,7 +217,11 @@ func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && resource == "join":
 		s.joinSession(w, r, sessionID)
 	case r.Method == http.MethodGet && resource == "events":
-		s.sessionEventsAfter(w, r, sessionID)
+		if strings.TrimSpace(r.URL.Query().Get("endpoint_id")) != "" {
+			s.sessionEventsAfter(w, r, sessionID)
+		} else {
+			s.sessionAgentEventsAfter(w, r, sessionID)
+		}
 	case r.Method == http.MethodPost && resource == "events":
 		s.appendSessionEvent(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "tasks" && taskID == "" && action == "":
@@ -226,11 +230,45 @@ func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
 		s.completeSessionTask(w, r, sessionID, taskID)
 	case r.Method == http.MethodPost && resource == "artifacts":
 		s.upsertSessionArtifact(w, r, sessionID)
+	case r.Method == http.MethodGet && resource == "artifacts":
+		s.listSessionArtifacts(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "close":
 		s.closeSession(w, r, sessionID)
 	default:
 		writeProtocolError(w, http.StatusNotFound, protocolHTTPError(controlplane.ErrSessionClosed, "unknown session endpoint", false))
 	}
+}
+
+func (s Server) sessionAgentEventsAfter(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "auditor role is required", false))
+		return
+	}
+	afterSeq, err := parseOptionalUint(r.URL.Query().Get("after_seq"), "after_seq")
+	if err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrStaleCursor, err.Error(), true))
+		return
+	}
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"), "limit")
+	if err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrTooManyEvents, err.Error(), true))
+		return
+	}
+	events, replay, err := s.Gateway.SessionEventsAfterForAgent(sessionID, afterSeq, limit)
+	if err != nil {
+		writeControlPlaneErrorWithReplay(w, err, replay)
+		return
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"events": events, "snapshot_required": replay.SnapshotRequired, "snapshot_seq": replay.SnapshotSeq,
+		"last_seq": replay.LastSeq, "retry_after_ms": replay.RetryAfterMS, "reconnecting": replay.Reconnecting,
+		"status": session.DeriveStatus(),
+	})
 }
 
 func (s Server) getSessionSnapshot(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -399,6 +437,19 @@ func (s Server) upsertSessionArtifact(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"artifact": artifact, "event": event})
+}
+
+func (s Server) listSessionArtifacts(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "auditor role is required", false))
+		return
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"artifacts": session.Artifacts, "status": session.DeriveStatus()})
 }
 
 func (s Server) closeSession(w http.ResponseWriter, r *http.Request, sessionID string) {

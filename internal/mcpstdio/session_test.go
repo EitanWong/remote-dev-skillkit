@@ -3,11 +3,13 @@ package mcpstdio
 import (
 	"bytes"
 	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 )
 
 func TestSessionsToolsListExposesOnlySessionControlPlane(t *testing.T) {
@@ -41,7 +43,7 @@ func TestSessionsToolsListExposesOnlySessionControlPlane(t *testing.T) {
 			t.Fatalf("missing session tool %s from tools/list: %#v", name, seen)
 		}
 	}
-	for _, old := range []string{"rdev.hosts.list", "rdev.jobs.create", "rdev.jobs.authorize", "rdev.artifacts.list"} {
+	for _, old := range []string{"rdev.tickets.create", "rdev.tickets.revoke", "rdev.hosts.list", "rdev.jobs.create", "rdev.jobs.authorize", "rdev.artifacts.list"} {
 		if seen[old] {
 			t.Fatalf("old experimental tool %s must be absent from tools/list", old)
 		}
@@ -123,8 +125,41 @@ func TestSessionsMCPCreateStatusTaskEventsAndClose(t *testing.T) {
 	}
 }
 
+func TestRemoteSessionsMCPEventsAndArtifacts(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "remote MCP", JoinPolicy: "single-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, _, _, err := gw.JoinSessionByCode(session.JoinCode, controlplane.EndpointSpec{
+		Role: controlplane.EndpointRoleTarget, Platform: "windows/amd64", IdentityFingerprint: "fp-remote-mcp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.UpsertSessionArtifact(session.ID, controlplane.ArtifactRef{
+		ID: "art_remote", Kind: "evidence", Name: "result.json", SHA256: strings.Repeat("a", 64), Complete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer httpServer.Close()
+	mcp := NewServerWithRemoteGateway(gateway.NewMemoryGateway(), httpServer.URL)
+
+	events := callSessionTool(t, mcp, "rdev.sessions.events", map[string]any{"session_id": session.ID, "after_seq": float64(0)})
+	rawEvents, ok := events["events"].([]any)
+	if !ok || len(rawEvents) == 0 || rawEvents[0].(map[string]any)["to_endpoint_id"] != endpoint.ID {
+		t.Fatalf("remote events missing joined endpoint: %#v", events)
+	}
+	artifacts := callSessionTool(t, mcp, "rdev.sessions.artifacts", map[string]any{"session_id": session.ID})
+	rawArtifacts, ok := artifacts["artifacts"].([]any)
+	if !ok || len(rawArtifacts) != 1 || rawArtifacts[0].(map[string]any)["id"] != "art_remote" {
+		t.Fatalf("remote artifacts mismatch: %#v", artifacts)
+	}
+}
+
 func TestSessionsMCPRejectsOldHostJobArtifactTools(t *testing.T) {
-	for _, tool := range []string{"rdev.hosts.list", "rdev.jobs.authorize", "rdev.artifacts.list"} {
+	for _, tool := range []string{"rdev.tickets.create", "rdev.tickets.revoke", "rdev.hosts.list", "rdev.jobs.authorize", "rdev.artifacts.list"} {
 		server := NewServer(gateway.NewMemoryGateway())
 		input := mcpRequestLine(t, tool, map[string]any{
 			"host_id":          "hst_old",

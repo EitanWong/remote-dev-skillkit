@@ -355,6 +355,13 @@
           "auto_activate": {
             "type": "boolean"
           },
+          "capabilities": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
           "gateway_url": {
             "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,

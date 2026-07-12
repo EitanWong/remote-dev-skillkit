@@ -102,7 +102,7 @@ func TestProxyPOSTToRetriesSessionTaskWithIdempotencyKey(t *testing.T) {
 	}
 }
 
-func TestServerToolCallCreateTicket(t *testing.T) {
+func TestServerToolCallLegacyCreateTicketIsUnknown(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rdev.tickets.create","arguments":{"mode":"attended-temporary","ttl_seconds":600,"reason":"test"}}}` + "\n"
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
@@ -114,19 +114,9 @@ func TestServerToolCallCreateTicket(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 response, got %d", len(lines))
 	}
-	result, ok := lines[0]["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing result: %#v", lines[0])
-	}
-	structured, ok := result["structuredContent"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing structured content: %#v", result)
-	}
-	if _, ok := structured["joinUrl"].(string); !ok {
-		t.Fatalf("expected joinUrl in structured content: %#v", structured)
-	}
-	if root, ok := structured["manifestRootPublicKey"].(string); !ok || root == "" {
-		t.Fatalf("expected manifestRootPublicKey in structured content: %#v", structured)
+	errPayload, ok := lines[0]["error"].(map[string]any)
+	if !ok || !strings.Contains(errPayload["message"].(string), "unknown tool") {
+		t.Fatalf("legacy ticket tool should be unknown: %#v", lines[0])
 	}
 }
 

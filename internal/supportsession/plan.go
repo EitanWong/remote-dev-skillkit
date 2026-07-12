@@ -96,6 +96,7 @@ type HandoffOptions struct {
 	Reason                     string
 	TTLSeconds                 int
 	AutoActivate               bool
+	Capabilities               []string
 	Locale                     string
 	RdevCommand                string
 	Region                     string
@@ -199,6 +200,9 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		"locale":        locale,
 		"rdev_command":  rdevCommand,
 	}
+	if len(opts.Capabilities) > 0 {
+		createArgs["capabilities"] = append([]string(nil), opts.Capabilities...)
+	}
 	startCommand := []string{
 		rdevCommand, "support-session", "start",
 		"--addr", addr,
@@ -218,6 +222,9 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		startCommand = append(startCommand, "--auto-activate")
 	} else {
 		startCommand = append(startCommand, "--auto-activate=false")
+	}
+	if len(opts.Capabilities) > 0 {
+		startCommand = append(startCommand, "--capabilities", strings.Join(opts.Capabilities, ","))
 	}
 	startCommand = appendTunnelPolicyFlags(startCommand, opts.Region, opts.ProviderPolicyPath, opts.AllowDegradedDirectHandoff)
 	connectStartCommand := []string{
@@ -240,6 +247,9 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		connectStartCommand = append(connectStartCommand, "--auto-activate")
 	} else {
 		connectStartCommand = append(connectStartCommand, "--auto-activate=false")
+	}
+	if len(opts.Capabilities) > 0 {
+		connectStartCommand = append(connectStartCommand, "--capabilities", strings.Join(opts.Capabilities, ","))
 	}
 	connectStartCommand = appendTunnelPolicyFlags(connectStartCommand, opts.Region, opts.ProviderPolicyPath, opts.AllowDegradedDirectHandoff)
 	return map[string]any{
