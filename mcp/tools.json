@@ -337,6 +337,77 @@
         ],
         "type": "object"
       }
+    },
+    {
+      "name": "rdev.support_session.connect",
+      "description": "Create or route the standard visible support-session entry, including region-aware tunnel availability, readiness, and the single human handoff contract.",
+      "safety": "Does not bypass local controls or accept provider terms. Without an explicit start action it returns bounded commands/contracts; direct single-entry handoffs remain non-sendable unless the caller explicitly enables the degraded override.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "addr": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "allow_degraded_direct_handoff": {
+            "type": "boolean"
+          },
+          "auto_activate": {
+            "type": "boolean"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "locale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider_policy": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rdev_command": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "region": {
+            "enum": [
+              "global",
+              "cn-mainland"
+            ],
+            "type": "string"
+          },
+          "repo_root": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "enum": [
+              "auto",
+              "windows",
+              "macos",
+              "linux"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "work_dir": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
     }
   ],
   "version": "0.0.1"

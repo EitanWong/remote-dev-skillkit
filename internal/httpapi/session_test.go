@@ -15,7 +15,84 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
+
+func TestPublishedTicketManifestJoinsBoundSessionAndReportsEndpoint(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	handler := NewServer(gw).Handler()
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "ticket session binding", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err = gw.PublishTicket(ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticket.SessionID == "" {
+		t.Fatal("published ticket did not persist its bound session id")
+	}
+
+	manifestReq := httptest.NewRequest(http.MethodGet, "https://gateway.example.test/v1/tickets/"+ticket.Code+"/manifest", nil)
+	manifestRec := httptest.NewRecorder()
+	handler.ServeHTTP(manifestRec, manifestReq)
+	if manifestRec.Code != http.StatusOK {
+		t.Fatalf("manifest status = %d, want 200", manifestRec.Code)
+	}
+	var manifestPayload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+	}
+	decodeHTTP(t, manifestRec, &manifestPayload)
+	if manifestPayload.Manifest.TicketCode != ticket.Code {
+		t.Fatal("signed manifest did not preserve the published ticket code")
+	}
+	if err := manifestPayload.Manifest.Verify(ticket.CreatedAt); err != nil {
+		t.Fatalf("manifest verification failed: %v", err)
+	}
+
+	joinRec := postJSON(t, handler, "/v1/session-joins", `{
+		"join_code":"`+manifestPayload.Manifest.TicketCode+`",
+		"endpoint":{
+			"role":"target",
+			"name":"windows-target",
+			"platform":"windows/amd64",
+			"identity_fingerprint":"fp-ticket-session-target",
+			"capabilities":["shell.user"],
+			"transport":"long-poll"
+		}
+	}`, "")
+	if joinRec.Code != http.StatusOK {
+		t.Fatalf("ticket session join status = %d, want 200", joinRec.Code)
+	}
+	var joined struct {
+		Session  controlplane.Session  `json:"session"`
+		Endpoint controlplane.Endpoint `json:"endpoint"`
+		Lease    controlplane.Lease    `json:"lease"`
+	}
+	decodeHTTP(t, joinRec, &joined)
+	if joined.Session.ID != ticket.SessionID || joined.Session.JoinCode != ticket.Code || joined.Session.SourceTicketID != ticket.ID || joined.Endpoint.ID == "" || joined.Lease.Secret == "" {
+		t.Fatal("ticket join response omitted the bound session, target endpoint, or lease")
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "https://gateway.example.test/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("support-session status = %d, want 200", statusRec.Code)
+	}
+	var status struct {
+		Connected                   bool   `json:"connected"`
+		SessionID                   string `json:"session_id"`
+		RecommendedTargetEndpointID string `json:"recommended_target_endpoint_id"`
+	}
+	decodeHTTP(t, statusRec, &status)
+	if !status.Connected || status.SessionID != joined.Session.ID || status.RecommendedTargetEndpointID != joined.Endpoint.ID {
+		t.Fatal("endpoint-only support status did not expose the bound session and target endpoint")
+	}
+	if strings.Contains(statusRec.Body.String(), joined.Lease.Secret) {
+		t.Fatal("support status leaked the endpoint lease secret")
+	}
+}
 
 func TestHTTPSessionCreateJoinEventsAndSnapshot(t *testing.T) {
 	handler := NewServer(gateway.NewMemoryGateway()).Handler()
@@ -119,6 +196,45 @@ func TestHTTPSessionCreateJoinEventsAndSnapshot(t *testing.T) {
 	decodeHTTP(t, snapshotRec, &snapshot)
 	if snapshot.Snapshot.Session.ID != created.Session.ID || snapshot.Snapshot.Limits.EventBatch == 0 {
 		t.Fatalf("snapshot missing session recovery fields: %#v", snapshot.Snapshot)
+	}
+}
+
+func TestHTTPAppendSessionEventRequiresLeaseOrOperatorForReservedSource(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{JoinPolicy: "single-target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-event-auth",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
+	path := "/v1/sessions/" + url.PathEscape(session.ID) + "/events"
+
+	missingSource := postJSON(t, handler, path, `{"type":"status","idempotency_key":"missing-source"}`, "")
+	if missingSource.Code != http.StatusUnauthorized {
+		t.Fatalf("missing event source status = %d, want 401: %s", missingSource.Code, missingSource.Body.String())
+	}
+	reservedSource := postJSON(t, handler, path, `{"type":"status","from_endpoint_id":"gateway","idempotency_key":"reserved-source"}`, "")
+	if reservedSource.Code != http.StatusForbidden {
+		t.Fatalf("reserved event source status = %d, want 403: %s", reservedSource.Code, reservedSource.Body.String())
+	}
+	agentSource := postJSON(t, handler, path, `{"type":"interrupt","from_endpoint_id":"agent","idempotency_key":"agent-source"}`, "")
+	if agentSource.Code != http.StatusForbidden {
+		t.Fatalf("agent event source status = %d, want 403: %s", agentSource.Code, agentSource.Body.String())
+	}
+	targetSource := postJSON(t, handler, path, `{"type":"status","from_endpoint_id":"`+endpoint.ID+`","idempotency_key":"target-source"}`, lease.Secret)
+	if targetSource.Code != http.StatusAccepted {
+		t.Fatalf("leased target event status = %d, want 202: %s", targetSource.Code, targetSource.Body.String())
+	}
+	operatorSource := postJSON(t, handler, path, `{"type":"status","from_endpoint_id":"gateway","idempotency_key":"operator-source"}`, "operator-secret")
+	if operatorSource.Code != http.StatusAccepted {
+		t.Fatalf("operator gateway event status = %d, want 202: %s", operatorSource.Code, operatorSource.Body.String())
 	}
 }
 

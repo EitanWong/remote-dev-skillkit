@@ -26,6 +26,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/relayadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -468,6 +469,295 @@ func TestServerToolCallSupportSessionConnectWithoutGatewayReturnsStart(t *testin
 	}
 }
 
+func TestServerToolCallSupportSessionConnectPropagatesTunnelPolicy(t *testing.T) {
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	if err := os.WriteFile(policyPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+		"target":                        "auto",
+		"region":                        "cn-mainland",
+		"provider_policy":               policyPath,
+		"allow_degraded_direct_handoff": false,
+	})
+	var out bytes.Buffer
+	server := NewServer(gateway.NewMemoryGateway())
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	startCommand := strings.Join(anyStrings(structured["cli_start_now_command"].([]any)), "\x00")
+	if !strings.Contains(startCommand, "--region\x00cn-mainland") ||
+		!strings.Contains(startCommand, "--provider-policy\x00"+policyPath) ||
+		strings.Contains(startCommand, "--allow-degraded-direct-handoff") {
+		t.Fatalf("MCP connect dropped or changed tunnel policy: %#v", structured)
+	}
+	availability := structured["availability_set"].(map[string]any)
+	if availability["region"] != "cn-mainland" ||
+		structured["regional_evidence"] == nil ||
+		structured["ready_to_send"] != false ||
+		structured["ready_to_send_human"] != false ||
+		structured["ready_to_send_to_human"] != false ||
+		structured["ready_to_activate"] != false ||
+		structured["ready_to_execute"] != false ||
+		structured["degraded_single_entry"] != false {
+		t.Fatalf("MCP connect omitted readiness aliases: %#v", structured)
+	}
+}
+
+func TestServerToolCallSupportSessionConnectExplicitGatewayRequiresForegroundRemoteTransaction(t *testing.T) {
+	now := time.Now().UTC()
+	policyDir := t.TempDir()
+	evidencePath := filepath.Join(policyDir, "evidence.json")
+	evidence := tunnel.RegionalEvidence{
+		ProviderID: "configured-gateway", Region: tunnel.RegionCNMainland, Status: tunnel.EvidenceVerified,
+		Issuer: "super-secret-token", ObservedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		Samples: validMCPMainlandSamples(),
+	}
+	encodedEvidence, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(evidencePath, encodedEvidence, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(policyDir, "providers.json")
+	policyBody := fmt.Sprintf(`{"allowed_provider_ids":["configured-gateway"],"regional_evidence_paths":[%q]}`, evidencePath)
+	if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+		"gateway_url":                   "https://gateway.example.test",
+		"target":                        "windows",
+		"region":                        "cn-mainland",
+		"provider_policy":               policyPath,
+		"allow_degraded_direct_handoff": true,
+	})
+	var out bytes.Buffer
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+
+	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	startCommand := strings.Join(anyStrings(structured["cli_start_now_command"].([]any)), "\x00")
+	nextArgs := structured["handoff"].(map[string]any)["mcp_next_arguments"].(map[string]any)
+	if structured["ready_to_send"] != false ||
+		structured["ready_to_send_human"] != false ||
+		structured["ready_to_send_to_human"] != false ||
+		structured["ready_to_activate"] != false ||
+		structured["ready_to_execute"] != false ||
+		structured["reason"] != "remote_ticket_and_probe_required" ||
+		structured["selected_path"] != "start-foreground-gateway" ||
+		nextArgs["gateway_url"] != "https://gateway.example.test" ||
+		!strings.Contains(startCommand, "support-session\x00connect\x00--start") ||
+		!strings.Contains(startCommand, "--gateway-url\x00https://gateway.example.test") {
+		t.Fatalf("explicit gateway must require foreground remote ticket/probe transaction: %#v", structured)
+	}
+	if len(gw.Snapshot().Tickets) != 0 {
+		t.Fatalf("MCP created a local ticket for an arbitrary remote gateway: %#v", gw.Snapshot().Tickets)
+	}
+	regionalEvidence := structured["regional_evidence"].([]any)
+	if structured["provider_policy_applied"] != true || len(regionalEvidence) != 1 {
+		t.Fatalf("explicit gateway dropped validated provider policy evidence: %#v", structured)
+	}
+	summary := regionalEvidence[0].(map[string]any)
+	if summary["provider_id"] != "configured-gateway" || summary["status"] != "verified" || summary["expires_at"] == nil {
+		t.Fatalf("unexpected safe evidence summary: %#v", summary)
+	}
+	encoded, err := json.Marshal(structured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "super-secret-token") || strings.Contains(string(encoded), "china-telecom") || strings.Contains(string(encoded), policyPath) || strings.Contains(string(encoded), evidencePath) {
+		t.Fatalf("MCP response leaked protected tunnel material: %s", encoded)
+	}
+}
+
+func TestSupportSessionConnectConfiguredGatewayRequiresForegroundRemoteTransaction(t *testing.T) {
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://configured.example.test/rdev")
+	gw := gateway.NewMemoryGateway()
+	result, err := NewServer(gw).supportSessionConnect(map[string]any{"target": "windows"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := result.(map[string]any)
+	command := strings.Join(payload["cli_start_now_command"].([]string), "\x00")
+	if payload["ready_to_send"] != false ||
+		payload["reason"] != "remote_ticket_and_probe_required" ||
+		payload["selected_path"] != "start-foreground-gateway" ||
+		!strings.Contains(command, "--gateway-url\x00https://configured.example.test/rdev") {
+		t.Fatalf("configured gateway must be retained only in foreground command: %#v", payload)
+	}
+	if len(gw.Snapshot().Tickets) != 0 {
+		t.Fatalf("configured remote gateway created local tickets: %#v", gw.Snapshot().Tickets)
+	}
+}
+
+func TestSupportSessionConnectRejectsInvalidProviderPolicy(t *testing.T) {
+	for _, body := range []string{
+		`{"token":"super-secret-token"}`,
+		`{"allowed_provider_ids":[""]}`,
+		`{"ssh_known_hosts_paths":{"configured-gateway":""}}`,
+		`{"allowed_provider_ids":["cloudflare-quick"],"disabled_provider_ids":["cloudflare-quick"]}`,
+		`{"allowed_provider_ids":[" cloudflare-quick"]}`,
+		`{"disabled_provider_ids":["cloudflare-quick "]}`,
+	} {
+		policyPath := filepath.Join(t.TempDir(), "providers.json")
+		if err := os.WriteFile(policyPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		server := NewServer(gateway.NewMemoryGateway())
+		if _, err := server.supportSessionConnect(map[string]any{
+			"gateway_url":     "https://gateway.example.test",
+			"region":          "cn-mainland",
+			"provider_policy": policyPath,
+		}); err == nil || !strings.Contains(err.Error(), "provider policy") {
+			t.Fatalf("invalid provider policy %s must be rejected, got %v", body, err)
+		}
+	}
+}
+
+func TestMCPProviderPolicyAllDisabledAllowsNoCanonicalProvider(t *testing.T) {
+	known := knownMCPProviderIDs(false)
+	allowed, disabled, err := validateMCPProviderPolicy(mcpTunnelProviderPolicyFile{
+		DisabledProviderIDs: tunnel.CanonicalProviderIDs(),
+	}, known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range tunnel.CanonicalProviderIDs() {
+		if mcpPolicyAllowsProvider(id, allowed, disabled) {
+			t.Fatalf("all-disabled MCP policy allowed %q", id)
+		}
+	}
+}
+
+func TestMCPProviderPolicyRejectsDuplicatesAndExplicitEmptyAllowlist(t *testing.T) {
+	known := knownMCPProviderIDs(false)
+	duplicateAllowed := []string{tunnel.ProviderCloudflareQuick, tunnel.ProviderCloudflareQuick}
+	for name, policy := range map[string]mcpTunnelProviderPolicyFile{
+		"duplicate allowed":  {AllowedProviderIDs: &duplicateAllowed},
+		"duplicate disabled": {DisabledProviderIDs: []string{tunnel.ProviderCloudflareQuick, tunnel.ProviderCloudflareQuick}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := validateMCPProviderPolicy(policy, known); err == nil {
+				t.Fatal("duplicate provider IDs must fail closed")
+			}
+		})
+	}
+
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	if err := os.WriteFile(policyPath, []byte(`{"allowed_provider_ids":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if summaries, err := loadMCPRegionalEvidence(policyPath, tunnel.RegionGlobal, time.Now().UTC(), false); err != nil {
+		t.Fatal(err)
+	} else if len(summaries) != 0 {
+		t.Fatalf("empty explicit allowlist unexpectedly included evidence: %#v", summaries)
+	}
+}
+
+func TestSupportSessionConnectRejectsUnknownProviderIDs(t *testing.T) {
+	tests := []struct {
+		name string
+		body func(t *testing.T, dir string) string
+	}{
+		{
+			name: "allowed URL",
+			body: func(*testing.T, string) string {
+				return `{"allowed_provider_ids":["https://provider.example.test/credential"]}`
+			},
+		},
+		{
+			name: "disabled IP",
+			body: func(*testing.T, string) string {
+				return `{"disabled_provider_ids":["198.51.100.42"]}`
+			},
+		},
+		{
+			name: "evidence credential-like ID",
+			body: func(t *testing.T, dir string) string {
+				now := time.Now().UTC()
+				evidence := tunnel.RegionalEvidence{
+					ProviderID: "super-secret-token", Region: tunnel.RegionGlobal, Status: tunnel.EvidenceVerified,
+					Issuer: "reviewed-probe", ObservedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+					Samples: []tunnel.NetworkSample{{Carrier: "probe-network", Region: "global", Success: true}},
+				}
+				encoded, err := json.Marshal(evidence)
+				if err != nil {
+					t.Fatal(err)
+				}
+				evidencePath := filepath.Join(dir, "evidence.json")
+				if err := os.WriteFile(evidencePath, encoded, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return fmt.Sprintf(`{"regional_evidence_paths":[%q]}`, evidencePath)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			policyPath := filepath.Join(dir, "providers.json")
+			if err := os.WriteFile(policyPath, []byte(tt.body(t, dir)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			server := NewServer(gateway.NewMemoryGateway())
+			if _, err := server.supportSessionConnect(map[string]any{
+				"gateway_url":     "https://gateway.example.test",
+				"region":          "global",
+				"provider_policy": policyPath,
+			}); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+				t.Fatalf("unknown provider ID must be rejected, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSupportSessionConnectAllowsConfiguredGatewayIDOnlyWithResolvedGateway(t *testing.T) {
+	for _, name := range []string{
+		"RDEV_HOSTED_GATEWAY_URL", "RDEV_RELAY_GATEWAY_URL", "RDEV_MESH_GATEWAY_URL",
+		"RDEV_VPN_GATEWAY_URL", "RDEV_SSH_GATEWAY_URL", "RDEV_CLOUDFLARED_GATEWAY_URL",
+	} {
+		t.Setenv(name, "")
+	}
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	if err := os.WriteFile(policyPath, []byte(`{"allowed_provider_ids":["configured-gateway"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(gateway.NewMemoryGateway())
+	if _, err := server.supportSessionConnect(map[string]any{
+		"region":          "global",
+		"provider_policy": policyPath,
+	}); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("configured-gateway must be rejected without a resolved gateway, got %v", err)
+	}
+	if _, err := server.supportSessionConnect(map[string]any{
+		"gateway_url":     "https://gateway.example.test",
+		"region":          "global",
+		"provider_policy": policyPath,
+	}); err != nil {
+		t.Fatalf("configured-gateway must be allowed with an explicit gateway: %v", err)
+	}
+}
+
+func validMCPMainlandSamples() []tunnel.NetworkSample {
+	var samples []tunnel.NetworkSample
+	for _, carrier := range []string{"china-telecom", "china-unicom", "china-mobile"} {
+		for _, region := range []string{"north", "south"} {
+			samples = append(samples, tunnel.NetworkSample{Carrier: carrier, Region: region, Success: true})
+		}
+	}
+	return samples
+}
+
 func TestServerToolCallSupportSessionConnectAutoDetectsStableRdevCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX executable bits for the fallback binary fixture")
@@ -509,7 +799,7 @@ func TestServerToolCallSupportSessionConnectAutoDetectsStableRdevCommand(t *test
 	}
 }
 
-func TestServerToolCallSupportSessionConnectWithGatewayCreatesReadyHandoff(t *testing.T) {
+func TestServerToolCallSupportSessionConnectWithGatewayRequiresForegroundTransaction(t *testing.T) {
 	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
 		"gateway_url":   "http://192.0.2.44:8787",
 		"target":        "windows",
@@ -518,7 +808,8 @@ func TestServerToolCallSupportSessionConnectWithGatewayCreatesReadyHandoff(t *te
 		"locale":        "zh-CN",
 	})
 	var out bytes.Buffer
-	server := NewServer(gateway.NewMemoryGateway())
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
 
 	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatal(err)
@@ -526,20 +817,19 @@ func TestServerToolCallSupportSessionConnectWithGatewayCreatesReadyHandoff(t *te
 	lines := responseLines(t, out.String())
 	result := lines[0]["result"].(map[string]any)
 	structured := result["structuredContent"].(map[string]any)
-	handoff := structured["user_handoff"].(map[string]any)
+	startCommand := strings.Join(anyStrings(structured["cli_start_now_command"].([]any)), "\x00")
 	if structured["schema_version"] != "rdev.support-session-connect.v1" ||
-		structured["selected_path"] != "created-with-reachable-gateway" ||
-		structured["ready_to_send_to_human"] != true ||
-		handoff["schema_version"] != "rdev.support-session-user-handoff.v1" ||
-		handoff["copy_paste_kind"] != "windows" ||
-		!strings.Contains(handoff["copy_paste"].(string), "powershell -NoProfile -Command") ||
-		!strings.Contains(handoff["copy_paste"].(string), "bootstrap.ps1") ||
-		!strings.Contains(handoff["copy_paste"].(string), "-UseBasicParsing") ||
-		strings.Contains(handoff["copy_paste"].(string), "-EncodedCommand") ||
-		strings.Contains(handoff["copy_paste"].(string), "$urls has been generated by rdev") ||
-		strings.Contains(handoff["copy_paste"].(string), "ProgressPrference") ||
-		strings.Contains(handoff["copy_paste"].(string), "ExecutionPolicy Bypass") {
-		t.Fatalf("expected connect tool to create ready handoff, got %#v", structured)
+		structured["selected_path"] != "start-foreground-gateway" ||
+		structured["ready_to_send_to_human"] != false ||
+		structured["ready_to_send"] != false ||
+		structured["ready_to_activate"] != false ||
+		structured["ready_to_execute"] != false ||
+		structured["reason"] != "remote_ticket_and_probe_required" ||
+		!strings.Contains(startCommand, "--gateway-url\x00http://192.0.2.44:8787") {
+		t.Fatalf("expected connect tool to require foreground remote transaction, got %#v", structured)
+	}
+	if len(gw.Snapshot().Tickets) != 0 {
+		t.Fatalf("remote gateway path created local tickets: %#v", gw.Snapshot().Tickets)
 	}
 }
 
@@ -644,7 +934,7 @@ func TestServerToolCallSupportSessionCreate(t *testing.T) {
 		handoff["copy_paste_kind"] != "windows" ||
 		handoff["copy_paste"] != targetCommand ||
 		!strings.Contains(handoff["message"].(string), "目标电脑") ||
-		!strings.Contains(handoff["agent_next_step"].(string), "wait=true") {
+		!strings.Contains(strings.ToLower(handoff["agent_next_step"].(string)), "do not send") {
 		t.Fatalf("expected ready user handoff, got %#v", handoff)
 	}
 	if len(gatewayCandidates) == 0 {
@@ -865,10 +1155,7 @@ func TestServerToolCallSupportSessionReportTicketCodeSelectsSingleActiveHost(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := gw.CreateSession(controlplane.SessionSpec{
-		Reason:       "mcp ticket report",
-		Capabilities: []string{"shell.user"},
-	})
+	session, err := gw.Session(ticket.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -928,6 +1215,37 @@ func TestServerToolCallSupportSessionReportTicketCodeSelectsSingleActiveHost(t *
 		!strings.Contains(structured["human_report"].(string), "identity probe") ||
 		!strings.Contains(structured["stale_host_rule"].(string), "Do not send new session tasks") {
 		t.Fatalf("expected ticket-code support session report, got %#v", structured)
+	}
+}
+
+func TestServerToolCallSupportSessionReportTicketCodeUsesBoundEndpoint(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "endpoint report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "mcp-endpoint-target",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-mcp-endpoint-report",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := mcpRequestLine(t, "rdev.support_session.report", map[string]any{"ticket_code": ticket.Code})
+	var out bytes.Buffer
+	if err := NewServer(gw).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	result := lines[0]["result"].(map[string]any)
+	structured := result["structuredContent"].(map[string]any)
+	host := structured["host"].(map[string]any)
+	if structured["ok"] != true || structured["session_id"] != ticket.SessionID || structured["target_endpoint_id"] != endpoint.ID || host["id"] != endpoint.ID {
+		t.Fatalf("ticket-only MCP report did not consume the bound endpoint IDs: %#v", structured)
 	}
 }
 

@@ -157,7 +157,6 @@ type Limits struct {
 
 type SessionSpec struct {
 	Profile            string             `json:"profile"`
-	JoinCode           string             `json:"join_code,omitempty"`
 	Reason             string             `json:"reason"`
 	Capabilities       []string           `json:"capabilities"`
 	JoinPolicy         string             `json:"join_policy"`
@@ -175,6 +174,7 @@ type Session struct {
 	SchemaVersion      string             `json:"schema_version"`
 	ID                 string             `json:"id"`
 	JoinCode           string             `json:"join_code"`
+	SourceTicketID     string             `json:"source_ticket_id,omitempty"`
 	Profile            string             `json:"profile"`
 	Status             SessionStatus      `json:"status"`
 	Reason             string             `json:"reason"`
@@ -334,18 +334,25 @@ type ProtocolError struct {
 	Details         map[string]any `json:"details,omitempty"`
 }
 
+func InvalidJoinCodeError() ProtocolError {
+	return ProtocolError{
+		SchemaVersion:   ErrorSchemaVersion,
+		Code:            ErrInvalidJoinCode,
+		Message:         "join code is invalid",
+		Recoverable:     false,
+		UserSummary:     "The support-session entry is invalid or no longer active.",
+		AgentNextAction: "create a fresh support-session entry and use its generated handoff",
+	}
+}
+
 func NewSession(spec SessionSpec, now time.Time) (Session, error) {
 	id, err := newID("ses")
 	if err != nil {
 		return Session{}, err
 	}
-	joinCode := strings.TrimSpace(spec.JoinCode)
-	if joinCode == "" {
-		var err error
-		joinCode, err = newJoinCode()
-		if err != nil {
-			return Session{}, err
-		}
+	joinCode, err := newJoinCode()
+	if err != nil {
+		return Session{}, err
 	}
 	profile := strings.TrimSpace(spec.Profile)
 	if profile == "" {

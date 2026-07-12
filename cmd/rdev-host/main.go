@@ -12,6 +12,10 @@ func main() {
 	app := hostcmd.New(os.Stdout, os.Stderr)
 	if err := app.Run(context.Background(), os.Args[1:]); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "rdev-host: %v\n", err)
-		os.Exit(1)
+		os.Exit(commandExitCode(err))
 	}
+}
+
+func commandExitCode(err error) int {
+	return hostcmd.ExitCode(err)
 }

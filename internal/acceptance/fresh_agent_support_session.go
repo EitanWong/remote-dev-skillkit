@@ -18,6 +18,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 const FreshAgentSupportSessionReportSchemaVersion = "rdev.acceptance.fresh-agent-support-session.v1"
@@ -42,6 +43,10 @@ type FreshAgentSupportSessionReport struct {
 	CreatedSession          map[string]any   `json:"created_session"`
 	StartedSession          map[string]any   `json:"started_session"`
 	StableFallbackSession   map[string]any   `json:"stable_fallback_session"`
+	DegradedOverrideSession map[string]any   `json:"degraded_override_session"`
+	MainlandEvidence        map[string]any   `json:"mainland_evidence"`
+	ShareableAttempts       []map[string]any `json:"shareable_attempts"`
+	LifecycleTransitions    map[string]any   `json:"lifecycle_transitions"`
 	ConnectedStatus         map[string]any   `json:"connected_status"`
 	WaitingRecovery         map[string]any   `json:"waiting_recovery"`
 	BootstrapSelfRepair     map[string]any   `json:"bootstrap_self_repair"`
@@ -101,6 +106,52 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		RdevCommand:  rdevCommand,
 	})
 	connectNoGateway := supportsession.BuildConnectFromHandoff(handoffNoGateway)
+	managedDirectSet := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates: []tunnel.Candidate{{
+			ProviderID: "managed-direct",
+			URL:        "https://managed-direct.example.test",
+		}},
+	}
+	managedDirectReadiness := supportsession.DirectAvailability(managedDirectSet, false)
+	degradedOverrideReadiness := supportsession.DirectAvailability(managedDirectSet, true)
+	mainlandEligibility := tunnel.EvaluateEligibility(
+		tunnel.ProviderMetadata{ID: "managed-direct", DefaultAutomatic: true},
+		tunnel.Policy{Region: tunnel.RegionCNMainland, Now: now},
+		nil,
+	)
+	mainlandEvidence := map[string]any{
+		"region":             tunnel.RegionCNMainland,
+		"verified":           mainlandEligibility.Evidence != nil && mainlandEligibility.Evidence.Status == tunnel.EvidenceVerified,
+		"eligible":           mainlandEligibility.Eligible,
+		"eligibility_reason": mainlandEligibility.Reason,
+	}
+	rawAttempt := map[string]any{
+		"provider_id": "managed-direct",
+		"status":      "degraded",
+		"error_class": "provider-health-check-failed",
+		"failure_domains": map[string]bool{
+			"authoritative_dns": true,
+			"edge_network":      true,
+			"control_plane":     true,
+		},
+		"known_hosts":  "AAAAC3NzaKnownHostsSecret",
+		"token":        "super-secret-token",
+		"target_ip":    "198.51.100.77",
+		"provider_url": "https://raw-provider.example.test/session/secret",
+	}
+	shareableAttempts := []map[string]any{redactShareableTunnelAttempt(rawAttempt)}
+	lifecycleTransitions := map[string]any{
+		"readiness": map[string]any{
+			"state":       managedDirectReadiness.State,
+			"transitions": []string{"unavailable", "degraded-single-entry"},
+		},
+		"cleanup": map[string]any{
+			"state":       "pending-explicit-stop",
+			"transitions": []string{"not-requested", "stop-requested", "cleaned"},
+		},
+	}
 
 	gw := gateway.NewMemoryGatewayWithClock(func() time.Time { return now })
 	ticket, err := gw.CreateTicketWithMetadata(
@@ -126,17 +177,19 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		Locale:                locale,
 		RdevCommand:           rdevCommand,
 		AutoActivate:          true,
+		AvailabilityReadiness: managedDirectReadiness,
 	})
 	connectReachableGateway := supportsession.BuildConnectFromCreated(created)
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
-		Addr:                "0.0.0.0:8787",
-		GatewayURL:          gatewayURL,
-		WorkDir:             filepath.Join(outDir, "support-session"),
-		ReadyFile:           filepath.Join(outDir, "support-session", "support-session-ready.json"),
-		StatusFile:          filepath.Join(outDir, "support-session", "support-session-status.json"),
-		HandoffTextFile:     filepath.Join(outDir, "support-session", "target-handoff.txt"),
-		ConnectedReportFile: filepath.Join(outDir, "support-session", "connected-report.txt"),
-		Created:             created,
+		Addr:                  "0.0.0.0:8787",
+		GatewayURL:            gatewayURL,
+		WorkDir:               filepath.Join(outDir, "support-session"),
+		ReadyFile:             filepath.Join(outDir, "support-session", "support-session-ready.json"),
+		StatusFile:            filepath.Join(outDir, "support-session", "support-session-status.json"),
+		HandoffTextFile:       filepath.Join(outDir, "support-session", "target-handoff.txt"),
+		ConnectedReportFile:   filepath.Join(outDir, "support-session", "connected-report.txt"),
+		Created:               created,
+		AvailabilityReadiness: managedDirectReadiness,
 	})
 	stableFallback := withFreshAgentGatewayEnv("RDEV_RELAY_GATEWAY_URL", "https://relay.example.test/rdev", func() map[string]any {
 		stableURL, stableCandidates := supportsession.ConfiguredGatewayURLCandidate()
@@ -172,6 +225,14 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 			Locale:                locale,
 			RdevCommand:           rdevCommand,
 			AutoActivate:          true,
+			AvailabilityReadiness: supportsession.DirectAvailability(tunnel.AvailabilitySet{
+				SchemaVersion: tunnel.AvailabilitySchemaVersion,
+				Region:        tunnel.RegionGlobal,
+				Candidates: []tunnel.Candidate{{
+					ProviderID: "configured-relay",
+					URL:        stableURL,
+				}},
+			}, false),
 		})
 		return map[string]any{
 			"schema_version": "rdev.acceptance.stable-fallback-session.v1",
@@ -219,10 +280,18 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		CreatedSession:          created,
 		StartedSession:          started,
 		StableFallbackSession:   stableFallback,
-		ConnectedStatus:         connectedStatus,
-		WaitingRecovery:         waitingRecovery,
-		BootstrapSelfRepair:     bootstrapSelfRepair,
-		LiveRemoteE2EGates:      liveRemoteE2EGates(gatewayURL, rdevCommand),
+		DegradedOverrideSession: map[string]any{
+			"schema_version":         "rdev.acceptance.degraded-override-session.v1",
+			"availability_readiness": degradedOverrideReadiness,
+			"prebootstrap_failover":  false,
+		},
+		MainlandEvidence:     mainlandEvidence,
+		ShareableAttempts:    shareableAttempts,
+		LifecycleTransitions: lifecycleTransitions,
+		ConnectedStatus:      connectedStatus,
+		WaitingRecovery:      waitingRecovery,
+		BootstrapSelfRepair:  bootstrapSelfRepair,
+		LiveRemoteE2EGates:   liveRemoteE2EGates(gatewayURL, rdevCommand),
 		Checks: freshAgentSupportSessionChecks(freshAgentSupportSessionCheckInput{
 			HandoffNoGateway:        handoffNoGateway,
 			HandoffReachableGateway: handoffReachableGateway,
@@ -251,6 +320,7 @@ func RunFreshAgentSupportSession(opts FreshAgentSupportSessionOptions) (FreshAge
 		},
 	}
 	report.Checks = append(report.Checks, bootstrapChecks...)
+	report.Checks = append(report.Checks, regionalTunnelAcceptanceChecks(report)...)
 	if err := writeFreshAgentSupportSessionReport(filepath.Join(outDir, "report.json"), report); err != nil {
 		return FreshAgentSupportSessionReport{}, err
 	}
@@ -265,6 +335,112 @@ func liveRemoteE2EGates(gatewayURL, rdevCommand string) []map[string]any {
 	})
 	gates, _ := plan["gates"].([]map[string]any)
 	return gates
+}
+
+func regionalTunnelAcceptanceChecks(report FreshAgentSupportSessionReport) []Check {
+	stableCreated := mapFromAny(report.StableFallbackSession["created"])
+	stable := availabilityReadinessForAcceptance(stableCreated["availability_readiness"])
+	managedDirect := availabilityReadinessForAcceptance(report.StartedSession["availability_readiness"])
+	override := availabilityReadinessForAcceptance(report.DegradedOverrideSession["availability_readiness"])
+	mainlandVerified := boolFromAny(report.MainlandEvidence["verified"])
+	mainlandReason := stringFromAny(report.MainlandEvidence["eligibility_reason"])
+	shareable, _ := json.Marshal(report.ShareableAttempts)
+	shareableText := string(shareable)
+	redacted := true
+	for _, forbidden := range []string{
+		"AAAAC3NzaKnownHostsSecret",
+		"super-secret-token",
+		"198.51.100.77",
+		"https://raw-provider.example.test/session/secret",
+	} {
+		redacted = redacted && !strings.Contains(shareableText, forbidden)
+	}
+	readinessTransition := mapFromAny(report.LifecycleTransitions["readiness"])
+	cleanupTransition := mapFromAny(report.LifecycleTransitions["cleanup"])
+	return []Check{
+		{
+			Name:   "stable_gateway_is_degraded_without_override",
+			Passed: stable.State == "degraded-single-entry" && !stable.ReadyToSend,
+			Detail: stable.State,
+		},
+		{
+			Name:   "managed_direct_tunnel_is_degraded_without_override",
+			Passed: managedDirect.State == "degraded-single-entry" && !managedDirect.ReadyToSend,
+			Detail: managedDirect.State,
+		},
+		{
+			Name:   "explicit_override_is_sendable_but_degraded",
+			Passed: override.State == "degraded-single-entry" && override.ReadyToSend && !override.ReadyToActivate && !override.ReadyToExecute,
+			Detail: override.State,
+		},
+		{
+			Name:   "cn_mainland_missing_evidence_is_not_verified",
+			Passed: !mainlandVerified && mainlandReason == "regional-evidence-missing",
+			Detail: mainlandReason,
+		},
+		{
+			Name:   "direct_mode_cannot_claim_prebootstrap_failover",
+			Passed: report.DegradedOverrideSession["prebootstrap_failover"] == false && len(override.AvailabilitySet.Candidates) == 1,
+			Detail: fmt.Sprintf("candidates=%d", len(override.AvailabilitySet.Candidates)),
+		},
+		{
+			Name:   "shareable_attempts_redact_protected_material",
+			Passed: redacted,
+			Detail: shareableText,
+		},
+		{
+			Name:   "cleanup_and_readiness_transitions_are_independent",
+			Passed: stringFromAny(readinessTransition["state"]) == "degraded-single-entry" && stringFromAny(cleanupTransition["state"]) == "pending-explicit-stop",
+			Detail: fmt.Sprintf("readiness=%s cleanup=%s", stringFromAny(readinessTransition["state"]), stringFromAny(cleanupTransition["state"])),
+		},
+	}
+}
+
+func redactShareableTunnelAttempt(attempt map[string]any) map[string]any {
+	allowedFailureDomains := []string{
+		"authoritative_dns",
+		"edge_network",
+		"origin_network",
+		"control_plane",
+		"certificate_dependency",
+	}
+	failureDomains := make(map[string]bool, len(allowedFailureDomains))
+	for _, name := range allowedFailureDomains {
+		failureDomains[name] = false
+	}
+	switch domains := attempt["failure_domains"].(type) {
+	case map[string]bool:
+		for _, name := range allowedFailureDomains {
+			failureDomains[name] = domains[name]
+		}
+	case map[string]any:
+		for _, name := range allowedFailureDomains {
+			failureDomains[name] = boolFromAny(domains[name])
+		}
+	}
+	return map[string]any{
+		"provider_id":     stringFromAny(attempt["provider_id"]),
+		"status":          stringFromAny(attempt["status"]),
+		"error_class":     stringFromAny(attempt["error_class"]),
+		"failure_domains": failureDomains,
+		"credentials":     "redacted",
+		"target":          "redacted",
+	}
+}
+
+func availabilityReadinessForAcceptance(value any) supportsession.AvailabilityReadiness {
+	if readiness, ok := value.(supportsession.AvailabilityReadiness); ok {
+		return readiness
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	var readiness supportsession.AvailabilityReadiness
+	if err := json.Unmarshal(encoded, &readiness); err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	return readiness
 }
 
 type freshAgentSupportSessionCheckInput struct {
@@ -335,11 +511,11 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 	forbiddenText := strings.Join(stringSliceFromAny(input.CreatedSession["forbidden"]), "\n") + "\n" + targetCommand + "\n" + copyPaste
 	checks := []Check{
 		{Name: "connect_without_gateway_returns_start_now_command", Passed: input.ConnectNoGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectNoGateway["selected_path"] == "start-foreground-gateway" && input.ConnectNoGateway["ready_to_send_to_human"] == false && containsAllStrings(connectStartNowCommand, "support-session", "connect", "--start") && containsAllStrings(connectStartCommand, "support-session", "start"), Detail: strings.Join(connectStartNowCommand, " ")},
-		{Name: "connect_with_gateway_returns_ready_handoff", Passed: input.ConnectReachableGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectReachableGateway["selected_path"] == "created-with-reachable-gateway" && input.ConnectReachableGateway["ready_to_send_to_human"] == true && stringFromAny(connectUserHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion, Detail: stringFromAny(connectUserHandoff["copy_paste_kind"])},
-		{Name: "connect_with_gateway_returns_forwardable_envelope", Passed: stringFromAny(connectEnvelope["schema_version"]) == supportsession.TargetHandoffEnvelopeSchemaVersion && boolFromAny(connectEnvelope["ready_to_forward"]) && strings.Contains(stringFromAny(connectEnvelope["full_text"]), stringFromAny(connectEnvelope["copy_paste"])) && strings.Contains(stringFromAny(connectEnvelope["agent_rule"]), "send full_text verbatim"), Detail: stringFromAny(connectEnvelope["copy_paste_kind"])},
+		{Name: "connect_with_gateway_returns_ready_handoff", Passed: input.ConnectReachableGateway["schema_version"] == supportsession.ConnectSchemaVersion && input.ConnectReachableGateway["selected_path"] == "created-with-reachable-gateway" && input.ConnectReachableGateway["ready_to_send_to_human"] == false && input.ConnectReachableGateway["ready_to_send"] == false && input.ConnectReachableGateway["ready_to_activate"] == false && input.ConnectReachableGateway["ready_to_execute"] == false && stringFromAny(connectUserHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion, Detail: stringFromAny(connectUserHandoff["copy_paste_kind"])},
+		{Name: "connect_with_gateway_returns_forwardable_envelope", Passed: stringFromAny(connectEnvelope["schema_version"]) == supportsession.TargetHandoffEnvelopeSchemaVersion && !boolFromAny(connectEnvelope["ready_to_forward"]) && strings.Contains(stringFromAny(connectEnvelope["full_text"]), stringFromAny(connectEnvelope["copy_paste"])) && strings.Contains(strings.ToLower(stringFromAny(connectEnvelope["agent_rule"])), "do not send"), Detail: stringFromAny(connectEnvelope["copy_paste_kind"])},
 		{Name: "connect_with_gateway_has_top_level_helper_preflight", Passed: stringFromAny(connectHelperPreflight["schema_version"]) == supportsession.ConnectivityHelperPreflightSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(connectHelperPreflight["forbidden"]), "\n"), "ExecutionPolicy Bypass"), Detail: fmt.Sprintf("%v", connectHelperPreflight["configured_helper_ids"])},
 		{Name: "connect_with_gateway_has_runner_recommendation", Passed: stringFromAny(connectRunnerRecommendation["schema_version"]) == supportsession.ConnectionEntryRunnerRecommendationSchemaVersion && stringFromAny(connectRunnerRecommendation["standard_tool"]) == "rdev.connection_entry.plan" && strings.TrimSpace(stringFromAny(connectRunnerRecommendation["invite_json"])) != "", Detail: stringFromAny(connectRunnerRecommendation["target_os"])},
-		{Name: "connect_with_gateway_has_fresh_agent_contract", Passed: stringFromAny(connectContract["schema_version"]) == supportsession.FreshAgentConnectContractSchemaVersion && boolFromAny(connectContract["ready_to_send_human"]) && strings.Contains(stringFromAny(connectContract["human_surface"]), "target_handoff_envelope.full_text") && strings.Contains(strings.Join(stringSliceFromAny(connectContract["do_not_ask_human_for"]), "\n"), "gateway URL") && strings.Contains(strings.Join(stringSliceFromAny(connectContract["agent_must_not_generate"]), "\n"), "PowerShell bootstrap code"), Detail: fmt.Sprintf("%v", connectContract)},
+		{Name: "connect_with_gateway_has_fresh_agent_contract", Passed: stringFromAny(connectContract["schema_version"]) == supportsession.FreshAgentConnectContractSchemaVersion && !boolFromAny(connectContract["ready_to_send_human"]) && !boolFromAny(connectContract["ready_to_send"]) && !boolFromAny(connectContract["ready_to_activate"]) && !boolFromAny(connectContract["ready_to_execute"]) && strings.Contains(stringFromAny(connectContract["human_surface"]), "target_handoff_envelope.full_text") && strings.Contains(strings.Join(stringSliceFromAny(connectContract["do_not_ask_human_for"]), "\n"), "gateway URL") && strings.Contains(strings.Join(stringSliceFromAny(connectContract["agent_must_not_generate"]), "\n"), "PowerShell bootstrap code"), Detail: fmt.Sprintf("%v", connectContract)},
 		{Name: "handoff_without_gateway_selects_foreground_start", Passed: input.HandoffNoGateway["selected_path"] == "start-foreground-gateway", Detail: stringFromAny(input.HandoffNoGateway["selected_path"])},
 		{Name: "handoff_without_gateway_prefers_connect_start", Passed: containsAllStrings(noGatewayStartNowCommand, "support-session", "connect", "--start"), Detail: strings.Join(noGatewayStartNowCommand, " ")},
 		{Name: "foreground_start_command_is_standard_tool", Passed: containsAllStrings(noGatewayCommand, "support-session", "start"), Detail: strings.Join(noGatewayCommand, " ")},
@@ -355,23 +531,23 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "created_session_has_gateway_candidate_preflight", Passed: stringFromAny(preflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(preflight["candidate_count"]) > 0 && strings.Contains(stringFromAny(preflight["agent_rule"]), "target command owns ordered URL fallback"), Detail: stringFromAny(preflight["preflight_mode"])},
 		{Name: "created_session_has_connectivity_helper_preflight", Passed: stringFromAny(helperPreflight["schema_version"]) == supportsession.ConnectivityHelperPreflightSchemaVersion && stringFromAny(helperPreflight["agent_rule"]) != "" && strings.Contains(strings.Join(stringSliceFromAny(helperPreflight["forbidden"]), "\n"), "ExecutionPolicy Bypass"), Detail: fmt.Sprintf("%v", helperPreflight["configured_helper_ids"])},
 		{Name: "created_session_has_connection_entry_runner_recommendation", Passed: stringFromAny(runnerRecommendation["schema_version"]) == supportsession.ConnectionEntryRunnerRecommendationSchemaVersion && stringFromAny(mapFromAny(runnerRecommendation["mcp_plan_call"])["tool"]) == "rdev.connection_entry.plan" && strings.Contains(strings.Join(stringSliceFromAny(runnerRecommendation["agent_sequence"]), "\n"), "dry-run the generated runner") && strings.Contains(strings.Join(stringSliceFromAny(runnerRecommendation["forbidden"]), "\n"), "Agent-authored SSH"), Detail: stringFromAny(runnerRecommendation["target_os"])},
-		{Name: "created_session_has_fresh_agent_contract", Passed: stringFromAny(createdContract["schema_version"]) == supportsession.FreshAgentConnectContractSchemaVersion && boolFromAny(createdContract["ready_to_send_human"]) && strings.Contains(strings.Join(stringSliceFromAny(createdContract["do_not_ask_human_for"]), "\n"), "ticket code") && strings.Contains(strings.Join(stringSliceFromAny(createdContract["agent_must_not_generate"]), "\n"), "ticket/root/gateway substitution scripts"), Detail: fmt.Sprintf("%v", createdContract)},
+		{Name: "created_session_has_fresh_agent_contract", Passed: stringFromAny(createdContract["schema_version"]) == supportsession.FreshAgentConnectContractSchemaVersion && !boolFromAny(createdContract["ready_to_send_human"]) && !boolFromAny(createdContract["ready_to_send"]) && !boolFromAny(createdContract["ready_to_activate"]) && !boolFromAny(createdContract["ready_to_execute"]) && strings.Contains(strings.Join(stringSliceFromAny(createdContract["do_not_ask_human_for"]), "\n"), "ticket code") && strings.Contains(strings.Join(stringSliceFromAny(createdContract["agent_must_not_generate"]), "\n"), "ticket/root/gateway substitution scripts"), Detail: fmt.Sprintf("%v", createdContract)},
 		{Name: "created_session_has_agent_connection_runbook", Passed: stringFromAny(runbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(runbook["sequence"]), "\n"), "target_handoff_envelope.full_text") && strings.Contains(strings.Join(stringSliceFromAny(runbook["forbidden"]), "\n"), "Agent-authored PowerShell"), Detail: stringFromAny(runbook["phase"])},
 		{Name: "agent_runbook_starts_with_support_session_connect", Passed: stringFromAny(runbookStandardEntry["mcp_tool"]) == "rdev.support_session.connect" && strings.Contains(strings.Join(stringSliceFromAny(runbookStandardEntry["cli_command"]), " "), "support-session connect"), Detail: fmt.Sprintf("%v", runbookStandardEntry)},
 		{Name: "agent_runbook_forbids_low_level_invite_first", Passed: strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.invites.create") && strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.connection_entry.plan"), Detail: fmt.Sprintf("%v", runbookLowLevelRule)},
 		{Name: "agent_runbook_contains_real_failure_prevention", Passed: stringFromAny(runbookFailurePrevention["schema_version"]) == supportsession.FreshAgentFailurePreventionSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["known_failure_pattern"]), "\n"), "rdev is required") && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["required_standard_path"]), "\n"), "cli_start_now_command") && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["forbidden_agent_generated_workarounds"]), "\n"), "ExecutionPolicy Bypass"), Detail: fmt.Sprintf("%v", runbookFailurePrevention)},
-		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == true && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
-		{Name: "started_payload_has_top_level_forwardable_envelope", Passed: stringFromAny(startedEnvelope["schema_version"]) == supportsession.TargetHandoffEnvelopeSchemaVersion && stringFromAny(startedEnvelope["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]) && strings.Contains(stringFromAny(startedEnvelope["after_send"]), "connected_next_steps.user_report"), Detail: stringFromAny(startedEnvelope["copy_paste_kind"])},
+		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == false && input.StartedSession["ready_to_send"] == false && input.StartedSession["ready_to_activate"] == false && input.StartedSession["ready_to_execute"] == false && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
+		{Name: "started_payload_has_top_level_forwardable_envelope", Passed: stringFromAny(startedEnvelope["schema_version"]) == supportsession.TargetHandoffEnvelopeSchemaVersion && !boolFromAny(startedEnvelope["ready_to_forward"]) && stringFromAny(startedEnvelope["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]) && strings.Contains(strings.ToLower(stringFromAny(startedEnvelope["after_send"])), "do not send"), Detail: stringFromAny(startedEnvelope["copy_paste_kind"])},
 		{Name: "started_payload_has_top_level_supervision", Passed: stringFromAny(startedSupervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(startedSupervision["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(startedSupervision["continuity_assessment"])},
 		{Name: "started_payload_has_top_level_gateway_preflight", Passed: stringFromAny(startedPreflight["schema_version"]) == supportsession.GatewayCandidatePreflightSchemaVersion && intFromAny(startedPreflight["candidate_count"]) > 0, Detail: stringFromAny(startedPreflight["preflight_mode"])},
 		{Name: "started_payload_has_top_level_helper_preflight", Passed: stringFromAny(startedHelperPreflight["schema_version"]) == supportsession.ConnectivityHelperPreflightSchemaVersion && strings.Contains(stringFromAny(startedHelperPreflight["agent_rule"]), "Connection Entry runner"), Detail: fmt.Sprintf("%v", startedHelperPreflight["configured_helper_ids"])},
 		{Name: "started_payload_has_top_level_runner_recommendation", Passed: stringFromAny(startedRunnerRecommendation["schema_version"]) == supportsession.ConnectionEntryRunnerRecommendationSchemaVersion && strings.TrimSpace(stringFromAny(startedRunnerRecommendation["invite_json"])) != "", Detail: stringFromAny(startedRunnerRecommendation["target_os"])},
-		{Name: "started_payload_has_fresh_agent_contract", Passed: stringFromAny(startedContract["schema_version"]) == supportsession.FreshAgentConnectContractSchemaVersion && boolFromAny(startedContract["ready_to_send_human"]) && strings.Contains(stringFromAny(startedContract["status_file_path"]), "support-session-status.json") && strings.Contains(strings.Join(stringSliceFromAny(startedContract["recovery_if_rdev_missing"]), "\n"), "go install ./cmd/rdev"), Detail: fmt.Sprintf("%v", startedContract)},
+		{Name: "started_payload_has_fresh_agent_contract", Passed: stringFromAny(startedContract["schema_version"]) == supportsession.FreshAgentConnectContractSchemaVersion && !boolFromAny(startedContract["ready_to_send_human"]) && !boolFromAny(startedContract["ready_to_send"]) && !boolFromAny(startedContract["ready_to_activate"]) && !boolFromAny(startedContract["ready_to_execute"]) && strings.Contains(stringFromAny(startedContract["status_file_path"]), "support-session-status.json") && strings.Contains(strings.Join(stringSliceFromAny(startedContract["recovery_if_rdev_missing"]), "\n"), "go install ./cmd/rdev"), Detail: fmt.Sprintf("%v", startedContract)},
 		{Name: "started_payload_has_top_level_agent_runbook", Passed: stringFromAny(startedRunbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(fmt.Sprintf("%v", startedRunbook["watch"]), "rdev.support_session.status"), Detail: stringFromAny(startedRunbook["phase"])},
 		{Name: "started_payload_has_foreground_feedback", Passed: stringFromAny(foregroundFeedback["schema_version"]) == "rdev.support-session-foreground-feedback.v1" && stringFromAny(foregroundFeedback["event_prefix"]) == "rdev support session event: " && strings.Contains(stringFromAny(foregroundFeedback["connected_rule"]), "connection has been established"), Detail: stringFromAny(foregroundFeedback["event_prefix"])},
 		{Name: "started_payload_exposes_ready_file", Passed: stringFromAny(readyFile["schema_version"]) == "rdev.support-session-ready-file.v1" && strings.Contains(stringFromAny(readyFile["path"]), "support-session-ready.json"), Detail: stringFromAny(readyFile["path"])},
 		{Name: "started_payload_exposes_status_file", Passed: stringFromAny(statusFile["schema_version"]) == supportsession.StatusFileSchemaVersion && strings.Contains(stringFromAny(statusFile["path"]), "support-session-status.json") && strings.Contains(stringFromAny(statusFile["agent_rule"]), "connected_next_steps.user_report"), Detail: stringFromAny(statusFile["path"])},
-		{Name: "started_payload_exposes_handoff_text_file", Passed: stringFromAny(handoffTextFile["schema_version"]) == supportsession.HandoffTextFileSchemaVersion && strings.Contains(stringFromAny(handoffTextFile["path"]), "target-handoff.txt") && strings.Contains(stringFromAny(handoffTextFile["agent_rule"]), "plain-text"), Detail: stringFromAny(handoffTextFile["path"])},
+		{Name: "started_payload_exposes_handoff_text_file", Passed: stringFromAny(handoffTextFile["schema_version"]) == supportsession.HandoffTextFileSchemaVersion && strings.Contains(stringFromAny(handoffTextFile["path"]), "target-handoff.txt") && strings.Contains(strings.ToLower(stringFromAny(handoffTextFile["agent_rule"])), "do not send"), Detail: stringFromAny(handoffTextFile["path"])},
 		{Name: "started_payload_exposes_connected_report_file", Passed: stringFromAny(connectedReportFile["schema_version"]) == supportsession.ConnectedReportFileSchemaVersion && strings.Contains(stringFromAny(connectedReportFile["path"]), "connected-report.txt") && strings.Contains(stringFromAny(connectedReportFile["agent_rule"]), "plain text"), Detail: stringFromAny(connectedReportFile["path"])},
 		{Name: "started_payload_embeds_created_session", Passed: stringFromAny(session["schema_version"]) == supportsession.CreatedSchemaVersion && stringFromAny(session["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(session["ticket_code"])},
 		{Name: "stable_fallback_handoff_uses_configured_gateway", Passed: stringFromAny(stableFallbackHandoff["selected_path"]) == "create-with-reachable-gateway" && stringFromAny(stableFallbackHandoffArgs["gateway_url"]) == "https://relay.example.test/rdev", Detail: fmt.Sprintf("%v", stableFallbackHandoffArgs)},
@@ -668,7 +844,15 @@ func mapFromAny(value any) map[string]any {
 	if typed, ok := value.(map[string]any); ok {
 		return typed
 	}
-	return nil
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return nil
+	}
+	return result
 }
 
 func stringSliceFromAny(value any) []string {

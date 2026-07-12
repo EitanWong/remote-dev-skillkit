@@ -16,8 +16,9 @@ manifest can be downloaded.
 
 ## User Experience
 
-The recommended Windows handoff uses a previously installed, Authenticode-signed
-static connector and remains short:
+The long-term recommended Windows handoff uses a previously installed,
+Authenticode-signed static connector and remains short. The current Phase 1
+foreground compatibility path is documented separately below:
 
 ```powershell
 rdev-connect 7K3M-Q9TV-2R6P-X8HD-4WCN-FA9B-2Z
@@ -85,6 +86,55 @@ a Cloudflare outage: Cloudflare Tunnel registered successfully, while the target
 resolver returned a name-resolution failure for the random
 `trycloudflare.com` hostname.
 
+## Current Phase 1 Foreground Compatibility Path
+
+As implemented on 2026-07-12, public fallback happens on the Agent/gateway side;
+the Windows human does not select providers. The current order is:
+
+1. configured stable operator gateway or named tunnel;
+2. Cloudflare Quick Tunnel, priority 10;
+3. managed checksum-pinned tunn3l v0.5.1, priority 20;
+4. localhost.run with the reviewed official host key, priority 30;
+5. Pinggy at priority 40, or another SSH provider, only after an explicit
+   operator allowlist and a reviewed exact host pin.
+
+`rdev` chooses one recommended public hostname and emits one short generated
+PowerShell command in `target_handoff_envelope.full_text`. A target report of
+`trycloudflare.com` DNS failure or NXDOMAIN is evidence to stop selecting
+Cloudflare for that recovery attempt, not a reason to restart it. The Agent
+creates a protected policy containing only
+`{"disabled_provider_ids":["cloudflare-quick"]}` inside the protected absolute
+work directory and reruns foreground `support-session connect --start` with
+`--region global --provider-policy <path>`. Managed tunn3l or localhost.run then
+owns fallback, and only the newly generated handoff is sent. The Agent does not
+manually start providers, background the supervisor, expose a LAN-primary
+handoff, construct a multi-URL PowerShell loop, or change DNS, hosts, proxy, or
+firewall state.
+
+Temporary anonymous/account-free services are candidates, not guaranteed
+mainland-China services. A successful Agent-side tunn3l sample, including the
+opt-in live readiness test, is not China Telecom/Unicom/Mobile evidence.
+`cn-mainland` remains fail-closed until fresh verified evidence exists for all
+three carriers under the evidence contract below. The generated Windows command
+must not use `EncodedCommand`, Base64 bootstrap, or `ExecutionPolicy Bypass`.
+Smoke-test completion does not authorize disconnecting a live session; the
+foreground supervisor remains alive until the operator explicitly disconnects.
+
+For tunn3l v0.5.1, `Anonymous=true` means no account or registration is
+required; it is not a privacy or no-telemetry guarantee. The pinned upstream
+source creates a `dv_` plus 24-hex device ID
+([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L35-L42))
+and sends that ID, the Agent hostname, and Agent OS in relay registration
+metadata
+([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L163-L169)).
+`rdev` supplies a fresh empty session `HOME`/`USERPROFILE`/XDG config and clears
+tunn3l token/subdomain/password plus runtime preload variables. It therefore
+does not reuse the user's real `~/.tunn3l` and generates a new session-scoped
+device ID. The relay still observes normal network and HTTP tunnel traffic.
+These claims are pinned to commit
+`2025a09e880bb6df4395ea8c65a6949a97265e44` and must not be generalized beyond
+v0.5.1.
+
 ## Provider Research
 
 Research was restricted to official documentation, official repositories, and
@@ -135,6 +185,18 @@ subprocessors, incident response, and user notice.
   guarantee. The documented limit is 200 in-flight requests, and SSE is not
   supported.
 - Eligible as a default provider, but never as the only reliable first entry.
+
+#### tunn3l.sh v0.5.1
+
+- Official repository and pinned release:
+  <https://github.com/bdecrem/tunn3l/tree/2025a09e880bb6df4395ea8c65a6949a97265e44>
+  and <https://github.com/bdecrem/tunn3l/releases/tag/v0.5.1>.
+- `rdev` downloads only the platform asset selected by GOOS/GOARCH, verifies its
+  embedded compressed SHA-256, expands it into protected session storage, and
+  invokes only foreground `tunn3l http <port> --json`.
+- No account is required. The privacy and session-scoped state limits are the
+  exact v0.5.1 limits stated in the Phase 1 section above.
+- Eligible as the priority-20 global fallback; it is not mainland-verified.
 
 #### Pinggy Free
 
@@ -294,13 +356,15 @@ The gateway lifecycle becomes:
 9. Publish the signed descriptor to rendezvous when configured.
 10. Generate the short handoff and begin supervision.
 
-For the global profile, Cloudflare, Pinggy, and localhost.run are candidates, not
-assumed-independent brands. Automatic racing requires evidence that the selected
-pair does not share the same relevant DNS, edge, origin, and control-plane
-failure domains. For `cn-mainland`, there is no hard-coded provider winner: the
-race uses the highest-ranked eligible candidates with unexpired mainland
-evidence. A configured domestic provider may outrank every anonymous provider.
-Serveo and LocalTunnel require explicit policy eligibility in every profile.
+For the global profile, Cloudflare, tunn3l, and localhost.run are the default
+automatic candidates, not assumed-independent brands. Pinggy is non-default and
+requires an explicit restrictive allowlist plus a reviewed exact pin. Automatic
+racing requires evidence that the selected pair does not share the same relevant
+DNS, edge, origin, and control-plane failure domains. For `cn-mainland`, there is
+no hard-coded provider winner: the race uses the highest-ranked eligible
+candidates with unexpired mainland evidence. A configured domestic provider may
+outrank every anonymous provider. Serveo and LocalTunnel require explicit policy
+eligibility in every profile.
 
 SSH-backed providers may be automatic only when an official host key or SSH CA
 can be pinned. The registry stores a reviewed pinset, its provenance, expiry, and
@@ -684,7 +748,8 @@ demotes the affected route until replacement evidence passes.
 ### Phase 1 — Provider registry and availability set
 
 - Introduce typed providers and lifecycle handles.
-- Implement Cloudflare, Pinggy, and localhost.run adapters.
+- Implement Cloudflare, managed pinned tunn3l, localhost.run, and explicit-only
+  Pinggy adapters with priorities 10, 20, 30, and 40.
 - Keep Serveo and LocalTunnel policy-disabled by default.
 - Refactor foreground startup so the local gateway is healthy before provider
   probes and the ticket is created after the availability set is known.

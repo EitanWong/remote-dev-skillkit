@@ -67,6 +67,109 @@ func TestMemoryGatewayJoinManifestUsesTicketMetadataGatewayCandidates(t *testing
 	}
 }
 
+func TestMemoryGatewayPreservesEmptyGatewayCandidateMetadataForFailClosedValidation(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "invalid authority", map[string]string{
+		TicketMetadataGatewayCandidates: "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := ticket.Metadata[TicketMetadataGatewayCandidates]; !ok || value != "" {
+		t.Fatalf("gateway candidate metadata presence was lost: %#v", ticket.Metadata)
+	}
+}
+
+func TestMemoryGatewayTicketReturnsAreDetachedFromStoredAuthority(t *testing.T) {
+	gw := NewMemoryGateway()
+	const originalMetadata = `[{"url":"https://public.example.test","recommended":true}]`
+	inputCapabilities := []string{"shell.user"}
+	created, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, inputCapabilities, "detached ticket", map[string]string{
+		TicketMetadataGatewayCandidates: originalMetadata,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created.Capabilities[0] = "unattended.access"
+	created.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://mutated.example.test"}]`
+	inputCapabilities[0] = "unattended.access"
+	assertStored := func(stage string, wantStatus model.TicketStatus) {
+		t.Helper()
+		stored, ok := gw.Ticket(created.ID)
+		if !ok {
+			t.Fatalf("%s: stored ticket missing", stage)
+		}
+		if stored.Status != wantStatus || len(stored.Capabilities) != 1 || stored.Capabilities[0] != "shell.user" || stored.Metadata[TicketMetadataGatewayCandidates] != originalMetadata {
+			t.Fatalf("%s: stored ticket was mutated through returned value: %#v", stage, stored)
+		}
+	}
+	assertStored("create", model.TicketStatusProbing)
+
+	published, err := gw.PublishTicket(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://published-mutation.example.test"}]`
+	byCode, ok := gw.TicketForCode(created.Code)
+	if !ok {
+		t.Fatal("published ticket missing by code")
+	}
+	byCode.Capabilities[0] = "unattended.access"
+	byCode.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://lookup-mutation.example.test"}]`
+	assertStored("publish and lookup", model.TicketStatusActive)
+
+	revoked, err := gw.RevokeTicket(created.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoked.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://revoke-mutation.example.test"}]`
+	assertStored("revoke", model.TicketStatusRevoked)
+
+	rollbackTicket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "rollback", map[string]string{
+		TicketMetadataGatewayCandidates: originalMetadata,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, _, err := gw.RollbackTicket(rollbackTicket.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolledBack.Metadata[TicketMetadataGatewayCandidates] = `[{"url":"https://rollback-mutation.example.test"}]`
+	storedRollback, ok := gw.Ticket(rollbackTicket.ID)
+	if !ok || storedRollback.Metadata[TicketMetadataGatewayCandidates] != originalMetadata {
+		t.Fatalf("rollback return mutated stored ticket: %#v", storedRollback)
+	}
+}
+
+func TestMemoryGatewayJoinManifestFailsClosedForInvalidStoredGatewayCandidates(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "empty", raw: ""},
+		{name: "malformed", raw: "{"},
+		{name: "empty array", raw: "[]"},
+		{name: "empty URL", raw: `[{"url":""}]`},
+		{name: "malformed URL", raw: `[{"url":"not a url"}]`},
+		{name: "empty query marker", raw: `[{"url":"https://public.example.test?"}]`},
+		{name: "empty fragment marker", raw: `[{"url":"https://public.example.test#"}]`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := NewMemoryGateway()
+			ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "invalid authority", map[string]string{
+				TicketMetadataGatewayCandidates: tt.raw,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := gw.JoinManifest(ticket.Code, "http://localhost", "http://localhost/join/"+ticket.Code); err == nil {
+				t.Fatal("invalid stored gateway candidates silently fell back")
+			}
+		})
+	}
+}
+
 func TestMemoryGatewayPreservesHostIdentity(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -448,6 +551,181 @@ func TestMemoryGatewayRevokeTicketPreventsRegistration(t *testing.T) {
 	}
 }
 
+func TestMemoryGatewayRollbackTicketRevokesRegisteredHostsAndAuthorization(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "transaction rollback", map[string]string{
+		"auto_activate": "attended-temporary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, secret, err := gw.RegisterHostWithIdempotencyKey("register-once", "request-hash", model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "rollback-host",
+		OS:         "windows",
+		Arch:       "amd64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gw.ValidateHostSecret(host.ID, secret) {
+		t.Fatal("expected host authorization before rollback")
+	}
+	if _, err := gw.RecordSupportSessionPreconnect(model.SupportSessionPreconnect{TicketCode: ticket.Code, Phase: "started"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rolledBack, affectedHosts, err := gw.RollbackTicket(ticket.ID, "handoff publication failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rolledBack.Status != model.TicketStatusRevoked {
+		t.Fatalf("ticket status = %q, want revoked", rolledBack.Status)
+	}
+	if len(affectedHosts) != 1 || affectedHosts[0].ID != host.ID || affectedHosts[0].Status != model.HostStatusRevoked {
+		t.Fatalf("affected hosts = %#v, want revoked host %q", affectedHosts, host.ID)
+	}
+	if gw.ValidateHostSecret(host.ID, secret) {
+		t.Fatal("rollback retained host authorization")
+	}
+	if events := gw.SupportSessionPreconnects(ticket.Code); len(events) != 0 {
+		t.Fatalf("rollback retained ticket preconnect state: %#v", events)
+	}
+	if _, err := gw.GenerateHostSecret(host.ID); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("generate secret for rolled-back host error = %v, want invalid state", err)
+	}
+	if err := gw.HeartbeatHost(host.ID, secret); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("heartbeat after rollback error = %v, want policy denied", err)
+	}
+	if _, _, err := gw.RegisterHostWithIdempotencyKey("register-once", "request-hash", model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "rollback-host",
+		OS:         "windows",
+		Arch:       "amd64",
+	}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("idempotent registration after rollback error = %v, want invalid state", err)
+	}
+	snapshot := gw.Snapshot()
+	if len(snapshot.Hosts) != 1 || snapshot.Hosts[0].Status != model.HostStatusRevoked {
+		t.Fatalf("rollback snapshot hosts = %#v, want revoked host", snapshot.Hosts)
+	}
+}
+
+func TestMemoryGatewayRollbackTicketIsIdempotent(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "transaction rollback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.RollbackTicket(ticket.ID, "first rollback"); err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, hosts, err := gw.RollbackTicket(ticket.ID, "repeated rollback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rolledBack.Status != model.TicketStatusRevoked || len(hosts) != 0 {
+		t.Fatalf("repeated rollback = %#v, %#v", rolledBack, hosts)
+	}
+}
+
+func TestMemoryGatewayProbingTicketOnlyAllowsPowerShellBootstrapUntilPublished(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "final probe", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticket.Status != model.TicketStatusProbing {
+		t.Fatalf("ticket status = %q, want probing", ticket.Status)
+	}
+	if err := gw.ValidatePowerShellBootstrapTicket(ticket.Code); err != nil {
+		t.Fatalf("probing bootstrap rejected: %v", err)
+	}
+	if _, err := gw.JoinManifest(ticket.Code, "https://gateway.example.test", "https://gateway.example.test/join/"+ticket.Code); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("probing ticket JoinManifest error = %v, want invalid state", err)
+	}
+	if _, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "blocked", OS: "windows", Arch: "amd64"}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("probing ticket registration error = %v, want invalid state", err)
+	}
+	if _, err := gw.RecordSupportSessionPreconnect(model.SupportSessionPreconnect{TicketCode: ticket.Code, Phase: "started"}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("probing ticket preconnect error = %v, want invalid state", err)
+	}
+	published, err := gw.PublishTicket(ticket.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if published.Status != model.TicketStatusActive {
+		t.Fatalf("published status = %q", published.Status)
+	}
+	if _, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "allowed", OS: "windows", Arch: "amd64"}); err != nil {
+		t.Fatalf("published ticket registration rejected: %v", err)
+	}
+}
+
+func TestMemoryGatewayRollbackTicketIfNoConnectedHostPreservesActiveHost(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "availability race", map[string]string{"auto_activate": "attended-temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "connected", OS: "windows", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, _, rolledBack, err := gw.RollbackTicketIfNoConnectedHost(ticket.ID, "route lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rolledBack || current.Status != model.TicketStatusActive {
+		t.Fatalf("connected ticket was rolled back: ticket=%#v rolledBack=%v", current, rolledBack)
+	}
+	currentHost, err := gw.Host(host.ID)
+	if err != nil || currentHost.Status != model.HostStatusActive {
+		t.Fatalf("connected host changed: host=%#v err=%v", currentHost, err)
+	}
+}
+
+func TestMemoryGatewayRollbackTicketIfNoConnectedHostRevokesPendingHost(t *testing.T) {
+	gw := NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "pending route loss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "pending", OS: "windows", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, affected, rolledBack, err := gw.RollbackTicketIfNoConnectedHost(ticket.ID, "route lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rolledBack || current.Status != model.TicketStatusRevoked || len(affected) != 1 || affected[0].ID != host.ID {
+		t.Fatalf("pending host blocked rollback: ticket=%#v affected=%#v rolledBack=%v", current, affected, rolledBack)
+	}
+}
+
+func TestMemoryGatewayRollbackTicketIfNoConnectedHostRevokesStaleActiveHost(t *testing.T) {
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "stale route loss", map[string]string{"auto_activate": "attended-temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "stale", OS: "windows", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(hostHeartbeatStaleAfter + time.Second)
+	current, affected, rolledBack, err := gw.RollbackTicketIfNoConnectedHost(ticket.ID, "route lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rolledBack || current.Status != model.TicketStatusRevoked || len(affected) != 1 || affected[0].ID != host.ID {
+		t.Fatalf("stale active host blocked rollback: ticket=%#v affected=%#v rolledBack=%v", current, affected, rolledBack)
+	}
+}
+
 func TestMemoryGatewayProjectsStaleHosts(t *testing.T) {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
@@ -482,6 +760,40 @@ func TestMemoryGatewayProjectsStaleHosts(t *testing.T) {
 	}
 	if hosts := gw.Hosts(string(model.HostStatusStale)); len(hosts) != 1 || hosts[0].ID != host.ID {
 		t.Fatalf("expected stale filter to return host, got %#v", hosts)
+	}
+}
+
+func TestMemoryGatewayHostsForUnknownTicketCodeReturnsEmpty(t *testing.T) {
+	gw := NewMemoryGateway()
+	wantHostIDs := map[string]bool{}
+	for _, name := range []string{"first-ticket-host", "second-ticket-host"} {
+		ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "ticket-scoped host list")
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, err := gw.RegisterHost(model.HostRegistration{
+			TicketCode: ticket.Code,
+			Name:       name,
+			OS:         "windows",
+			Arch:       "amd64",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantHostIDs[host.ID] = true
+	}
+
+	if hosts := gw.HostsForTicketCode("UNKNOWN-NONEMPTY-TICKET", ""); len(hosts) != 0 {
+		t.Fatalf("unknown nonempty ticket returned %d hosts, want 0", len(hosts))
+	}
+	hosts := gw.HostsForTicketCode("", "")
+	if len(hosts) != len(wantHostIDs) {
+		t.Fatalf("empty ticket code returned %d hosts, want %d", len(hosts), len(wantHostIDs))
+	}
+	for _, host := range hosts {
+		if !wantHostIDs[host.ID] {
+			t.Fatal("empty ticket code returned an unexpected host")
+		}
 	}
 }
 

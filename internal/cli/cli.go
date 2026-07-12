@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -26,6 +25,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/acceptance"
@@ -42,6 +42,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostawake"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostedprovider"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
@@ -59,6 +60,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tasktemplate"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
@@ -67,12 +69,33 @@ import (
 const exampleAgentJoinBaseURL = "https://agent.example.com"
 
 type App struct {
-	Stdout io.Writer
-	Stderr io.Writer
+	Stdout                  io.Writer
+	Stderr                  io.Writer
+	supportSessionStartDeps *supportSessionStartDeps
+}
+
+type supportSessionStartDeps struct {
+	Registry             tunnel.Registry
+	Evidence             []tunnel.RegionalEvidence
+	Manager              tunnel.Manager
+	BootstrapProbe       func(context.Context, tunnel.Candidate, string) error
+	FinalProbe           func(context.Context, tunnel.Candidate, string, string) error
+	RecordEvent          func(string)
+	WaitForLocalHealth   func(context.Context, gatewayServerHandle, string, time.Duration) error
+	WaitForGatewayServer func(context.Context, gatewayServerHandle) error
+	StateStore           gateway.StateStore
+	LivenessInterval     time.Duration
+	LivenessFailures     int
 }
 
 func NewApp(stdout, stderr io.Writer) App {
 	return App{Stdout: stdout, Stderr: stderr}
+}
+
+func (a App) recordSupportSessionStartEvent(event string) {
+	if a.supportSessionStartDeps != nil && a.supportSessionStartDeps.RecordEvent != nil {
+		a.supportSessionStartDeps.RecordEvent(event)
+	}
 }
 
 func (a App) Run(ctx context.Context, args []string) error {
@@ -93,6 +116,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.bootstrap(ctx, args[1:])
 	case "support-session":
 		return a.supportSession(ctx, args[1:])
+	case "tunnel":
+		return a.tunnel(ctx, args[1:])
 	case "mcp":
 		return a.mcp(args[1:])
 	case "host":
@@ -169,6 +194,157 @@ func (a App) Run(ctx context.Context, args []string) error {
 
 func isHelpArg(arg string) bool {
 	return arg == "help" || arg == "-h" || arg == "--help"
+}
+
+type tunnelProviderInspection struct {
+	ID                    string                      `json:"id"`
+	DisplayName           string                      `json:"display_name"`
+	Protocols             []string                    `json:"protocols"`
+	Anonymous             bool                        `json:"anonymous"`
+	CredentialRequirement string                      `json:"credential_requirement,omitempty"`
+	Executable            string                      `json:"executable"`
+	DocumentationURL      string                      `json:"documentation_url"`
+	TermsURL              string                      `json:"terms_url,omitempty"`
+	DefaultAutomatic      bool                        `json:"default_automatic"`
+	AutomaticPriority     int                         `json:"automatic_priority,omitempty"`
+	RequiresSSHPin        bool                        `json:"requires_ssh_pin"`
+	FailureDomains        map[string]bool             `json:"failure_domains"`
+	Eligibility           tunnelEligibilityInspection `json:"eligibility"`
+	EvidenceStatus        string                      `json:"evidence_status"`
+	EvidenceExpiresAt     *time.Time                  `json:"evidence_expires_at,omitempty"`
+}
+
+type tunnelEligibilityInspection struct {
+	Eligible bool   `json:"eligible"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type tunnelProbeInspection struct {
+	ID                   string `json:"id"`
+	Executable           string `json:"executable"`
+	ExecutableConfigured bool   `json:"executable_configured"`
+	KnownHostsConfigured bool   `json:"known_hosts_configured"`
+	ConfigurationReady   bool   `json:"configuration_ready"`
+	Eligible             bool   `json:"eligible"`
+	EligibilityReason    string `json:"eligibility_reason,omitempty"`
+}
+
+func (a App) tunnel(_ context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("missing tunnel subcommand")
+	}
+	switch args[0] {
+	case "providers":
+		fs := flag.NewFlagSet("tunnel providers", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
+		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
+		_ = fs.Bool("json", false, "emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return err
+		}
+		registry, config, err := inspectTunnelRuntime(*region, *providerPolicyPath, a.Stderr)
+		if err != nil {
+			return err
+		}
+		policy := tunnelRuntimePolicy(config, time.Now().UTC())
+		evaluations := registry.Evaluate(policy, config.Evidence)
+		evaluations, _ = preflightTunnelEvaluations(evaluations, config, runtime.GOOS, runtime.GOARCH)
+		providers := make([]tunnelProviderInspection, 0, len(registry.Providers()))
+		for _, item := range evaluations {
+			metadata := item.Metadata
+			eligibility := item.Eligibility
+			status := "missing"
+			var expiresAt *time.Time
+			if eligibility.Evidence != nil {
+				status = string(eligibility.Evidence.Status)
+				expiry := eligibility.Evidence.ExpiresAt
+				expiresAt = &expiry
+			}
+			providers = append(providers, tunnelProviderInspection{
+				ID: metadata.ID, DisplayName: metadata.DisplayName, Protocols: metadata.Protocols,
+				Anonymous: metadata.Anonymous, CredentialRequirement: metadata.CredentialRequirement,
+				Executable: metadata.Executable, DocumentationURL: metadata.DocumentationURL,
+				TermsURL: metadata.TermsURL, DefaultAutomatic: metadata.DefaultAutomatic,
+				AutomaticPriority: metadata.AutomaticPriority,
+				RequiresSSHPin:    metadata.RequiresSSHPin, FailureDomains: redactedFailureDomains(metadata.FailureDomains),
+				Eligibility:    tunnelEligibilityInspection{Eligible: eligibility.Eligible, Reason: eligibility.Reason},
+				EvidenceStatus: status, EvidenceExpiresAt: expiresAt,
+			})
+		}
+		return writeJSON(a.Stdout, map[string]any{
+			"schema_version": "rdev.tunnel-providers.v1",
+			"region":         config.Region,
+			"read_only":      true,
+			"providers":      providers,
+		})
+	case "probe":
+		fs := flag.NewFlagSet("tunnel probe", flag.ContinueOnError)
+		fs.SetOutput(a.Stderr)
+		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
+		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
+		_ = fs.Bool("json", false, "emit JSON output")
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return err
+		}
+		registry, config, err := inspectTunnelRuntime(*region, *providerPolicyPath, a.Stderr)
+		if err != nil {
+			return err
+		}
+		policy := tunnelRuntimePolicy(config, time.Now().UTC())
+		evaluations := registry.Evaluate(policy, config.Evidence)
+		evaluations, configurations := preflightTunnelEvaluations(evaluations, config, runtime.GOOS, runtime.GOARCH)
+		probes := make([]tunnelProbeInspection, 0, len(registry.Providers()))
+		for _, item := range evaluations {
+			metadata := item.Metadata
+			configuration := configurations[metadata.ID]
+			eligibility := item.Eligibility
+			probes = append(probes, tunnelProbeInspection{
+				ID: metadata.ID, Executable: metadata.Executable, ExecutableConfigured: configuration.ExecutableConfigured,
+				KnownHostsConfigured: configuration.KnownHostsConfigured,
+				ConfigurationReady:   configuration.ConfigurationReady,
+				Eligible:             eligibility.Eligible, EligibilityReason: eligibility.Reason,
+			})
+		}
+		return writeJSON(a.Stdout, map[string]any{
+			"schema_version":            "rdev.tunnel-probe.v1",
+			"region":                    config.Region,
+			"read_only":                 true,
+			"persistent_tunnel_started": false,
+			"network_probe_performed":   false,
+			"providers":                 probes,
+		})
+	default:
+		return fmt.Errorf("unknown tunnel subcommand %q", args[0])
+	}
+}
+
+func inspectTunnelRuntime(region, providerPolicyPath string, stderr io.Writer) (tunnel.Registry, tunnelRuntimeConfig, error) {
+	deps, err := defaultTunnelRuntimeDeps(stderr, nil)
+	if err != nil {
+		return tunnel.Registry{}, tunnelRuntimeConfig{}, err
+	}
+	config, err := loadTunnelRuntimeConfig(region, providerPolicyPath, deps.Registry)
+	if err != nil {
+		return tunnel.Registry{}, tunnelRuntimeConfig{}, err
+	}
+	return deps.Registry, config, nil
+}
+
+func redactedFailureDomains(domains tunnel.FailureDomains) map[string]bool {
+	return map[string]bool{
+		"authoritative_dns":      strings.TrimSpace(domains.AuthoritativeDNS) != "",
+		"edge_network":           strings.TrimSpace(domains.EdgeNetwork) != "",
+		"origin_network":         strings.TrimSpace(domains.OriginNetwork) != "",
+		"control_plane":          strings.TrimSpace(domains.ControlPlane) != "",
+		"certificate_dependency": strings.TrimSpace(domains.CertificateDependency) != "",
+	}
 }
 
 func (a App) update(ctx context.Context, args []string) error {
@@ -3279,6 +3455,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file when --start is used")
 		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file when --start is used")
 		connectedReportFile := fs.String("connected-report-file", "", "write the exact connected user report text to this file when --start is used")
+		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
+		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
+		allowDegradedDirectHandoff := fs.Bool("allow-degraded-direct-handoff", false, "allow sending a single-entry direct tunnel handoff for an attended session")
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil
@@ -3286,22 +3465,25 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.supportSessionConnect(ctx, supportSessionConnectOptions{
-			RepoRoot:            *repoRoot,
-			WorkDir:             *workDir,
-			Addr:                *addr,
-			GatewayURL:          *gatewayURL,
-			Target:              *target,
-			Reason:              *reason,
-			TTLSeconds:          *ttl,
-			AutoActivate:        *autoActivate,
-			Locale:              *locale,
-			OperatorTokenFile:   *operatorTokenFile,
-			RdevCommand:         *rdevCommand,
-			Start:               *start,
-			ReadyFile:           *readyFile,
-			StatusFile:          *statusFile,
-			HandoffTextFile:     *handoffTextFile,
-			ConnectedReportFile: *connectedReportFile,
+			RepoRoot:                   *repoRoot,
+			WorkDir:                    *workDir,
+			Addr:                       *addr,
+			GatewayURL:                 *gatewayURL,
+			Target:                     *target,
+			Reason:                     *reason,
+			TTLSeconds:                 *ttl,
+			AutoActivate:               *autoActivate,
+			Locale:                     *locale,
+			OperatorTokenFile:          *operatorTokenFile,
+			RdevCommand:                *rdevCommand,
+			Start:                      *start,
+			ReadyFile:                  *readyFile,
+			StatusFile:                 *statusFile,
+			HandoffTextFile:            *handoffTextFile,
+			ConnectedReportFile:        *connectedReportFile,
+			Region:                     *region,
+			ProviderPolicyPath:         *providerPolicyPath,
+			AllowDegradedDirectHandoff: *allowDegradedDirectHandoff,
 		})
 	case "handoff":
 		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
@@ -3379,6 +3561,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		statusFile := fs.String("status-file", "", "write the latest foreground support-session status event to this file before serving; defaults to the session work dir")
 		handoffTextFile := fs.String("handoff-text-file", "", "write the exact target-side human handoff text to this file before serving; defaults to the session work dir")
 		connectedReportFile := fs.String("connected-report-file", "", "write the exact connected user report text to this file after the target connects; defaults to the session work dir")
+		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
+		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
+		allowDegradedDirectHandoff := fs.Bool("allow-degraded-direct-handoff", false, "allow sending a single-entry direct tunnel handoff for an attended session")
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil
@@ -3386,20 +3571,23 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
-			RepoRoot:            *repoRoot,
-			Addr:                *addr,
-			GatewayURL:          *gatewayURL,
-			WorkDir:             *workDir,
-			Target:              *target,
-			Reason:              *reason,
-			TTLSeconds:          *ttl,
-			AutoActivate:        *autoActivate,
-			Locale:              *locale,
-			RdevCommand:         *rdevCommand,
-			ReadyFile:           *readyFile,
-			StatusFile:          *statusFile,
-			HandoffTextFile:     *handoffTextFile,
-			ConnectedReportFile: *connectedReportFile,
+			RepoRoot:                   *repoRoot,
+			Addr:                       *addr,
+			GatewayURL:                 *gatewayURL,
+			WorkDir:                    *workDir,
+			Target:                     *target,
+			Reason:                     *reason,
+			TTLSeconds:                 *ttl,
+			AutoActivate:               *autoActivate,
+			Locale:                     *locale,
+			RdevCommand:                *rdevCommand,
+			ReadyFile:                  *readyFile,
+			StatusFile:                 *statusFile,
+			HandoffTextFile:            *handoffTextFile,
+			ConnectedReportFile:        *connectedReportFile,
+			Region:                     *region,
+			ProviderPolicyPath:         *providerPolicyPath,
+			AllowDegradedDirectHandoff: *allowDegradedDirectHandoff,
 		})
 	case "create":
 		fs := flag.NewFlagSet("support-session create", flag.ContinueOnError)
@@ -3646,39 +3834,45 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 }
 
 type supportSessionStartOptions struct {
-	RepoRoot            string
-	Addr                string
-	GatewayURL          string
-	WorkDir             string
-	Target              string
-	Reason              string
-	TTLSeconds          int
-	AutoActivate        bool
-	Locale              string
-	RdevCommand         string
-	ReadyFile           string
-	StatusFile          string
-	HandoffTextFile     string
-	ConnectedReportFile string
+	RepoRoot                   string
+	Addr                       string
+	GatewayURL                 string
+	WorkDir                    string
+	Target                     string
+	Reason                     string
+	TTLSeconds                 int
+	AutoActivate               bool
+	Locale                     string
+	RdevCommand                string
+	ReadyFile                  string
+	StatusFile                 string
+	HandoffTextFile            string
+	ConnectedReportFile        string
+	Region                     string
+	ProviderPolicyPath         string
+	AllowDegradedDirectHandoff bool
 }
 
 type supportSessionConnectOptions struct {
-	RepoRoot            string
-	WorkDir             string
-	Addr                string
-	GatewayURL          string
-	Target              string
-	Reason              string
-	TTLSeconds          int
-	AutoActivate        bool
-	Locale              string
-	OperatorTokenFile   string
-	RdevCommand         string
-	Start               bool
-	ReadyFile           string
-	StatusFile          string
-	HandoffTextFile     string
-	ConnectedReportFile string
+	RepoRoot                   string
+	WorkDir                    string
+	Addr                       string
+	GatewayURL                 string
+	Target                     string
+	Reason                     string
+	TTLSeconds                 int
+	AutoActivate               bool
+	Locale                     string
+	OperatorTokenFile          string
+	RdevCommand                string
+	Start                      bool
+	ReadyFile                  string
+	StatusFile                 string
+	HandoffTextFile            string
+	ConnectedReportFile        string
+	Region                     string
+	ProviderPolicyPath         string
+	AllowDegradedDirectHandoff bool
 }
 
 type supportSessionPrepareOptions struct {
@@ -3730,20 +3924,23 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	}
 	if opts.Start {
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
-			RepoRoot:            opts.RepoRoot,
-			Addr:                opts.Addr,
-			GatewayURL:          opts.GatewayURL,
-			WorkDir:             opts.WorkDir,
-			Target:              opts.Target,
-			Reason:              opts.Reason,
-			TTLSeconds:          opts.TTLSeconds,
-			AutoActivate:        opts.AutoActivate,
-			Locale:              opts.Locale,
-			RdevCommand:         opts.RdevCommand,
-			ReadyFile:           opts.ReadyFile,
-			StatusFile:          opts.StatusFile,
-			HandoffTextFile:     opts.HandoffTextFile,
-			ConnectedReportFile: opts.ConnectedReportFile,
+			RepoRoot:                   opts.RepoRoot,
+			Addr:                       opts.Addr,
+			GatewayURL:                 opts.GatewayURL,
+			WorkDir:                    opts.WorkDir,
+			Target:                     opts.Target,
+			Reason:                     opts.Reason,
+			TTLSeconds:                 opts.TTLSeconds,
+			AutoActivate:               opts.AutoActivate,
+			Locale:                     opts.Locale,
+			RdevCommand:                opts.RdevCommand,
+			ReadyFile:                  opts.ReadyFile,
+			StatusFile:                 opts.StatusFile,
+			HandoffTextFile:            opts.HandoffTextFile,
+			ConnectedReportFile:        opts.ConnectedReportFile,
+			Region:                     opts.Region,
+			ProviderPolicyPath:         opts.ProviderPolicyPath,
+			AllowDegradedDirectHandoff: opts.AllowDegradedDirectHandoff,
 		})
 	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
@@ -3752,15 +3949,18 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	}
 	if gatewayURL == "" {
 		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-			RepoRoot:     opts.RepoRoot,
-			WorkDir:      opts.WorkDir,
-			Addr:         opts.Addr,
-			Target:       opts.Target,
-			Reason:       opts.Reason,
-			TTLSeconds:   opts.TTLSeconds,
-			AutoActivate: opts.AutoActivate,
-			Locale:       opts.Locale,
-			RdevCommand:  opts.RdevCommand,
+			RepoRoot:                   opts.RepoRoot,
+			WorkDir:                    opts.WorkDir,
+			Addr:                       opts.Addr,
+			Target:                     opts.Target,
+			Reason:                     opts.Reason,
+			TTLSeconds:                 opts.TTLSeconds,
+			AutoActivate:               opts.AutoActivate,
+			Locale:                     opts.Locale,
+			RdevCommand:                opts.RdevCommand,
+			Region:                     opts.Region,
+			ProviderPolicyPath:         opts.ProviderPolicyPath,
+			AllowDegradedDirectHandoff: opts.AllowDegradedDirectHandoff,
 		})
 		return writeJSON(a.Stdout, supportsession.BuildConnectFromHandoff(handoff))
 	}
@@ -3780,39 +3980,9 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	return writeJSON(a.Stdout, supportsession.BuildConnectFromCreated(created))
 }
 
-// startBestAvailableTunnel tries ephemeral public tunnel providers in order
-// until one succeeds. The order is:
-//
-//  1. cloudflared quick-tunnel (zero-auth, ephemeral fallback)
-//  2. localhost.run via SSH (fallback, needs only openssh client)
-//
-// If none succeed it logs a warning and returns ("", noop) — the caller
-// falls back to LAN-only connectivity.
-func startBestAvailableTunnel(ctx context.Context, stderr io.Writer, localListenURL, localPort string) (string, context.CancelFunc) {
-	// --- Provider 1: cloudflared ---
-	_, _ = fmt.Fprintf(stderr, "[rdev] trying cloudflared quick-tunnel for %s ...\n", localListenURL)
-	tunnelURL, cancel, err := startCloudflaredQuickTunnel(ctx, stderr, localListenURL)
-	if err == nil {
-		_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared quick-tunnel active: %s\n", tunnelURL)
-		return tunnelURL, cancel
-	}
-	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared failed: %v\n", err)
-
-	// --- Provider 2: localhost.run (SSH reverse tunnel) ---
-	_, _ = fmt.Fprintf(stderr, "[rdev] trying localhost.run SSH tunnel for port %s ...\n", localPort)
-	tunnelURL, cancel, err = startLocalhostRunTunnel(ctx, stderr, localPort)
-	if err == nil {
-		_, _ = fmt.Fprintf(stderr, "[rdev] localhost.run tunnel active: %s\n", tunnelURL)
-		return tunnelURL, cancel
-	}
-	_, _ = fmt.Fprintf(stderr, "[rdev] localhost.run failed: %v\n", err)
-
-	_, _ = fmt.Fprintf(stderr, "[rdev] all public tunnel providers failed; falling back to LAN gateway\n")
-	return "", func() {}
-}
-
 type cloudflaredStableTunnelConfig struct {
 	GatewayURL string
+	ProviderID string
 	Argv       []string
 	Preview    []string
 	Source     string
@@ -3820,15 +3990,22 @@ type cloudflaredStableTunnelConfig struct {
 }
 
 func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflaredStableTunnelConfig, bool, error) {
-	gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL")), "/")
+	gatewayURL := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"))
 	gatewaySource := "RDEV_CLOUDFLARED_NAMED_TUNNEL_URL"
+	providerID := "cloudflared-named"
 	if gatewayURL == "" {
-		gatewayURL = strings.TrimRight(strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_GATEWAY_URL")), "/")
+		gatewayURL = strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_GATEWAY_URL"))
 		gatewaySource = "RDEV_CLOUDFLARED_GATEWAY_URL"
+		providerID = "cloudflared"
 	}
 	if gatewayURL == "" {
 		return cloudflaredStableTunnelConfig{}, false, nil
 	}
+	canonicalGatewayURL, err := canonicalCloudflaredStableGatewayURL(gatewayURL)
+	if err != nil {
+		return cloudflaredStableTunnelConfig{}, true, err
+	}
+	gatewayURL = canonicalGatewayURL
 	rawArgv := strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON"))
 	argvSource := "RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON"
 	if rawArgv == "" {
@@ -3842,6 +4019,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+" + argvSource,
@@ -3853,6 +4031,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", "--token-file", tokenFile}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE",
@@ -3864,6 +4043,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", "--token", token}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_TOKEN",
@@ -3875,6 +4055,7 @@ func configuredCloudflaredStableTunnelConfig(cfPath, localURL string) (cloudflar
 		argv := []string{cfPath, "tunnel", "--protocol", "http2", "--url", localURL, "run", tunnelName}
 		return cloudflaredStableTunnelConfig{
 			GatewayURL: gatewayURL,
+			ProviderID: providerID,
 			Argv:       argv,
 			Preview:    redactCloudflaredArgv(argv),
 			Source:     gatewaySource + "+RDEV_CLOUDFLARED_TUNNEL_NAME",
@@ -3922,253 +4103,232 @@ func parseCloudflaredStableStartArgv(raw, envName, localURL string) ([]string, e
 		}
 		argv[i] = expandCloudflaredStartArg(arg, localURL)
 	}
-	if base := strings.ToLower(filepath.Base(argv[0])); base != "cloudflared" && base != "cloudflared.exe" {
-		return nil, fmt.Errorf("%s must start with a cloudflared executable, got %q", envName, filepath.Base(argv[0]))
+	if base := strings.ToLower(portablePathBase(argv[0])); base != "cloudflared" && base != "cloudflared.exe" {
+		return nil, fmt.Errorf("%s must start with a cloudflared executable", envName)
 	}
-	joined := strings.ToLower(strings.Join(argv, "\x00"))
-	for _, forbidden := range []string{"executionpolicy", "encodedcommand", "bypass", "powershell", "cmd.exe", "bash", " zsh", " sh ", "nohup"} {
-		if strings.Contains(joined, forbidden) {
-			return nil, fmt.Errorf("%s contains unsafe shell or policy token %q", envName, forbidden)
-		}
+	if err := validateCloudflaredStableRunArgv(argv, envName, localURL); err != nil {
+		return nil, err
 	}
 	return argv, nil
 }
 
+func validateCloudflaredStableRunArgv(argv []string, envName, localURL string) error {
+	if len(argv) < 5 || argv[1] != "tunnel" {
+		return fmt.Errorf("%s must run a foreground cloudflared tunnel command", envName)
+	}
+	seenRun, seenURL, seenProtocol := false, false, false
+	identityCount := 0
+	for index := 2; index < len(argv); index++ {
+		arg := argv[index]
+		if !strings.HasPrefix(arg, "--") {
+			if !seenRun && arg == "run" {
+				seenRun = true
+				continue
+			}
+			if !seenRun || identityCount > 0 {
+				return fmt.Errorf("%s contains an unsupported cloudflared tunnel argument", envName)
+			}
+			identityCount++
+			continue
+		}
+		key, _, _ := strings.Cut(strings.ToLower(arg), "=")
+		value, consumedIndex, err := cloudflaredStableOptionValue(argv, index, arg, envName)
+		if err != nil {
+			return err
+		}
+		index = consumedIndex
+		switch key {
+		case "--protocol":
+			if seenRun || seenProtocol || !isCloudflaredStableProtocol(value) {
+				return fmt.Errorf("%s contains an unsupported cloudflared protocol option", envName)
+			}
+			seenProtocol = true
+		case "--url":
+			if seenRun || seenURL || value != localURL {
+				return fmt.Errorf("%s must route only to the current local gateway", envName)
+			}
+			seenURL = true
+		case "--token", "--token-file":
+			if !seenRun || identityCount > 0 {
+				return fmt.Errorf("%s contains conflicting cloudflared tunnel identity options", envName)
+			}
+			identityCount++
+		default:
+			return fmt.Errorf("%s contains an unsupported cloudflared tunnel option", envName)
+		}
+	}
+	if !seenRun || !seenURL || identityCount != 1 {
+		return fmt.Errorf("%s must contain one foreground tunnel identity and the current local gateway URL", envName)
+	}
+	return nil
+}
+
+func cloudflaredStableOptionValue(argv []string, index int, arg, envName string) (string, int, error) {
+	if _, value, hasValue := strings.Cut(arg, "="); hasValue {
+		if value == "" {
+			return "", index, fmt.Errorf("%s contains an empty cloudflared option value", envName)
+		}
+		return value, index, nil
+	}
+	if index+1 >= len(argv) || strings.HasPrefix(argv[index+1], "--") {
+		return "", index, fmt.Errorf("%s contains a cloudflared option without a value", envName)
+	}
+	return argv[index+1], index + 1, nil
+}
+
+func isCloudflaredStableProtocol(value string) bool {
+	switch strings.ToLower(value) {
+	case "auto", "http2", "quic":
+		return true
+	default:
+		return false
+	}
+}
+
 func expandCloudflaredStartArg(arg, localURL string) string {
-	replacements := map[string]string{
-		"{local_url}":       localURL,
-		"{{local_url}}":     localURL,
-		"$RDEV_LOCAL_URL":   localURL,
-		"${RDEV_LOCAL_URL}": localURL,
-	}
-	for marker, value := range replacements {
-		arg = strings.ReplaceAll(arg, marker, value)
-	}
-	return arg
+	return strings.NewReplacer(
+		"{{local_url}}", localURL,
+		"${RDEV_LOCAL_URL}", localURL,
+		"{local_url}", localURL,
+		"$RDEV_LOCAL_URL", localURL,
+	).Replace(arg)
 }
 
 func redactCloudflaredArgv(argv []string) []string {
-	out := append([]string(nil), argv...)
-	for i, arg := range out {
-		switch arg {
-		case "--token", "--credentials-contents":
-			if i+1 < len(out) {
-				out[i+1] = "<redacted>"
+	if len(argv) == 0 {
+		return nil
+	}
+	executable := strings.ToLower(portablePathBase(argv[0]))
+	if executable != "cloudflared" && executable != "cloudflared.exe" {
+		executable = "<executable>"
+	}
+	out := []string{executable}
+	for index := 1; index < len(argv); index++ {
+		arg := argv[index]
+		lower := strings.ToLower(arg)
+		if lower == "tunnel" || lower == "run" {
+			out = append(out, lower)
+			continue
+		}
+		if !strings.HasPrefix(lower, "--") {
+			out = append(out, "<argument>")
+			continue
+		}
+		key, value, hasValue := strings.Cut(lower, "=")
+		nextValue := func() string {
+			if hasValue {
+				return value
 			}
+			if index+1 < len(argv) {
+				index++
+				return argv[index]
+			}
+			return ""
+		}
+		switch key {
+		case "--protocol":
+			protocol := strings.ToLower(strings.TrimSpace(nextValue()))
+			if protocol != "auto" && protocol != "http2" && protocol != "quic" {
+				protocol = "<redacted>"
+			}
+			out = append(out, "--protocol", protocol)
+		case "--url":
+			_ = nextValue()
+			out = append(out, "--url", "<local-url>")
+		case "--token", "--credentials-contents":
+			_ = nextValue()
+			out = append(out, key, "<redacted>")
+		case "--token-file", "--credentials-file", "--config", "--origincert":
+			_ = nextValue()
+			out = append(out, key, "<path>")
+		default:
+			out = append(out, "<option>")
 		}
 	}
 	return out
 }
 
+func portablePathBase(value string) string {
+	value = strings.TrimRight(value, "/\\")
+	if index := strings.LastIndexAny(value, "/\\"); index >= 0 {
+		return value[index+1:]
+	}
+	return value
+}
+
+func canonicalCloudflaredStableGatewayURL(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.User != nil ||
+		parsed.Port() != "" || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	if !strings.EqualFold(parsed.Host, parsed.Hostname()) {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	if escapedPath := parsed.EscapedPath(); escapedPath != "" && escapedPath != "/" {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if !validDNSHostname(host) || strings.ContainsAny(host, "\x00\r\n\t ") {
+		return "", fmt.Errorf("configured Cloudflare gateway URL must be a canonical HTTPS origin")
+	}
+	return "https://" + host, nil
+}
+
 func startConfiguredCloudflaredStableTunnel(ctx context.Context, stderr io.Writer, cfg cloudflaredStableTunnelConfig) (string, context.CancelFunc, error) {
+	return startConfiguredCloudflaredStableTunnelWithGrace(ctx, stderr, cfg, 3*time.Second)
+}
+
+func startConfiguredCloudflaredStableTunnelWithGrace(ctx context.Context, stderr io.Writer, cfg cloudflaredStableTunnelConfig, startupGrace time.Duration) (string, context.CancelFunc, error) {
 	if len(cfg.Argv) == 0 {
 		return "", func() {}, fmt.Errorf("cloudflared stable tunnel argv is empty")
 	}
-	tunnelCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(tunnelCtx, cfg.Argv[0], cfg.Argv[1:]...)
-	cmd.Stdout = stderr
-	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return "", func() {}, fmt.Errorf("cloudflared stable tunnel start failed: %w", err)
+	gatewayURL, err := canonicalCloudflaredStableGatewayURL(cfg.GatewayURL)
+	if err != nil {
+		return "", func() {}, err
 	}
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
+	providerID := normalizedCloudflaredStableProviderID(cfg.ProviderID)
+	process, err := startProviderProcess(ctx, stderr, providerID, cfg.Argv, "", "")
+	if err != nil {
+		return "", func() {}, err
+	}
+	timer := time.NewTimer(startupGrace)
+	defer timer.Stop()
 	select {
-	case err := <-done:
-		cancel()
-		if err != nil {
-			return "", func() {}, fmt.Errorf("cloudflared stable tunnel exited during startup: %w", err)
-		}
-		return "", func() {}, fmt.Errorf("cloudflared stable tunnel exited during startup")
-	case <-time.After(3 * time.Second):
-		return cfg.GatewayURL, func() {
-			cancel()
-			select {
-			case <-done:
-			case <-time.After(2 * time.Second):
-				if cmd.Process != nil {
-					_ = cmd.Process.Kill()
+	case <-process.lifecycle.reaped:
+		cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout)
+		writeTunnelProviderEvent(stderr, providerID, "startup", "failed", "", "process-exited")
+		return "", func() {}, fmt.Errorf("%s provider process exited during startup", providerID)
+	case <-timer.C:
+		writeTunnelProviderEvent(stderr, providerID, "startup", "ready", gatewayURL, "")
+		var stopOnce sync.Once
+		return gatewayURL, func() {
+			stopOnce.Do(func() {
+				if cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout) {
+					writeTunnelProviderEvent(stderr, providerID, "stop", "stopped", gatewayURL, "")
+				} else {
+					writeTunnelProviderEvent(stderr, providerID, "stop", "failed", gatewayURL, "reap-timeout")
 				}
-			}
+			})
 		}, nil
+	case <-ctx.Done():
+		if cancelAndWaitProviderProcess(process, providerProcessCleanupTimeout) {
+			writeTunnelProviderEvent(stderr, providerID, "startup", "stopped", "", "canceled")
+		} else {
+			writeTunnelProviderEvent(stderr, providerID, "startup", "failed", "", "reap-timeout")
+		}
+		return "", func() {}, ctx.Err()
 	}
 }
 
-// startLocalhostRunTunnel creates a public HTTPS tunnel through localhost.run
-// using only an OpenSSH client (available on macOS, Linux, and Windows 10+).
-// It runs: ssh -o StrictHostKeyChecking=no -R 80:localhost:PORT nokey@localhost.run
-// and scans stdout/stderr for the assigned https://*.localhost.run URL.
-func startLocalhostRunTunnel(ctx context.Context, stderr io.Writer, localPort string) (string, context.CancelFunc, error) {
-	sshPath, err := exec.LookPath("ssh")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("ssh not found in PATH: %w", err)
-	}
-	tunnelCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(tunnelCtx, sshPath,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=3",
-		"-o", "ExitOnForwardFailure=yes",
-		"-R", "80:localhost:"+localPort,
-		"nokey@localhost.run",
-	)
-	pr, pw := io.Pipe()
-	combined := io.MultiWriter(pw, stderr)
-	cmd.Stdout = combined
-	cmd.Stderr = combined
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = pw.Close()
-		return "", func() {}, fmt.Errorf("localhost.run ssh start failed: %w", err)
-	}
-	urlCh := make(chan string, 1)
-	go func() {
-		defer pw.Close()
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			if candidate := localhostRunTunnelURLFromLine(scanner.Text()); candidate != "" {
-				select {
-				case urlCh <- candidate:
-				default:
-				}
-			}
-		}
-	}()
-	select {
-	case tunnelURL := <-urlCh:
-		return tunnelURL, cancel, nil
-	case <-time.After(20 * time.Second):
-		cancel()
-		_ = pr.Close()
-		return "", func() {}, fmt.Errorf("localhost.run did not print a tunnel URL within 20s")
-	}
-}
-
-func localhostRunTunnelURLFromLine(line string) string {
-	for remaining := line; ; {
-		idx := strings.Index(remaining, "https://")
-		if idx < 0 {
-			return ""
-		}
-		rest := remaining[idx:]
-		end := strings.IndexAny(rest, " \t\n\r")
-		if end < 0 {
-			end = len(rest)
-		}
-		candidate := strings.Trim(strings.TrimRight(rest[:end], "/"), "\"'()[]{}<>,;|")
-		u, err := url.Parse(candidate)
-		if err == nil && strings.EqualFold(u.Scheme, "https") && u.Host != "" && u.User == nil {
-			host := strings.ToLower(u.Hostname())
-			if strings.HasSuffix(host, ".lhr.life") ||
-				(strings.HasSuffix(host, ".localhost.run") && host != "admin.localhost.run") {
-				return candidate
-			}
-		}
-		remaining = rest[end:]
-	}
-}
-
-// in the background and waits up to 30 seconds for it to print a public HTTPS tunnel URL.
-//
-// It always uses --protocol http2 first because many networks (particularly those behind
-// corporate firewalls or in China) block UDP/QUIC. If http2 fails to produce a URL within
-// the timeout the function returns an error; the caller can retry or fall back to another
-// tunnel provider.
-//
-// The returned cancel function must be called when the session ends to clean up the
-// cloudflared process.
-//
-// On success it returns (tunnelURL, cancel, nil).
-// On failure it returns ("", noop, err).
-func startCloudflaredQuickTunnel(ctx context.Context, stderr io.Writer, localURL string) (string, context.CancelFunc, error) {
-	cfPath, err := exec.LookPath("cloudflared")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("cloudflared not found in PATH: %w", err)
-	}
-
-	// Attempt 1: force HTTP/2 (TCP-based, works in networks that block QUIC/UDP).
-	tunnelURL, cancel, err := startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "http2", 25*time.Second)
-	if err == nil {
-		return tunnelURL, cancel, nil
-	}
-	_, _ = fmt.Fprintf(stderr, "[rdev] cloudflared http2 attempt failed (%v); retrying without protocol flag\n", err)
-
-	// Attempt 2: let cloudflared choose the protocol (QUIC, then http2 fallback).
-	// Some older cloudflared versions do not accept --protocol http2, so this
-	// second attempt keeps backward compatibility.
-	return startCloudflaredWithProtocol(ctx, cfPath, stderr, localURL, "", 20*time.Second)
-}
-
-// startCloudflaredWithProtocol is the inner helper that launches a single cloudflared
-// process with an optional --protocol flag and scans its stderr for a trycloudflare.com URL.
-func startCloudflaredWithProtocol(ctx context.Context, cfPath string, stderr io.Writer, localURL, protocol string, timeout time.Duration) (string, context.CancelFunc, error) {
-	tunnelCtx, cancel := context.WithCancel(ctx)
-
-	args := []string{"tunnel"}
-	if protocol != "" {
-		args = append(args, "--protocol", protocol)
-	}
-	args = append(args, "--url", localURL)
-
-	cmd := exec.CommandContext(tunnelCtx, cfPath, args...)
-	// cloudflared prints the tunnel URL to stderr
-	pr, pw := io.Pipe()
-	cmd.Stderr = io.MultiWriter(pw, stderr)
-	if err := cmd.Start(); err != nil {
-		cancel()
-		_ = pw.Close()
-		return "", func() {}, fmt.Errorf("cloudflared start failed (protocol=%q): %w", protocol, err)
-	}
-
-	// Scan stderr for the tunnel URL (looks like https://*.trycloudflare.com).
-	// Candidates must pass URL parsing to prevent garbled error lines from being
-	// accepted as tunnel addresses (cloudflared occasionally writes error text on
-	// the same line as a partial URL when the tunnel fails to establish).
-	urlCh := make(chan string, 1)
-	go func() {
-		defer pw.Close()
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if idx := strings.Index(line, "https://"); idx >= 0 {
-				rest := line[idx:]
-				end := strings.IndexAny(rest, " \t\n\r|")
-				if end < 0 {
-					end = len(rest)
-				}
-				candidate := strings.TrimRight(rest[:end], "/")
-				if !strings.Contains(candidate, ".trycloudflare.com") {
-					continue
-				}
-				// Strict validation: must parse as a URL with https scheme and
-				// a non-empty host that does not contain whitespace or error
-				// keywords that indicate cloudflared wrote a diagnostic line
-				// rather than an actual tunnel address.
-				u, err := url.Parse(candidate)
-				if err != nil || u.Scheme != "https" || u.Host == "" {
-					continue
-				}
-				if strings.ContainsAny(u.Host, " \t\n\r") {
-					continue
-				}
-				select {
-				case urlCh <- candidate:
-				default:
-				}
-			}
-		}
-	}()
-
-	select {
-	case tunnelURL := <-urlCh:
-		return tunnelURL, cancel, nil
-	case <-time.After(timeout):
-		cancel()
-		_ = pr.Close()
-		return "", func() {}, fmt.Errorf("cloudflared (protocol=%q) did not print a tunnel URL within %v", protocol, timeout)
+func normalizedCloudflaredStableProviderID(value string) string {
+	switch strings.TrimSpace(value) {
+	case "cloudflared-named":
+		return "cloudflared-named"
+	case "cloudflared":
+		return "cloudflared"
+	default:
+		return "cloudflared"
 	}
 }
 
@@ -4188,55 +4348,33 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	localPort := extractPort(addr, "8787")
 	localListenURL := "http://127.0.0.1:" + localPort
 	gatewayURL, candidates := supportsession.ResolveGatewayURL(addr, opts.GatewayURL)
-	if stableGatewayURL := firstStableGatewayURL(candidates); stableGatewayURL != "" {
+	stableGatewayURL := firstStableGatewayURL(candidates)
+	stableProviderID := gatewayProviderID(candidates, stableGatewayURL)
+	if stableGatewayURL != "" {
 		gatewayURL = stableGatewayURL
 	}
-
-	stableTunnelStartFailed := false
-	if strings.TrimSpace(opts.GatewayURL) == "" {
-		cfPath, cfErr := exec.LookPath("cloudflared")
-		if cfErr != nil {
-			if cloudflaredStableTunnelStartRequested() {
-				stableTunnelStartFailed = true
-				_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel requested but cloudflared is not in PATH: %v\n", cfErr)
-			}
-		} else {
-			cfg, ok, err := configuredCloudflaredStableTunnelConfig(cfPath, localListenURL)
-			if err != nil {
-				stableTunnelStartFailed = true
-				_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel is invalid: %v\n", err)
-			} else if ok {
-				_, _ = fmt.Fprintf(a.Stderr, "[rdev] starting configured Cloudflare stable tunnel for %s with %s (%s)\n", cfg.GatewayURL, cfg.Mode, strings.Join(cfg.Preview, " "))
-				tunnelURL, tunnelCancel, err := startConfiguredCloudflaredStableTunnel(ctx, a.Stderr, cfg)
-				if err == nil {
-					defer tunnelCancel()
-					gatewayURL = tunnelURL
-					_ = os.Setenv("RDEV_CLOUDFLARED_GATEWAY_URL", tunnelURL)
-					_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel active: %s\n", tunnelURL)
-				} else {
-					stableTunnelStartFailed = true
-					_, _ = fmt.Fprintf(a.Stderr, "[rdev] configured Cloudflare stable tunnel failed: %v\n", err)
-				}
-			}
+	deps := supportSessionStartDeps{}
+	injectedDeps := a.supportSessionStartDeps != nil
+	if injectedDeps {
+		deps = *a.supportSessionStartDeps
+	} else {
+		var err error
+		deps, err = defaultTunnelRuntimeDeps(a.Stderr, nil)
+		if err != nil {
+			return fmt.Errorf("build public tunnel provider registry: %w", err)
 		}
 	}
-
-	// Start an ephemeral public tunnel when no stable
-	// (hosted/cloudflared/relay/mesh/vpn/ssh) gateway is already configured, or
-	// when the configured Cloudflare stable tunnel failed to start. The fallback
-	// providers are tried in order: cloudflared Quick Tunnel (HTTP/2 first, then
-	// provider default) → localhost.run SSH. LAN-only fallback applies only when
-	// all providers fail.
-	summary := supportsession.GatewayCandidateSummary(candidates)
-	needsPublicTunnel, _ := summary["needs_public_tunnel"].(bool)
-	if shouldStartManagedPublicTunnel(needsPublicTunnel || stableTunnelStartFailed, opts.GatewayURL) {
-		tunnelURL, tunnelCancel := startBestAvailableTunnel(ctx, a.Stderr, localListenURL, localPort)
-		if tunnelURL != "" {
-			defer tunnelCancel()
-			gatewayURL = tunnelURL
-			_ = os.Setenv("RDEV_CLOUDFLARED_GATEWAY_URL", tunnelURL)
+	runtimeConfig, err := loadTunnelRuntimeConfig(opts.Region, opts.ProviderPolicyPath, deps.Registry)
+	if err != nil {
+		return err
+	}
+	if !injectedDeps && len(runtimeConfig.SSHKnownHostsPaths) > 0 {
+		deps, err = defaultTunnelRuntimeDeps(a.Stderr, runtimeConfig.SSHKnownHostsPaths)
+		if err != nil {
+			return fmt.Errorf("build public tunnel provider registry: %w", err)
 		}
 	}
+	deps.Evidence = append(append([]tunnel.RegionalEvidence(nil), deps.Evidence...), runtimeConfig.Evidence...)
 	workDir := strings.TrimSpace(opts.WorkDir)
 	if workDir == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -4248,42 +4386,78 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 			workDir = filepath.Join(".", "work", "rdev-support-session")
 		}
 	}
-	if absWorkDir, err := filepath.Abs(workDir); err == nil {
-		workDir = absWorkDir
+	canonicalWorkDir, err := canonicalPathThroughExistingAncestor(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session work directory: %w", err)
 	}
+	workDir = canonicalWorkDir
 	readyFile := strings.TrimSpace(opts.ReadyFile)
 	if readyFile == "" {
 		readyFile = filepath.Join(workDir, "support-session-ready.json")
 	}
-	if absReadyFile, err := filepath.Abs(readyFile); err == nil {
-		readyFile = absReadyFile
+	canonicalReadyFile, err := canonicalPathThroughExistingAncestor(readyFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session ready file: %w", err)
 	}
+	readyFile = canonicalReadyFile
 	statusFile := strings.TrimSpace(opts.StatusFile)
 	if statusFile == "" {
 		statusFile = filepath.Join(workDir, "support-session-status.json")
 	}
-	if absStatusFile, err := filepath.Abs(statusFile); err == nil {
-		statusFile = absStatusFile
+	canonicalStatusFile, err := canonicalPathThroughExistingAncestor(statusFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session status file: %w", err)
 	}
+	statusFile = canonicalStatusFile
 	handoffTextFile := strings.TrimSpace(opts.HandoffTextFile)
 	if handoffTextFile == "" {
 		handoffTextFile = filepath.Join(workDir, "target-handoff.txt")
 	}
-	if absHandoffTextFile, err := filepath.Abs(handoffTextFile); err == nil {
-		handoffTextFile = absHandoffTextFile
+	canonicalHandoffTextFile, err := canonicalPathThroughExistingAncestor(handoffTextFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session handoff file: %w", err)
 	}
+	handoffTextFile = canonicalHandoffTextFile
 	connectedReportFile := strings.TrimSpace(opts.ConnectedReportFile)
 	if connectedReportFile == "" {
 		connectedReportFile = filepath.Join(workDir, "connected-report.txt")
 	}
-	if absConnectedReportFile, err := filepath.Abs(connectedReportFile); err == nil {
-		connectedReportFile = absConnectedReportFile
+	canonicalConnectedReportFile, err := canonicalPathThroughExistingAncestor(connectedReportFile)
+	if err != nil {
+		return fmt.Errorf("resolve protected support-session connected report file: %w", err)
 	}
+	connectedReportFile = canonicalConnectedReportFile
 	repoRoot := strings.TrimSpace(opts.RepoRoot)
 	if repoRoot == "" {
 		repoRoot = "."
 	}
 	repoRoot = resolveSupportSessionRepoRoot(repoRoot)
+	providerRoot := filepath.Join(workDir, ".rdev")
+	signingKeyPath := filepath.Join(providerRoot, "keys", "gateway-signing-key.json")
+	manifestKeyPath := filepath.Join(providerRoot, "keys", "manifest-root-key.json")
+	statePath := filepath.Join(providerRoot, "gateway", "state.json")
+	auditLogPath := filepath.Join(providerRoot, "audit", "events.jsonl")
+	publicationJournalPath := filepath.Join(providerRoot, "gateway", "publication-journal.json")
+	for _, protectedDir := range []string{
+		workDir,
+		providerRoot,
+		filepath.Join(providerRoot, "keys"),
+		filepath.Join(providerRoot, "gateway"),
+		filepath.Join(providerRoot, "audit"),
+	} {
+		if err := os.MkdirAll(protectedDir, 0o700); err != nil {
+			return err
+		}
+		if err := tunnel.ValidateProtectedDirectory(protectedDir); err != nil {
+			return fmt.Errorf("unsafe support-session work directory %q: %w", protectedDir, err)
+		}
+	}
+	if err := prepareAndValidateSupportSessionPublicationPaths([]string{
+		readyFile, handoffTextFile, statusFile, connectedReportFile, statePath,
+		auditLogPath, signingKeyPath, manifestKeyPath, publicationJournalPath,
+	}); err != nil {
+		return err
+	}
 	prepared, err := prepareSupportSessionEnvironment(ctx, supportSessionPrepareOptions{
 		RepoRoot:    repoRoot,
 		WorkDir:     workDir,
@@ -4297,7 +4471,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		return err
 	}
 	if warning := stringFromMap(prepared, "repo_root_warning"); warning != "" {
-		_, _ = fmt.Fprintf(a.Stderr, "[rdev] warning: %s\n", warning)
+		_, _ = io.WriteString(a.Stderr, "[rdev] support session warning: repository assets require review\n")
 	}
 	gatewayCandidates, _ := prepared["gateway_url_candidates"].([]supportsession.GatewayURLCandidate)
 
@@ -4339,30 +4513,39 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "keys"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(providerRoot, "keys"), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "gateway"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(providerRoot, "gateway"), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(workDir, ".rdev", "audit"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(providerRoot, "audit"), 0o700); err != nil {
 		return err
 	}
-	signingKeyPath := filepath.Join(workDir, ".rdev", "keys", "gateway-signing-key.json")
-	manifestKeyPath := filepath.Join(workDir, ".rdev", "keys", "manifest-root-key.json")
-	statePath := filepath.Join(workDir, ".rdev", "gateway", "state.json")
-	auditLogPath := filepath.Join(workDir, ".rdev", "audit", "events.jsonl")
 	key, _, err := signing.LoadOrCreate(signingKeyPath, signing.DefaultKeyID)
 	if err != nil {
 		return err
 	}
 	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, key.ID, key.PublicKey, key.PrivateKey)
-	store, err := gateway.NewFileStateStore(statePath)
+	var store gateway.StateStore
+	if deps.StateStore != nil {
+		store = deps.StateStore
+	} else {
+		fileStore, storeErr := gateway.NewFileStateStore(statePath)
+		if storeErr != nil {
+			return storeErr
+		}
+		store = fileStore
+	}
+	store, err = gateway.NewSerializedStateStore(store)
 	if err != nil {
 		return err
 	}
 	if _, _, err := store.LoadInto(gw); err != nil {
 		return err
+	}
+	if err := recoverSupportSessionPublication(gw, store, publicationJournalPath, []string{readyFile, handoffTextFile}, statusFile); err != nil {
+		return fmt.Errorf("recover interrupted support-session publication: %w", err)
 	}
 	manifestKey, _, err := signing.LoadOrCreate(manifestKeyPath, "manifest-dev")
 	if err != nil {
@@ -4371,27 +4554,6 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	gw.WithManifestSigningKey(manifestKey.ID, manifestKey.PublicKey, manifestKey.PrivateKey)
 	auditStore := audit.NewJSONLStore(auditLogPath)
 	gw.WithAuditSink(&auditStore)
-	metadata := map[string]string{
-		"connection_entry":    "standard-visible",
-		"activation_contract": "target-consent-scoped-ticket",
-	}
-	if opts.AutoActivate {
-		metadata["auto_activate"] = "attended-temporary"
-	}
-	metadata = addGatewayCandidateTicketMetadata(metadata, gatewayCandidates)
-	ticket, err := gw.CreateTicketWithMetadata(
-		model.HostModeAttendedTemporary,
-		opts.TTLSeconds,
-		cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults()),
-		opts.Reason,
-		metadata,
-	)
-	if err != nil {
-		return err
-	}
-	if _, err := store.SaveFrom(gw); err != nil {
-		return err
-	}
 	server := httpapi.NewServerWithStateStore(gw, store)
 	server.Assets = httpapi.AssetConfig{
 		RdevWindowsAMD64Path: filepath.Join(workDir, "bin", "rdev-windows-amd64.exe"),
@@ -4400,15 +4562,214 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		RdevLinuxAMD64Path:   filepath.Join(workDir, "bin", "rdev-linux-amd64"),
 		RdevLinuxARM64Path:   filepath.Join(workDir, "bin", "rdev-linux-arm64"),
 	}
+	gatewayServer := startGatewayServer(addr, server.Handler(), nil)
+	defer func() { _ = shutdownGatewayServer(gatewayServer) }()
+	a.recordSupportSessionStartEvent("local_gateway_started")
+	waitForLocalHealth := waitForGatewayHealthOrServerExit
+	if deps.WaitForLocalHealth != nil {
+		waitForLocalHealth = deps.WaitForLocalHealth
+	}
+	if err := waitForLocalHealth(ctx, gatewayServer, localListenURL, 15*time.Second); err != nil {
+		return errors.New("local gateway health check failed")
+	}
+	a.recordSupportSessionStartEvent("local_health_passed")
+
+	availability := tunnel.AvailabilitySet{SchemaVersion: tunnel.AvailabilitySchemaVersion, Region: runtimeConfig.Region}
+	var availabilityRuntime *tunnel.Runtime
+	explicitStableURL := stableGatewayURL
+	explicitStableProviderID := stableProviderID
+	if strings.TrimSpace(opts.GatewayURL) != "" {
+		explicitStableURL = strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+		explicitStableProviderID = "explicit"
+	}
+	if strings.TrimSpace(opts.GatewayURL) == "" && cloudflaredStableTunnelStartRequested() {
+		a.recordSupportSessionStartEvent("providers_started")
+		configuredProviderID := configuredCloudflaredStableProviderID()
+		cfPath, lookupErr := exec.LookPath("cloudflared")
+		if lookupErr != nil {
+			writeTunnelProviderEvent(a.Stderr, configuredProviderID, "configuration", "failed", "", "executable-not-found")
+			explicitStableURL = ""
+		} else if cfg, ok, configErr := configuredCloudflaredStableTunnelConfig(cfPath, localListenURL); configErr != nil {
+			writeTunnelProviderEvent(a.Stderr, configuredProviderID, "configuration", "failed", "", "invalid-config")
+			explicitStableURL = ""
+		} else if ok {
+			explicitStableProviderID = cfg.ProviderID
+			writeTunnelProviderEvent(a.Stderr, cfg.ProviderID, "configuration", "ready", cfg.GatewayURL, "")
+			startedURL, stopTunnel, startErr := startConfiguredCloudflaredStableTunnel(ctx, a.Stderr, cfg)
+			if startErr != nil {
+				writeTunnelProviderEvent(a.Stderr, cfg.ProviderID, "startup", "failed", "", "start-failed")
+				explicitStableURL = ""
+			} else {
+				defer stopTunnel()
+				explicitStableURL = startedURL
+			}
+		}
+	}
+	if explicitStableURL != "" {
+		if explicitStableProviderID == "" || explicitStableProviderID == "explicit" && strings.TrimSpace(opts.GatewayURL) == "" {
+			explicitStableProviderID = gatewayProviderID(candidates, explicitStableURL)
+		}
+		candidate := tunnel.Candidate{ProviderID: explicitStableProviderID, URL: explicitStableURL}
+		probe := deps.Manager.Probe
+		if probe == nil {
+			probe = func(probeCtx context.Context, candidate tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+				return tunnel.ProbeGatewayHealth(probeCtx, nil, candidate, server.GatewayInstance())
+			}
+		}
+		evidence, probeErr := probe(ctx, candidate)
+		attempt := tunnel.Attempt{
+			ProviderID: candidate.ProviderID, CandidateID: tunnel.CandidateID(candidate.ProviderID, candidate.URL),
+			Status: tunnel.AttemptHealthy, Probe: evidence,
+		}
+		if probeErr != nil {
+			attempt.Status = tunnel.AttemptDegraded
+			attempt.ErrorClass = "probe-failed"
+		} else {
+			availability.Candidates = []tunnel.Candidate{candidate}
+			a.recordSupportSessionStartEvent("provider_health_passed")
+		}
+		availability.Attempts = []tunnel.Attempt{attempt}
+	} else {
+		policy := tunnelRuntimePolicy(runtimeConfig, time.Now().UTC())
+		evaluations := deps.Registry.Evaluate(policy, deps.Evidence)
+		evaluations, _ = preflightTunnelEvaluations(evaluations, runtimeConfig, runtime.GOOS, runtime.GOARCH)
+		availability = availabilityFromEligibilityEvaluations(evaluations, runtimeConfig.Region)
+		selections := eligibleTunnelSelections(evaluations)
+		if len(selections) == 0 {
+			diagnostic := newSupportSessionStartDiagnostic(
+				"provider-selection",
+				"no_public_gateway_provider_eligible",
+				"review-provider-eligibility",
+				availability,
+			)
+			if err := writeSupportSessionDiagnostic(statusFile, a.Stdout, diagnostic); err != nil {
+				return err
+			}
+			return errors.New("no public gateway provider is eligible for the selected region")
+		}
+		a.recordSupportSessionStartEvent("providers_started")
+		manager := deps.Manager
+		manager.Region = runtimeConfig.Region
+		if manager.Probe == nil {
+			manager.Probe = func(probeCtx context.Context, candidate tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+				return tunnel.ProbeGatewayHealth(probeCtx, nil, candidate, server.GatewayInstance())
+			}
+		}
+		availabilityRuntime, err = manager.Start(ctx, selections, tunnel.StartRequest{
+			LocalURL:     localListenURL,
+			LocalPort:    localPort,
+			ProviderRoot: providerRoot,
+		})
+		if err != nil {
+			return fmt.Errorf("start public tunnel availability: %w", err)
+		}
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = availabilityRuntime.Stop(cleanupCtx)
+		}()
+		runtimeAvailability := retainHealthyAvailabilityCandidates(availabilityRuntime.Snapshot())
+		availability.Candidates = append([]tunnel.Candidate(nil), runtimeAvailability.Candidates...)
+		availability.Attempts = append(availability.Attempts, runtimeAvailability.Attempts...)
+		if len(availability.Candidates) > 0 {
+			a.recordSupportSessionStartEvent("provider_health_passed")
+		}
+	}
+	if len(availability.Candidates) > 0 {
+		gatewayURL = availability.Candidates[0].URL
+		gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
+	}
+	bootstrapProbe := deps.BootstrapProbe
+	if bootstrapProbe == nil {
+		bootstrapProbe = func(probeCtx context.Context, candidate tunnel.Candidate, instance string) error {
+			_, err := tunnel.ProbeBootstrapTemplate(probeCtx, nil, candidate, instance)
+			return err
+		}
+	}
+	availability = bootstrapProbeAvailability(ctx, availability, server.GatewayInstance(), bootstrapProbe)
+	if len(availability.Candidates) == 0 {
+		diagnostic := newSupportSessionStartDiagnostic(
+			"static-bootstrap-probe",
+			"no_public_gateway_candidate_passed_static_bootstrap_probe",
+			"review-provider-availability",
+			availability,
+		)
+		if err := writeSupportSessionDiagnostic(statusFile, a.Stdout, diagnostic); err != nil {
+			return err
+		}
+		return errors.New("no public gateway candidate passed the static bootstrap probe")
+	}
+	if availabilityRuntime != nil {
+		availability = intersectAvailabilityWithRuntime(availability, availabilityRuntime.Snapshot())
+		if len(availability.Candidates) == 0 {
+			return errors.New("all public gateway candidates exited before ticket probing")
+		}
+	}
+	gatewayURL = availability.Candidates[0].URL
+	gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
+
+	finalProbe := deps.FinalProbe
+	if finalProbe == nil {
+		finalProbe = func(probeCtx context.Context, candidate tunnel.Candidate, ticketCode, instance string) error {
+			_, err := tunnel.ProbeBootstrapAsset(probeCtx, nil, candidate, ticketCode, instance)
+			return err
+		}
+	}
+	ticketMetadata := func(candidates []supportsession.GatewayURLCandidate) map[string]string {
+		metadata := map[string]string{
+			"connection_entry":    "standard-visible",
+			"activation_contract": "target-consent-scoped-ticket",
+		}
+		if opts.AutoActivate {
+			metadata["auto_activate"] = "attended-temporary"
+		}
+		return addGatewayCandidateTicketMetadata(metadata, candidates)
+	}
+	var ticket model.Ticket
+	for retries := len(availability.Candidates); ; retries-- {
+		ticket, availability, err = createFinalProbedSupportTicket(ctx, gw, store, availability, opts.TTLSeconds, opts.Reason, ticketMetadata, finalProbe, server.GatewayInstance())
+		if err != nil {
+			return err
+		}
+		if availabilityRuntime == nil {
+			break
+		}
+		liveAvailability := intersectAvailabilityWithRuntime(availability, availabilityRuntime.Snapshot())
+		if sameAvailabilityCandidates(availability, liveAvailability) {
+			availability = liveAvailability
+			break
+		}
+		rollbackErr := rollbackSupportTicket(gw, store, ticket.ID, "tunnel availability changed before handoff publication")
+		if rollbackErr != nil {
+			return errors.New("support-session availability rollback failed")
+		}
+		if len(liveAvailability.Candidates) == 0 {
+			return errors.New("all public gateway candidates exited before handoff publication")
+		}
+		if retries <= 1 {
+			return errors.New("tunnel availability did not stabilize before handoff publication")
+		}
+		availability = liveAvailability
+	}
+	a.recordSupportSessionStartEvent("ticket_created")
+	gatewayURL = availability.Candidates[0].URL
+	gatewayCandidates = gatewayURLCandidatesFromTunnelCandidates(availability.Candidates)
+	readiness := supportsession.DirectAvailability(availability, opts.AllowDegradedDirectHandoff)
+	if len(availability.Candidates) > 0 {
+		a.recordSupportSessionStartEvent("bootstrap_probe_passed")
+	}
+	publishedTicket := ticket
+	publishedTicket.Status = model.TicketStatusActive
 	created := supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
 		GatewayURLCandidates:  gatewayCandidates,
-		Ticket:                ticket,
+		Ticket:                publishedTicket,
 		ManifestRootPublicKey: rootPublicKeyString(gw.ManifestRoot()),
 		Target:                opts.Target,
 		Locale:                opts.Locale,
 		RdevCommand:           opts.RdevCommand,
 		AutoActivate:          opts.AutoActivate,
+		AvailabilityReadiness: readiness,
 	})
 	started := supportsession.BuildStarted(supportsession.StartedOptions{
 		Addr:                      addr,
@@ -4422,89 +4783,200 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 		AssetReport:               prepared["asset_report"],
 		ConnectionReadiness:       prepared["connection_readiness"],
 		ConnectivityStrategy:      prepared["connectivity_strategy"],
-		GatewayCandidatePreflight: prepared["gateway_candidate_preflight"],
+		GatewayCandidatePreflight: nil,
+		AvailabilityReadiness:     readiness,
 	})
-	gatewayServer := startGatewayServer(addr, server.Handler(), nil)
-	if err := waitForGatewayHealthOrServerExit(ctx, gatewayServer, localListenURL, 15*time.Second); err != nil {
-		_ = shutdownGatewayServer(gatewayServer)
-		return fmt.Errorf("local gateway health check failed for %s: %w", localListenURL, err)
+	if readiness.ReadyToSend {
+		if err := publishSupportSessionHandoff(gw, store, ticket.ID, a.Stdout, a.Stderr, readyFile, handoffTextFile, publicationJournalPath, started, supportSessionMonitoring{StatusPath: statusFile, Availability: availability}); err != nil {
+			return errors.New("support-session handoff publication failed")
+		}
+		a.recordSupportSessionStartEvent("handoff_written")
+	} else {
+		if err := rollbackSupportTicket(gw, store, ticket.ID, "direct handoff readiness was not satisfied"); err != nil {
+			return errors.New("support-session readiness rollback failed")
+		}
+		diagnostic := newSupportSessionStartDiagnostic(
+			"readiness-policy",
+			"direct_handoff_readiness_not_satisfied",
+			"configure-redundant-public-gateway",
+			availability,
+		)
+		if err := writeSupportSessionDiagnostic(statusFile, a.Stdout, diagnostic); err != nil {
+			return err
+		}
+		return errors.New("public gateway candidates did not satisfy direct handoff readiness policy")
 	}
-	for _, probeURL := range foregroundGatewayHealthProbeURLs(localListenURL, gatewayURL) {
-		if err := waitForGatewayHealthOrServerExit(ctx, gatewayServer, probeURL, 15*time.Second); err != nil {
-			_ = shutdownGatewayServer(gatewayServer)
-			return fmt.Errorf("gateway health check failed for %s: %w", probeURL, err)
+	if readiness.ReadyToSend {
+		_, _ = io.WriteString(a.Stderr, "rdev support session state: handoff-ready\n")
+	}
+	_, _ = io.WriteString(a.Stderr, "rdev support session state: status-monitoring\n")
+	_, _ = io.WriteString(a.Stderr, "rdev support session state: gateway-ready\n")
+	sessionCtx, cancelSession := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	availabilityFailure := make(chan error, 1)
+	var livenessProbe func(context.Context) error
+	if len(availability.Candidates) > 0 {
+		candidate := availability.Candidates[0]
+		livenessProbe = func(probeCtx context.Context) error {
+			return finalProbe(probeCtx, candidate, ticket.Code, server.GatewayInstance())
 		}
 	}
-	if err := writeJSONFile0600(readyFile, started); err != nil {
-		_ = shutdownGatewayServer(gatewayServer)
-		return err
+	if readiness.ReadyToSend {
+		go func() {
+			defer close(watchDone)
+			watchForegroundSupportSessionAvailability(sessionCtx, foregroundSupportSessionOptions{
+				Out: a.Stderr, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffTextFile,
+				ConnectedReportFile: connectedReportFile, JournalPath: publicationJournalPath,
+				Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
+				Locale: opts.Locale, GatewayURL: gatewayURL, Runtime: availabilityRuntime, Published: availability,
+				LivenessProbe: livenessProbe, LivenessInterval: deps.LivenessInterval, LivenessFailures: deps.LivenessFailures,
+				OnInvalidated: func(err error) {
+					select {
+					case availabilityFailure <- err:
+					default:
+					}
+					_ = shutdownGatewayServer(gatewayServer)
+				},
+			})
+		}()
+	} else {
+		close(watchDone)
 	}
-	if err := writeSupportSessionHandoffTextFile0600(handoffTextFile, started); err != nil {
-		_ = shutdownGatewayServer(gatewayServer)
-		return err
+	defer func() {
+		cancelSession()
+		<-watchDone
+	}()
+	waitForServer := waitForGatewayServer
+	if deps.WaitForGatewayServer != nil {
+		waitForServer = deps.WaitForGatewayServer
 	}
-	if err := writeJSON(a.Stdout, started); err != nil {
-		_ = shutdownGatewayServer(gatewayServer)
-		return err
+	serverErr := waitForServer(ctx, gatewayServer)
+	select {
+	case availabilityErr := <-availabilityFailure:
+		return availabilityErr
+	default:
+		return serverErr
 	}
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session ready payload written to %s\n", readyFile)
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session target handoff written to %s\n", handoffTextFile)
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session status file writing to %s\n", statusFile)
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session connected report will be written to %s\n", connectedReportFile)
-	_, _ = fmt.Fprintf(a.Stderr, "rdev support session gateway listening on %s\n", gatewayURL)
-	go watchForegroundSupportSession(ctx, a.Stderr, statusFile, connectedReportFile, gw, ticket.Code, opts.Locale, gatewayURL)
-	return waitForGatewayServer(ctx, gatewayServer)
+}
+
+func retainHealthyAvailabilityCandidates(set tunnel.AvailabilitySet) tunnel.AvailabilitySet {
+	healthy := make(map[string]bool, len(set.Attempts))
+	for _, attempt := range set.Attempts {
+		if attempt.Status == tunnel.AttemptHealthy {
+			healthy[attempt.ProviderID] = true
+		}
+	}
+	filtered := set
+	filtered.Candidates = make([]tunnel.Candidate, 0, len(set.Candidates))
+	for _, candidate := range set.Candidates {
+		if healthy[candidate.ProviderID] {
+			filtered.Candidates = append(filtered.Candidates, candidate)
+		}
+	}
+	return filtered
+}
+
+func gatewayProviderID(candidates []supportsession.GatewayURLCandidate, rawURL string) string {
+	for _, candidate := range candidates {
+		candidateURL := strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		comparedURL := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+		if strings.HasPrefix(strings.TrimSpace(candidate.Kind), "cloudflared") {
+			canonicalCandidate, candidateErr := canonicalCloudflaredStableGatewayURL(candidate.URL)
+			canonicalCompared, comparedErr := canonicalCloudflaredStableGatewayURL(rawURL)
+			if candidateErr != nil || comparedErr != nil || canonicalCandidate != canonicalCompared {
+				continue
+			}
+		} else if candidateURL != comparedURL {
+			continue
+		}
+		if kind := strings.TrimSpace(candidate.Kind); kind != "" {
+			return kind
+		}
+	}
+	return "explicit"
+}
+
+func configuredCloudflaredStableProviderID() string {
+	if strings.TrimSpace(os.Getenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL")) != "" {
+		return "cloudflared-named"
+	}
+	return "cloudflared"
+}
+
+func gatewayURLCandidatesFromTunnelCandidates(candidates []tunnel.Candidate) []supportsession.GatewayURLCandidate {
+	result := make([]supportsession.GatewayURLCandidate, 0, len(candidates))
+	for index, candidate := range candidates {
+		parsed, err := url.Parse(candidate.URL)
+		if err != nil {
+			continue
+		}
+		result = append(result, supportsession.GatewayURLCandidate{
+			URL:         strings.TrimRight(candidate.URL, "/"),
+			Kind:        candidate.ProviderID,
+			Scope:       "public",
+			Host:        parsed.Hostname(),
+			Port:        parsed.Port(),
+			Source:      "managed:" + candidate.ProviderID,
+			Recommended: index == 0,
+			Reason:      "healthy policy-eligible public tunnel candidate",
+		})
+	}
+	return result
+}
+
+func bootstrapProbeAvailability(ctx context.Context, set tunnel.AvailabilitySet, instance string, probe func(context.Context, tunnel.Candidate, string) error) tunnel.AvailabilitySet {
+	final := tunnel.AvailabilitySet{
+		SchemaVersion: set.SchemaVersion,
+		Region:        set.Region,
+		Candidates:    append([]tunnel.Candidate(nil), set.Candidates...),
+		Attempts:      append([]tunnel.Attempt(nil), set.Attempts...),
+	}
+	final.Candidates = make([]tunnel.Candidate, 0, len(set.Candidates))
+	for _, candidate := range set.Candidates {
+		if err := probe(ctx, candidate, instance); err != nil {
+			for index := range final.Attempts {
+				if final.Attempts[index].ProviderID == candidate.ProviderID {
+					final.Attempts[index].Status = tunnel.AttemptDegraded
+					final.Attempts[index].ErrorClass = "bootstrap-template-probe-failed"
+				}
+			}
+			continue
+		}
+		final.Candidates = append(final.Candidates, candidate)
+		for index := range final.Attempts {
+			if final.Attempts[index].ProviderID == candidate.ProviderID {
+				final.Attempts[index].Probe.BootstrapOK = true
+				final.Attempts[index].Probe.StaticBootstrapOK = true
+				final.Attempts[index].Probe.SmallAssetOK = true
+			}
+		}
+	}
+	return final
 }
 
 func watchForegroundSupportSession(ctx context.Context, out io.Writer, statusFile, connectedReportFile string, gw *gateway.MemoryGateway, ticketCode, locale, gatewayURL string) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	seenPending := false
-	writeSupportSessionEvent(out, statusFile, "waiting", supportsession.BuildStatus(supportsession.StatusOptions{
-		TicketCode:  ticketCode,
-		Hosts:       gw.HostsForTicketCode(ticketCode, ""),
-		Locale:      locale,
-		GatewayURL:  gatewayURL,
-		Preconnects: gw.SupportSessionPreconnects(ticketCode),
-	}))
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			status := supportsession.BuildStatus(supportsession.StatusOptions{
-				TicketCode:  ticketCode,
-				Hosts:       gw.HostsForTicketCode(ticketCode, ""),
-				Locale:      locale,
-				GatewayURL:  gatewayURL,
-				Preconnects: gw.SupportSessionPreconnects(ticketCode),
-			})
-			if status["connected"] == true {
-				_ = writeSupportSessionConnectedReportFile0600(connectedReportFile, status)
-				writeSupportSessionEvent(out, statusFile, "connected", status)
-				return
-			}
-			if status["status"] == "pending-activation" && !seenPending {
-				seenPending = true
-				writeSupportSessionEvent(out, statusFile, "pending-activation", status)
-			}
-		}
-	}
+	watchForegroundSupportSessionAvailability(ctx, foregroundSupportSessionOptions{
+		Out: out, StatusFile: statusFile, ConnectedReportFile: connectedReportFile,
+		Gateway: gw, TicketCode: ticketCode, Locale: locale, GatewayURL: gatewayURL,
+	})
 }
 
 func writeSupportSessionEvent(out io.Writer, statusFile, event string, status map[string]any) {
-	payload := map[string]any{
+	protectedPayload := map[string]any{
 		"schema_version": "rdev.support-session-foreground-event.v1",
 		"event":          event,
 		"status":         status,
 		"agent_rule":     "when event=connected or status.connected=true, immediately report status.connected_next_steps.user_report before creating session tasks",
 	}
-	content, err := json.Marshal(payload)
+	if strings.TrimSpace(statusFile) != "" {
+		_ = writeJSONFile0600(statusFile, protectedPayload)
+	}
+	content, err := json.Marshal(newSupportSessionStderrEvent(event, status))
 	if err != nil {
 		return
 	}
-	if strings.TrimSpace(statusFile) != "" {
-		_ = writeJSONFile0600(statusFile, payload)
+	if out == nil {
+		return
 	}
 	_, _ = fmt.Fprintf(out, "rdev support session event: %s\n", string(content))
 }
@@ -4939,6 +5411,7 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 	hostID := strings.TrimSpace(opts.HostID)
 	sessionID := strings.TrimSpace(opts.SessionID)
 	ticketCode := strings.TrimSpace(opts.TicketCode)
+	targetEndpointID := ""
 	var status map[string]any
 	activeHosts := []map[string]any{}
 	selectedHost := map[string]any{}
@@ -4952,12 +5425,20 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		if statusErr != nil {
 			return statusErr
 		}
+		boundSessionID := strings.TrimSpace(stringFromMap(status, "session_id"))
+		targetEndpointID = strings.TrimSpace(stringFromMap(status, "recommended_target_endpoint_id"))
+		if boundSessionID != "" {
+			if sessionID != "" && sessionID != boundSessionID {
+				return fmt.Errorf("explicit session_id does not match the ticket binding")
+			}
+			sessionID = boundSessionID
+		}
 		activeHosts = mapSlice(status["active_hosts"])
 		if hostID == "" {
 			if len(activeHosts) == 1 {
 				hostID = stringFromMap(activeHosts[0], "id")
 				selectedHost = activeHosts[0]
-			} else {
+			} else if sessionID == "" || targetEndpointID == "" {
 				return writeJSON(a.Stdout, supportSessionTicketReportWithoutSelectedHost(gatewayURL, ticketCode, status, len(activeHosts)))
 			}
 		} else {
@@ -4993,7 +5474,11 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		}
 		sessionSnapshot = snapshot
 		taskReports = taskReportsFromSnapshot(snapshot)
-		host = enrichReportHostFromSessionSnapshot(host, snapshot)
+		endpoint := reportTargetEndpointFromSnapshot(snapshot, targetEndpointID)
+		if targetEndpointID == "" {
+			targetEndpointID = stringFromMap(endpoint, "id")
+		}
+		host = enrichReportHostFromSessionSnapshot(host, endpoint)
 	}
 	remoteControlEntry := supportSessionRemoteControlEntryForReport(gatewayURL, ticketCode, status, host)
 	report := map[string]any{
@@ -5004,10 +5489,11 @@ func (a App) supportSessionReport(ctx context.Context, opts supportSessionReport
 		"disconnect_policy":     "do not disconnect automatically after task completion; keep the session alive until the operator explicitly requests disconnect/revoke/stop",
 		"remote_control_entry":  remoteControlEntry,
 		"managed_upgrade":       supportSessionManagedUpgradeRecommendation(host),
-		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID, SessionID: sessionID}),
+		"live_remote_e2e_plan":  supportsession.BuildLiveE2EPlan(supportsession.LiveE2EPlanOptions{GatewayURL: gatewayURL, TicketCode: ticketCode, HostID: hostID, SessionID: sessionID, TargetEndpointID: targetEndpointID}),
 		"ticket_code":           ticketCode,
 		"host_id":               hostID,
 		"session_id":            sessionID,
+		"target_endpoint_id":    targetEndpointID,
 		"host":                  host,
 		"session":               sessionSnapshot,
 		"tasks":                 taskReports,
@@ -5093,17 +5579,21 @@ func taskReportsFromSnapshot(snapshot map[string]any) []map[string]any {
 	return reports
 }
 
-func enrichReportHostFromSessionSnapshot(host, snapshot map[string]any) map[string]any {
+func enrichReportHostFromSessionSnapshot(host, endpoint map[string]any) map[string]any {
 	if host == nil {
 		host = map[string]any{}
 	}
-	endpoint := reportTargetEndpointFromSnapshot(snapshot)
 	if len(endpoint) == 0 {
 		return host
 	}
 	enriched := map[string]any{}
 	for key, value := range host {
 		enriched[key] = value
+	}
+	if _, ok := enriched["id"]; !ok {
+		if id := stringFromMap(endpoint, "id"); id != "" {
+			enriched["id"] = id
+		}
 	}
 	if _, ok := enriched["name"]; !ok {
 		if name := stringFromMap(endpoint, "name"); name != "" {
@@ -5131,10 +5621,10 @@ func enrichReportHostFromSessionSnapshot(host, snapshot map[string]any) map[stri
 	return enriched
 }
 
-func reportTargetEndpointFromSnapshot(snapshot map[string]any) map[string]any {
+func reportTargetEndpointFromSnapshot(snapshot map[string]any, preferredEndpointID string) map[string]any {
 	endpoints := mapSlice(snapshot["endpoints"])
 	tasks := mapSlice(snapshot["tasks"])
-	targetEndpointID := ""
+	targetEndpointID := strings.TrimSpace(preferredEndpointID)
 	for _, task := range tasks {
 		if value := stringFromMap(task, "target_endpoint_id"); value != "" {
 			targetEndpointID = value
@@ -6201,6 +6691,8 @@ type hostServeOptions struct {
 	ReleaseRootPublicKey        string
 	ReleaseRequiredArtifacts    []string
 	ManifestGatewayCandidates   []model.JoinManifestGatewayCandidate
+	CapabilityCeiling           []string
+	CapabilityCeilingSet        bool
 }
 
 type hostInstallServiceOptions struct {
@@ -6309,6 +6801,8 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		}
 		opts.TicketCode = manifest.TicketCode
 		opts.TrustPin = manifest.TrustFingerprint
+		opts.CapabilityCeiling = append([]string(nil), manifest.Capabilities...)
+		opts.CapabilityCeilingSet = true
 	}
 	if opts.TicketCode == "" {
 		_, err := fmt.Fprintf(
@@ -6339,7 +6833,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		Name:                inventory.Name,
 		Platform:            inventory.OS + "/" + inventory.Arch,
 		IdentityFingerprint: identity.Fingerprint(),
-		Capabilities:        inventory.TemporaryCapabilities,
+		Capabilities:        hostcmd.ConstrainCapabilities(inventory.TemporaryCapabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet),
 		Transport:           controlplane.TransportLongPoll,
 		LeaseTTLMS:          60_000,
 		RenewAfterMS:        20_000,
@@ -11432,6 +11926,8 @@ Usage:
   rdev support-session status --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234 --wait --locale auto
   rdev support-session report --gateway-url http://127.0.0.1:8787 --ticket-code ABCD-1234
   rdev support-session --help
+  rdev tunnel providers --region cn-mainland --json
+  rdev tunnel probe --region cn-mainland --provider-policy /protected/path/providers.json --json
   rdev ticket create --mode attended-temporary --ttl-seconds 7200
   rdev policy explain --mode attended-temporary --capability shell.user
   rdev policy explain-shell --policy-json '{"workspace_root":"~","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"]}'
@@ -11595,6 +12091,7 @@ func (a App) printCommandGroupUsage(command string) bool {
 		"relay-adapter":    "package, verify",
 		"skillkit":         "export, verify, plan-install, verify-install-plan, install",
 		"ticket":           "create",
+		"tunnel":           "providers, probe",
 		"trust":            "init, rotate, revoke, verify",
 		"update":           "check, plan",
 		"workspace":        "lock, status, unlock, prepare-worktree",
@@ -11740,10 +12237,10 @@ func joinSessionByCode(ctx context.Context, client *http.Client, gatewayURL, joi
 		Events   []controlplane.Event  `json:"events"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, err))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, hostcmd.NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, nil))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, hostcmd.NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, nil)
 	}
 	if payload.Session.ID == "" || payload.Endpoint.ID == "" || payload.Lease.Secret == "" {
 		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: incomplete session join response")
@@ -11834,11 +12331,17 @@ func (a App) runSessionTasks(ctx context.Context, opts hostServeOptions, client 
 
 func (a App) runSessionTask(ctx context.Context, opts hostServeOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, task controlplane.Task) error {
 	_ = client
-	result, err := hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
-		IdentityFingerprint:   identityFingerprint,
-		WorkspaceLockStore:    opts.WorkspaceLockStore,
-		CaptureRuntimeFixture: opts.CaptureRuntimeFixture,
-	})
+	result := hostrunner.Result{}
+	var err error
+	if !hostcmd.CapabilitiesAllowed(task.Capabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet) {
+		err = fmt.Errorf("task capabilities exceed the signed join manifest ceiling")
+	} else {
+		result, err = hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
+			IdentityFingerprint:   identityFingerprint,
+			WorkspaceLockStore:    opts.WorkspaceLockStore,
+			CaptureRuntimeFixture: opts.CaptureRuntimeFixture,
+		})
+	}
 	status := string(controlplane.TaskStatusSucceeded)
 	reason := ""
 	if err != nil {
@@ -12603,8 +13106,15 @@ func firstStableGatewayURL(candidates []supportsession.GatewayURLCandidate) stri
 	for _, candidate := range candidates {
 		switch strings.TrimSpace(candidate.Kind) {
 		case "hosted", "relay", "mesh", "vpn", "ssh", "cloudflared", "cloudflared-named":
-			if url := strings.TrimRight(strings.TrimSpace(candidate.URL), "/"); url != "" {
-				return url
+			if rawURL := strings.TrimSpace(candidate.URL); rawURL != "" {
+				if strings.HasPrefix(strings.TrimSpace(candidate.Kind), "cloudflared") {
+					canonical, err := canonicalCloudflaredStableGatewayURL(rawURL)
+					if err != nil {
+						continue
+					}
+					return canonical
+				}
+				return strings.TrimRight(rawURL, "/")
 			}
 		}
 	}
@@ -12663,6 +13173,10 @@ func atomicWriteFile0600(path string, data []byte) error {
 		_ = tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
@@ -12670,10 +13184,21 @@ func atomicWriteFile0600(path string, data []byte) error {
 		return err
 	}
 	cleanup = false
-	return os.Chmod(path, 0o600)
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	return syncSupportSessionArtifactDirectory(path)
 }
 
 func writeSupportSessionHandoffTextFile0600(path string, started map[string]any) error {
+	text, err := supportSessionHandoffText(started)
+	if err != nil {
+		return err
+	}
+	return writeTextFile0600(path, text)
+}
+
+func supportSessionHandoffText(started map[string]any) (string, error) {
 	envelope, _ := started["target_handoff_envelope"].(map[string]any)
 	text, _ := envelope["full_text"].(string)
 	if strings.TrimSpace(text) == "" {
@@ -12690,9 +13215,9 @@ func writeSupportSessionHandoffTextFile0600(path string, started map[string]any)
 		}
 	}
 	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("support session handoff text is empty")
+		return "", fmt.Errorf("support session handoff text is empty")
 	}
-	return writeTextFile0600(path, text)
+	return strings.TrimRight(text, "\n"), nil
 }
 
 func writeSupportSessionConnectedReportFile0600(path string, status map[string]any) error {
@@ -12735,6 +13260,6 @@ func Main() {
 			return
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "rdev: %v\n", err)
-		os.Exit(1)
+		os.Exit(hostcmd.ExitCode(err))
 	}
 }

@@ -63,6 +63,24 @@ func TestSessionToolsExposeGatewayURLAndAgentFields(t *testing.T) {
 	}
 }
 
+func TestSupportSessionConnectSchemaAcceptsRegionalTunnelPolicy(t *testing.T) {
+	tool := findTool("rdev.support_session.connect")
+	if tool == nil {
+		t.Fatal("missing rdev.support_session.connect from live MCP contract")
+	}
+	properties, _ := tool.InputSchema["properties"].(map[string]any)
+	region, _ := properties["region"].(map[string]any)
+	enumValues, _ := region["enum"].([]any)
+	if !reflect.DeepEqual(enumValues, []any{"global", "cn-mainland"}) {
+		t.Fatalf("unexpected region schema: %#v", region)
+	}
+	providerPolicy, _ := properties["provider_policy"].(map[string]any)
+	allowDegraded, _ := properties["allow_degraded_direct_handoff"].(map[string]any)
+	if providerPolicy["type"] != "string" || allowDegraded["type"] != "boolean" {
+		t.Fatalf("missing tunnel policy fields: %#v", properties)
+	}
+}
+
 func TestToolsDoNotExposeOldExperimentalHostJobContracts(t *testing.T) {
 	forbidden := []string{
 		"rdev.hosts.list",

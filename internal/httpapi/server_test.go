@@ -9,20 +9,25 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 func TestCreateTicketAndAudit(t *testing.T) {
@@ -52,6 +57,341 @@ func TestCreateTicketAndAudit(t *testing.T) {
 	}
 	if !bytes.Contains(auditRec.Body.Bytes(), []byte("ticket.create")) {
 		t.Fatalf("expected audit response to include ticket.create, got %s", auditRec.Body.String())
+	}
+}
+
+func TestHealthzIncludesGatewayInstanceMarker(t *testing.T) {
+	first := NewServer(gateway.NewMemoryGateway())
+	second := NewServer(gateway.NewMemoryGateway())
+
+	readMarker := func(t *testing.T, server Server) string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		marker := rec.Header().Get("X-Rdev-Gateway-Instance")
+		decoded, err := hex.DecodeString(marker)
+		if err != nil || len(decoded) != 16 {
+			t.Fatalf("expected a 128-bit hex gateway instance marker, got %q", marker)
+		}
+		if strings.Contains(strings.ToLower(marker), "ticket") || strings.Contains(strings.ToLower(marker), "key") {
+			t.Fatalf("gateway instance marker must not expose ticket or key material: %q", marker)
+		}
+		return marker
+	}
+
+	firstMarker := readMarker(t, first)
+	if repeated := readMarker(t, first); repeated != firstMarker {
+		t.Fatalf("expected stable marker %q, got %q", firstMarker, repeated)
+	}
+	if first.GatewayInstance() != firstMarker {
+		t.Fatalf("GatewayInstance returned %q, health returned %q", first.GatewayInstance(), firstMarker)
+	}
+	if secondMarker := readMarker(t, second); secondMarker == firstMarker {
+		t.Fatalf("expected distinct per-server markers, both were %q", firstMarker)
+	}
+}
+
+func TestProbingTicketPowerShellBootstrapUsesAuthoritativePublicCandidate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	const publicBase = "https://ticket-public.example.com"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{{
+		URL: publicBase, Kind: "tunn3l", Scope: "public-tunnel", Recommended: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "public bootstrap authority", map[string]string{
+		gateway.TicketMetadataGatewayCandidates: string(candidates),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+"/bootstrap.ps1", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected probing bootstrap 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Rdev-Gateway-Instance"); got != server.GatewayInstance() {
+		t.Errorf("gateway instance header = %q, want server marker", got)
+	}
+	if got := rec.Header().Get(tunnel.TicketCodeSHA256Header); got != tunnel.TicketCodeSHA256(ticket.Code) {
+		t.Errorf("ticket hash header = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		publicBase + "/assets",
+		publicBase + "/v1/support-session/preconnect",
+		publicBase + "/v1/tickets/" + ticket.Code + "/manifest",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("bootstrap omitted authoritative public base fragment %q", want)
+		}
+	}
+	for _, forbidden := range []string{"http://localhost", "https://localhost"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("bootstrap embedded request Host authority %q", forbidden)
+		}
+	}
+}
+
+func TestPublishedTicketResourcesUseAuthoritativePublicCandidate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	const publicBase = "https://published-public.example.com/rdev"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{{
+		URL: publicBase, Kind: "tunn3l", Scope: "public-tunnel", Recommended: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "published public authority", map[string]string{
+		gateway.TicketMetadataGatewayCandidates: string(candidates),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.PublishTicket(ticket.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, resource := range []string{"", "/bootstrap.sh", "/bootstrap.ps1"} {
+		req := httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+resource, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("resource %q expected 200, got %d: %s", resource, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), publicBase) || strings.Contains(rec.Body.String(), "http://localhost") {
+			t.Errorf("resource %q did not preserve authoritative public base", resource)
+		}
+	}
+
+	malicious := url.QueryEscape(`[{"url":"https://query-injection.example.com","recommended":true}]`)
+	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+ticket.Code+"/manifest?gateway_url_candidates="+malicious, nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manifest expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Manifest model.JoinManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Manifest.GatewayURL != publicBase || payload.Manifest.JoinURL != publicBase+"/join/"+ticket.Code {
+		t.Errorf("manifest authority = gateway %q join %q", payload.Manifest.GatewayURL, payload.Manifest.JoinURL)
+	}
+	for _, candidate := range payload.Manifest.GatewayCandidates {
+		if candidate.URL != publicBase {
+			t.Errorf("signed manifest included non-authoritative candidate %q", candidate.URL)
+		}
+	}
+	for _, candidate := range payload.Manifest.PackageCatalog.Candidates {
+		if !strings.HasPrefix(candidate.FallbackScriptURL, publicBase+"/join/"+ticket.Code+"/") {
+			t.Errorf("package fallback URL = %q", candidate.FallbackScriptURL)
+		}
+		if candidate.HelperAsset.SHA256URL != "" && !strings.HasPrefix(candidate.HelperAsset.SHA256URL, publicBase+"/assets/") {
+			t.Errorf("helper SHA URL = %q", candidate.HelperAsset.SHA256URL)
+		}
+	}
+	if strings.Contains(rec.Body.String(), "query-injection.example.com") || strings.Contains(rec.Body.String(), "http://localhost") {
+		t.Error("manifest response trusted query or request Host authority")
+	}
+}
+
+func TestCreateTicketSelectsAuthoritativePublicCandidate(t *testing.T) {
+	const recommendedBase = "https://recommended.example.com/rdev"
+	const matchingBase = "https://matching.example.com/rdev"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{
+		{URL: recommendedBase, Kind: "stable", Recommended: true},
+		{URL: matchingBase, Kind: "tunn3l"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name     string
+		host     string
+		wantBase string
+	}{
+		{name: "request authority match wins", host: "matching.example.com", wantBase: matchingBase},
+		{name: "recommended wins without match", host: "localhost", wantBase: recommendedBase},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := NewServer(gateway.NewMemoryGateway())
+			body, err := json.Marshal(map[string]any{
+				"mode": "attended-temporary", "ttl_seconds": 600, "reason": "authority selection",
+				"metadata": map[string]string{gateway.TicketMetadataGatewayCandidates: string(candidates)},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewReader(body))
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+			server.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var payload struct {
+				Ticket      model.Ticket `json:"ticket"`
+				JoinURL     string       `json:"joinUrl"`
+				ManifestURL string       `json:"manifestUrl"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.JoinURL != tt.wantBase+"/join/"+payload.Ticket.Code || payload.ManifestURL != tt.wantBase+"/v1/tickets/"+payload.Ticket.Code+"/manifest" {
+				t.Fatalf("create response authority = join %q manifest %q", payload.JoinURL, payload.ManifestURL)
+			}
+		})
+	}
+}
+
+func TestCreateTicketFailsClosedForInvalidAuthoritativeCandidateMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "malformed", raw: "{"},
+		{name: "empty", raw: "[]"},
+		{name: "non HTTPS", raw: `[{"url":"http://public.example.com"}]`},
+		{name: "query", raw: `[{"url":"https://public.example.com?token=value"}]`},
+		{name: "userinfo", raw: `[{"url":"https://user@public.example.com"}]`},
+		{name: "port", raw: `[{"url":"https://public.example.com:8443"}]`},
+		{name: "localhost", raw: `[{"url":"https://localhost"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := gateway.NewMemoryGateway()
+			server := NewServer(gw)
+			body, err := json.Marshal(map[string]any{
+				"mode": "attended-temporary", "ttl_seconds": 600,
+				"metadata": map[string]string{gateway.TicketMetadataGatewayCandidates: tt.raw},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewReader(body))
+			req.Host = "localhost"
+			rec := httptest.NewRecorder()
+			server.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("invalid metadata expected 400, got %d", rec.Code)
+			}
+			snapshot := gw.Snapshot()
+			if len(snapshot.Tickets) != 0 || len(snapshot.Audit) != 0 {
+				t.Fatalf("invalid metadata left ticket or audit state: tickets=%d audit=%d", len(snapshot.Tickets), len(snapshot.Audit))
+			}
+		})
+	}
+
+	server := NewServer(gateway.NewMemoryGateway())
+	mixed := `[{"url":"http://invalid.example.com"},{"url":"https://valid.example.com/rdev","recommended":true}]`
+	body, err := json.Marshal(map[string]any{
+		"mode": "attended-temporary", "ttl_seconds": 600,
+		"metadata": map[string]string{gateway.TicketMetadataGatewayCandidates: mixed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/tickets", bytes.NewReader(body))
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "https://valid.example.com/rdev/join/") || strings.Contains(rec.Body.String(), "invalid.example.com") {
+		t.Fatalf("mixed metadata did not select only valid candidate: code=%d", rec.Code)
+	}
+}
+
+func TestRequestBaseURLDoesNotTrustForwardedProto(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Host = "gateway.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	if got := requestBaseURL(req); got != "http://gateway.example.com" {
+		t.Fatalf("request base trusted forwarded proto: %q", got)
+	}
+}
+
+func TestBootstrapProbeTemplateIsStaticAndDoesNotMutateGateway(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	handler := server.Handler()
+	before := gw.Snapshot()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/support-session/bootstrap-probe.ps1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Rdev-Gateway-Instance"); got != server.GatewayInstance() {
+		t.Fatalf("gateway instance header = %q, want %q", got, server.GatewayInstance())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("content type = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("cache control = %q", got)
+	}
+	body := rec.Body.String()
+	if body != tunnel.BootstrapProbePowerShell {
+		t.Fatalf("probe template mismatch: %q", body)
+	}
+	for _, want := range []string{"$ErrorActionPreference = 'Stop'", "rdev-bootstrap-probe-v1"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("probe template missing %q: %s", want, body)
+		}
+	}
+	for _, forbidden := range []string{"ticket_code", "/v1/hosts/register", "host serve", "Invoke-RestMethod"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("probe template contains enrollment capability %q: %s", forbidden, body)
+		}
+	}
+	if rec.Body.Len() == 0 || rec.Body.Len() > 4096 {
+		t.Fatalf("probe template size = %d", rec.Body.Len())
+	}
+
+	for _, rawURL := range []string{
+		"/v1/support-session/bootstrap-probe.ps1?ticket_code=SENSITIVE",
+		"/v1/support-session/bootstrap-probe.ps1?code=SENSITIVE",
+	} {
+		invalid := httptest.NewRecorder()
+		handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, rawURL, nil))
+		if invalid.Code != http.StatusBadRequest {
+			t.Fatalf("expected query rejection for %s, got %d: %s", rawURL, invalid.Code, invalid.Body.String())
+		}
+	}
+	withBody := httptest.NewRecorder()
+	handler.ServeHTTP(withBody, httptest.NewRequest(http.MethodGet, "/v1/support-session/bootstrap-probe.ps1", strings.NewReader("SENSITIVE")))
+	if withBody.Code != http.StatusBadRequest {
+		t.Fatalf("expected GET body rejection, got %d: %s", withBody.Code, withBody.Body.String())
+	}
+
+	post := httptest.NewRecorder()
+	handler.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/v1/support-session/bootstrap-probe.ps1", strings.NewReader(`{"ticket_code":"ignored"}`)))
+	if post.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected POST 405, got %d: %s", post.Code, post.Body.String())
+	}
+	after := gw.Snapshot()
+	after.GeneratedAt = before.GeneratedAt
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("probe requests mutated gateway: before=%#v after=%#v", before, after)
 	}
 }
 
@@ -204,6 +544,77 @@ func TestShellBootstrapRetryLoopSurvivesSetE(t *testing.T) {
 	}
 }
 
+func TestBootstrapRetryLoopsStopOnPermanentHostFailureAndKeepSixAttemptLimit(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	handler := server.Handler()
+	ticket := createTicket(t, handler)
+	permanentCode := strconv.Itoa(hostcmd.PermanentJoinFailureExitCode)
+
+	tests := []struct {
+		name     string
+		path     string
+		contains []string
+	}{
+		{
+			name: "shell",
+			path: "/join/" + ticket.Code + "/bootstrap.sh",
+			contains: []string{
+				"rdev_permanent_exit=" + permanentCode,
+				"rdev_max_retries=5",
+				`[ "$rdev_exit" -eq "$rdev_permanent_exit" ]`,
+				`[ "$rdev_attempt" -gt "$rdev_max_retries" ]`,
+			},
+		},
+		{
+			name: "powershell",
+			path: "/join/" + ticket.Code + "/bootstrap.ps1",
+			contains: []string{
+				"$rdevPermanentExitCode = " + permanentCode,
+				"$rdevMaxRetries = 5",
+				"$rdevExitCode -ne $rdevPermanentExitCode",
+				"$rdevAttempt -le $rdevMaxRetries",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, want := range tc.contains {
+				if !strings.Contains(body, want) {
+					t.Fatalf("bootstrap must contain %q:\n%s", want, body)
+				}
+			}
+		})
+	}
+}
+
+func TestUnexpectedControlPlaneErrorIsRecoverableAndDoesNotLeakDetails(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeControlPlaneError(recorder, errors.New("database password secret-detail"))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", recorder.Code)
+	}
+	var payload struct {
+		Error controlplane.ProtocolError `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.Error.Recoverable {
+		t.Fatal("unexpected server error must remain retryable")
+	}
+	if strings.Contains(recorder.Body.String(), "secret-detail") {
+		t.Fatal("unexpected server error leaked internal details")
+	}
+}
+
 func TestBootstrapHelperDownloadsUseRetryBackoff(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
@@ -233,6 +644,16 @@ func TestBootstrapHelperDownloadsUseRetryBackoff(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected PowerShell bootstrap 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("PowerShell bootstrap Cache-Control = %q, want no-store", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("PowerShell bootstrap X-Content-Type-Options = %q, want nosniff", got)
+	}
+	expectedTicketHash := tunnel.TicketCodeSHA256(ticket.Code)
+	if got := rec.Header().Get(tunnel.TicketCodeSHA256Header); got != expectedTicketHash || strings.Contains(got, ticket.Code) {
+		t.Fatalf("PowerShell bootstrap ticket hash header = %q, want opaque hash %q", got, expectedTicketHash)
 	}
 	powerShellBody := rec.Body.String()
 	for _, want := range []string{
@@ -323,6 +744,192 @@ func TestSupportSessionStatusIncludesPreconnectEvents(t *testing.T) {
 	}
 }
 
+func TestSupportSessionStatusUsesAuthoritativePublicCandidate(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	const publicBase = "https://status-public.example.com/rdev"
+	candidates, err := json.Marshal([]model.JoinManifestGatewayCandidate{{
+		URL: publicBase, Kind: "tunn3l", Scope: "public-tunnel", Recommended: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "status public authority", map[string]string{
+		gateway.TicketMetadataGatewayCandidates: string(candidates),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := gw.RegisterHost(model.HostRegistration{
+		TicketCode: ticket.Code,
+		Name:       "connected-target",
+		OS:         "windows",
+		Arch:       "amd64",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.ActivateHost(host.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for support-session status, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "http://localhost") || strings.Contains(rec.Body.String(), "https://localhost") {
+		t.Fatalf("status embedded request authority instead of stored public authority: %s", rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	remoteEntry := payload["remote_control_entry"].(map[string]any)
+	if remoteEntry["gateway_url"] != publicBase {
+		t.Fatalf("remote control entry gateway = %#v, want %q", remoteEntry["gateway_url"], publicBase)
+	}
+	next := payload["connected_next_steps"].(map[string]any)
+	nextCalls := next["mcp_next_calls"].([]any)
+	nextArgs := nextCalls[0].(map[string]any)["arguments"].(map[string]any)
+	if nextArgs["gateway_url"] != publicBase {
+		t.Fatalf("connected next-step gateway = %#v, want %q", nextArgs["gateway_url"], publicBase)
+	}
+	assertRunbookAuthority := func(name string, value any) {
+		t.Helper()
+		runbook := value.(map[string]any)
+		if runbook["gateway_url"] != publicBase {
+			t.Fatalf("%s gateway = %#v, want %q", name, runbook["gateway_url"], publicBase)
+		}
+		watch := runbook["watch"].(map[string]any)
+		watchArgs := watch["mcp_arguments"].(map[string]any)
+		if watchArgs["gateway_url"] != publicBase {
+			t.Fatalf("%s MCP watch gateway = %#v, want %q", name, watchArgs["gateway_url"], publicBase)
+		}
+		commandValues := watch["cli_command"].([]any)
+		command := make([]string, 0, len(commandValues))
+		for _, value := range commandValues {
+			command = append(command, value.(string))
+		}
+		if !strings.Contains(strings.Join(command, "\x00"), publicBase) {
+			t.Fatalf("%s CLI watch command omitted authoritative base: %#v", name, command)
+		}
+	}
+	recovery := payload["connection_recovery"].(map[string]any)
+	assertRunbookAuthority("recovery runbook", recovery["agent_connection_runbook"])
+	assertRunbookAuthority("status runbook", payload["agent_connection_runbook"])
+}
+
+func TestSupportSessionStatusFailsClosedForInvalidStoredGatewayCandidates(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "empty", raw: ""},
+		{name: "malformed", raw: "{"},
+		{name: "no public HTTPS candidate", raw: `[{"url":"http://localhost"}]`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gw := gateway.NewMemoryGateway()
+			ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "invalid status authority", map[string]string{
+				gateway.TicketMetadataGatewayCandidates: tt.raw,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+			req.Host = "localhost"
+			rec := httptest.NewRecorder()
+			NewServer(gw).Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected invalid stored authority to return 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestSupportSessionStatusWithoutStoredGatewayCandidatesUsesRequestBase(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "legacy status authority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const legacyBase = "https://legacy-status.example.test"
+	req := httptest.NewRequest(http.MethodGet, legacyBase+"/v1/support-session/status?ticket_code="+url.QueryEscape(ticket.Code), nil)
+	rec := httptest.NewRecorder()
+	NewServer(gw).Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected legacy status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	remoteEntry := payload["remote_control_entry"].(map[string]any)
+	if remoteEntry["gateway_url"] != legacyBase {
+		t.Fatalf("legacy request base = %#v, want %q", remoteEntry["gateway_url"], legacyBase)
+	}
+}
+
+func TestSupportSessionStatusUnknownTicketDoesNotExposeHosts(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	hosts := make([]model.Host, 0, 2)
+	for _, name := range []string{"first-private-target", "second-private-target"} {
+		ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "private status target")
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, err := gw.RegisterHost(model.HostRegistration{
+			TicketCode: ticket.Code,
+			Name:       name,
+			OS:         "windows",
+			Arch:       "amd64",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, err = gw.ActivateHost(host.ID, []string{"shell.user"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		hosts = append(hosts, host)
+	}
+
+	const unknownTicket = "UNKNOWN-NONEMPTY-TICKET"
+	req := httptest.NewRequest(http.MethodGet, "/v1/support-session/status?ticket_code="+url.QueryEscape(unknownTicket), nil)
+	rec := httptest.NewRecorder()
+	NewServer(gw).Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown ticket status = %d, want 404", rec.Code)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 || payload["error"] != "support session not found" {
+		t.Fatal("unknown ticket response was not the generic not-found envelope")
+	}
+	for _, forbidden := range []string{
+		unknownTicket,
+		hosts[0].ID,
+		hosts[1].ID,
+		hosts[0].Name,
+		hosts[1].Name,
+		`"connected"`,
+		"remote_control_entry",
+		"recommended_task_endpoint_id",
+		"agent_connection_runbook",
+		"--gateway-url",
+	} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatal("unknown ticket response exposed host state or control parameters")
+		}
+	}
+}
+
 func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
 	dir := t.TempDir()
 	binaryPath := filepath.Join(dir, "rdev.exe")
@@ -404,9 +1011,7 @@ func TestTicketManifestPackageCatalogIncludesHelperAssetMirrors(t *testing.T) {
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/tickets/"+ticket.Code+"/manifest", nil)
-	req.Host = "gateway.example.test"
-	req.Header.Set("X-Forwarded-Proto", "https")
+	req := httptest.NewRequest(http.MethodGet, "https://gateway.example.test/v1/tickets/"+ticket.Code+"/manifest", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1028,7 +1633,7 @@ func TestTicketManifestEndpointSignsJoinManifest(t *testing.T) {
 	}
 }
 
-func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
+func TestTicketManifestEndpointDoesNotSignQueryGatewayCandidates(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
 	handler := server.Handler()
@@ -1047,8 +1652,11 @@ func TestTicketManifestEndpointSignsGatewayCandidates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Manifest.GatewayCandidates) < 2 || payload.Manifest.GatewayCandidates[0].Kind != "relay" {
-		t.Fatalf("expected signed relay candidate first, got %#v", payload.Manifest.GatewayCandidates)
+	if payload.Manifest.GatewayURL != "http://example.com" || len(payload.Manifest.GatewayCandidates) != 1 || payload.Manifest.GatewayCandidates[0].URL != "http://example.com" {
+		t.Fatalf("query candidate changed legacy request authority: %#v", payload.Manifest)
+	}
+	if strings.Contains(rec.Body.String(), "relay.example.test") {
+		t.Fatal("unauthenticated query candidate was signed")
 	}
 	if err := payload.Manifest.Verify(ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)
@@ -1096,8 +1704,8 @@ func TestTicketManifestEndpointUsesServerSideGatewayCandidateMetadata(t *testing
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.Manifest.GatewayCandidates) < 2 || payload.Manifest.GatewayCandidates[0].Kind != "relay" {
-		t.Fatalf("expected server-side metadata gateway candidates, got %#v", payload.Manifest.GatewayCandidates)
+	if len(payload.Manifest.GatewayCandidates) != 1 || payload.Manifest.GatewayCandidates[0].Kind != "relay" || payload.Manifest.GatewayCandidates[0].URL != "https://relay.example.test/rdev" {
+		t.Fatalf("expected only the valid server-side metadata gateway candidate, got %#v", payload.Manifest.GatewayCandidates)
 	}
 	if err := payload.Manifest.Verify(created.Ticket.CreatedAt); err != nil {
 		t.Fatalf("expected manifest to verify: %v", err)

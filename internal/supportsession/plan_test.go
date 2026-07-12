@@ -8,12 +8,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 func TestGatewayURLCandidatesPreferPrivateAddressForWildcardListen(t *testing.T) {
@@ -408,6 +411,27 @@ func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 	}
 }
 
+func TestBuildHandoffExplicitGatewayPreservesTunnelPolicyFlags(t *testing.T) {
+	handoff := BuildHandoff(HandoffOptions{
+		GatewayURL:                 "https://gateway.example.test",
+		Target:                     "windows",
+		RdevCommand:                "rdev",
+		Region:                     "cn-mainland",
+		ProviderPolicyPath:         "/secure/providers.json",
+		AllowDegradedDirectHandoff: true,
+	})
+	for _, key := range []string{"cli_start_now_command", "foreground_start_command"} {
+		command := handoff[key].([]string)
+		joined := strings.Join(command, "\x00")
+		if !strings.Contains(joined, "--gateway-url\x00https://gateway.example.test") ||
+			!strings.Contains(joined, "--region\x00cn-mainland") ||
+			!strings.Contains(joined, "--provider-policy\x00/secure/providers.json") ||
+			!slices.Contains(command, "--allow-degraded-direct-handoff") {
+			t.Fatalf("%s dropped explicit tunnel policy: %v", key, command)
+		}
+	}
+}
+
 func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 	handoff := BuildHandoff(HandoffOptions{
 		Addr:         "0.0.0.0:8787",
@@ -441,7 +465,7 @@ func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 	}
 }
 
-func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
+func TestBuildConnectFromCreatedFailsClosedWithoutAvailabilityReadiness(t *testing.T) {
 	created := BuildCreated(CreatedOptions{
 		GatewayURL:            "http://192.0.2.10:8787",
 		ManifestRootPublicKey: "manifest-root:abc",
@@ -455,7 +479,7 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 
 	if connect["schema_version"] != ConnectSchemaVersion ||
 		connect["selected_path"] != "created-with-reachable-gateway" ||
-		connect["ready_to_send_to_human"] != true ||
+		connect["ready_to_send_to_human"] != false ||
 		connect["user_handoff"] == nil ||
 		connect["target_handoff_envelope"] == nil ||
 		connect["connection_supervision"] == nil ||
@@ -465,25 +489,25 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 		connect["agent_connection_runbook"] == nil ||
 		connect["fresh_agent_connect_contract"] == nil ||
 		connect["target_command"] != created["target_command"] ||
-		!strings.Contains(connect["agent_next_step"].(string), "connected_next_steps.user_report") {
-		t.Fatalf("expected ready connect payload, got %#v", connect)
+		!strings.Contains(strings.ToLower(connect["agent_next_step"].(string)), "do not send") {
+		t.Fatalf("expected fail-closed connect payload with compatibility fields, got %#v", connect)
 	}
 	contract := connect["fresh_agent_connect_contract"].(map[string]any)
 	autoActivate := contract["auto_activate"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
-		contract["ready_to_send_human"] != true ||
+		contract["ready_to_send_human"] != false ||
 		contract["ticket_code"] != "ABCD-1234" ||
 		autoActivate["enabled"] != true ||
 		!strings.Contains(contract["human_surface"].(string), "target_handoff_envelope.full_text") ||
 		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "manifest root public key") ||
-		!strings.Contains(contract["status_rule"].(string), "connected_next_steps.user_report") {
+		!strings.Contains(strings.ToLower(contract["status_rule"].(string)), "do not send") {
 		t.Fatalf("expected ready fresh-Agent connect contract, got %#v", contract)
 	}
 	envelope := connect["target_handoff_envelope"].(map[string]any)
 	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
-		envelope["ready_to_forward"] != true ||
+		envelope["ready_to_forward"] != false ||
 		!strings.Contains(envelope["full_text"].(string), "ABCD-1234") ||
-		!strings.Contains(envelope["agent_rule"].(string), "send full_text verbatim") {
+		!strings.Contains(strings.ToLower(envelope["agent_rule"].(string)), "do not send") {
 		t.Fatalf("expected ready target handoff envelope, got %#v", envelope)
 	}
 	connectHelperPreflight := connect["connectivity_helper_preflight"].(map[string]any)
@@ -511,6 +535,135 @@ func TestBuildConnectFromCreatedIsReadyForHumanHandoff(t *testing.T) {
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		!strings.Contains(runbook["agent_rule"].(string), "runbook before choosing lower-level") {
 		t.Fatalf("expected connect runbook, got %#v", runbook)
+	}
+}
+
+func TestBuildConnectMapsAvailabilityReadinessAliases(t *testing.T) {
+	readiness := DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates: []tunnel.Candidate{
+			{ProviderID: "stable", URL: "https://gateway.example"},
+		},
+	}, true)
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "https://gateway.example",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "auto",
+		AvailabilityReadiness: readiness,
+	})
+	connect := BuildConnectFromCreated(created)
+
+	for name, payload := range map[string]map[string]any{"created": created, "connect": connect} {
+		got, ok := payload["availability_readiness"].(AvailabilityReadiness)
+		if !ok || !reflect.DeepEqual(got, readiness) {
+			t.Fatalf("%s readiness mismatch: %#v", name, payload["availability_readiness"])
+		}
+		if payload["ready_to_send_to_human"] != readiness.ReadyToSend {
+			t.Fatalf("%s compatibility alias must derive from readiness: %#v", name, payload)
+		}
+		if payload["ready_to_send"] != readiness.ReadyToSend ||
+			payload["ready_to_activate"] != readiness.ReadyToActivate ||
+			payload["ready_to_execute"] != readiness.ReadyToExecute {
+			t.Fatalf("%s readiness states must derive from readiness: %#v", name, payload)
+		}
+		contract := payload["fresh_agent_connect_contract"].(map[string]any)
+		if contract["ready_to_send_human"] != readiness.ReadyToSend ||
+			contract["ready_to_send"] != readiness.ReadyToSend ||
+			contract["ready_to_activate"] != readiness.ReadyToActivate ||
+			contract["ready_to_execute"] != readiness.ReadyToExecute {
+			t.Fatalf("%s fresh-agent alias must derive from readiness: %#v", name, contract)
+		}
+	}
+
+	started := BuildStarted(StartedOptions{
+		Created:               created,
+		AssetReport:           map[string]any{"all_ready": true},
+		AvailabilityReadiness: readiness,
+	})
+	got, ok := started["availability_readiness"].(AvailabilityReadiness)
+	if !ok || !reflect.DeepEqual(got, readiness) ||
+		started["ready_to_send_to_human"] != readiness.ReadyToSend ||
+		started["ready_to_send"] != readiness.ReadyToSend ||
+		started["ready_to_activate"] != readiness.ReadyToActivate ||
+		started["ready_to_execute"] != readiness.ReadyToExecute {
+		t.Fatalf("started readiness mapping mismatch: %#v", started)
+	}
+}
+
+func TestBuildPayloadsForbidHandoffWhenNotReadyToSend(t *testing.T) {
+	readiness := DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "provider", URL: "https://gateway.example"}},
+	}, false)
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "https://gateway.example",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		Target:                "auto",
+		AvailabilityReadiness: readiness,
+	})
+	connect := BuildConnectFromCreated(created)
+	started := BuildStarted(StartedOptions{
+		Created:               created,
+		AssetReport:           map[string]any{"all_ready": true},
+		AvailabilityReadiness: readiness,
+	})
+
+	for name, payload := range map[string]map[string]any{"created": created, "connect": connect, "started": started} {
+		envelope := payload["target_handoff_envelope"].(map[string]any)
+		if envelope["ready_to_forward"] != false ||
+			!strings.Contains(strings.ToLower(envelope["agent_rule"].(string)), "do not send") ||
+			!strings.Contains(strings.ToLower(envelope["after_send"].(string)), "do not send") {
+			t.Fatalf("%s envelope must forbid forwarding: %#v", name, envelope)
+		}
+		handoff := payload["user_handoff"].(map[string]any)
+		if !strings.Contains(strings.ToLower(handoff["agent_next_step"].(string)), "do not send") {
+			t.Fatalf("%s user handoff must forbid sending: %#v", name, handoff)
+		}
+		contract := payload["fresh_agent_connect_contract"].(map[string]any)
+		if !strings.Contains(strings.ToLower(contract["human_surface"].(string)), "do not send") {
+			t.Fatalf("%s human surface must forbid sending: %#v", name, contract)
+		}
+	}
+	if !strings.Contains(strings.ToLower(strings.Join(created["agent_flow"].([]string), "\n")), "do not send") ||
+		!strings.Contains(strings.ToLower(connect["agent_next_step"].(string)), "do not send") ||
+		!strings.Contains(strings.ToLower(connect["human_surface_rule"].(string)), "do not send") ||
+		!strings.Contains(strings.ToLower(strings.Join(started["agent_flow"].([]string), "\n")), "do not send") ||
+		!strings.Contains(strings.ToLower(started["human_surface_rule"].(string)), "do not send") {
+		t.Fatalf("payload instructions must consistently forbid sending: created=%#v connect=%#v started=%#v", created, connect, started)
+	}
+}
+
+func TestBuildStartedRequiresReadyAssetsToSend(t *testing.T) {
+	readiness := DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "provider", URL: "https://gateway.example"}},
+	}, true)
+	created := BuildCreated(CreatedOptions{
+		GatewayURL:            "https://gateway.example",
+		Ticket:                model.Ticket{Code: "ABCD-1234", Mode: model.HostModeAttendedTemporary},
+		AvailabilityReadiness: readiness,
+	})
+
+	blocked := BuildStarted(StartedOptions{Created: created, AvailabilityReadiness: readiness})
+	blockedReadiness := blocked["availability_readiness"].(AvailabilityReadiness)
+	blockedEnvelope := blocked["target_handoff_envelope"].(map[string]any)
+	if blocked["ready_to_send"] != false || blocked["ready_to_send_to_human"] != false || blockedReadiness.ReadyToSend ||
+		blockedEnvelope["ready_to_forward"] != false ||
+		!strings.Contains(strings.ToLower(blocked["handoff_blocked_reason"].(string)), "helper assets") {
+		t.Fatalf("missing asset report must block sending: %#v", blocked)
+	}
+
+	ready := BuildStarted(StartedOptions{
+		Created:               created,
+		AssetReport:           map[string]any{"all_ready": true},
+		AvailabilityReadiness: readiness,
+	})
+	if ready["ready_to_send"] != true || ready["ready_to_send_to_human"] != true ||
+		ready["target_handoff_envelope"].(map[string]any)["ready_to_forward"] != true {
+		t.Fatalf("ready assets and explicit override should permit sending: %#v", ready)
 	}
 }
 
@@ -556,13 +709,13 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		handoff["copy_paste_kind"] != "windows" ||
 		handoff["copy_paste"] != created["target_command"] ||
 		!strings.Contains(handoff["message"].(string), "目标电脑") ||
-		!strings.Contains(handoff["agent_next_step"].(string), "wait=true") ||
-		!strings.Contains(handoff["agent_rule"].(string), "do not rewrite") {
+		!strings.Contains(strings.ToLower(handoff["agent_next_step"].(string)), "do not send") ||
+		!strings.Contains(strings.ToLower(handoff["agent_rule"].(string)), "do not send") {
 		t.Fatalf("expected ready localized user handoff, got %#v", handoff)
 	}
 	envelope := created["target_handoff_envelope"].(map[string]any)
 	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
-		envelope["ready_to_forward"] != true ||
+		envelope["ready_to_forward"] != false ||
 		envelope["copy_paste"] != created["target_command"] ||
 		!strings.Contains(envelope["full_text"].(string), envelope["message"].(string)) ||
 		!strings.Contains(envelope["full_text"].(string), created["target_command"].(string)) ||
@@ -616,7 +769,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 	contract := created["fresh_agent_connect_contract"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
-		contract["ready_to_send_human"] != true ||
+		contract["ready_to_send_human"] != false ||
 		contract["first_tool"] != "rdev.support_session.connect" ||
 		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "gateway URL") ||
 		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "relay, mesh, VPN, SSH, or polling scripts") {
@@ -851,7 +1004,7 @@ func TestBuildCreatedAutoTargetReturnsMultiPlatformHandoffWithCommandFallbacks(t
 		!strings.Contains(copyPaste, "Browser fallback") ||
 		!strings.Contains(copyPaste, "bootstrap.ps1") ||
 		!strings.Contains(copyPaste, "bootstrap.sh") ||
-		!strings.Contains(handoff["auto_target_rule"].(string), "target platform is unknown") ||
+		!strings.Contains(strings.ToLower(handoff["auto_target_rule"].(string)), "do not send") ||
 		!strings.Contains(handoff["windows_command"].(string), "bootstrap.ps1") ||
 		!strings.Contains(handoff["macos_linux_command"].(string), "bootstrap.sh") {
 		t.Fatalf("expected auto target handoff with executable command fallbacks, got %#v", handoff)
@@ -899,7 +1052,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 		t.Fatalf("expected embedded created session, got %#v", session)
 	}
 	handoff := started["user_handoff"].(map[string]any)
-	if started["ready_to_send_to_human"] != true ||
+	if started["ready_to_send_to_human"] != false ||
 		handoff["schema_version"] != UserHandoffSchemaVersion ||
 		handoff["copy_paste"] != started["target_command"] ||
 		started["target_command"] != session["target_command"] ||
@@ -912,7 +1065,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	envelope := started["target_handoff_envelope"].(map[string]any)
 	if envelope["schema_version"] != TargetHandoffEnvelopeSchemaVersion ||
 		envelope["copy_paste"] != started["target_command"] ||
-		!strings.Contains(envelope["after_send"].(string), "connected_next_steps.user_report") {
+		!strings.Contains(strings.ToLower(envelope["after_send"].(string)), "do not send") {
 		t.Fatalf("expected started top-level target handoff envelope, got %#v", envelope)
 	}
 	startedHelperPreflight := started["connectivity_helper_preflight"].(map[string]any)
@@ -959,6 +1112,8 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	feedback := started["foreground_feedback"].(map[string]any)
 	if feedback["schema_version"] != "rdev.support-session-foreground-feedback.v1" ||
 		feedback["stream"] != "stderr" ||
+		feedback["log_event_schema_version"] != "rdev.support-session-foreground-log-event.v1" ||
+		feedback["protected_status_schema_version"] != "rdev.support-session-foreground-event.v1" ||
 		!strings.Contains(feedback["connected_rule"].(string), "connection has been established") {
 		t.Fatalf("expected foreground feedback contract, got %#v", feedback)
 	}
@@ -981,7 +1136,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	if handoffTextFile["schema_version"] != HandoffTextFileSchemaVersion ||
 		handoffTextFile["path"] != "work/rdev-support-session/target-handoff.txt" ||
 		handoffTextFile["contains"] != "target_handoff_envelope.full_text" ||
-		!strings.Contains(handoffTextFile["agent_rule"].(string), "plain-text") {
+		!strings.Contains(strings.ToLower(handoffTextFile["agent_rule"].(string)), "do not send") {
 		t.Fatalf("expected handoff text file metadata, got %#v", handoffTextFile)
 	}
 	connectedReportFile := started["connected_report_file"].(map[string]any)
@@ -993,7 +1148,7 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	}
 	contract := started["fresh_agent_connect_contract"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
-		contract["ready_to_send_human"] != true ||
+		contract["ready_to_send_human"] != false ||
 		contract["ready_file_path"] != "work/rdev-support-session/support-session-ready.json" ||
 		contract["status_file_path"] != "work/rdev-support-session/support-session-status.json" ||
 		contract["handoff_text_file_path"] != "work/rdev-support-session/target-handoff.txt" ||
@@ -1262,6 +1417,86 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 		!slices.Contains(watchCommand, "https://gateway.example.test") ||
 		!strings.Contains(strings.Join(runbook["on_connected"].([]string), "\n"), "capabilities") {
 		t.Fatalf("expected connected status runbook, got %#v", runbook)
+	}
+}
+
+func TestBuildStatusUsesBoundTargetEndpointAcrossNestedContracts(t *testing.T) {
+	now := time.Now().UTC()
+	ticket := model.Ticket{
+		ID:        "tkt_bound",
+		Code:      "BOUND-1234",
+		SessionID: "ses_bound",
+		Status:    model.TicketStatusActive,
+		ExpiresAt: now.Add(10 * time.Minute),
+	}
+	session := controlplane.Session{
+		ID:             ticket.SessionID,
+		JoinCode:       ticket.Code,
+		SourceTicketID: ticket.ID,
+		Status:         controlplane.SessionStatusOnline,
+		Endpoints: []controlplane.Endpoint{{
+			ID:           "ep_bound_target",
+			SessionID:    ticket.SessionID,
+			Role:         controlplane.EndpointRoleTarget,
+			Name:         "windows-target",
+			Platform:     "windows/amd64",
+			Capabilities: []string{"shell.user"},
+			State:        controlplane.EndpointStateOnline,
+			LastSeenAt:   now,
+		}},
+	}
+
+	status := BuildStatus(StatusOptions{
+		TicketCode: ticket.Code,
+		Ticket:     &ticket,
+		Session:    &session,
+		Locale:     "en",
+		GatewayURL: "https://gateway.example.test",
+	})
+	if status["connected"] != true || status["session_id"] != session.ID || status["recommended_target_endpoint_id"] != session.Endpoints[0].ID {
+		t.Fatal("endpoint-driven status omitted the bound session or target endpoint")
+	}
+	next := status["connected_next_steps"].(map[string]any)
+	calls, _ := next["mcp_next_calls"].([]map[string]any)
+	capabilities, _ := next["capabilities"].([]string)
+	if next["connected"] != true || next["session_id"] != session.ID || next["target_endpoint_id"] != session.Endpoints[0].ID || next["host_name"] != session.Endpoints[0].Name || !slices.Equal(capabilities, session.Endpoints[0].Capabilities) || len(calls) != 1 || calls[0]["arguments"].(map[string]any)["session_id"] != session.ID {
+		t.Fatal("connected next steps did not use the real bound endpoint IDs")
+	}
+	remoteEntry := status["remote_control_entry"].(map[string]any)
+	if remoteEntry["session_id"] != session.ID || remoteEntry["recommended_target_endpoint_id"] != session.Endpoints[0].ID {
+		t.Fatal("remote control entry did not use the real bound endpoint IDs")
+	}
+}
+
+func TestBuildStatusRejectsStaleOrTicketInvalidTargetEndpoint(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tt := range []struct {
+		name         string
+		ticketStatus model.TicketStatus
+		expiresAt    time.Time
+		lastSeenAt   time.Time
+	}{
+		{name: "stale endpoint", ticketStatus: model.TicketStatusActive, expiresAt: now.Add(time.Minute), lastSeenAt: now.Add(-91 * time.Second)},
+		{name: "expired ticket", ticketStatus: model.TicketStatusActive, expiresAt: now.Add(-time.Second), lastSeenAt: now},
+		{name: "revoked ticket", ticketStatus: model.TicketStatusRevoked, expiresAt: now.Add(time.Minute), lastSeenAt: now},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ticket := model.Ticket{ID: "tkt_status", Code: "STATE-1234", SessionID: "ses_status", Status: tt.ticketStatus, ExpiresAt: tt.expiresAt}
+			session := controlplane.Session{
+				ID:             ticket.SessionID,
+				JoinCode:       ticket.Code,
+				SourceTicketID: ticket.ID,
+				Status:         controlplane.SessionStatusOnline,
+				Endpoints: []controlplane.Endpoint{{
+					ID: "ep_status", SessionID: ticket.SessionID, Role: controlplane.EndpointRoleTarget,
+					State: controlplane.EndpointStateOnline, LastSeenAt: tt.lastSeenAt,
+				}},
+			}
+			status := BuildStatus(StatusOptions{TicketCode: ticket.Code, Ticket: &ticket, Session: &session})
+			if status["connected"] == true || status["recommended_target_endpoint_id"] != "" {
+				t.Fatal("stale or invalid ticket endpoint was reported connected")
+			}
+		})
 	}
 }
 

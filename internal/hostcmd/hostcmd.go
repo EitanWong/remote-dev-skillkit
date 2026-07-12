@@ -109,6 +109,8 @@ type serveOptions struct {
 	ReleaseRootPublicKey       string
 	ReleaseRequiredArtifacts   []string
 	ManifestGatewayCandidates  []model.JoinManifestGatewayCandidate
+	CapabilityCeiling          []string
+	CapabilityCeilingSet       bool
 }
 
 func (a App) serve(ctx context.Context, args []string) error {
@@ -215,6 +217,8 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		}
 		opts.TicketCode = manifest.TicketCode
 		opts.TrustPin = manifest.TrustFingerprint
+		opts.CapabilityCeiling = append([]string(nil), manifest.Capabilities...)
+		opts.CapabilityCeilingSet = true
 	}
 	if opts.TicketCode == "" {
 		_, err := fmt.Fprintf(a.Stdout, "rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --gateway and --ticket-code, or --manifest-url for a signed join manifest\n", opts.Mode, opts.GatewayURL)
@@ -240,7 +244,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		Name:                inventory.Name,
 		Platform:            inventory.OS + "/" + inventory.Arch,
 		IdentityFingerprint: identity.Fingerprint(),
-		Capabilities:        inventory.TemporaryCapabilities,
+		Capabilities:        ConstrainCapabilities(inventory.TemporaryCapabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet),
 		Transport:           controlplane.TransportLongPoll,
 		LeaseTTLMS:          60_000,
 		RenewAfterMS:        20_000,
@@ -665,10 +669,10 @@ func joinSessionByCode(ctx context.Context, client *http.Client, gatewayURL, joi
 		Events   []controlplane.Event  `json:"events"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, err))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: %s", gatewayErrorMessage(resp.Status, body, nil))
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, NewJoinSessionResponseError(resp.StatusCode, resp.Status, body, nil)
 	}
 	if payload.Session.ID == "" || payload.Endpoint.ID == "" || payload.Lease.Secret == "" {
 		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: incomplete session join response")
@@ -759,11 +763,17 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 
 func (a App) runSessionTask(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, task controlplane.Task) error {
 	_ = client
-	result, err := hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
-		IdentityFingerprint:   identityFingerprint,
-		WorkspaceLockStore:    opts.WorkspaceLockStore,
-		CaptureRuntimeFixture: opts.CaptureRuntimeFixture,
-	})
+	result := hostrunner.Result{}
+	var err error
+	if !CapabilitiesAllowed(task.Capabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet) {
+		err = fmt.Errorf("task capabilities exceed the signed join manifest ceiling")
+	} else {
+		result, err = hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
+			IdentityFingerprint:   identityFingerprint,
+			WorkspaceLockStore:    opts.WorkspaceLockStore,
+			CaptureRuntimeFixture: opts.CaptureRuntimeFixture,
+		})
+	}
 	status := string(controlplane.TaskStatusSucceeded)
 	reason := ""
 	if err != nil {

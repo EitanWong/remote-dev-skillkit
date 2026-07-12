@@ -21,6 +21,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
 	"github.com/EitanWong/remote-dev-skillkit/internal/cdnopt"
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
@@ -43,6 +44,7 @@ const ConnectionRecoverySchemaVersion = "rdev.support-session-connection-recover
 const ConnectedNextStepsSchemaVersion = "rdev.support-session-connected-next-steps.v1"
 const ContinuityPolicySchemaVersion = "rdev.support-session-continuity-policy.v1"
 const ConnectionSupervisionSchemaVersion = "rdev.support-session-connection-supervision.v1"
+const supportSessionEndpointFreshAfter = 90 * time.Second
 const GatewayCandidatePreflightSchemaVersion = "rdev.support-session-gateway-candidate-preflight.v1"
 const ConnectivityHelperPreflightSchemaVersion = "rdev.support-session-connectivity-helper-preflight.v1"
 const ConnectionEntryRunnerRecommendationSchemaVersion = "rdev.support-session-connection-entry-runner-recommendation.v1"
@@ -86,24 +88,30 @@ type PrepareOptions struct {
 }
 
 type HandoffOptions struct {
-	RepoRoot     string
-	WorkDir      string
-	Addr         string
-	GatewayURL   string
-	Target       string
-	Reason       string
-	TTLSeconds   int
-	AutoActivate bool
-	Locale       string
-	RdevCommand  string
+	RepoRoot                   string
+	WorkDir                    string
+	Addr                       string
+	GatewayURL                 string
+	Target                     string
+	Reason                     string
+	TTLSeconds                 int
+	AutoActivate               bool
+	Locale                     string
+	RdevCommand                string
+	Region                     string
+	ProviderPolicyPath         string
+	AllowDegradedDirectHandoff bool
+	RequireForeground          bool
 }
 
 type RemoteControlEntryOptions struct {
-	GatewayURL string
-	TicketCode string
-	Ticket     *model.Ticket
-	Hosts      []model.Host
-	Locale     string
+	GatewayURL       string
+	TicketCode       string
+	Ticket           *model.Ticket
+	Hosts            []model.Host
+	Locale           string
+	SessionID        string
+	TargetEndpointID string
 }
 
 type GatewayURLCandidate struct {
@@ -170,7 +178,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	if resolvedCreateGatewayURL == "" {
 		resolvedCreateGatewayURL, _ = ConfiguredGatewayURLCandidate()
 	}
-	if resolvedCreateGatewayURL != "" {
+	if resolvedCreateGatewayURL != "" && !opts.RequireForeground {
 		gatewayURL = resolvedCreateGatewayURL
 		selectedPath = "create-with-reachable-gateway"
 		agentNextStep = "call rdev.support_session.create with mcp_next_arguments, then send the returned target_handoff_envelope.full_text"
@@ -211,6 +219,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	} else {
 		startCommand = append(startCommand, "--auto-activate=false")
 	}
+	startCommand = appendTunnelPolicyFlags(startCommand, opts.Region, opts.ProviderPolicyPath, opts.AllowDegradedDirectHandoff)
 	connectStartCommand := []string{
 		rdevCommand, "support-session", "connect",
 		"--start",
@@ -232,6 +241,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	} else {
 		connectStartCommand = append(connectStartCommand, "--auto-activate=false")
 	}
+	connectStartCommand = appendTunnelPolicyFlags(connectStartCommand, opts.Region, opts.ProviderPolicyPath, opts.AllowDegradedDirectHandoff)
 	return map[string]any{
 		"schema_version":           HandoffSchemaVersion,
 		"ok":                       true,
@@ -277,6 +287,21 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	}
 }
 
+func appendTunnelPolicyFlags(command []string, region, policyPath string, allowDegraded bool) []string {
+	region = strings.TrimSpace(region)
+	if region != "" {
+		command = append(command, "--region", region)
+	}
+	policyPath = strings.TrimSpace(policyPath)
+	if policyPath != "" {
+		command = append(command, "--provider-policy", policyPath)
+	}
+	if allowDegraded {
+		command = append(command, "--allow-degraded-direct-handoff")
+	}
+	return command
+}
+
 func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	selectedPath, _ := handoff["selected_path"].(string)
 	payload := map[string]any{
@@ -295,7 +320,6 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	}
 	payload["fresh_agent_connect_contract"] = freshAgentConnectContract(freshAgentConnectContractOptions{
 		Phase:        selectedPath,
-		Ready:        false,
 		RdevCommand:  rdevCommandFromHandoff(handoff),
 		AutoActivate: autoActivateFromHandoff(handoff),
 	})
@@ -347,15 +371,28 @@ func supportSessionStartCommand(rdevCommand, addr, gatewayURL, target string) []
 }
 
 func BuildConnectFromCreated(created map[string]any) map[string]any {
+	readiness := availabilityReadinessFromMap(created)
+	userHandoff := userHandoffWithReadiness(created["user_handoff"], readiness)
+	envelope := targetHandoffEnvelopeWithReadiness(created["target_handoff_envelope"], readiness)
+	agentNextStep := "send target_handoff_envelope.full_text to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true"
+	humanSurfaceRule := "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback"
+	if !readiness.ReadyToSend {
+		agentNextStep = blockedHandoffInstruction(readiness.DegradedReason)
+		humanSurfaceRule = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":          ConnectSchemaVersion,
 		"ok":                      true,
 		"intent":                  "single-call-agent-entry-for-one-command-visible-support-session",
 		"selected_path":           "created-with-reachable-gateway",
-		"ready_to_send_to_human":  true,
+		"availability_readiness":  readiness,
+		"ready_to_send":           readiness.ReadyToSend,
+		"ready_to_activate":       readiness.ReadyToActivate,
+		"ready_to_execute":        readiness.ReadyToExecute,
+		"ready_to_send_to_human":  readiness.ReadyToSend,
 		"created_session":         created,
-		"user_handoff":            created["user_handoff"],
-		"target_handoff_envelope": created["target_handoff_envelope"],
+		"user_handoff":            userHandoff,
+		"target_handoff_envelope": envelope,
 		"target_command":          created["target_command"],
 		"join_url":                created["join_url"],
 		"watch_connection_status": created["watch_connection_status"],
@@ -367,16 +404,15 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"agent_connection_runbook":                   created["agent_connection_runbook"],
 		"rdev_bootstrap_connector":                   created["rdev_bootstrap_connector"],
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
-			Phase:              "created-with-reachable-gateway",
-			Ready:              true,
-			TicketCode:         stringFromMap(created, "ticket_code"),
-			RdevCommand:        rdevCommandFromRunbook(created["agent_connection_runbook"]),
-			UserHandoffPresent: created["user_handoff"] != nil,
-			AutoActivate:       boolFromMap(created, "auto_activate"),
+			Phase:                 "created-with-reachable-gateway",
+			AvailabilityReadiness: readiness,
+			TicketCode:            stringFromMap(created, "ticket_code"),
+			RdevCommand:           rdevCommandFromRunbook(created["agent_connection_runbook"]),
+			AutoActivate:          boolFromMap(created, "auto_activate"),
 		}),
 		"mcp_follow_up":      created["mcp_follow_up"],
-		"agent_next_step":    "send target_handoff_envelope.full_text to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true",
-		"human_surface_rule": "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback",
+		"agent_next_step":    agentNextStep,
+		"human_surface_rule": humanSurfaceRule,
 		"agent_rule":         "Agents should call rdev.support_session.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
@@ -390,6 +426,7 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 type StatusOptions struct {
 	TicketCode  string
 	Hosts       []model.Host
+	Session     *controlplane.Session
 	Locale      string
 	GatewayURL  string
 	Preconnects []model.SupportSessionPreconnect
@@ -410,6 +447,7 @@ type CreatedOptions struct {
 	RdevCommand              string
 	AutoActivate             bool
 	TargetBootstrapReadiness any
+	AvailabilityReadiness    AvailabilityReadiness
 }
 
 type StartedOptions struct {
@@ -426,6 +464,7 @@ type StartedOptions struct {
 	ConnectivityStrategy      any
 	GatewayCandidatePreflight any
 	StandardRecoveryActions   []string
+	AvailabilityReadiness     AvailabilityReadiness
 }
 
 func BuildStarted(opts StartedOptions) map[string]any {
@@ -438,6 +477,26 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	connectedReportFile := strings.TrimSpace(opts.ConnectedReportFile)
 	session := opts.Created
 	assetsReady := assetReportAllReady(opts.AssetReport)
+	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
+	readiness.ReadyToSend = readiness.ReadyToSend && assetsReady
+	blockedReason := readiness.DegradedReason
+	if !assetsReady {
+		blockedReason = "helper assets are not ready; do not send target_handoff_envelope.full_text until rdev support-session connect --start or prepare --build-assets reports asset_report.all_ready=true"
+	}
+	userHandoff := userHandoffWithReadiness(session["user_handoff"], readinessWithReason(readiness, blockedReason))
+	envelope := targetHandoffEnvelopeWithReadiness(session["target_handoff_envelope"], readinessWithReason(readiness, blockedReason))
+	agentFlow := []string{
+		"keep this process running while the target host connects",
+		"give the target-side human only target_handoff_envelope.full_text",
+		"watch connection status with status_file.path, foreground_feedback, watch_connection_status, or rdev.support_session.status",
+		"when connected=true, proactively report that the connection is established",
+		"if connection_readiness.ready is false, follow standard_recovery_actions instead of writing ad hoc bootstrap or relay code",
+	}
+	humanSurfaceRule := "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback"
+	if !readiness.ReadyToSend {
+		agentFlow[1] = blockedHandoffInstruction(blockedReason)
+		humanSurfaceRule = blockedHandoffInstruction(blockedReason)
+	}
 	payload := map[string]any{
 		"schema_version": StartedSchemaVersion,
 		"ok":             true,
@@ -449,21 +508,29 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"lifecycle":   "foreground-visible-process",
 			"stop":        "interrupt this rdev support-session start process",
 		},
-		"ready_to_send_to_human":                     assetsReady,
-		"user_handoff":                               session["user_handoff"],
-		"target_handoff_envelope":                    session["target_handoff_envelope"],
+		"availability_readiness":                     readiness,
+		"ready_to_send":                              readiness.ReadyToSend,
+		"ready_to_activate":                          readiness.ReadyToActivate,
+		"ready_to_execute":                           readiness.ReadyToExecute,
+		"ready_to_send_to_human":                     readiness.ReadyToSend,
+		"user_handoff":                               userHandoff,
+		"target_handoff_envelope":                    envelope,
 		"target_command":                             session["target_command"],
 		"join_url":                                   session["join_url"],
 		"watch_connection_status":                    session["watch_connection_status"],
 		"watch_connection_status_configured_gateway": session["watch_connection_status_configured_gateway"],
 		"connection_supervision":                     session["connection_supervision"],
 		"foreground_feedback": map[string]any{
-			"schema_version": "rdev.support-session-foreground-feedback.v1",
-			"stream":         "stderr",
-			"event_prefix":   "rdev support session event: ",
-			"events":         []string{"waiting", "pending-activation", "connected"},
-			"connected_rule": "when event=connected, immediately tell the user the connection has been established before submitting session tasks",
-			"agent_rule":     "parse foreground feedback events from stderr when this command is kept open; read status_file.path or use the status watcher as fallback sources of truth",
+			"schema_version":                  "rdev.support-session-foreground-feedback.v1",
+			"stream":                          "stderr",
+			"event_prefix":                    "rdev support session event: ",
+			"log_event_schema_version":        "rdev.support-session-foreground-log-event.v1",
+			"protected_status_schema_version": "rdev.support-session-foreground-event.v1",
+			"log_fields":                      []string{"event", "status_class", "connected", "action_class"},
+			"events":                          []string{"waiting", "pending-activation", "connected"},
+			"connected_rule":                  "when event=connected, immediately tell the user the connection has been established before submitting session tasks",
+			"security_rule":                   "stderr contains only the minimal shareable event; read status_file.path for protected ticket, gateway, host, and next-step details",
+			"agent_rule":                      "parse foreground feedback events from stderr when this command is kept open; read status_file.path or use the status watcher as fallback sources of truth",
 		},
 		"mcp_follow_up":         session["mcp_follow_up"],
 		"session":               session,
@@ -478,16 +545,15 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"connection_entry_runner_recommendation": session["connection_entry_runner_recommendation"],
 		"rdev_bootstrap_connector":               session["rdev_bootstrap_connector"],
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
-			Phase:               "foreground-started",
-			Ready:               true,
-			TicketCode:          stringFromMap(session, "ticket_code"),
-			RdevCommand:         rdevCommandFromRunbook(session["agent_connection_runbook"]),
-			UserHandoffPresent:  session["user_handoff"] != nil,
-			AutoActivate:        boolFromMap(session, "auto_activate"),
-			ReadyFile:           readyFile,
-			StatusFile:          statusFile,
-			HandoffTextFile:     handoffTextFile,
-			ConnectedReportFile: connectedReportFile,
+			Phase:                 "foreground-started",
+			AvailabilityReadiness: readiness,
+			TicketCode:            stringFromMap(session, "ticket_code"),
+			RdevCommand:           rdevCommandFromRunbook(session["agent_connection_runbook"]),
+			AutoActivate:          boolFromMap(session, "auto_activate"),
+			ReadyFile:             readyFile,
+			StatusFile:            statusFile,
+			HandoffTextFile:       handoffTextFile,
+			ConnectedReportFile:   connectedReportFile,
 		}),
 		"agent_connection_runbook": firstNonNil(
 			session["agent_connection_runbook"],
@@ -498,15 +564,9 @@ func BuildStarted(opts StartedOptions) map[string]any {
 				RdevCommand: "rdev",
 			}),
 		),
-		"agent_flow": []string{
-			"keep this process running while the target host connects",
-			"give the target-side human only target_handoff_envelope.full_text",
-			"watch connection status with status_file.path, foreground_feedback, watch_connection_status, or rdev.support_session.status",
-			"when connected=true, proactively report that the connection is established",
-			"if connection_readiness.ready is false, follow standard_recovery_actions instead of writing ad hoc bootstrap or relay code",
-		},
+		"agent_flow":                agentFlow,
 		"standard_recovery_actions": standardRecoveryActions(opts.StandardRecoveryActions),
-		"human_surface_rule":        "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback",
+		"human_surface_rule":        humanSurfaceRule,
 		"forbidden": []string{
 			"background hidden gateway",
 			"ExecutionPolicy Bypass",
@@ -514,15 +574,15 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"ad hoc bootstrap script generated by the Agent",
 		},
 	}
-	if !assetsReady {
-		payload["handoff_blocked_reason"] = "helper assets are not ready; do not send target_handoff_envelope.full_text until rdev support-session connect --start or prepare --build-assets reports asset_report.all_ready=true"
+	if !readiness.ReadyToSend {
+		payload["handoff_blocked_reason"] = blockedReason
 	}
 	if readyFile != "" {
 		payload["ready_file"] = map[string]any{
 			"schema_version": "rdev.support-session-ready-file.v1",
 			"path":           readyFile,
 			"contains":       StartedSchemaVersion,
-			"agent_rule":     "read this file after starting the foreground gateway when terminal stdout is hard to parse; send target_handoff_envelope.full_text to the human",
+			"agent_rule":     handoffFileInstruction(readiness.ReadyToSend, blockedReason, "read this file after starting the foreground gateway when terminal stdout is hard to parse; send target_handoff_envelope.full_text to the human"),
 		}
 	}
 	if statusFile != "" {
@@ -539,7 +599,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"schema_version": HandoffTextFileSchemaVersion,
 			"path":           handoffTextFile,
 			"contains":       "target_handoff_envelope.full_text",
-			"agent_rule":     "read and forward this plain-text file verbatim to the target-side human; do not rewrite commands or extract ticket/root/gateway fields",
+			"agent_rule":     handoffFileInstruction(readiness.ReadyToSend, blockedReason, "read and forward this plain-text file verbatim to the target-side human; do not rewrite commands or extract ticket/root/gateway fields"),
 		}
 	}
 	if connectedReportFile != "" {
@@ -555,7 +615,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 
 func assetReportAllReady(report any) bool {
 	if report == nil {
-		return true
+		return false
 	}
 	if typed, ok := report.(map[string]any); ok {
 		ready, ok := typed["all_ready"].(bool)
@@ -1106,17 +1166,16 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 }
 
 type freshAgentConnectContractOptions struct {
-	Phase               string
-	Ready               bool
-	TicketCode          string
-	GatewayURL          string
-	RdevCommand         string
-	UserHandoffPresent  bool
-	AutoActivate        bool
-	ReadyFile           string
-	StatusFile          string
-	HandoffTextFile     string
-	ConnectedReportFile string
+	Phase                 string
+	TicketCode            string
+	GatewayURL            string
+	RdevCommand           string
+	AutoActivate          bool
+	ReadyFile             string
+	StatusFile            string
+	HandoffTextFile       string
+	ConnectedReportFile   string
+	AvailabilityReadiness AvailabilityReadiness
 }
 
 func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string]any {
@@ -1125,14 +1184,25 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 		rdevCommand = "rdev"
 	}
 	ticketCode := strings.TrimSpace(opts.TicketCode)
+	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
+	humanSurface := "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads"
+	statusRule := "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, connected_report_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately"
+	if !readiness.ReadyToSend {
+		humanSurface = blockedHandoffInstruction(readiness.DegradedReason)
+		statusRule = blockedHandoffInstruction(readiness.DegradedReason) + "; wait for a new payload whose ready_to_send=true before beginning status supervision"
+	}
 	contract := map[string]any{
-		"schema_version":      FreshAgentConnectContractSchemaVersion,
-		"intent":              "model-independent-standard-path-for-a-fresh-agent-to-connect-one-target-machine",
-		"phase":               strings.TrimSpace(opts.Phase),
-		"ready_to_send_human": opts.Ready && opts.UserHandoffPresent,
-		"human_surface":       "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads",
-		"first_tool":          "rdev.support_session.connect",
-		"first_cli":           []string{rdevCommand, "support-session", "connect"},
+		"schema_version":         FreshAgentConnectContractSchemaVersion,
+		"intent":                 "model-independent-standard-path-for-a-fresh-agent-to-connect-one-target-machine",
+		"phase":                  strings.TrimSpace(opts.Phase),
+		"availability_readiness": readiness,
+		"ready_to_send":          readiness.ReadyToSend,
+		"ready_to_activate":      readiness.ReadyToActivate,
+		"ready_to_execute":       readiness.ReadyToExecute,
+		"ready_to_send_human":    readiness.ReadyToSend,
+		"human_surface":          humanSurface,
+		"first_tool":             "rdev.support_session.connect",
+		"first_cli":              []string{rdevCommand, "support-session", "connect"},
 		"recovery_if_rdev_missing": []string{
 			"do not stop at rdev not found",
 			"if inside a remote-dev-skillkit checkout, run go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
@@ -1160,7 +1230,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 			"ExecutionPolicy Bypass",
 			"hidden install or persistence",
 		},
-		"status_rule": "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, connected_report_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately",
+		"status_rule": statusRule,
 		"auto_activate": map[string]any{
 			"enabled": opts.AutoActivate,
 			"scope":   "first attended-temporary host for the standard visible support-session ticket only",
@@ -2189,6 +2259,21 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		Ticket:     &opts.Ticket,
 		Locale:     locale,
 	})
+	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
+	agentFlow := []string{
+		"give the target-side human only target_handoff_envelope.full_text when present; use target_command or join_url only as compatibility fallback fields",
+		"target_command is the human-safe primary command; signed join-manifest gateway candidates are embedded for rdev runtime failover after bootstrap; do not write your own fallback script",
+		"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
+		"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
+		"watch connection status with watch_connection_status or rdev.support_session.status",
+		"read rdev_bootstrap_connector before interpreting target_preconnects; preconnect means the target command started before the full helper finished downloading, not that session tasks can run yet",
+		"when connected=true, proactively report that the connection is established",
+		"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
+	}
+	if !readiness.ReadyToSend {
+		agentFlow[0] = blockedHandoffInstruction(readiness.DegradedReason)
+		agentFlow[3] = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":                         CreatedSchemaVersion,
 		"ok":                                     true,
@@ -2204,11 +2289,16 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"target":                                 target,
 		"locale":                                 locale,
 		"auto_activate":                          opts.AutoActivate,
+		"availability_readiness":                 readiness,
+		"ready_to_send":                          readiness.ReadyToSend,
+		"ready_to_activate":                      readiness.ReadyToActivate,
+		"ready_to_execute":                       readiness.ReadyToExecute,
+		"ready_to_send_to_human":                 readiness.ReadyToSend,
 		"recommended_surface":                    recommendedSurface,
 		"target_command":                         recommended,
 		"target_commands":                        targetCommands,
-		"user_handoff":                           userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands),
-		"target_handoff_envelope":                targetHandoffEnvelope(locale, target, recommendedSurface, recommended, joinURL, targetCommands, remoteControlEntry),
+		"user_handoff":                           userHandoff(locale, target, recommendedSurface, recommended, joinURL, targetCommands, readiness),
+		"target_handoff_envelope":                targetHandoffEnvelope(locale, target, recommendedSurface, recommended, joinURL, targetCommands, remoteControlEntry, readiness),
 		"remote_control_entry":                   remoteControlEntry,
 		"connection_attempt_policy":              attemptPolicy,
 		"connection_continuity_policy":           continuityPolicy,
@@ -2218,13 +2308,12 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"connection_entry_runner_recommendation": runnerRecommendation,
 		"rdev_bootstrap_connector":               rdevBootstrapConnectorContract(),
 		"fresh_agent_connect_contract": freshAgentConnectContract(freshAgentConnectContractOptions{
-			Phase:              "created",
-			Ready:              true,
-			TicketCode:         opts.Ticket.Code,
-			GatewayURL:         gatewayURL,
-			RdevCommand:        rdevCommand,
-			UserHandoffPresent: true,
-			AutoActivate:       opts.AutoActivate,
+			Phase:                 "created",
+			AvailabilityReadiness: readiness,
+			TicketCode:            opts.Ticket.Code,
+			GatewayURL:            gatewayURL,
+			RdevCommand:           rdevCommand,
+			AutoActivate:          opts.AutoActivate,
 		}),
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
 			Phase:        "created",
@@ -2263,16 +2352,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 			},
 		},
 		"human_message": localizedCreatedMessage(locale),
-		"agent_flow": []string{
-			"give the target-side human only target_handoff_envelope.full_text when present; use target_command or join_url only as compatibility fallback fields",
-			"target_command is the human-safe primary command; signed join-manifest gateway candidates are embedded for rdev runtime failover after bootstrap; do not write your own fallback script",
-			"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
-			"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
-			"watch connection status with watch_connection_status or rdev.support_session.status",
-			"read rdev_bootstrap_connector before interpreting target_preconnects; preconnect means the target command started before the full helper finished downloading, not that session tasks can run yet",
-			"when connected=true, proactively report that the connection is established",
-			"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
-		},
+		"agent_flow":    agentFlow,
 		"forbidden": []string{
 			"ExecutionPolicy Bypass",
 			"hidden install",
@@ -2339,7 +2419,15 @@ func cdnDownloadOptimizerContract() map[string]any {
 	}
 }
 
-func userHandoff(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string) map[string]any {
+func userHandoff(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, readiness AvailabilityReadiness) map[string]any {
+	agentNextStep := "send message plus copy_paste to the user, then call rdev.support_session.status with wait=true"
+	agentRule := "do not rewrite copy_paste, do not ask the user to assemble ticket/root/gateway/transport, and do not add custom polling"
+	autoTargetRule := autoTargetHandoffRule(target)
+	if !readiness.ReadyToSend {
+		agentNextStep = blockedHandoffInstruction(readiness.DegradedReason)
+		agentRule = blockedHandoffInstruction(readiness.DegradedReason)
+		autoTargetRule = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":      UserHandoffSchemaVersion,
 		"locale":              locale,
@@ -2350,23 +2438,32 @@ func userHandoff(locale, target, surface, copyPaste, joinURL string, targetComma
 		"message":             localizedUserHandoffMessage(locale, surface),
 		"windows_command":     targetCommands["windows"],
 		"macos_linux_command": targetCommands["macos_linux"],
-		"auto_target_rule":    autoTargetHandoffRule(target),
-		"agent_next_step":     "send message plus copy_paste to the user, then call rdev.support_session.status with wait=true",
-		"agent_rule":          "do not rewrite copy_paste, do not ask the user to assemble ticket/root/gateway/transport, and do not add custom polling",
+		"auto_target_rule":    autoTargetRule,
+		"ready_to_send":       readiness.ReadyToSend,
+		"agent_next_step":     agentNextStep,
+		"agent_rule":          agentRule,
 	}
 }
 
-func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, remoteControlEntry map[string]any) map[string]any {
+func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, remoteControlEntry map[string]any, readiness AvailabilityReadiness) map[string]any {
 	message := localizedUserHandoffMessage(locale, surface)
 	fullText := message + "\n\n" + copyPaste
 	if card := remoteControlEntryText(remoteControlEntry); card != "" {
 		fullText += "\n\n" + card
 	}
+	agentRule := "send full_text verbatim to the target-side human; do not rewrite copy_paste, append ticket/root/gateway details, or generate custom setup scripts"
+	afterSend := "wait with connection_supervision, status_file.path, foreground_feedback, or rdev.support_session.status wait=true and report connected_next_steps.user_report when connected=true"
+	autoTargetRule := autoTargetHandoffRule(target)
+	if !readiness.ReadyToSend {
+		agentRule = blockedHandoffInstruction(readiness.DegradedReason)
+		afterSend = blockedHandoffInstruction(readiness.DegradedReason)
+		autoTargetRule = blockedHandoffInstruction(readiness.DegradedReason)
+	}
 	return map[string]any{
 		"schema_version":       TargetHandoffEnvelopeSchemaVersion,
 		"locale":               locale,
 		"target":               target,
-		"ready_to_forward":     true,
+		"ready_to_forward":     readiness.ReadyToSend,
 		"format":               "plain-text",
 		"message":              message,
 		"copy_paste":           copyPaste,
@@ -2379,9 +2476,9 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 			"macos_linux_command": targetCommands["macos_linux"],
 			"join_url":            targetCommands["join_url"],
 		},
-		"auto_target_rule": autoTargetHandoffRule(target),
-		"agent_rule":       "send full_text verbatim to the target-side human; do not rewrite copy_paste, append ticket/root/gateway details, or generate custom setup scripts",
-		"after_send":       "wait with connection_supervision, status_file.path, foreground_feedback, or rdev.support_session.status wait=true and report connected_next_steps.user_report when connected=true",
+		"auto_target_rule": autoTargetRule,
+		"agent_rule":       agentRule,
+		"after_send":       afterSend,
 		"forbidden": []string{
 			"rewriting copy_paste",
 			"manual ticket/root/gateway/transport assembly",
@@ -2391,6 +2488,57 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 			"hidden install or persistence",
 		},
 	}
+}
+
+func blockedHandoffInstruction(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "availability readiness is not sendable"
+	}
+	return "do not send target_handoff_envelope.full_text, handoff_text_file.path, user_handoff.message, or user_handoff.copy_paste to the target human while ready_to_send=false: " + reason
+}
+
+func readinessWithReason(readiness AvailabilityReadiness, reason string) AvailabilityReadiness {
+	readiness.DegradedReason = strings.TrimSpace(reason)
+	return readiness
+}
+
+func userHandoffWithReadiness(value any, readiness AvailabilityReadiness) map[string]any {
+	handoff := cloneAnyMap(value)
+	handoff["ready_to_send"] = readiness.ReadyToSend
+	if !readiness.ReadyToSend {
+		handoff["agent_next_step"] = blockedHandoffInstruction(readiness.DegradedReason)
+		handoff["agent_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+		handoff["auto_target_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+	}
+	return handoff
+}
+
+func targetHandoffEnvelopeWithReadiness(value any, readiness AvailabilityReadiness) map[string]any {
+	envelope := cloneAnyMap(value)
+	envelope["ready_to_forward"] = readiness.ReadyToSend
+	if !readiness.ReadyToSend {
+		envelope["agent_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+		envelope["after_send"] = blockedHandoffInstruction(readiness.DegradedReason)
+		envelope["auto_target_rule"] = blockedHandoffInstruction(readiness.DegradedReason)
+	}
+	return envelope
+}
+
+func cloneAnyMap(value any) map[string]any {
+	source, _ := value.(map[string]any)
+	cloned := make(map[string]any, len(source))
+	for key, item := range source {
+		cloned[key] = item
+	}
+	return cloned
+}
+
+func handoffFileInstruction(ready bool, reason, allowed string) string {
+	if ready {
+		return allowed
+	}
+	return blockedHandoffInstruction(reason)
 }
 
 func remoteControlEntryText(entry map[string]any) string {
@@ -2525,6 +2673,13 @@ func BuildRemoteControlEntry(opts RemoteControlEntryOptions) map[string]any {
 	}
 	if len(activeHosts) == 1 {
 		entry["recommended_task_endpoint_id"] = activeHosts[0].ID
+	}
+	if sessionID := strings.TrimSpace(opts.SessionID); sessionID != "" {
+		entry["session_id"] = sessionID
+	}
+	if targetEndpointID := strings.TrimSpace(opts.TargetEndpointID); targetEndpointID != "" {
+		entry["recommended_target_endpoint_id"] = targetEndpointID
+		entry["recommended_task_endpoint_id"] = targetEndpointID
 	}
 	if len(hosts) > 0 {
 		entry["host_count"] = map[string]int{
@@ -3048,6 +3203,7 @@ func localizedUserHandoffMessage(locale, surface string) string {
 
 func BuildStatus(opts StatusOptions) map[string]any {
 	ticketCode := strings.TrimSpace(opts.TicketCode)
+	now := time.Now().UTC()
 	locale := strings.TrimSpace(opts.Locale)
 	if locale == "" {
 		locale = "auto"
@@ -3057,7 +3213,23 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	stale := hostsByStatus(hosts, model.HostStatusStale)
 	pending := hostsByStatus(hosts, model.HostStatusPending)
 	revoked := hostsByStatus(hosts, model.HostStatusRevoked)
-	connected := len(active) > 0
+	ticketUsable := opts.Ticket == nil || (opts.Ticket.Status == model.TicketStatusActive && now.Before(opts.Ticket.ExpiresAt))
+	bindingValid := opts.Ticket == nil || opts.Session == nil || (opts.Ticket.SessionID == opts.Session.ID && opts.Session.SourceTicketID == opts.Ticket.ID && opts.Session.JoinCode == opts.Ticket.Code)
+	targetEndpoints := onlineTargetEndpoints(opts.Session, now)
+	if !ticketUsable || !bindingValid {
+		targetEndpoints = nil
+	}
+	sessionID := ""
+	if opts.Session != nil {
+		sessionID = opts.Session.ID
+	}
+	recommendedTargetEndpointID := ""
+	var recommendedTargetEndpoint *controlplane.Endpoint
+	if len(targetEndpoints) > 0 {
+		recommendedTargetEndpointID = targetEndpoints[0].ID
+		recommendedTargetEndpoint = &targetEndpoints[0]
+	}
+	connected := ticketUsable && (len(active) > 0 || recommendedTargetEndpointID != "")
 	preconnectSummary := targetPreconnectSummary(opts.Preconnects)
 	preconnectStatus, _ := preconnectSummary["status"].(string)
 	waiting := !connected && len(pending) == 0 && len(stale) == 0 && len(revoked) == 0 && preconnectStatus == ""
@@ -3073,28 +3245,39 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	} else if preconnectStatus != "" {
 		status = preconnectStatus
 	}
+	connectedSessionID := ""
+	if recommendedTargetEndpointID != "" {
+		connectedSessionID = sessionID
+	}
 	remoteControlEntry := BuildRemoteControlEntry(RemoteControlEntryOptions{
-		GatewayURL: opts.GatewayURL,
-		TicketCode: ticketCode,
-		Ticket:     opts.Ticket,
-		Hosts:      hosts,
-		Locale:     locale,
+		GatewayURL:       opts.GatewayURL,
+		TicketCode:       ticketCode,
+		Ticket:           opts.Ticket,
+		Hosts:            hosts,
+		Locale:           locale,
+		SessionID:        sessionID,
+		TargetEndpointID: recommendedTargetEndpointID,
 	})
 	out := map[string]any{
-		"schema_version":       StatusSchemaVersion,
-		"ok":                   connected || len(pending) > 0 || waiting || preconnectStatus != "",
-		"ticket_code":          ticketCode,
-		"status":               status,
-		"connected":            connected,
-		"waiting":              waiting,
-		"feedback":             localizedStatusFeedback(status, locale),
-		"next_action":          localizedStatusNextAction(status, locale),
-		"remote_control_entry": remoteControlEntry,
+		"schema_version":                 StatusSchemaVersion,
+		"ok":                             connected || len(pending) > 0 || waiting || preconnectStatus != "",
+		"ticket_code":                    ticketCode,
+		"status":                         status,
+		"connected":                      connected,
+		"session_id":                     sessionID,
+		"recommended_target_endpoint_id": recommendedTargetEndpointID,
+		"waiting":                        waiting,
+		"feedback":                       localizedStatusFeedback(status, locale),
+		"next_action":                    localizedStatusNextAction(status, locale),
+		"remote_control_entry":           remoteControlEntry,
 		"connected_next_steps": BuildConnectedNextSteps(ConnectedNextStepsOptions{
-			Status:     status,
-			Hosts:      active,
-			Locale:     locale,
-			GatewayURL: opts.GatewayURL,
+			Status:           status,
+			Hosts:            active,
+			Locale:           locale,
+			GatewayURL:       opts.GatewayURL,
+			SessionID:        connectedSessionID,
+			TargetEndpointID: recommendedTargetEndpointID,
+			TargetEndpoint:   recommendedTargetEndpoint,
 		}),
 		"connection_recovery": BuildConnectionRecovery(ConnectionRecoveryOptions{
 			Status:     status,
@@ -3133,7 +3316,6 @@ func BuildStatus(opts StatusOptions) map[string]any {
 	// Attach ticket expiry when the caller provides the ticket so agents and
 	// users can see how much time remains without having to infer it.
 	if opts.Ticket != nil {
-		now := time.Now().UTC()
 		remainingSec := int(opts.Ticket.ExpiresAt.Sub(now).Seconds())
 		if remainingSec < 0 {
 			remainingSec = 0
@@ -3143,6 +3325,26 @@ func BuildStatus(opts StatusOptions) map[string]any {
 		out["ticket_status"] = string(opts.Ticket.Status)
 	}
 	return out
+}
+
+func onlineTargetEndpoints(session *controlplane.Session, now time.Time) []controlplane.Endpoint {
+	if session == nil || session.Status == controlplane.SessionStatusClosed || session.Status == controlplane.SessionStatusFailed || session.Status == controlplane.SessionStatusRevoked {
+		return nil
+	}
+	endpoints := make([]controlplane.Endpoint, 0, len(session.Endpoints))
+	for _, endpoint := range session.Endpoints {
+		if endpoint.Role != controlplane.EndpointRoleTarget {
+			continue
+		}
+		if endpoint.LastSeenAt.IsZero() || endpoint.LastSeenAt.Before(now.Add(-supportSessionEndpointFreshAfter)) {
+			continue
+		}
+		switch endpoint.State {
+		case controlplane.EndpointStateOnline, controlplane.EndpointStateBusy, controlplane.EndpointStateDegraded:
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	return endpoints
 }
 
 func targetPreconnectSummary(preconnects []model.SupportSessionPreconnect) map[string]any {
@@ -3202,23 +3404,31 @@ func targetPreconnectAgentInterpretation(status string) string {
 }
 
 type ConnectedNextStepsOptions struct {
-	Status     string
-	Hosts      []model.Host
-	Locale     string
-	GatewayURL string
+	Status           string
+	Hosts            []model.Host
+	Locale           string
+	GatewayURL       string
+	SessionID        string
+	TargetEndpointID string
+	TargetEndpoint   *controlplane.Endpoint
 }
 
 func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
-	connected := opts.Status == "connected" && len(opts.Hosts) > 0
+	sessionID := strings.TrimSpace(opts.SessionID)
+	targetEndpointID := strings.TrimSpace(opts.TargetEndpointID)
 	hostID := ""
 	hostName := ""
 	capabilities := []string{}
-	if connected {
+	if len(opts.Hosts) > 0 {
 		host := opts.Hosts[0]
 		hostID = host.ID
 		hostName = host.Name
 		capabilities = append([]string(nil), host.Capabilities...)
+	} else if opts.TargetEndpoint != nil {
+		hostName = opts.TargetEndpoint.Name
+		capabilities = append([]string(nil), opts.TargetEndpoint.Capabilities...)
 	}
+	connected := opts.Status == "connected" && (hostID != "" || targetEndpointID != "")
 	report := "Connection established. I can see the target host and will keep the connector online until you explicitly ask me to disconnect, revoke, or stop it."
 	switch opts.Locale {
 	case "zh-CN", "zh":
@@ -3239,14 +3449,20 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	var mcpNextCalls any
 	var cliNextCommands any
 	if connected {
-		mcpNextCalls = connectedNextMCPCalls(hostID, opts.GatewayURL)
-		cliNextCommands = connectedNextCLICommands(hostID)
+		mcpSessionID := sessionID
+		if mcpSessionID == "" && hostID != "" {
+			mcpSessionID = "<session-id>"
+		}
+		mcpNextCalls = connectedNextMCPCalls(mcpSessionID, opts.GatewayURL)
+		cliNextCommands = connectedNextCLICommands(hostID, sessionID, targetEndpointID)
 	}
 	return map[string]any{
 		"schema_version":     ConnectedNextStepsSchemaVersion,
 		"connected":          connected,
 		"host_id":            hostID,
 		"host_name":          hostName,
+		"session_id":         sessionID,
+		"target_endpoint_id": targetEndpointID,
 		"capabilities":       capabilities,
 		"user_report":        report,
 		"agent_next_actions": actions,
@@ -3261,12 +3477,12 @@ func BuildConnectedNextSteps(opts ConnectedNextStepsOptions) map[string]any {
 	}
 }
 
-func connectedNextMCPCalls(hostID, gatewayURL string) []map[string]any {
-	if strings.TrimSpace(hostID) == "" {
+func connectedNextMCPCalls(sessionID, gatewayURL string) []map[string]any {
+	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
 	args := map[string]any{
-		"session_id": "<session-id>",
+		"session_id": sessionID,
 	}
 	if gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/"); gatewayURL != "" {
 		args["gateway_url"] = gatewayURL
@@ -3279,8 +3495,14 @@ func connectedNextMCPCalls(hostID, gatewayURL string) []map[string]any {
 	}
 }
 
-func connectedNextCLICommands(hostID string) [][]string {
-	if strings.TrimSpace(hostID) == "" {
+func connectedNextCLICommands(hostID, sessionID, targetEndpointID string) [][]string {
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" && strings.TrimSpace(targetEndpointID) != "" {
+		return [][]string{
+			{"rdev", "support-session", "audit-capabilities", "--gateway-url", "<active-gateway-url>", "--session-id", sessionID, "--target-endpoint-id", targetEndpointID},
+			{"rdev", "mcp", "serve", "--gateway-url", "<active-gateway-url>"},
+		}
+	}
+	if hostID = strings.TrimSpace(hostID); hostID == "" {
 		return nil
 	}
 	return [][]string{

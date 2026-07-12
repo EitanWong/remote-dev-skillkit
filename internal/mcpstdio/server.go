@@ -27,11 +27,32 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 	"github.com/EitanWong/remote-dev-skillkit/internal/update"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
 const protocolVersion = "2025-11-25"
+
+const configuredGatewayProviderID = "configured-gateway"
+
+const mcpProviderPolicyRestrictedKey = "\x00restricted"
+
+type mcpTunnelProviderPolicyFile struct {
+	AllowedProviderIDs    *[]string         `json:"allowed_provider_ids"`
+	DisabledProviderIDs   []string          `json:"disabled_provider_ids"`
+	RegionalEvidencePaths []string          `json:"regional_evidence_paths"`
+	SSHKnownHostsPaths    map[string]string `json:"ssh_known_hosts_paths"`
+}
+
+type mcpRegionalEvidenceSummary struct {
+	ProviderID string                `json:"provider_id"`
+	Region     tunnel.RegionProfile  `json:"region"`
+	Status     tunnel.EvidenceStatus `json:"status"`
+	ObservedAt time.Time             `json:"observed_at"`
+	ExpiresAt  time.Time             `json:"expires_at"`
+	Fresh      bool                  `json:"fresh"`
+}
 
 type Server struct {
 	Gateway *gateway.MemoryGateway
@@ -685,30 +706,253 @@ func (s Server) supportSessionConnect(args map[string]any) (any, error) {
 	if ttl < 60 || ttl > 86400 {
 		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
 	}
+	region, err := tunnelRegionArg(args)
+	if err != nil {
+		return nil, err
+	}
+	providerPolicy := strings.TrimSpace(stringArg(args, "provider_policy", ""))
+	allowDegraded := boolArg(args, "allow_degraded_direct_handoff", false)
 	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
 	if gatewayURL == "" {
 		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
 	}
-	if gatewayURL == "" {
-		rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
-		handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-			RepoRoot:     stringArg(args, "repo_root", "."),
-			WorkDir:      stringArg(args, "work_dir", ""),
-			Addr:         stringArg(args, "addr", "0.0.0.0:8787"),
-			Target:       stringArg(args, "target", "auto"),
-			Reason:       stringArg(args, "reason", "visible temporary remote support"),
-			TTLSeconds:   ttl,
-			AutoActivate: boolArg(args, "auto_activate", true),
-			Locale:       stringArg(args, "locale", "auto"),
-			RdevCommand:  rdevCommand,
-		})
-		return supportsession.BuildConnectFromHandoff(handoff), nil
-	}
-	created, err := s.createSupportSessionPayload(args, gatewayURL, ttl)
+	regionalEvidence, err := loadMCPRegionalEvidence(providerPolicy, region, time.Now().UTC(), gatewayURL != "")
 	if err != nil {
 		return nil, err
 	}
-	return supportsession.BuildConnectFromCreated(created), nil
+	foregroundPolicyPath := providerPolicy
+	if gatewayURL != "" {
+		foregroundPolicyPath = ""
+	}
+	rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
+	handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
+		RepoRoot:                   stringArg(args, "repo_root", "."),
+		WorkDir:                    stringArg(args, "work_dir", ""),
+		Addr:                       stringArg(args, "addr", "0.0.0.0:8787"),
+		GatewayURL:                 gatewayURL,
+		Target:                     stringArg(args, "target", "auto"),
+		Reason:                     stringArg(args, "reason", "visible temporary remote support"),
+		TTLSeconds:                 ttl,
+		AutoActivate:               boolArg(args, "auto_activate", true),
+		Locale:                     stringArg(args, "locale", "auto"),
+		RdevCommand:                rdevCommand,
+		Region:                     string(region),
+		ProviderPolicyPath:         foregroundPolicyPath,
+		AllowDegradedDirectHandoff: allowDegraded,
+		RequireForeground:          gatewayURL != "",
+	})
+	if nextArgs, ok := handoff["mcp_next_arguments"].(map[string]any); ok {
+		nextArgs["region"] = string(region)
+		if foregroundPolicyPath != "" {
+			nextArgs["provider_policy"] = foregroundPolicyPath
+		}
+		nextArgs["allow_degraded_direct_handoff"] = allowDegraded
+	}
+	readiness := supportsession.DirectAvailability(tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        region,
+	}, false)
+	payload := addTunnelReadinessAliases(supportsession.BuildConnectFromHandoff(handoff), readiness, regionalEvidence, providerPolicy != "")
+	if gatewayURL != "" {
+		payload["reason"] = "remote_ticket_and_probe_required"
+	}
+	return payload, nil
+}
+
+func tunnelRegionArg(args map[string]any) (tunnel.RegionProfile, error) {
+	region := tunnel.RegionProfile(strings.TrimSpace(stringArg(args, "region", string(tunnel.RegionGlobal))))
+	if region == "" {
+		region = tunnel.RegionGlobal
+	}
+	if region != tunnel.RegionGlobal && region != tunnel.RegionCNMainland {
+		return "", fmt.Errorf("unsupported tunnel region %q; use global or cn-mainland", region)
+	}
+	return region, nil
+}
+
+func addTunnelReadinessAliases(payload map[string]any, readiness supportsession.AvailabilityReadiness, evidence []mcpRegionalEvidenceSummary, providerPolicyApplied bool) map[string]any {
+	payload["availability_readiness"] = readiness
+	payload["availability_set"] = readiness.AvailabilitySet
+	payload["regional_evidence"] = evidence
+	payload["provider_policy_applied"] = providerPolicyApplied
+	payload["ready_to_send"] = readiness.ReadyToSend
+	payload["ready_to_send_human"] = readiness.ReadyToSend
+	payload["ready_to_send_to_human"] = readiness.ReadyToSend
+	payload["ready_to_activate"] = readiness.ReadyToActivate
+	payload["ready_to_execute"] = readiness.ReadyToExecute
+	payload["degraded_single_entry"] = readiness.DegradedSingleEntry
+	return payload
+}
+
+func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now time.Time, allowConfiguredGateway bool) ([]mcpRegionalEvidenceSummary, error) {
+	policyPath = strings.TrimSpace(policyPath)
+	if policyPath == "" {
+		return []mcpRegionalEvidenceSummary{}, nil
+	}
+	var policy mcpTunnelProviderPolicyFile
+	if err := tunnel.ReadProtectedJSONFile(policyPath, &policy); err != nil {
+		return nil, fmt.Errorf("decode provider policy: %w", err)
+	}
+	knownProviders := knownMCPProviderIDs(allowConfiguredGateway)
+	allowed, disabled, err := validateMCPProviderPolicy(policy, knownProviders)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]mcpRegionalEvidenceSummary, 0)
+	for _, evidencePath := range policy.RegionalEvidencePaths {
+		evidencePath = strings.TrimSpace(evidencePath)
+		if evidencePath == "" {
+			return nil, fmt.Errorf("provider policy contains an empty regional evidence path")
+		}
+		var evidenceData json.RawMessage
+		if err := tunnel.ReadProtectedJSONFile(evidencePath, &evidenceData); err != nil {
+			return nil, fmt.Errorf("read regional evidence: %w", err)
+		}
+		values, err := decodeMCPRegionalEvidence(evidenceData)
+		if err != nil {
+			return nil, fmt.Errorf("decode regional evidence: %w", err)
+		}
+		for _, item := range values {
+			if !knownProviders[item.ProviderID] {
+				return nil, fmt.Errorf("regional evidence references unknown provider %q", item.ProviderID)
+			}
+			if err := item.Validate(); err != nil {
+				return nil, fmt.Errorf("validate regional evidence: %w", err)
+			}
+			if item.Region != region || !mcpPolicyAllowsProvider(item.ProviderID, allowed, disabled) {
+				continue
+			}
+			summaries = append(summaries, mcpRegionalEvidenceSummary{
+				ProviderID: item.ProviderID,
+				Region:     item.Region,
+				Status:     item.Status,
+				ObservedAt: item.ObservedAt,
+				ExpiresAt:  item.ExpiresAt,
+				Fresh:      !item.ObservedAt.After(now) && item.ExpiresAt.After(now),
+			})
+		}
+	}
+	return summaries, nil
+}
+
+func knownMCPProviderIDs(allowConfiguredGateway bool) map[string]bool {
+	known := make(map[string]bool, len(tunnel.CanonicalProviderIDs())+1)
+	for _, id := range tunnel.CanonicalProviderIDs() {
+		known[id] = true
+	}
+	if allowConfiguredGateway {
+		known[configuredGatewayProviderID] = true
+	}
+	return known
+}
+
+func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile, known map[string]bool) (map[string]bool, map[string]bool, error) {
+	allowedCount := 0
+	if policy.AllowedProviderIDs != nil {
+		allowedCount = len(*policy.AllowedProviderIDs)
+	}
+	allowed := make(map[string]bool, allowedCount+1)
+	disabled := make(map[string]bool, len(policy.DisabledProviderIDs))
+	allowedValues := []string(nil)
+	if policy.AllowedProviderIDs != nil {
+		allowed[mcpProviderPolicyRestrictedKey] = true
+		allowedValues = *policy.AllowedProviderIDs
+	}
+	for label, values := range map[string][]string{
+		"allowed_provider_ids":  allowedValues,
+		"disabled_provider_ids": policy.DisabledProviderIDs,
+	} {
+		target := allowed
+		if label == "disabled_provider_ids" {
+			target = disabled
+		}
+		for _, value := range values {
+			id := strings.TrimSpace(value)
+			if id != value {
+				return nil, nil, fmt.Errorf("provider policy %s contains non-canonical provider %q", label, value)
+			}
+			if id == "" {
+				return nil, nil, fmt.Errorf("provider policy %s contains an empty provider ID", label)
+			}
+			if target[id] {
+				return nil, nil, fmt.Errorf("provider policy %s contains duplicate provider %q", label, id)
+			}
+			if !known[id] {
+				return nil, nil, fmt.Errorf("provider policy %s references unknown provider %q", label, id)
+			}
+			target[id] = true
+		}
+	}
+	for id := range allowed {
+		if disabled[id] {
+			return nil, nil, fmt.Errorf("provider policy lists provider %q as both allowed and disabled", id)
+		}
+	}
+	for id, path := range policy.SSHKnownHostsPaths {
+		if strings.TrimSpace(id) == "" || strings.TrimSpace(path) == "" {
+			return nil, nil, fmt.Errorf("provider policy ssh_known_hosts_paths requires non-empty provider IDs and paths")
+		}
+		if !known[strings.TrimSpace(id)] {
+			return nil, nil, fmt.Errorf("provider policy ssh_known_hosts_paths references unknown provider %q", id)
+		}
+	}
+	return allowed, disabled, nil
+}
+
+func mcpPolicyAllowsProvider(providerID string, allowed, disabled map[string]bool) bool {
+	if disabled[providerID] {
+		return false
+	}
+	if allowed[mcpProviderPolicyRestrictedKey] {
+		return allowed[providerID]
+	}
+	return len(allowed) == 0 || allowed[providerID]
+}
+
+func decodeMCPRegionalEvidence(data []byte) ([]tunnel.RegionalEvidence, error) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("regional evidence is empty")
+	}
+	if bytes.TrimSpace(data)[0] == '[' {
+		var values []tunnel.RegionalEvidence
+		if err := decodeStrictMCPJSON(data, &values); err != nil {
+			return nil, err
+		}
+		return values, nil
+	}
+	var value tunnel.RegionalEvidence
+	if err := decodeStrictMCPJSON(data, &value); err != nil {
+		return nil, err
+	}
+	return []tunnel.RegionalEvidence{value}, nil
+}
+
+func decodeStrictMCPJSON(data []byte, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("trailing JSON value is not allowed")
+		}
+		return err
+	}
+	return nil
+}
+
+func availabilityReadinessFromCreated(created map[string]any) supportsession.AvailabilityReadiness {
+	encoded, err := json.Marshal(created["availability_readiness"])
+	if err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	var readiness supportsession.AvailabilityReadiness
+	if err := json.Unmarshal(encoded, &readiness); err != nil {
+		return supportsession.AvailabilityReadiness{}
+	}
+	return readiness
 }
 
 func (s Server) updateCheck(args map[string]any) (any, error) {
@@ -788,6 +1032,10 @@ func (s Server) supportSessionCreate(args map[string]any) (any, error) {
 
 func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL string, ttl int) (map[string]any, error) {
 	autoActivate := boolArg(args, "auto_activate", true)
+	region, err := tunnelRegionArg(args)
+	if err != nil {
+		return nil, err
+	}
 	gatewayCandidates := supportsession.GatewayURLCandidatesFromIPs("0.0.0.0:8787", gatewayURL, nil)
 	metadata := map[string]string{
 		"connection_entry":    "standard-visible",
@@ -809,6 +1057,15 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 	}
 	joinURL := strings.TrimRight(gatewayURL, "/") + "/join/" + ticket.Code
 	manifestURL := strings.TrimRight(gatewayURL, "/") + "/v1/tickets/" + ticket.Code + "/manifest"
+	availabilitySet := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        region,
+		Candidates: []tunnel.Candidate{{
+			ProviderID: configuredGatewayProviderID,
+			URL:        gatewayURL,
+		}},
+	}
+	readiness := supportsession.DirectAvailability(availabilitySet, boolArg(args, "allow_degraded_direct_handoff", false))
 	return supportsession.BuildCreated(supportsession.CreatedOptions{
 		GatewayURL:            gatewayURL,
 		GatewayURLCandidates:  gatewayCandidates,
@@ -820,6 +1077,7 @@ func (s Server) createSupportSessionPayload(args map[string]any, gatewayURL stri
 		Locale:                stringArg(args, "locale", "auto"),
 		RdevCommand:           agentRdevCommand(stringArg(args, "rdev_command", "")),
 		AutoActivate:          autoActivate,
+		AvailabilityReadiness: readiness,
 	}), nil
 }
 
@@ -898,13 +1156,27 @@ func (s Server) supportSessionStatus(args map[string]any) (any, error) {
 	}
 	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
 	for {
-		status := supportsession.BuildStatus(supportsession.StatusOptions{
+		ticket, ticketFound := s.Gateway.TicketForCode(ticketCode)
+		var boundSession *controlplane.Session
+		if ticketFound && ticket.SessionID != "" {
+			session, err := s.Gateway.Session(ticket.SessionID)
+			if err != nil || session.SourceTicketID != ticket.ID || session.JoinCode != ticket.Code {
+				return nil, fmt.Errorf("support session binding is invalid")
+			}
+			boundSession = &session
+		}
+		statusOpts := supportsession.StatusOptions{
 			TicketCode:  ticketCode,
 			Hosts:       s.Gateway.HostsForTicketCode(ticketCode, ""),
+			Session:     boundSession,
 			Locale:      stringArg(args, "locale", "auto"),
 			GatewayURL:  s.effectiveGatewayURL(args),
 			Preconnects: s.Gateway.SupportSessionPreconnects(ticketCode),
-		})
+		}
+		if ticketFound {
+			statusOpts.Ticket = &ticket
+		}
+		status := supportsession.BuildStatus(statusOpts)
 		if !wait || status["connected"] == true || status["status"] == "pending-activation" {
 			return status, nil
 		}
@@ -944,6 +1216,7 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 	gatewayURL := s.effectiveGatewayURL(args)
 	hostID := strings.TrimSpace(stringArg(args, "host_id", ""))
 	sessionID := strings.TrimSpace(stringArg(args, "session_id", ""))
+	targetEndpointID := strings.TrimSpace(stringArg(args, "target_endpoint_id", ""))
 	ticketCode := strings.TrimSpace(stringArg(args, "ticket_code", ""))
 	var status map[string]any
 	activeHosts := []map[string]any{}
@@ -961,12 +1234,26 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 			return nil, err
 		}
 		status = nestedMapOrSelfAny(statusAny, "")
+		boundSessionID := strings.TrimSpace(stringMapValue(status, "session_id"))
+		boundTargetEndpointID := strings.TrimSpace(stringMapValue(status, "recommended_target_endpoint_id"))
+		if boundSessionID != "" {
+			if sessionID != "" && sessionID != boundSessionID {
+				return nil, fmt.Errorf("explicit session_id does not match the ticket binding")
+			}
+			sessionID = boundSessionID
+		}
+		if boundTargetEndpointID != "" {
+			if targetEndpointID != "" && targetEndpointID != boundTargetEndpointID {
+				return nil, fmt.Errorf("explicit target_endpoint_id does not match the ticket binding")
+			}
+			targetEndpointID = boundTargetEndpointID
+		}
 		activeHosts = mapSliceFromAny(status["active_hosts"])
 		if hostID == "" {
 			if len(activeHosts) == 1 {
 				hostID = stringMapValue(activeHosts[0], "id")
 				selectedHost = activeHosts[0]
-			} else {
+			} else if sessionID == "" || targetEndpointID == "" {
 				nextAction := "No active target endpoint is ready for this ticket. Wait with rdev.support_session.status or run recovery if stale endpoints are present."
 				if len(activeHosts) > 1 {
 					nextAction = "Multiple active targets are registered for this ticket; choose the intended session_id or target_endpoint_id before sending tasks."
@@ -1021,7 +1308,11 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 			return nil, err
 		}
 		tasks = mcpTaskReportsFromSnapshot(snapshot)
-		host = mcpEnrichHostMapFromEndpoint(host, mcpTargetEndpointFromSnapshot(snapshot, stringArg(args, "target_endpoint_id", "")))
+		endpoint := mcpTargetEndpointFromSnapshot(snapshot, targetEndpointID)
+		if targetEndpointID == "" {
+			targetEndpointID = stringMapValue(endpoint, "id")
+		}
+		host = mcpEnrichHostMapFromEndpoint(host, endpoint)
 	}
 	report := map[string]any{
 		"schema_version":        "rdev.support-session-report.v1",
@@ -1036,17 +1327,18 @@ func (s Server) supportSessionReport(args map[string]any) (any, error) {
 			TicketCode:       ticketCode,
 			HostID:           hostID,
 			SessionID:        sessionID,
-			TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+			TargetEndpointID: targetEndpointID,
 		}),
-		"ticket_code":     ticketCode,
-		"host_id":         hostID,
-		"session_id":      sessionID,
-		"host":            host,
-		"session":         snapshot,
-		"tasks":           tasks,
-		"human_report":    supportSessionHumanReportMap(host, tasks),
-		"next_action":     "Use rdev.sessions.task/events/artifacts for scoped work; keep the connection alive until the operator explicitly requests disconnect or revocation.",
-		"stale_host_rule": "Do not send new session tasks to stale endpoints; run recovery or create a fresh session if no target endpoint is online.",
+		"ticket_code":        ticketCode,
+		"host_id":            hostID,
+		"session_id":         sessionID,
+		"target_endpoint_id": targetEndpointID,
+		"host":               host,
+		"session":            snapshot,
+		"tasks":              tasks,
+		"human_report":       supportSessionHumanReportMap(host, tasks),
+		"next_action":        "Use rdev.sessions.task/events/artifacts for scoped work; keep the connection alive until the operator explicitly requests disconnect or revocation.",
+		"stale_host_rule":    "Do not send new session tasks to stale endpoints; run recovery or create a fresh session if no target endpoint is online.",
 	}
 	if status != nil {
 		report["status"] = status

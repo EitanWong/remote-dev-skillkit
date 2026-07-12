@@ -20,12 +20,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,6 +36,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
@@ -42,12 +45,267 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
+	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
+	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+func TestJoinSessionByCodePermanentProtocolRejectionUsesExitCode78(t *testing.T) {
+	err := cliJoinSessionResponseError(t, http.StatusNotFound, `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The support-session entry is invalid or no longer active.","agent_next_action":"create a fresh support-session entry"}}`)
+	if got := hostcmd.ExitCode(err); got != hostcmd.PermanentJoinFailureExitCode {
+		t.Fatalf("ExitCode() = %d, want %d for %v", got, hostcmd.PermanentJoinFailureExitCode, err)
+	}
+}
+
+func TestJoinSessionByCodeRecoverableProtocolRejectionUsesExitCode1(t *testing.T) {
+	err := cliJoinSessionResponseError(t, http.StatusServiceUnavailable, `{"error":{"schema_version":"rdev.error.v1","code":"gateway_unavailable","message":"gateway is temporarily unavailable","recoverable":true,"retry_after_ms":1000,"user_summary":"The gateway is temporarily unavailable.","agent_next_action":"retry after the suggested delay"}}`)
+	if got := hostcmd.ExitCode(err); got != 1 {
+		t.Fatalf("ExitCode() = %d, want 1 for %v", got, err)
+	}
+}
+
+func TestFullHostRunSessionTaskRejectsCapabilityOutsideSignedManifestBeforeAdapter(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "must-not-exist")
+	resultPayload := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		resultPayload <- payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"task":{},"event":{}}`)
+	}))
+	defer server.Close()
+
+	app := NewApp(io.Discard, io.Discard)
+	err := app.runSessionTask(context.Background(), hostServeOptions{
+		GatewayURL:           server.URL,
+		CapabilityCeiling:    []string{"fs.read.scoped"},
+		CapabilityCeilingSet: true,
+	}, server.Client(), "ses_test", "end_test", "fp-test", "lease-test", controlplane.Task{
+		ID:               "task_test",
+		AttemptID:        "attempt_test",
+		TargetEndpointID: "end_test",
+		Adapter:          "shell",
+		Capabilities:     []string{"shell.user"},
+		Payload: map[string]any{
+			"workspace_root": filepath.Dir(marker),
+			"argv":           []any{"sh", "-c", "touch " + marker},
+			"allow_commands": []any{"sh"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("full rdev adapter ran outside signed capability ceiling: %v", err)
+	}
+	payload := <-resultPayload
+	if payload["status"] != string(controlplane.TaskStatusFailed) || !strings.Contains(fmt.Sprint(payload["reason"]), "signed join manifest ceiling") {
+		t.Fatalf("full rdev capability denial was not reported as a failed task: %#v", payload)
+	}
+}
+
+func cliJoinSessionResponseError(t *testing.T, statusCode int, body string) error {
+	t.Helper()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: statusCode,
+			Status:     fmt.Sprintf("%d test response", statusCode),
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})}
+	_, _, _, _, err := joinSessionByCode(context.Background(), client, "https://gateway.example.test", "WAIT-1234", controlplane.EndpointSpec{
+		Role: controlplane.EndpointRoleTarget,
+		Name: "windows-target",
+	})
+	if err == nil {
+		t.Fatal("joinSessionByCode() error = nil, want protocol rejection")
+	}
+	return err
+}
+
+type synchronizedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+type recordingStateStore struct {
+	mu             sync.Mutex
+	snapshots      []gateway.Snapshot
+	failSaves      int
+	failAfterWrite int
+}
+
+func (s *recordingStateStore) LoadInto(gw *gateway.MemoryGateway) (gateway.Snapshot, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.snapshots) == 0 {
+		return gateway.Snapshot{}, false, nil
+	}
+	snapshot := s.snapshots[len(s.snapshots)-1]
+	if err := gw.RestoreSnapshot(snapshot); err != nil {
+		return gateway.Snapshot{}, false, err
+	}
+	return snapshot, true, nil
+}
+
+func (s *recordingStateStore) SaveFrom(gw *gateway.MemoryGateway) (gateway.Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot := gw.Snapshot()
+	if s.failSaves > 0 {
+		s.failSaves--
+		return gateway.Snapshot{}, errors.New("injected state save failure")
+	}
+	s.snapshots = append(s.snapshots, snapshot)
+	if s.failAfterWrite > 0 {
+		s.failAfterWrite--
+		return gateway.Snapshot{}, errors.New("injected ambiguous state save failure")
+	}
+	return snapshot, nil
+}
+
+func (s *recordingStateStore) Describe() string { return "recording" }
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+type panicWriter struct{}
+
+func (panicWriter) Write([]byte) (int, error) { panic("injected stdout panic") }
+
+type ambiguousRollbackStore struct {
+	calls   int
+	durable []gateway.Snapshot
+}
+
+func (s *ambiguousRollbackStore) LoadInto(gw *gateway.MemoryGateway) (gateway.Snapshot, bool, error) {
+	if len(s.durable) == 0 {
+		return gateway.Snapshot{}, false, nil
+	}
+	snapshot := s.durable[len(s.durable)-1]
+	return snapshot, true, gw.RestoreSnapshot(snapshot)
+}
+
+func (s *ambiguousRollbackStore) SaveFrom(gw *gateway.MemoryGateway) (gateway.Snapshot, error) {
+	s.calls++
+	snapshot := gw.Snapshot()
+	switch s.calls {
+	case 1:
+		s.durable = append(s.durable, snapshot)
+		return gateway.Snapshot{}, errors.New("ambiguous active save")
+	case 2:
+		return gateway.Snapshot{}, errors.New("rollback save unavailable")
+	default:
+		s.durable = append(s.durable, snapshot)
+		return snapshot, nil
+	}
+}
+
+func (*ambiguousRollbackStore) Describe() string { return "ambiguous-rollback" }
+
+func (b *synchronizedBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(data)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type supportSessionTestTunnelProvider struct{}
+
+func (supportSessionTestTunnelProvider) ID() string { return "ordered-test" }
+
+func (supportSessionTestTunnelProvider) Metadata() tunnel.ProviderMetadata {
+	return tunnel.ProviderMetadata{
+		ID: "ordered-test", DisplayName: "ordered test", Protocols: []string{"https"},
+		Anonymous: true, Executable: "test", DocumentationURL: "https://example.test/docs", DefaultAutomatic: true,
+	}
+}
+
+func (supportSessionTestTunnelProvider) Start(context.Context, tunnel.StartRequest) (tunnel.Handle, error) {
+	return newSupportSessionTestTunnelHandle(tunnel.Candidate{ProviderID: "ordered-test", URL: "https://ordered.example.test"}), nil
+}
+
+type supportSessionTestTunnelHandle struct {
+	candidate tunnel.Candidate
+	wait      chan error
+	stopOnce  sync.Once
+}
+
+func newSupportSessionTestTunnelHandle(candidate tunnel.Candidate) *supportSessionTestTunnelHandle {
+	return &supportSessionTestTunnelHandle{candidate: candidate, wait: make(chan error, 1)}
+}
+
+func (h *supportSessionTestTunnelHandle) Candidate() tunnel.Candidate { return h.candidate }
+func (h *supportSessionTestTunnelHandle) Wait() <-chan error          { return h.wait }
+func (h *supportSessionTestTunnelHandle) Stop(context.Context) error {
+	h.stopOnce.Do(func() { close(h.wait) })
+	return nil
+}
+
+type supportSessionFuncTunnelProvider struct {
+	id           string
+	url          string
+	metadata     *tunnel.ProviderMetadata
+	start        func() error
+	startRequest func(tunnel.StartRequest) error
+	stop         func()
+}
+
+func (p supportSessionFuncTunnelProvider) ID() string { return p.id }
+func (p supportSessionFuncTunnelProvider) Metadata() tunnel.ProviderMetadata {
+	if p.metadata != nil {
+		metadata := *p.metadata
+		metadata.Protocols = append([]string(nil), p.metadata.Protocols...)
+		return metadata
+	}
+	return tunnel.ProviderMetadata{
+		ID: p.id, DisplayName: p.id, Protocols: []string{"https"}, Anonymous: true,
+		Executable: "test", DocumentationURL: "https://example.test/docs", DefaultAutomatic: true,
+	}
+}
+func (p supportSessionFuncTunnelProvider) Start(_ context.Context, request tunnel.StartRequest) (tunnel.Handle, error) {
+	if p.start != nil {
+		if err := p.start(); err != nil {
+			return nil, err
+		}
+	}
+	if p.startRequest != nil {
+		if err := p.startRequest(request); err != nil {
+			return nil, err
+		}
+	}
+	handle := newSupportSessionTestTunnelHandle(tunnel.Candidate{ProviderID: p.id, URL: p.url})
+	if p.stop == nil {
+		return handle, nil
+	}
+	return &supportSessionStopCallbackHandle{supportSessionTestTunnelHandle: handle, stop: p.stop}, nil
+}
+
+type supportSessionStopCallbackHandle struct {
+	*supportSessionTestTunnelHandle
+	stop     func()
+	callback sync.Once
+}
+
+func (h *supportSessionStopCallbackHandle) Stop(ctx context.Context) error {
+	h.callback.Do(h.stop)
+	return h.supportSessionTestTunnelHandle.Stop(ctx)
 }
 
 func TestVersion(t *testing.T) {
@@ -1262,13 +1520,21 @@ echo 'abc123.lhr.life tunneled with tls termination, https://abc123.lhr.life'
 	}
 	t.Setenv("PATH", binDir)
 
-	tunnelURL, cancel, err := startLocalhostRunTunnel(context.Background(), io.Discard, "8787")
-	defer cancel()
+	knownHostsRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tunnelURL != "https://abc123.lhr.life" {
-		t.Fatalf("expected assigned tunnel URL, got %q", tunnelURL)
+	knownHostsPath := filepath.Join(knownHostsRoot, "known_hosts")
+	if err := os.WriteFile(knownHostsPath, []byte("localhost.run ssh-ed25519 dGVzdA==\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started, err := startLocalhostRunTunnel(context.Background(), io.Discard, "8787", knownHostsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer started.cancel()
+	if started.URL != "https://abc123.lhr.life" {
+		t.Fatalf("expected assigned tunnel URL, got %q", started.URL)
 	}
 }
 
@@ -1318,12 +1584,316 @@ func TestConfiguredCloudflaredStableTunnelConfigUsesNamedURLAndRedactsToken(t *t
 	}
 }
 
+func TestRedactCloudflaredArgvUsesStructuralAllowlist(t *testing.T) {
+	argv := []string{
+		`C:\Users\Alice\bin\cloudflared.exe`, "tunnel", "--protocol=HTTP2",
+		`--url=https://user:password@[2001:db8::5]/?token=query-secret`, "run",
+		"--token=secret-token", "--credentials-contents", `{"TunnelSecret":"secret-json"}`,
+		"--token-file", `C:\Users\Alice\.cloudflared\token.txt`,
+		"--credentials-file=/Users/alice/.cloudflared/creds.json",
+		"--config", `/Users/alice/.cloudflared/config.yml`,
+		"--origincert=/Users/alice/.cloudflared/cert.pem",
+		"--unknown=unknown-secret", "sensitive-tunnel-name",
+	}
+	original := slices.Clone(argv)
+	got := redactCloudflaredArgv(argv)
+	want := []string{
+		"cloudflared.exe", "tunnel", "--protocol", "http2", "--url", "<local-url>", "run",
+		"--token", "<redacted>", "--credentials-contents", "<redacted>",
+		"--token-file", "<path>", "--credentials-file", "<path>", "--config", "<path>",
+		"--origincert", "<path>", "<option>", "<argument>",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("redactCloudflaredArgv() = %#v, want %#v", got, want)
+	}
+	if !slices.Equal(argv, original) {
+		t.Fatalf("redaction mutated execution argv: got %#v want %#v", argv, original)
+	}
+	preview := strings.Join(got, " ")
+	for _, forbidden := range []string{
+		"Alice", "password", "2001:db8", "query-secret", "secret-token", "secret-json",
+		"token.txt", "creds.json", "config.yml", "cert.pem", "unknown-secret", "sensitive-tunnel-name",
+	} {
+		if strings.Contains(preview, forbidden) {
+			t.Fatalf("argv preview leaked %q: %q", forbidden, preview)
+		}
+	}
+}
+
+func TestRedactCloudflaredArgvUsesSeparatorNeutralExecutableBase(t *testing.T) {
+	for _, path := range []string{
+		"/usr/local/bin/cloudflared",
+		`C:\Program Files\cloudflared\cloudflared.exe`,
+		`\\server\share\cloudflared.exe`,
+		`C:\mixed/path\cloudflared.exe`,
+	} {
+		preview := redactCloudflaredArgv([]string{path})
+		if len(preview) != 1 || (preview[0] != "cloudflared" && preview[0] != "cloudflared.exe") {
+			t.Fatalf("portable executable preview for %q = %#v", path, preview)
+		}
+	}
+}
+
+func TestConfiguredStableTunnelDoesNotForwardProviderOutput(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "secret-block")
+	var stderr synchronizedBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	startedURL, stop, err := startConfiguredCloudflaredStableTunnel(ctx, &stderr, cloudflaredStableTunnelConfig{
+		GatewayURL: "https://stable.example.test",
+		ProviderID: "cloudflared-named",
+		Argv:       []string{os.Args[0], "-test.run=TestTunnelHelperProcess"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	if startedURL != "https://stable.example.test" {
+		t.Fatalf("stable URL = %q", startedURL)
+	}
+	logged := stderr.String()
+	for _, forbidden := range []string{
+		"cf-secret", "ABCD-1234", "203.0.113.9", "2001:db8::9", "/Users/alice/private/creds.json",
+		"query-secret", "https://abc.trycloudflare.com", "cloudflare-stable",
+	} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("stable provider output sentinel %q leaked: %q", forbidden, logged)
+		}
+	}
+	expectedCandidateID := tunnel.CandidateID("cloudflared-named", startedURL)
+	if !strings.Contains(logged, `"provider_id":"cloudflared-named"`) ||
+		!strings.Contains(logged, `"candidate_id":"`+expectedCandidateID+`"`) {
+		t.Fatalf("stable provider lifecycle identity did not match availability identity: %q", logged)
+	}
+}
+
 func TestConfiguredCloudflaredStableTunnelConfigRejectsShellWrapper(t *testing.T) {
 	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
 	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON", `["sh","-c","cloudflared tunnel run"]`)
 
 	if _, ok, err := configuredCloudflaredStableTunnelConfig("/usr/local/bin/cloudflared", "http://127.0.0.1:8787"); !ok || err == nil {
 		t.Fatalf("expected configured unsafe cloudflared argv to be rejected, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestParseCloudflaredStableStartArgvAllowsOnlyForegroundTunnelRun(t *testing.T) {
+	localURL := "http://127.0.0.1:8787"
+	for _, raw := range []string{
+		`["cloudflared","tunnel","--protocol","http2","--url","{local_url}","run","prod"]`,
+		`["cloudflared","tunnel","--protocol","auto","--url","{local_url}","run","prod"]`,
+		`["cloudflared","tunnel","--protocol","quic","--url","{local_url}","run","prod"]`,
+		`["cloudflared","tunnel","--protocol=http2","--url={{local_url}}","run","--token=secret"]`,
+		`["cloudflared.exe","tunnel","--url","$RDEV_LOCAL_URL","run","--token-file","token.txt"]`,
+	} {
+		if _, err := parseCloudflaredStableStartArgv(raw, "RDEV_TEST_ARGV", localURL); err != nil {
+			t.Fatalf("safe foreground tunnel argv rejected: raw=%s err=%v", raw, err)
+		}
+	}
+
+	for _, raw := range []string{
+		`["cloudflared","service","install"]`,
+		`["cloudflared","tunnel","delete","prod"]`,
+		`["cloudflared","tunnel","--url","http://127.0.0.1:9999","run","prod"]`,
+		`["cloudflared","tunnel","--url","{local_url}"]`,
+		`["cloudflared","tunnel","--url","{local_url}","run"]`,
+		`["cloudflared","tunnel","--url","{local_url}","run","prod","extra"]`,
+		`["cloudflared","tunnel","--url","{local_url}","--config","secret.yml","run","prod"]`,
+		`["cloudflared","tunnel","--protocol","h3","--url","{local_url}","run","prod"]`,
+		`["cloudflared","tunnel","--url=","run","prod"]`,
+		`["cloudflared","tunnel","--url","{local_url}","run","--token="]`,
+		`["cloudflared","tunnel","--url","{local_url}","run","--token"]`,
+	} {
+		if argv, err := parseCloudflaredStableStartArgv(raw, "RDEV_TEST_ARGV", localURL); err == nil {
+			t.Fatalf("unsafe or non-foreground argv accepted: %#v", argv)
+		}
+	}
+}
+
+func TestParseCloudflaredStableStartArgvRejectsMalformedBoundaries(t *testing.T) {
+	for _, raw := range []string{
+		`{`,
+		`[]`,
+		`["cloudflared",""]`,
+		"[\"cloudflared\",\"tunnel\\nrun\"]",
+		`["not-cloudflared","tunnel","--url","{local_url}","run","prod"]`,
+	} {
+		if argv, err := parseCloudflaredStableStartArgv(raw, "RDEV_TEST_ARGV", "http://127.0.0.1:8787"); err == nil {
+			t.Fatalf("malformed argv accepted: %#v", argv)
+		}
+	}
+}
+
+func TestExpandCloudflaredStartArgReplacesLongestMarkersFirst(t *testing.T) {
+	localURL := "http://127.0.0.1:8787"
+	for index := 0; index < 100; index++ {
+		for _, input := range []string{"{{local_url}}", "${RDEV_LOCAL_URL}"} {
+			if got := expandCloudflaredStartArg(input, localURL); got != localURL {
+				t.Fatalf("expandCloudflaredStartArg(%q) = %q", input, got)
+			}
+		}
+	}
+}
+
+func TestConfiguredCloudflaredStableTunnelConfigRequiresCanonicalHTTPSOrigin(t *testing.T) {
+	for _, rawURL := range []string{
+		"http://rdev.example.test",
+		"https://user:password@rdev.example.test",
+		"https://rdev.example.test:8443",
+		"https://rdev.example.test/private",
+		"https://rdev.example.test/?token=query-secret",
+		"https://rdev.example.test/#fragment-secret",
+		"https://*.example.test",
+		"https://a..example.test",
+		"https://" + strings.Repeat("a", 64) + ".example.test",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", rawURL)
+			t.Setenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN", "secret-token")
+			if _, ok, err := configuredCloudflaredStableTunnelConfig("/usr/local/bin/cloudflared", "http://127.0.0.1:8787"); !ok || err == nil {
+				t.Fatalf("credential-bearing or non-origin URL accepted: ok=%v err=%v", ok, err)
+			}
+		})
+	}
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://RDEV.EXAMPLE.TEST/")
+	t.Setenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN", "secret-token")
+	cfg, ok, err := configuredCloudflaredStableTunnelConfig("/usr/local/bin/cloudflared", "http://127.0.0.1:8787")
+	if err != nil || !ok || cfg.GatewayURL != "https://rdev.example.test" || cfg.ProviderID != "cloudflared-named" {
+		t.Fatalf("canonical stable URL = %#v ok=%v err=%v", cfg, ok, err)
+	}
+}
+
+func TestGatewayProviderIDMatchesCanonicalOrigins(t *testing.T) {
+	candidates := []supportsession.GatewayURLCandidate{{
+		Kind: "cloudflared-named", URL: "https://RDEV.EXAMPLE.TEST/",
+	}}
+	if got := gatewayProviderID(candidates, "https://rdev.example.test"); got != "cloudflared-named" {
+		t.Fatalf("gatewayProviderID() = %q", got)
+	}
+	for _, rawURL := range []string{
+		"https://different.example.test",
+		"https://rdev.example.test/private",
+		"https://rdev.example.test/?token=secret",
+	} {
+		if got := gatewayProviderID(candidates, rawURL); got != "explicit" {
+			t.Fatalf("gatewayProviderID(%q) = %q", rawURL, got)
+		}
+	}
+}
+
+func TestConfiguredCloudflaredStableTunnelConfigUsesURLSourceProviderID(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		namedURL   string
+		gatewayURL string
+		providerID string
+	}{
+		{name: "named", namedURL: "HTTPS://NAMED.EXAMPLE.TEST/", providerID: "cloudflared-named"},
+		{name: "gateway", gatewayURL: "HTTPS://GATEWAY.EXAMPLE.TEST/", providerID: "cloudflared"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", testCase.namedURL)
+			t.Setenv("RDEV_CLOUDFLARED_GATEWAY_URL", testCase.gatewayURL)
+			t.Setenv("RDEV_CLOUDFLARED_TUNNEL_TOKEN", "secret-token")
+			cfg, ok, err := configuredCloudflaredStableTunnelConfig("cloudflared", "http://127.0.0.1:8787")
+			if err != nil || !ok || cfg.ProviderID != testCase.providerID {
+				t.Fatalf("configured provider identity = %#v ok=%v err=%v", cfg, ok, err)
+			}
+		})
+	}
+}
+
+func TestConfiguredCloudflaredStableTunnelConfigSupportsOnlyReviewedStartModes(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		envName  string
+		envValue string
+		mode     string
+	}{
+		{name: "reviewed argv", envName: "RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON", envValue: `["cloudflared","tunnel","--url","{local_url}","run","prod"]`, mode: "configured-start-argv"},
+		{name: "token file", envName: "RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE", envValue: "token.txt", mode: "token-file"},
+		{name: "tunnel name", envName: "RDEV_CLOUDFLARED_TUNNEL_NAME", envValue: "prod", mode: "named-tunnel"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			for _, name := range []string{
+				"RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON", "RDEV_CLOUDFLARED_START_ARGV_JSON",
+				"RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE", "RDEV_CLOUDFLARED_TUNNEL_TOKEN", "RDEV_CLOUDFLARED_TUNNEL_NAME",
+			} {
+				t.Setenv(name, "")
+			}
+			t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://rdev.example.test")
+			t.Setenv(testCase.envName, testCase.envValue)
+			cfg, ok, err := configuredCloudflaredStableTunnelConfig("cloudflared", "http://127.0.0.1:8787")
+			if err != nil || !ok || cfg.Mode != testCase.mode {
+				t.Fatalf("configured mode = %#v ok=%v err=%v", cfg, ok, err)
+			}
+		})
+	}
+
+	for _, name := range []string{
+		"RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "RDEV_CLOUDFLARED_GATEWAY_URL",
+		"RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON", "RDEV_CLOUDFLARED_START_ARGV_JSON",
+		"RDEV_CLOUDFLARED_TUNNEL_TOKEN_FILE", "RDEV_CLOUDFLARED_TUNNEL_TOKEN", "RDEV_CLOUDFLARED_TUNNEL_NAME",
+	} {
+		t.Setenv(name, "")
+	}
+	if cfg, ok, err := configuredCloudflaredStableTunnelConfig("cloudflared", "http://127.0.0.1:8787"); err != nil || ok || len(cfg.Argv) != 0 {
+		t.Fatalf("empty stable configuration = %#v ok=%v err=%v", cfg, ok, err)
+	}
+}
+
+func TestCloudflaredStableProviderIDsFailClosed(t *testing.T) {
+	for _, testCase := range []struct {
+		value string
+		want  string
+	}{
+		{value: "cloudflared-named", want: "cloudflared-named"},
+		{value: "cloudflared", want: "cloudflared"},
+		{value: "unsafe provider", want: "cloudflared"},
+	} {
+		if got := normalizedCloudflaredStableProviderID(testCase.value); got != testCase.want {
+			t.Fatalf("normalized provider ID for %q = %q", testCase.value, got)
+		}
+	}
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "https://named.example.test")
+	if got := configuredCloudflaredStableProviderID(); got != "cloudflared-named" {
+		t.Fatalf("configured named provider ID = %q", got)
+	}
+	t.Setenv("RDEV_CLOUDFLARED_NAMED_TUNNEL_URL", "")
+	if got := configuredCloudflaredStableProviderID(); got != "cloudflared" {
+		t.Fatalf("configured generic provider ID = %q", got)
+	}
+}
+
+func TestConfiguredStableTunnelCancellationReapsProcess(t *testing.T) {
+	t.Setenv("RDEV_TEST_TUNNEL_HELPER", "block")
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := startConfiguredCloudflaredStableTunnelWithGrace(ctx, io.Discard, cloudflaredStableTunnelConfig{
+			GatewayURL: "https://stable.example.test", ProviderID: "cloudflared",
+			Argv: []string{os.Args[0], "-test.run=TestTunnelHelperProcess"},
+		}, time.Second)
+		result <- err
+	}()
+	time.Sleep(25 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("stable cancellation error = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("stable tunnel cancellation did not reap the provider process")
+	}
+}
+
+func TestFirstStableGatewayURLRejectsCredentialBearingCloudflaredCandidate(t *testing.T) {
+	candidates := []supportsession.GatewayURLCandidate{
+		{Kind: "cloudflared-named", URL: "https://user:password@secret.example.test/?token=query-secret"},
+		{Kind: "cloudflared", URL: "https://SAFE.EXAMPLE.TEST/"},
+	}
+	if got := firstStableGatewayURL(candidates); got != "https://safe.example.test" {
+		t.Fatalf("firstStableGatewayURL() = %q", got)
 	}
 }
 
@@ -1342,12 +1912,17 @@ func TestCloudflaredStableTunnelStartRequestedRequiresURLAndStartConfig(t *testi
 }
 
 func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
-	var out bytes.Buffer
+	var out synchronizedBuffer
 	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
 	writeSupportSessionEvent(&out, statusFile, "connected", map[string]any{
 		"schema_version": "rdev.support-session-status.v1",
 		"connected":      true,
 		"status":         "connected",
+		"ticket_code":    "ABCD-1234",
+		"gateway_url":    "https://gateway.example.test/?token=query-secret",
+		"peer_ip":        "203.0.113.9",
+		"peer_ipv6":      "2001:db8::9",
+		"artifact_path":  "/Users/alice/private/status.json",
 	})
 
 	const prefix = "rdev support session event: "
@@ -1356,19 +1931,27 @@ func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 		t.Fatalf("expected event prefix, got %q", line)
 	}
 	var payload struct {
-		SchemaVersion string         `json:"schema_version"`
-		Event         string         `json:"event"`
-		Status        map[string]any `json:"status"`
-		AgentRule     string         `json:"agent_rule"`
+		SchemaVersion string `json:"schema_version"`
+		Event         string `json:"event"`
+		StatusClass   string `json:"status_class"`
+		Connected     bool   `json:"connected"`
+		ActionClass   string `json:"action_class"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, prefix)), &payload); err != nil {
 		t.Fatalf("invalid event JSON: %v\n%s", err, line)
 	}
-	if payload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
+	if payload.SchemaVersion != "rdev.support-session-foreground-log-event.v1" ||
 		payload.Event != "connected" ||
-		payload.Status["connected"] != true ||
-		!strings.Contains(payload.AgentRule, "connected_next_steps.user_report") {
+		payload.StatusClass != "connected" || !payload.Connected ||
+		payload.ActionClass != "report-connection-established" {
 		t.Fatalf("unexpected event payload: %#v", payload)
+	}
+	for _, forbidden := range []string{
+		"ABCD-1234", "gateway.example.test", "query-secret", "203.0.113.9", "2001:db8::9", "/Users/alice/private/status.json",
+	} {
+		if strings.Contains(line, forbidden) {
+			t.Fatalf("stderr event leaked %q: %s", forbidden, line)
+		}
 	}
 	statusBytes, err := os.ReadFile(statusFile)
 	if err != nil {
@@ -1386,6 +1969,7 @@ func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 	if statusPayload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
 		statusPayload.Event != "connected" ||
 		statusPayload.Status["connected"] != true ||
+		statusPayload.Status["ticket_code"] != "ABCD-1234" ||
 		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
 		t.Fatalf("unexpected status file payload: %#v", statusPayload)
 	}
@@ -1395,6 +1979,48 @@ func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("expected status file permissions 0600, got %v", info.Mode().Perm())
+	}
+}
+
+func TestSupportSessionBlockedReadinessDiagnosticDoesNotEmbedHandoff(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{
+		id: "blocked-readiness", url: "https://blocked.example.test/?token=query-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(t.TempDir(), "private-work-dir")
+	statusFile := filepath.Join(workDir, "private-status.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true, InstanceMarker: "instance-marker-secret"}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return nil },
+		FinalProbe:     func(context.Context, tunnel.Candidate, string, string) error { return nil },
+	}
+	err = app.supportSessionStart(context.Background(), supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: workDir, StatusFile: statusFile,
+		Target: "windows", Reason: "blocked diagnostic", TTLSeconds: 60, Locale: "en",
+	})
+	if err == nil || !strings.Contains(err.Error(), "readiness policy") {
+		t.Fatalf("expected blocked readiness error, got %v", err)
+	}
+	statusBytes, readErr := os.ReadFile(statusFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	for surface, content := range map[string][]byte{"stdout": stdout.Bytes(), "status": statusBytes} {
+		for _, forbidden := range []string{
+			"started", "availability_readiness", "query-secret", "blocked.example.test", "instance-marker-secret",
+			"private-work-dir", "private-status.json", "ticket_code", "/join/",
+		} {
+			if bytes.Contains(content, []byte(forbidden)) {
+				t.Fatalf("%s diagnostic leaked %q: %s", surface, forbidden, content)
+			}
+		}
 	}
 }
 
@@ -1413,7 +2039,7 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var out bytes.Buffer
+	var out synchronizedBuffer
 	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
 	connectedReportFile := filepath.Join(t.TempDir(), "connected-report.txt")
 	gatewayURL := "http://127.0.0.1:9876"
@@ -1445,6 +2071,11 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 	}
 	if !waitForBufferContains(&out, `"event":"connected"`, 3*time.Second) {
 		t.Fatalf("expected connected stderr event, got %s", out.String())
+	}
+	for _, forbidden := range []string{gatewayURL, ticket.Code, "fresh-agent-connected-host", `"mcp_next_calls"`, `"gateway_url"`} {
+		if strings.Contains(out.String(), forbidden) {
+			t.Fatalf("connected stderr event leaked %q: %s", forbidden, out.String())
+		}
 	}
 	report, err := os.ReadFile(connectedReportFile)
 	if err != nil {
@@ -1542,7 +2173,7 @@ func waitForStatusFileEvent(t *testing.T, path, event string) supportSessionStat
 	return supportSessionStatusFileEvent{}
 }
 
-func waitForBufferContains(buf *bytes.Buffer, needle string, timeout time.Duration) bool {
+func waitForBufferContains(buf interface{ String() string }, needle string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if strings.Contains(buf.String(), needle) {
@@ -2273,7 +2904,7 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		payload.UserHandoff.CopyPasteKind != "windows" ||
 		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
 		!strings.Contains(payload.UserHandoff.Message, "目标电脑") ||
-		!strings.Contains(payload.UserHandoff.AgentNextStep, "wait=true") {
+		!strings.Contains(strings.ToLower(payload.UserHandoff.AgentNextStep), "do not send") {
 		t.Fatalf("expected ready user handoff, got %#v", payload.UserHandoff)
 	}
 	watch := strings.Join(payload.WatchConnectionStatus, "\x00")
@@ -2296,7 +2927,28 @@ func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
 	handler := httpapi.NewServer(gw).Handler()
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	t.Setenv("RDEV_HOSTED_GATEWAY_URL", server.URL)
+	backendURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const publicGatewayURL = "https://gateway.example.test"
+	oldDefaultClient := http.DefaultClient
+	oldDefaultTransport := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultClient = oldDefaultClient
+		http.DefaultTransport = oldDefaultTransport
+	})
+	http.DefaultClient = &http.Client{}
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		forwarded := req.Clone(req.Context())
+		forwardedURL := *req.URL
+		forwardedURL.Scheme = backendURL.Scheme
+		forwardedURL.Host = backendURL.Host
+		forwarded.URL = &forwardedURL
+		forwarded.Host = "gateway.example.test"
+		return oldDefaultTransport.RoundTrip(forwarded)
+	})
+	t.Setenv("RDEV_HOSTED_GATEWAY_URL", publicGatewayURL)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -2324,21 +2976,21 @@ func TestSupportSessionCreateUsesConfiguredGatewayURL(t *testing.T) {
 		t.Fatalf("invalid create JSON: %v\n%s", err, stdout.String())
 	}
 	if payload.SchemaVersion != "rdev.support-session-created.v1" ||
-		payload.GatewayURL != server.URL ||
+		payload.GatewayURL != publicGatewayURL ||
 		payload.TicketCode == "" ||
 		!strings.Contains(payload.TargetCommand, "Windows PowerShell") ||
 		!strings.Contains(payload.TargetCommand, "macOS/Linux terminal") ||
-		!strings.Contains(payload.TargetCommand, server.URL+"/join/"+payload.TicketCode) {
+		!strings.Contains(payload.TargetCommand, publicGatewayURL+"/join/"+payload.TicketCode) {
 		t.Fatalf("expected configured gateway create payload, got %#v", payload)
 	}
 	if len(payload.GatewayURLCandidates) == 0 ||
-		payload.GatewayURLCandidates[0].URL != server.URL ||
+		payload.GatewayURLCandidates[0].URL != publicGatewayURL ||
 		!payload.GatewayURLCandidates[0].Recommended {
 		t.Fatalf("expected configured gateway candidate, got %#v", payload.GatewayURLCandidates)
 	}
 }
 
-func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
+func TestSupportSessionStartLANFailsImmediatelyWithoutTicketAndCleansServer(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -2347,278 +2999,1396 @@ func TestSupportSessionStartServesGatewayAndPrintsReadySession(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	gatewayURL := "http://" + addr
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := NewApp(&stdout, &stderr)
+	registry, err := tunnel.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.supportSessionStartDeps = &supportSessionStartDeps{Registry: registry}
 	workDir := filepath.Join(t.TempDir(), "support")
 	readyFile := filepath.Join(workDir, "ready", "support-session-ready.json")
 	statusFile := filepath.Join(workDir, "status", "support-session-status.json")
 	handoffTextFile := filepath.Join(workDir, "handoff", "target-handoff.txt")
-	connectedReportFile := filepath.Join(workDir, "status", "connected-report.txt")
-	rdevCommand := filepath.Join(t.TempDir(), "bin", "rdev")
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- app.Run(ctx, []string{
-			"support-session", "start",
-			"--addr", addr,
-			"--gateway-url", gatewayURL,
-			"--work-dir", workDir,
-			"--ready-file", readyFile,
-			"--status-file", statusFile,
-			"--handoff-text-file", handoffTextFile,
-			"--connected-report-file", connectedReportFile,
-			"--target", "windows",
-			"--locale", "zh-CN",
-			"--rdev-command", rdevCommand,
-		})
-	}()
-	waitForHTTP(t, gatewayURL+"/healthz")
-	resp, err := http.Get(gatewayURL + "/assets/rdev-windows-amd64.exe.sha256")
+
+	started := time.Now()
+	err = app.Run(ctx, []string{
+		"support-session", "start",
+		"--addr", addr,
+		"--gateway-url", "http://" + addr,
+		"--work-dir", workDir,
+		"--ready-file", readyFile,
+		"--status-file", statusFile,
+		"--handoff-text-file", handoffTextFile,
+		"--target", "windows",
+		"--locale", "zh-CN",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no public gateway candidate") {
+		t.Fatalf("expected immediate LAN fail-closed error, got %v", err)
+	}
+	if time.Since(started) > 25*time.Second {
+		t.Fatalf("LAN fail-closed path returned too slowly: %v", time.Since(started))
+	}
+
+	var diagnostic struct {
+		SchemaVersion string `json:"schema_version"`
+		ReadyToSend   bool   `json:"ready_to_send"`
+	}
+	diagnosticBytes, err := os.ReadFile(statusFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("support-session start should serve Windows helper hash, got %s", resp.Status)
+	if err := json.Unmarshal(diagnosticBytes, &diagnostic); err != nil {
+		t.Fatalf("invalid diagnostic JSON: %v", err)
 	}
-	waitForStatusFileEvent(t, statusFile, "waiting")
-	cancel()
-	err = <-errCh
+	if diagnostic.SchemaVersion != "rdev.support-session-start-diagnostic.v2" || diagnostic.ReadyToSend {
+		t.Fatalf("LAN-only foreground start must fail closed, got %#v", diagnostic)
+	}
+	for _, blockedPath := range []string{readyFile, handoffTextFile} {
+		if _, err := os.Stat(blockedPath); !os.IsNotExist(err) {
+			t.Fatalf("LAN-only foreground start must not write %s", blockedPath)
+		}
+	}
+	stateBytes, err := os.ReadFile(filepath.Join(workDir, ".rdev", "gateway", "state.json"))
+	if err == nil {
+		var snapshot gateway.Snapshot
+		if err := json.Unmarshal(stateBytes, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Tickets) != 0 {
+			t.Fatalf("LAN fail-closed path created tickets: %#v", snapshot.Tickets)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	listener, err = net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("LAN fail-closed path did not clean server: %v", err)
+	}
+	_ = listener.Close()
+}
+func TestSupportSessionStartFakePublicLifecycleOrdersGatewayBeforePublicTunnels(t *testing.T) {
+	for _, name := range []string{
+		"RDEV_HOSTED_GATEWAY_URL",
+		"RDEV_CLOUDFLARED_GATEWAY_URL",
+		"RDEV_RELAY_GATEWAY_URL",
+		"RDEV_MESH_GATEWAY_URL",
+		"RDEV_VPN_GATEWAY_URL",
+		"RDEV_SSH_GATEWAY_URL",
+	} {
+		t.Setenv(name, "")
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	events := make([]string, 0, 7)
+	record := func(event string) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+		if event == "handoff_written" {
+			cancel()
+		}
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		RecordEvent: record,
+		Registry:    registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return nil },
+		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error {
+			return nil
+		},
+	}
+	workDir := filepath.Join(t.TempDir(), "support")
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot:                   ".",
+		Addr:                       addr,
+		WorkDir:                    workDir,
+		Target:                     "windows",
+		Reason:                     "test ordered foreground startup",
+		TTLSeconds:                 60,
+		AutoActivate:               true,
+		Locale:                     "en",
+		RdevCommand:                filepath.Join(t.TempDir(), "bin", "rdev"),
+		AllowDegradedDirectHandoff: true,
+	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled foreground server, got %v", err)
 	}
 
+	mu.Lock()
+	got := append([]string(nil), events...)
+	mu.Unlock()
+	want := []string{
+		"local_gateway_started",
+		"local_health_passed",
+		"providers_started",
+		"provider_health_passed",
+		"ticket_created",
+		"bootstrap_probe_passed",
+		"handoff_written",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("support-session startup events = %v, want %v", got, want)
+	}
+}
+
+func TestBootstrapProbeAvailabilityDoesNotMutateInput(t *testing.T) {
+	original := tunnel.AvailabilitySet{
+		SchemaVersion: tunnel.AvailabilitySchemaVersion,
+		Region:        tunnel.RegionGlobal,
+		Candidates:    []tunnel.Candidate{{ProviderID: "failed", URL: "https://failed.example.test"}},
+		Attempts: []tunnel.Attempt{{
+			ProviderID: "failed",
+			Status:     tunnel.AttemptHealthy,
+			Probe:      tunnel.ProbeEvidence{HealthOK: true, InstanceMarker: "instance"},
+		}},
+	}
+	filtered := bootstrapProbeAvailability(context.Background(), original, "instance", func(context.Context, tunnel.Candidate, string) error {
+		return errors.New("rejected")
+	})
+	if len(filtered.Candidates) != 0 || filtered.Attempts[0].Status != tunnel.AttemptDegraded {
+		t.Fatalf("unexpected filtered set: %#v", filtered)
+	}
+	if len(original.Candidates) != 1 || original.Attempts[0].Status != tunnel.AttemptHealthy || original.Attempts[0].ErrorClass != "" || !original.Attempts[0].Probe.HealthOK {
+		t.Fatalf("bootstrap filtering mutated input: %#v", original)
+	}
+}
+
+func TestSupportSessionStartMainlandFailureCleanup(t *testing.T) {
+	var starts atomic.Int32
+	var staticProbes atomic.Int32
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{
+		id: "mainland-unverified", url: "https://mainland-unverified.example.test",
+		start: func() error { starts.Add(1); return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	workDir := filepath.Join(t.TempDir(), "support")
+	statusFile := filepath.Join(workDir, "status.json")
+	readyFile := filepath.Join(workDir, "ready.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry, Manager: tunnel.Manager{},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { staticProbes.Add(1); return nil },
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile, ReadyFile: readyFile,
+		Target: "windows", Reason: "mainland evidence test", TTLSeconds: 60, Locale: "en", Region: string(tunnel.RegionCNMainland),
+	})
+	if err == nil || err.Error() != "no public gateway provider is eligible for the selected region" {
+		t.Fatalf("expected provider-selection failure, got %v", err)
+	}
+	if starts.Load() != 0 {
+		t.Fatalf("unverified mainland provider started %d times", starts.Load())
+	}
+	if staticProbes.Load() != 0 {
+		t.Fatalf("empty selection ran %d static bootstrap probes", staticProbes.Load())
+	}
+	if _, err := os.Stat(readyFile); !os.IsNotExist(err) {
+		t.Fatalf("mainland failure must not write ready file")
+	}
+	statusBytes, readErr := os.ReadFile(statusFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var diagnostic supportSessionStartDiagnostic
+	if err := json.Unmarshal(statusBytes, &diagnostic); err != nil {
+		t.Fatalf("decode provider-selection diagnostic: %v; payload=%s", err, statusBytes)
+	}
+	if diagnostic.Phase != "provider-selection" || diagnostic.Reason != "no_public_gateway_provider_eligible" ||
+		diagnostic.NextActionClass != "review-provider-eligibility" || len(diagnostic.Attempts) != 1 ||
+		diagnostic.Attempts[0].ProviderID != "mainland-unverified" || diagnostic.Attempts[0].Status != string(tunnel.AttemptSkipped) ||
+		diagnostic.Attempts[0].ErrorClass != "regional-evidence-missing" {
+		t.Fatalf("unexpected provider-selection diagnostic: %#v", diagnostic)
+	}
+	for surface, content := range map[string][]byte{"status": statusBytes, "stdout": stdout.Bytes()} {
+		if bytes.Contains(content, []byte("static-bootstrap-probe")) {
+			t.Fatalf("%s misreported an unexecuted static probe: %s", surface, content)
+		}
+	}
+	listener, listenErr := net.Listen("tcp", addr)
+	if listenErr != nil {
+		t.Fatalf("provider-selection failure did not clean local gateway listener: %v", listenErr)
+	}
+	_ = listener.Close()
+}
+
+func TestSupportSessionExplicitPinProviderPreflightSkipsUnsafeConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		knownHosts string
+		wantReason string
+	}{
+		{name: "missing", wantReason: "ssh-pin-missing"},
+		{name: "invalid", knownHosts: "wrong.example ssh-ed25519 dGVzdA==\n", wantReason: "ssh-pin-invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("RDEV_SSH_KNOWN_HOSTS_FILE", "")
+			var starts atomic.Int32
+			metadata := tunnel.ProviderMetadata{
+				ID: tunnel.ProviderPinggy, DisplayName: "Pinggy", Protocols: []string{"https", "ssh"}, Anonymous: true,
+				Executable: "ssh", DocumentationURL: "https://pinggy.io/docs/", DefaultAutomatic: false,
+				AutomaticPriority: 40, RequiresSSHPin: true,
+			}
+			registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{
+				id: tunnel.ProviderPinggy, url: "https://unsafe-pin.example.test", metadata: &metadata,
+				start: func() error { starts.Add(1); return nil },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			policyPath := filepath.Join(root, "providers.json")
+			policyBody := `{"allowed_provider_ids":["pinggy"]}`
+			if test.knownHosts != "" {
+				knownHostsPath := filepath.Join(root, "known_hosts")
+				if err := os.WriteFile(knownHostsPath, []byte(test.knownHosts), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				policyBody = fmt.Sprintf(`{"allowed_provider_ids":["pinggy"],"ssh_known_hosts_paths":{"pinggy":%q}}`, knownHostsPath)
+			}
+			if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			workDir := filepath.Join(root, "support")
+			statusFile := filepath.Join(workDir, "status.json")
+			var stdout bytes.Buffer
+			app := NewApp(&stdout, io.Discard)
+			app.supportSessionStartDeps = &supportSessionStartDeps{Registry: registry}
+			err = app.supportSessionStart(context.Background(), supportSessionStartOptions{
+				RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: workDir, StatusFile: statusFile,
+				Target: "windows", Reason: "pin preflight", TTLSeconds: 60, Locale: "en", ProviderPolicyPath: policyPath,
+			})
+			if err == nil || err.Error() != "no public gateway provider is eligible for the selected region" {
+				t.Fatalf("expected provider-selection failure, got %v", err)
+			}
+			if starts.Load() != 0 {
+				t.Fatalf("unsafe pin provider started %d times", starts.Load())
+			}
+			var diagnostic supportSessionStartDiagnostic
+			content, readErr := os.ReadFile(statusFile)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if err := json.Unmarshal(content, &diagnostic); err != nil {
+				t.Fatal(err)
+			}
+			if len(diagnostic.Attempts) != 1 || diagnostic.Attempts[0].ProviderID != tunnel.ProviderPinggy ||
+				diagnostic.Attempts[0].Status != string(tunnel.AttemptSkipped) || diagnostic.Attempts[0].ErrorClass != test.wantReason {
+				t.Fatalf("unexpected pin preflight diagnostic: %#v", diagnostic)
+			}
+			if test.knownHosts != "" && bytes.Contains(stdout.Bytes(), []byte(test.knownHosts)) || bytes.Contains(content, []byte(root)) {
+				t.Fatalf("pin preflight diagnostic leaked protected material: stdout=%s status=%s", stdout.Bytes(), content)
+			}
+		})
+	}
+}
+
+func TestSupportSessionStartFinalBootstrapFailureCleanup(t *testing.T) {
+	var stops atomic.Int32
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{
+		id: "bootstrap-failure", url: "https://bootstrap-failure.example.test", stop: func() { stops.Add(1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	workDir := filepath.Join(t.TempDir(), "support")
+	statusFile := filepath.Join(workDir, "status.json")
+	readyFile := filepath.Join(workDir, "ready.json")
+	handoffFile := filepath.Join(workDir, "handoff.txt")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return nil },
+		FinalProbe:     func(context.Context, tunnel.Candidate, string, string) error { return errors.New("bootstrap failed") },
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile, ReadyFile: readyFile,
+		HandoffTextFile: handoffFile, Target: "windows", Reason: "final bootstrap failure", TTLSeconds: 60, Locale: "en",
+		AllowDegradedDirectHandoff: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "final ticket bootstrap") {
+		t.Fatalf("expected final-ticket bootstrap failure, got %v", err)
+	}
+	if stops.Load() != 1 {
+		t.Fatalf("provider handle stopped %d times, want 1", stops.Load())
+	}
+	for _, path := range []string{readyFile, handoffFile} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("final bootstrap failure must not write %s", path)
+		}
+	}
+}
+
+func TestSupportSessionStartFinalTicketMetadataExcludesFailedCandidates(t *testing.T) {
+	registry, err := tunnel.NewRegistry(
+		supportSessionFuncTunnelProvider{id: "a-failed", url: "https://a-failed.example.test"},
+		supportSessionFuncTunnelProvider{id: "b-healthy", url: "https://b-healthy.example.test"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe: func(_ context.Context, candidate tunnel.Candidate, _ string) error {
+			if candidate.ProviderID == "a-failed" {
+				return errors.New("candidate failed static bootstrap probe")
+			}
+			return nil
+		},
+		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error { return nil },
+		RecordEvent: func(event string) {
+			if event == "handoff_written" {
+				cancel()
+			}
+		},
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "final ticket metadata", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
 	var payload struct {
-		SchemaVersion string `json:"schema_version"`
-		Gateway       struct {
-			Addr       string `json:"addr"`
-			GatewayURL string `json:"gateway_url"`
-			Lifecycle  string `json:"lifecycle"`
-		} `json:"gateway"`
-		AssetReport struct {
-			SchemaVersion string `json:"schema_version"`
-			AllReady      bool   `json:"all_ready"`
-		} `json:"asset_report"`
-		ConnectionReadiness struct {
-			Ready                     bool `json:"ready"`
-			TargetBootstrapSelfRepair bool `json:"target_bootstrap_self_repair"`
-			AgentConnectionRunbook    struct {
-				StandardEntryTool struct {
-					CLICommand []string `json:"cli_command"`
-				} `json:"standard_entry_tool"`
-			} `json:"agent_connection_runbook"`
-		} `json:"connection_readiness"`
-		ConnectivityStrategy struct {
-			SchemaVersion  string   `json:"schema_version"`
-			SelectionOrder []string `json:"selection_order"`
-		} `json:"connectivity_strategy"`
-		GatewayCandidatePreflight struct {
-			SchemaVersion  string `json:"schema_version"`
-			CandidateCount int    `json:"candidate_count"`
-			AgentRule      string `json:"agent_rule"`
-		} `json:"gateway_candidate_preflight"`
-		AgentConnectionRunbook struct {
-			SchemaVersion     string `json:"schema_version"`
-			Phase             string `json:"phase"`
-			StandardEntryTool struct {
-				CLICommand []string `json:"cli_command"`
-			} `json:"standard_entry_tool"`
-			Watch struct {
-				MCPTool string `json:"mcp_tool"`
-			} `json:"watch"`
-		} `json:"agent_connection_runbook"`
-		ReadyFile struct {
-			SchemaVersion string `json:"schema_version"`
-			Path          string `json:"path"`
-			Contains      string `json:"contains"`
-			AgentRule     string `json:"agent_rule"`
-		} `json:"ready_file"`
-		StatusFile struct {
-			SchemaVersion       string `json:"schema_version"`
-			Path                string `json:"path"`
-			Contains            string `json:"contains"`
-			StatusSchemaVersion string `json:"status_schema_version"`
-			AgentRule           string `json:"agent_rule"`
-		} `json:"status_file"`
-		HandoffTextFile struct {
-			SchemaVersion string `json:"schema_version"`
-			Path          string `json:"path"`
-			Contains      string `json:"contains"`
-			AgentRule     string `json:"agent_rule"`
-		} `json:"handoff_text_file"`
-		ConnectedReportFile struct {
-			SchemaVersion string `json:"schema_version"`
-			Path          string `json:"path"`
-			Contains      string `json:"contains"`
-			AgentRule     string `json:"agent_rule"`
-		} `json:"connected_report_file"`
-		ReadyToSendHuman bool   `json:"ready_to_send_to_human"`
-		TargetCommand    string `json:"target_command"`
-		JoinURL          string `json:"join_url"`
-		UserHandoff      struct {
-			SchemaVersion string `json:"schema_version"`
-			CopyPaste     string `json:"copy_paste"`
-		} `json:"user_handoff"`
-		WatchConnectionStatus []string `json:"watch_connection_status"`
-		Session               struct {
-			SchemaVersion         string   `json:"schema_version"`
-			TicketCode            string   `json:"ticket_code"`
-			TargetCommand         string   `json:"target_command"`
-			WatchConnectionStatus []string `json:"watch_connection_status"`
-			AutoActivate          bool     `json:"auto_activate"`
+		Session struct {
+			Ticket struct {
+				Code     string            `json:"code"`
+				Metadata map[string]string `json:"metadata"`
+			} `json:"ticket"`
 		} `json:"session"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-		t.Fatalf("invalid start JSON: %v\n%s", err, stdout.String())
+		t.Fatal(err)
 	}
-	if payload.SchemaVersion != "rdev.support-session-started.v1" ||
-		payload.Gateway.Addr != addr ||
-		payload.Gateway.GatewayURL != gatewayURL ||
-		payload.Gateway.Lifecycle != "foreground-visible-process" {
-		t.Fatalf("unexpected started payload: %#v", payload)
+	metadata := payload.Session.Ticket.Metadata[gateway.TicketMetadataGatewayCandidates]
+	if strings.Contains(metadata, "a-failed") || !strings.Contains(metadata, "b-healthy") {
+		t.Fatalf("final ticket must contain only statically probed candidates: code=%s metadata=%s", payload.Session.Ticket.Code, metadata)
 	}
-	if payload.AssetReport.SchemaVersion != "rdev.support-session-assets.v1" ||
-		!payload.AssetReport.AllReady ||
-		!payload.ConnectionReadiness.Ready ||
-		!payload.ConnectionReadiness.TargetBootstrapSelfRepair ||
-		payload.ConnectivityStrategy.SchemaVersion != "rdev.support-session-connectivity-strategy.v1" ||
-		!slices.Contains(payload.ConnectivityStrategy.SelectionOrder, "existing-wireguard-vpn") {
-		t.Fatalf("expected support-session start to prepare helper assets, got %#v", payload)
-	}
-	if payload.GatewayCandidatePreflight.SchemaVersion != "rdev.support-session-gateway-candidate-preflight.v1" ||
-		payload.GatewayCandidatePreflight.CandidateCount == 0 ||
-		!strings.Contains(payload.GatewayCandidatePreflight.AgentRule, "candidate table") {
-		t.Fatalf("expected started payload gateway preflight, got %#v", payload.GatewayCandidatePreflight)
-	}
-	if payload.AgentConnectionRunbook.SchemaVersion != "rdev.support-session-agent-runbook.v1" ||
-		len(payload.AgentConnectionRunbook.StandardEntryTool.CLICommand) == 0 ||
-		payload.AgentConnectionRunbook.StandardEntryTool.CLICommand[0] != rdevCommand ||
-		len(payload.ConnectionReadiness.AgentConnectionRunbook.StandardEntryTool.CLICommand) == 0 ||
-		payload.ConnectionReadiness.AgentConnectionRunbook.StandardEntryTool.CLICommand[0] != rdevCommand ||
-		payload.AgentConnectionRunbook.Watch.MCPTool != "rdev.support_session.status" {
-		t.Fatalf("expected started payload Agent runbook, got %#v", payload.AgentConnectionRunbook)
-	}
-	if payload.ReadyFile.SchemaVersion != "rdev.support-session-ready-file.v1" ||
-		payload.ReadyFile.Path != readyFile ||
-		payload.ReadyFile.Contains != "rdev.support-session-started.v1" ||
-		!strings.Contains(payload.ReadyFile.AgentRule, "target_handoff_envelope.full_text") {
-		t.Fatalf("expected ready-file metadata, got %#v", payload.ReadyFile)
-	}
-	if payload.StatusFile.SchemaVersion != "rdev.support-session-status-file.v1" ||
-		payload.StatusFile.Path != statusFile ||
-		payload.StatusFile.Contains != "rdev.support-session-foreground-event.v1" ||
-		payload.StatusFile.StatusSchemaVersion != "rdev.support-session-status.v1" ||
-		!strings.Contains(payload.StatusFile.AgentRule, "connected_next_steps.user_report") {
-		t.Fatalf("expected status-file metadata, got %#v", payload.StatusFile)
-	}
-	if payload.HandoffTextFile.SchemaVersion != "rdev.support-session-handoff-text-file.v1" ||
-		payload.HandoffTextFile.Path != handoffTextFile ||
-		payload.HandoffTextFile.Contains != "target_handoff_envelope.full_text" ||
-		!strings.Contains(payload.HandoffTextFile.AgentRule, "plain-text") {
-		t.Fatalf("expected handoff text-file metadata, got %#v", payload.HandoffTextFile)
-	}
-	if payload.ConnectedReportFile.SchemaVersion != "rdev.support-session-connected-report-file.v1" ||
-		payload.ConnectedReportFile.Path != connectedReportFile ||
-		payload.ConnectedReportFile.Contains != "connected_next_steps.user_report" ||
-		!strings.Contains(payload.ConnectedReportFile.AgentRule, "plain text") {
-		t.Fatalf("expected connected report-file metadata, got %#v", payload.ConnectedReportFile)
-	}
-	if !payload.ReadyToSendHuman ||
-		payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
-		payload.UserHandoff.CopyPaste != payload.TargetCommand ||
-		payload.TargetCommand != payload.Session.TargetCommand ||
-		payload.JoinURL == "" {
-		t.Fatalf("expected top-level started handoff fields, got %#v", payload)
-	}
-	if payload.Session.SchemaVersion != "rdev.support-session-created.v1" ||
-		payload.Session.TicketCode == "" ||
-		!payload.Session.AutoActivate ||
-		!strings.Contains(payload.Session.TargetCommand, payload.Session.TicketCode) ||
-		strings.Contains(payload.Session.TargetCommand, "<ticket-code>") ||
-		strings.Contains(payload.Session.TargetCommand, "ExecutionPolicy Bypass") {
-		t.Fatalf("expected ready embedded session, got %#v", payload.Session)
-	}
-	watch := strings.Join(payload.Session.WatchConnectionStatus, "\x00")
-	if !strings.Contains(watch, payload.Session.TicketCode) || !strings.Contains(watch, "--wait") {
-		t.Fatalf("expected ready watcher, got %#v", payload.Session.WatchConnectionStatus)
-	}
-	topLevelWatch := strings.Join(payload.WatchConnectionStatus, "\x00")
-	if !strings.Contains(topLevelWatch, payload.Session.TicketCode) || !strings.Contains(topLevelWatch, "--wait") {
-		t.Fatalf("expected top-level ready watcher, got %#v", payload.WatchConnectionStatus)
-	}
-	readyInfo, err := os.Stat(readyFile)
+}
+
+func TestSupportSessionStaticProbeDoesNotCreateProvisionalTicket(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{id: "static-probe", url: "https://static-probe.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if readyInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("expected ready file permissions 0600, got %v", readyInfo.Mode().Perm())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var probeTicketCount int
+	app := NewApp(io.Discard, io.Discard)
+	workDir := filepath.Join(t.TempDir(), "support")
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error {
+			probeTicketCount++
+			return nil
+		},
+		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error { return nil },
+		RecordEvent: func(event string) {
+			if event == "handoff_written" {
+				cancel()
+			}
+		},
 	}
-	statusInfo, err := os.Stat(statusFile)
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: workDir,
+		Target: "windows", Reason: "static probe", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
+	}
+	if probeTicketCount != 1 {
+		t.Fatalf("static probe calls = %d, want 1", probeTicketCount)
+	}
+	content, err := os.ReadFile(filepath.Join(workDir, ".rdev", "gateway", "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if statusInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("expected status file permissions 0600, got %v", statusInfo.Mode().Perm())
+	var snapshot gateway.Snapshot
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		t.Fatal(err)
 	}
-	handoffBytes, err := os.ReadFile(handoffTextFile)
+	if len(snapshot.Tickets) != 1 {
+		t.Fatalf("static filtering must create exactly one final ticket, got %d", len(snapshot.Tickets))
+	}
+}
+
+func TestSupportSessionStaticProbeRejectsAllWithoutCreatingTicket(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{id: "rejected", url: "https://rejected.example.test/?token=query-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(handoffBytes), payload.Session.TicketCode) ||
-		!strings.Contains(string(handoffBytes), payload.TargetCommand) {
-		t.Fatalf("expected handoff text file to contain final target command, got %q", string(handoffBytes))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var events []string
+	var stdout bytes.Buffer
+	workDir := filepath.Join(t.TempDir(), "support")
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true, InstanceMarker: "instance-marker-secret"}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return errors.New("template mismatch") },
+		RecordEvent:    func(event string) { events = append(events, event) },
 	}
-	var readyPayload struct {
-		SchemaVersion string `json:"schema_version"`
-		ReadyFile     struct {
-			Path string `json:"path"`
-		} `json:"ready_file"`
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: workDir,
+		Target: "windows", Reason: "reject all", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no public gateway candidate") {
+		t.Fatalf("expected fail-closed no-candidate error, got %v", err)
+	}
+	if slices.Contains(events, "ticket_created") {
+		t.Fatalf("zero-candidate path created a ticket: events=%v", events)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"ready_to_send": false`)) {
+		t.Fatalf("expected fail-closed diagnostic, got %s", stdout.String())
+	}
+	for _, forbidden := range []string{"query-secret", "rejected.example.test", "instance-marker-secret", `"probe"`, `"candidates"`} {
+		if bytes.Contains(stdout.Bytes(), []byte(forbidden)) {
+			t.Fatalf("static-probe diagnostic leaked %q: %s", forbidden, stdout.String())
+		}
+	}
+	statePath := filepath.Join(workDir, ".rdev", "gateway", "state.json")
+	if content, readErr := os.ReadFile(statePath); readErr == nil && bytes.Contains(content, []byte(`"tickets"`)) {
+		var snapshot gateway.Snapshot
+		if err := json.Unmarshal(content, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Tickets) != 0 {
+			t.Fatalf("zero-candidate state persisted tickets: %#v", snapshot.Tickets)
+		}
+	} else if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+}
+
+func TestSupportSessionStartServerFailureCleansWatcherAndHandle(t *testing.T) {
+	var stops atomic.Int32
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{id: "server-error", url: "https://server-error.example.test", stop: func() { stops.Add(1) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentinel := errors.New("simulated gateway server failure")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	app := NewApp(io.Discard, io.Discard)
+	addr := supportSessionTestAddr(t)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe:       func(context.Context, tunnel.Candidate, string) error { return nil },
+		FinalProbe:           func(context.Context, tunnel.Candidate, string, string) error { return nil },
+		WaitForGatewayServer: func(context.Context, gatewayServerHandle) error { return sentinel },
+	}
+	started := time.Now()
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "server failure cleanup", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, sentinel) || time.Since(started) > 25*time.Second {
+		t.Fatalf("server failure should return promptly, got %v after %v", err, time.Since(started))
+	}
+	if stops.Load() != 1 {
+		t.Fatalf("provider handle stopped %d times, want 1", stops.Load())
+	}
+	listener, listenErr := net.Listen("tcp", addr)
+	if listenErr != nil {
+		t.Fatalf("gateway server was not cleaned up: %v", listenErr)
+	}
+	_ = listener.Close()
+}
+
+func TestSupportSessionStartLocalHealthFailureCleanup(t *testing.T) {
+	sentinel := errors.New("simulated local health failure")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	app := NewApp(io.Discard, io.Discard)
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry:           registry,
+		WaitForLocalHealth: func(context.Context, gatewayServerHandle, string, time.Duration) error { return sentinel },
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, GatewayURL: "http://" + addr, WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "local health failure", TTLSeconds: 60, Locale: "en",
+	})
+	if err == nil || err.Error() != "local gateway health check failed" || strings.Contains(err.Error(), sentinel.Error()) {
+		t.Fatalf("expected local health failure, got %v", err)
+	}
+}
+
+func TestSupportSessionStartNXDOMAINFallbackCleanup(t *testing.T) {
+	var starts atomic.Int32
+	var stops atomic.Int32
+	var handoffWritten atomic.Bool
+	cloudflareMetadata := tunnel.ProviderMetadata{
+		ID: tunnel.ProviderCloudflareQuick, DisplayName: "Cloudflare Quick Tunnel", Protocols: []string{"https"},
+		Anonymous: true, Executable: "cloudflared", DocumentationURL: "https://example.test/cloudflare",
+		DefaultAutomatic: true, AutomaticPriority: 10,
+	}
+	tunn3lMetadata := tunnel.ProviderMetadata{
+		ID: tunnel.ProviderTunn3l, DisplayName: "tunn3l.sh", Protocols: []string{"https", "wss"},
+		Anonymous: true, Executable: "rdev-managed:tunn3l-v0.5.1", DocumentationURL: "https://example.test/tunn3l",
+		DefaultAutomatic: true, AutomaticPriority: 20,
+	}
+	registry, err := tunnel.NewRegistry(
+		supportSessionFuncTunnelProvider{id: tunnel.ProviderCloudflareQuick, url: "https://a-nxdomain.example.test", metadata: &cloudflareMetadata, start: func() error { starts.Add(1); return nil }, stop: func() { stops.Add(1) }},
+		supportSessionFuncTunnelProvider{id: tunnel.ProviderTunn3l, url: "https://b-healthy.example.test", metadata: &tunn3lMetadata, start: func() error { starts.Add(1); return nil }, stop: func() { stops.Add(1) }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(_ context.Context, candidate tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			if candidate.ProviderID == tunnel.ProviderCloudflareQuick {
+				return tunnel.ProbeEvidence{}, &net.DNSError{Err: "no such host", Name: "a-nxdomain.example.test", IsNotFound: true}
+			}
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return nil },
+		FinalProbe:     func(context.Context, tunnel.Candidate, string, string) error { return nil },
+		RecordEvent: func(event string) {
+			if event == "handoff_written" {
+				handoffWritten.Store(true)
+				cancel()
+			}
+		},
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: filepath.Join(t.TempDir(), "support"),
+		Target: "windows", Reason: "nxdomain fallback", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, context.Canceled) || starts.Load() != 2 || stops.Load() != 2 || !handoffWritten.Load() {
+		t.Fatalf("expected tunn3l handoff after Cloudflare NXDOMAIN, err=%v starts=%d stops=%d handoff=%v", err, starts.Load(), stops.Load(), handoffWritten.Load())
+	}
+	var payload struct {
 		Session struct {
-			TicketCode  string `json:"ticket_code"`
-			UserHandoff struct {
-				CopyPaste string `json:"copy_paste"`
-			} `json:"user_handoff"`
+			TargetCommand         string `json:"target_command"`
+			TargetHandoffEnvelope struct {
+				FullText string `json:"full_text"`
+			} `json:"target_handoff_envelope"`
 		} `json:"session"`
 	}
-	readyBytes, err := os.ReadFile(readyFile)
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode tunn3l handoff payload: %v; stdout=%s", err, stdout.String())
+	}
+	command := payload.Session.TargetCommand
+	if command == "" || len(command) > 512 || strings.ContainsAny(command, "\r\n") ||
+		!strings.Contains(command, "powershell -NoProfile -Command") || !strings.Contains(command, "bootstrap.ps1") ||
+		strings.Contains(command, "-EncodedCommand") || strings.Contains(command, "ExecutionPolicy") ||
+		strings.Contains(command, "foreach") || strings.Contains(command, "while (") {
+		t.Fatalf("Windows handoff command was not short and readable: %q", command)
+	}
+	if !strings.Contains(payload.Session.TargetHandoffEnvelope.FullText, command) {
+		t.Fatalf("handoff full_text did not preserve the exact Windows command: %#v", payload.Session.TargetHandoffEnvelope)
+	}
+}
+
+func TestSupportSessionTunnelStartReceivesProviderRoot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workDir := filepath.Join(t.TempDir(), "support")
+	requestCh := make(chan tunnel.StartRequest, 1)
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{
+		id: "provider-root", url: "https://provider-root.example.test",
+		startRequest: func(request tunnel.StartRequest) error {
+			requestCh <- request
+			return nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(readyBytes, &readyPayload); err != nil {
-		t.Fatalf("invalid ready file JSON: %v\n%s", err, string(readyBytes))
+	app := NewApp(io.Discard, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return nil },
+		FinalProbe:     func(context.Context, tunnel.Candidate, string, string) error { return nil },
+		RecordEvent: func(event string) {
+			if event == "handoff_written" {
+				cancel()
+			}
+		},
 	}
-	if readyPayload.SchemaVersion != "rdev.support-session-started.v1" ||
-		readyPayload.ReadyFile.Path != readyFile ||
-		readyPayload.Session.TicketCode != payload.Session.TicketCode ||
-		!strings.Contains(readyPayload.Session.UserHandoff.CopyPaste, payload.Session.TicketCode) {
-		t.Fatalf("expected ready file to mirror started payload, got %#v", readyPayload)
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: supportSessionTestAddr(t), WorkDir: workDir,
+		Target: "windows", Reason: "provider root", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled foreground server, got %v", err)
 	}
-	var statusPayload struct {
+	select {
+	case request := <-requestCh:
+		canonicalWorkDir, canonicalErr := canonicalPathThroughExistingAncestor(workDir)
+		if canonicalErr != nil {
+			t.Fatal(canonicalErr)
+		}
+		want := filepath.Join(canonicalWorkDir, ".rdev")
+		if request.ProviderRoot != want {
+			t.Fatalf("ProviderRoot = %q, want %q", request.ProviderRoot, want)
+		}
+	default:
+		t.Fatal("provider start request was not captured")
+	}
+}
+
+func TestSupportSessionStartMarkerMismatchCleanup(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{id: "marker-mismatch", url: "https://marker-mismatch.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr := supportSessionTestAddr(t)
+	statusDir := t.TempDir()
+	if err := os.Chmod(statusDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	statusFile := filepath.Join(statusDir, "status.json")
+	workDir := filepath.Join(t.TempDir(), "support")
+	app := NewApp(io.Discard, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true}, errors.New("gateway instance marker mismatch")
+		}},
+	}
+	err = app.supportSessionStart(ctx, supportSessionStartOptions{
+		RepoRoot: ".", Addr: addr, WorkDir: workDir, StatusFile: statusFile,
+		Target: "windows", Reason: "marker mismatch", TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no public gateway candidate") {
+		t.Fatalf("expected fail-closed marker mismatch error, got %v", err)
+	}
+	data, readErr := os.ReadFile(statusFile)
+	if readErr != nil || !bytes.Contains(data, []byte("rdev.support-session-start-diagnostic.v2")) {
+		t.Fatalf("expected marker mismatch diagnostic: err=%v data=%s", readErr, data)
+	}
+}
+
+func waitForSupportSessionDiagnostic(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var payload struct {
+				SchemaVersion string `json:"schema_version"`
+			}
+			if json.Unmarshal(data, &payload) == nil && payload.SchemaVersion == "rdev.support-session-start-diagnostic.v2" {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for support-session diagnostic %s", path)
+}
+
+func supportSessionTestAddr(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return addr
+}
+
+func TestTunnelRuntimePolicyValidation(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadTunnelRuntimeConfig("unknown", "", registry); err == nil {
+		t.Fatal("unknown region should fail")
+	}
+	if _, err := loadTunnelRuntimeConfig("global", filepath.Join(t.TempDir(), "missing.json"), registry); err == nil {
+		t.Fatal("unreadable policy should fail")
+	}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "unknown provider", body: `{"allowed_provider_ids":["unknown"]}`},
+		{name: "inline credential", body: `{"allowed_provider_ids":["ordered-test"],"token":"secret"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "policy.json")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+				t.Fatal("invalid provider policy should fail")
+			}
+		})
+	}
+	if runtime.GOOS != "windows" {
+		path := filepath.Join(t.TempDir(), "policy.json")
+		if err := os.WriteFile(path, []byte(`{"allowed_provider_ids":["ordered-test"]}`), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+			t.Fatal("execute permission on provider policy should fail")
+		}
+	}
+	path := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(path, []byte("{\"allowed_provider_ids\":[\"ordered-test\"]}\n{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+		t.Fatal("trailing JSON data should fail")
+	}
+
+	overlapPath := filepath.Join(t.TempDir(), "overlap.json")
+	if err := os.WriteFile(overlapPath, []byte(`{"allowed_provider_ids":["ordered-test"],"disabled_provider_ids":["ordered-test"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadTunnelRuntimeConfig("global", overlapPath, registry); err == nil {
+		t.Fatal("allowed/disabled provider overlap must fail closed")
+	}
+
+	allDisabledPath := filepath.Join(t.TempDir(), "all-disabled.json")
+	if err := os.WriteFile(allDisabledPath, []byte(`{"disabled_provider_ids":["ordered-test"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadTunnelRuntimeConfig("global", allDisabledPath, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := registry.Select(tunnel.Policy{
+		Region: config.Region, AllowedProviderIDs: config.AllowedProviderIDs,
+		RestrictProviders: config.RestrictProviders, AllowNonDefault: true,
+	}, config.Evidence)
+	if len(selected) != 0 {
+		t.Fatalf("all-disabled policy failed open: %#v", selected)
+	}
+	if config.ExplicitAllowlist || tunnelRuntimePolicy(config, time.Now()).AllowNonDefault {
+		t.Fatalf("disabled-only policy must not enable operator-pin-only providers: %#v", config)
+	}
+
+	emptyAllowedPath := filepath.Join(t.TempDir(), "empty-allowed.json")
+	if err := os.WriteFile(emptyAllowedPath, []byte(`{"allowed_provider_ids":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err = loadTunnelRuntimeConfig("global", emptyAllowedPath, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.RestrictProviders || !config.ExplicitAllowlist || len(config.AllowedProviderIDs) != 0 || !tunnelRuntimePolicy(config, time.Now()).AllowNonDefault {
+		t.Fatalf("explicit empty allowlist must mean allow none: %#v", config)
+	}
+
+	for name, body := range map[string]string{
+		"duplicate allowed":     `{"allowed_provider_ids":["ordered-test","ordered-test"]}`,
+		"duplicate disabled":    `{"disabled_provider_ids":["ordered-test","ordered-test"]}`,
+		"noncanonical allowed":  `{"allowed_provider_ids":[" ordered-test"]}`,
+		"noncanonical disabled": `{"disabled_provider_ids":["ordered-test "]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "duplicates.json")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadTunnelRuntimeConfig("global", path, registry); err == nil {
+				t.Fatal("duplicate provider ID must fail closed")
+			}
+		})
+	}
+}
+
+func TestTunnelRuntimePolicyProtectsRegionalEvidenceFiles(t *testing.T) {
+	registry, err := tunnel.NewRegistry(supportSessionTestTunnelProvider{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	valid := fmt.Sprintf(`{"provider_id":"ordered-test","region":"global","status":"verified","issuer":"reviewed-probe","observed_at":%q,"expires_at":%q,"samples":[{"carrier":"probe-network","region":"global","success":true}]}`,
+		now.Add(-time.Hour).Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano))
+	tests := []struct {
+		name string
+		body string
+		mode os.FileMode
+	}{
+		{name: "trailing JSON", body: valid + `\n{}`, mode: 0o600},
+		{name: "unknown field", body: strings.TrimSuffix(valid, "}") + `,"unexpected":"secret"}`, mode: 0o600},
+		{name: "oversize", body: valid + strings.Repeat(" ", (1<<20)+1), mode: 0o600},
+	}
+	if runtime.GOOS != "windows" {
+		tests = append(tests, struct {
+			name string
+			body string
+			mode os.FileMode
+		}{name: "writable by group or others", body: valid, mode: 0o666})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			evidencePath := filepath.Join(dir, "evidence.json")
+			if err := os.WriteFile(evidencePath, []byte(tt.body), tt.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(evidencePath, tt.mode); err != nil {
+				t.Fatal(err)
+			}
+			policyPath := filepath.Join(dir, "policy.json")
+			policyBody := fmt.Sprintf(`{"regional_evidence_paths":[%q]}`, evidencePath)
+			if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadTunnelRuntimeConfig("global", policyPath, registry); err == nil {
+				t.Fatalf("protected evidence case %q must fail", tt.name)
+			}
+		})
+	}
+}
+
+func TestTunnelDefaultRegistrySelectsAutomaticProvidersInPriorityOrder(t *testing.T) {
+	deps, err := defaultTunnelRuntimeDeps(io.Discard, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := deps.Registry.Providers()
+	if len(metadata) != 4 {
+		t.Fatalf("default provider metadata count = %d, want 4: %#v", len(metadata), metadata)
+	}
+	byID := make(map[string]tunnel.ProviderMetadata, len(metadata))
+	for _, item := range metadata {
+		byID[item.ID] = item
+	}
+	if _, ok := byID[tunnel.ProviderTunn3l]; !ok {
+		t.Fatalf("default registry omitted tunn3l: %#v", metadata)
+	}
+	if byID[tunnel.ProviderCloudflareQuick].AutomaticPriority != 10 {
+		t.Fatalf("Cloudflare automatic priority = %d, want 10", byID[tunnel.ProviderCloudflareQuick].AutomaticPriority)
+	}
+
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	config := tunnelRuntimeConfig{Region: tunnel.RegionGlobal, SSHKnownHostsPaths: map[string]string{}}
+	evaluations := deps.Registry.Evaluate(tunnelRuntimePolicy(config, now), nil)
+	evaluations, _ = preflightTunnelEvaluations(evaluations, config, runtime.GOOS, runtime.GOARCH)
+	selections := eligibleTunnelSelections(evaluations)
+	got := make([]string, 0, len(selections))
+	for _, selection := range selections {
+		got = append(got, selection.Metadata.ID)
+	}
+	want := []string{tunnel.ProviderCloudflareQuick, tunnel.ProviderTunn3l, tunnel.ProviderLocalhostRun}
+	if !slices.Equal(got, want) {
+		t.Fatalf("default global selection = %v, want %v", got, want)
+	}
+
+	knownHostsRoot, err := canonicalPathThroughExistingAncestor(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath := filepath.Join(knownHostsRoot, "known_hosts")
+	if err := os.WriteFile(knownHostsPath, []byte("[free.pinggy.io]:443 ssh-ed25519 dGVzdA==\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	explicit := tunnelRuntimeConfig{
+		Region: tunnel.RegionGlobal, AllowedProviderIDs: []string{tunnel.ProviderPinggy}, RestrictProviders: true, ExplicitAllowlist: true,
+		SSHKnownHostsPaths: map[string]string{tunnel.ProviderPinggy: knownHostsPath},
+	}
+	evaluations = deps.Registry.Evaluate(tunnelRuntimePolicy(explicit, now), nil)
+	evaluations, _ = preflightTunnelEvaluations(evaluations, explicit, runtime.GOOS, runtime.GOARCH)
+	selections = eligibleTunnelSelections(evaluations)
+	if len(selections) != 1 || selections[0].Metadata.ID != tunnel.ProviderPinggy {
+		t.Fatalf("explicit Pinggy selection = %#v, want only Pinggy", selections)
+	}
+}
+
+func TestTunnelRuntimePolicyOptsInNonDefaultProvidersOnlyWithExplicitAllowlist(t *testing.T) {
+	deps, err := defaultTunnelRuntimeDeps(io.Discard, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := canonicalPathThroughExistingAncestor(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath := filepath.Join(root, "known_hosts")
+	if err := os.WriteFile(knownHostsPath, []byte("[free.pinggy.io]:443 ssh-ed25519 dGVzdA==\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writePolicy := func(t *testing.T, name, body string) string {
+		t.Helper()
+		if body == "" {
+			return ""
+		}
+		path := filepath.Join(root, name+".json")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	tests := []struct {
+		name              string
+		body              string
+		wantExplicit      bool
+		wantPinggy        bool
+		wantSelectionSize int
+	}{
+		{name: "no-policy", wantSelectionSize: 3},
+		{name: "explicit-pinggy", body: fmt.Sprintf(`{"allowed_provider_ids":["pinggy"],"ssh_known_hosts_paths":{"pinggy":%q}}`, knownHostsPath), wantExplicit: true, wantPinggy: true, wantSelectionSize: 1},
+		{name: "empty-allowlist", body: `{"allowed_provider_ids":[]}`, wantExplicit: true, wantSelectionSize: 0},
+		{name: "disabled-only", body: fmt.Sprintf(`{"disabled_provider_ids":["localhost-run"],"ssh_known_hosts_paths":{"pinggy":%q}}`, knownHostsPath), wantSelectionSize: 2},
+		{name: "ssh-path-only", body: fmt.Sprintf(`{"ssh_known_hosts_paths":{"pinggy":%q}}`, knownHostsPath), wantSelectionSize: 3},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config, err := loadTunnelRuntimeConfig("global", writePolicy(t, test.name, test.body), deps.Registry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy := tunnelRuntimePolicy(config, time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC))
+			if config.ExplicitAllowlist != test.wantExplicit || policy.AllowNonDefault != test.wantExplicit {
+				t.Fatalf("explicit allowlist state = config:%v policy:%v, want %v", config.ExplicitAllowlist, policy.AllowNonDefault, test.wantExplicit)
+			}
+			evaluations := deps.Registry.Evaluate(policy, nil)
+			evaluations, _ = preflightTunnelEvaluations(evaluations, config, runtime.GOOS, runtime.GOARCH)
+			selections := eligibleTunnelSelections(evaluations)
+			if len(selections) != test.wantSelectionSize {
+				t.Fatalf("selection count = %d, want %d: %#v", len(selections), test.wantSelectionSize, selections)
+			}
+			foundPinggy := false
+			for _, selection := range selections {
+				foundPinggy = foundPinggy || selection.Metadata.ID == tunnel.ProviderPinggy
+			}
+			if foundPinggy != test.wantPinggy {
+				t.Fatalf("Pinggy selected = %v, want %v: %#v", foundPinggy, test.wantPinggy, selections)
+			}
+		})
+	}
+
+	t.Run("invalid localhost override does not fall back to built-in trust", func(t *testing.T) {
+		root, err := canonicalPathThroughExistingAncestor(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		knownHostsPath := filepath.Join(root, "known_hosts")
+		if err := os.WriteFile(knownHostsPath, []byte("wrong.example ssh-ed25519 dGVzdA==\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		policyPath := filepath.Join(root, "providers.json")
+		policyBody := fmt.Sprintf(`{"allowed_provider_ids":["localhost-run"],"ssh_known_hosts_paths":{"localhost-run":%q}}`, knownHostsPath)
+		if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout bytes.Buffer
+		app := NewApp(&stdout, io.Discard)
+		if err := app.Run(context.Background(), []string{"tunnel", "probe", "--region", "global", "--provider-policy", policyPath, "--json"}); err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Providers []tunnelProbeInspection `json:"providers"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, provider := range payload.Providers {
+			if provider.ID == tunnel.ProviderLocalhostRun &&
+				(provider.ConfigurationReady || provider.KnownHostsConfigured || provider.Eligible || provider.EligibilityReason != "ssh-pin-invalid") {
+				t.Fatalf("invalid localhost.run override fell back to built-in trust: %#v", provider)
+			}
+		}
+		if strings.Contains(stdout.String(), knownHostsPath) || strings.Contains(stdout.String(), "wrong.example") {
+			t.Fatalf("localhost.run override preflight leaked protected material: %s", stdout.String())
+		}
+	})
+}
+
+func TestTunnelPreflightMarksOnlyBuiltInUnsupportedManagedProviderIneligible(t *testing.T) {
+	deps, err := defaultTunnelRuntimeDeps(io.Discard, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := tunnelRuntimeConfig{Region: tunnel.RegionGlobal, SSHKnownHostsPaths: map[string]string{}}
+	evaluations := deps.Registry.Evaluate(tunnelRuntimePolicy(config, time.Now().UTC()), nil)
+	evaluations, configurations := preflightTunnelEvaluations(evaluations, config, "windows", "amd64")
+	found := false
+	for _, item := range evaluations {
+		if item.Metadata.ID != tunnel.ProviderTunn3l {
+			continue
+		}
+		found = true
+		if item.Eligibility.Eligible || item.Eligibility.Reason != "tool-unsupported" || configurations[tunnel.ProviderTunn3l].ConfigurationReady {
+			t.Fatalf("unsupported built-in tunn3l preflight = %#v, configuration=%#v", item, configurations[tunnel.ProviderTunn3l])
+		}
+	}
+	if !found {
+		t.Fatal("default registry omitted tunn3l")
+	}
+
+	metadata := tunnel.ProviderMetadata{
+		ID: tunnel.ProviderTunn3l, DisplayName: "fake tunn3l", Protocols: []string{"https"}, Anonymous: true,
+		Executable: "test", DocumentationURL: "https://example.test", DefaultAutomatic: true, AutomaticPriority: 20,
+	}
+	fakeRegistry, err := tunnel.NewRegistry(supportSessionFuncTunnelProvider{id: tunnel.ProviderTunn3l, metadata: &metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluations = fakeRegistry.Evaluate(tunnelRuntimePolicy(config, time.Now().UTC()), nil)
+	evaluations, configurations = preflightTunnelEvaluations(evaluations, config, "windows", "amd64")
+	if len(evaluations) != 1 || !evaluations[0].Eligibility.Eligible || !configurations[tunnel.ProviderTunn3l].ConfigurationReady {
+		t.Fatalf("injected fake provider depended on local managed-tool support: evaluations=%#v configuration=%#v", evaluations, configurations)
+	}
+
+	mainland := tunnelRuntimeConfig{Region: tunnel.RegionCNMainland, SSHKnownHostsPaths: map[string]string{}}
+	evaluations = deps.Registry.Evaluate(tunnelRuntimePolicy(mainland, time.Now().UTC()), nil)
+	evaluations, _ = preflightTunnelEvaluations(evaluations, mainland, "windows", "amd64")
+	for _, item := range evaluations {
+		if item.Eligibility.Eligible || item.Eligibility.Reason != "regional-evidence-missing" {
+			t.Fatalf("configuration preflight overwrote regional eligibility: %#v", item)
+		}
+	}
+}
+
+func TestTunnelProvidersReportsReadOnlyMainlandEligibility(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{
+		"tunnel", "providers", "--region", "cn-mainland", "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
 		SchemaVersion string `json:"schema_version"`
-		Event         string `json:"event"`
-		Status        struct {
-			SchemaVersion string `json:"schema_version"`
-			TicketCode    string `json:"ticket_code"`
-			Status        string `json:"status"`
-		} `json:"status"`
-		AgentRule string `json:"agent_rule"`
+		Region        string `json:"region"`
+		ReadOnly      bool   `json:"read_only"`
+		Providers     []struct {
+			ID             string             `json:"id"`
+			Executable     string             `json:"executable"`
+			Eligibility    tunnel.Eligibility `json:"eligibility"`
+			EvidenceStatus string             `json:"evidence_status"`
+			FailureDomains map[string]bool    `json:"failure_domains"`
+		} `json:"providers"`
 	}
-	statusBytes, err := os.ReadFile(statusFile)
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode providers output: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+	if payload.SchemaVersion != "rdev.tunnel-providers.v1" || payload.Region != "cn-mainland" || !payload.ReadOnly {
+		t.Fatalf("unexpected providers envelope: %#v", payload)
+	}
+	if len(payload.Providers) != 4 {
+		t.Fatalf("expected all registered providers, got %#v", payload.Providers)
+	}
+	foundTunn3l := false
+	for _, provider := range payload.Providers {
+		foundTunn3l = foundTunn3l || provider.ID == tunnel.ProviderTunn3l
+		if provider.ID == "" || provider.Executable == "" {
+			t.Fatalf("provider metadata is incomplete: %#v", provider)
+		}
+		if provider.Eligibility.Eligible || provider.Eligibility.Reason != "regional-evidence-missing" || provider.EvidenceStatus != "missing" {
+			t.Fatalf("mainland provider without evidence must be ineligible: %#v", provider)
+		}
+		for domain, configured := range provider.FailureDomains {
+			if strings.Contains(domain, "://") || strings.Contains(domain, "192.0.2.") {
+				t.Fatalf("failure-domain output leaked a raw endpoint: %#v", provider.FailureDomains)
+			}
+			_ = configured
+		}
+	}
+	if !foundTunn3l {
+		t.Fatalf("provider metadata omitted tunn3l: %#v", payload.Providers)
+	}
+}
+
+func TestTunnelProvidersRedactsRegionalEvidenceDetails(t *testing.T) {
+	now := time.Now().UTC()
+	evidencePath := filepath.Join(t.TempDir(), "evidence.json")
+	evidence := tunnel.RegionalEvidence{
+		ProviderID: "cloudflare-quick", Region: tunnel.RegionCNMainland, Status: tunnel.EvidenceVerified,
+		Issuer: "super-secret-token", ObservedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		Samples: validCLIMainlandSamples(),
+	}
+	evidenceJSON, err := json.Marshal(evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(statusBytes, &statusPayload); err != nil {
-		t.Fatalf("invalid status file JSON: %v\n%s", err, string(statusBytes))
+	if err := os.WriteFile(evidencePath, evidenceJSON, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if statusPayload.SchemaVersion != "rdev.support-session-foreground-event.v1" ||
-		statusPayload.Event != "waiting" ||
-		statusPayload.Status.SchemaVersion != "rdev.support-session-status.v1" ||
-		statusPayload.Status.TicketCode != payload.Session.TicketCode ||
-		!strings.Contains(statusPayload.AgentRule, "connected_next_steps.user_report") {
-		t.Fatalf("expected status file to mirror foreground event, got %#v", statusPayload)
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	policyBody := fmt.Sprintf(`{"allowed_provider_ids":["cloudflare-quick"],"regional_evidence_paths":[%q]}`, evidencePath)
+	if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	if err := app.Run(context.Background(), []string{
+		"tunnel", "providers", "--region", "cn-mainland", "--provider-policy", policyPath, "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), evidence.Issuer) || strings.Contains(stdout.String(), "china-telecom") {
+		t.Fatalf("providers output leaked evidence internals: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"evidence_status": "verified"`) || !strings.Contains(stdout.String(), `"evidence_expires_at"`) {
+		t.Fatalf("providers output omitted safe evidence summary: %s", stdout.String())
+	}
+}
+
+func validCLIMainlandSamples() []tunnel.NetworkSample {
+	var samples []tunnel.NetworkSample
+	for _, carrier := range []string{"china-telecom", "china-unicom", "china-mobile"} {
+		for _, region := range []string{"north", "south"} {
+			samples = append(samples, tunnel.NetworkSample{Carrier: carrier, Region: region, Success: true})
+		}
+	}
+	return samples
+}
+
+func TestTunnelProbeChecksConfigurationWithoutStartingTunnel(t *testing.T) {
+	policyDir, err := canonicalPathThroughExistingAncestor(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath := filepath.Join(policyDir, "known_hosts")
+	knownHostsContent := localhostRunOfficialKnownHostsLine + "\n"
+	if err := os.WriteFile(knownHostsPath, []byte(knownHostsContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(policyDir, "providers.json")
+	policyBody := fmt.Sprintf(`{"allowed_provider_ids":["localhost-run"],"ssh_known_hosts_paths":{"localhost-run":%q}}`, knownHostsPath)
+	if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{
+		"tunnel", "probe", "--region", "cn-mainland", "--provider-policy", policyPath, "--json",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SchemaVersion           string `json:"schema_version"`
+		ReadOnly                bool   `json:"read_only"`
+		PersistentTunnelStarted bool   `json:"persistent_tunnel_started"`
+		Providers               []struct {
+			ID                   string `json:"id"`
+			ExecutableConfigured bool   `json:"executable_configured"`
+			KnownHostsConfigured bool   `json:"known_hosts_configured"`
+			ConfigurationReady   bool   `json:"configuration_ready"`
+			Eligible             bool   `json:"eligible"`
+			EligibilityReason    string `json:"eligibility_reason"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode probe output: %v; stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	}
+	if payload.SchemaVersion != "rdev.tunnel-probe.v1" || !payload.ReadOnly || payload.PersistentTunnelStarted {
+		t.Fatalf("probe must be explicitly read-only: %#v", payload)
+	}
+	if len(payload.Providers) != 4 {
+		t.Fatalf("expected probe result for every provider, got %#v", payload.Providers)
+	}
+	var localhostRun map[string]any
+	encoded, _ := json.Marshal(payload.Providers)
+	var rows []map[string]any
+	if err := json.Unmarshal(encoded, &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row["id"] == "localhost-run" {
+			localhostRun = row
+		}
+	}
+	if localhostRun == nil || localhostRun["known_hosts_configured"] != true || localhostRun["eligible"] != false || localhostRun["eligibility_reason"] != "regional-evidence-missing" {
+		t.Fatalf("unexpected localhost.run probe: %#v", localhostRun)
+	}
+	if strings.Contains(stdout.String(), knownHostsContent) || strings.Contains(stdout.String(), knownHostsPath) || strings.Contains(stdout.String(), policyPath) {
+		t.Fatalf("probe output leaked protected policy material: %q", stdout.String())
+	}
+}
+
+func TestTunnelProbeUsesProviderConfigurationPreflight(t *testing.T) {
+	t.Run("built-in trust and managed asset are ready", func(t *testing.T) {
+		var stdout bytes.Buffer
+		app := NewApp(&stdout, io.Discard)
+		if err := app.Run(context.Background(), []string{"tunnel", "probe", "--region", "global", "--json"}); err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Providers []tunnelProbeInspection `json:"providers"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		byID := make(map[string]tunnelProbeInspection, len(payload.Providers))
+		for _, provider := range payload.Providers {
+			byID[provider.ID] = provider
+		}
+		localhost := byID[tunnel.ProviderLocalhostRun]
+		if !localhost.KnownHostsConfigured {
+			t.Fatalf("localhost.run built-in trust was not ready: %#v", localhost)
+		}
+		if _, err := exec.LookPath("ssh"); err == nil && !localhost.ConfigurationReady {
+			t.Fatalf("localhost.run configuration should be ready with ssh installed: %#v", localhost)
+		}
+		tunn3l := byID[tunnel.ProviderTunn3l]
+		_, supported := tunn3lManagedAsset(runtime.GOOS, runtime.GOARCH)
+		if tunn3l.ConfigurationReady != supported || tunn3l.ExecutableConfigured != supported {
+			t.Fatalf("tunn3l managed-asset readiness = %#v, supported=%v", tunn3l, supported)
+		}
+	})
+
+	tests := []struct {
+		name    string
+		content string
+		mode    os.FileMode
+	}{
+		{name: "wrong host", content: "wrong.example ssh-ed25519 dGVzdA==\n", mode: 0o600},
+		{name: "malformed", content: "[free.pinggy.io]:443 ssh-ed25519 !!!\n", mode: 0o600},
+	}
+	if runtime.GOOS != "windows" {
+		tests = append(tests, struct {
+			name    string
+			content string
+			mode    os.FileMode
+		}{name: "unsafe permissions", content: "[free.pinggy.io]:443 ssh-ed25519 dGVzdA==\n", mode: 0o666})
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			knownHostsPath := filepath.Join(dir, "operator-known-hosts")
+			if err := os.WriteFile(knownHostsPath, []byte(test.content), test.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(knownHostsPath, test.mode); err != nil {
+				t.Fatal(err)
+			}
+			policyPath := filepath.Join(dir, "providers.json")
+			policyBody := fmt.Sprintf(`{"allowed_provider_ids":["pinggy"],"ssh_known_hosts_paths":{"pinggy":%q}}`, knownHostsPath)
+			if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			app := NewApp(&stdout, io.Discard)
+			if err := app.Run(context.Background(), []string{"tunnel", "probe", "--region", "global", "--provider-policy", policyPath, "--json"}); err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				Providers []tunnelProbeInspection `json:"providers"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			var pinggy tunnelProbeInspection
+			for _, provider := range payload.Providers {
+				if provider.ID == tunnel.ProviderPinggy {
+					pinggy = provider
+				}
+			}
+			if pinggy.ConfigurationReady || pinggy.KnownHostsConfigured || pinggy.Eligible || pinggy.EligibilityReason != "ssh-pin-invalid" {
+				t.Fatalf("invalid operator pin failed open: %#v", pinggy)
+			}
+			for _, forbidden := range []string{knownHostsPath, policyPath, test.content, "wrong.example"} {
+				if strings.Contains(stdout.String(), forbidden) {
+					t.Fatalf("probe output leaked protected pin material %q: %s", forbidden, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+func TestSupportSessionConnectPropagatesTunnelPolicyFlags(t *testing.T) {
+	for _, name := range []string{"RDEV_HOSTED_GATEWAY_URL", "RDEV_RELAY_GATEWAY_URL", "RDEV_MESH_GATEWAY_URL", "RDEV_VPN_GATEWAY_URL", "RDEV_SSH_GATEWAY_URL"} {
+		t.Setenv(name, "")
+	}
+	policyPath := filepath.Join(t.TempDir(), "providers.json")
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, io.Discard)
+	if err := app.Run(context.Background(), []string{
+		"support-session", "connect",
+		"--region", "cn-mainland",
+		"--provider-policy", policyPath,
+		"--allow-degraded-direct-handoff",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		CLIStartNowCommand     []string `json:"cli_start_now_command"`
+		ForegroundStartCommand []string `json:"foreground_start_command"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range [][]string{payload.CLIStartNowCommand, payload.ForegroundStartCommand} {
+		joined := strings.Join(command, "\x00")
+		if !strings.Contains(joined, "--region\x00cn-mainland") ||
+			!strings.Contains(joined, "--provider-policy\x00"+policyPath) ||
+			!slices.Contains(command, "--allow-degraded-direct-handoff") {
+			t.Fatalf("generated start command dropped tunnel policy flags: %v", command)
+		}
 	}
 }
 
@@ -6335,10 +8105,7 @@ func TestSupportSessionReportTicketCodeSelectsSingleActiveHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := gw.CreateSession(controlplane.SessionSpec{
-		Reason:       "ticket report test",
-		Capabilities: []string{"shell.user"},
-	})
+	session, err := gw.Session(ticket.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6411,6 +8178,86 @@ func TestSupportSessionReportTicketCodeSelectsSingleActiveHost(t *testing.T) {
 		payload.RemoteControlEntry["explicit_disconnect_required"] != true ||
 		!strings.Contains(payload.StaleHostRule, "Do not send new session tasks") {
 		t.Fatalf("expected ticket-code report to select one active host, got %s", stdout.String())
+	}
+}
+
+func TestSupportSessionReportTicketCodeUsesBoundEndpointWithoutLegacyHost(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, []string{"shell.user"}, "endpoint report")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "endpoint-report-target",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-endpoint-report",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(ticket.SessionID, controlplane.TaskSpec{
+		TargetEndpointID: endpoint.ID,
+		Adapter:          "shell",
+		Intent:           "endpoint identity probe",
+		Capabilities:     []string{"shell.user"},
+		IdempotencyKey:   "endpoint-report-task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CompleteSessionTask(ticket.SessionID, task.ID, map[string]any{"status": "succeeded"}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"support-session", "report", "--gateway-url", server.URL, "--ticket-code", ticket.Code,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK               bool             `json:"ok"`
+		HostID           string           `json:"host_id"`
+		SessionID        string           `json:"session_id"`
+		TargetEndpointID string           `json:"target_endpoint_id"`
+		Tasks            []map[string]any `json:"tasks"`
+		Host             map[string]any   `json:"host"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.HostID != "" || payload.SessionID != ticket.SessionID || payload.TargetEndpointID != endpoint.ID || len(payload.Tasks) != 1 || payload.Host["id"] != endpoint.ID {
+		t.Fatalf("ticket-only report did not consume the bound endpoint IDs: %s", stdout.String())
+	}
+}
+
+func TestSupportSessionReportRejectsExplicitSessionOutsideTicketBinding(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	ticket, err := gw.CreateTicket(model.HostModeAttendedTemporary, 600, nil, "binding mismatch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{Role: controlplane.EndpointRoleTarget}); err != nil {
+		t.Fatal(err)
+	}
+	standalone, err := gw.CreateSession(controlplane.SessionSpec{ExpiresAt: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"support-session", "report", "--gateway-url", server.URL, "--ticket-code", ticket.Code, "--session-id", standalone.ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match the ticket binding") || stdout.Len() != 0 {
+		t.Fatal("report did not fail closed for an explicit session outside the ticket binding")
 	}
 }
 

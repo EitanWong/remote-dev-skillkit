@@ -19,7 +19,7 @@ Before creating any session:
 1. Check `gateway_candidate_summary.needs_public_tunnel` from `rdev.support_session.prepare` output.
 2. If `needs_public_tunnel=true` OR if no stable configured gateway exists:
    - Run `rdev support-session connect --start`.
-   - Let `rdev` manage the public tunnel internally. It prefers configured stable gateways (`RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`, relay/mesh/VPN/SSH URLs), then starts Cloudflare Quick Tunnel with HTTP/2 first, then falls back to localhost.run SSH tunnel when needed.
+   - Let `rdev` manage the public tunnel internally. It prefers configured stable gateways (`RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`, relay/mesh/VPN/SSH URLs), then evaluates Cloudflare Quick Tunnel (priority 10), managed pinned tunn3l v0.5.1 (priority 20), and localhost.run with the reviewed official host key (priority 30). Pinggy (priority 40) or another SSH provider is used only after an explicit operator allowlist and reviewed exact pin.
    - Read the generated `target_handoff_envelope.full_text` or `handoff_text_file.path`; do not manually start tunnels or assemble `--gateway-url`.
 3. LAN/private-IP candidates are acceptable as **secondary** fallbacks only after the managed public-tunnel path fails or a stable configured gateway is already present.
 
@@ -39,9 +39,32 @@ server, prefer:
   `RDEV_CLOUDFLARED_NAMED_TUNNEL_START_ARGV_JSON` when a reusable Cloudflare
   Named Tunnel has been configured.
 
-If no stable URL is configured, connect first with the managed Quick Tunnel
-fallback, then tell the operator how to configure a stable URL for the next
-session.
+The custom Cloudflare argv remains policy constrained: use only a direct
+foreground `cloudflared tunnel ... --url {local_url} run ...` command with one
+tunnel name, token, or token file. Do not use it for `service install`, delete
+or administrative subcommands, shell wrappers, or a different local origin;
+`rdev` rejects those forms before execution.
+
+If no stable URL is configured, connect with the managed automatic fallback,
+then tell the operator how to configure a stable URL for the next session.
+
+Anonymous/account-free providers are availability candidates, not guaranteed
+mainland-China services. `cn-mainland` remains fail-closed unless fresh verified
+China Telecom, China Unicom, and China Mobile evidence is loaded. A successful
+Agent-side live sample must not be promoted into regional evidence.
+
+For tunn3l v0.5.1, `Anonymous=true` means no account or registration is
+required; it is not a privacy or no-telemetry guarantee. The pinned upstream
+source creates a `dv_` plus 24-hex device ID
+([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L35-L42))
+and sends that ID, the Agent hostname, and Agent OS in relay registration
+metadata
+([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L163-L169)).
+`rdev` gives it a fresh empty session `HOME`/`USERPROFILE`/XDG config and clears
+tunn3l token/subdomain/password and runtime preload variables, so it does not
+reuse the user's real `~/.tunn3l` and generates a new session-scoped ID. The
+relay still observes normal network and HTTP tunnel traffic. Do not generalize
+these commit-pinned v0.5.1 statements to other releases.
 
 ### Rule 2 — One command to the user, nothing else
 
@@ -71,7 +94,8 @@ Do not ask the user:
 - "Which tunnel do you want to use?"
 - "Can you open port X?"
 
-Auto-detect everything. If detection is ambiguous, default to public tunnel (cloudflared).
+Auto-detect everything. If detection is ambiguous, use the managed public-tunnel
+policy and let `rdev` evaluate eligible providers; do not hard-code Cloudflare.
 
 ### Rule 4 — rdev recovery is automatic
 
@@ -166,7 +190,8 @@ After sending the handoff:
    - Was a public-tunnel URL sent, or a LAN IP?
    - Is the active gateway still running? (`curl <ACTIVE_GATEWAY_URL>/healthz`)
    - Did the target machine go to sleep or lock?
-   - Is the Cloudflare tunnel still alive? (check process)
+   - Is the selected managed provider process still alive? (use the redacted
+     provider attempt/status fields)
 3. Present the user with specific, actionable next steps — not another "still waiting" message.
 
 ### Rule 12 — Host sessions keep awake, but never bypass lock policy
@@ -190,8 +215,19 @@ asking the user to edit bootstrap scripts.
 Completing a task is not a signal to disconnect. Keep the host/session alive
 until the operator explicitly asks to disconnect, revoke, stop the gateway, or
 uninstall a managed service. Final reports should state connection continuity:
-ephemeral Quick Tunnel vs stable configured gateway, and whether managed
-reconnect is ready.
+ephemeral managed foreground provider vs stable configured gateway, and whether
+managed reconnect is ready.
+
+After smoke testing or reporting, the required positive output contract is:
+
+- `connection_state: alive`
+- `disconnect_performed: false`
+- `gateway_continuity: <ephemeral foreground or stable configured>`
+- `next_action: wait for explicit operator disconnect`
+
+Then return to foreground supervision. Do not send Ctrl-C, call disconnect or
+revoke, stop the gateway, or describe immediate cleanup as the next step merely
+because verification passed.
 
 ### Rule 14 — Treat sessions as Support Device Entries
 
@@ -256,7 +292,11 @@ If `needs_public_tunnel=true`:
 rdev support-session connect --start
 ```
 
-Do not add `--public-tunnel`; that option no longer exists. Do not start `cloudflared` in a separate terminal. Do not run this command with `&`, `nohup`, or any background terminal. The CLI owns tunnel selection, process lifetime, HTTP/2 fallback, localhost.run fallback, helper assets, and in-memory session state. Keep this foreground process alive for the whole session.
+Do not add `--public-tunnel`; that option no longer exists. Do not start
+cloudflared, tunn3l, or an SSH tunnel in a separate terminal. Do not run this
+command with `&`, `nohup`, or any background terminal. The CLI owns provider
+selection, process lifetime, fallback, helper assets, and in-memory session
+state. Keep this foreground process alive for the whole session.
 
 ### Step 3 — Send ONE thing to the user
 
@@ -266,7 +306,7 @@ Forward it verbatim. For unknown targets it will look like:
 > **Connect to the remote support session:**
 > Windows PowerShell: `powershell -NoProfile -Command "irm 'https://.../bootstrap.ps1' -UseBasicParsing | iex"`
 > macOS/Linux terminal: `curl -fsSL 'https://...' | sh`
-> Browser fallback: `https://<tunnel>.trycloudflare.com/join/<TICKET>/...`
+> Browser fallback: `https://<selected-public-host>/join/<TICKET>/...`
 
 Nothing more. No explanation of tickets, no network configuration.
 
@@ -283,15 +323,15 @@ If the status is `stale`, do **not** create session tasks. Report that the targe
 was seen previously but is no longer task-ready, then use the generated recovery
 instructions instead of manually building new bootstrap scripts.
 
-Before any command that needs `--host-id`, prefer:
+Before smoke testing, prefer:
 
 ```
 rdev support-session report --gateway-url <ACTIVE_GATEWAY_URL> --ticket-code <TICKET>
 ```
 
-Use `recommended_target_endpoint_id` from that report. If the report says there are no
-active hosts or multiple active hosts, follow its `next_action` instead of
-guessing from stale/pending host IDs.
+Use `session_id` and `recommended_target_endpoint_id` from that report. If the
+report says there are no active hosts or multiple active hosts, follow its
+`next_action` instead of guessing from stale/pending endpoint IDs.
 
 Also read `remote_control_entry` from the report/status. Use
 `support_device_id` and `session_passcode` as the standard Agent-facing
@@ -311,7 +351,7 @@ switch transports manually unless the recover command is unavailable.
 After connection, run the built-in smoke test first (no user prompts):
 
 ```
-rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID>
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID> --target-endpoint-id <ENDPOINT_ID> --ticket-code <TICKET>
 ```
 
 This command owns OS-specific probe tasks, PowerShell/cmd fallback semantics,
@@ -325,7 +365,7 @@ When validating native remote-control surfaces, run the same smoke test with the
 low-risk probe switch:
 
 ```
-rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID> --remote-control
+rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID> --target-endpoint-id <ENDPOINT_ID> --ticket-code <TICKET> --remote-control
 ```
 
 For MCP, call `rdev.support_session.smoke_test` with `"remote_control": true`
@@ -367,11 +407,20 @@ disconnect after the report unless the operator explicitly asks for cleanup.
 If the target does not appear within 2 minutes:
 
 1. Check `gateway_candidate_summary` — was a public tunnel URL sent?
-2. If LAN URL was sent by mistake: restart with cloudflared URL, give user new command.
-3. If tunnel dropped: restart cloudflared, get new URL, give user new command.
-4. If stale endpoints or queued tasks accumulated: run `rdev support-session recover`.
-5. **Do not write custom PowerShell/bash polling scripts.**
-6. Use `rdev.support_session.status` or `connection_recovery` returned fields.
+2. If a LAN URL was sent by mistake: restart the managed foreground flow and
+   give the user only its newly generated handoff.
+3. If the target explicitly reports `trycloudflare.com` DNS failure or
+   NXDOMAIN, create a protected policy file inside the protected absolute work
+   directory containing exactly
+   `{"disabled_provider_ids":["cloudflare-quick"]}`. Validate it with read-only
+   `rdev tunnel probe --region global --provider-policy <path> --json`, then run
+   foreground `rdev support-session connect --start --work-dir <ABSOLUTE_PROTECTED_WORK_DIR> --region global --provider-policy <path>`. Let managed tunn3l or localhost.run take over and send only the new generated handoff. Do not restart Cloudflare by default, manually start a provider, or write a multi-URL PowerShell loop.
+4. If a different tunnel dropped, rerun the same managed foreground flow and let
+   policy evaluation select the next eligible provider; give the user only the
+   new generated handoff.
+5. If stale endpoints or queued tasks accumulated: run `rdev support-session recover`.
+6. **Do not write custom PowerShell/bash polling scripts.**
+7. Use `rdev.support_session.status` or `connection_recovery` returned fields.
 
 ---
 
