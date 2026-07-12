@@ -292,27 +292,27 @@ func desktopCapabilityAndAuthorization(action string) (string, string) {
 	case "windows", "window.inspect":
 		return string(CapabilityWindowInspect), ""
 	case "screenshot", "screen.screenshot":
-		return string(CapabilityScreenScreenshot), "screen.screenshot"
+		return string(CapabilityScreenScreenshot), ""
 	case "record", "screen.record":
-		return string(CapabilityScreenRecord), "screen.record"
+		return string(CapabilityScreenRecord), ""
 	case "focus", "window.focus":
-		return string(CapabilityWindowFocus), "window.focus"
+		return string(CapabilityWindowFocus), ""
 	case "move", "window.move":
-		return string(CapabilityWindowMove), "window.move"
+		return string(CapabilityWindowMove), ""
 	case "keyboard", "input.keyboard":
-		return string(CapabilityInputKeyboard), "input.keyboard"
+		return string(CapabilityInputKeyboard), ""
 	case "mouse", "input.mouse":
-		return string(CapabilityInputMouse), "input.mouse"
+		return string(CapabilityInputMouse), ""
 	case "app.launch":
-		return string(CapabilityAppLaunch), "app.launch"
+		return string(CapabilityAppLaunch), ""
 	case "app.close":
-		return string(CapabilityAppClose), "app.close"
+		return string(CapabilityAppClose), ""
 	case "url.open":
-		return string(CapabilityURLOpen), "url.open"
+		return string(CapabilityURLOpen), ""
 	case "clipboard.read":
-		return string(CapabilityClipboardRead), "clipboard.read"
+		return string(CapabilityClipboardRead), ""
 	case "clipboard.write":
-		return string(CapabilityClipboardWrite), "clipboard.write"
+		return string(CapabilityClipboardWrite), ""
 	case "unattended.access":
 		return string(CapabilityUnattendedAccess), "unattended.access"
 	default:

@@ -56,15 +56,34 @@ func TestPolicyTemplateUsesHomeWorkspaceRoot(t *testing.T) {
 	}
 }
 
-func TestPolicyTemplateDesktopScreenshotRequiresAuthorization(t *testing.T) {
-	template := PolicyTemplate("screen.screenshot", "windows")
-	if template["adapter"] != "desktop" {
-		t.Fatalf("expected desktop adapter, got %#v", template["adapter"])
-	}
-	policy := template["policy"].(map[string]any)
-	authorizations := policy["authorizations_required"].([]string)
-	if len(authorizations) != 1 || authorizations[0] != "screen.screenshot" {
-		t.Fatalf("expected screenshot authorization, got %#v", policy)
+func TestPolicyTemplateDesktopActionsDoNotRequireTaskAuthorization(t *testing.T) {
+	for _, capability := range []string{
+		"screen.screenshot",
+		"screen.record",
+		"window.inspect",
+		"window.focus",
+		"window.move",
+		"input.keyboard",
+		"input.mouse",
+		"app.launch",
+		"app.close",
+		"url.open",
+		"clipboard.read",
+		"clipboard.write",
+	} {
+		t.Run(capability, func(t *testing.T) {
+			template := PolicyTemplate(capability, "windows")
+			if template["adapter"] != "desktop" {
+				t.Fatalf("expected desktop adapter, got %#v", template["adapter"])
+			}
+			policy := template["policy"].(map[string]any)
+			if _, ok := policy["authorizations_required"]; ok {
+				t.Fatalf("expected no GUI task authorization, got %#v", policy)
+			}
+			if policy["max_output_bytes"] != 65536 {
+				t.Fatalf("expected GUI artifact budget, got %#v", policy["max_output_bytes"])
+			}
+		})
 	}
 }
 

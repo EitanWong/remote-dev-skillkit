@@ -97,6 +97,65 @@ func TestExecuteWriteReportsExpectedTransferMismatch(t *testing.T) {
 	}
 }
 
+func TestExecuteReadSupportsResumableChunks(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("0123456789abcdef")
+	path := filepath.Join(root, "artifact.bin")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	expectedHash := "sha256:" + hex.EncodeToString(sum[:])
+
+	first, err := Execute(Spec{
+		WorkspaceRoot: root,
+		Action:        "read",
+		Path:          "artifact.bin",
+		Offset:        0,
+		ChunkBytes:    5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ContentBase64 != base64.StdEncoding.EncodeToString(content[:5]) ||
+		first.Offset != 0 || first.NextOffset != 5 || first.TotalBytes != int64(len(content)) ||
+		first.Complete || first.SHA256 != expectedHash || first.ChunkSHA256 == "" {
+		t.Fatalf("unexpected first chunk: %#v", first)
+	}
+
+	second, err := Execute(Spec{
+		WorkspaceRoot: root,
+		Action:        "download",
+		Path:          "artifact.bin",
+		Offset:        first.NextOffset,
+		ChunkBytes:    32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ContentBase64 != base64.StdEncoding.EncodeToString(content[5:]) ||
+		second.Offset != 5 || second.NextOffset != int64(len(content)) ||
+		!second.Complete || second.SHA256 != expectedHash {
+		t.Fatalf("unexpected final chunk: %#v", second)
+	}
+}
+
+func TestExecuteReadRejectsInvalidChunkOffset(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "artifact.bin"), []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Execute(Spec{
+		WorkspaceRoot: root,
+		Action:        "read",
+		Path:          "artifact.bin",
+		Offset:        5,
+		ChunkBytes:    2,
+	}); err == nil {
+		t.Fatal("expected offset beyond file size to be rejected")
+	}
+}
+
 func TestExecuteExpandsHomeWorkspaceRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

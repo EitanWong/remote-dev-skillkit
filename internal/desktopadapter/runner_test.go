@@ -1,6 +1,12 @@
 package desktopadapter
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -36,5 +42,49 @@ func TestExecuteFailClosedWhenNativeDesktopUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "desktop_session_unavailable") {
 		t.Fatalf("expected unavailable error, got %v", err)
+	}
+}
+
+func TestEncodePNGWithinBudgetKeepsValidPNG(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1024, 768))
+	for y := 0; y < 768; y++ {
+		for x := 0; x < 1024; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: uint8(x ^ y), A: 255})
+		}
+	}
+	pngBytes, err := encodePNGWithinBudget(img, 12000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pngBytes) > 12000 {
+		t.Fatalf("PNG size %d exceeds budget", len(pngBytes))
+	}
+	decoded, err := png.Decode(bytes.NewReader(pngBytes))
+	if err != nil {
+		t.Fatalf("bounded PNG is invalid: %v", err)
+	}
+	if decoded.Bounds().Dx() == 0 || decoded.Bounds().Dy() == 0 {
+		t.Fatalf("bounded PNG has empty dimensions: %v", decoded.Bounds())
+	}
+}
+
+func TestPersistDesktopArtifactReturnsRelativeMetadata(t *testing.T) {
+	root := t.TempDir()
+	artifact, err := persistDesktopArtifact(root, ".rdev/desktop-artifacts/capture.png", "image/png", []byte("png-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Path != ".rdev/desktop-artifacts/capture.png" || artifact.ContentType != "image/png" || artifact.Bytes != 8 || artifact.SHA256 == "" {
+		t.Fatalf("unexpected artifact metadata: %#v", artifact)
+	}
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(artifact.Path)))
+	if err != nil || string(data) != "png-data" {
+		t.Fatalf("expected persisted artifact, data=%q err=%v", data, err)
+	}
+}
+
+func TestPersistDesktopArtifactRejectsPathEscape(t *testing.T) {
+	if _, err := persistDesktopArtifact(t.TempDir(), "../capture.png", "image/png", []byte("x")); err == nil {
+		t.Fatal("expected artifact path escape to be rejected")
 	}
 }

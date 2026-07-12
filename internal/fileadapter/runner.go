@@ -29,6 +29,8 @@ type Spec struct {
 	ExpectedBytes      int
 	ExpectedSHA256     string
 	MaxBytes           int
+	Offset             int64
+	ChunkBytes         int
 	MaxDurationSeconds int
 	MaxOutputBytes     int
 }
@@ -54,6 +56,11 @@ type ResultArtifact struct {
 	Encoding        string  `json:"encoding,omitempty"`
 	Bytes           int     `json:"bytes,omitempty"`
 	SHA256          string  `json:"sha256,omitempty"`
+	ChunkSHA256     string  `json:"chunk_sha256,omitempty"`
+	Offset          int64   `json:"offset"`
+	NextOffset      int64   `json:"next_offset"`
+	TotalBytes      int64   `json:"total_bytes"`
+	Complete        bool    `json:"complete"`
 	ExpectedBytes   int     `json:"expected_bytes,omitempty"`
 	ExpectedSHA256  string  `json:"expected_sha256,omitempty"`
 	ByteCompare     string  `json:"byte_compare,omitempty"`
@@ -127,7 +134,7 @@ func ExecuteContext(ctx context.Context, spec Spec) (ResultArtifact, error) {
 			return finish(), err
 		}
 		artifact.ResolvedPath = resolved
-		if err := readFileContent(resolved, spec.MaxBytes, &artifact); err != nil {
+		if err := readFileContent(resolved, spec.MaxBytes, spec.Offset, spec.ChunkBytes, spec.MaxOutputBytes, &artifact); err != nil {
 			return finish(), err
 		}
 		applyExpectedTransferEvidence(&artifact, spec.ExpectedBytes, spec.ExpectedSHA256)
@@ -356,7 +363,7 @@ func entryFor(root, path string, info os.FileInfo) Entry {
 	}
 }
 
-func readFileContent(path string, maxBytes int, artifact *ResultArtifact) error {
+func readFileContent(path string, maxBytes int, offset int64, chunkBytes int, maxOutputBytes int, artifact *ResultArtifact) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -364,31 +371,80 @@ func readFileContent(path string, maxBytes int, artifact *ResultArtifact) error 
 	if info.IsDir() {
 		return fmt.Errorf("cannot read directory as file")
 	}
-	if maxBytes <= 0 {
-		maxBytes = 1024 * 1024
+	if offset < 0 || offset > info.Size() {
+		return fmt.Errorf("read offset %d is outside file size %d", offset, info.Size())
+	}
+	if chunkBytes <= 0 {
+		chunkBytes = maxBytes
+	}
+	if chunkBytes <= 0 {
+		chunkBytes = 32 * 1024
+	}
+	if maxBytes > 0 && chunkBytes > maxBytes {
+		chunkBytes = maxBytes
+	}
+	if budget := safeChunkBytes(maxOutputBytes); budget > 0 && chunkBytes > budget {
+		chunkBytes = budget
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	limited := io.LimitReader(f, int64(maxBytes)+1)
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	limited := io.LimitReader(f, int64(chunkBytes))
 	content, err := io.ReadAll(limited)
 	if err != nil {
 		return err
 	}
-	if len(content) > maxBytes {
-		content = content[:maxBytes]
-		artifact.OutputTruncated = true
+	wholeHash, err := hashFile(f, info.Size())
+	if err != nil {
+		return err
 	}
-	sum := sha256.Sum256(content)
+	chunkHash := sha256.Sum256(content)
 	artifact.Bytes = len(content)
-	artifact.SHA256 = "sha256:" + hex.EncodeToString(sum[:])
+	artifact.SHA256 = wholeHash
+	artifact.ChunkSHA256 = "sha256:" + hex.EncodeToString(chunkHash[:])
+	artifact.Offset = offset
+	artifact.NextOffset = offset + int64(len(content))
+	artifact.TotalBytes = info.Size()
+	artifact.Complete = artifact.NextOffset >= info.Size()
 	artifact.ContentBase64 = base64.StdEncoding.EncodeToString(content)
-	if utf8.Valid(content) {
+	if len(content) <= 4096 && utf8.Valid(content) {
 		artifact.ContentText = string(content)
 	}
 	return nil
+}
+
+func safeChunkBytes(maxOutputBytes int) int {
+	if maxOutputBytes <= 0 {
+		return 32 * 1024
+	}
+	const overhead = 4096
+	if maxOutputBytes <= overhead {
+		return 1024
+	}
+	budget := (maxOutputBytes - overhead) * 3 / 4
+	if budget > 32*1024 {
+		budget = 32 * 1024
+	}
+	if budget < 1024 {
+		return 1024
+	}
+	return budget
+}
+
+func hashFile(f *os.File, size int64) (string, error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	hasher := sha256.New()
+	if _, err := io.CopyN(hasher, f, size); err != nil && err != io.EOF {
+		return "", err
+	}
+	return "sha256:" + hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func applyExpectedTransferEvidence(artifact *ResultArtifact, expectedBytes int, expectedSHA256 string) {

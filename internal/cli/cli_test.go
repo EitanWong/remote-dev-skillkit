@@ -7892,14 +7892,16 @@ func TestDesktopScreenshotCLICreatesDesktopAdapterTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := received["payload"].(map[string]any)
-	authorizations := payload["authorizations_required"].([]any)
 	if received["adapter"] != "desktop" ||
 		received["intent"] != "capture remote desktop screenshot" ||
 		payload["workspace_root"] != "~" ||
 		payload["action"] != "screen.screenshot" ||
-		len(authorizations) != 1 ||
-		authorizations[0] != "screen.screenshot" {
+		payload["max_output_bytes"] != float64(65536) ||
+		payload["output_path"] == nil || payload["output_path"] == "" {
 		t.Fatalf("unexpected desktop screenshot task payload: %#v", received)
+	}
+	if _, ok := payload["authorizations_required"]; ok {
+		t.Fatalf("expected screenshot task without authorization, got %#v", payload)
 	}
 }
 
@@ -7963,13 +7965,13 @@ func TestDesktopClipboardCLICreatesDesktopAdapterTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := received["payload"].(map[string]any)
-	authorizations := payload["authorizations_required"].([]any)
 	if received["adapter"] != "desktop" ||
 		payload["action"] != "clipboard.write" ||
-		payload["text"] != "hello clipboard" ||
-		len(authorizations) != 1 ||
-		authorizations[0] != "clipboard.write" {
+		payload["text"] != "hello clipboard" {
 		t.Fatalf("unexpected desktop clipboard task payload: %#v", received)
+	}
+	if _, ok := payload["authorizations_required"]; ok {
+		t.Fatalf("expected clipboard task without authorization, got %#v", payload)
 	}
 }
 

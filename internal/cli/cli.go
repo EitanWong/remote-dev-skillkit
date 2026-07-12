@@ -8693,7 +8693,9 @@ func (a App) files(ctx context.Context, args []string) error {
 	content := fs.String("content", "", "inline content for write/upload")
 	contentFile := fs.String("content-file", "", "file whose content is sent for write/upload")
 	encoding := fs.String("encoding", "utf-8", "content encoding for write/upload: utf-8 or base64")
-	maxBytes := fs.Int("max-bytes", 1024*1024, "max bytes for read/download")
+	maxBytes := fs.Int("max-bytes", 32*1024, "maximum bytes returned per read/download chunk")
+	chunkBytes := fs.Int("chunk-bytes", 32*1024, "bytes returned per resumable read/download chunk")
+	offset := fs.Int64("offset", 0, "byte offset for resumable read/download")
 	operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -8705,13 +8707,19 @@ func (a App) files(ctx context.Context, args []string) error {
 		return fmt.Errorf("--session-id is required")
 	}
 	capabilities := []string{"file.transfer.read", "fs.read"}
+	maxOutputBytes := 20000
+	if action == "read" || action == "download" {
+		maxOutputBytes = 65536
+	}
 	payload := map[string]any{
 		"workspace_root":       *workspaceRoot,
 		"action":               action,
 		"path":                 *path,
 		"max_bytes":            *maxBytes,
+		"chunk_bytes":          *chunkBytes,
+		"offset":               *offset,
 		"max_duration_seconds": 60,
-		"max_output_bytes":     20000,
+		"max_output_bytes":     maxOutputBytes,
 		"network":              "default-deny",
 	}
 	if action == "write" || action == "upload" || action == "delete" {
@@ -8764,6 +8772,7 @@ func (a App) desktop(ctx context.Context, args []string) error {
 	urlValue := fs.String("url", "", "URL to open")
 	frames := fs.Int("frames", 3, "record frame count")
 	intervalMillis := fs.Int("interval-millis", 500, "record frame interval in milliseconds")
+	outputPath := fs.String("output-path", "", "workspace-relative artifact path for screenshot/record transfer")
 	operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator bearer token")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -8779,15 +8788,29 @@ func (a App) desktop(ctx context.Context, args []string) error {
 		return err
 	}
 	capability, authorization := desktopCapabilityForAction(action)
+	maxOutputBytes := 20000
+	if action == "screen.screenshot" || action == "screen.record" {
+		maxOutputBytes = 65536
+		if strings.TrimSpace(*outputPath) == "" {
+			extension := "png"
+			if action == "screen.record" {
+				extension = "zip"
+			}
+			*outputPath = fmt.Sprintf(".rdev/desktop-artifacts/%d.%s", time.Now().UTC().UnixNano(), extension)
+		}
+	}
 	payload := map[string]any{
 		"workspace_root":       *workspaceRoot,
 		"action":               action,
 		"max_duration_seconds": 30,
-		"max_output_bytes":     20000,
+		"max_output_bytes":     maxOutputBytes,
 		"network":              "default-deny",
 	}
 	if authorization != "" {
 		payload["authorizations_required"] = []string{authorization}
+	}
+	if action == "screen.screenshot" || action == "screen.record" {
+		payload["output_path"] = *outputPath
 	}
 	if *windowID != "" {
 		payload["window_id"] = *windowID
@@ -8934,27 +8957,27 @@ func desktopCapabilityForAction(action string) (string, string) {
 	case "window.inspect":
 		return "window.inspect", ""
 	case "screen.screenshot":
-		return "screen.screenshot", "screen.screenshot"
+		return "screen.screenshot", ""
 	case "screen.record":
-		return "screen.record", "screen.record"
+		return "screen.record", ""
 	case "window.focus":
-		return "window.focus", "window.focus"
+		return "window.focus", ""
 	case "window.move":
-		return "window.move", "window.move"
+		return "window.move", ""
 	case "input.keyboard":
-		return "input.keyboard", "input.keyboard"
+		return "input.keyboard", ""
 	case "input.mouse":
-		return "input.mouse", "input.mouse"
+		return "input.mouse", ""
 	case "app.launch":
-		return "app.launch", "app.launch"
+		return "app.launch", ""
 	case "app.close":
-		return "app.close", "app.close"
+		return "app.close", ""
 	case "url.open":
-		return "url.open", "url.open"
+		return "url.open", ""
 	case "clipboard.read":
-		return "clipboard.read", "clipboard.read"
+		return "clipboard.read", ""
 	case "clipboard.write":
-		return "clipboard.write", "clipboard.write"
+		return "clipboard.write", ""
 	default:
 		return action, action
 	}

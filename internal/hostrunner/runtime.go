@@ -182,8 +182,17 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 		})
 		return execution.ArtifactContent(), err
 	case "desktop":
+		action := desktopadapter.NormalizeAction(stringValue(envelope.Payload, "action", ""))
+		outputPath := stringValue(envelope.Payload, "output_path", "")
+		if outputPath == "" && (action == "screen.screenshot" || action == "screen.record") {
+			extension := "png"
+			if action == "screen.record" {
+				extension = "zip"
+			}
+			outputPath = ".rdev/desktop-artifacts/" + safeArtifactTaskID(envelope.TaskID) + "." + extension
+		}
 		execution, err := desktopadapter.ExecuteContext(ctx, desktopadapter.Spec{
-			Action:             stringValue(envelope.Payload, "action", ""),
+			Action:             action,
 			URL:                stringValue(envelope.Payload, "url", ""),
 			App:                stringValue(envelope.Payload, "app", ""),
 			WindowID:           stringValue(envelope.Payload, "window_id", ""),
@@ -198,6 +207,8 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 			IntervalMillis:     intValue(envelope.Payload, "interval_millis", 0),
 			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
 			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
+			WorkspaceRoot:      envelope.Workspace.Root,
+			OutputPath:         outputPath,
 		})
 		return execution.ArtifactContent(), err
 	case "file":
@@ -211,6 +222,8 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 			ExpectedBytes:      intValue(envelope.Payload, "expected_bytes", 0),
 			ExpectedSHA256:     stringValue(envelope.Payload, "expected_sha256", ""),
 			MaxBytes:           intValue(envelope.Payload, "max_bytes", envelope.Limits.MaxOutputBytes),
+			Offset:             int64Value(envelope.Payload, "offset", 0),
+			ChunkBytes:         intValue(envelope.Payload, "chunk_bytes", 0),
 			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
 			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
 		})
@@ -237,6 +250,23 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 		})
 		return execution.ArtifactContent(), err
 	}
+}
+
+func safeArtifactTaskID(taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "desktop-artifact"
+	}
+	var b strings.Builder
+	for _, r := range taskID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "desktop-artifact"
+	}
+	return b.String()
 }
 
 func adapterDenial(adapter string, err error) (denialSpec, bool) {

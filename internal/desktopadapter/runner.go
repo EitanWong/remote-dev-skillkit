@@ -1,12 +1,22 @@
 package desktopadapter
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
 const ResultSchemaVersion = "rdev.desktop-result.v1"
@@ -27,6 +37,8 @@ type Spec struct {
 	IntervalMillis     int
 	MaxDurationSeconds int
 	MaxOutputBytes     int
+	WorkspaceRoot      string
+	OutputPath         string
 }
 
 type Window struct {
@@ -52,6 +64,10 @@ type ResultArtifact struct {
 	Windows             []Window `json:"windows,omitempty"`
 	PNGBase64           string   `json:"png_base64,omitempty"`
 	Frames              []Frame  `json:"frames,omitempty"`
+	ArtifactPath        string   `json:"artifact_path,omitempty"`
+	ArtifactContentType string   `json:"artifact_content_type,omitempty"`
+	ArtifactBytes       int64    `json:"artifact_bytes,omitempty"`
+	ArtifactSHA256      string   `json:"artifact_sha256,omitempty"`
 	ClipboardText       string   `json:"clipboard_text,omitempty"`
 	WindowID            string   `json:"window_id,omitempty"`
 	Target              string   `json:"target,omitempty"`
@@ -167,4 +183,101 @@ func encodeFrame(index int, png []byte) Frame {
 		PNGBase64:  base64.StdEncoding.EncodeToString(png),
 		Bytes:      len(png),
 	}
+}
+
+type persistedArtifact struct {
+	Path        string
+	ContentType string
+	Bytes       int64
+	SHA256      string
+}
+
+func persistDesktopArtifact(workspaceRoot, outputPath, contentType string, data []byte) (persistedArtifact, error) {
+	root, err := workspace.CanonicalDir(workspaceRoot)
+	if err != nil {
+		return persistedArtifact{}, fmt.Errorf("artifact workspace root must exist: %w", err)
+	}
+	if strings.TrimSpace(outputPath) == "" || filepath.IsAbs(outputPath) {
+		return persistedArtifact{}, fmt.Errorf("artifact output path must be workspace-relative")
+	}
+	clean := filepath.Clean(outputPath)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || (len(clean) >= 2 && clean[1] == ':') {
+		return persistedArtifact{}, fmt.Errorf("artifact output path escapes workspace root")
+	}
+	target := filepath.Join(root, clean)
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return persistedArtifact{}, err
+	}
+	if err := os.WriteFile(target, data, 0o600); err != nil {
+		return persistedArtifact{}, err
+	}
+	sum := sha256.Sum256(data)
+	return persistedArtifact{Path: filepath.ToSlash(clean), ContentType: contentType, Bytes: int64(len(data)), SHA256: fmt.Sprintf("sha256:%x", sum[:])}, nil
+}
+
+func encodeFrameBundle(frames [][]byte) ([]byte, error) {
+	var out bytes.Buffer
+	archive := zip.NewWriter(&out)
+	for i, frame := range frames {
+		name := fmt.Sprintf("frame-%04d.png", i)
+		writer, err := archive.Create(name)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := io.Copy(writer, bytes.NewReader(frame)); err != nil {
+			return nil, err
+		}
+	}
+	if err := archive.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func encodePNGWithinBudget(img image.Image, budget int) ([]byte, error) {
+	if img == nil {
+		return nil, fmt.Errorf("image is required")
+	}
+	if budget <= 0 {
+		budget = 12000
+	}
+	current := img
+	for attempt := 0; attempt < 10; attempt++ {
+		var out bytes.Buffer
+		encoder := png.Encoder{CompressionLevel: png.BestCompression}
+		if err := encoder.Encode(&out, current); err != nil {
+			return nil, err
+		}
+		if out.Len() <= budget {
+			return out.Bytes(), nil
+		}
+		bounds := current.Bounds()
+		width, height := bounds.Dx(), bounds.Dy()
+		if width <= 160 || height <= 90 {
+			break
+		}
+		nextWidth := width * 3 / 4
+		nextHeight := height * 3 / 4
+		if nextWidth < 160 {
+			nextWidth = 160
+		}
+		if nextHeight < 90 {
+			nextHeight = 90
+		}
+		current = resizeNearest(current, nextWidth, nextHeight)
+	}
+	return nil, fmt.Errorf("PNG exceeds the %d-byte artifact budget", budget)
+}
+
+func resizeNearest(src image.Image, width, height int) image.Image {
+	srcBounds := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		sy := srcBounds.Min.Y + y*srcBounds.Dy()/height
+		for x := 0; x < width; x++ {
+			sx := srcBounds.Min.X + x*srcBounds.Dx()/width
+			dst.Set(x, y, src.At(sx, sy))
+		}
+	}
+	return dst
 }

@@ -1158,6 +1158,8 @@ func hostServeCommand(rdevCommand, manifestURL, manifestRootPublicKey, transport
 	}
 	if once {
 		command += " --once"
+	} else {
+		command += " --once=false --max-tasks 0"
 	}
 	return command
 }

@@ -3,12 +3,10 @@
 package desktopadapter
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"image"
-	"image/png"
 	"strconv"
 	"strings"
 	"syscall"
@@ -154,9 +152,20 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 		}
 		return ResultArtifact{Status: "succeeded", WindowID: formatHWND(hwnd)}, nil
 	case "screen.screenshot":
-		pngBytes, err := captureScreenPNG()
+		captureBudget := pngBudget(spec.MaxOutputBytes, 1)
+		if strings.TrimSpace(spec.OutputPath) != "" {
+			captureBudget = 16 * 1024 * 1024
+		}
+		pngBytes, err := captureScreenPNG(captureBudget)
 		if err != nil {
 			return ResultArtifact{Status: "failed", DesktopSessionState: "desktop_session_unavailable"}, err
+		}
+		if strings.TrimSpace(spec.OutputPath) != "" {
+			persisted, err := persistDesktopArtifact(spec.WorkspaceRoot, spec.OutputPath, "image/png", pngBytes)
+			if err != nil {
+				return ResultArtifact{Status: "failed"}, err
+			}
+			return ResultArtifact{Status: "succeeded", ArtifactPath: persisted.Path, ArtifactContentType: persisted.ContentType, ArtifactBytes: persisted.Bytes, ArtifactSHA256: persisted.SHA256}, nil
 		}
 		return ResultArtifact{Status: "succeeded", PNGBase64: base64.StdEncoding.EncodeToString(pngBytes)}, nil
 	case "screen.record":
@@ -172,6 +181,11 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 			interval = 500 * time.Millisecond
 		}
 		result := ResultArtifact{Status: "succeeded"}
+		capturedFrames := make([][]byte, 0, frames)
+		captureBudget := 16 * 1024 * 1024
+		if strings.TrimSpace(spec.OutputPath) == "" {
+			captureBudget = pngBudget(spec.MaxOutputBytes, frames)
+		}
 		for i := 0; i < frames; i++ {
 			select {
 			case <-ctx.Done():
@@ -179,16 +193,28 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 				return result, ctx.Err()
 			default:
 			}
-			pngBytes, err := captureScreenPNG()
+			pngBytes, err := captureScreenPNG(captureBudget)
 			if err != nil {
 				result.Status = "failed"
 				result.DesktopSessionState = "desktop_session_unavailable"
 				return result, err
 			}
+			capturedFrames = append(capturedFrames, pngBytes)
 			result.Frames = append(result.Frames, encodeFrame(i, pngBytes))
 			if i+1 < frames {
 				time.Sleep(interval)
 			}
+		}
+		if strings.TrimSpace(spec.OutputPath) != "" {
+			bundle, err := encodeFrameBundle(capturedFrames)
+			if err != nil {
+				return ResultArtifact{Status: "failed"}, err
+			}
+			persisted, err := persistDesktopArtifact(spec.WorkspaceRoot, spec.OutputPath, "application/zip", bundle)
+			if err != nil {
+				return ResultArtifact{Status: "failed"}, err
+			}
+			return ResultArtifact{Status: "succeeded", ArtifactPath: persisted.Path, ArtifactContentType: persisted.ContentType, ArtifactBytes: persisted.Bytes, ArtifactSHA256: persisted.SHA256}, nil
 		}
 		return result, nil
 	case "input.keyboard":
@@ -462,7 +488,7 @@ func openClipboard() error {
 	return nil
 }
 
-func captureScreenPNG() ([]byte, error) {
+func captureScreenPNG(budget int) ([]byte, error) {
 	width, _, _ := procGetSystemMetrics.Call(smCXScreen)
 	height, _, _ := procGetSystemMetrics.Call(smCYScreen)
 	if width == 0 || height == 0 {
@@ -518,9 +544,19 @@ func captureScreenPNG() ([]byte, error) {
 		img.Pix[i*4+2] = b
 		img.Pix[i*4+3] = a
 	}
-	var out bytes.Buffer
-	if err := png.Encode(&out, img); err != nil {
-		return nil, err
+	return encodePNGWithinBudget(img, budget)
+}
+
+func pngBudget(maxOutputBytes, frames int) int {
+	budget := 40000
+	if maxOutputBytes > 0 && maxOutputBytes/2 < budget {
+		budget = maxOutputBytes / 2
 	}
-	return out.Bytes(), nil
+	if frames > 1 {
+		budget /= frames
+	}
+	if budget < 4000 {
+		budget = 4000
+	}
+	return budget
 }

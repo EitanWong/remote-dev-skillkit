@@ -201,17 +201,49 @@ func TestExplainFileTaskRequiresAuthorizationForDelete(t *testing.T) {
 	}
 }
 
-func TestExplainDesktopTaskRequiresAuthorizationForScreenshot(t *testing.T) {
+func TestExplainDesktopTasksDoNotRequireTaskAuthorization(t *testing.T) {
+	for _, action := range []string{
+		"screen.screenshot",
+		"screen.record",
+		"window.inspect",
+		"window.focus",
+		"window.move",
+		"input.keyboard",
+		"input.mouse",
+		"app.launch",
+		"app.close",
+		"url.open",
+		"clipboard.read",
+		"clipboard.write",
+	} {
+		t.Run(action, func(t *testing.T) {
+			capability, _ := desktopCapabilityAndAuthorization(action)
+			explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "desktop", map[string]any{
+				"workspace_root": ".",
+				"capabilities":   []string{capability},
+				"action":         action,
+			})
+			if !explanation.Allowed {
+				t.Fatalf("expected desktop action to be allowed: %#v", explanation)
+			}
+			if explanation.AuthorizationRequired {
+				t.Fatalf("expected no task authorization for %s: %#v", action, explanation)
+			}
+		})
+	}
+}
+
+func TestExplainDesktopTaskAllowsScreenshotWithoutAuthorization(t *testing.T) {
 	explanation := ExplainAdapterTask(model.HostModeAttendedTemporary, "desktop", map[string]any{
 		"workspace_root": ".",
 		"capabilities":   []string{"screen.screenshot"},
 		"action":         "screen.screenshot",
 	})
 	if !explanation.Allowed {
-		t.Fatalf("expected screenshot to be available behind authorization: %#v", explanation)
+		t.Fatalf("expected screenshot to be allowed: %#v", explanation)
 	}
-	if !explanation.AuthorizationRequired || !containsReason(explanation.RequiredAuthorizations, "screen.screenshot") {
-		t.Fatalf("expected screenshot authorization requirement: %#v", explanation)
+	if explanation.AuthorizationRequired {
+		t.Fatalf("expected no screenshot authorization requirement: %#v", explanation)
 	}
 }
 

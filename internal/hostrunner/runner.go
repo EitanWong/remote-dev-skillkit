@@ -436,6 +436,23 @@ func intValue(values map[string]any, key string, fallback int) int {
 	}
 }
 
+func int64Value(values map[string]any, key string, fallback int64) int64 {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	default:
+		return fallback
+	}
+}
+
 type denialSpec struct {
 	Code       string
 	Summary    string

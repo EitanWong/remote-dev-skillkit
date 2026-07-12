@@ -108,77 +108,66 @@ func PolicyTemplate(capability, targetOS string) map[string]any {
 		capability = "screen.screenshot"
 		adapter = "desktop"
 		caps = []string{"screen.screenshot"}
-		authorizations = []string{"screen.screenshot"}
 		intent = "capture a desktop screenshot through native rdev desktop adapter"
 		action = "screen.screenshot"
 	case "screen.record", "desktop.record":
 		capability = "screen.record"
 		adapter = "desktop"
 		caps = []string{"screen.record"}
-		authorizations = []string{"screen.record"}
 		intent = "capture a short desktop PNG frame bundle through native rdev desktop adapter"
 		action = "screen.record"
 	case "window.focus", "desktop.focus":
 		capability = "window.focus"
 		adapter = "desktop"
 		caps = []string{"window.focus"}
-		authorizations = []string{"window.focus"}
 		intent = "focus a visible desktop window through native rdev desktop adapter"
 		action = "window.focus"
 	case "window.move", "desktop.move":
 		capability = "window.move"
 		adapter = "desktop"
 		caps = []string{"window.move"}
-		authorizations = []string{"window.move"}
 		intent = "move a visible desktop window through native rdev desktop adapter"
 		action = "window.move"
 	case "input.keyboard", "desktop.keyboard":
 		capability = "input.keyboard"
 		adapter = "desktop"
 		caps = []string{"input.keyboard"}
-		authorizations = []string{"input.keyboard"}
-		intent = "send authorized keyboard input through native rdev desktop adapter"
+		intent = "send keyboard input through native rdev desktop adapter"
 		action = "input.keyboard"
 	case "input.mouse", "desktop.mouse":
 		capability = "input.mouse"
 		adapter = "desktop"
 		caps = []string{"input.mouse"}
-		authorizations = []string{"input.mouse"}
-		intent = "send authorized mouse input through native rdev desktop adapter"
+		intent = "send mouse input through native rdev desktop adapter"
 		action = "input.mouse"
 	case "app.launch", "desktop.app.launch":
 		capability = "app.launch"
 		adapter = "desktop"
 		caps = []string{"app.launch"}
-		authorizations = []string{"app.launch"}
-		intent = "launch an authorized desktop app through native rdev desktop adapter"
+		intent = "launch a desktop app through native rdev desktop adapter"
 		action = "app.launch"
 	case "app.close", "desktop.app.close":
 		capability = "app.close"
 		adapter = "desktop"
 		caps = []string{"app.close"}
-		authorizations = []string{"app.close"}
-		intent = "gracefully close an authorized desktop window through native rdev desktop adapter"
+		intent = "gracefully close a desktop window through native rdev desktop adapter"
 		action = "app.close"
 	case "url.open", "desktop.url.open":
 		capability = "url.open"
 		adapter = "desktop"
 		caps = []string{"url.open"}
-		authorizations = []string{"url.open"}
-		intent = "open an authorized URL through native rdev desktop adapter"
+		intent = "open a URL through native rdev desktop adapter"
 		action = "url.open"
 	case "clipboard.read":
 		capability = "clipboard.read"
 		adapter = "desktop"
 		caps = []string{"clipboard.read"}
-		authorizations = []string{"clipboard.read"}
 		intent = "read clipboard through native rdev desktop adapter"
 		action = "clipboard.read"
 	case "clipboard.write":
 		capability = "clipboard.write"
 		adapter = "desktop"
 		caps = []string{"clipboard.write"}
-		authorizations = []string{"clipboard.write"}
 		intent = "write clipboard through native rdev desktop adapter"
 		action = "clipboard.write"
 	case "unattended.access":
@@ -207,6 +196,9 @@ func PolicyTemplate(capability, targetOS string) map[string]any {
 	if adapter == "powershell" {
 		policy["command"] = "Write-Output $env:COMPUTERNAME; whoami; Get-Location"
 	} else if adapter == "file" || adapter == "desktop" {
+		if adapter == "desktop" {
+			policy["max_output_bytes"] = 65536
+		}
 		policy["action"] = action
 		delete(policy, "allow_commands")
 		if path != "" {
