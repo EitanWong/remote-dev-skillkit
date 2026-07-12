@@ -721,9 +721,6 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 		if replay.SnapshotRequired {
 			return processed, fmt.Errorf("session event cursor is stale; restart host session to refresh snapshot")
 		}
-		if replay.LastSeq > afterSeq {
-			afterSeq = replay.LastSeq
-		}
 		foundTask := false
 		for _, event := range events {
 			if event.Seq > afterSeq {
@@ -751,6 +748,9 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 			if processed >= maxTasks {
 				return processed, nil
 			}
+		}
+		if replay.LastSeq > afterSeq {
+			afterSeq = replay.LastSeq
 		}
 		if !foundTask {
 			if err := sleepOrDone(ctx, interval); err != nil {
