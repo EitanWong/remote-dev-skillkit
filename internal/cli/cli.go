@@ -6885,7 +6885,7 @@ func (a App) hostServe(ctx context.Context, opts hostServeOptions) error {
 		Name:                inventory.Name,
 		Platform:            inventory.OS + "/" + inventory.Arch,
 		IdentityFingerprint: identity.Fingerprint(),
-		Capabilities:        hostcmd.ConstrainCapabilities(inventory.TemporaryCapabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet),
+		Capabilities:        hostcmd.ConstrainCapabilities(hostcmd.RegistrationCapabilities(inventory), opts.CapabilityCeiling, opts.CapabilityCeilingSet),
 		Transport:           controlplane.TransportLongPoll,
 		LeaseTTLMS:          60_000,
 		RenewAfterMS:        20_000,

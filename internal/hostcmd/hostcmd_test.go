@@ -18,6 +18,7 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -228,6 +229,21 @@ func TestSignedManifestCapabilityCeilingConstrainsInventoryAndTasks(t *testing.T
 	}
 	if !CapabilitiesAllowed([]string{"desktop.admin"}, nil, false) {
 		t.Fatal("local direct mode unexpectedly enforced a missing signed ceiling")
+	}
+}
+
+func TestRegistrationCapabilitiesAdvertisesWindowsDesktopSupportOnlyWhenManifestGrantsIt(t *testing.T) {
+	detected := RegistrationCapabilities(hostcap.Inventory{
+		OS:                    "windows",
+		TemporaryCapabilities: []string{"shell.user", "fs.read"},
+	})
+	got := ConstrainCapabilities(detected, []string{"shell.user", "window.inspect", "screen.screenshot"}, true)
+	if strings.Join(got, ",") != "shell.user,window.inspect,screen.screenshot" {
+		t.Fatalf("registered capabilities = %#v", got)
+	}
+	withoutDesktopGrant := ConstrainCapabilities(detected, []string{"shell.user"}, true)
+	if strings.Join(withoutDesktopGrant, ",") != "shell.user" {
+		t.Fatalf("manifest ceiling did not restrict desktop capabilities: %#v", withoutDesktopGrant)
 	}
 }
 

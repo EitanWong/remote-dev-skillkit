@@ -1,6 +1,36 @@
 package hostcmd
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
+)
+
+// RegistrationCapabilities reports capabilities this helper can implement.
+// The signed manifest ceiling still decides which of these are granted to a
+// particular session.
+func RegistrationCapabilities(inventory hostcap.Inventory) []string {
+	capabilities := append([]string(nil), inventory.TemporaryCapabilities...)
+	if strings.EqualFold(inventory.OS, "windows") {
+		capabilities = append(capabilities,
+			"window.inspect",
+			"gui.view",
+			"gui.control.requiresAuthorization",
+			"screen.screenshot",
+			"screen.record",
+			"window.focus",
+			"window.move",
+			"input.keyboard",
+			"input.mouse",
+			"app.launch",
+			"app.close",
+			"url.open",
+			"clipboard.read",
+			"clipboard.write",
+		)
+	}
+	return capabilities
+}
 
 // ConstrainCapabilities intersects detected host capabilities with a verified
 // manifest ceiling. Direct local development can leave enforceCeiling false.

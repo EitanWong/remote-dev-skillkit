@@ -244,7 +244,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		Name:                inventory.Name,
 		Platform:            inventory.OS + "/" + inventory.Arch,
 		IdentityFingerprint: identity.Fingerprint(),
-		Capabilities:        ConstrainCapabilities(inventory.TemporaryCapabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet),
+		Capabilities:        ConstrainCapabilities(RegistrationCapabilities(inventory), opts.CapabilityCeiling, opts.CapabilityCeilingSet),
 		Transport:           controlplane.TransportLongPoll,
 		LeaseTTLMS:          60_000,
 		RenewAfterMS:        20_000,
