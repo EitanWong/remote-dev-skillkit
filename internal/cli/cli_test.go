@@ -1590,9 +1590,9 @@ func TestRedactCloudflaredArgvUsesStructuralAllowlist(t *testing.T) {
 		`--url=https://user:password@[2001:db8::5]/?token=query-secret`, "run",
 		"--token=secret-token", "--credentials-contents", `{"TunnelSecret":"secret-json"}`,
 		"--token-file", `C:\Users\Alice\.cloudflared\token.txt`,
-		"--credentials-file=/Users/alice/.cloudflared/creds.json",
-		"--config", `/Users/alice/.cloudflared/config.yml`,
-		"--origincert=/Users/alice/.cloudflared/cert.pem",
+		"--credentials-file=/Users/example/.cloudflared/creds.json",
+		"--config", `/Users/example/.cloudflared/config.yml`,
+		"--origincert=/Users/example/.cloudflared/cert.pem",
 		"--unknown=unknown-secret", "sensitive-tunnel-name",
 	}
 	original := slices.Clone(argv)
@@ -1653,7 +1653,7 @@ func TestConfiguredStableTunnelDoesNotForwardProviderOutput(t *testing.T) {
 	}
 	logged := stderr.String()
 	for _, forbidden := range []string{
-		"cf-secret", "ABCD-1234", "203.0.113.9", "2001:db8::9", "/Users/alice/private/creds.json",
+		"cf-secret", "ABCD-1234", "203.0.113.9", "2001:db8::9", "/Users/example/private/creds.json",
 		"query-secret", "https://abc.trycloudflare.com", "cloudflare-stable",
 	} {
 		if strings.Contains(logged, forbidden) {
@@ -1922,7 +1922,7 @@ func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 		"gateway_url":    "https://gateway.example.test/?token=query-secret",
 		"peer_ip":        "203.0.113.9",
 		"peer_ipv6":      "2001:db8::9",
-		"artifact_path":  "/Users/alice/private/status.json",
+		"artifact_path":  "/Users/example/private/status.json",
 	})
 
 	const prefix = "rdev support session event: "
@@ -1947,7 +1947,7 @@ func TestSupportSessionForegroundEventIsMachineReadable(t *testing.T) {
 		t.Fatalf("unexpected event payload: %#v", payload)
 	}
 	for _, forbidden := range []string{
-		"ABCD-1234", "gateway.example.test", "query-secret", "203.0.113.9", "2001:db8::9", "/Users/alice/private/status.json",
+		"ABCD-1234", "gateway.example.test", "query-secret", "203.0.113.9", "2001:db8::9", "/Users/example/private/status.json",
 	} {
 		if strings.Contains(line, forbidden) {
 			t.Fatalf("stderr event leaked %q: %s", forbidden, line)

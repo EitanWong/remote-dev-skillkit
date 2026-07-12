@@ -148,7 +148,7 @@ func TestWindowsRemotePathClassificationRejectsUNC(t *testing.T) {
 			t.Fatalf("remote Windows path classified as local: %q", path)
 		}
 	}
-	if windowsFinalPathIsRemote(`\\?\C:\Users\Administrator\known_hosts`) {
+	if windowsFinalPathIsRemote(`\\?\C:\Users\Alice\known_hosts`) {
 		t.Fatal("local Windows device path classified as remote")
 	}
 }

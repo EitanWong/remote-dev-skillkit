@@ -154,7 +154,7 @@ func TestWindowsFinalPathRemoteClassification(t *testing.T) {
 		path string
 		want bool
 	}{
-		{path: `\\?\C:\Users\me\policy.json`, want: false},
+		{path: `\\?\C:\Users\Alice\policy.json`, want: false},
 		{path: `\\?\UNC\server\share\policy.json`, want: true},
 		{path: `\\?\GLOBALROOT\Device\Mup\server\share\policy.json`, want: true},
 		{path: `\\?\GLOBALROOT\Device\LanmanRedirector\server\share\policy.json`, want: true},

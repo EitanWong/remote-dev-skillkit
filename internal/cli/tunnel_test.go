@@ -246,7 +246,7 @@ func TestTunnelHelperProcess(t *testing.T) {
 		time.Sleep(time.Hour)
 	case "secret-block":
 		_, _ = fmt.Fprintln(os.Stdout, "token=cf-secret ticket=ABCD-1234 peer=203.0.113.9")
-		_, _ = fmt.Fprintln(os.Stderr, "peer6=2001:db8::9 path=/Users/alice/private/creds.json rejected=https://abc.trycloudflare.com/?token=query-secret")
+		_, _ = fmt.Fprintln(os.Stderr, "peer6=2001:db8::9 path=/Users/example/private/creds.json rejected=https://abc.trycloudflare.com/?token=query-secret")
 		time.Sleep(50 * time.Millisecond)
 		_, _ = fmt.Fprintln(os.Stdout, "assigned=https://abc.trycloudflare.com")
 		time.Sleep(time.Hour)
@@ -280,7 +280,7 @@ func TestTunnelProviderOutputIsPrivate(t *testing.T) {
 		t.Fatalf("provider lifecycle log did not use stable candidate correlation IDs: %q", logged)
 	}
 	for _, forbidden := range []string{
-		"cf-secret", "ABCD-1234", "203.0.113.9", "2001:db8::9", "/Users/alice/private/creds.json",
+		"cf-secret", "ABCD-1234", "203.0.113.9", "2001:db8::9", "/Users/example/private/creds.json",
 		"query-secret", "https://abc.trycloudflare.com",
 	} {
 		if strings.Contains(logged, forbidden) {

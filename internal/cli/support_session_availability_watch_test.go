@@ -115,9 +115,9 @@ func TestTunnelAvailabilityLogIncludesOnlySafeCorrelationFields(t *testing.T) {
 }
 
 func TestPublicSupportSessionInvalidationErrorUsesFixedText(t *testing.T) {
-	for _, detail := range []error{nil, errors.New("private /Users/alice/status.json failure")} {
+	for _, detail := range []error{nil, errors.New("private /Users/example/status.json failure")} {
 		err := publicSupportSessionInvalidationError("tunnel availability lost before target connection", detail)
-		if err == nil || strings.Contains(err.Error(), "/Users/alice") || strings.Contains(err.Error(), "private") {
+		if err == nil || strings.Contains(err.Error(), "/Users/example") || strings.Contains(err.Error(), "private") {
 			t.Fatalf("public invalidation error = %v", err)
 		}
 	}
