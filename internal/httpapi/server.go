@@ -11,6 +11,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -831,7 +832,7 @@ func ticketGatewayAuthorityFromMetadata(r *http.Request, metadata map[string]str
 	validated := make([]model.JoinManifestGatewayCandidate, 0, len(candidates))
 	seen := make(map[string]bool, len(candidates))
 	for _, candidate := range candidates {
-		normalized, ok := normalizePublicHTTPSGatewayBase(candidate.URL)
+		normalized, ok := normalizeGatewayBase(candidate.URL)
 		if !ok || seen[normalized] {
 			continue
 		}
@@ -840,7 +841,7 @@ func ticketGatewayAuthorityFromMetadata(r *http.Request, metadata map[string]str
 		validated = append(validated, candidate)
 	}
 	if len(validated) == 0 {
-		return ticketGatewayAuthority{}, errors.New("ticket gateway candidate metadata has no valid public HTTPS candidate")
+		return ticketGatewayAuthority{}, errors.New("ticket gateway candidate metadata has no valid public HTTPS or private LAN candidate")
 	}
 	selected := validated[0]
 	matchedRequest := false
@@ -863,13 +864,22 @@ func ticketGatewayAuthorityFromMetadata(r *http.Request, metadata map[string]str
 }
 
 func normalizePublicHTTPSGatewayBase(value string) (string, bool) {
+	return normalizeGatewayBase(value)
+}
+
+func normalizeGatewayBase(value string) (string, bool) {
 	value = strings.TrimSpace(value)
 	parsed, err := url.Parse(value)
-	if err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() != "" ||
-		!strings.EqualFold(parsed.Scheme, "https") || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(value, "#") || parsed.RawPath != "" {
+	if err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(value, "#") || parsed.RawPath != "" {
 		return "", false
 	}
-	if strings.HasSuffix(parsed.Hostname(), ".") || tunnel.ValidatePublicCandidate(tunnel.Candidate{ProviderID: "ticket-metadata", URL: value}) != nil {
+	privateLAN := false
+	if address, err := netip.ParseAddr(parsed.Hostname()); err == nil {
+		privateLAN = address.IsPrivate()
+	}
+	if strings.HasSuffix(parsed.Hostname(), ".") || (!privateLAN && tunnel.ValidatePublicCandidate(tunnel.Candidate{ProviderID: "ticket-metadata", URL: value}) != nil) ||
+		(privateLAN && !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) ||
+		(!privateLAN && (!strings.EqualFold(parsed.Scheme, "https") || parsed.Port() != "")) {
 		return "", false
 	}
 	pathValue := strings.TrimRight(parsed.Path, "/")
@@ -883,7 +893,7 @@ func normalizePublicHTTPSGatewayBase(value string) (string, bool) {
 			}
 		}
 	}
-	parsed.Scheme = "https"
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
 	parsed.Path = pathValue
 	parsed.RawPath = ""
