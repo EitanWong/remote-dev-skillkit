@@ -113,6 +113,9 @@ func (s *MemoryStore) CreateSession(spec SessionSpec) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	if _, exists := s.joinCodes[session.JoinCode]; exists {
+		return Session{}, s.err(ErrInvalidJoinCode, "join code already exists", false)
+	}
 	s.sessions[session.ID] = session
 	s.joinCodes[session.JoinCode] = session.ID
 	s.events[session.ID] = []Event{}

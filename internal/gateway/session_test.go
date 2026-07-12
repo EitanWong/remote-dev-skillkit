@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
 func TestGatewaySessionCreateJoinReplay(t *testing.T) {
@@ -66,6 +67,44 @@ func TestGatewaySessionCreateJoinReplay(t *testing.T) {
 	}
 	if renewed.Secret == "" || replayState.LastSeq != appended.Seq {
 		t.Fatalf("event polling should piggyback lease and replay state: %#v %#v", renewed, replayState)
+	}
+}
+
+func TestGatewaySessionJoinAcceptsSupportTicketCode(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicketWithMetadata(
+		model.HostModeAttendedTemporary,
+		600,
+		[]string{"shell.user", "fs.read"},
+		"visible temporary remote support",
+		map[string]string{
+			TicketMetadataGatewayCandidates: `[{"url":"https://gateway.example","kind":"explicit"}]`,
+		},
+	)
+	if err != nil {
+		t.Fatalf("CreateTicketWithMetadata() error = %v", err)
+	}
+
+	joined, endpoint, lease, events, err := gw.JoinSessionByCode(ticket.Code, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "winbox",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-winbox",
+		Capabilities:        []string{"shell.user", "fs.read"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatalf("JoinSessionByCode(ticket.Code) error = %v", err)
+	}
+	if joined.JoinCode != ticket.Code || joined.Profile != string(ticket.Mode) || joined.ExpiresAt != ticket.ExpiresAt {
+		t.Fatalf("bridged session did not preserve ticket contract: session=%#v ticket=%#v", joined, ticket)
+	}
+	if endpoint.ID == "" || lease.EndpointID != endpoint.ID || len(events) == 0 {
+		t.Fatalf("bridged join did not return endpoint lease and hello events: %#v %#v %#v", endpoint, lease, events)
+	}
+	if len(joined.GatewayCandidates) != 1 || joined.GatewayCandidates[0].URL != "https://gateway.example" {
+		t.Fatalf("bridged session did not carry gateway candidates: %#v", joined.GatewayCandidates)
 	}
 }
 

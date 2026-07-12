@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
@@ -15,7 +16,18 @@ func (g *MemoryGateway) Session(sessionID string) (controlplane.Session, error) 
 }
 
 func (g *MemoryGateway) JoinSessionByCode(joinCode string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, []controlplane.Event, error) {
-	return g.controlPlane().JoinByCode(joinCode, spec)
+	store := g.controlPlane()
+	session, endpoint, lease, events, err := store.JoinByCode(joinCode, spec)
+	if err == nil {
+		return session, endpoint, lease, events, nil
+	}
+	if !errors.Is(err, controlplane.ProtocolError{Code: controlplane.ErrInvalidJoinCode}) {
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, err
+	}
+	if bridgeErr := g.ensureSessionForTicketCode(joinCode); bridgeErr != nil {
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, err
+	}
+	return store.JoinByCode(joinCode, spec)
 }
 
 func (g *MemoryGateway) JoinSession(sessionID string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, error) {
@@ -81,4 +93,49 @@ func (g *MemoryGateway) controlPlane() *controlplane.MemoryStore {
 		g.sessionStore = controlplane.NewMemoryStore(g.now)
 	}
 	return g.sessionStore
+}
+
+func (g *MemoryGateway) ensureSessionForTicketCode(joinCode string) error {
+	g.mu.Lock()
+	ticketID, ok := g.codeIndex[joinCode]
+	if !ok {
+		g.mu.Unlock()
+		return ErrNotFound
+	}
+	ticket := g.tickets[ticketID]
+	if ticket.Status != "active" {
+		g.mu.Unlock()
+		return ErrInvalidState
+	}
+	if !g.now().Before(ticket.ExpiresAt) {
+		g.mu.Unlock()
+		return ErrTicketExpired
+	}
+	candidates := gatewayCandidatesFromTicketMetadata(ticket.Metadata)
+	sessionCandidates := make([]controlplane.GatewayCandidate, 0, len(candidates))
+	for i, candidate := range candidates {
+		sessionCandidates = append(sessionCandidates, controlplane.GatewayCandidate{
+			URL:      candidate.URL,
+			Priority: i + 1,
+			Kind:     candidate.Kind,
+		})
+	}
+	store := g.sessionStore
+	g.mu.Unlock()
+
+	_, err := store.CreateSession(controlplane.SessionSpec{
+		Profile:           string(ticket.Mode),
+		JoinCode:          ticket.Code,
+		Reason:            ticket.Reason,
+		Capabilities:      append([]string(nil), ticket.Capabilities...),
+		JoinPolicy:        "single-target",
+		GatewayCandidates: sessionCandidates,
+		ReconnectGraceMS:  120_000,
+		RetryAfterMS:      1_000,
+		ExpiresAt:         ticket.ExpiresAt,
+	})
+	if errors.Is(err, controlplane.ProtocolError{Code: controlplane.ErrInvalidJoinCode}) {
+		return nil
+	}
+	return err
 }

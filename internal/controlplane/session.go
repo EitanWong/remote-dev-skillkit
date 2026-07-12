@@ -157,6 +157,7 @@ type Limits struct {
 
 type SessionSpec struct {
 	Profile            string             `json:"profile"`
+	JoinCode           string             `json:"join_code,omitempty"`
 	Reason             string             `json:"reason"`
 	Capabilities       []string           `json:"capabilities"`
 	JoinPolicy         string             `json:"join_policy"`
@@ -338,9 +339,13 @@ func NewSession(spec SessionSpec, now time.Time) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	joinCode, err := newJoinCode()
-	if err != nil {
-		return Session{}, err
+	joinCode := strings.TrimSpace(spec.JoinCode)
+	if joinCode == "" {
+		var err error
+		joinCode, err = newJoinCode()
+		if err != nil {
+			return Session{}, err
+		}
 	}
 	profile := strings.TrimSpace(spec.Profile)
 	if profile == "" {
