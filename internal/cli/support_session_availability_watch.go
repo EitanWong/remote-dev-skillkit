@@ -135,7 +135,7 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			}
 			logTunnelAvailabilityLoss(opts.Out, live, "liveness-probe-failed")
 			if opts.OnInvalidated != nil {
-				opts.OnInvalidated(publicSupportSessionInvalidationError("explicit gateway liveness lost before target connection", err))
+				opts.OnInvalidated(publicSupportSessionInvalidationError("public gateway liveness lost before target connection", err))
 			}
 			return
 		case <-ticker.C:

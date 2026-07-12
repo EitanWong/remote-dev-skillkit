@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -437,6 +438,74 @@ func TestSupportSessionStartReturnsAndCleansUpWhenPublishedRouteDies(t *testing.
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatalf("gateway listener not cleaned after route loss: %v", err)
+	}
+	_ = listener.Close()
+}
+
+func TestSupportSessionStartInvalidatesManagedRouteWhenPublicBootstrapDisappears(t *testing.T) {
+	for _, name := range []string{"RDEV_HOSTED_GATEWAY_URL", "RDEV_CLOUDFLARED_GATEWAY_URL", "RDEV_RELAY_GATEWAY_URL", "RDEV_MESH_GATEWAY_URL", "RDEV_VPN_GATEWAY_URL", "RDEV_SSH_GATEWAY_URL"} {
+		t.Setenv(name, "")
+	}
+	handle := newSupportSessionTestTunnelHandle(tunnel.Candidate{ProviderID: "managed-stale", URL: "https://managed-stale.example.test"})
+	registry, err := tunnel.NewRegistry(fixedSupportSessionProvider{id: "managed-stale", handle: handle})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := supportSessionTestAddr(t)
+	workDir := filepath.Join(t.TempDir(), "support")
+	handoffWritten := make(chan struct{})
+	var bootstrapGone atomic.Bool
+	app := NewApp(io.Discard, io.Discard)
+	app.supportSessionStartDeps = &supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{Probe: func(context.Context, tunnel.Candidate) (tunnel.ProbeEvidence, error) {
+			return tunnel.ProbeEvidence{DNSOK: true, TCPConnectOK: true, TLSOK: true, HealthOK: true}, nil
+		}},
+		BootstrapProbe: func(context.Context, tunnel.Candidate, string) error { return nil },
+		FinalProbe: func(context.Context, tunnel.Candidate, string, string) error {
+			if bootstrapGone.Load() {
+				return errors.New("public bootstrap returned 404")
+			}
+			return nil
+		},
+		LivenessInterval: time.Millisecond,
+		LivenessFailures: 1,
+		RecordEvent: func(event string) {
+			if event == "handoff_written" {
+				select {
+				case <-handoffWritten:
+				default:
+					close(handoffWritten)
+				}
+			}
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		result <- app.supportSessionStart(ctx, supportSessionStartOptions{
+			RepoRoot: ".", Addr: addr, WorkDir: workDir, Target: "windows", Reason: "managed public bootstrap loss",
+			TTLSeconds: 60, Locale: "en", AllowDegradedDirectHandoff: true,
+		})
+	}()
+	select {
+	case <-handoffWritten:
+	case <-ctx.Done():
+		t.Fatal("support session did not publish handoff")
+	}
+	bootstrapGone.Store(true)
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "public gateway liveness lost before target connection") {
+			t.Fatalf("managed public bootstrap loss error = %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("support session remained published after managed public bootstrap disappeared")
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("gateway listener not cleaned after managed public bootstrap loss: %v", err)
 	}
 	_ = listener.Close()
 }

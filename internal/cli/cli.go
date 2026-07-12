@@ -4815,7 +4815,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	watchDone := make(chan struct{})
 	availabilityFailure := make(chan error, 1)
 	var livenessProbe func(context.Context) error
-	if availabilityRuntime == nil && len(availability.Candidates) > 0 {
+	if len(availability.Candidates) > 0 {
 		candidate := availability.Candidates[0]
 		livenessProbe = func(probeCtx context.Context) error {
 			return finalProbe(probeCtx, candidate, ticket.Code, server.GatewayInstance())
