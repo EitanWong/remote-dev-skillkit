@@ -90,14 +90,14 @@ func rollbackSupportTicket(gw *gateway.MemoryGateway, store gateway.StateStore, 
 }
 
 func intersectAvailabilityWithRuntime(current, live tunnel.AvailabilitySet) tunnel.AvailabilitySet {
-	liveCandidates := make(map[string]bool, len(live.Candidates))
-	for _, candidate := range live.Candidates {
-		liveCandidates[candidate.ProviderID+"\x00"+candidate.URL] = true
+	currentProviders := make(map[string]bool, len(current.Candidates))
+	for _, candidate := range current.Candidates {
+		currentProviders[candidate.ProviderID] = true
 	}
 	result := current
-	result.Candidates = make([]tunnel.Candidate, 0, len(current.Candidates))
-	for _, candidate := range current.Candidates {
-		if liveCandidates[candidate.ProviderID+"\x00"+candidate.URL] {
+	result.Candidates = make([]tunnel.Candidate, 0, len(live.Candidates))
+	for _, candidate := range live.Candidates {
+		if currentProviders[candidate.ProviderID] {
 			result.Candidates = append(result.Candidates, candidate)
 		}
 	}

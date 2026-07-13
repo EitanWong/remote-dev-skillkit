@@ -692,18 +692,29 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 	if interval <= 0 {
 		interval = time.Second
 	}
-	if _, err := fetchHostTrust(ctx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath); err != nil {
-		return 0, err
+	routes := newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates)
+	for {
+		opts.GatewayURL = routes.current()
+		if _, err := fetchHostTrust(ctx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath); err == nil {
+			break
+		} else if !routes.rotate(ctx, client, opts.TrustPin) {
+			return 0, err
+		}
 	}
 	processed := 0
 	afterSeq := uint64(0)
 	if lease.RetryAfterMS > 0 {
 		interval = time.Duration(lease.RetryAfterMS) * time.Millisecond
 	}
+pollLoop:
 	for processed < maxTasks {
+		opts.GatewayURL = routes.current()
 		events, nextLease, replay, err := fetchSessionEvents(ctx, client, opts.GatewayURL, sessionID, endpointID, leaseSecret, afterSeq, sessionEventLimit(opts.Transport))
 		if err != nil {
 			if isTransientGatewayResponseError(err) {
+				if routes.rotate(ctx, client, opts.TrustPin) {
+					continue pollLoop
+				}
 				_, _ = fmt.Fprintf(a.Stderr, "rdev-host: transient gateway response while polling session events: %v\n", err)
 				if err := sleepOrDone(ctx, interval); err != nil {
 					return processed, err
@@ -722,6 +733,7 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 			return processed, fmt.Errorf("session event cursor is stale; restart host session to refresh snapshot")
 		}
 		foundTask := false
+		batchStartSeq := afterSeq
 		for _, event := range events {
 			if event.Seq > afterSeq {
 				afterSeq = event.Seq
@@ -735,13 +747,17 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 			}
 			task, err := fetchSessionTask(ctx, client, opts.GatewayURL, sessionID, event.TaskID)
 			if err != nil {
+				if isTransientGatewayResponseError(err) && routes.rotate(ctx, client, opts.TrustPin) {
+					afterSeq = batchStartSeq
+					continue pollLoop
+				}
 				return processed, err
 			}
 			if task.TargetEndpointID != endpointID || task.Terminal() {
 				continue
 			}
 			foundTask = true
-			if err := a.runSessionTask(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task); err != nil {
+			if err := a.runSessionTaskWithRoutes(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task, routes); err != nil {
 				return processed, err
 			}
 			processed++
@@ -762,7 +778,10 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 }
 
 func (a App) runSessionTask(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, task controlplane.Task) error {
-	_ = client
+	return a.runSessionTaskWithRoutes(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task, newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates))
+}
+
+func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, task controlplane.Task, routes *gatewayCandidateSet) error {
 	result := hostrunner.Result{}
 	var err error
 	if !CapabilitiesAllowed(task.Capabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet) {
@@ -792,13 +811,17 @@ func (a App) runSessionTask(ctx context.Context, opts serveOptions, client *http
 	if result.RuntimeFixtureContent != "" {
 		payload["runtime_fixture_content"] = result.RuntimeFixtureContent
 	}
-	if _, _, completeErr := completeSessionTask(ctx, client, opts.GatewayURL, sessionID, task.ID, leaseSecret, payload); completeErr != nil {
-		if err != nil {
-			return fmt.Errorf("%v; additionally failed to report session task failure: %w", err, completeErr)
+	for {
+		opts.GatewayURL = routes.current()
+		if _, _, completeErr := completeSessionTask(ctx, client, opts.GatewayURL, sessionID, task.ID, leaseSecret, payload); completeErr == nil {
+			return nil
+		} else if !isTransientGatewayResponseError(completeErr) || !routes.rotate(ctx, client, opts.TrustPin) {
+			if err != nil {
+				return fmt.Errorf("%v; additionally failed to report session task failure: %w", err, completeErr)
+			}
+			return completeErr
 		}
-		return completeErr
 	}
-	return nil
 }
 
 func sessionTaskSpec(task controlplane.Task, endpointID, identityFingerprint string) hostrunner.SessionTaskSpec {
@@ -907,7 +930,7 @@ func fetchSessionEvents(ctx context.Context, client *http.Client, gatewayURL, se
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, err
+		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, transientGatewayResponseError{Endpoint: endpoint, Cause: err}
 	}
 	defer resp.Body.Close()
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
@@ -927,10 +950,10 @@ func fetchSessionEvents(ctx context.Context, client *http.Client, gatewayURL, se
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil, controlplane.Lease{}, controlplane.EventReplayState{}, transientGatewayResponseError{Endpoint: endpoint, Status: resp.Status, Body: bodyPreview(body), Cause: err}
 		}
-		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, fmt.Errorf("fetch session events failed: %s", gatewayErrorMessage(resp.Status, body, err))
+		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, gatewayResponseError("fetch session events failed", endpoint, resp, body, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, fmt.Errorf("fetch session events failed: %s", gatewayErrorMessage(resp.Status, body, nil))
+		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, gatewayResponseError("fetch session events failed", endpoint, resp, body, nil)
 	}
 	replay := controlplane.EventReplayState{
 		SnapshotRequired: payload.SnapshotRequired,
@@ -949,21 +972,21 @@ func fetchSessionTask(ctx context.Context, client *http.Client, gatewayURL, sess
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return controlplane.Task{}, err
+		return controlplane.Task{}, transientGatewayResponseError{Endpoint: req.URL.String(), Cause: err}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
 	if err != nil {
-		return controlplane.Task{}, err
+		return controlplane.Task{}, transientGatewayResponseError{Endpoint: req.URL.String(), Status: resp.Status, Cause: err}
 	}
 	var payload struct {
 		Snapshot controlplane.SessionSnapshot `json:"snapshot"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return controlplane.Task{}, fmt.Errorf("fetch session task failed: %s", gatewayErrorMessage(resp.Status, body, err))
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return controlplane.Task{}, fmt.Errorf("fetch session task failed: %s", gatewayErrorMessage(resp.Status, body, nil))
+		return controlplane.Task{}, gatewayResponseError("fetch session task failed", req.URL.String(), resp, body, nil)
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return controlplane.Task{}, gatewayResponseError("fetch session task failed", req.URL.String(), resp, body, err)
 	}
 	for _, task := range payload.Snapshot.Tasks {
 		if task.ID == taskID {
@@ -983,28 +1006,32 @@ func completeSessionTask(ctx context.Context, client *http.Client, gatewayURL, s
 		return controlplane.Task{}, controlplane.Event{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Idempotency-Key", newIdempotencyKey("task-result"))
+	idempotencyKey, _ := result["idempotency_key"].(string)
+	if strings.TrimSpace(idempotencyKey) == "" {
+		idempotencyKey = newIdempotencyKey("task-result")
+	}
+	req.Header.Set("Idempotency-Key", idempotencyKey)
 	if leaseSecret != "" {
 		req.Header.Set("Authorization", "Bearer "+leaseSecret)
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return controlplane.Task{}, controlplane.Event{}, err
+		return controlplane.Task{}, controlplane.Event{}, transientGatewayResponseError{Endpoint: req.URL.String(), Cause: err}
 	}
 	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
 	if err != nil {
-		return controlplane.Task{}, controlplane.Event{}, err
+		return controlplane.Task{}, controlplane.Event{}, transientGatewayResponseError{Endpoint: req.URL.String(), Status: resp.Status, Cause: err}
 	}
 	var payload struct {
 		Task  controlplane.Task  `json:"task"`
 		Event controlplane.Event `json:"event"`
 	}
-	if err := json.Unmarshal(responseBody, &payload); err != nil {
-		return controlplane.Task{}, controlplane.Event{}, fmt.Errorf("complete session task failed: %s", gatewayErrorMessage(resp.Status, responseBody, err))
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return controlplane.Task{}, controlplane.Event{}, fmt.Errorf("complete session task failed: %s", gatewayErrorMessage(resp.Status, responseBody, nil))
+		return controlplane.Task{}, controlplane.Event{}, gatewayResponseError("complete session task failed", req.URL.String(), resp, responseBody, nil)
+	}
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return controlplane.Task{}, controlplane.Event{}, gatewayResponseError("complete session task failed", req.URL.String(), resp, responseBody, err)
 	}
 	return payload.Task, payload.Event, nil
 }
@@ -1114,6 +1141,59 @@ func selectJoinManifestGatewayURL(ctx context.Context, client *http.Client, mani
 		}
 	}
 	return fallback
+}
+
+type gatewayCandidateSet struct {
+	urls  []string
+	index int
+}
+
+func newGatewayCandidateSet(current string, candidates []model.JoinManifestGatewayCandidate) *gatewayCandidateSet {
+	urls := make([]string, 0, len(candidates)+1)
+	add := func(value string) {
+		value = strings.TrimRight(strings.TrimSpace(value), "/")
+		if value == "" {
+			return
+		}
+		for _, existing := range urls {
+			if existing == value {
+				return
+			}
+		}
+		urls = append(urls, value)
+	}
+	add(current)
+	for _, candidate := range candidates {
+		add(candidate.URL)
+	}
+	return &gatewayCandidateSet{urls: urls}
+}
+
+func (s *gatewayCandidateSet) current() string {
+	if s == nil || len(s.urls) == 0 {
+		return ""
+	}
+	if s.index >= len(s.urls) {
+		s.index = 0
+	}
+	return s.urls[s.index]
+}
+
+func (s *gatewayCandidateSet) rotate(ctx context.Context, client *http.Client, trustPin string) bool {
+	if s == nil || len(s.urls) < 2 {
+		return false
+	}
+	for step := 1; step < len(s.urls); step++ {
+		index := (s.index + step) % len(s.urls)
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		reachable := joinManifestGatewayReachable(probeCtx, client, s.urls[index], trustPin)
+		cancel()
+		if reachable {
+			s.index = index
+			return true
+		}
+	}
+	return false
 }
 
 func joinManifestGatewayReachable(ctx context.Context, client *http.Client, gatewayURL, trustPin string) bool {
@@ -1243,6 +1323,35 @@ type transientGatewayResponseError struct {
 	Status   string
 	Body     string
 	Cause    error
+}
+
+func gatewayResponseError(operation, endpoint string, resp *http.Response, body []byte, cause error) error {
+	if resp != nil && gatewayRouteFailure(resp.StatusCode, body) {
+		return transientGatewayResponseError{
+			Endpoint: endpoint,
+			Status:   resp.Status,
+			Cause:    cause,
+		}
+	}
+	status := "gateway response unavailable"
+	if resp != nil {
+		status = resp.Status
+	}
+	return fmt.Errorf("%s: %s", operation, gatewayErrorMessage(status, body, cause))
+}
+
+func gatewayRouteFailure(statusCode int, body []byte) bool {
+	if statusCode == http.StatusRequestTimeout || statusCode == http.StatusTooEarly || statusCode == http.StatusTooManyRequests || statusCode == http.StatusGone {
+		return true
+	}
+	if statusCode >= http.StatusInternalServerError && statusCode <= 599 {
+		return true
+	}
+	if statusCode != http.StatusNotFound {
+		return false
+	}
+	message := strings.ToLower(string(body))
+	return strings.Contains(message, "tunnel") || strings.Contains(message, "gateway")
 }
 
 func (e transientGatewayResponseError) Error() string {

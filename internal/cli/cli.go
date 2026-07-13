@@ -4828,9 +4828,24 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	availabilityFailure := make(chan error, 1)
 	var livenessProbe func(context.Context) error
 	if len(availability.Candidates) > 0 {
-		candidate := availability.Candidates[0]
 		livenessProbe = func(probeCtx context.Context) error {
-			return finalProbe(probeCtx, candidate, ticket.Code, server.GatewayInstance())
+			candidates := availability.Candidates
+			if availabilityRuntime != nil {
+				live := retainHealthyAvailabilityCandidates(availabilityRuntime.Snapshot())
+				candidates = live.Candidates
+			}
+			var lastErr error
+			for _, candidate := range candidates {
+				if err := finalProbe(probeCtx, candidate, ticket.Code, server.GatewayInstance()); err == nil {
+					return nil
+				} else {
+					lastErr = err
+				}
+			}
+			if lastErr != nil {
+				return fmt.Errorf("all public gateway candidates failed liveness probe: %w", lastErr)
+			}
+			return errors.New("no public gateway candidate is available for liveness probe")
 		}
 	}
 	if readiness.ReadyToSend {

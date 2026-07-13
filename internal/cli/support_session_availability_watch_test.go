@@ -163,7 +163,7 @@ func TestForegroundSecondaryRouteDeathKeepsPrimaryHandoffUntilLastRouteDies(t *t
 	assertAvailabilityInvalidated(t, gw, ticket, readyFile, handoffFile, statusFile)
 }
 
-func TestForegroundPrimaryRouteDeathInvalidatesWhileSecondaryRemainsLive(t *testing.T) {
+func TestForegroundPrimaryRouteDeathKeepsHandoffWhileSecondaryRemainsLive(t *testing.T) {
 	runtime, handles := supportSessionAvailabilityRuntime(t, "primary", "secondary")
 	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
 	root := t.TempDir()
@@ -182,8 +182,14 @@ func TestForegroundPrimaryRouteDeathInvalidatesWhileSecondaryRemainsLive(t *test
 	handles[0].wait <- errors.New("primary exited")
 	select {
 	case <-done:
+		t.Fatal("primary route loss invalidated the handoff while secondary remained live")
+	case <-time.After(100 * time.Millisecond):
+	}
+	handles[1].wait <- errors.New("secondary exited")
+	select {
+	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("primary route loss did not invalidate the handoff while secondary remained live")
+		t.Fatal("last route loss did not invalidate the handoff")
 	}
 	assertAvailabilityInvalidated(t, gw, ticket, readyFile, handoffFile, statusFile)
 }

@@ -93,7 +93,7 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			if sameAvailabilityCandidates(published, live) {
 				continue
 			}
-			if publishedPrimaryRemains(published, live) {
+			if len(live.Candidates) > 0 || opts.Runtime.RecoveryPending() {
 				published = live
 				logTunnelAvailabilityLoss(opts.Out, live, "tunnel-redundancy-reduced")
 				continue
@@ -129,6 +129,10 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			}
 			consecutiveLivenessFailures++
 			if consecutiveLivenessFailures < failureThreshold {
+				continue
+			}
+			if opts.Runtime != nil && opts.Runtime.RecoveryPending() {
+				consecutiveLivenessFailures = 0
 				continue
 			}
 			live := availabilityWithoutCandidates(published, "liveness-probe-failed")

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math/rand"
 	"net"
 	"net/url"
 	"path"
@@ -56,11 +57,16 @@ type AvailabilitySet struct {
 type ProbeFunc func(context.Context, Candidate) (ProbeEvidence, error)
 
 type Manager struct {
-	Region       RegionProfile
-	MaxActive    int
-	StartTimeout time.Duration
-	ProbeTimeout time.Duration
-	Probe        ProbeFunc
+	Region                RegionProfile
+	MaxActive             int
+	StartTimeout          time.Duration
+	ProbeTimeout          time.Duration
+	Probe                 ProbeFunc
+	PoolTarget            int
+	LivenessInterval      time.Duration
+	LivenessFailures      int
+	ReplacementBackoff    time.Duration
+	ReplacementMaxBackoff time.Duration
 }
 
 type lifetimeBoundHandle struct {
@@ -85,22 +91,33 @@ type runtimeHandle struct {
 }
 
 type Runtime struct {
-	mu           sync.RWMutex
-	snapshot     AvailabilitySet
-	handles      []*runtimeHandle
-	candidates   []Candidate
-	hasCandidate []bool
-	done         chan struct{}
-	cleanupOnce  sync.Once
-	cleanupDone  chan struct{}
-	cleanupErr   error
-	updates      chan struct{}
+	mu                  sync.RWMutex
+	snapshot            AvailabilitySet
+	handles             []*runtimeHandle
+	currentHandles      []*runtimeHandle
+	candidates          []Candidate
+	hasCandidate        []bool
+	replacementInFlight []bool
+	livenessFailures    []int
+	selections          []Selection
+	request             StartRequest
+	manager             Manager
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	stopRequested       atomic.Bool
+	replacementWG       sync.WaitGroup
+	done                chan struct{}
+	cleanupOnce         sync.Once
+	cleanupDone         chan struct{}
+	cleanupErr          error
+	updates             chan struct{}
 }
 
 func (m Manager) Start(ctx context.Context, selections []Selection, request StartRequest) (*Runtime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	runtimeCtx, cancel := context.WithCancel(ctx)
 	maxActive := m.MaxActive
 	if maxActive <= 0 {
 		maxActive = 2
@@ -111,11 +128,19 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 			Region:        normalizedManagerRegion(m.Region),
 			Attempts:      make([]Attempt, len(selections)),
 		},
-		done:         make(chan struct{}),
-		cleanupDone:  make(chan struct{}),
-		updates:      make(chan struct{}, 1),
-		candidates:   make([]Candidate, len(selections)),
-		hasCandidate: make([]bool, len(selections)),
+		done:                make(chan struct{}),
+		cleanupDone:         make(chan struct{}),
+		updates:             make(chan struct{}, 1),
+		candidates:          make([]Candidate, len(selections)),
+		hasCandidate:        make([]bool, len(selections)),
+		currentHandles:      make([]*runtimeHandle, len(selections)),
+		replacementInFlight: make([]bool, len(selections)),
+		livenessFailures:    make([]int, len(selections)),
+		selections:          append([]Selection(nil), selections...),
+		request:             request,
+		manager:             m,
+		ctx:                 runtimeCtx,
+		cancel:              cancel,
 	}
 	for i, selection := range selections {
 		providerID := selection.Metadata.ID
@@ -137,7 +162,7 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 		go func() {
 			defer workers.Done()
 			for index := range jobs {
-				if !m.startOne(ctx, runtime, index, selections[index], request) {
+				if !m.startOne(runtimeCtx, runtime, index, selections[index], request) {
 					return
 				}
 			}
@@ -149,11 +174,14 @@ func (m Manager) Start(ctx context.Context, selections []Selection, request Star
 
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-runtimeCtx.Done():
 			_ = runtime.Stop(context.Background())
 		case <-runtime.done:
 		}
 	}()
+	if m.PoolTarget > 0 {
+		go runtime.supervise()
+	}
 	return runtime, nil
 }
 
@@ -193,10 +221,14 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 	item := newRuntimeHandle(handle, index)
 	item.startWaiter()
 	runtime.mu.Lock()
+	if len(runtime.currentHandles) < len(runtime.candidates) {
+		runtime.currentHandles = append(runtime.currentHandles, make([]*runtimeHandle, len(runtime.candidates)-len(runtime.currentHandles))...)
+	}
 	runtime.candidates[index] = candidate
 	runtime.hasCandidate[index] = true
 	runtime.snapshot.Attempts[index].CandidateID = candidateID
 	runtime.handles = append(runtime.handles, item)
+	runtime.currentHandles[index] = item
 	runtime.mu.Unlock()
 
 	if item.syncWaitCompleted() {
@@ -204,14 +236,8 @@ func (m Manager) startOne(ctx context.Context, runtime *Runtime, index int, sele
 		return true
 	}
 
-	probe := m.Probe
-	if probe == nil {
-		probe = func(probeCtx context.Context, candidate Candidate) (ProbeEvidence, error) {
-			return ProbeGatewayHealth(probeCtx, nil, candidate, "")
-		}
-	}
 	probeCtx, cancelProbe := withOptionalTimeout(ctx, m.ProbeTimeout)
-	evidence, probeErr := probe(probeCtx, candidate)
+	evidence, probeErr := m.probeCandidate(probeCtx, candidate)
 	cancelProbe()
 	if runtime.completeProbe(index, item, evidence, probeErr) {
 		return true
@@ -290,9 +316,35 @@ func (r *Runtime) Snapshot() AvailabilitySet {
 
 func (r *Runtime) Changes() <-chan struct{} { return r.updates }
 
+// RecoveryPending reports whether a pool slot is between a failed handle and
+// its replacement. Callers can keep the published handoff alive during this
+// short transition instead of treating the intermediate empty snapshot as a
+// terminal outage.
+func (r *Runtime) RecoveryPending() bool {
+	if r == nil || r.manager.PoolTarget <= 0 || r.stopRequested.Load() {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for index, attempt := range r.snapshot.Attempts {
+		if index < len(r.replacementInFlight) && r.replacementInFlight[index] {
+			return true
+		}
+		if attempt.Status == AttemptHealthy || index >= len(r.currentHandles) || r.currentHandles[index] == nil {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func (r *Runtime) Stop(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	r.stopRequested.Store(true)
+	if r.cancel != nil {
+		r.cancel()
 	}
 	r.cleanupOnce.Do(func() { go r.cleanup() })
 	select {
@@ -304,6 +356,7 @@ func (r *Runtime) Stop(ctx context.Context) error {
 }
 
 func (r *Runtime) cleanup() {
+	r.replacementWG.Wait()
 	r.mu.RLock()
 	handles := append([]*runtimeHandle(nil), r.handles...)
 	r.mu.RUnlock()
@@ -338,8 +391,212 @@ func (r *Runtime) cleanup() {
 
 func (r *Runtime) observeExit(item *runtimeHandle) {
 	<-item.waitDone
-	if !item.stopping.Load() {
-		r.markExited(item.attemptIndex, item.waitErr)
+	if item.stopping.Load() || r.ctx.Err() != nil || !r.isCurrentHandle(item) {
+		return
+	}
+	r.markExited(item.attemptIndex, item.waitErr)
+	r.scheduleReplacement(item.attemptIndex)
+}
+
+func (m Manager) probeCandidate(ctx context.Context, candidate Candidate) (ProbeEvidence, error) {
+	if m.Probe != nil {
+		return m.Probe(ctx, candidate)
+	}
+	return ProbeGatewayHealth(ctx, nil, candidate, "")
+}
+
+func (r *Runtime) supervise() {
+	interval := r.manager.LivenessInterval
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-ticker.C:
+			r.probeHealthyCandidates()
+		}
+	}
+}
+
+func (r *Runtime) probeHealthyCandidates() {
+	type probeTarget struct {
+		index     int
+		candidate Candidate
+	}
+	r.mu.RLock()
+	targets := make([]probeTarget, 0, len(r.snapshot.Candidates))
+	for index, attempt := range r.snapshot.Attempts {
+		if attempt.Status == AttemptHealthy && index < len(r.hasCandidate) && r.hasCandidate[index] {
+			targets = append(targets, probeTarget{index: index, candidate: r.candidates[index]})
+		}
+	}
+	r.mu.RUnlock()
+	for _, target := range targets {
+		probeCtx, cancel := withOptionalTimeout(r.ctx, r.manager.ProbeTimeout)
+		evidence, err := r.manager.probeCandidate(probeCtx, target.candidate)
+		cancel()
+		if err == nil {
+			r.recordLivenessSuccess(target.index, evidence)
+			continue
+		}
+		if r.recordLivenessFailure(target.index, evidence) {
+			r.retireForReplacement(target.index, "liveness-probe-failed", evidence)
+		}
+	}
+}
+
+func (r *Runtime) recordLivenessSuccess(index int, evidence ProbeEvidence) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if index >= len(r.snapshot.Attempts) || r.snapshot.Attempts[index].Status != AttemptHealthy {
+		return
+	}
+	r.livenessFailures[index] = 0
+	r.snapshot.Attempts[index].Probe = evidence
+}
+
+func (r *Runtime) recordLivenessFailure(index int, evidence ProbeEvidence) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if index >= len(r.snapshot.Attempts) || r.snapshot.Attempts[index].Status != AttemptHealthy {
+		return false
+	}
+	r.livenessFailures[index]++
+	r.snapshot.Attempts[index].Probe = evidence
+	threshold := r.manager.LivenessFailures
+	if threshold <= 0 {
+		threshold = 3
+	}
+	return r.livenessFailures[index] >= threshold
+}
+
+func (r *Runtime) retireForReplacement(index int, errorClass string, evidence ProbeEvidence) {
+	r.mu.Lock()
+	if index >= len(r.snapshot.Attempts) || r.snapshot.Attempts[index].Status != AttemptHealthy || r.replacementInFlight[index] {
+		r.mu.Unlock()
+		return
+	}
+	item := r.currentHandles[index]
+	r.snapshot.Attempts[index].Status = AttemptDegraded
+	r.snapshot.Attempts[index].ErrorClass = errorClass
+	r.snapshot.Attempts[index].Probe = evidence
+	r.hasCandidate[index] = false
+	r.refreshCandidatesLocked()
+	r.notifyLocked()
+	r.mu.Unlock()
+	if item == nil {
+		r.scheduleReplacement(index)
+		return
+	}
+	go func() {
+		item.stopAndReap()
+		r.scheduleReplacement(index)
+	}()
+}
+
+func (r *Runtime) isCurrentHandle(item *runtimeHandle) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return item.attemptIndex >= 0 && item.attemptIndex < len(r.currentHandles) && r.currentHandles[item.attemptIndex] == item
+}
+
+func (r *Runtime) scheduleReplacement(index int) {
+	if r.stopRequested.Load() || r.ctx.Err() != nil || index < 0 || index >= len(r.selections) {
+		return
+	}
+	r.mu.Lock()
+	if r.stopRequested.Load() || r.replacementInFlight[index] {
+		r.mu.Unlock()
+		return
+	}
+	r.replacementInFlight[index] = true
+	r.replacementWG.Add(1)
+	r.mu.Unlock()
+	go func() {
+		defer r.replacementWG.Done()
+		defer func() {
+			r.mu.Lock()
+			r.replacementInFlight[index] = false
+			r.mu.Unlock()
+		}()
+		delay := r.replacementDelay()
+		for {
+			if err := sleepContext(r.ctx, delay); err != nil {
+				return
+			}
+			r.prepareReplacement(index)
+			r.manager.startOne(r.ctx, r, index, r.selections[index], r.request)
+			if r.isHealthy(index) {
+				return
+			}
+			delay = nextReplacementDelay(delay, r.manager.ReplacementMaxBackoff)
+		}
+	}()
+}
+
+func (r *Runtime) prepareReplacement(index int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	providerID := r.selections[index].Metadata.ID
+	if providerID == "" && r.selections[index].Provider != nil {
+		providerID = r.selections[index].Provider.ID()
+	}
+	r.currentHandles[index] = nil
+	r.hasCandidate[index] = false
+	r.snapshot.Attempts[index] = Attempt{ProviderID: providerID, Status: AttemptStarting}
+	r.livenessFailures[index] = 0
+	r.refreshCandidatesLocked()
+	r.notifyLocked()
+}
+
+func (r *Runtime) isHealthy(index int) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return index >= 0 && index < len(r.snapshot.Attempts) && r.snapshot.Attempts[index].Status == AttemptHealthy && r.hasCandidate[index]
+}
+
+func (r *Runtime) replacementDelay() time.Duration {
+	base := r.manager.ReplacementBackoff
+	if base <= 0 {
+		base = time.Second
+	}
+	max := r.manager.ReplacementMaxBackoff
+	if max <= 0 {
+		max = time.Minute
+	}
+	if base > max {
+		base = max
+	}
+	// A bounded jitter prevents multiple providers from retrying in lockstep.
+	jitter := time.Duration(rand.Int63n(int64(base/4 + 1)))
+	if base+jitter > max {
+		return max
+	}
+	return base + jitter
+}
+
+func nextReplacementDelay(current, maximum time.Duration) time.Duration {
+	if maximum <= 0 {
+		maximum = time.Minute
+	}
+	if current >= maximum/2 {
+		return maximum
+	}
+	return current * 2
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

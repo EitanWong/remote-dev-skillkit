@@ -46,6 +46,8 @@ func (h *managerFakeHandle) Stop(context.Context) error {
 type managerFakeProvider struct {
 	id                    string
 	handle                *managerFakeHandle
+	handleFactory         func(int) *managerFakeHandle
+	starts                atomic.Int32
 	started               chan struct{}
 	release               <-chan struct{}
 	active                *atomic.Int32
@@ -61,6 +63,11 @@ func (p *managerFakeProvider) Metadata() ProviderMetadata {
 	return ProviderMetadata{ID: p.id, DefaultAutomatic: true}
 }
 func (p *managerFakeProvider) Start(ctx context.Context, _ StartRequest) (Handle, error) {
+	startIndex := int(p.starts.Add(1) - 1)
+	handle := p.handle
+	if p.handleFactory != nil {
+		handle = p.handleFactory(startIndex)
+	}
 	if p.contextDone != nil {
 		go func() {
 			<-ctx.Done()
@@ -88,8 +95,8 @@ func (p *managerFakeProvider) Start(ctx context.Context, _ StartRequest) (Handle
 			}
 		}
 	}
-	if p.handle.live != nil {
-		current := p.handle.live.Add(1)
+	if handle.live != nil {
+		current := handle.live.Add(1)
 		for peak := p.peak.Load(); current > peak && !p.peak.CompareAndSwap(peak, current); peak = p.peak.Load() {
 		}
 	}
@@ -97,12 +104,12 @@ func (p *managerFakeProvider) Start(ctx context.Context, _ StartRequest) (Handle
 		go func() {
 			<-ctx.Done()
 			select {
-			case p.handle.wait <- ctx.Err():
+			case handle.wait <- ctx.Err():
 			default:
 			}
 		}()
 	}
-	return p.handle, nil
+	return handle, nil
 }
 
 func managerSelection(provider Provider, region RegionProfile) Selection {
@@ -162,6 +169,100 @@ func TestManagerBoundsConcurrentStartsAndRecordsProbeResults(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "https://") || strings.Contains(string(encoded), "nxdomain:") {
 		t.Fatalf("shareable attempts leaked URL or raw error: %s", encoded)
+	}
+}
+
+func TestManagerPoolReplacesExitedHandle(t *testing.T) {
+	handles := make(chan *managerFakeHandle, 4)
+	provider := &managerFakeProvider{
+		id: "pool-provider",
+		handleFactory: func(index int) *managerFakeHandle {
+			handle := &managerFakeHandle{
+				candidate: Candidate{ProviderID: "pool-provider", URL: fmt.Sprintf("https://pool-%d.example.test", index)},
+				wait:      make(chan error, 1),
+			}
+			handles <- handle
+			return handle
+		},
+	}
+	runtime, err := (Manager{
+		MaxActive:             1,
+		PoolTarget:            1,
+		StartTimeout:          time.Second,
+		ProbeTimeout:          time.Second,
+		ReplacementBackoff:    time.Millisecond,
+		ReplacementMaxBackoff: 10 * time.Millisecond,
+		Probe: func(context.Context, Candidate) (ProbeEvidence, error) {
+			return ProbeEvidence{DNSOK: true, TLSOK: true, HealthOK: true}, nil
+		},
+	}).Start(context.Background(), []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Stop(context.Background()) })
+	first := <-handles
+	if got := runtime.Snapshot().Candidates; len(got) != 1 || got[0].URL != "https://pool-0.example.test" {
+		t.Fatalf("initial pool candidate = %#v", got)
+	}
+	first.wait <- errors.New("provider connection closed")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snapshot := runtime.Snapshot()
+		if len(snapshot.Candidates) == 1 && snapshot.Candidates[0].URL == "https://pool-1.example.test" && provider.starts.Load() >= 2 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pool did not replace exited candidate: starts=%d snapshot=%#v", provider.starts.Load(), snapshot)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestManagerPoolReplacesCandidateAfterLivenessFailures(t *testing.T) {
+	handles := make(chan *managerFakeHandle, 4)
+	provider := &managerFakeProvider{
+		id: "liveness-provider",
+		handleFactory: func(index int) *managerFakeHandle {
+			handle := &managerFakeHandle{
+				candidate: Candidate{ProviderID: "liveness-provider", URL: fmt.Sprintf("https://liveness-%d.example.test", index)},
+				wait:      make(chan error, 1),
+			}
+			handles <- handle
+			return handle
+		},
+	}
+	var probes atomic.Int32
+	runtime, err := (Manager{
+		MaxActive:             1,
+		PoolTarget:            1,
+		StartTimeout:          time.Second,
+		ProbeTimeout:          time.Second,
+		LivenessInterval:      time.Millisecond,
+		LivenessFailures:      1,
+		ReplacementBackoff:    time.Millisecond,
+		ReplacementMaxBackoff: 10 * time.Millisecond,
+		Probe: func(_ context.Context, candidate Candidate) (ProbeEvidence, error) {
+			if candidate.URL == "https://liveness-0.example.test" && probes.Add(1) > 1 {
+				return ProbeEvidence{DNSOK: true, TLSOK: false}, errors.New("gateway health failed")
+			}
+			return ProbeEvidence{DNSOK: true, TLSOK: true, HealthOK: true}, nil
+		},
+	}).Start(context.Background(), []Selection{managerSelection(provider, RegionGlobal)}, StartRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Stop(context.Background()) })
+	<-handles
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snapshot := runtime.Snapshot()
+		if len(snapshot.Candidates) == 1 && snapshot.Candidates[0].URL == "https://liveness-1.example.test" && provider.starts.Load() >= 2 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pool did not replace liveness-failed candidate: starts=%d snapshot=%#v", provider.starts.Load(), snapshot)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

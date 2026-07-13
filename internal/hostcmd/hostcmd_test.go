@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -333,6 +334,9 @@ func TestCompleteSessionTaskRetriesTransientEOFWithIdempotencyKey(t *testing.T) 
 		if key == "" {
 			t.Fatalf("expected idempotency key on attempt %d", attempts)
 		}
+		if key != "result_1" {
+			t.Fatalf("expected payload idempotency key, got %q", key)
+		}
 		if attempts == 1 {
 			firstKey = key
 		} else if key != firstKey {
@@ -372,6 +376,60 @@ func TestCompleteSessionTaskRetriesTransientEOFWithIdempotencyKey(t *testing.T) 
 	}
 	if task.ID != "task_1" || task.Status != controlplane.TaskStatusSucceeded || event.Type != controlplane.EventTypeTaskResult {
 		t.Fatalf("unexpected task result task=%#v event=%#v", task, event)
+	}
+}
+
+func TestRunSessionTasksRotatesAfterTunnelRouteIsReclaimed(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust := model.NewTrustBundle("test", publicKey)
+	trustBody, err := json.Marshal(map[string]any{"trust": trust})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deadEvents, healthyEvents int
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host == "dead.example.test" {
+			if strings.HasSuffix(req.URL.Path, "/events") {
+				deadEvents++
+				return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("No tunnel found")), Request: req}, nil
+			}
+			if req.URL.Path == "/v1/trust" {
+				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(trustBody)), Request: req}, nil
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("not found")), Request: req}, nil
+		}
+		if req.URL.Host != "healthy.example.test" {
+			return nil, fmt.Errorf("unexpected candidate host %q", req.URL.Host)
+		}
+		if req.URL.Path == "/v1/trust-bundle" {
+			return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("legacy gateway")), Request: req}, nil
+		}
+		if req.URL.Path == "/v1/trust" {
+			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(trustBody)), Request: req}, nil
+		}
+		if strings.HasSuffix(req.URL.Path, "/events") {
+			healthyEvents++
+			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"events":[],"lease":{"secret":"lease-test"},"last_seq":0}`)), Request: req}, nil
+		}
+		return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("not found")), Request: req}, nil
+	})}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	app := New(io.Discard, io.Discard)
+	processed, err := app.runSessionTasks(ctx, serveOptions{
+		GatewayURL:                "https://dead.example.test",
+		ManifestGatewayCandidates: []model.JoinManifestGatewayCandidate{{URL: "https://healthy.example.test"}},
+		PollInterval:              time.Millisecond,
+		MaxTasks:                  1,
+	}, client, "ses_test", "end_test", "fp-test", "lease-test", controlplane.Lease{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runSessionTasks error = %v, want context deadline after continued polling", err)
+	}
+	if processed != 0 || deadEvents == 0 || healthyEvents == 0 {
+		t.Fatalf("expected route rotation and continued polling, processed=%d dead_events=%d healthy_events=%d", processed, deadEvents, healthyEvents)
 	}
 }
 
