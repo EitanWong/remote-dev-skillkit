@@ -2038,12 +2038,23 @@ func TestSupportSessionForegroundWatcherWritesConnectedStatusFile(t *testing.T) 
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	var out synchronizedBuffer
 	statusFile := filepath.Join(t.TempDir(), "support-session-status.json")
 	connectedReportFile := filepath.Join(t.TempDir(), "connected-report.txt")
 	gatewayURL := "http://127.0.0.1:9876"
-	go watchForegroundSupportSession(ctx, &out, statusFile, connectedReportFile, gw, ticket.Code, "en", gatewayURL)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watchForegroundSupportSession(ctx, &out, statusFile, connectedReportFile, gw, ticket.Code, "en", gatewayURL)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Errorf("foreground status watcher did not stop during cleanup")
+		}
+	})
 
 	waitForStatusFileEvent(t, statusFile, "waiting")
 	if _, err := gw.RegisterHost(model.HostRegistration{
