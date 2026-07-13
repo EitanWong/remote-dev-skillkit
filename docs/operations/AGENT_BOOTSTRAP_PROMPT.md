@@ -113,7 +113,7 @@ Steps:
     durable workstation, third-party temporary repair, LAN, hosted, relay, mesh,
     SSH, or VPN-assisted connectivity. Do not ask a human to assemble ticket
     codes, manifest roots, gateway URLs, transports, release roots, or checksum
-    flags. First call `rdev.support_session.connect` through MCP or run
+    flags. First call `rdev.sessions.connect` through MCP or run
     `rdev support-session connect`. If it returns `ready_to_send_to_human=true`,
     forward `target_handoff_envelope.full_text` verbatim when present; fall
     back to `user_handoff.message` plus `user_handoff.copy_paste` only for
@@ -159,7 +159,7 @@ Steps:
     as Agent/tool metadata:
     `rdev` appends them to `gateway_url_candidates` after direct/LAN candidates
     and before loopback so the target command can fail over without custom
-    relay or tunnel code. `rdev.support_session.connect`,
+    relay or tunnel code. `rdev.sessions.connect`,
     `rdev.support_session.handoff`, and `rdev.support_session.create` can use the first configured
     `RDEV_*_GATEWAY_URL` when no explicit `gateway_url` was supplied, so do not
     ask me to choose a gateway URL when the runtime already has one configured.

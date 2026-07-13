@@ -693,7 +693,7 @@ Expected: FAIL with unknown tunnel subcommand.
 
 - [ ] **Step 3: Implement CLI commands and MCP propagation**
 
-Add top-level `tunnel` routing with `providers` and `probe`. Ensure `rdev.support_session.connect` schema accepts and forwards:
+Add top-level `tunnel` routing with `providers` and `probe`. Ensure `rdev.sessions.connect` schema accepts and forwards:
 
 ```json
 {

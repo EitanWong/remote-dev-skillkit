@@ -115,7 +115,7 @@ func Tools() []Tool {
 			}, []string{"session_id"}),
 		},
 		{
-			Name:        "rdev.support_session.connect",
+			Name:        "rdev.sessions.connect",
 			Description: "Create or route the standard visible support-session entry, including region-aware tunnel availability, readiness, and the single human handoff contract.",
 			Safety:      "Does not bypass local controls or accept provider terms. Without an explicit start action it returns bounded commands/contracts; direct single-entry handoffs remain non-sendable unless the caller explicitly enables the degraded override.",
 			InputSchema: object(map[string]any{

@@ -265,7 +265,7 @@ contracts.
 - Fixed `rdev bootstrap agent-plan --remote-requested` remote-host defaults
   that still told fresh Agents to create invites and materialize Connection
   Entries after authorization. The planner now routes ordinary remote support
-  through `rdev.support_session.connect` / `rdev support-session connect`,
+  through `rdev.sessions.connect` / `rdev support-session connect`,
   sends only `handoff_text_file.path` or `target_handoff_envelope.full_text`,
   and reserves Connection Entry runner materialization for reviewed package,
   managed owned-host, or restrictive-network recovery paths.
@@ -286,7 +286,7 @@ contracts.
   connection work through low-level invite creation or describe
   `gateway_url_candidates` as a recommended URL source. README, Bootstrap, MCP
   stdio docs, and task tracking now separate the high-level
-  `rdev.support_session.connect` path from explicit package/materialization
+  `rdev.sessions.connect` path from explicit package/materialization
   workflows.
 - Fixed top-level `rdev --help` ordering so fresh Agents see
   `rdev support-session connect --start` and `rdev support-session --help`
@@ -1437,7 +1437,7 @@ metadata, status watching, or authorization polling by hand.
 - Tightened `rdev.support-session-agent-runbook.v1` with
   `standard_entry_tool`, `fallback_entry_tool`, and `low_level_entry_rule`.
   Fresh Agents are now explicitly told to start ordinary "connect this
-  computer" requests with `rdev.support_session.connect` /
+  computer" requests with `rdev.sessions.connect` /
   `rdev support-session connect`, and not with `rdev.invites.create`,
   `rdev.connection_entry.plan`, package materialization, or hand-written gateway
   setup unless the operator or a high-level recovery payload explicitly asks
@@ -1451,7 +1451,7 @@ metadata, status watching, or authorization polling by hand.
   workarounds and recover through `cli_start_now_command`, `ready_file.path`,
   `status_file.path`, `connection_supervision`, or
   `rdev.support_session.prepare` instead.
-- Reordered the public MCP tool contract so `rdev.support_session.connect` is
+- Reordered the public MCP tool contract so `rdev.sessions.connect` is
   the first listed tool. This makes the high-level connection entry the most
   discoverable choice for Codex, Claude Code, Hermes, OpenClaw/OpenCode, and
   other MCP-capable Agents, while moving low-level `rdev.invites.create` behind
@@ -1671,7 +1671,7 @@ metadata, status watching, or authorization polling by hand.
   relay, ticket/root/gateway/transport assembly, hidden install, or
   `ExecutionPolicy Bypass` shortcuts.
 - Added high-level `rdev support-session connect` and MCP tool
-  `rdev.support_session.connect` with schema `rdev.support-session-connect.v1`.
+  `rdev.sessions.connect` with schema `rdev.support-session-connect.v1`.
   Fresh Agents can now call one "connect a computer" entry first: when a
 	  reachable or configured gateway exists it creates the session and returns the
 	  ready `target_handoff_envelope.full_text` plus compatibility

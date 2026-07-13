@@ -3323,7 +3323,7 @@ func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, re
 		"third_party_mode":      "attended-temporary",
 		"first_human_question":  "Please confirm that company policy and the device owner allow a visible temporary Remote Dev Skillkit support session on this machine.",
 		"agent_should_continue_after_confirmation": []string{
-			"call rdev.support_session.connect or run rdev support-session connect",
+			"call rdev.sessions.connect or run rdev support-session connect",
 			"if no gateway is running, run the returned visible foreground rdev support-session connect --start command",
 			"send only handoff_text_file.path or target_handoff_envelope.full_text verbatim to the target side",
 			"wait through connection_supervision, foreground_feedback, status_file.path, or rdev.support_session.status",

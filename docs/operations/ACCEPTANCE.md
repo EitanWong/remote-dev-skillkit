@@ -185,7 +185,7 @@ tunnel, or prove real Codex/Claude Code/Hermes/OpenClaw behavior. Instead, it
 checks that the standard tool payloads still let a fresh Agent do the intended
 one-message flow:
 
-1. call `rdev.support_session.connect` first;
+1. call `rdev.sessions.connect` first;
 2. return ready `target_handoff_envelope.full_text` and compatibility
    `user_handoff` when a gateway is reachable;
 3. return `cli_start_now_command` for visible foreground `rdev support-session connect --start` when no gateway is running;

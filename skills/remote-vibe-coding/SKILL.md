@@ -43,7 +43,7 @@ revocation.
   JSON plan for local MCP, `rdev` recovery, Connection Entry defaults, and
   ask/auto-probe boundaries.
 - When a fresh Agent session is asked to connect a machine, first call
-  `rdev.support_session.connect` or run `rdev support-session connect`. This is
+  `rdev.sessions.connect` or run `rdev support-session connect`. This is
   the high-level "connect a computer" entry. If a reachable or configured
   gateway exists, it returns `ready_to_send_to_human=true` with
   `target_handoff_envelope.full_text`, the complete plain-text handoff to
@@ -93,7 +93,7 @@ revocation.
   `RDEV_SSH_GATEWAY_URL` values are tool metadata: `rdev` appends them to
   ordered gateway candidates after direct/LAN paths and before loopback so the
   target one-liner can fail over without Agent-authored tunnel scripts.
-  `rdev.support_session.connect`, `rdev support-session connect`,
+  `rdev.sessions.connect`, `rdev support-session connect`,
   `rdev.support_session.handoff`, `rdev support-session handoff`,
   `rdev.support_session.create`, and `rdev support-session create` may use the
   first configured `RDEV_*_GATEWAY_URL` when no explicit gateway URL was
@@ -124,7 +124,7 @@ revocation.
   `connection_supervision`, or `rdev.support_session.prepare` recovery path
   instead.
 - Read `fresh_agent_connect_contract` whenever it is returned by
-  `rdev.support_session.connect`, `rdev.support_session.create`, or a started
+  `rdev.sessions.connect`, `rdev.support_session.create`, or a started
   foreground session. Treat it as the shortest model-independent contract:
   recover missing `rdev`, forward `target_handoff_envelope.full_text` when
   present, fall back to `user_handoff.message` plus `user_handoff.copy_paste`
@@ -132,7 +132,7 @@ revocation.
   humans for ticket/root/gateway values or generate custom PowerShell, shell,
   tunnel, interrupt, or polling scripts.
 - For a new support session, prefer the high-level connect output. If
-  `rdev.support_session.connect` returns `ready_to_send_to_human=true`, send
+  `rdev.sessions.connect` returns `ready_to_send_to_human=true`, send
   only `target_handoff_envelope.full_text` when present, falling back to the
   returned `user_handoff` only for older payloads. If it returns
   `ready_to_send_to_human=false`, run the returned `cli_start_now_command` in

@@ -26,7 +26,7 @@ before asking for paths or choosing connection mode.
 For company or third-party machines, the only required first question is
 authorization: confirm that policy and the device owner allow a visible
 temporary Remote Dev Skillkit support session. After confirmation, agents should
-default to attended-temporary mode and start with `rdev.support_session.connect`
+default to attended-temporary mode and start with `rdev.sessions.connect`
 or `rdev support-session connect`. That high-level entry either returns the
 ready `target_handoff_envelope.full_text`, or returns the visible foreground
 `rdev support-session connect --start` command that creates the gateway, helper
@@ -166,7 +166,7 @@ contracts: the same handoff covers owned managed workstations, third-party
 temporary repair, LAN, hosted, relay, mesh, SSH, and VPN-assisted paths.
 
 For ordinary "connect this computer" requests, Agents should start with
-`rdev.support_session.connect` through MCP or `rdev support-session connect`
+`rdev.sessions.connect` through MCP or `rdev support-session connect`
 through the CLI. That high-level path either returns the ready
 `target_handoff_envelope.full_text` to forward to the human, or the visible
 foreground `rdev support-session connect --start` command that creates the

@@ -14,7 +14,7 @@ The server currently uses an in-memory gateway. It is suitable for local integra
 Agent-first session tools include:
 
 - `rdev.support_session.handoff`
-- `rdev.support_session.connect`
+- `rdev.sessions.connect`
 - `rdev.support_session.prepare`
 - `rdev.support_session.plan`
 - `rdev.support_session.create`
@@ -39,7 +39,7 @@ runner. They should not write custom relay, SSH, mesh, VPN, PowerShell, shell,
 tunnel, interrupt polling, or bootstrap scripts. The package contains no real
 endpoint, credential, key, private IP, local path, or secret.
 
-`rdev.support_session.connect` returns `rdev.support-session-connect.v1` in
+`rdev.sessions.connect` returns `rdev.support-session-connect.v1` in
 `structuredContent`. Fresh Agents should call it first when a human says
 "connect a computer" or similar. If `gateway_url` is present, or if
 `RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
@@ -77,7 +77,7 @@ tunnels or change provider configuration.
 
 `rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
 `structuredContent`. It remains available for review/debug routing details and
-older harnesses, but fresh Agents should prefer `rdev.support_session.connect`
+older harnesses, but fresh Agents should prefer `rdev.sessions.connect`
 as the normal first step.
 
 `rdev.support_session.create` returns `rdev.support-session-created.v1` in
@@ -277,7 +277,7 @@ not need to invent status wording.
 
 `rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
 Fresh Agents should not use it as the first step for ordinary "connect this
-computer" requests; start with `rdev.support_session.connect` instead.
+computer" requests; start with `rdev.sessions.connect` instead.
 `invites.create` is for explicit package materialization, authorized managed
 owned-host planning, or recovery flows that name the lower-level path. It
 creates a ticket and returns a manifest URL, `host_command`,

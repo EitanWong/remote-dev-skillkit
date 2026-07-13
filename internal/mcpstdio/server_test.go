@@ -436,7 +436,7 @@ func TestServerToolCallSupportSessionHandoffUsesConfiguredGateway(t *testing.T) 
 }
 
 func TestServerToolCallSupportSessionConnectWithoutGatewayReturnsStart(t *testing.T) {
-	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+	input := mcpRequestLine(t, "rdev.sessions.connect", map[string]any{
 		"target": "auto",
 	})
 	var out bytes.Buffer
@@ -464,7 +464,7 @@ func TestServerToolCallSupportSessionConnectPropagatesTunnelPolicy(t *testing.T)
 	if err := os.WriteFile(policyPath, []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+	input := mcpRequestLine(t, "rdev.sessions.connect", map[string]any{
 		"target":                        "auto",
 		"region":                        "cn-mainland",
 		"provider_policy":               policyPath,
@@ -519,7 +519,7 @@ func TestServerToolCallSupportSessionConnectExplicitGatewayRequiresForegroundRem
 	if err := os.WriteFile(policyPath, []byte(policyBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+	input := mcpRequestLine(t, "rdev.sessions.connect", map[string]any{
 		"gateway_url":                   "https://gateway.example.test",
 		"target":                        "windows",
 		"region":                        "cn-mainland",
@@ -573,7 +573,7 @@ func TestServerToolCallSupportSessionConnectExplicitGatewayRequiresForegroundRem
 func TestSupportSessionConnectConfiguredGatewayRequiresForegroundRemoteTransaction(t *testing.T) {
 	t.Setenv("RDEV_HOSTED_GATEWAY_URL", "https://configured.example.test/rdev")
 	gw := gateway.NewMemoryGateway()
-	result, err := NewServer(gw).supportSessionConnect(map[string]any{"target": "windows"})
+	result, err := NewServer(gw).sessionsConnect(map[string]any{"target": "windows"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +604,7 @@ func TestSupportSessionConnectRejectsInvalidProviderPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 		server := NewServer(gateway.NewMemoryGateway())
-		if _, err := server.supportSessionConnect(map[string]any{
+		if _, err := server.sessionsConnect(map[string]any{
 			"gateway_url":     "https://gateway.example.test",
 			"region":          "cn-mainland",
 			"provider_policy": policyPath,
@@ -700,7 +700,7 @@ func TestSupportSessionConnectRejectsUnknownProviderIDs(t *testing.T) {
 				t.Fatal(err)
 			}
 			server := NewServer(gateway.NewMemoryGateway())
-			if _, err := server.supportSessionConnect(map[string]any{
+			if _, err := server.sessionsConnect(map[string]any{
 				"gateway_url":     "https://gateway.example.test",
 				"region":          "global",
 				"provider_policy": policyPath,
@@ -723,13 +723,13 @@ func TestSupportSessionConnectAllowsConfiguredGatewayIDOnlyWithResolvedGateway(t
 		t.Fatal(err)
 	}
 	server := NewServer(gateway.NewMemoryGateway())
-	if _, err := server.supportSessionConnect(map[string]any{
+	if _, err := server.sessionsConnect(map[string]any{
 		"region":          "global",
 		"provider_policy": policyPath,
 	}); err == nil || !strings.Contains(err.Error(), "unknown provider") {
 		t.Fatalf("configured-gateway must be rejected without a resolved gateway, got %v", err)
 	}
-	if _, err := server.supportSessionConnect(map[string]any{
+	if _, err := server.sessionsConnect(map[string]any{
 		"gateway_url":     "https://gateway.example.test",
 		"region":          "global",
 		"provider_policy": policyPath,
@@ -774,7 +774,7 @@ func TestServerToolCallSupportSessionConnectAutoDetectsStableRdevCommand(t *test
 		t.Fatal(err)
 	}
 
-	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{"target": "auto"})
+	input := mcpRequestLine(t, "rdev.sessions.connect", map[string]any{"target": "auto"})
 	var out bytes.Buffer
 	server := NewServer(gateway.NewMemoryGateway())
 	if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
@@ -790,7 +790,7 @@ func TestServerToolCallSupportSessionConnectAutoDetectsStableRdevCommand(t *test
 }
 
 func TestServerToolCallSupportSessionConnectWithGatewayRequiresForegroundTransaction(t *testing.T) {
-	input := mcpRequestLine(t, "rdev.support_session.connect", map[string]any{
+	input := mcpRequestLine(t, "rdev.sessions.connect", map[string]any{
 		"gateway_url":   "http://192.0.2.44:8787",
 		"target":        "windows",
 		"reason":        "company computer support",

@@ -1276,7 +1276,7 @@ func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
 		t.Fatalf("remote defaults should collapse decisions into visible temporary support: %#v", payload.RemoteDefaults)
 	}
 	agentSteps := strings.Join(payload.RemoteDefaults.AgentShouldDo, "\n")
-	if !strings.Contains(agentSteps, "rdev.support_session.connect") ||
+	if !strings.Contains(agentSteps, "rdev.sessions.connect") ||
 		!strings.Contains(agentSteps, "target_handoff_envelope.full_text") ||
 		strings.Contains(agentSteps, "create an invite") ||
 		strings.Contains(agentSteps, "materialize a Connection Entry") {

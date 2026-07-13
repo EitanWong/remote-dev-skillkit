@@ -320,7 +320,7 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 		"intent":         "single-call-agent-entry-for-one-command-visible-support-session",
 		"selected_path":  selectedPath,
 		"handoff":        handoff,
-		"agent_rule":     "Agents should call rdev.support_session.connect first when a human asks to connect a computer; follow this payload instead of choosing handoff/create/start/status manually.",
+		"agent_rule":     "Agents should call rdev.sessions.connect first when a human asks to connect a computer; follow this payload instead of choosing handoff/create/start/status manually.",
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
 			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
@@ -423,7 +423,7 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 		"mcp_follow_up":      created["mcp_follow_up"],
 		"agent_next_step":    agentNextStep,
 		"human_surface_rule": humanSurfaceRule,
-		"agent_rule":         "Agents should call rdev.support_session.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
+		"agent_rule":         "Agents should call rdev.sessions.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
 			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
@@ -957,7 +957,7 @@ func gatewayCandidatePreflight(gatewayURL, target string, gatewayCandidates []Ga
 		"candidate_count": len(candidates),
 		"candidates":      candidates,
 		"standard_sequence": []string{
-			"call rdev.support_session.connect or run rdev support-session connect first",
+			"call rdev.sessions.connect or run rdev support-session connect first",
 			"send only returned target_handoff_envelope.full_text",
 			"wait with returned connection_supervision or foreground_feedback",
 			"if all candidates fail, rerun rdev.support_session.prepare or rdev support-session prepare --build-assets before asking the human",
@@ -1076,7 +1076,7 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 	}
 	ticketCode := strings.TrimSpace(opts.TicketCode)
 	sequence := []string{
-		"start with rdev.support_session.connect or rdev support-session connect",
+		"start with rdev.sessions.connect or rdev support-session connect",
 		"if ready_to_send_to_human=false, run cli_start_now_command exactly in a visible foreground terminal",
 		"send only target_handoff_envelope.full_text to the target-side human",
 		"keep the target-side command/page and the local foreground gateway open while waiting",
@@ -1117,7 +1117,7 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 		"locale":         opts.Locale,
 		"gateway_url":    strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"),
 		"standard_entry_tool": map[string]any{
-			"mcp_tool":    "rdev.support_session.connect",
+			"mcp_tool":    "rdev.sessions.connect",
 			"cli_command": []string{rdevCommand, "support-session", "connect"},
 			"rule":        "for a human request like connect this computer, call this first; it chooses create-via-reachable-gateway or foreground start and returns the only human handoff to send",
 		},
@@ -1157,11 +1157,11 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 				"rdev.connection_entry.plan",
 				"rdev connection-entry plan",
 			},
-			"reason": "low-level invite and package materialization surfaces are for reviewed packaging or advanced workflows; fresh Agents should use support_session.connect so helper assets, auto-activation, foreground feedback, and status watching are generated together",
+			"reason": "low-level invite and package materialization surfaces are for reviewed packaging or advanced workflows; fresh Agents should use rdev.sessions.connect so helper assets, auto-activation, foreground feedback, and status watching are generated together",
 			"allowed_when": []string{
 				"an operator explicitly asks for package materialization",
 				"managed owned-host service planning has been explicitly authorized",
-				"support_session.connect or support_session.prepare returns a standard recovery instruction that names Connection Entry planning",
+				"rdev.sessions.connect or rdev.support_session.prepare returns a standard recovery instruction that names Connection Entry planning",
 			},
 		},
 		"forbidden": []string{
@@ -1211,7 +1211,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 		"ready_to_execute":       readiness.ReadyToExecute,
 		"ready_to_send_human":    readiness.ReadyToSend,
 		"human_surface":          humanSurface,
-		"first_tool":             "rdev.support_session.connect",
+		"first_tool":             "rdev.sessions.connect",
 		"first_cli":              []string{rdevCommand, "support-session", "connect"},
 		"recovery_if_rdev_missing": []string{
 			"do not stop at rdev not found",
@@ -1325,7 +1325,7 @@ func freshAgentFailurePrevention() map[string]any {
 			"sending a multi-step sequence (prepare, then create cloudflared, then connect separately) instead of a single rdev support-session connect --start command adds unnecessary round-trips and failure surfaces",
 		},
 		"required_standard_path": []string{
-			"start ordinary connect-this-computer requests with rdev.support_session.connect or rdev support-session connect",
+			"start ordinary connect-this-computer requests with rdev.sessions.connect or rdev support-session connect",
 			"when ready_to_send_to_human=false, run cli_start_now_command exactly in a visible foreground terminal",
 			"send handoff_text_file.path when present; otherwise send only target_handoff_envelope.full_text to the human",
 			"watch foreground_feedback, status_file.path, connected_report_file.path, connection_supervision, or rdev.support_session.status wait=true",

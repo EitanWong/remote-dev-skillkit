@@ -64,9 +64,9 @@ func TestSessionToolsExposeGatewayURLAndAgentFields(t *testing.T) {
 }
 
 func TestSupportSessionConnectSchemaAcceptsRegionalTunnelPolicy(t *testing.T) {
-	tool := findTool("rdev.support_session.connect")
+	tool := findTool("rdev.sessions.connect")
 	if tool == nil {
-		t.Fatal("missing rdev.support_session.connect from live MCP contract")
+		t.Fatal("missing rdev.sessions.connect from live MCP contract")
 	}
 	properties, _ := tool.InputSchema["properties"].(map[string]any)
 	region, _ := properties["region"].(map[string]any)

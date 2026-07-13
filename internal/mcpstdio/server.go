@@ -378,8 +378,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.sessionClose(params.Arguments)
 	case "rdev.invites.create":
 		data, err = s.createInvite(params.Arguments)
-	case "rdev.support_session.connect":
-		data, err = s.supportSessionConnect(params.Arguments)
+	case "rdev.sessions.connect":
+		data, err = s.sessionsConnect(params.Arguments)
 	case "rdev.support_session.handoff":
 		data, err = s.supportSessionHandoff(params.Arguments)
 	case "rdev.support_session.prepare":
@@ -700,7 +700,7 @@ func (s Server) supportSessionPrepare(args map[string]any) (any, error) {
 	})
 }
 
-func (s Server) supportSessionConnect(args map[string]any) (any, error) {
+func (s Server) sessionsConnect(args map[string]any) (any, error) {
 	ttl := intArg(args, "ttl_seconds", 7200)
 	if ttl < 60 || ttl > 86400 {
 		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")

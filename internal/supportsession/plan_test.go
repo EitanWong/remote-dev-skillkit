@@ -471,7 +471,7 @@ func TestBuildConnectFromHandoffRoutesMissingGatewayToStart(t *testing.T) {
 	contract := connect["fresh_agent_connect_contract"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
 		contract["ready_to_send_human"] != false ||
-		contract["first_tool"] != "rdev.support_session.connect" ||
+		contract["first_tool"] != "rdev.sessions.connect" ||
 		!strings.Contains(strings.Join(contract["recovery_if_rdev_missing"].([]string), "\n"), "go install ./cmd/rdev") ||
 		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "PowerShell bootstrap code") {
 		t.Fatalf("expected fresh-Agent connect contract, got %#v", contract)
@@ -783,7 +783,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	contract := created["fresh_agent_connect_contract"].(map[string]any)
 	if contract["schema_version"] != FreshAgentConnectContractSchemaVersion ||
 		contract["ready_to_send_human"] != false ||
-		contract["first_tool"] != "rdev.support_session.connect" ||
+		contract["first_tool"] != "rdev.sessions.connect" ||
 		!strings.Contains(strings.Join(contract["do_not_ask_human_for"].([]string), "\n"), "gateway URL") ||
 		!strings.Contains(strings.Join(contract["agent_must_not_generate"].([]string), "\n"), "relay, mesh, VPN, SSH, or polling scripts") {
 		t.Fatalf("expected created fresh-Agent connect contract, got %#v", contract)
@@ -897,7 +897,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		runbook["phase"] != "created" ||
 		watchRunbook["mcp_tool"] != "rdev.support_session.status" ||
-		standardEntry["mcp_tool"] != "rdev.support_session.connect" ||
+		standardEntry["mcp_tool"] != "rdev.sessions.connect" ||
 		!strings.Contains(strings.Join(runbook["sequence"].([]string), "\n"), "connected_next_steps.user_report") ||
 		!strings.Contains(strings.Join(runbook["forbidden"].([]string), "\n"), "Agent-authored PowerShell") ||
 		!strings.Contains(strings.Join(lowLevelEntry["do_not_start_with"].([]string), "\n"), "rdev.connection_entry.plan") {

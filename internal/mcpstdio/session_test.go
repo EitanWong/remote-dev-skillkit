@@ -32,6 +32,7 @@ func TestSessionsToolsListExposesOnlySessionControlPlane(t *testing.T) {
 	}
 	for _, name := range []string{
 		"rdev.sessions.create",
+		"rdev.sessions.connect",
 		"rdev.sessions.status",
 		"rdev.sessions.events",
 		"rdev.sessions.task",
@@ -42,6 +43,9 @@ func TestSessionsToolsListExposesOnlySessionControlPlane(t *testing.T) {
 		if !seen[name] {
 			t.Fatalf("missing session tool %s from tools/list: %#v", name, seen)
 		}
+	}
+	if seen["rdev.support_session.connect"] {
+		t.Fatal("old support-session connect tool must be absent from tools/list")
 	}
 	for _, old := range []string{"rdev.tickets.create", "rdev.tickets.revoke", "rdev.hosts.list", "rdev.jobs.create", "rdev.jobs.authorize", "rdev.artifacts.list"} {
 		if seen[old] {
@@ -159,7 +163,7 @@ func TestRemoteSessionsMCPEventsAndArtifacts(t *testing.T) {
 }
 
 func TestSessionsMCPRejectsOldHostJobArtifactTools(t *testing.T) {
-	for _, tool := range []string{"rdev.tickets.create", "rdev.tickets.revoke", "rdev.hosts.list", "rdev.jobs.authorize", "rdev.artifacts.list"} {
+	for _, tool := range []string{"rdev.tickets.create", "rdev.tickets.revoke", "rdev.hosts.list", "rdev.jobs.authorize", "rdev.artifacts.list", "rdev.support_session.connect"} {
 		server := NewServer(gateway.NewMemoryGateway())
 		input := mcpRequestLine(t, tool, map[string]any{
 			"host_id":          "hst_old",

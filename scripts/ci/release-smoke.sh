@@ -986,7 +986,7 @@ expected_skillkit_tool_names = [
     "rdev.sessions.interrupt",
     "rdev.sessions.artifacts",
     "rdev.sessions.close",
-    "rdev.support_session.connect",
+    "rdev.sessions.connect",
 ]
 assert skillkit_tool_names == expected_skillkit_tool_names, skillkit_tool_names
 assert skillkit_install_plan_output["adaptive_configuration_schema"] == "rdev.adaptive-configuration-contract.v1", skillkit_install_plan_output

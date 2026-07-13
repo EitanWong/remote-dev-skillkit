@@ -77,7 +77,7 @@ Ask your agent:
 Use Remote Dev Skillkit to connect this computer for a visible support session.
 ```
 
-The agent should use `rdev.support_session.connect` or:
+The agent should use `rdev.sessions.connect` or:
 
 ```bash
 rdev support-session connect --start
