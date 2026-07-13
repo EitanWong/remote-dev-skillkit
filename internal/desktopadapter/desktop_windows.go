@@ -24,6 +24,8 @@ var (
 	procGetWindowTextLength = user32.NewProc("GetWindowTextLengthW")
 	procGetWindowText       = user32.NewProc("GetWindowTextW")
 	procGetWindowThreadPID  = user32.NewProc("GetWindowThreadProcessId")
+	procShowWindow          = user32.NewProc("ShowWindow")
+	procBringWindowToTop    = user32.NewProc("BringWindowToTop")
 	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
 	procSetWindowPos        = user32.NewProc("SetWindowPos")
 	procPostMessage         = user32.NewProc("PostMessageW")
@@ -129,9 +131,8 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 		if err != nil {
 			return ResultArtifact{Status: "failed", DesktopSessionState: "desktop_session_unavailable"}, err
 		}
-		ret, _, callErr := procSetForegroundWindow.Call(hwnd)
-		if ret == 0 {
-			return ResultArtifact{Status: "failed", WindowID: formatHWND(hwnd)}, fmt.Errorf("SetForegroundWindow: %w", callErr)
+		if err := focusWindow(hwnd); err != nil {
+			return ResultArtifact{Status: "failed", WindowID: formatHWND(hwnd)}, err
 		}
 		return ResultArtifact{Status: "succeeded", WindowID: formatHWND(hwnd)}, nil
 	case "window.move":
@@ -153,7 +154,7 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 		return ResultArtifact{Status: "succeeded", WindowID: formatHWND(hwnd)}, nil
 	case "screen.screenshot":
 		captureBudget := pngBudget(spec.MaxOutputBytes, 1)
-		if strings.TrimSpace(spec.OutputPath) != "" {
+		if strings.TrimSpace(spec.OutputPath) != "" && spec.MaxOutputBytes <= 0 {
 			captureBudget = 16 * 1024 * 1024
 		}
 		pngBytes, err := captureScreenPNG(captureBudget)
@@ -274,6 +275,29 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 	}
 }
 
+func focusWindow(hwnd uintptr) error {
+	// Restore a minimized target before asking Windows to grant foreground focus.
+	// The bounded retry accommodates the normal handoff delay without bypassing
+	// Windows' foreground-window security policy.
+	procShowWindow.Call(hwnd, swShownormal)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		procBringWindowToTop.Call(hwnd)
+		ret, _, callErr := procSetForegroundWindow.Call(hwnd)
+		if ret != 0 {
+			return nil
+		}
+		lastErr = callErr
+		if attempt < 2 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("SetForegroundWindow refused after 3 attempts; Windows foreground policy requires interactive operator focus: %w", lastErr)
+	}
+	return fmt.Errorf("SetForegroundWindow refused after 3 attempts; Windows foreground policy requires interactive operator focus")
+}
+
 func enumWindows() ([]Window, error) {
 	var windows []Window
 	cb := syscall.NewCallback(func(hwnd uintptr, lparam uintptr) uintptr {
@@ -316,9 +340,9 @@ func resolveWindow(spec Spec) (uintptr, error) {
 	if spec.WindowID != "" {
 		return parseHWND(spec.WindowID)
 	}
-	title := strings.ToLower(strings.TrimSpace(spec.Title))
+	title := normalizeWindowQuery(spec.Title)
 	if title == "" && strings.TrimSpace(spec.App) != "" {
-		title = strings.ToLower(strings.TrimSpace(spec.App))
+		title = normalizeWindowQuery(spec.App)
 	}
 	if title == "" {
 		return 0, fmt.Errorf("window_id or title is required")

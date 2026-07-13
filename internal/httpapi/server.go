@@ -25,6 +25,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
+	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
@@ -661,6 +662,9 @@ func (s Server) createTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AutoActivate {
 		metadata["auto_activate"] = "attended-temporary"
+	}
+	if req.Mode == model.HostModeAttendedTemporary {
+		req.Capabilities = policy.MergeTemporaryCapabilities(req.Capabilities)
 	}
 	authority, err := ticketGatewayAuthorityFromMetadata(r, metadata)
 	if err != nil {

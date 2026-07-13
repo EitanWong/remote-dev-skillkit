@@ -6,24 +6,49 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
-func TestTemporaryDefaultsExcludeDangerousCapabilities(t *testing.T) {
-	for _, cap := range TemporaryDefaults() {
-		if IsDangerous(cap) {
-			t.Fatalf("temporary default capability %s must not be dangerous", cap)
-		}
-	}
-}
-
-func TestTemporaryDefaultsIncludeFileTransferButExcludeDesktopControl(t *testing.T) {
+func TestTemporaryDefaultsIncludeFileTransferAndControlledDesktopCapabilities(t *testing.T) {
 	defaults := TemporaryDefaults()
-	for _, cap := range []Capability{CapabilityFileTransferRead, CapabilityFileTransferWrite} {
+	for _, cap := range []Capability{
+		CapabilityFileTransferRead,
+		CapabilityFileTransferWrite,
+		CapabilityGUIView,
+		CapabilityGUIControlAuthorization,
+		CapabilityAppLaunch,
+		CapabilityAppClose,
+		CapabilityURLOpen,
+		CapabilityScreenScreenshot,
+		CapabilityScreenRecord,
+		CapabilityWindowInspect,
+		CapabilityWindowFocus,
+		CapabilityWindowMove,
+		CapabilityInputKeyboard,
+		CapabilityInputMouse,
+	} {
 		if !containsCapability(defaults, cap) {
 			t.Fatalf("temporary defaults should include %s", cap)
 		}
 	}
-	for _, cap := range []Capability{CapabilityScreenRecord, CapabilityInputKeyboard, CapabilityInputMouse, CapabilityUnattendedAccess} {
+	for _, cap := range []Capability{CapabilityClipboardRead, CapabilityClipboardWrite, CapabilityUnattendedAccess} {
 		if containsCapability(defaults, cap) {
-			t.Fatalf("temporary defaults must not include %s", cap)
+			t.Fatalf("temporary defaults must keep %s explicit", cap)
+		}
+	}
+}
+
+func TestMergeTemporaryCapabilitiesPreservesExplicitAndAddsMissingDefaults(t *testing.T) {
+	got := MergeTemporaryCapabilities([]string{"shell.user", "window.inspect", "shell.user"})
+	if got[0] != "shell.user" || got[1] != "window.inspect" || len(got) <= 2 {
+		t.Fatalf("unexpected merged capabilities: %#v", got)
+	}
+	for _, capability := range []string{"screen.screenshot", "input.mouse", "app.launch"} {
+		count := 0
+		for _, value := range got {
+			if value == capability {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("capability %q count = %d in %#v", capability, count, got)
 		}
 	}
 }

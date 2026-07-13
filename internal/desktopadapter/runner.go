@@ -61,6 +61,7 @@ type ResultArtifact struct {
 	Action              string   `json:"action"`
 	Status              string   `json:"status"`
 	Detail              string   `json:"detail,omitempty"`
+	Error               string   `json:"error,omitempty"`
 	Windows             []Window `json:"windows,omitempty"`
 	PNGBase64           string   `json:"png_base64,omitempty"`
 	Frames              []Frame  `json:"frames,omitempty"`
@@ -125,6 +126,9 @@ func ExecuteContext(ctx context.Context, spec Spec) (ResultArtifact, error) {
 	if result.Status == "" {
 		result.Status = "succeeded"
 	}
+	if err != nil && result.Error == "" {
+		result.Error = err.Error()
+	}
 	return finish(result, started), err
 }
 
@@ -159,6 +163,11 @@ func NormalizeAction(action string) string {
 	default:
 		return action
 	}
+}
+
+func normalizeWindowQuery(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.TrimSuffix(value, ".exe")
 }
 
 func finish(artifact ResultArtifact, started time.Time) ResultArtifact {

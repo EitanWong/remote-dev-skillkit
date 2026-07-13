@@ -900,7 +900,7 @@ func (s *MemoryStore) routeTaskLocked(session Session, spec TaskSpec) (Endpoint,
 					return Endpoint{}, s.err(ErrEndpointNotFound, "target endpoint is not online", true)
 				}
 				if !endpointHasCapabilities(endpoint, spec.Capabilities) {
-					return Endpoint{}, s.err(ErrCapabilityUnavailable, "endpoint lacks required capabilities", true)
+					return Endpoint{}, s.capabilityUnavailableError(endpoint.Capabilities, spec.Capabilities)
 				}
 				return endpoint, nil
 			}
@@ -923,7 +923,18 @@ func (s *MemoryStore) routeTaskLocked(session Session, spec TaskSpec) (Endpoint,
 			return endpoint, nil
 		}
 	}
-	return Endpoint{}, s.err(ErrCapabilityUnavailable, "no online endpoint matches task capabilities", true)
+	return Endpoint{}, s.capabilityUnavailableError(nil, spec.Capabilities)
+}
+
+func (s *MemoryStore) capabilityUnavailableError(available, requested []string) ProtocolError {
+	err := s.err(ErrCapabilityUnavailable, "no online endpoint matches task capabilities", true)
+	err.Details = map[string]any{
+		"missing_capabilities":   missingCapabilities(available, requested),
+		"requested_capabilities": append([]string(nil), requested...),
+		"available_capabilities": append([]string(nil), available...),
+	}
+	err.AgentNextAction = "request the missing capabilities and create a fresh support-session entry before retrying"
+	return err
 }
 
 func (s *MemoryStore) findTaskLocked(sessionID, taskID string) (Task, int, Session, error) {
@@ -1051,6 +1062,27 @@ func endpointHasCapabilities(endpoint Endpoint, required []string) bool {
 		}
 	}
 	return true
+}
+
+func missingCapabilities(available, requested []string) []string {
+	have := map[string]bool{}
+	for _, capability := range available {
+		capability = strings.TrimSpace(capability)
+		if capability != "" {
+			have[capability] = true
+		}
+	}
+	missing := make([]string, 0, len(requested))
+	seen := map[string]bool{}
+	for _, capability := range requested {
+		capability = strings.TrimSpace(capability)
+		if capability == "" || seen[capability] || have[capability] {
+			continue
+		}
+		seen[capability] = true
+		missing = append(missing, capability)
+	}
+	return missing
 }
 
 func constrainedEndpointCapabilities(session Session, role EndpointRole, advertised, existing []string) []string {

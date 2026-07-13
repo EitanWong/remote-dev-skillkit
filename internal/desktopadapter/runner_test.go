@@ -29,6 +29,12 @@ func TestNormalizeActionAliases(t *testing.T) {
 	}
 }
 
+func TestNormalizeWindowQueryStripsExecutableSuffix(t *testing.T) {
+	if got := normalizeWindowQuery("  Notepad.exe  "); got != "notepad" {
+		t.Fatalf("normalizeWindowQuery() = %q, want notepad", got)
+	}
+}
+
 func TestExecuteFailClosedWhenNativeDesktopUnavailable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows backend has native desktop integration tests outside this package")
@@ -42,6 +48,9 @@ func TestExecuteFailClosedWhenNativeDesktopUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "desktop_session_unavailable") {
 		t.Fatalf("expected unavailable error, got %v", err)
+	}
+	if !strings.Contains(result.ArtifactContent(), "native desktop backend is not available") {
+		t.Fatalf("desktop error detail was not preserved in artifact: %s", result.ArtifactContent())
 	}
 }
 

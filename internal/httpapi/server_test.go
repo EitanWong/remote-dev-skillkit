@@ -41,12 +41,27 @@ func TestCreateTicketAndAudit(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var payload map[string]any
+	var payload struct {
+		Ticket  model.Ticket `json:"ticket"`
+		JoinURL string       `json:"joinUrl"`
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := payload["joinUrl"].(string); !ok {
+	if payload.JoinURL == "" {
 		t.Fatalf("expected joinUrl, got %#v", payload)
+	}
+	for _, capability := range []string{"window.inspect", "screen.screenshot", "input.mouse", "app.launch"} {
+		found := false
+		for _, granted := range payload.Ticket.Capabilities {
+			if granted == capability {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("temporary ticket missing default capability %q: %#v", capability, payload.Ticket.Capabilities)
+		}
 	}
 
 	auditReq := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)

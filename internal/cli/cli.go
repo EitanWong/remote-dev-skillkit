@@ -5338,10 +5338,7 @@ func fetchSupportSessionStatus(ctx context.Context, client *http.Client, opts su
 }
 
 func effectiveSupportSessionCapabilities(explicit []string) []string {
-	if len(explicit) > 0 {
-		return append([]string(nil), explicit...)
-	}
-	return cliPolicyCapabilitiesToStrings(policy.TemporaryDefaults())
+	return policy.MergeTemporaryCapabilities(explicit)
 }
 
 func normalizeInvitePayloadOrigins(payload gatewayInviteTicketPayload, gatewayURL string) (gatewayInviteTicketPayload, error) {
@@ -7997,8 +7994,8 @@ func (a App) ticketCreate(mode model.HostMode, ttlSeconds int, reason, capList s
 	}
 
 	capabilities := splitCapabilities(capList)
-	if len(capabilities) == 0 {
-		capabilities = capabilitiesToStrings(policy.TemporaryDefaults())
+	if mode == model.HostModeAttendedTemporary {
+		capabilities = effectiveSupportSessionCapabilities(capabilities)
 	}
 	ticket, err := model.NewTicket(mode, ttlSeconds, capabilities, reason, time.Now())
 	if err != nil {

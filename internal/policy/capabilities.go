@@ -1,6 +1,10 @@
 package policy
 
-import "github.com/EitanWong/remote-dev-skillkit/internal/model"
+import (
+	"strings"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+)
 
 type Capability string
 
@@ -54,7 +58,42 @@ func TemporaryDefaults() []Capability {
 		CapabilityFileTransferWrite,
 		CapabilityProcessInspect,
 		CapabilityElevationRequest,
+		CapabilityGUIView,
+		CapabilityGUIControlAuthorization,
+		CapabilityAppLaunch,
+		CapabilityAppClose,
+		CapabilityURLOpen,
+		CapabilityScreenScreenshot,
+		CapabilityScreenRecord,
+		CapabilityWindowInspect,
+		CapabilityWindowFocus,
+		CapabilityWindowMove,
+		CapabilityInputKeyboard,
+		CapabilityInputMouse,
 	}
+}
+
+// MergeTemporaryCapabilities keeps explicitly requested capabilities and adds
+// any standard temporary-session capabilities that were omitted.
+func MergeTemporaryCapabilities(explicit []string) []string {
+	result := make([]string, 0, len(explicit)+len(TemporaryDefaults()))
+	seen := make(map[string]bool, len(explicit))
+	for _, raw := range explicit {
+		capability := strings.TrimSpace(raw)
+		if capability == "" || seen[capability] {
+			continue
+		}
+		result = append(result, capability)
+		seen[capability] = true
+	}
+	for _, capability := range TemporaryDefaults() {
+		value := string(capability)
+		if !seen[value] {
+			result = append(result, value)
+			seen[value] = true
+		}
+	}
+	return result
 }
 
 func IsDangerous(cap Capability) bool {

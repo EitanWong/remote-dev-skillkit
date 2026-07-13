@@ -39,8 +39,10 @@ func TestCreateFinalProbedSupportTicketReplacesTicketWithSurvivingCandidate(t *t
 	if len(final.Candidates) != 1 || final.Candidates[0].ProviderID != "b-healthy" {
 		t.Fatalf("final candidates = %#v", final.Candidates)
 	}
-	if !slices.Equal(ticket.Capabilities, []string{"shell.user", "window.inspect"}) {
-		t.Fatalf("explicit capabilities were not preserved: %#v", ticket.Capabilities)
+	for _, capability := range []string{"shell.user", "window.inspect", "screen.screenshot", "input.mouse"} {
+		if !slices.Contains(ticket.Capabilities, capability) {
+			t.Fatalf("capability %q was not preserved or added: %#v", capability, ticket.Capabilities)
+		}
 	}
 	if len(probedCodes["b-healthy"]) != 2 || probedCodes["b-healthy"][0] == probedCodes["b-healthy"][1] {
 		t.Fatalf("survivor must pass both replaced and final tickets, codes=%v", probedCodes["b-healthy"])

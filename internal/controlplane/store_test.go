@@ -630,6 +630,17 @@ func TestTaskRoutingUsesDefaultTargetAndCapabilityMatch(t *testing.T) {
 	if !errors.Is(err, ProtocolError{Code: ErrCapabilityUnavailable}) {
 		t.Fatalf("capability miss err = %v, want capability_unavailable", err)
 	}
+	protocolErr, ok := err.(ProtocolError)
+	if !ok {
+		t.Fatalf("capability miss error type = %T, want ProtocolError", err)
+	}
+	missing, ok := protocolErr.Details["missing_capabilities"].([]string)
+	if !ok || len(missing) != 1 || missing[0] != "desktop" {
+		t.Fatalf("missing capability details = %#v", protocolErr.Details)
+	}
+	if !strings.Contains(protocolErr.AgentNextAction, "fresh support-session") {
+		t.Fatalf("capability miss next action = %q", protocolErr.AgentNextAction)
+	}
 }
 
 func TestExplicitTaskTargetMustBeOnlineTargetEndpoint(t *testing.T) {

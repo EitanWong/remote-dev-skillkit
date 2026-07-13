@@ -5026,11 +5026,17 @@ func TestNormalizeInvitePayloadLoopbackOrigins(t *testing.T) {
 
 func TestCreateSupportSessionPayloadUsesExplicitCapabilities(t *testing.T) {
 	explicit := []string{"shell.user", "window.inspect", "screen.screenshot"}
-	if got := effectiveSupportSessionCapabilities(explicit); !slices.Equal(got, explicit) {
-		t.Fatalf("explicit capabilities not preserved: %#v", got)
+	got := effectiveSupportSessionCapabilities(explicit)
+	for _, capability := range explicit {
+		if !slices.Contains(got, capability) {
+			t.Fatalf("explicit capability %q was dropped: %#v", capability, got)
+		}
+	}
+	if len(got) <= len(explicit) {
+		t.Fatalf("explicit capabilities did not receive missing temporary defaults: %#v", got)
 	}
 	defaults := effectiveSupportSessionCapabilities(nil)
-	if !slices.Contains(defaults, "shell.user") || slices.Contains(defaults, "screen.screenshot") {
+	if !slices.Contains(defaults, "shell.user") || !slices.Contains(defaults, "screen.screenshot") || !slices.Contains(defaults, "input.mouse") {
 		t.Fatalf("unexpected temporary defaults: %#v", defaults)
 	}
 }
