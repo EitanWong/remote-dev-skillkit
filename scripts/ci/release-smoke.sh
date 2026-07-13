@@ -978,8 +978,17 @@ assert "available connection modes" in skillkit_manifest["adaptive_configuration
 assert "framework install path" in skillkit_manifest["adaptive_configuration"]["ask_if_unclear"], skillkit_manifest
 assert "https://api.example.com/v1" in skillkit_manifest["adaptive_configuration"]["placeholders"], skillkit_manifest
 skillkit_tool_names = [tool["name"] for tool in skillkit_mcp_tools["tools"]]
-assert skillkit_tool_names[:3] == ["rdev.sessions.create", "rdev.sessions.status", "rdev.sessions.events"], skillkit_tool_names[:5]
-assert all(name.startswith("rdev.sessions.") for name in skillkit_tool_names), skillkit_tool_names
+expected_skillkit_tool_names = [
+    "rdev.sessions.create",
+    "rdev.sessions.status",
+    "rdev.sessions.events",
+    "rdev.sessions.task",
+    "rdev.sessions.interrupt",
+    "rdev.sessions.artifacts",
+    "rdev.sessions.close",
+    "rdev.support_session.connect",
+]
+assert skillkit_tool_names == expected_skillkit_tool_names, skillkit_tool_names
 assert skillkit_install_plan_output["adaptive_configuration_schema"] == "rdev.adaptive-configuration-contract.v1", skillkit_install_plan_output
 assert skillkit_install_plan_verification["schema"] == "rdev.skillkit-install-plan-verification.v1", skillkit_install_plan_verification
 assert skillkit_install_plan_verification["ok"] is True, skillkit_install_plan_verification
