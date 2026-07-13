@@ -248,6 +248,27 @@ func TestRegistrationCapabilitiesAdvertisesWindowsDesktopSupportOnlyWhenManifest
 	}
 }
 
+func TestRegistrationCapabilitiesOmitsDesktopSupportOnNonWindows(t *testing.T) {
+	for _, osName := range []string{"darwin", "linux"} {
+		t.Run(osName, func(t *testing.T) {
+			got := RegistrationCapabilities(hostcap.Inventory{
+				OS: osName,
+				TemporaryCapabilities: []string{
+					"shell.user",
+					"gui.view",
+					"screen.screenshot",
+					"window.inspect",
+				},
+			})
+			for _, capability := range got {
+				if strings.HasPrefix(capability, "gui.") || strings.HasPrefix(capability, "screen.") || strings.HasPrefix(capability, "window.") || strings.HasPrefix(capability, "input.") || strings.HasPrefix(capability, "app.") || strings.HasPrefix(capability, "clipboard.") || capability == "url.open" {
+					t.Fatalf("non-Windows %s advertised unsupported desktop capability %q: %#v", osName, capability, got)
+				}
+			}
+		})
+	}
+}
+
 func TestRunSessionTaskRejectsCapabilityOutsideSignedManifestBeforeAdapter(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "must-not-exist")
 	resultPayload := make(chan map[string]any, 1)

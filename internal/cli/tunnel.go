@@ -61,18 +61,18 @@ func defaultTunnelRuntimeDeps(stderr io.Writer, knownHostsPaths map[string]strin
 	if err != nil {
 		return supportSessionStartDeps{}, err
 	}
-		return supportSessionStartDeps{
-			Registry: registry,
-			Manager: tunnel.Manager{
-				MaxActive:             4,
-				PoolTarget:            4,
-				StartTimeout:          120 * time.Second,
-				ProbeTimeout:          15 * time.Second,
-				LivenessInterval:      15 * time.Second,
-				LivenessFailures:      3,
-				ReplacementBackoff:    2 * time.Second,
-				ReplacementMaxBackoff: time.Minute,
-			},
+	return supportSessionStartDeps{
+		Registry: registry,
+		Manager: tunnel.Manager{
+			MaxActive:             4,
+			PoolTarget:            4,
+			StartTimeout:          120 * time.Second,
+			ProbeTimeout:          15 * time.Second,
+			LivenessInterval:      15 * time.Second,
+			LivenessFailures:      3,
+			ReplacementBackoff:    2 * time.Second,
+			ReplacementMaxBackoff: time.Minute,
+		},
 		BootstrapProbe: func(ctx context.Context, candidate tunnel.Candidate, instance string) error {
 			_, err := tunnel.ProbeBootstrapTemplate(ctx, nil, candidate, instance)
 			return err

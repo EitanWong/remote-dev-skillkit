@@ -6,8 +6,7 @@ operator auth, key custody, fleet renewal, or emergency drills.
 ## Certificate Checks
 
 - Before trusting a managed or temporary host registration that includes an
-  enrollment certificate, verify it with MCP tool
-  `rdev.enrollment.verify_certificate` or CLI
+  enrollment certificate, verify it with the CLI-only command
   `rdev enrollment verify-certificate`.
 - Certificate and revocation verification are read-only and never grant host
   access by themselves.

@@ -53,9 +53,9 @@ rdev acceptance evidence-status \
 
 The status command emits `rdev.acceptance-evidence-status.v1` and exits
 nonzero until every required evidence file exists, is non-empty, and is not a
-scaffold placeholder. Agents should use MCP tool
-`rdev.acceptance.evidence_status` when available so they can report exactly
-which evidence files are still missing or placeholder-backed before attempting
+scaffold placeholder. Agents should run the CLI-only
+`rdev acceptance evidence-status` command so they can report exactly which
+evidence files are still missing or placeholder-backed before attempting
 `rdev acceptance package-*`.
 
 By default the scaffold does not create placeholder evidence files. Use
@@ -91,8 +91,8 @@ success marker: include `failure_mode_tested=true` plus a field such as
 Agents should not pass those as separate file flags unless a reviewed operator
 override is needed.
 
-Agents should prefer MCP tool `rdev.acceptance.scaffold_evidence` when
-available, then collect the listed files instead of writing custom PowerShell,
+Agents should run the CLI-only `rdev acceptance scaffold-evidence` command, then
+collect the listed files instead of writing custom PowerShell,
 shell, relay, gateway, or evidence-layout scripts.
 
 ## Post-Release Download Evidence Scaffolding
@@ -126,9 +126,9 @@ rdev acceptance post-release-evidence-status \
 The status command emits `rdev.post-release-download-evidence-status.v1` and
 exits nonzero until every planned platform transcript, candidate verification,
 bundle verification, and required Skillkit evidence file exists, is non-empty,
-and is not a scaffold placeholder. Agents should prefer MCP tools
-`rdev.acceptance.scaffold_post_release_download` and
-`rdev.acceptance.post_release_evidence_status` when available.
+and is not a scaffold placeholder. Agents should run the CLI-only
+`rdev acceptance scaffold-post-release-download` and
+`rdev acceptance post-release-evidence-status` commands.
 
 The post-release download evidence packager and verifier also reject scaffold
 placeholders under archived platform evidence, Skillkit evidence, and the
@@ -168,7 +168,7 @@ The command emits `rdev.acceptance-release-evidence-index.v1`, writes
 three release-blocking evidence tracks verify. It records package manifest
 hashes and verification summaries instead of copying each package manifest, so
 the index does not re-archive local source paths from package metadata. Agents
-should prefer MCP tool `rdev.acceptance.release_evidence_index` when available.
+should run the CLI-only `rdev acceptance release-evidence-index` command.
 
 ## Fresh-Agent Support-Session Contract Gate
 
@@ -203,7 +203,7 @@ one-message flow:
    connection is established before submitting session tasks;
 9. expose foreground stderr feedback events so an Agent can report
    `event=connected` from the kept-open command;
-10. wait for status with `rdev.support_session.status` as the fallback source of
+10. wait for status with `rdev.sessions.status` as the fallback source of
    truth;
 11. report `connected=true` through `connected_next_steps.user_report`;
 12. fetch a local join page, Windows `bootstrap.ps1`, macOS/Linux

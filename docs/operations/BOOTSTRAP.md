@@ -173,10 +173,10 @@ foreground `rdev support-session connect --start` command that creates the
 gateway, verified helper assets, ready files, status files, auto-authorization
 metadata, and recovery guidance together.
 
-Low-level invite creation is reserved for explicit package materialization,
+Low-level invite creation is CLI-only and reserved for explicit package materialization,
 authorized managed owned-host planning, or a support-session recovery payload
-that names that path. In those cases, use `rdev.invites.create` or
-`rdev invite create`. The resulting `rdev.agent-invite.v1` payload includes
+that names that path. In those cases, use `rdev invite create`. The resulting
+`rdev.agent-invite.v1` payload includes
 `connection_entry`:
 
 - `entry_url`: the page to open on the target machine;
@@ -189,8 +189,8 @@ that names that path. In those cases, use `rdev.invites.create` or
   appears;
 - `revocation_instructions`: how to stop the session and revoke access.
 
-After explicit invite creation, agents must call `rdev.connection_entry.plan`
-through MCP or `rdev connection-entry plan` through the CLI before giving
+After explicit invite creation, agents must run `rdev connection-entry plan`
+through the CLI before giving
 target-side instructions. That materializes the invite into
 `rdev.connection-entry.materialization-plan.v1`, including:
 

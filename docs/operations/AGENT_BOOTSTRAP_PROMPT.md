@@ -135,15 +135,15 @@ Steps:
     shell, tunnel, interrupt, or polling scripts are forbidden. If you are about
     to improvise setup code, stop and follow that contract instead. If local
     `rdev`, gateway state, or target helper assets are unclear, call
-    `rdev.support_session.prepare` through MCP or run
+    the CLI-only `rdev support-session prepare` command or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
     `connection_readiness`, `asset_report`, `missing_inputs`, and
     `standard_recovery` fields instead of writing custom setup code. Use its
     `agent_connection_runbook.standard_entry_tool` as the source of truth for
     ordinary "connect this computer" requests, and obey
     `agent_connection_runbook.low_level_entry_rule`: do not start with
-    `rdev.invites.create`, `rdev invite create`,
-    `rdev.connection_entry.plan`, or `rdev connection-entry plan` unless the
+    `CLI-only: rdev invite create`, `rdev invite create`,
+    `CLI-only: rdev connection-entry plan`, or `rdev connection-entry plan` unless the
     operator explicitly asks for reviewed package materialization, authorized
     managed owned-host planning, or a high-level support-session recovery
     payload names that path.
@@ -160,7 +160,7 @@ Steps:
     `rdev` appends them to `gateway_url_candidates` after direct/LAN candidates
     and before loopback so the target command can fail over without custom
     relay or tunnel code. `rdev.sessions.connect`,
-    `rdev.support_session.handoff`, and `rdev.support_session.create` can use the first configured
+    `CLI-only: rdev support-session handoff`, and `rdev.sessions.create` can use the first configured
     `RDEV_*_GATEWAY_URL` when no explicit `gateway_url` was supplied, so do not
     ask me to choose a gateway URL when the runtime already has one configured.
     Read `connectivity_helper_preflight` as well: it reports configured
@@ -170,17 +170,17 @@ Steps:
     paths, validates tool allow-lists, and flags unsafe argv such as shell
     command strings, encoded commands, elevation, or `ExecutionPolicy Bypass`
     without executing anything. If helper execution is needed, use
-    `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run`
+    `CLI-only: rdev connection-entry plan` plus `rdev connection-entry run --dry-run`
     and the returned runner metadata instead of writing tunnel scripts.
     When a created or connected support-session payload includes
     `connection_entry_runner_recommendation`, use that field for durable,
     long-running, or restrictive-network support: it carries the inline invite
-    JSON, the standard `rdev.connection_entry.plan` call, and the
+    JSON, the standard `CLI-only: rdev connection-entry plan` call, and the
     `rdev connection-entry run --dry-run` template. Do not reconstruct invite,
     ticket, manifest root, gateway, relay, mesh, VPN, SSH, or checksum metadata
     by hand.
     If a lower-level explicit gateway workflow is needed, call
-    `rdev.support_session.create` through MCP, or
+    the MCP `rdev.sessions.create` tool, or
     `rdev support-session create` through the CLI, to create the session and
     obtain the ready target command, join URL, manifest root, real ticket code,
     and status watcher in one payload. The target command already tries ordered
@@ -201,7 +201,7 @@ Steps:
     polling, and Agent-written PowerShell/shell bootstraps. If you are about to
     write one of those workarounds, stop and use the returned
     `cli_start_now_command`, `ready_file.path`, `status_file.path`,
-    `connection_supervision`, or `rdev.support_session.prepare` recovery path
+    `connection_supervision`, or `CLI-only: rdev support-session prepare` recovery path
     instead. Read
     `gateway_candidate_preflight` before asking me network questions or writing
     probes; it classifies LAN/direct, same-machine, operator-provided, and
@@ -262,12 +262,12 @@ Steps:
     `status.connected=true`. When the target connects, it writes
     `connected_report_file.path` (`connected-report.txt` by default), the exact
     plain-text success report to send to the user before creating session tasks. Use
-    `rdev.support_session.plan` or
+    `CLI-only: rdev support-session plan` or
     `rdev support-session plan`
     only for review/debug planning or when the operator asks for the underlying
     gateway argv.
     After giving the target command to the human, call
-    `rdev.support_session.status` with `wait=true` through MCP or
+    the MCP `rdev.sessions.status` tool or
     `rdev support-session status --wait` through CLI. Created session payloads
     include `watch_connection_status_configured_gateway`; use that returned
     command when configured gateway metadata is present, otherwise use
@@ -289,14 +289,14 @@ Steps:
     `--auto-build-rdev-assets` behavior enabled from a valid checkout with Go,
     or configure helper assets with `--rdev-assets-dir` / platform-specific
     asset flags before generating human-facing target commands. For lower-level package materialization
-    or when `rdev.support_session.create` is not sufficient, use
-    `rdev.invites.create` or `rdev invite create` so the Agent receives
+    or when `rdev.sessions.create` is not sufficient, use
+    `CLI-only: rdev invite create` or `rdev invite create` so the Agent receives
     `connection_entry`, `connection_entry.package_catalog`,
     `connection_entry_plan`, manifest root, and transport fallback instructions
     together. Verify the signed join manifest, read its `package_catalog`, and
     use target OS/architecture probes to select the package candidate. Then call
-    `rdev.connection_entry.plan`
-    through MCP or `rdev connection-entry plan` through the CLI to materialize
+    `CLI-only: rdev connection-entry plan`
+    using the CLI-only `rdev connection-entry plan` command to materialize
     the generic Connection Entry Package Plan. Present the target-side human
     with only the selected human surface: `connection_entry.entry_url`, a visible
     script, or a signed package. When package assets are not published or

@@ -26,4 +26,11 @@ func TestDetectReturnsHostInventory(t *testing.T) {
 	if _, ok := inventory.Executables["powershell"]; !ok {
 		t.Fatal("expected powershell executable status")
 	}
+	if runtime.GOOS != "windows" {
+		for _, capability := range inventory.TemporaryCapabilities {
+			if IsDesktopCapability(capability) {
+				t.Fatalf("non-Windows inventory advertised unsupported desktop capability %q", capability)
+			}
+		}
+	}
 }

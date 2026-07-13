@@ -5,6 +5,14 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 
 # Safe Remote Support
 
+## Current MCP Boundary
+
+MCP exposes only `rdev.sessions.*`: `create`, `connect`, `status`, `events`,
+`task`, `interrupt`, `artifacts`, and `close`. Legacy dotted MCP names for
+support sessions, invites, audits, policy, acceptance, adapters, or enrollment
+are retired. Use the documented `rdev ...` CLI command for those workflows;
+never ask an MCP client to call a retired name.
+
 Use this skill whenever a user says "connect to my machine", "remote debug", "help with this computer", or similar.
 
 ---
@@ -16,7 +24,7 @@ Use this skill whenever a user says "connect to my machine", "remote debug", "he
 **The target machine may be on a completely different network. NEVER use a LAN/private-IP address as the primary endpoint.**
 
 Before creating any session:
-1. Check `gateway_candidate_summary.needs_public_tunnel` from `rdev.support_session.prepare` output.
+1. Check `gateway_candidate_summary.needs_public_tunnel` from `CLI-only: rdev support-session prepare` output.
 2. If `needs_public_tunnel=true` OR if no stable configured gateway exists:
    - Run `rdev support-session connect --start`.
    - Let `rdev` manage the public tunnel internally. It prefers configured stable gateways (`RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`, relay/mesh/VPN/SSH URLs), then evaluates Cloudflare Quick Tunnel (priority 10), managed pinned tunn3l v0.5.1 (priority 20), and localhost.run with the reviewed official host key (priority 30). Pinggy (priority 40) or another SSH provider is used only after an explicit operator allowlist and reviewed exact pin.
@@ -132,8 +140,7 @@ plan surfaces. Never install persistence for third-party temporary support.
 The MCP server (`rdev mcp serve`) can maintain its own separate in-memory gateway. It may not see sessions, endpoints, tasks, or artifacts created by `rdev support-session connect --start`.
 
 Pass `"gateway_url": "<active-gateway-url>"` explicitly on every
-gateway-backed `rdev.sessions.*`, `rdev.audit.query`, and support-session
-status/report call:
+gateway-backed `rdev.sessions.*` and the CLI-only `rdev audit query` command:
 
 ```
 rdev.sessions.status(gateway_url="<ACTIVE_GATEWAY_URL>", session_id="ses_...")
@@ -167,7 +174,7 @@ Before calling any MCP tool that requires a running gateway:
 2. Verify that exact gateway: `curl -fsS <ACTIVE_GATEWAY_URL>/healthz`.
 3. If no active gateway URL exists, start the standard foreground flow with
    `rdev support-session connect --start`.
-4. Never call `rdev.support_session.create` or `rdev.sessions.*` when no
+4. Never call `rdev.sessions.create` or `rdev.sessions.*` when no
    gateway URL is available — the call will fail or hit the wrong in-memory
    gateway.
 
@@ -185,7 +192,7 @@ When the session is ready, deliver exactly `target_handoff_envelope.full_text` (
 ### Rule 11 — Status polling has a 3-minute deadline; then diagnose
 
 After sending the handoff:
-1. Poll with `rdev.support_session.status wait=true` or watch `status_file.path`.
+1. Poll with `rdev.sessions.status wait=true` or watch `status_file.path`.
 2. **After 3 minutes without `connected=true`**, stop polling and switch to diagnosis mode:
    - Was a public-tunnel URL sent, or a LAN IP?
    - Is the active gateway still running? (`curl <ACTIVE_GATEWAY_URL>/healthz`)
@@ -316,7 +323,7 @@ Nothing more. No explanation of tickets, no network configuration.
 rdev support-session status --ticket-code <TICKET> --wait --gateway-url <TUNNEL_URL>
 ```
 
-Or use MCP: `rdev.support_session.status` with `wait=true` and `gateway_url: "<TUNNEL_URL>"`.
+Or use MCP: `rdev.sessions.status` with `wait=true` and `gateway_url: "<TUNNEL_URL>"`.
 
 When `connected=true`, immediately tell the user: "Connected to `<hostname>`."
 If the status is `stale`, do **not** create session tasks. Report that the target runner
@@ -368,8 +375,8 @@ low-risk probe switch:
 rdev support-session smoke-test --gateway-url <ACTIVE_GATEWAY_URL> --session-id <SESSION_ID> --target-endpoint-id <ENDPOINT_ID> --ticket-code <TICKET> --remote-control
 ```
 
-For MCP, call `rdev.support_session.smoke_test` with `"remote_control": true`
-and the same explicit `gateway_url`. It adds only file-list and window-inspect
+Use the CLI-only `rdev support-session smoke-test` command with `--remote-control`
+and the same explicit gateway URL. It adds only file-list and window-inspect
 adapter probes, never screenshot, recording, input, clipboard, app launch, URL
 open, or delete actions.
 
@@ -420,7 +427,7 @@ If the target does not appear within 2 minutes:
    new generated handoff.
 5. If stale endpoints or queued tasks accumulated: run `rdev support-session recover`.
 6. **Do not write custom PowerShell/bash polling scripts.**
-7. Use `rdev.support_session.status` or `connection_recovery` returned fields.
+7. Use `rdev.sessions.status` or `connection_recovery` returned fields.
 
 ---
 

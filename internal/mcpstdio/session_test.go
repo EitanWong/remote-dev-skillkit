@@ -129,6 +129,34 @@ func TestSessionsMCPCreateStatusTaskEventsAndClose(t *testing.T) {
 	}
 }
 
+func TestSessionsMCPInterruptAndArtifactAppend(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	created := callSessionTool(t, server, "rdev.sessions.create", map[string]any{"reason": "interrupt test"})
+	sessionID := stringValue(t, mapValue(t, created, "session"), "id")
+
+	interrupt := callSessionTool(t, server, "rdev.sessions.interrupt", map[string]any{
+		"session_id":      sessionID,
+		"reason":          "operator stop",
+		"idempotency_key": "interrupt-1",
+	})
+	if stringValue(t, mapValue(t, interrupt, "event"), "type") != string(controlplane.EventTypeInterrupt) {
+		t.Fatalf("unexpected interrupt event: %#v", interrupt)
+	}
+
+	artifact := callSessionTool(t, server, "rdev.sessions.artifacts", map[string]any{
+		"session_id": sessionID,
+		"id":         "art-1",
+		"kind":       "text",
+		"name":       "result.txt",
+		"size_bytes": float64(4),
+		"sha256":     strings.Repeat("a", 64),
+		"complete":   true,
+	})
+	if stringValue(t, mapValue(t, artifact, "artifact"), "id") != "art-1" {
+		t.Fatalf("unexpected artifact result: %#v", artifact)
+	}
+}
+
 func TestRemoteSessionsMCPEventsAndArtifacts(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "remote MCP", JoinPolicy: "single-target"})

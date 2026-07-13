@@ -29,12 +29,22 @@ func Detect(ctx context.Context) Inventory {
 	if err != nil || name == "" {
 		name = "unknown-host"
 	}
+	capabilities := capabilitiesToStrings(policy.TemporaryDefaults())
+	if !strings.EqualFold(runtime.GOOS, "windows") {
+		filtered := make([]string, 0, len(capabilities))
+		for _, capability := range capabilities {
+			if !IsDesktopCapability(capability) {
+				filtered = append(filtered, capability)
+			}
+		}
+		capabilities = filtered
+	}
 	return Inventory{
 		Name:                  name,
 		OS:                    runtime.GOOS,
 		Arch:                  runtime.GOARCH,
 		AdminLikely:           adminLikely(),
-		TemporaryCapabilities: capabilitiesToStrings(policy.TemporaryDefaults()),
+		TemporaryCapabilities: capabilities,
 		Executables: map[string]ExecutableStatus{
 			"git":        lookup(ctx, "git"),
 			"ssh":        lookup(ctx, "ssh"),
@@ -46,6 +56,20 @@ func Detect(ctx context.Context) Inventory {
 			"winget":     lookup(ctx, "winget"),
 		},
 	}
+}
+
+// IsDesktopCapability reports capabilities implemented only by the native
+// desktop backend. Non-Windows hosts must not advertise these capabilities
+// while the platform backend remains fail-closed.
+func IsDesktopCapability(capability string) bool {
+	capability = strings.TrimSpace(capability)
+	return strings.HasPrefix(capability, "gui.") ||
+		strings.HasPrefix(capability, "screen.") ||
+		strings.HasPrefix(capability, "window.") ||
+		strings.HasPrefix(capability, "input.") ||
+		strings.HasPrefix(capability, "app.") ||
+		strings.HasPrefix(capability, "clipboard.") ||
+		capability == "url.open"
 }
 
 func lookup(ctx context.Context, names ...string) ExecutableStatus {

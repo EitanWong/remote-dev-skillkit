@@ -55,7 +55,7 @@ rdev adapter verify-runtime \
   --require-result-artifact
 ```
 
-MCP clients can call `rdev.adapter.verify_runtime` with `artifact_json` or
+Use the CLI-only `rdev adapter verify-runtime` command with `artifact_json` or
 `artifact_id`. The verifier returns `rdev.adapter-conformance-report.v1`.
 
 Built-in hostrunner adapters can also emit runtime fixtures in real host tasks.
@@ -147,8 +147,8 @@ default result schema as `rdev.<adapter>-result.v1`, refuses to overwrite
 existing files unless `--force` is passed, and immediately verifies the
 generated manifest before returning `ok=true`.
 
-Agent runtimes can call MCP tool `rdev.adapter.verify_lifecycle` with
-`artifact_json` or `artifact_id`.
+Agent runtimes must use the CLI-only `rdev adapter verify-lifecycle` command
+with `artifact_json` or `artifact_id`.
 
 ## Result Artifact Conformance
 
@@ -193,8 +193,8 @@ rdev adapter verify-result \
 The CLI prints `rdev.adapter-conformance-report.v1`. When `ok=false`, it prints
 the structured report before returning a nonzero exit code.
 
-Agent runtimes can call the same verifier through MCP tool
-`rdev.adapter.verify_result`. Pass either `artifact_json` directly or
+Agent runtimes must use the CLI-only `rdev adapter verify-result` command. Pass
+either `artifact_json` directly or
 `artifact_id` for an artifact stored in the current gateway:
 
 ```json
@@ -273,8 +273,8 @@ rdev adapter verify-cancellation \
   --command-fields codex_command
 ```
 
-Agent runtimes can call MCP tool `rdev.adapter.verify_cancellation` with
-`artifact_json` or `artifact_id`. The tool returns
+Agent runtimes must use the CLI-only `rdev adapter verify-cancellation` command
+with `artifact_json` or `artifact_id`. The command returns
 `rdev.adapter-conformance-report.v1` just like the result and lifecycle
 verifiers.
 

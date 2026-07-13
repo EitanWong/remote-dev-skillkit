@@ -500,7 +500,7 @@ rdev policy explain-shell \
   --policy-json '{"workspace_root":".","capabilities":["shell.user"],"argv":["go","env","GOOS"],"allow_commands":["go"],"max_duration_seconds":30,"max_output_bytes":65536}'
 ```
 
-Agents can call the same policy engine through MCP tool `rdev.policy.explain_shell`.
+Agents must use the CLI-only `rdev policy explain-shell` command for this policy check.
 
 `rdev host serve` generates an Ed25519 host identity for the session. When `--identity-store <path>` is set, the identity is persisted to a local `0600` JSON file using schema `rdev.host-identity.v1`; the parent directory is created with `0700` permissions. On macOS, `--identity-store keychain:<service>/<account>` stores the same `rdev.host-identity.v1` payload in the user's Keychain instead of a JSON file. On Windows, `--identity-store dpapi:<service>/<account>` stores the same payload through a CurrentUser DPAPI-protected local envelope. On Linux, `--identity-store libsecret:<service>/<account>` stores the same payload through `secret-tool` and the user's Secret Service when available; `--identity-store keyctl:<service>/<account>` stores the same payload in the user's Linux keyring for headless hosts where Secret Service is unavailable. The session endpoint advertises the identity key id, public key, and fingerprint during join. Routed tasks include the target endpoint identity context, and a host with a local identity rejects work bound to a different fingerprint.
 

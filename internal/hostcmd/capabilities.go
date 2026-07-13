@@ -11,6 +11,15 @@ import (
 // particular session.
 func RegistrationCapabilities(inventory hostcap.Inventory) []string {
 	capabilities := append([]string(nil), inventory.TemporaryCapabilities...)
+	if !strings.EqualFold(inventory.OS, "windows") {
+		filtered := make([]string, 0, len(capabilities))
+		for _, capability := range capabilities {
+			if !hostcap.IsDesktopCapability(capability) {
+				filtered = append(filtered, capability)
+			}
+		}
+		capabilities = filtered
+	}
 	if strings.EqualFold(inventory.OS, "windows") {
 		capabilities = append(capabilities,
 			"window.inspect",

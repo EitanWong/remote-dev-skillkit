@@ -1,496 +1,70 @@
 # MCP Stdio Server
 
-`rdev mcp serve` exposes the current Remote Dev Skillkit tool contract over a newline-delimited JSON-RPC stdio loop.
-
-Implemented methods:
+`rdev mcp serve` exposes the current Remote Dev Skillkit Control Plane v1
+surface over newline-delimited JSON-RPC. The server implements the official MCP
+`2025-11-25` lifecycle and tools methods:
 
 - `initialize`
 - `notifications/initialized`
 - `tools/list`
 - `tools/call`
 
-The server currently uses an in-memory gateway. It is suitable for local integration tests and early agent wiring, not persistent production use.
+## Current Tools
 
-Agent-first session tools include:
+The MCP surface contains only these session-control tools:
 
-- `rdev.support_session.handoff`
+- `rdev.sessions.create`
+- `rdev.sessions.status`
+- `rdev.sessions.events`
+- `rdev.sessions.task`
+- `rdev.sessions.interrupt`
+- `rdev.sessions.artifacts`
+- `rdev.sessions.close`
 - `rdev.sessions.connect`
-- `rdev.support_session.prepare`
-- `rdev.support_session.plan`
-- `rdev.support_session.create`
-- `rdev.support_session.status`
-- `rdev.invites.create`
-- `rdev.connection_entry.plan`
-- `rdev.relay_adapter.package`
-- `rdev.relay_adapter.verify`
 
-Connection Entry is the universal target-side handoff. MCP clients should not
-invent narrower public names such as customer link or connector package plan:
-the same contract covers owned managed hosts, third-party temporary support,
-LAN, hosted, relay, mesh, SSH, and VPN-assisted connectivity.
+`tools/list`, `rdev mcp tools`, and the checked-in
+`mcp/tools.json` are generated from the same Go contract. Clients must use
+`tools/list` rather than guessing additional tool names.
 
-`rdev.relay_adapter.package` and `rdev.relay_adapter.verify` generate and
-verify standard connectivity adapter packages for restrictive-network
-Connection Entries. Supported adapter kinds include Chisel/frpc relay,
-SSH tunnel, headscale/Tailscale-compatible mesh, and WireGuard. Agents should
-use these tools to prepare reviewed `RDEV_RELAY_*`, `RDEV_SSH_*`,
-`RDEV_MESH_*`, or `RDEV_VPN_*` metadata, then dry-run the Connection Entry
-runner. They should not write custom relay, SSH, mesh, VPN, PowerShell, shell,
-tunnel, interrupt polling, or bootstrap scripts. The package contains no real
-endpoint, credential, key, private IP, local path, or secret.
+The session tools return bounded `structuredContent` together with a textual
+`content` item. Session status fields include `user_summary`,
+`agent_next_action`, `recoverable`, `retry_after_ms`, `last_seq`, and
+`snapshot_seq` where applicable. Large logs and binary artifacts stay behind
+artifact references.
 
-`rdev.sessions.connect` returns `rdev.support-session-connect.v1` in
-`structuredContent`. Fresh Agents should call it first when a human says
-"connect a computer" or similar. If `gateway_url` is present, or if
-`RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
-`RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
-`RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is configured, it creates
-the attended-temporary support session. Direct gateways and managed direct
-tunnels are `degraded-single-entry` and return `ready_to_send=false` by default;
-an attended operator must explicitly set `allow_degraded_direct_handoff=true`
-to make the handoff sendable, and the response remains
-`ready_to_activate=false` and `ready_to_execute=false`. The response includes
-`availability_set`, `regional_evidence`, `degraded_single_entry`, and the
-readiness compatibility aliases `ready_to_send_to_human` and
-`ready_to_send_human`. When `provider_policy` references validated evidence,
-`regional_evidence` contains only provider, region, status, timestamps, and
-freshness; issuer, samples, policy paths, and credentials are omitted. The older
-`user_handoff.message` and `user_handoff.copy_paste` fields remain for
-compatibility. If no gateway is present, it returns
-`ready_to_send_to_human=false` with `cli_start_now_command`, the standard foreground
-`rdev support-session connect --start` command to run in a visible terminal. Agents should
-follow the connect payload instead of choosing between handoff/create/start/plan
-themselves or writing bootstrap, relay, interrupt-polling, or recovery scripts.
-The payload includes `fresh_agent_connect_contract`, which is the shortest
-machine-readable standard path for a newly installed Agent: recover missing
-`rdev`, forward `target_handoff_envelope.full_text` when present, wait through the standard status
-surfaces, and do not ask humans for ticket/root/gateway values or generate
-custom PowerShell, shell, tunnel, interrupt, or polling scripts.
+## Retired Tools
 
-The connect schema accepts `region` (`global` or `cn-mainland`),
-`provider_policy`, and `allow_degraded_direct_handoff`. Use `rdev tunnel
-providers --region cn-mainland --json` and `rdev tunnel probe --region
-cn-mainland --provider-policy /protected/path/providers.json --json` for
-read-only inspection. Missing mainland evidence is never treated as verified.
-Probe output redacts protected policy material and does not start persistent
-tunnels or change provider configuration.
-
-`rdev.support_session.handoff` returns `rdev.support-session-handoff.v1` in
-`structuredContent`. It remains available for review/debug routing details and
-older harnesses, but fresh Agents should prefer `rdev.sessions.connect`
-as the normal first step.
-
-`rdev.support_session.create` returns `rdev.support-session-created.v1` in
-`structuredContent`. Agents should prefer it when a reachable gateway is
-already running. If `gateway_url` is omitted, the tool uses the first configured
-`RDEV_*_GATEWAY_URL`; if no explicit or configured gateway exists, use
-`rdev support-session connect --start`. It creates the scoped attended-temporary ticket
-and returns a ready target-machine command, join URL, manifest URL, pinned
-manifest root, ticket code, and status watcher command. The returned command
-strings have the real ticket code already filled in. The target command is the standard fallback
-surface: it can try ordered Connection Entry URLs on the target machine with
-bounded per-candidate timeout/retry behavior before failing. The payload also
-includes `connection_attempt_policy`, so Agents can explain the behavior without
-writing replacement PowerShell, shell, relay, interrupt polling, or bootstrap
-code. It also includes `fresh_agent_connect_contract`; read it before writing
-any setup or recovery code. The ordinary attended bootstrap uses
-`rdev host serve --transport long-poll` for stable HTTPS-only connectivity;
-managed or explicit advanced runners may still use `--transport auto` when WSS
-fallback has been validated for that deployment. It also includes
-`connectivity_helper_preflight`, a read-only contract that reports configured
-SSH, relay, mesh, and VPN helper gateway URLs, start argv JSON, install action
-JSON, allow-listed tools, authorization boundaries, and validation errors such as
-wrong tools, shell command strings, encoded commands, elevation, or
-`ExecutionPolicy Bypass`. Agents should read this field before writing network
-questions or tunnel commands; helper execution belongs to the Connection Entry
-runner and its dry-run/report path. It also includes
-`connection_entry_runner_recommendation`, the standard upgrade path from a
-simple support-session handoff to a self-contained adaptive Connection Entry
-runner. That field carries inline invite JSON plus the
-`rdev.connection_entry.plan` call and `rdev connection-entry run --dry-run`
-template, so Agents do not reconstruct ticket, root, gateway, transport, relay,
-mesh, VPN, or SSH metadata by hand. It also includes
-`connection_supervision`, the Agent-side contract for
-waiting, proactively reporting `connected=true`, and choosing standard
-prepare/runner/Connection Entry upgrade or recovery tools when the first path is
-LAN-only or times out. It also includes `target_handoff_envelope` with
-`full_text`, `copy_paste`, platform fallbacks, and `auto_target_rule`; Agents
-should forward `full_text` to the human verbatim and use `user_handoff` only
-for compatibility. When the target is `auto`, Agents should follow the returned
-`auto_target_rule`: send the multi-platform `full_text` verbatim. It already
-includes Windows PowerShell, macOS/Linux terminal, and browser fallback
-sections; do not extract the join URL into a separate first message. The payload also
-includes `target_bootstrap_requirements`; CLI-created sessions can include
-`target_bootstrap_readiness` after probing gateway `/assets` endpoints. If an
-existing gateway cannot serve the verified helper assets for the selected
-platform, Agents should recover with `rdev support-session connect --start` or
-`rdev support-session prepare --build-assets` instead of asking the target-side
-human to install `rdev` manually.
-
-`rdev.support_session.prepare` returns `rdev.support-session-prepare.v1` in
-`structuredContent`. Fresh Agent sessions should call connect first, then call
-prepare when local `rdev`, gateway state, helper assets, or one-command target
-readiness is unclear. It
-reports the detected OS/arch, Go/Git/`rdev` paths, resolved repo/work dirs,
-gateway URL candidates, Windows/macOS/Linux helper asset URLs and SHA-256
-hashes, `agent_connection_runbook`, `gateway_candidate_preflight`,
-`connectivity_helper_preflight`, `connection_readiness`,
-`missing_inputs`, and standard recovery actions. Agents should read
-`agent_connection_runbook` first, read `gateway_candidate_preflight` before
-asking humans or writing probes, then treat `gateway_url_candidates` as
-diagnostic and signed-runtime metadata for `rdev`-generated handoffs. Agents
-should not turn LAN, loopback, or diagnostic candidates into hand-written
-target-side commands and should not ask humans to assemble gateway URLs.
-Wildcard listen
-addresses such as `0.0.0.0` are never a
-target URL; loopback candidates are same-machine only. If
-`agent_connection_runbook.fresh_agent_failure_prevention` is present, read it
-before writing setup code: it captures real fresh-Agent failure patterns such
-as manual gateway/invite/bootstrap glue, missing helper assets that produce
-`rdev is required`, background gateway workarounds, custom interrupt polling,
-and Agent-written PowerShell/shell setup.
-If
-`RDEV_HOSTED_GATEWAY_URL`, `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`,
-`RDEV_RELAY_GATEWAY_URL`, `RDEV_MESH_GATEWAY_URL`,
-`RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is configured,
-support-session tools append those hosted/cloudflared/relay/mesh/VPN/SSH
-candidates after direct/LAN candidates and before loopback, so Agents can hand
-over one target command instead of writing custom tunnel fallback scripts. By
-default it is read-only. `connectivity_helper_preflight` also reports matching
-`RDEV_*_START_ARGV_JSON` and `RDEV_*_INSTALL_ACTION_JSON` metadata without
-executing it. With `build_assets=true`, it builds local helper binaries from the
-checked-out source so target bootstraps can download verified helpers when the
-target machine does not already have `rdev`.
-
-Do not treat `https://*.trycloudflare.com` Quick Tunnel URLs as durable
-configuration. They are fallback URLs for the current foreground session. When
-the Agent runs on a cloud/VPS machine with its own reachable DNS/IP, prefer
-`RDEV_HOSTED_GATEWAY_URL`. When Cloudflare should provide a reusable address,
-configure `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` plus a reviewed named-tunnel
-token, token file, tunnel name, or start argv; `connect --start` can then reuse
-that address and only fall back to Quick Tunnel if needed.
-Custom Cloudflare start argv is not an unrestricted command escape hatch. It
-must be a direct foreground invocation shaped like
-`cloudflared tunnel ... --url <current-local-gateway> run ...`, with exactly
-one tunnel name, token, or token file.
-Service installation, delete/administrative subcommands, shell wrappers,
-unknown options, and URLs for other local services are rejected before
-execution.
-
-When no suitable gateway is running yet, Agents should run
-`rdev support-session connect --start` as a visible foreground CLI process. It starts the
-local gateway, creates the attended-temporary ticket, prints
-`rdev.support-session-started.v1`, mirrors the created session's
-`target_handoff_envelope`, `user_handoff`, `target_command`, `join_url`, `connection_supervision`, and
-watcher at the top level, keeps the full `rdev.support-session-created.v1`
-under `session` for compatibility, includes `asset_report` and
-`connection_readiness`, includes `agent_connection_runbook`, includes
-`gateway_candidate_preflight`, includes the
-same runtime gateway URL candidates, and emits `rdev`-generated target commands that try
-those ordered candidates before failing. The embedded
-`connection_attempt_policy` is the only place Agents should read target-side
-timeout/retry behavior from.
-The embedded `connection_supervision.automatic_downgrade_boundaries` also
-describes post-registration runtime failover across signed join-manifest gateway
-candidates, so Agents should wait/report/recover through standard status tools
-instead of generating relay or polling code.
-The payload also includes `foreground_feedback`: while the foreground command
-is kept open, it emits machine-readable stderr lines prefixed with
-`rdev support session event: `. Agents should report connection success as soon
-as they see `event=connected`; the MCP/CLI status watcher remains the fallback
-source of truth. These stderr records use
-`rdev.support-session-foreground-log-event.v1` and intentionally contain only
-`event`, `status_class`, `connected`, and `action_class`. Ticket codes, gateway
-URLs, host details, paths, and recovery arguments remain only in the protected
-0600 status artifact.
-
-Tunnel-provider stdout and stderr are private process streams. `rdev` drains
-them internally to discover a validated canonical HTTPS origin, but never
-forwards raw provider lines into CLI stderr, status diagnostics, or shareable
-logs. Provider lifecycle logs contain only a provider ID, deterministic
-candidate ID, lifecycle phase/status, and fixed error class. Configured
-cloudflared argv previews are structural allowlists: credential values, URLs,
-IP addresses, tunnel names, and POSIX/Windows paths are replaced by typed
-placeholders.
-
-When foreground startup or a published handoff fails closed, the emitted
-`rdev.support-session-start-diagnostic.v2` object is also a shareable summary.
-It contains only the lifecycle phase, fixed reason/next-action classes, and
-redacted attempts (`provider_id`, deterministic `candidate_id`, status, and
-fixed `error_class`). It never embeds the created/started handoff, ticket,
-candidate URL, probe marker, argv, arbitrary error text, or local path.
-The CLI also writes the same started payload to `ready_file.path`
-(`support-session-ready.json` in the session work directory by default), so
-Agents can read top-level `target_handoff_envelope.full_text` from a stable file when a long-running
-foreground terminal makes stdout hard to parse. It also writes
-`handoff_text_file.path` (`target-handoff.txt` by default), a plain-text file
-containing the exact target-side human handoff. Fresh Agents should read and
-forward this file verbatim when it is present, instead of parsing JSON or
-rebuilding the command from ticket/root/gateway fields. It also writes the latest
-foreground status event to `status_file.path` (`support-session-status.json` by
-default), so Agents can report `event=connected` without inventing a polling
-loop. The ready, handoff, status, and connected-report files are sensitive
-operational artifacts and must not be attached as shareable diagnostics or
-copied into public issue logs. When the target connects, it writes
-`connected_report_file.path`
-(`connected-report.txt` by default), a plain-text success report Agents can send
-to the user before creating session tasks.
-This is a CLI foreground process rather than an MCP tool because MCP calls
-should not hide or orphan a long-running gateway.
-Agents should not manually combine `rdev gateway serve` and `rdev invite create`
-for ordinary support sessions; use `rdev support-session connect --start` so
-ready/status files, scoped auto-authorization, and helper assets are generated as one
-standard flow. If a dev gateway is intentionally started by hand, keep the
-default `--auto-build-rdev-assets` behavior enabled from a valid checkout with
-Go, or configure `--rdev-assets-dir` / platform-specific `--rdev-*` asset flags
-before issuing target-side commands.
-
-`rdev.support_session.plan` returns `rdev.support-session-plan.v1` in
-`structuredContent`. Agents should call it before inventing any gateway,
-PowerShell, relay, nohup, ticket, root, transport, interrupt, or helper install
-steps when they need review/debug access to the underlying gateway argv. The
-plan returns:
-
-- build commands for a local `rdev` plus Windows/macOS/Linux helper binaries;
-- runtime gateway URL candidates derived from the listen address and local
-  private interfaces, with explicit gateway overrides preserved;
-- a gateway start argv with state, signing keys, audit log, and verified helper
-  asset flags;
-- HTTP and CLI invite creation commands with scoped attended-temporary
-  `auto_activate` when enabled;
-- localized target-user instructions for Windows and macOS/Linux;
-- forbidden-action guardrails such as no `ExecutionPolicy Bypass`, hidden
-  install, unverified binary download, or human assembly of ticket/root/gateway
-  values.
-
-The plan is read-only. It does not start the gateway, create a ticket, authorize a
-host, install software, or execute on the target host. Agents execute only the
-returned argv steps they have verified in the current environment.
-
-`rdev.support_session.status` returns `rdev.support-session-status.v1` in
-`structuredContent`. Agents should call it after giving the target user the
-Connection Entry command, and should continue watching until `connected=true` or
-`status=pending-activation`. When `connected=true`, the Agent must proactively
-tell the user that the connection has been established before creating session tasks. The
-tool returns localized `feedback` and `next_action` strings so the Agent does
-not need to invent status wording.
-
-`rdev.invites.create` returns `rdev.agent-invite.v1` in `structuredContent`.
-Fresh Agents should not use it as the first step for ordinary "connect this
-computer" requests; start with `rdev.sessions.connect` instead.
-`invites.create` is for explicit package materialization, authorized managed
-owned-host planning, or recovery flows that name the lower-level path. It
-creates a ticket and returns a manifest URL, `host_command`,
-`transport_plan`, `connection_plan`, `connection_entry`,
-`connection_entry.package_catalog`, `connection_entry_plan`,
-`host_context_plan`, `agent_provisioning_plan`,
-`agent_collaboration_plan`, `localization_plan`,
-`managed_development_plan`, `fallback_commands`, `authority_profile`,
-`connectivity_checks`, `human_next_actions`, and `agent_next_actions`. The
-command still requires consent on the target machine; it does not execute
-remotely by itself. For attended temporary support, the visible bootstrap
-default is HTTPS long-poll. `auto` remains available for managed or explicit
-advanced entries where WSS fallback has been validated for the deployment.
-
-When `auto_activate=true`, `rdev.invites.create` creates ticket metadata that can
-auto-activate the first host only for an attended-temporary Connection Entry.
-This is meant for explicit visible support sessions generated by
-`rdev.support_session.create` or `rdev.support_session.plan`; it is not a global
-authorization bypass and is rejected for managed or break-glass tickets.
-
-`rdev.support_session.status` accepts `wait`, `timeout_seconds`, and
-`interval_millis`. Agents should use the MCP wait mode or the CLI
-`rdev support-session status --wait` instead of writing their own polling loop.
-CLI status can omit `--gateway-url` when `RDEV_HOSTED_GATEWAY_URL`,
-`RDEV_CLOUDFLARED_NAMED_TUNNEL_URL`, `RDEV_RELAY_GATEWAY_URL`,
-`RDEV_MESH_GATEWAY_URL`, `RDEV_VPN_GATEWAY_URL`, or `RDEV_SSH_GATEWAY_URL` is
-configured, so Agents do not need to remember or ask
-for the gateway URL just to watch a known ticket. Created-session payloads
-include `watch_connection_status_configured_gateway.command`; use it when a
-configured gateway exists, otherwise use `watch_connection_status`.
-Created-session payloads also include `connection_continuity_policy` with
-schema `rdev.support-session-continuity-policy.v1`. Agents should read
-`stable_after_lan_change`: when it is `false`, LAN is only an opportunistic
-first path and durable work should prefer a configured hosted, relay, mesh, VPN,
-or SSH gateway before claiming robust connectivity.
-When the returned status has `connected=true`, immediately tell the user the
-connection is established before creating session tasks. Status payloads include
-`connected_next_steps` with schema
-`rdev.support-session-connected-next-steps.v1`; when connected, Agents should
-send `connected_next_steps.user_report`, call the listed
-`rdev.sessions.status` follow-up, then create only the smallest scoped
-`rdev.sessions.task` matching the user's task. Status payloads also include
-`connection_recovery` with schema
-`rdev.support-session-connection-recovery.v1`; when the session is still
-waiting, revoked, pending authorization, or the wait call times out, Agents must
-follow that structured recovery plan and its `standard_tools`/`forbidden`
-fields instead of authoring custom PowerShell, shell, relay, interrupt-polling,
-or bootstrap code.
-
-For every new target host, use `connection_entry.entry_url` or a signed
-connection entry package over manually copying host flags. The join page
-provides visible, inspectable platform bootstrap commands for the target
-machine. Agents should verify the signed join manifest, read its
-`package_catalog`, and select a package candidate from target OS/architecture
-probes. When package assets are not published or release inputs are missing,
-use the catalog's visible script fallback instead of asking a human to assemble
-raw connection values. Agents should treat those commands as consented startup,
-then choose the correct host mode from
-`connection_entry_plan.target_selection_policy`: `managed` for operator-owned
-machines that need durable development access, or `attended-temporary` for
-third-party or one-off repair. If ownership or persistence authorization is unclear,
-ask one short question before managed mode. After the endpoint connects, the
-Agent watches `rdev.sessions.status/events`, uses `rdev.sessions.interrupt`
-only for bounded pause/cancel consent, runs scoped session tasks, exports
-evidence, and revokes or stops the session when finished.
-
-`rdev.connection_entry.plan` turns an invite into
-`rdev.connection-entry.materialization-plan.v1`. MCP clients should call it
-before showing target-side instructions. It returns the selected
-ownership/session-mode decision, human-facing surfaces, Agent-only metadata,
-network strategy, package-catalog candidate choice, missing release inputs, and,
-when enough release material is available, an
-`rdev.connection-entry.package-plan.v1` wrapper around the platform
-package/launcher plan. When the agent supplies `out_dir`, the MCP tool also
-writes `CONNECTION_ENTRY.md`, `connection-entry-plan.json`, and generated
-launcher/package planning files into that empty directory. Target-side humans
-receive only the selected Connection Entry surface. Ticket codes, manifest
-roots, gateway URLs, transport preferences, release roots, and checksums stay in
-Agent/tool metadata.
-
-For owned managed machines, `rdev.connection_entry.plan` can also generate
-reviewed macOS LaunchAgent, Linux systemd user-service, or Windows Service
-package plans when the agent supplies the target-local `managed_binary_path`,
-`release_bundle_path`, release root, and optional service label/name/unit. This
-is still planning only: service start/install/uninstall remains an explicit
-operator-reviewed follow-up step.
-
-The `host_context_plan` is the standard for AI-native context management. It
-sets `storage_location=remote-host-first` and
-`server_context_budget=index-and-on-demand-slices`. Agents should keep project
-structure, environment probes, requirement notes, transcripts, logs, and large
-evidence on the host; the gateway should expose only host ids, workspace
-handles, artifact ids, checksums, sizes, redaction metadata, and freshness
-timestamps until the agent explicitly requests a slice.
-
-The `agent_provisioning_plan` is the standard for adaptive target-host setup.
-MCP clients should detect installed Skillkit skills, MCP tool contracts,
-adapters, shells, package managers, language runtimes, project lockfiles,
-framework paths, proxy settings, permissions, and trust roots before installing
-anything. Policy may allow user-scoped or workspace-scoped installation of
-verified skills, MCP metadata, adapter helpers, and project dependencies. It
-must ask for authorization before elevation, system-wide packages, services,
-credentials, firewall changes, external accounts, paid resources, publish,
-deploy, push, or security-policy mutation.
-
-The `agent_collaboration_plan` is the standard for cooperating with other AI
-tools on the target host. It includes A2A-style discovery through Agent Cards,
-JSON-RPC/HTTP tasks, SSE streaming, MCP stdio peers, and local Agent CLIs. MCP
-clients may delegate bounded subtasks to discovered peers when doing so helps
-the remote repair or development task, but peer work must be wrapped in rdev
-session tasks so host policy, workspace locks, redaction, cancellation, interrupt gates,
-audit, and evidence still apply.
-
-The `localization_plan` is the standard for cross-language behavior. MCP
-clients should detect the target-side language from explicit `lang`
-inputs, `Accept-Language`, `LANG`/`LC_*`/`LANGUAGE`, Windows UI culture, macOS
-AppleLanguages, Linux locale settings, and operator preferences. User-facing
-instructions, authorizations, summaries, and evidence should use the selected BCP 47
-language. Protocol keys, schema versions, capability ids, command names, paths,
-JSON field names, checksums, and code blocks must remain stable and untranslated.
-
-The `managed_development_plan` is the standard for owned long-running
-developer workstations. MCP clients should prefer managed mode for machines
-owned by the operator and expected to do recurring development work. The plan
-points agents toward reviewed LaunchAgent, systemd user service, or Windows
-Service surfaces, `--once=false`, `--transport auto`, release-bundle startup
-gates, enrollment renewal, revocation refresh, trust-bundle rollback checks,
-workspace locks, Git worktrees, reconnect proof, and session evidence.
-
-The `connection_plan` separates native support from agent-managed paths:
-implemented native paths are outbound WSS/mTLS, HTTPS long-poll, HTTPS
-short-poll, and LAN-reachable gateway URLs. Agent-managed paths such as an
-HTTPS relay, mesh/VPN, or SSH tunnel may be used automatically when local
-configuration or credentials are already available. Missing or ambiguous
-configuration should trigger a concise question; external account or credential
-mutation still requires explicit authorization. These paths remain connectivity
-only.
-
-The default `authority_profile` is `max-control`. It allows the authorized remote
-host to act as a field workstation for heuristic discovery and downstream
-control when the task policy grants capabilities such as
-`network.discovery.scoped`, `ssh.tunnel`, `mesh.use`, `relay.use`, and
-`downstream.control.scoped`. MCP clients should treat the profile as the
-machine-readable boundary for autonomous discovery, selected control paths,
-stop conditions, and required evidence.
-
-Useful read-only tools include:
-
-- `rdev.policy.explain`
-- `rdev.policy.explain_shell`
-- `rdev.enrollment.verify_certificate`
-- `rdev.adapter.verify_result`
-- `rdev.adapter.verify_lifecycle`
-- `rdev.adapter.verify_cancellation`
-- `rdev.adapter.verify_runtime`
-
-`rdev.enrollment.verify_certificate` returns
-`rdev.enrollment-certificate-verification.v1` in `structuredContent`. It
-accepts `certificate_json`, plus a required
-`root_public_key` encoded as `key_id:base64url_ed25519_public_key`, optional
-`revocations_json`, and optional RFC3339
-`verify_at`. Invalid certificates, expired windows, wrong roots, stale or
-tampered revocation lists, revoked certificates, and signature mismatches return
-`ok=false` with recommended actions rather than an RPC failure. Missing required
-arguments remain RPC errors.
-
-When a gateway exposes configured dev revocations through
-`GET /v1/enrollment/revocations`, operators or agents should first fetch and
-verify the list with `rdev enrollment fetch-revocations --root-public-key ...`,
-then pass the fetched JSON as `revocations_json`. Fetching a revocation list is
-read-only and does not authorize a host.
-
-`rdev.adapter.verify_result` returns `rdev.adapter-conformance-report.v1` in
-`structuredContent`. It accepts `artifact_json`, plus the expected adapter and
-result schema.
-
-`rdev.adapter.verify_lifecycle` returns the same report schema for
-`rdev.adapter-lifecycle.v1` manifests. It validates the required adapter
-lifecycle phases, safety declarations, cancellation behavior, cleanup behavior,
-and result schema declarations before a new adapter is exposed to agents.
-
-`rdev.adapter.verify_cancellation` returns the same report schema for canceled
-result artifacts. It accepts `artifact_json`, plus the expected adapter and
-result schema. It verifies normal result conformance first, then requires
-command evidence to show `canceled=true`, `timed_out=false`, an `exit_code`, and
-`output_truncated` metadata.
-
-`rdev.adapter.verify_runtime` returns the same report schema for
-`rdev.adapter-runtime-fixture.v1` fixtures generated by the public Adapter SDK
-runtime lifecycle runner. It verifies phase order, evidence, timing, cleanup,
-optional result artifacts, and optional cancellation behavior.
+Older invite, support-session, acceptance, adapter-verification, audit,
+policy, enrollment, update, file, and desktop MCP names are not part of the
+current protocol surface. Calling one returns the MCP protocol error
+`-32602` with an `unknown tool` message. Their operator workflows remain
+available through the corresponding `rdev` CLI and Control Plane session task
+adapters.
 
 ## Example
 
 ```bash
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rdev.invites.create","arguments":{"gateway_url":"https://api.example.com/v1","mode":"attended-temporary","ttl_seconds":600,"reason":"local test","transport":"auto"}}}' \
-  '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"rdev.adapter.verify_result","arguments":{"adapter":"shell","schema":"rdev.shell-result.v1","artifact_json":"{\"schema_version\":\"rdev.shell-result.v1\",\"adapter\":\"shell\",\"workspace_root\":\"/tmp/repo\",\"exit_code\":0,\"timed_out\":false,\"canceled\":false,\"output_truncated\":false,\"started_at\":\"2026-06-30T00:00:00Z\",\"ended_at\":\"2026-06-30T00:00:01Z\",\"duration_millis\":1000,\"redacted\":false,\"redaction_rules\":[\"openai_api_key\"]}"}}}' \
-  '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"rdev.adapter.verify_lifecycle","arguments":{"adapter":"claude-code","artifact_json":"{\"schema_version\":\"rdev.adapter-lifecycle.v1\",\"adapter\":\"claude-code\",\"phases\":{\"detect\":{\"implemented\":true,\"evidence\":[\"version\"]},\"plan\":{\"implemented\":true,\"evidence\":[\"commands\"],\"declares_external_consequences\":true,\"declares_required_authorizations\":true},\"prepare\":{\"implemented\":true,\"evidence\":[\"workspace\"],\"enforces_workspace_boundary\":true,\"uses_workspace_lock\":true},\"run\":{\"implemented\":true,\"evidence\":[\"process\"],\"supports_timeout\":true,\"supports_cancellation\":true},\"collect\":{\"implemented\":true,\"evidence\":[\"result\"],\"emits_result_artifact\":true,\"result_schema\":\"rdev.claude-code-result.v1\"},\"cleanup\":{\"implemented\":true,\"evidence\":[\"cleanup\"],\"idempotent\":true,\"releases_locks\":true}},\"safety\":{\"adapter_authorizes_tasks\":false,\"adapter_authorizes_dangerous_actions\":false,\"adapter_installs_persistence\":false,\"host_validates_before_run\":true,\"redacts_outputs\":true},\"cancellation\":{\"supported\":true,\"evidence_field\":\"canceled\",\"timeout_exclusive\":true,\"cleanup_on_cancel\":true}}"}}}' \
-  '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"rdev.adapter.verify_cancellation","arguments":{"adapter":"shell","schema":"rdev.shell-result.v1","artifact_json":"{\"schema_version\":\"rdev.shell-result.v1\",\"adapter\":\"shell\",\"workspace_root\":\"/tmp/repo\",\"exit_code\":-1,\"timed_out\":false,\"canceled\":true,\"output_truncated\":false,\"started_at\":\"2026-06-30T00:00:00Z\",\"ended_at\":\"2026-06-30T00:00:01Z\",\"duration_millis\":1000,\"redacted\":false,\"redaction_rules\":[\"openai_api_key\"]}"}}}' \
-  | rdev mcp serve
+rdev mcp serve
 ```
 
-Tool calls return:
+```text
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"rdev.sessions.create","arguments":{"reason":"visible temporary remote support"}}}
+```
 
-- `content`: text content for basic MCP clients.
-- `structuredContent`: machine-readable result data.
+The server is a local MCP control surface. Real host networking and task
+execution happen through the gateway and host Control Plane transports; MCP
+clients submit only policy-bound session tasks.
 
-## Current Limitations
+## Gateway Proxying
 
-- In-memory only.
-- Persistent host sessions require a gateway with configured storage.
-- Task envelopes are signed with a development Ed25519 key when no signing key is configured. The stdio server is not itself a gateway storage authority or production key authority — use `--signing-key`, a configured storage provider, or a trust bundle for production deployments.
-- Real host networking is provided by the gateway HTTP/WSS surfaces; this stdio server is the local MCP control surface.
+Set a server-level gateway URL or pass `gateway_url` on a session tool call:
+
+```bash
+rdev mcp serve --gateway-url https://gateway.example.test/v1
+```
+
+The per-call `gateway_url` overrides the server-level value for that request.
+The gateway URL must be selected through the normal trust and connection-entry
+workflow; MCP does not bypass gateway, host, or local OS authorization.

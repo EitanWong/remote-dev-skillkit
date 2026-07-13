@@ -9,6 +9,15 @@ Use this skill when a human wants an AI agent to work on a remote or managed
 host while preserving consent, host-local policy, interrupts, evidence, and
 revocation.
 
+## Current MCP Boundary
+
+The MCP server exposes only the eight `rdev.sessions.*` tools documented in
+`docs/operations/MCP_STDIO.md`: `create`, `connect`, `status`, `events`,
+`task`, `interrupt`, `artifacts`, and `close`. Do not call legacy dotted names
+such as legacy support-session, invite, or connection-entry dotted names
+through MCP. Workflows that are not session tools
+are CLI-only and must use their corresponding `rdev ...` command.
+
 ## Non-Negotiables
 
 - Read before guessing: inspect existing source, contracts, schemas, docs, MCP
@@ -50,12 +59,12 @@ revocation.
   forward verbatim, plus compatibility `user_handoff`. If no gateway is
   running, it returns `ready_to_send_to_human=false` with `cli_start_now_command`, the standard visible foreground
   `rdev support-session connect --start` command. Use
-  `rdev.support_session.handoff` only for review/debug routing details, and use
-  `rdev.support_session.plan` only when the connect/handoff output, operator,
+  `CLI-only: rdev support-session handoff` only for review/debug routing details, and use
+  `CLI-only: rdev support-session plan` only when the connect/handoff output, operator,
   or debug workflow explicitly asks for review-level planning.
 - When a fresh Agent session is asked to connect a machine and local `rdev`,
   gateway state, or target helper assets are unclear, call
-  `rdev.support_session.prepare` or run
+  `CLI-only: rdev support-session prepare` or run
   `rdev support-session prepare --build-assets` from a checkout. Follow its
   `standard_recovery`, `asset_report`, and `connection_readiness` fields
   instead of writing custom PowerShell, interrupt polling, ticket substitution,
@@ -71,14 +80,14 @@ revocation.
   validation failures without executing helpers. Read
   `connection_entry_runner_recommendation` when durable, long-running, or
   restrictive-network connectivity is needed; it carries inline invite JSON and
-  the standard `rdev.connection_entry.plan` plus
+  the standard `CLI-only: rdev connection-entry plan` plus
   `rdev connection-entry run --dry-run` route. Do not reconstruct ticket,
   gateway, manifest root, relay, mesh, VPN, SSH, or checksum metadata by hand.
   `agent_connection_runbook` first; it is the standard order of operations for
   connect, wait, report, operate, and recover. Use its `standard_entry_tool`
   for ordinary "connect this computer" requests and obey
-  `low_level_entry_rule`: do not start with `rdev.invites.create`,
-  `rdev invite create`, `rdev.connection_entry.plan`, or
+  `low_level_entry_rule`: do not start with `CLI-only: rdev invite create`,
+  `rdev invite create`, `CLI-only: rdev connection-entry plan`, or
   `rdev connection-entry plan` unless the operator explicitly requests reviewed
   package materialization, authorized managed owned-host planning, or a returned
   high-level recovery payload names that path. Read
@@ -94,8 +103,8 @@ revocation.
   ordered gateway candidates after direct/LAN paths and before loopback so the
   target one-liner can fail over without Agent-authored tunnel scripts.
   `rdev.sessions.connect`, `rdev support-session connect`,
-  `rdev.support_session.handoff`, `rdev support-session handoff`,
-  `rdev.support_session.create`, and `rdev support-session create` may use the
+  `CLI-only: rdev support-session handoff`, `rdev support-session handoff`,
+  `rdev.sessions.create`, and `rdev support-session create` may use the
   first configured `RDEV_*_GATEWAY_URL` when no explicit gateway URL was
   supplied; do not ask the human to choose a gateway URL when the runtime has
   one configured.
@@ -106,8 +115,8 @@ revocation.
   `RDEV_CLOUDFLARED_NAMED_TUNNEL_URL` plus a reviewed named-tunnel token,
   token file, tunnel name, or start argv.
   Read `remote_control_entry`, `connection_continuity`, `managed_upgrade`, and
-  `disconnect_policy` from `rdev.support_session.report` or
-  `rdev.support_session.smoke_test` before promising durable reconnect. A
+  `disconnect_policy` from `CLI-only: rdev support-session report` or
+  `CLI-only: rdev support-session smoke-test` before promising durable reconnect. A
   `https://*.trycloudflare.com` Quick Tunnel means current-session fallback,
   not a reusable address.
   Treat `remote_control_entry.support_device_id` as the DeviceID-like handle
@@ -121,10 +130,10 @@ revocation.
   polling, and Agent-written PowerShell/shell bootstraps. If you are about to
   write one of those workarounds, stop and use the returned
   `cli_start_now_command`, `ready_file.path`, `status_file.path`,
-  `connection_supervision`, or `rdev.support_session.prepare` recovery path
+  `connection_supervision`, or `CLI-only: rdev support-session prepare` recovery path
   instead.
 - Read `fresh_agent_connect_contract` whenever it is returned by
-  `rdev.sessions.connect`, `rdev.support_session.create`, or a started
+  `rdev.sessions.connect`, `rdev.sessions.create`, or a started
   foreground session. Treat it as the shortest model-independent contract:
   recover missing `rdev`, forward `target_handoff_envelope.full_text` when
   present, fall back to `user_handoff.message` plus `user_handoff.copy_paste`
@@ -145,13 +154,13 @@ revocation.
   human instead of parsing JSON or rebuilding commands. If
   `connected_report_file.path` is present after connection, read that plain text
   and report it to the user before creating session tasks. For lower-level explicit gateway workflows, use
-  `rdev.support_session.create` through MCP or `rdev support-session create`
+  `rdev.sessions.create` through MCP or `rdev support-session create`
   through CLI. It returns the ready target command, join URL, real ticket code,
   manifest root, and status watcher in one payload. If no gateway is running
   yet, run `rdev support-session connect --start` in a visible foreground terminal. It
   starts the gateway, chooses a target-usable gateway URL candidate, and prints
   the same ready session payload before listening. Use
-  `rdev.support_session.plan` or `rdev support-session plan` only for
+  `CLI-only: rdev support-session plan` or `rdev support-session plan` only for
   review/debug planning before creating custom gateway, shell, PowerShell,
   relay, nohup, interrupt, or bootstrap steps.
 - When running `rdev support-session connect --start`, keep the foreground
@@ -180,7 +189,7 @@ revocation.
   fallback before promising durable long-running work.
 - Read returned `connectivity_helper_preflight` before starting SSH, relay,
   mesh, or VPN helpers. If helper metadata is configured and valid, use
-  `rdev.connection_entry.plan` plus `rdev connection-entry run --dry-run` and
+  `CLI-only: rdev connection-entry plan` plus `rdev connection-entry run --dry-run` and
   its runner metadata; do not write custom helper startup scripts.
 - Read returned `connection_entry_runner_recommendation` before promising
   durable connectivity or changing from a simple support-session link to a
@@ -214,7 +223,7 @@ revocation.
   ordinary support sessions. That low-level path can omit verified bootstrap
   helper assets. If a dev gateway must be started by hand, configure
   `--rdev-assets-dir` or platform-specific helper asset flags first.
-- When `rdev.support_session.status` or `rdev support-session status --wait`
+- When `rdev.sessions.status` or `rdev support-session status --wait`
   returns `waiting`, `pending-activation`, `revoked`, or `timed_out=true`, read
   `connection_recovery` and follow its `agent_next_actions`,
   `standard_tools`, and `forbidden` fields. Do not invent target-side recovery
@@ -225,7 +234,7 @@ revocation.
 - When status returns `connected=true`, immediately send
   `connected_next_steps.user_report` to the user, call the listed
   `rdev.sessions.status` follow-up, run the standard
-  `rdev.support_session.smoke_test` / `rdev support-session smoke-test` when it
+  `CLI-only: rdev support-session smoke-test` / `rdev support-session smoke-test` when it
   is available, then create only the smallest scoped session task matching the user's
   task. When validating native remote-control adapters, pass
   `remote_control=true` through MCP or `--remote-control` through CLI; this adds
@@ -272,7 +281,7 @@ revocation.
    `go run ./cmd/rdev bootstrap agent-plan --repo-root .` to get a
    machine-readable install/connect plan.
 3. If the user wants to connect a target machine, call
-   `rdev.support_session.prepare` or run `rdev support-session prepare` to
+   `CLI-only: rdev support-session prepare` or run `rdev support-session prepare` to
    verify one-command support-session readiness. If helper assets are missing
    and a checkout plus Go are available, use `--build-assets`; use the returned
    `gateway_url_candidates` only as diagnostic metadata carried by
@@ -288,7 +297,7 @@ revocation.
 4. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, interrupts, or release decisions.
 5. If no suitable host is active and a reachable gateway already exists, create
-   the session with `rdev.support_session.create` or
+   the session with `rdev.sessions.create` or
    `rdev support-session create`; give the target side only
    `target_handoff_envelope.full_text` when present, falling back to
    `target_command` or `join_url` only for older payloads, then watch the
@@ -302,10 +311,10 @@ revocation.
    started payload from returned `ready_file.path`; if terminal output is
    unavailable while waiting, read returned `status_file.path` and report
    immediately when it shows `event=connected` or `status.connected=true`. Use
-   `rdev.support_session.plan` or
+   `CLI-only: rdev support-session plan` or
    `rdev support-session plan` only for review/debug planning. For lower-level
-   package materialization only, create an invite with `rdev.invites.create` or
-   `rdev invite create`, and materialize it with `rdev.connection_entry.plan`
+   package materialization only, create an invite with `CLI-only: rdev invite create` or
+   `rdev invite create`, and materialize it with `CLI-only: rdev connection-entry plan`
    or `rdev connection-entry plan` before giving target-side instructions.
    Read `connection_entry.package_catalog` and the signed join manifest's
    `package_catalog`, select the target OS/architecture candidate from probes,
@@ -323,7 +332,7 @@ revocation.
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
 6. Watch the host using returned `connection_supervision.mcp_watch_call`, or
-   `rdev.support_session.status` with `wait=true`, or
+   `rdev.sessions.status` with `wait=true`, or
    `rdev support-session status --wait`. When `connected=true`, proactively
    report `connected_next_steps.user_report` to the user, inspect
    `rdev.sessions.status`, run standard smoke-test/report tooling, use
