@@ -313,6 +313,42 @@ func (g *MemoryGateway) PublishTicket(ticketID string) (model.Ticket, error) {
 	return cloneTicket(ticket), nil
 }
 
+// UpdateTicketGatewayCandidates replaces the signed public gateway candidate
+// list for an active or probing ticket after a managed tunnel rotation.
+func (g *MemoryGateway) UpdateTicketGatewayCandidates(ticketID string, candidates []model.JoinManifestGatewayCandidate) (model.Ticket, error) {
+	raw, err := json.Marshal(candidates)
+	if err != nil {
+		return model.Ticket{}, err
+	}
+	validated, present, err := gatewayCandidatesFromTicketMetadata(map[string]string{TicketMetadataGatewayCandidates: string(raw)})
+	if err != nil || !present {
+		return model.Ticket{}, err
+	}
+	canonical, err := json.Marshal(validated)
+	if err != nil {
+		return model.Ticket{}, err
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ticket, ok := g.tickets[strings.TrimSpace(ticketID)]
+	if !ok {
+		return model.Ticket{}, fmt.Errorf("%w: ticket", ErrNotFound)
+	}
+	if ticket.Status != model.TicketStatusActive && ticket.Status != model.TicketStatusProbing {
+		return model.Ticket{}, fmt.Errorf("%w: ticket is not active", ErrInvalidState)
+	}
+	metadata := cloneStringMap(ticket.Metadata)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata[TicketMetadataGatewayCandidates] = string(canonical)
+	ticket.Metadata = metadata
+	g.tickets[ticket.ID] = cloneTicket(ticket)
+	g.appendAuditLocked("operator", "ticket.gateway-candidates.update", ticket.ID, "updated signed public gateway candidates after tunnel rotation")
+	return cloneTicket(ticket), nil
+}
+
 func (g *MemoryGateway) bindTicketSessionLocked(ticket *model.Ticket) error {
 	if strings.TrimSpace(ticket.SessionID) != "" {
 		return g.validateTicketSessionBindingLocked(*ticket)

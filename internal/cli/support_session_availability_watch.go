@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
+	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
@@ -30,6 +31,7 @@ type foregroundSupportSessionOptions struct {
 	GatewayURL          string
 	Runtime             *tunnel.Runtime
 	Published           tunnel.AvailabilitySet
+	Started             map[string]any
 	LivenessProbe       func(context.Context) error
 	LivenessInterval    time.Duration
 	LivenessFailures    int
@@ -93,7 +95,20 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			if sameAvailabilityCandidates(published, live) {
 				continue
 			}
-			if len(live.Candidates) > 0 || opts.Runtime.RecoveryPending() {
+			recoveryPending := opts.Runtime.RecoveryPending()
+			if len(live.Candidates) == 0 && recoveryPending {
+				// Keep the last known provider in published while its replacement
+				// is starting so the next candidate can be admitted into the set.
+				continue
+			}
+			if len(live.Candidates) > 0 {
+				if len(live.Candidates) > 0 && !sameAvailabilityCandidates(published, live) {
+					if updated, err := refreshPublishedSupportSession(opts, live); err != nil {
+						logTunnelAvailabilityLoss(opts.Out, live, "candidate-publication-failed")
+					} else if updated != nil {
+						opts.Started = updated
+					}
+				}
 				published = live
 				logTunnelAvailabilityLoss(opts.Out, live, "tunnel-redundancy-reduced")
 				continue
@@ -315,9 +330,104 @@ func logTunnelAvailabilityLoss(out io.Writer, live tunnel.AvailabilitySet, error
 
 func safeTunnelAvailabilityErrorClass(value string) string {
 	switch value {
-	case "tunnel-redundancy-reduced", "invalidation-failed", "tunnel-availability-lost", "liveness-probe-failed":
+	case "tunnel-redundancy-reduced", "candidate-publication-failed", "invalidation-failed", "tunnel-availability-lost", "liveness-probe-failed":
 		return value
 	default:
 		return "availability-changed"
 	}
+}
+
+func refreshPublishedSupportSession(opts foregroundSupportSessionOptions, live tunnel.AvailabilitySet) (map[string]any, error) {
+	if opts.Gateway == nil || opts.Store == nil || opts.Started == nil || strings.TrimSpace(opts.TicketID) == "" || len(live.Candidates) == 0 {
+		return nil, nil
+	}
+	manifestCandidates := manifestGatewayCandidatesFromRuntime(live.Candidates)
+	if _, err := opts.Gateway.UpdateTicketGatewayCandidates(opts.TicketID, manifestCandidates); err != nil {
+		return nil, err
+	}
+	if _, err := opts.Store.SaveFrom(opts.Gateway); err != nil {
+		return nil, err
+	}
+	started, err := rebuildStartedSupportSession(opts, live, manifestCandidates)
+	if err != nil {
+		return nil, err
+	}
+	if err := publishSupportSessionHandoff(
+		opts.Gateway, opts.Store, opts.TicketID, io.Discard, opts.Out,
+		opts.ReadyFile, opts.HandoffTextFile, opts.JournalPath, started,
+		supportSessionMonitoring{StatusPath: opts.StatusFile, Availability: live},
+	); err != nil {
+		return nil, err
+	}
+	return started, nil
+}
+
+func manifestGatewayCandidatesFromRuntime(candidates []tunnel.Candidate) []model.JoinManifestGatewayCandidate {
+	result := make([]model.JoinManifestGatewayCandidate, 0, len(candidates))
+	for index, candidate := range candidates {
+		url := strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
+		if url == "" {
+			continue
+		}
+		result = append(result, model.JoinManifestGatewayCandidate{
+			URL:         url,
+			Kind:        candidate.ProviderID,
+			Scope:       "public",
+			Recommended: index == 0,
+			Reason:      "healthy replacement tunnel candidate",
+		})
+	}
+	return result
+}
+
+func rebuildStartedSupportSession(opts foregroundSupportSessionOptions, live tunnel.AvailabilitySet, candidates []model.JoinManifestGatewayCandidate) (map[string]any, error) {
+	created, ok := opts.Started["session"].(map[string]any)
+	if !ok {
+		return nil, errors.New("support-session started payload is missing session details")
+	}
+	ticket, ok := opts.Gateway.Ticket(opts.TicketID)
+	if !ok {
+		return nil, errors.New("support-session ticket disappeared during tunnel rotation")
+	}
+	gatewayURL := strings.TrimRight(strings.TrimSpace(live.Candidates[0].URL), "/")
+	target, _ := created["target"].(string)
+	locale, _ := created["locale"].(string)
+	autoActivate, _ := created["auto_activate"].(bool)
+	rootPublicKey, _ := created["manifest_root_public_key"].(string)
+	joinURL := gatewayURL + "/join/" + ticket.Code
+	manifestURL := gatewayURL + "/v1/tickets/" + ticket.Code + "/manifest"
+	rdevCommand := "rdev"
+	if command, ok := created["watch_connection_status"].([]string); ok && len(command) > 0 && strings.TrimSpace(command[0]) != "" {
+		rdevCommand = command[0]
+	}
+	readiness, _ := opts.Started["availability_readiness"].(supportsession.AvailabilityReadiness)
+	created = supportsession.BuildCreated(supportsession.CreatedOptions{
+		GatewayURL: gatewayURL, GatewayURLCandidates: gatewayURLCandidatesFromManifest(candidates),
+		JoinURL: joinURL, ManifestURL: manifestURL, ManifestRootPublicKey: rootPublicKey,
+		Ticket: ticket, Target: target, Locale: locale, RdevCommand: rdevCommand,
+		AutoActivate: autoActivate, TargetBootstrapReadiness: created["target_bootstrap_readiness"],
+		AvailabilityReadiness: readiness,
+	})
+	gatewayInfo, _ := opts.Started["gateway"].(map[string]any)
+	addr, _ := gatewayInfo["addr"].(string)
+	workDir, _ := gatewayInfo["work_dir"].(string)
+	return supportsession.BuildStarted(supportsession.StartedOptions{
+		Addr: addr, GatewayURL: gatewayURL, WorkDir: workDir, ReadyFile: opts.ReadyFile,
+		StatusFile: opts.StatusFile, HandoffTextFile: opts.HandoffTextFile,
+		ConnectedReportFile: opts.ConnectedReportFile, Created: created,
+		AssetReport: opts.Started["asset_report"], ConnectionReadiness: opts.Started["connection_readiness"],
+		ConnectivityStrategy: opts.Started["connectivity_strategy"], GatewayCandidatePreflight: created["gateway_candidate_preflight"],
+		AvailabilityReadiness: readiness,
+	}), nil
+}
+
+func gatewayURLCandidatesFromManifest(candidates []model.JoinManifestGatewayCandidate) []supportsession.GatewayURLCandidate {
+	result := make([]supportsession.GatewayURLCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		result = append(result, supportsession.GatewayURLCandidate{
+			URL: candidate.URL, Kind: candidate.Kind, Scope: candidate.Scope,
+			Recommended: candidate.Recommended, Reason: candidate.Reason,
+		})
+	}
+	return result
 }

@@ -67,6 +67,33 @@ func TestMemoryGatewayJoinManifestUsesTicketMetadataGatewayCandidates(t *testing
 	}
 }
 
+func TestMemoryGatewayUpdatesSignedGatewayCandidatesAfterRotation(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	ticket, err := gw.CreateTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "rotation", map[string]string{
+		TicketMetadataGatewayCandidates: `[{"url":"https://old.example.test","kind":"tunn3l"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = gw.UpdateTicketGatewayCandidates(ticket.ID, []model.JoinManifestGatewayCandidate{
+		{URL: "https://replacement.example.test", Kind: "tunn3l", Scope: "public-tunnel", Recommended: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := gw.JoinManifest(ticket.Code, "https://replacement.example.test", "https://replacement.example.test/join/"+ticket.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.GatewayCandidates) != 1 || manifest.GatewayCandidates[0].URL != "https://replacement.example.test" {
+		t.Fatalf("updated gateway candidates = %#v", manifest.GatewayCandidates)
+	}
+	if err := manifest.Verify(now); err != nil {
+		t.Fatalf("updated manifest did not verify: %v", err)
+	}
+}
+
 func TestMemoryGatewayPreservesEmptyGatewayCandidateMetadataForFailClosedValidation(t *testing.T) {
 	gw := NewMemoryGateway()
 	ticket, err := gw.CreateProbingTicketWithMetadata(model.HostModeAttendedTemporary, 600, nil, "invalid authority", map[string]string{

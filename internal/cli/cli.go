@@ -4855,7 +4855,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 				Out: a.Stderr, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffTextFile,
 				ConnectedReportFile: connectedReportFile, JournalPath: publicationJournalPath,
 				Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
-				Locale: opts.Locale, GatewayURL: gatewayURL, Runtime: availabilityRuntime, Published: availability,
+				Locale: opts.Locale, GatewayURL: gatewayURL, Runtime: availabilityRuntime, Published: availability, Started: started,
 				LivenessProbe: livenessProbe, LivenessInterval: deps.LivenessInterval, LivenessFailures: deps.LivenessFailures,
 				OnInvalidated: func(err error) {
 					select {
