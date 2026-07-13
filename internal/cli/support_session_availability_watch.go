@@ -44,9 +44,12 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 	initialStatus := foregroundSupportStatus(opts)
 	if initialStatus["connected"] == true {
 		writeConnectedSupportSession(opts, initialStatus)
-		return
+		if opts.Runtime == nil && opts.LivenessProbe == nil {
+			return
+		}
+	} else {
+		writeSupportSessionEvent(opts.Out, opts.StatusFile, "waiting", initialStatus)
 	}
-	writeSupportSessionEvent(opts.Out, opts.StatusFile, "waiting", initialStatus)
 	published := opts.Published
 	var runtimeChanges <-chan struct{}
 	if opts.Runtime != nil {
@@ -85,7 +88,6 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			status := foregroundSupportStatus(opts)
 			if status["connected"] == true {
 				writeConnectedSupportSession(opts, status)
-				return
 			}
 			live := intersectAvailabilityWithRuntime(published, opts.Runtime.Snapshot())
 			if sameAvailabilityCandidates(published, live) {
@@ -101,6 +103,9 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			}
 			connected, err := invalidatePublishedSupportSession(opts, live, "tunnel_availability_lost")
 			if connected {
+				if opts.OnInvalidated != nil {
+					opts.OnInvalidated(publicSupportSessionInvalidationError("tunnel availability lost after target connection", err))
+				}
 				writeConnectedSupportSession(opts, foregroundSupportStatus(opts))
 				return
 			}
@@ -117,7 +122,6 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			status := foregroundSupportStatus(opts)
 			if status["connected"] == true {
 				writeConnectedSupportSession(opts, status)
-				return
 			}
 			if err := opts.LivenessProbe(ctx); err == nil {
 				consecutiveLivenessFailures = 0
@@ -130,6 +134,9 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			live := availabilityWithoutCandidates(published, "liveness-probe-failed")
 			connected, err := invalidatePublishedSupportSession(opts, live, "explicit_gateway_liveness_lost")
 			if connected {
+				if opts.OnInvalidated != nil {
+					opts.OnInvalidated(publicSupportSessionInvalidationError("public gateway liveness lost after target connection", err))
+				}
 				writeConnectedSupportSession(opts, foregroundSupportStatus(opts))
 				return
 			}
@@ -142,7 +149,7 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			status := foregroundSupportStatus(opts)
 			if status["connected"] == true {
 				writeConnectedSupportSession(opts, status)
-				return
+				continue
 			}
 			if status["status"] == "pending-activation" && !seenPending {
 				seenPending = true

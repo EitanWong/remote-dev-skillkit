@@ -633,7 +633,7 @@ func classifyError(err error, fallback string) string {
 		return "timeout"
 	case errors.Is(err, context.Canceled):
 		return "canceled"
-	case strings.Contains(lower, "nxdomain") || strings.Contains(lower, "no such host"):
+	case strings.Contains(lower, "nxdomain") || strings.Contains(lower, "no such host") || strings.Contains(lower, "resolved a non-public address"):
 		return "dns-failed"
 	case strings.Contains(lower, "marker"):
 		return "marker-mismatch"

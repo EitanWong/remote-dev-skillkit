@@ -686,6 +686,35 @@ func TestProbeSecureDialRejectsResolvedPrivateAddressesAndTrailingDotLiteral(t *
 	}
 }
 
+func TestProbeSecureDialPrefersUsableIPv4WhenResolverAlsoReturnsPrivateIPv6(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Rdev-Gateway-Instance", "instance")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	evidence, err := probeGatewayHealthWithOptions(context.Background(), Candidate{ProviderID: "provider", URL: "https://public.example.test"}, "instance", probeOptions{
+		Resolver: networkProbeResolver{
+			IPv4: []netip.Addr{netip.MustParseAddr("8.8.8.8")},
+			IPv6: []netip.Addr{netip.MustParseAddr("fd27:712::1")},
+		},
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, target.Host)
+		},
+		TLSConfig: &tls.Config{InsecureSkipVerify: true}, // test-only certificate for routed public hostname
+	})
+	if err != nil {
+		t.Fatalf("usable IPv4 was rejected alongside private IPv6: evidence=%#v err=%v", evidence, err)
+	}
+	if !evidence.DNSOK || !evidence.TCPConnectOK || !evidence.TLSOK || !evidence.HealthOK {
+		t.Fatalf("probe evidence did not record all successful stages: %#v", evidence)
+	}
+}
+
 func TestProbeClientDoesNotTrustCallerTransportOrJar(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		t.Fatal("caller transport must not be used")
@@ -857,6 +886,22 @@ type staticProbeResolver struct{ IPs []netip.Addr }
 
 func (r staticProbeResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
 	return append([]netip.Addr(nil), r.IPs...), nil
+}
+
+type networkProbeResolver struct {
+	IPv4 []netip.Addr
+	IPv6 []netip.Addr
+}
+
+func (r networkProbeResolver) LookupNetIP(_ context.Context, network, _ string) ([]netip.Addr, error) {
+	switch network {
+	case "ip4":
+		return append([]netip.Addr(nil), r.IPv4...), nil
+	case "ip6":
+		return append([]netip.Addr(nil), r.IPv6...), nil
+	default:
+		return append(append([]netip.Addr(nil), r.IPv6...), r.IPv4...), nil
+	}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

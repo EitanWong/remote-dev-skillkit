@@ -237,13 +237,27 @@ func resolvePublicIPs(ctx context.Context, resolver probeResolver, hostname stri
 		}
 		return []netip.Addr{literal}, nil
 	}
-	ips, err := resolver.LookupNetIP(ctx, "ip", hostname)
-	if err != nil {
-		return nil, fmt.Errorf("resolve public candidate: %w", err)
+	ips, err := resolver.LookupNetIP(ctx, "ip4", hostname)
+	if err == nil && len(ips) > 0 {
+		return validateResolvedPublicIPs(ips)
+	}
+	// Some local resolvers synthesize a private IPv6 answer alongside a usable
+	// IPv4 route. Prefer IPv4 for public tunnel candidates; only use IPv6 when
+	// the resolver has no IPv4 answer at all.
+	ips, ipv6Err := resolver.LookupNetIP(ctx, "ip6", hostname)
+	if ipv6Err != nil {
+		if err != nil {
+			return nil, fmt.Errorf("resolve public candidate: %w", err)
+		}
+		return nil, fmt.Errorf("resolve public candidate: %w", ipv6Err)
 	}
 	if len(ips) == 0 {
 		return nil, errors.New("public candidate resolved no addresses")
 	}
+	return validateResolvedPublicIPs(ips)
+}
+
+func validateResolvedPublicIPs(ips []netip.Addr) ([]netip.Addr, error) {
 	validated := make([]netip.Addr, 0, len(ips))
 	for _, ip := range ips {
 		ip = ip.Unmap()

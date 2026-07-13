@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func TestForegroundAvailabilityLossRevokesTicketAndInvalidatesHandoff(t *testing
 	root := t.TempDir()
 	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
 	published := runtime.Snapshot()
-	var output bytes.Buffer
+	var output synchronizedTestBuffer
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -217,36 +218,52 @@ func TestForegroundExplicitGatewayLivenessFailureInvalidatesHandoff(t *testing.T
 	assertAvailabilityInvalidated(t, gw, ticket, readyFile, handoffFile, statusFile)
 }
 
-func TestForegroundConnectedHostStopsExplicitGatewayLivenessProbe(t *testing.T) {
+func TestForegroundConnectedHostContinuesExplicitGatewayLivenessProbe(t *testing.T) {
 	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
 	if _, err := gw.RegisterHost(model.HostRegistration{TicketCode: ticket.Code, Name: "connected-explicit", OS: "windows", Arch: "amd64"}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
 	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
-	probeCalls := 0
+	var probeCalls atomic.Int32
+	callback := make(chan error, 1)
 	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
 		defer close(done)
-		watchForegroundSupportSessionAvailability(context.Background(), foregroundSupportSessionOptions{
+		watchForegroundSupportSessionAvailability(ctx, foregroundSupportSessionOptions{
 			Out: &bytes.Buffer{}, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
 			ConnectedReportFile: filepath.Join(root, "connected.txt"), JournalPath: filepath.Join(root, "journal.json"),
 			Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
 			Published:        tunnel.AvailabilitySet{SchemaVersion: tunnel.AvailabilitySchemaVersion, Region: tunnel.RegionGlobal},
 			LivenessInterval: time.Millisecond,
 			LivenessProbe: func(context.Context) error {
-				probeCalls++
-				return nil
+				probeCalls.Add(1)
+				return errors.New("explicit gateway unavailable")
+			},
+			LivenessFailures: 1,
+			OnInvalidated: func(err error) {
+				callback <- err
+				cancel()
 			},
 		})
 	}()
 	select {
+	case err := <-callback:
+		if err == nil || !strings.Contains(err.Error(), "public gateway liveness lost after target connection") {
+			t.Fatalf("unexpected connected liveness error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("connected explicit host did not run liveness watcher")
+	}
+	if probeCalls.Load() == 0 {
+		t.Fatal("liveness probe did not run after host connected")
+	}
+	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("connected explicit host did not stop liveness watcher")
-	}
-	if probeCalls != 0 {
-		t.Fatalf("liveness probe ran %d times after host connected", probeCalls)
+		t.Fatal("connected liveness watcher did not stop after invalidation")
 	}
 }
 
@@ -298,27 +315,44 @@ func TestForegroundConnectedHostStopsAvailabilityWatcher(t *testing.T) {
 	root := t.TempDir()
 	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
 	published := runtime.Snapshot()
-	var output bytes.Buffer
+	var output synchronizedTestBuffer
 	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
 		defer close(done)
-		watchForegroundSupportSessionAvailability(context.Background(), foregroundSupportSessionOptions{
+		watchForegroundSupportSessionAvailability(ctx, foregroundSupportSessionOptions{
 			Out: &output, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
 			ConnectedReportFile: filepath.Join(root, "connected.txt"), JournalPath: filepath.Join(root, "journal.json"),
 			Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code,
 			Runtime: runtime, Published: published,
 		})
 	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("connected host did not stop availability watcher")
+	connectedReport := filepath.Join(root, "connected.txt")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, err := os.Stat(connectedReport); err == nil && output.Len() > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("connected host watcher did not publish connected report")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if !strings.Contains(output.String(), `"event":"connected"`) || strings.Contains(output.String(), `"event":"waiting"`) {
 		t.Fatalf("already-connected watcher emitted contradictory lifecycle event: %q", output.String())
 	}
+	select {
+	case <-done:
+		t.Fatal("connected host watcher exited before route loss or cancellation")
+	case <-time.After(150 * time.Millisecond):
+	}
 	handles[0].wait <- errors.New("exit after connection")
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("connected host watcher did not react to route loss")
+	}
 	current, _ := gw.TicketForCode(ticket.Code)
 	if current.Status != model.TicketStatusActive {
 		t.Fatalf("route exit after connection revoked ticket: %#v", current)
@@ -618,4 +652,27 @@ func assertAvailabilityInvalidated(t *testing.T, gw *gateway.MemoryGateway, tick
 	if err != nil || !bytes.Contains(status, []byte(`"ready_to_send": false`)) {
 		t.Fatalf("status is not fail-closed: %s err=%v", status, err)
 	}
+}
+
+type synchronizedTestBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *synchronizedTestBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(data)
+}
+
+func (b *synchronizedTestBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Len()
+}
+
+func (b *synchronizedTestBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
