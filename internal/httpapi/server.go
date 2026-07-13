@@ -1406,15 +1406,46 @@ function Send-RdevPreconnect([string]$phase, [string]$message) {
   }
 }
 function Invoke-RdevWebRequestWithRetry([string]$Uri, [string]$OutFile = '', [int]$MaxAttempts = 3, [int]$DelaySeconds = 2) {
-  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-    try {
-      if ([string]::IsNullOrWhiteSpace($OutFile)) {
-        return Invoke-WebRequest -Uri $Uri -UseBasicParsing -ErrorAction Stop -TimeoutSec 30
-      }
-      Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -ErrorAction Stop -TimeoutSec 30
-      return
-    } catch {
-      if ($attempt -ge $MaxAttempts) { throw }
+	if ([string]::IsNullOrWhiteSpace($OutFile)) {
+		for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+			try {
+				return Invoke-WebRequest -Uri $Uri -UseBasicParsing -ErrorAction Stop -TimeoutSec 30
+			} catch {
+				if ($attempt -ge $MaxAttempts) { throw }
+				Write-Host "[rdev] download attempt $attempt failed: $($_.Exception.Message). Retrying..."
+				Start-Sleep -Seconds $DelaySeconds
+			}
+		}
+		return
+	}
+	$partialPath = $OutFile + '.part'
+	for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+		try {
+			$offset = [int64]0
+			if (Test-Path -LiteralPath $partialPath) {
+				$offset = (Get-Item -LiteralPath $partialPath).Length
+			}
+			$request = [System.Net.HttpWebRequest]::Create($Uri)
+			$request.Method = 'GET'
+			$request.Timeout = 30000
+			$request.ReadWriteTimeout = 30000
+			$request.AutomaticDecompression = [System.Net.DecompressionMethods]::None
+			if ($offset -gt 0) { $request.AddRange($offset) }
+			$response = $request.GetResponse()
+			try {
+				$append = $offset -gt 0 -and $response.StatusCode -eq [System.Net.HttpStatusCode]::PartialContent
+				$mode = [System.IO.FileMode]::Create
+				if ($append) { $mode = [System.IO.FileMode]::Append }
+				$inputStream = $response.GetResponseStream()
+				try {
+					$outputStream = [System.IO.File]::Open($partialPath, $mode, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+					try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose() }
+				} finally { $inputStream.Dispose() }
+			} finally { $response.Dispose() }
+			Move-Item -Force -LiteralPath $partialPath -Destination $OutFile
+			return
+		} catch {
+			if ($attempt -ge $MaxAttempts) { throw }
       Write-Host "[rdev] download attempt $attempt failed: $($_.Exception.Message). Retrying..."
       Start-Sleep -Seconds $DelaySeconds
     }
@@ -1473,10 +1504,11 @@ if ($rdevCmd) {
 	    }
 	    Remove-Item -Force $compressedPath -ErrorAction SilentlyContinue
 	    $usedCompressed = $true
-	  } catch {
-	    Remove-Item -Force $compressedPath -ErrorAction SilentlyContinue
-	    Write-Host "Compressed rdev helper unavailable; falling back to uncompressed download."
-	  }
+		  } catch {
+		    Remove-Item -Force $compressedPath -ErrorAction SilentlyContinue
+		    Remove-Item -Force ($compressedPath + '.part') -ErrorAction SilentlyContinue
+		    Write-Host "Compressed rdev helper unavailable; falling back to uncompressed download."
+		  }
 		  if (-not $usedCompressed) {
 		    try {
 		      Invoke-RdevWebRequestWithRetry -Uri ('%s/' + $asset) -OutFile $rdevPath
