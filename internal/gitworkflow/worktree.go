@@ -49,7 +49,24 @@ func DefaultWorktreeRoot(repoRoot string) (string, error) {
 	if err := ensureDirectoryExists(root); err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(root), ".worktrees", filepath.Base(root)), nil
+	evidence, err := (ExecRunner{}).Run(context.Background(), root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	commonDir := strings.TrimSpace(evidence.Stdout)
+	if commonDir == "" {
+		return "", fmt.Errorf("git rev-parse --git-common-dir returned empty output")
+	}
+	commonRoot, err := filepath.Abs(commonDir)
+	if err != nil {
+		return "", err
+	}
+	commonRoot = filepath.Clean(commonRoot)
+	if filepath.Base(commonRoot) != ".git" {
+		return "", fmt.Errorf("git common directory %q must end in .git", commonRoot)
+	}
+	repositoryRoot := filepath.Dir(commonRoot)
+	return filepath.Join(filepath.Dir(repositoryRoot), ".worktrees", filepath.Base(repositoryRoot)), nil
 }
 
 func NewWorktreeManager(repoRoot, root string, git Runner) (WorktreeManager, error) {
@@ -72,6 +89,9 @@ func NewWorktreeManager(repoRoot, root string, git Runner) (WorktreeManager, err
 		}
 		root = filepath.Clean(root)
 	}
+	if err := rejectSymlinkBoundary(root); err != nil {
+		return WorktreeManager{}, err
+	}
 	if isWithinPath(canonicalRoot, root) {
 		return WorktreeManager{}, fmt.Errorf("worktree root %q must be outside repository %q", root, canonicalRoot)
 	}
@@ -90,13 +110,13 @@ func (m WorktreeManager) Create(ctx context.Context, branch, base string) (Workt
 		base = defaultBaseBranch
 	}
 
-	entries, evidence, err := m.list(ctx)
+	allEntries, _, evidence, err := m.listWorktrees(ctx)
 	report.Commands = append(report.Commands, evidence...)
 	if err != nil {
 		report.Errors = append(report.Errors, err.Error())
 		return report, err
 	}
-	for _, entry := range entries {
+	for _, entry := range allEntries {
 		if entry.Branch == branch {
 			err := fmt.Errorf("branch %q is already bound to worktree %q", branch, entry.Path)
 			return m.failReport(report, err.Error()), err
@@ -183,11 +203,17 @@ func (m WorktreeManager) Remove(ctx context.Context, branch string, force bool) 
 		return m.failReport(report, err.Error()), err
 	}
 
-	entries, evidence, err := m.list(ctx)
+	allEntries, entries, evidence, err := m.listWorktrees(ctx)
 	report.Commands = append(report.Commands, evidence...)
 	if err != nil {
 		report.Errors = append(report.Errors, err.Error())
 		return report, err
+	}
+	for _, entry := range allEntries {
+		if entry.Branch == branch && !isWithinPath(m.Root, entry.Path) {
+			err := fmt.Errorf("worktree path %q for branch %q is outside developer root %q", entry.Path, branch, m.Root)
+			return m.failReport(report, err.Error()), err
+		}
 	}
 	for _, entry := range entries {
 		if entry.Branch != branch {
@@ -219,49 +245,80 @@ func (m WorktreeManager) Remove(ctx context.Context, branch string, force bool) 
 }
 
 func (m WorktreeManager) list(ctx context.Context) ([]WorktreeEntry, []CommandEvidence, error) {
+	_, entries, commands, err := m.listWorktrees(ctx)
+	return entries, commands, err
+}
+
+func (m WorktreeManager) listWorktrees(ctx context.Context) ([]WorktreeEntry, []WorktreeEntry, []CommandEvidence, error) {
 	evidence, err := m.Git.Run(ctx, m.RepoRoot, "worktree", "list", "--porcelain")
 	commands := []CommandEvidence{evidence}
 	if err != nil {
-		return nil, commands, err
+		return nil, nil, commands, err
 	}
-	entries, err := parseWorktreePorcelain(evidence.Stdout)
+	allEntries, err := parseWorktreePorcelain(evidence.Stdout)
 	if err != nil {
-		return nil, commands, err
+		return nil, nil, commands, err
 	}
-	for index := range entries {
-		if entries[index].Branch != "" && entries[index].Branch != defaultBaseBranch && !isWithinPath(m.Root, entries[index].Path) {
-			return entries, commands, fmt.Errorf("developer worktree path %q is outside root %q", entries[index].Path, m.Root)
-		}
-		if entries[index].Bare {
-			entries[index].Clean = true
+	if err := rejectDuplicateBranches(allEntries); err != nil {
+		return allEntries, nil, commands, err
+	}
+	var entries []WorktreeEntry
+	for index := range allEntries {
+		if !isManagedEntry(m.Root, allEntries[index]) {
 			continue
 		}
-		statusEvidence, statusErr := m.Git.Run(ctx, entries[index].Path, "status", "--porcelain=v1")
+		entry := allEntries[index]
+		if entry.Bare {
+			entry.Clean = true
+			entries = append(entries, entry)
+			continue
+		}
+		statusEvidence, statusErr := m.Git.Run(ctx, entry.Path, "status", "--porcelain=v1")
 		commands = append(commands, statusEvidence)
 		if statusErr != nil {
-			return entries, commands, statusErr
+			return allEntries, entries, commands, statusErr
 		}
-		entries[index].Clean = strings.TrimSpace(statusEvidence.Stdout) == ""
+		entry.Clean = strings.TrimSpace(statusEvidence.Stdout) == ""
 
-		if entries[index].Detached || entries[index].Branch == "" {
+		if entry.Detached || entry.Branch == "" {
+			entries = append(entries, entry)
 			continue
 		}
-		merged, mergeEvidence, mergeErr := m.isMerged(ctx, entries[index].Branch)
+		merged, mergeEvidence, mergeErr := m.isMerged(ctx, entry.Branch)
 		commands = append(commands, mergeEvidence...)
 		if mergeErr != nil {
-			return entries, commands, mergeErr
+			return allEntries, entries, commands, mergeErr
 		}
-		entries[index].Merged = merged
+		entry.Merged = merged
 
-		ahead, behind, distanceEvidence, distanceErr := m.branchDistance(ctx, entries[index].Branch)
+		ahead, behind, distanceEvidence, distanceErr := m.branchDistance(ctx, entry.Branch)
 		commands = append(commands, distanceEvidence...)
 		if distanceErr != nil {
-			return entries, commands, distanceErr
+			return allEntries, entries, commands, distanceErr
 		}
-		entries[index].Ahead = ahead
-		entries[index].Behind = behind
+		entry.Ahead = ahead
+		entry.Behind = behind
+		entries = append(entries, entry)
 	}
-	return entries, commands, nil
+	return allEntries, entries, commands, nil
+}
+
+func isManagedEntry(root string, entry WorktreeEntry) bool {
+	return entry.Branch == defaultBaseBranch || isWithinPath(root, entry.Path)
+}
+
+func rejectDuplicateBranches(entries []WorktreeEntry) error {
+	paths := make(map[string]string)
+	for _, entry := range entries {
+		if entry.Branch == "" {
+			continue
+		}
+		if previous, ok := paths[entry.Branch]; ok {
+			return fmt.Errorf("branch %q is bound to multiple worktrees: %q and %q", entry.Branch, previous, entry.Path)
+		}
+		paths[entry.Branch] = entry.Path
+	}
+	return nil
 }
 
 func (m WorktreeManager) isMerged(ctx context.Context, branch string) (bool, []CommandEvidence, error) {
@@ -399,6 +456,30 @@ func ensureDirectoryExists(path string) error {
 		return fmt.Errorf("path must be a directory")
 	}
 	return nil
+}
+
+func rejectSymlinkBoundary(path string) error {
+	current, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	for {
+		info, statErr := os.Lstat(current)
+		if statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("worktree root %q crosses symlink %q", path, current)
+			}
+			return nil
+		}
+		if !os.IsNotExist(statErr) {
+			return statErr
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return nil
+		}
+		current = parent
+	}
 }
 
 func isWithinPath(root, path string) bool {
