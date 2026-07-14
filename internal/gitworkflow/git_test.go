@@ -2,6 +2,7 @@ package gitworkflow
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,6 +72,17 @@ func TestExecRunnerRecordsCommandEvidence(t *testing.T) {
 	}
 	if strings.Contains(evidence.Stdout, "RDEV_GIT_LEAK_TEST") || strings.Contains(evidence.Stderr, "RDEV_GIT_LEAK_TEST") {
 		t.Fatalf("evidence leaked environment marker: %#v", evidence)
+	}
+
+	content, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	gotJSON := string(content)
+	for _, key := range []string{`"argv":`, `"dir":`, `"stdout":`, `"stderr":`, `"exit_code":`} {
+		if !strings.Contains(gotJSON, key) {
+			t.Fatalf("serialized evidence missing %s: %s", key, gotJSON)
+		}
 	}
 }
 

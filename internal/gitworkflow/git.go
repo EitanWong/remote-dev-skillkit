@@ -14,8 +14,8 @@ import (
 type CommandEvidence struct {
 	Argv     []string `json:"argv"`
 	Dir      string   `json:"dir"`
-	Stdout   string   `json:"stdout,omitempty"`
-	Stderr   string   `json:"stderr,omitempty"`
+	Stdout   string   `json:"stdout"`
+	Stderr   string   `json:"stderr"`
 	ExitCode int      `json:"exit_code"`
 }
 
