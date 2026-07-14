@@ -157,4 +157,12 @@ head_after="$(git -C "$pr_repo" rev-parse HEAD)"
 current_branch="$(git -C "$pr_repo" branch --show-current)"
 [[ "$current_branch" == 'feat/123-valid-name' ]] || die "expected local metadata branch context, got $current_branch"
 
+pr_issue_repo="$(setup_repo pr-issue-mismatch)"
+assert_failure "$pr_issue_repo" 'pull request body must include Closes #123' \
+  GIT_POLICY_EVENT_NAME=pull_request_target \
+  GIT_POLICY_BRANCH_NAME='feat/123-valid-name' \
+  GIT_POLICY_BASE_REF='main' \
+  GIT_POLICY_PR_TITLE='feat: add trusted git policy workflow' \
+  GIT_POLICY_PR_BODY=$'## Summary\n- validate trusted base checkout\n\nCloses #456'
+
 printf 'git policy wrapper tests passed\n'

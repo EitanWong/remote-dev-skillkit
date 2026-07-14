@@ -68,3 +68,39 @@ Committed with:
 ## Final state
 
 Task 7 changes are implemented in the approved ownership surface, with the known unrelated `./scripts/check.sh` coverage failure documented above.
+
+
+## Task 7 verification/fix follow-up — CLI coverage gate
+
+### Outcome
+- Raised `./internal/cli` coverage above the existing `82.0%` gate with focused Git workflow CLI tests only.
+- Added the requested negative wrapper test for PR issue linkage mismatch on `feat/123-...` with `Closes #456`.
+
+### Coverage
+- Before: `81.7%` for `./internal/cli` (reported by `./scripts/check.sh` before this worker pass)
+- After: `82.1%` for `./internal/cli` (`coverage_check_ok package=./internal/cli coverage=82.1 threshold=82.0`)
+
+### Files changed
+- `internal/cli/gitworkflow_test.go`
+- `scripts/ci/git-policy_test.sh`
+
+### Tests added
+- CLI branch-create success coverage
+- CLI sync success coverage
+- CLI `git pr create --execute` fake-`gh` execution/redaction coverage
+- Direct dispatch/helper coverage for git subcommand routing and helper edge cases
+- Wrapper failure coverage for `feat/123-valid-name` + PR body `Closes #456`
+
+### Verification run
+- `rtk go test ./internal/cli -count=1`
+- `rtk go test ./... -count=1`
+- `rtk go vet ./internal/cli`
+- `rtk bash scripts/ci/git-policy_test.sh`
+- `rtk ./scripts/check.sh`
+- `rtk git diff --check`
+
+### Commit
+- `pending at report-write time; see final HEAD for this worker commit`
+
+### Concerns
+- None beyond the intentionally narrow test-only ownership surface.
