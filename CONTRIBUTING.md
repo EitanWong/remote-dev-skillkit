@@ -29,12 +29,11 @@ opening a pull request.
 - Use `go run ./cmd/rdev git pr plan` before any external mutation, then use
   `go run ./cmd/rdev git pr create --execute` only when the branch is ready.
 - Keep developer worktrees outside the repository tree. A shared root such as
-  `../.worktrees/remote-dev-skillkit` is valid. Lifecycle commands such as
-  `branch create`, `worktree create`, `worktree list`, `worktree doctor`,
-  `worktree clean`, `worktree remove`, and `git sync` must run from the
-  stable/main checkout with `--repo` and `--root` because the manager checkout
-  is excluded and refused. Only policy and PR commands may omit `--repo` when
-  run from inside the external worktree.
+  `../.worktrees/remote-dev-skillkit` is valid. `branch create` and `git sync`
+  use `--repo` only. Worktree lifecycle commands use `--repo` and optional
+  `--root` from the stable/main checkout because the manager checkout is
+  excluded and refused. Only policy and PR commands may omit `--repo` when run
+  from inside the external worktree.
 - Open pull requests against `main` only.
 - Include matching issue text in the PR body, for example `Closes #123`.
 - Prefer Squash merge after review. Do not use merge commits or rebase merges

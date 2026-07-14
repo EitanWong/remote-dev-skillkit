@@ -39,8 +39,8 @@ worktree.
 ```bash
 gh issue create --title "Track worktree governance" --body "..."
 go run ./cmd/rdev git worktree create --repo . --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree doctor --repo . --root ../.worktrees/remote-dev-skillkit
 cd ../.worktrees/remote-dev-skillkit/feat-123-worktree-governance
-go run ./cmd/rdev git worktree doctor
 go run ./cmd/rdev git policy check
 go run ./cmd/rdev git pr plan
 go run ./cmd/rdev git pr create --execute
@@ -61,11 +61,14 @@ create a PR.
 3. For the worktree flow, `cd` into the created external worktree before policy
    or PR commands.
 4. Make changes in the worktree, not in the main checkout.
-5. Run `go run ./cmd/rdev git worktree doctor` and `go run ./cmd/rdev git
-   policy check` before planning the PR.
-6. Run `go run ./cmd/rdev git pr plan` to inspect the generated ready PR
+5. Run `go run ./cmd/rdev git worktree doctor --repo . --root
+   ../.worktrees/remote-dev-skillkit` from the stable/main checkout before
+   planning the PR.
+6. Run `go run ./cmd/rdev git policy check` from inside the external worktree
+   or with `--repo` pointing at that worktree before planning the PR.
+7. Run `go run ./cmd/rdev git pr plan` to inspect the generated ready PR
    title, body, head, and base.
-7. Run `go run ./cmd/rdev git pr create --execute` only when the branch is
+8. Run `go run ./cmd/rdev git pr create --execute` only when the branch is
    clean, reviewed, and ready for the external PR mutation.
 
 ## Multi-worktree use
@@ -85,11 +88,20 @@ go run ./cmd/rdev git worktree list --root ../.worktrees/remote-dev-skillkit
 go run ./cmd/rdev git worktree doctor --root ../.worktrees/remote-dev-skillkit
 ```
 
+`--root` applies only to worktree lifecycle commands. Valid flag shapes:
+
+- `go run ./cmd/rdev git branch create --type <type> --issue <n> --slug <slug> [--base <ref>] [--repo <checkout>]`
+- `go run ./cmd/rdev git worktree create --repo <main-checkout> --branch <branch> [--base <ref>] [--root <developer-root>]`
+- `go run ./cmd/rdev git worktree list --repo <main-checkout> [--root <developer-root>]`
+- `go run ./cmd/rdev git worktree doctor --repo <main-checkout> [--root <developer-root>]`
+- `go run ./cmd/rdev git worktree clean --repo <main-checkout> [--root <developer-root>]`
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --branch <branch> [--root <developer-root>] [--force]`
+- `go run ./cmd/rdev git sync --repo <main-checkout> [--prune]`
+
 If you are already inside the external worktree, omit `--repo` only for policy
-and PR commands. Lifecycle commands such as `branch create`, `worktree create`,
-`worktree list`, `worktree doctor`, `worktree clean`, `worktree remove`, and
-`git sync` must run from the stable/main checkout with `--repo` and `--root`
-because the current manager checkout is excluded and refused.
+and PR commands. The stable/main checkout is still the manager boundary for
+lifecycle commands because the current manager checkout is excluded and
+refused.
 
 ## PR timing
 
@@ -97,7 +109,7 @@ because the current manager checkout is excluded and refused.
   checks are clean.
 - Use `go run ./cmd/rdev git pr plan` as the review point for title, body,
   base, and head before any external mutation.
-- `git pr create` calls `gh pr create` with the exact argv shape
+- `go run ./cmd/rdev git pr create --execute` calls `gh pr create` with the exact argv shape
   `gh pr create --base <base> --head <head> --title <title> --body <body>`.
 - The current implementation creates a normal PR with that exact argv.
 - The CLI has no `--draft` flag. If a Draft PR is desired, mark it manually in
@@ -108,13 +120,13 @@ because the current manager checkout is excluded and refused.
 ## Cleanup and recovery
 
 Run cleanup from the stable/main checkout that owns the manager repository, not
-from the target external worktree. Choose one of these alternatives:
+from the target external worktree.
 
 - `go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <root>`
   removes eligible merged-clean worktrees and their branches.
-- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance`
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch <branch>`
   removes a specific eligible target that was not already cleaned.
-- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance --force`
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch <branch> --force`
   is the dirty merged-worktree example. The current implementation still
   rejects unmerged branches even with `--force`.
 
@@ -124,7 +136,7 @@ Recovery rules:
   `go run ./cmd/rdev git pr create --execute`.
 - `go run ./cmd/rdev git worktree clean` removes eligible merged-clean
   worktrees and their branches from the stable checkout. Use
-  `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance`
+  `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch <branch>`
   only for a specific eligible target that was not already cleaned.
 - For dirty merged worktrees, use the `--force` form shown above. The current
   implementation still rejects unmerged branches even with `--force`.
