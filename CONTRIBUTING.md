@@ -16,6 +16,22 @@ go vet ./...
 Use focused tests while developing, then run the full verification set before
 opening a pull request.
 
+## Branch and Pull Request Workflow
+
+- Create issue-linked branches that match `<type>/<issue>-<slug>`, such as
+  `feat/123-git-policy-workflow` or `fix/456-main-pr-base`.
+- Open pull requests against `main` only.
+- Include matching issue text in the PR body, for example `Closes #123`.
+- Capture branch and worktree evidence in the pull request using:
+
+```bash
+git branch --show-current
+git worktree list --porcelain | sed -n '1,8p'
+```
+
+- Before opening a PR, run `./scripts/ci/git-policy.sh` to verify the branch,
+  PR base, and PR issue linkage checks enforced in GitHub Actions.
+
 ## Contribution Rules
 
 - Follow the Agent engineering discipline:
@@ -74,6 +90,7 @@ opening a pull request.
 - [ ] `go test ./...` passes.
 - [ ] `go vet ./...` passes.
 - [ ] `./scripts/check.sh` passes.
+- [ ] `./scripts/ci/git-policy.sh` passes for the branch and PR metadata.
 - [ ] `./scripts/ci/release-smoke.sh` passes when release, Skillkit, GitHub,
       enrollment, or adapter behavior changes.
 - [ ] Documentation, Skillkit notes, and release checklists are updated when user

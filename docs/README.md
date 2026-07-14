@@ -24,6 +24,7 @@ the toolkit.
 | Adapter SDK and conformance | [Adapter SDK](operations/ADAPTER_SDK.md) |
 | Dev gateway behavior | [Dev Gateway](operations/DEV_GATEWAY.md) |
 | Acceptance and release evidence | [Acceptance](operations/ACCEPTANCE.md) |
+| Branch, worktree, and pull request workflow | [Contributing Guide](../CONTRIBUTING.md) |
 
 ## Architecture
 
