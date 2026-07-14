@@ -56,7 +56,10 @@ func (ExecRunner) Run(ctx context.Context, dir string, args ...string) (CommandE
 		if trimmed != "" {
 			return evidence, errors.New(trimmed)
 		}
-		return evidence, runErr
+		if ctx.Err() != nil {
+			return evidence, fmt.Errorf("git command failed without stderr: %w", ctx.Err())
+		}
+		return evidence, fmt.Errorf("git command failed without stderr")
 	}
 	return evidence, nil
 }
