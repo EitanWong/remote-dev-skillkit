@@ -170,13 +170,14 @@ func (m WorktreeManager) Doctor(ctx context.Context) (WorktreeReport, error) {
 
 func (m WorktreeManager) Clean(ctx context.Context) (WorktreeReport, error) {
 	report := m.newReport()
-	entries, evidence, err := m.list(ctx)
+	allEntries, entries, evidence, err := m.listWorktrees(ctx)
 	report.Commands = append(report.Commands, evidence...)
 	report.Entries = entries
 	if err != nil {
 		report.Errors = append(report.Errors, err.Error())
 		return report, err
 	}
+	mainCheckout := mainCheckoutPath(allEntries)
 
 	for _, entry := range entries {
 		if entry.Bare || entry.Detached || entry.Branch == "" || !isWithinPath(m.Root, entry.Path) {
@@ -185,7 +186,7 @@ func (m WorktreeManager) Clean(ctx context.Context) (WorktreeReport, error) {
 		if !entry.Clean || !entry.Merged {
 			continue
 		}
-		if err := m.removeEntry(ctx, &report, entry, false); err != nil {
+		if err := m.removeEntry(ctx, &report, entry, false, mainCheckout); err != nil {
 			report.Errors = append(report.Errors, err.Error())
 			return report, err
 		}
@@ -209,6 +210,7 @@ func (m WorktreeManager) Remove(ctx context.Context, branch string, force bool) 
 		report.Errors = append(report.Errors, err.Error())
 		return report, err
 	}
+	mainCheckout := mainCheckoutPath(allEntries)
 	for _, entry := range allEntries {
 		if entry.Branch == branch && m.isManagerCheckout(entry) {
 			err := fmt.Errorf("cannot remove manager checkout %q at %q", branch, entry.Path)
@@ -235,7 +237,7 @@ func (m WorktreeManager) Remove(ctx context.Context, branch string, force bool) 
 			err := fmt.Errorf("worktree %q is not merged into %s", branch, defaultBaseBranch)
 			return m.failReport(report, err.Error()), err
 		}
-		if err := m.removeEntry(ctx, &report, entry, force); err != nil {
+		if err := m.removeEntry(ctx, &report, entry, force, mainCheckout); err != nil {
 			report.Errors = append(report.Errors, err.Error())
 			return report, err
 		}
@@ -332,6 +334,15 @@ func rejectDuplicateBranches(entries []WorktreeEntry) error {
 	return nil
 }
 
+func mainCheckoutPath(entries []WorktreeEntry) string {
+	for _, entry := range entries {
+		if entry.Branch == defaultBaseBranch && !entry.Bare {
+			return entry.Path
+		}
+	}
+	return ""
+}
+
 func (m WorktreeManager) isMerged(ctx context.Context, branch string) (bool, []CommandEvidence, error) {
 	evidence, err := m.Git.Run(ctx, m.RepoRoot, "merge-base", "--is-ancestor", branch, defaultBaseBranch)
 	if err == nil {
@@ -363,7 +374,14 @@ func (m WorktreeManager) branchDistance(ctx context.Context, branch string) (int
 	return ahead, behind, []CommandEvidence{evidence}, nil
 }
 
-func (m WorktreeManager) removeEntry(ctx context.Context, report *WorktreeReport, entry WorktreeEntry, force bool) error {
+func (m WorktreeManager) removeEntry(ctx context.Context, report *WorktreeReport, entry WorktreeEntry, force bool, mainCheckout string) error {
+	stableCheckout := mainCheckout
+	if stableCheckout == "" {
+		stableCheckout = m.RepoRoot
+	}
+	if err := ensureDirectoryExists(stableCheckout); err != nil {
+		return fmt.Errorf("stable checkout %q is unavailable for branch deletion: %w", stableCheckout, err)
+	}
 	args := []string{"worktree", "remove"}
 	if force {
 		args = append(args, "--force")
@@ -374,10 +392,14 @@ func (m WorktreeManager) removeEntry(ctx context.Context, report *WorktreeReport
 	if err != nil {
 		return err
 	}
-	if err := ensureDirectoryExists(m.RepoRoot); err != nil {
-		return fmt.Errorf("stable checkout %q is unavailable for branch deletion: %w", m.RepoRoot, err)
+	if mainCheckout != "" {
+		evidence, err = m.Git.Run(ctx, mainCheckout, "branch", "-d", entry.Branch)
+	} else {
+		// No main checkout is registered. The earlier merge-base proof established
+		// that this branch is merged into main before its worktree was removed,
+		// so force deletion is safe from the still-existing manager checkout.
+		evidence, err = m.Git.Run(ctx, m.RepoRoot, "branch", "-D", entry.Branch)
 	}
-	evidence, err = m.Git.Run(ctx, m.RepoRoot, "branch", "-d", entry.Branch)
 	report.Commands = append(report.Commands, evidence)
 	return err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -97,6 +98,57 @@ func TestLinkedManagerNeverCleansOrRemovesItsOwnCheckout(t *testing.T) {
 		t.Fatalf("linked manager checkout was removed by Remove(): %v", err)
 	}
 	runGitForTest(t, repo, "show-ref", "--verify", "refs/heads/"+branch)
+}
+
+func TestLinkedManagerCleansDifferentMergedWorktreeFromMainCheckout(t *testing.T) {
+	requireGit(t)
+	repo := initGitRepo(t)
+	developerRoot, err := DefaultWorktreeRoot(repo)
+	if err != nil {
+		t.Fatalf("DefaultWorktreeRoot() error = %v", err)
+	}
+	manager, err := NewWorktreeManager(repo, developerRoot, ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager() error = %v", err)
+	}
+	managerBranch := "feat/123-linked-clean-manager"
+	targetBranch := "feat/124-linked-clean-target"
+	if _, err := manager.Create(context.Background(), managerBranch, "main"); err != nil {
+		t.Fatalf("Create(manager) error = %v", err)
+	}
+	if _, err := manager.Create(context.Background(), targetBranch, "main"); err != nil {
+		t.Fatalf("Create(target) error = %v", err)
+	}
+	managerPath := filepath.Join(developerRoot, "feat-123-linked-clean-manager")
+	targetPath := filepath.Join(developerRoot, "feat-124-linked-clean-target")
+	t.Cleanup(func() {
+		runGitForTest(t, repo, "worktree", "remove", "--force", managerPath)
+		runGitForTest(t, repo, "branch", "-D", managerBranch)
+	})
+
+	if err := os.WriteFile(filepath.Join(targetPath, "merged.txt"), []byte("merged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, targetPath, "add", "merged.txt")
+	runGitForTest(t, targetPath, "commit", "-m", "merge target worktree")
+	runGitForTest(t, repo, "merge", "--ff-only", targetBranch)
+
+	linkedManager, err := NewWorktreeManager(managerPath, "", ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager(linked manager) error = %v", err)
+	}
+	if _, err := linkedManager.Clean(context.Background()); err != nil {
+		t.Fatalf("linked manager Clean() error = %v", err)
+	}
+	if _, err := os.Stat(managerPath); err != nil {
+		t.Fatalf("manager checkout was removed: %v", err)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target worktree was not removed: %v", err)
+	}
+	if err := runGitForTestOutput(t, repo, "show-ref", "--verify", "refs/heads/"+targetBranch); err == nil {
+		t.Fatalf("target branch %q still exists after cleanup", targetBranch)
+	}
 }
 
 func TestCreateDeveloperWorktreeUsesNormalizedBranchDirectory(t *testing.T) {
@@ -529,4 +581,14 @@ func (r *scriptedRunner) Run(_ context.Context, dir string, args ...string) (Com
 
 func keyFor(dir string, args ...string) string {
 	return dir + "::" + strings.Join(args, "\x00")
+}
+
+func runGitForTestOutput(t *testing.T, dir string, args ...string) error {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git -C %s %s failed: %v\n%s", dir, strings.Join(args, " "), err, string(output))
+	}
+	return nil
 }
