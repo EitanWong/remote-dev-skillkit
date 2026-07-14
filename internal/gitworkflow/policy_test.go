@@ -1,6 +1,10 @@
 package gitworkflow
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestParseBranchValidCases(t *testing.T) {
 	tests := []struct {
@@ -8,9 +12,16 @@ func TestParseBranchValidCases(t *testing.T) {
 		input string
 		want  BranchRef
 	}{
-		{name: "feat issue slug", input: "feat/123-worktree-governance", want: BranchRef{Name: "feat/123-worktree-governance", Type: "feat", Issue: 123, Slug: "worktree-governance"}},
-		{name: "docs issue slug", input: "docs/7-git-guide", want: BranchRef{Name: "docs/7-git-guide", Type: "docs", Issue: 7, Slug: "git-guide"}},
-		{name: "release issue slug", input: "release/42-v1-2-0", want: BranchRef{Name: "release/42-v1-2-0", Type: "release", Issue: 42, Slug: "v1-2-0"}},
+		{name: "feat", input: "feat/123-worktree-governance", want: BranchRef{Name: "feat/123-worktree-governance", Type: "feat", Issue: 123, Slug: "worktree-governance"}},
+		{name: "fix", input: "fix/124-stale-worktree-cleanup", want: BranchRef{Name: "fix/124-stale-worktree-cleanup", Type: "fix", Issue: 124, Slug: "stale-worktree-cleanup"}},
+		{name: "refactor", input: "refactor/125-policy-api", want: BranchRef{Name: "refactor/125-policy-api", Type: "refactor", Issue: 125, Slug: "policy-api"}},
+		{name: "docs", input: "docs/7-git-guide", want: BranchRef{Name: "docs/7-git-guide", Type: "docs", Issue: 7, Slug: "git-guide"}},
+		{name: "test", input: "test/8-policy-coverage", want: BranchRef{Name: "test/8-policy-coverage", Type: "test", Issue: 8, Slug: "policy-coverage"}},
+		{name: "chore", input: "chore/9-dependency-refresh", want: BranchRef{Name: "chore/9-dependency-refresh", Type: "chore", Issue: 9, Slug: "dependency-refresh"}},
+		{name: "perf", input: "perf/10-faster-policy-checks", want: BranchRef{Name: "perf/10-faster-policy-checks", Type: "perf", Issue: 10, Slug: "faster-policy-checks"}},
+		{name: "ci", input: "ci/11-workflow-hardening", want: BranchRef{Name: "ci/11-workflow-hardening", Type: "ci", Issue: 11, Slug: "workflow-hardening"}},
+		{name: "hotfix", input: "hotfix/12-release-blocker", want: BranchRef{Name: "hotfix/12-release-blocker", Type: "hotfix", Issue: 12, Slug: "release-blocker"}},
+		{name: "release", input: "release/42-v1-2-0", want: BranchRef{Name: "release/42-v1-2-0", Type: "release", Issue: 42, Slug: "v1-2-0"}},
 	}
 
 	for _, tt := range tests {
@@ -33,19 +44,22 @@ func TestParseBranchValidCases(t *testing.T) {
 	}
 }
 
-func TestParseBranchInvalidCases(t *testing.T) {
+func TestParseBranchRejectsInvalidCases(t *testing.T) {
 	tests := []string{
 		"codex/123-agent-work",
+		"agent/123-worktree",
 		"feat/worktree-governance",
 		"feat/abc-worktree",
 		"feat/123_Worktree",
 		"main",
 		"feature/123-worktree",
 		"feat/123-",
+		" feat/123-worktree",
+		"feat/123-worktree ",
 	}
 
 	for _, input := range tests {
-		t.Run(input, func(t *testing.T) {
+		t.Run(strings.ReplaceAll(input, "/", "_"), func(t *testing.T) {
 			if _, err := ParseBranch(input); err == nil {
 				t.Fatalf("ParseBranch(%q) expected error", input)
 			}
@@ -64,9 +78,22 @@ func TestValidateCommitSubject(t *testing.T) {
 	}{
 		{name: "feat subject", subject: "feat: add worktree doctor", valid: true},
 		{name: "fix with scope", subject: "fix(cli): reject main edits", valid: true},
+		{name: "refactor subject", subject: "refactor(policy): split branch validation", valid: true},
+		{name: "docs subject", subject: "docs: update git workflow guide", valid: true},
+		{name: "test subject", subject: "test: cover git workflow policy", valid: true},
+		{name: "chore subject", subject: "chore: refresh policy fixtures", valid: true},
+		{name: "perf subject", subject: "perf: speed up policy checks", valid: true},
+		{name: "ci subject", subject: "ci: harden branch checks", valid: true},
+		{name: "hotfix subject", subject: "hotfix: unblock release branch", valid: true},
+		{name: "release subject", subject: "release: publish v1.2.0", valid: true},
+		{name: "invalid build type", subject: "build: add worktree doctor", valid: false},
+		{name: "invalid revert type", subject: "revert: roll back worktree doctor", valid: false},
 		{name: "missing type separator", subject: "add worktree doctor", valid: false},
 		{name: "uppercase type", subject: "Feat: uppercase type", valid: false},
 		{name: "empty description", subject: "feat:", valid: false},
+		{name: "whitespace padded", subject: " feat: add worktree doctor", valid: false},
+		{name: "imperative past tense", subject: "feat: added worktree doctor", valid: false},
+		{name: "imperative third person", subject: "feat: rejects main edits", valid: false},
 	}
 
 	for _, tt := range tests {
@@ -90,9 +117,16 @@ func TestValidatePRTitle(t *testing.T) {
 	}{
 		{name: "feat title", title: "feat: add worktree doctor", valid: true},
 		{name: "fix title with scope", title: "fix(cli): reject main edits", valid: true},
+		{name: "docs title", title: "docs: update git workflow guide", valid: true},
+		{name: "hotfix title", title: "hotfix: unblock release branch", valid: true},
+		{name: "invalid build type", title: "build: add worktree doctor", valid: false},
+		{name: "invalid revert type", title: "revert: roll back worktree doctor", valid: false},
 		{name: "missing separator", title: "add worktree doctor", valid: false},
 		{name: "uppercase type", title: "Feat: uppercase type", valid: false},
 		{name: "empty description", title: "feat:", valid: false},
+		{name: "whitespace padded", title: "feat: add worktree doctor ", valid: false},
+		{name: "imperative past tense", title: "feat: added worktree doctor", valid: false},
+		{name: "imperative third person", title: "feat: rejects main edits", valid: false},
 	}
 
 	for _, tt := range tests {
@@ -105,5 +139,54 @@ func TestValidatePRTitle(t *testing.T) {
 				t.Fatalf("ValidatePRTitle(%q) expected error", tt.title)
 			}
 		})
+	}
+}
+
+func TestPolicyReportJSONSchema(t *testing.T) {
+	report := PolicyReport{
+		Schema:   SchemaVersion,
+		OK:       true,
+		RepoRoot: "/repo",
+		Branch:   "feat/123-worktree-governance",
+		Issue:    123,
+		Base:     "origin/main",
+		Worktree: "/worktrees/feat-123-worktree-governance",
+		Checks: []PolicyCheck{{
+			Name:   "branch_format",
+			Passed: true,
+			Detail: "branch matches schema",
+		}},
+		Commands: []CommandRecord{{
+			Argv: []string{"git", "status", "--short"},
+			Cwd:  "/worktrees/feat-123-worktree-governance",
+		}},
+	}
+
+	content, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(content, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	for _, key := range []string{"schema", "ok", "repo_root", "branch", "issue", "base", "worktree", "checks", "commands"} {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("missing JSON key %q in %s", key, string(content))
+		}
+	}
+	if got["schema"] != SchemaVersion {
+		t.Fatalf("schema = %v, want %q", got["schema"], SchemaVersion)
+	}
+	if got["branch"] != "feat/123-worktree-governance" {
+		t.Fatalf("branch = %v, want branch string", got["branch"])
+	}
+	if got["issue"].(float64) != 123 {
+		t.Fatalf("issue = %v, want 123", got["issue"])
+	}
+	if !got["ok"].(bool) {
+		t.Fatalf("ok = %v, want true", got["ok"])
 	}
 }
