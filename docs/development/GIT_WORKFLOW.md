@@ -38,9 +38,9 @@ command create the branch and worktree together. Do not run `branch create` and
 
 ```bash
 gh issue create --title "Track worktree governance" --body "..."
-go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
-cd /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit/feat-123-worktree-governance
+go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root <developer-root>
+go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root <developer-root>
+cd <developer-root>/feat-123-worktree-governance
 go run ./cmd/rdev git policy check
 go run ./cmd/rdev git pr plan
 go run ./cmd/rdev git pr create --execute
@@ -66,19 +66,19 @@ Notes:
 2. Prefer the external-worktree path for normal development:
 
    ```bash
-   go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
+   go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root <developer-root>
    ```
 
 3. Move into the external worktree before making changes:
 
    ```bash
-   cd /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit/feat-123-worktree-governance
+   cd <developer-root>/feat-123-worktree-governance
    ```
 
 4. Verify the worktree mapping from the stable/main checkout:
 
    ```bash
-   go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
+   go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root <developer-root>
    ```
 
 5. Run policy checks from the worktree or with `--repo` pointed at the
@@ -106,7 +106,9 @@ Notes:
 ## Multi-worktree use
 
 - Keep one issue-linked branch per task and one worktree per active branch.
-- Use an external shared root such as `/Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit`.
+- Use an external shared root such as `<developer-root>`.
+- The resolved developer root must be an absolute path outside the repository
+  tree.
 - Keep worktree roots outside the repository tree; manager commands reject
   roots that live inside the repo.
 - Run `go run ./cmd/rdev git worktree list --repo <main-checkout>` to see which
@@ -172,7 +174,7 @@ Recovery rules:
 - If the checkout is dirty, finish, stash, or discard local changes before
   `go run ./cmd/rdev git pr create --execute`.
 - Do not let stale local state trigger a remote mutation. Re-run
-  `go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit`
+  `go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root <developer-root>`
   before planning the PR if the branch or path moved.
 - If metadata looks stale after branch deletion or a move, use Git’s repair
   path from the main checkout or a linked worktree: `git worktree move

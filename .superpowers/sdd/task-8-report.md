@@ -31,3 +31,11 @@
 - **Commit:** `5e48584` (`docs: align release hotfix workflow policy`)
 - **Tests / checks:** will run `rtk rg -n "worktree list --root|branch create.*worktree create|worktree create.*branch create|gh issue create|git push --delete|git push -u origin|--execute|main only|maintainer-managed|absolute/path/to/.worktrees/remote-dev-skillkit" CONTRIBUTING.md docs/README.md docs/development/GIT_WORKFLOW.md .superpowers/sdd/task-8-report.md` and `rtk git diff --check`
 - **Concerns:** Release/hotfix guidance now says main is the PR base under local policy and any separate maintainer release flow is outside this document.
+
+## Portability fix
+
+- **Status:** Replaced hard-coded developer-specific paths with portable placeholders.
+- **Files:** `docs/development/GIT_WORKFLOW.md`
+- **Commit:** `92c92b5` (`docs: make git workflow paths portable`)
+- **Tests / checks:** will run `rtk rg -n \"/Users/eitan|/absolute/path/to/.worktrees|<developer-root>\" docs/development/GIT_WORKFLOW.md CONTRIBUTING.md docs/README.md .superpowers/sdd/task-8-report.md` and `rtk git diff --check`
+- **Concerns:** The guide now uses `<developer-root>` for the external worktree root and states that the resolved path must be an absolute path outside the repository tree.
