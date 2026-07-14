@@ -1,7 +1,9 @@
 package gitworkflow
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -156,9 +158,12 @@ func TestPolicyReportJSONSchema(t *testing.T) {
 			Passed: true,
 			Detail: "branch matches schema",
 		}},
-		Commands: []CommandRecord{{
-			Argv: []string{"git", "status", "--short"},
-			Cwd:  "/worktrees/feat-123-worktree-governance",
+		Commands: []CommandEvidence{{
+			Argv:     []string{"git", "-C", "/worktrees/feat-123-worktree-governance", "status", "--short"},
+			Dir:      "/worktrees/feat-123-worktree-governance",
+			Stdout:   "",
+			Stderr:   "",
+			ExitCode: 0,
 		}},
 	}
 
@@ -188,5 +193,131 @@ func TestPolicyReportJSONSchema(t *testing.T) {
 	}
 	if !got["ok"].(bool) {
 		t.Fatalf("ok = %v, want true", got["ok"])
+	}
+}
+
+func TestPolicyReportValidBranchProducesOK(t *testing.T) {
+	repo := Repo{Root: "/repo/worktrees/feat-123-worktree-governance"}
+	runner := &scriptedRunner{
+		responses: map[string]scriptedResponse{
+			keyFor(repo.Root, "rev-parse", "--path-format=absolute", "--git-common-dir"): {
+				evidence: CommandEvidence{Stdout: "/repo/.git\n", ExitCode: 0},
+			},
+			keyFor(repo.Root, "branch", "--show-current"): {
+				evidence: CommandEvidence{Stdout: "feat/123-worktree-governance\n", ExitCode: 0},
+			},
+		},
+	}
+
+	report, err := CheckPolicy(context.Background(), repo, runner, "origin/main")
+	if err != nil {
+		t.Fatalf("CheckPolicy() error = %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("report.OK = false, want true: %#v", report)
+	}
+	if report.Schema != SchemaVersion {
+		t.Fatalf("schema = %q, want %q", report.Schema, SchemaVersion)
+	}
+	if report.RepoRoot != "/repo" {
+		t.Fatalf("repo root = %q, want /repo", report.RepoRoot)
+	}
+	if report.Worktree != repo.Root {
+		t.Fatalf("worktree = %q, want %q", report.Worktree, repo.Root)
+	}
+	if report.Branch != "feat/123-worktree-governance" {
+		t.Fatalf("branch = %q", report.Branch)
+	}
+	if report.Issue != 123 {
+		t.Fatalf("issue = %d, want 123", report.Issue)
+	}
+	if report.Base != "origin/main" {
+		t.Fatalf("base = %q, want origin/main", report.Base)
+	}
+	if len(report.Commands) != 2 {
+		t.Fatalf("commands = %d, want 2", len(report.Commands))
+	}
+}
+
+func TestPolicyReportRejectsLegacyCodexBranch(t *testing.T) {
+	repo := Repo{Root: "/repo/worktrees/codex-legacy"}
+	runner := &scriptedRunner{
+		responses: map[string]scriptedResponse{
+			keyFor(repo.Root, "rev-parse", "--path-format=absolute", "--git-common-dir"): {
+				evidence: CommandEvidence{Stdout: "/repo/.git\n", ExitCode: 0},
+			},
+			keyFor(repo.Root, "branch", "--show-current"): {
+				evidence: CommandEvidence{Stdout: "codex/phase1-regional-tunnel-availability\n", ExitCode: 0},
+			},
+		},
+	}
+
+	report, err := CheckPolicy(context.Background(), repo, runner, "origin/main")
+	if err == nil {
+		t.Fatal("CheckPolicy() expected error")
+	}
+	if report.OK {
+		t.Fatalf("report.OK = true, want false: %#v", report)
+	}
+	check, ok := findPolicyCheck(report.Checks, "legacy_codex_branch_forbidden")
+	if !ok {
+		t.Fatalf("missing legacy_codex_branch_forbidden check: %#v", report.Checks)
+	}
+	if check.Passed {
+		t.Fatalf("legacy_codex_branch_forbidden passed unexpectedly: %#v", check)
+	}
+}
+
+func TestPolicyReportRejectsInvalidBase(t *testing.T) {
+	repo := Repo{Root: "/repo/worktrees/feat-123-worktree-governance"}
+
+	report, err := CheckPolicy(context.Background(), repo, &scriptedRunner{responses: map[string]scriptedResponse{}}, " origin/main")
+	if err == nil {
+		t.Fatal("CheckPolicy() expected error")
+	}
+	if report.OK {
+		t.Fatalf("report.OK = true, want false: %#v", report)
+	}
+	check, ok := findPolicyCheck(report.Checks, "base_reference")
+	if !ok {
+		t.Fatalf("missing base_reference check: %#v", report.Checks)
+	}
+	if check.Passed {
+		t.Fatalf("base_reference passed unexpectedly: %#v", check)
+	}
+}
+
+func findPolicyCheck(checks []PolicyCheck, name string) (PolicyCheck, bool) {
+	for _, check := range checks {
+		if check.Name == name {
+			return check, true
+		}
+	}
+	return PolicyCheck{}, false
+}
+
+func TestPolicyReportAggregatesPolicyFailures(t *testing.T) {
+	repo := Repo{Root: "/repo/worktrees/bad"}
+	runner := &scriptedRunner{
+		responses: map[string]scriptedResponse{
+			keyFor(repo.Root, "rev-parse", "--path-format=absolute", "--git-common-dir"): {
+				evidence: CommandEvidence{Stdout: "/repo/.git\n", ExitCode: 0},
+			},
+			keyFor(repo.Root, "branch", "--show-current"): {
+				evidence: CommandEvidence{Stdout: "feat/nope\n", ExitCode: 0},
+			},
+		},
+	}
+
+	report, err := CheckPolicy(context.Background(), repo, runner, "origin/main")
+	if err == nil {
+		t.Fatal("CheckPolicy() expected error")
+	}
+	var policyErr interface{ Unwrap() []error }
+	if !errors.As(err, &policyErr) {
+		t.Fatalf("error = %T, want joined error", err)
+	}
+	if report.OK {
+		t.Fatalf("report.OK = true, want false")
 	}
 }
