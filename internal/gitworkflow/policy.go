@@ -107,7 +107,7 @@ type PolicyReport struct {
 	Commands []CommandEvidence `json:"commands"`
 }
 
-var baseRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+var baseRefPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 func ParseBranch(name string) (BranchRef, error) {
 	if name == "" {
@@ -318,8 +318,30 @@ func validateBaseRef(base string) error {
 	if !baseRefPattern.MatchString(base) {
 		return fmt.Errorf("base reference %q is invalid", base)
 	}
-	if strings.Contains(base, "..") || strings.HasPrefix(base, "/") || strings.HasSuffix(base, "/") {
+	if strings.ContainsAny(base, `\~^:?*[]`) ||
+		strings.Contains(base, "..") ||
+		strings.Contains(base, "//") ||
+		strings.Contains(base, "@{") ||
+		strings.HasPrefix(base, "/") ||
+		strings.HasSuffix(base, "/") ||
+		strings.HasSuffix(base, ".") ||
+		strings.HasSuffix(base, ".lock") ||
+		base == "@" ||
+		base == "." ||
+		base == ".." {
 		return fmt.Errorf("base reference %q is invalid", base)
+	}
+	for _, runeValue := range base {
+		if runeValue < 0x20 || runeValue == 0x7f {
+			return fmt.Errorf("base reference %q is invalid", base)
+		}
+	}
+	for _, component := range strings.Split(base, "/") {
+		if component == "" || component == "." || component == ".." ||
+			strings.HasPrefix(component, ".") || strings.HasPrefix(component, "-") ||
+			strings.HasSuffix(component, ".") || strings.HasSuffix(component, ".lock") {
+			return fmt.Errorf("base reference %q is invalid", base)
+		}
 	}
 	return nil
 }

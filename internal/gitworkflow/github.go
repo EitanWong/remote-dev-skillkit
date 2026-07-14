@@ -21,6 +21,14 @@ type PRPlan struct {
 	Args   []string `json:"args"`
 }
 
+// GitHubExecutor runs an argv-form GitHub CLI command in a repository.
+// Implementations must execute argv[0] directly; the git-only ExecRunner is
+// not compatible because it prefixes commands with "git -C".
+type GitHubExecutor interface {
+	Run(ctx context.Context, dir string, args ...string) (CommandEvidence, error)
+}
+
+// GitHubRunner executes gh directly and never prefixes it with git -C.
 type GitHubRunner struct{}
 
 func (GitHubRunner) Run(ctx context.Context, dir string, args ...string) (CommandEvidence, error) {
@@ -53,14 +61,18 @@ func PlanPR(repo Repo, branch BranchRef, title, body string) (PRPlan, error) {
 	if strings.TrimSpace(repo.Root) == "" {
 		return PRPlan{}, fmt.Errorf("repository root is required")
 	}
-	if branch.Name == "" || branch.Issue <= 0 {
-		return PRPlan{}, fmt.Errorf("branch reference must include a positive issue number")
+	parsedBranch, err := ParseBranch(branch.Name)
+	if err != nil {
+		return PRPlan{}, err
+	}
+	if branch.Type != parsedBranch.Type || branch.Issue != parsedBranch.Issue || branch.Slug != parsedBranch.Slug {
+		return PRPlan{}, fmt.Errorf("branch metadata does not match parsed branch %q", branch.Name)
 	}
 	if err := ValidatePRTitle(title); err != nil {
 		return PRPlan{}, err
 	}
 
-	normalizedBody, err := normalizePRBody(branch.Issue, body)
+	normalizedBody, err := normalizePRBody(parsedBranch.Issue, body)
 	if err != nil {
 		return PRPlan{}, err
 	}
@@ -68,32 +80,27 @@ func PlanPR(repo Repo, branch BranchRef, title, body string) (PRPlan, error) {
 	plan := PRPlan{
 		Schema: SchemaVersion,
 		Base:   defaultBaseBranch,
-		Head:   branch.Name,
+		Head:   parsedBranch.Name,
 		Title:  title,
 		Body:   normalizedBody,
 	}
-	plan.Args = []string{
-		"gh", "pr", "create",
-		"--base", plan.Base,
-		"--head", plan.Head,
-		"--title", plan.Title,
-		"--body", plan.Body,
-	}
+	plan.Args = buildPRArgs(plan)
 	return plan, nil
 }
 
-func ExecutePR(ctx context.Context, r Runner, repoRoot string, plan PRPlan) (CommandEvidence, error) {
+func ExecutePR(ctx context.Context, r GitHubExecutor, repoRoot string, plan PRPlan) (CommandEvidence, error) {
 	if r == nil {
 		return CommandEvidence{}, fmt.Errorf("github runner is required")
 	}
 	if strings.TrimSpace(repoRoot) == "" {
 		return CommandEvidence{}, fmt.Errorf("repository root is required")
 	}
-	if err := validatePRPlan(plan); err != nil {
+	normalizedPlan, err := normalizePRPlan(plan)
+	if err != nil {
 		return CommandEvidence{}, err
 	}
 
-	evidence, err := r.Run(ctx, repoRoot, plan.Args...)
+	evidence, err := r.Run(ctx, repoRoot, normalizedPlan.Args...)
 	evidence = redactEvidence(evidence)
 	if err == nil {
 		return evidence, nil
@@ -113,45 +120,38 @@ func ExecutePR(ctx context.Context, r Runner, repoRoot string, plan PRPlan) (Com
 	return evidence, fmt.Errorf("gh pr create failed: %s", message)
 }
 
-func validatePRPlan(plan PRPlan) error {
+func normalizePRPlan(plan PRPlan) (PRPlan, error) {
 	if plan.Schema != SchemaVersion {
-		return fmt.Errorf("unsupported PR plan schema %q", plan.Schema)
+		return PRPlan{}, fmt.Errorf("unsupported PR plan schema %q", plan.Schema)
 	}
 	if err := validateBaseRef(plan.Base); err != nil {
-		return err
+		return PRPlan{}, err
 	}
-	if _, err := ParseBranch(plan.Head); err != nil {
-		return err
+	parsedBranch, err := ParseBranch(plan.Head)
+	if err != nil {
+		return PRPlan{}, err
 	}
 	if err := ValidatePRTitle(plan.Title); err != nil {
-		return err
+		return PRPlan{}, err
 	}
-	issue, err := IssueFromBranch(plan.Head)
+	normalizedBody, err := normalizePRBody(parsedBranch.Issue, plan.Body)
 	if err != nil {
-		return err
+		return PRPlan{}, err
 	}
-	if _, err := normalizePRBody(issue, plan.Body); err != nil {
-		return err
-	}
-	if len(plan.Args) == 0 {
-		return fmt.Errorf("PR plan arguments are required")
-	}
-	expected := []string{
+	plan.Head = parsedBranch.Name
+	plan.Body = normalizedBody
+	plan.Args = buildPRArgs(plan)
+	return plan, nil
+}
+
+func buildPRArgs(plan PRPlan) []string {
+	return []string{
 		"gh", "pr", "create",
 		"--base", plan.Base,
 		"--head", plan.Head,
 		"--title", plan.Title,
 		"--body", plan.Body,
 	}
-	if len(plan.Args) != len(expected) {
-		return fmt.Errorf("PR plan arguments do not match the approved gh invocation")
-	}
-	for index := range expected {
-		if plan.Args[index] != expected[index] {
-			return fmt.Errorf("PR plan arguments do not match the approved gh invocation")
-		}
-	}
-	return nil
 }
 
 func normalizePRBody(issue int64, body string) (string, error) {
@@ -183,9 +183,13 @@ func normalizePRBody(issue int64, body string) (string, error) {
 
 var issueReferencePattern = regexp.MustCompile(`(?im)\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#([0-9]+)\b`)
 
-var tokenPattern = regexp.MustCompile(`(?i)(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|(?:token|password|secret|authorization)[=: ]+[^\s]+)`)
+var tokenPattern = regexp.MustCompile(`(?i)(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._~+/=-]+|(?:token|password|secret|authorization)(?:\s*[:=]\s*|\s+)(?:bearer\s+)?[^\s,;]+)`)
 
 func redactEvidence(evidence CommandEvidence) CommandEvidence {
+	evidence.Argv = append([]string(nil), evidence.Argv...)
+	for index, arg := range evidence.Argv {
+		evidence.Argv[index] = redactText(arg)
+	}
 	evidence.Stdout = redactText(evidence.Stdout)
 	evidence.Stderr = redactText(evidence.Stderr)
 	return evidence
@@ -215,5 +219,10 @@ func isGitHubAuthFailure(message string) bool {
 	return strings.Contains(normalized, "auth login") ||
 		strings.Contains(normalized, "not logged into") ||
 		strings.Contains(normalized, "authentication failed") ||
+		strings.Contains(normalized, "authentication required") ||
+		strings.Contains(normalized, "bad credentials") ||
+		strings.Contains(normalized, "unauthorized") ||
+		strings.Contains(normalized, "http 401") ||
+		strings.Contains(normalized, "401 unauthorized") ||
 		strings.Contains(normalized, "could not resolve to a repository")
 }

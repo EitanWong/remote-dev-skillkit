@@ -177,7 +177,14 @@ func TestPolicyReportJSONSchema(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	for _, key := range []string{"schema", "ok", "repo_root", "branch", "issue", "base", "worktree", "checks", "commands"} {
+	wantKeys := map[string]struct{}{
+		"schema": {}, "ok": {}, "repo_root": {}, "branch": {}, "issue": {},
+		"base": {}, "worktree": {}, "checks": {}, "commands": {},
+	}
+	if len(got) != len(wantKeys) {
+		t.Fatalf("JSON keys = %d, want exactly %d: %s", len(got), len(wantKeys), string(content))
+	}
+	for key := range wantKeys {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("missing JSON key %q in %s", key, string(content))
 		}
@@ -319,5 +326,40 @@ func TestPolicyReportAggregatesPolicyFailures(t *testing.T) {
 	}
 	if report.OK {
 		t.Fatalf("report.OK = true, want false")
+	}
+}
+
+func TestValidateBaseRefRejectsGitInvalidRefs(t *testing.T) {
+	tests := []string{
+		"main.",
+		"main.lock",
+		"origin/main..feature",
+		"origin//main",
+		"origin/.hidden",
+		".hidden/main",
+		"origin/main@{1}",
+		"origin/main with-space",
+		"origin/main\\feature",
+		"origin/main~1",
+		"origin/main^",
+		"origin/main:feature",
+		"origin/main?feature",
+		"origin/main*",
+		"origin/main[0]",
+		"/origin/main",
+		"origin/main/",
+		"-main",
+		"origin/-main",
+		"@",
+		".",
+		"..",
+		"origin/\x7fmain",
+	}
+	for _, ref := range tests {
+		t.Run(strings.ReplaceAll(ref, "/", "_"), func(t *testing.T) {
+			if err := validateBaseRef(ref); err == nil {
+				t.Fatalf("validateBaseRef(%q) expected error", ref)
+			}
+		})
 	}
 }
