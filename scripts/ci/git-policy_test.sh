@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 policy_script="$repo_root/scripts/ci/git-policy.sh"
+workflow_file="$repo_root/.github/workflows/git-policy.yml"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/git-policy-test.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -12,12 +13,33 @@ die() {
   exit 1
 }
 
+assert_contains() {
+  local file="$1"
+  local needle="$2"
+  grep -F "$needle" "$file" >/dev/null || die "expected $file to contain: $needle"
+}
+
+assert_not_contains() {
+  local file="$1"
+  local needle="$2"
+  if grep -F "$needle" "$file" >/dev/null; then
+    die "did not expect $file to contain: $needle"
+  fi
+}
+
+assert_not_line() {
+  local file="$1"
+  local line="$2"
+  if grep -Fx "$line" "$file" >/dev/null; then
+    die "did not expect $file to contain exact line: $line"
+  fi
+}
+
 setup_repo() {
   local name="$1"
   local dest="$tmp_dir/$name"
   mkdir -p "$dest"
   python3 - "$repo_root" "$dest" <<'PY'
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -73,38 +95,65 @@ assert_failure() {
 if [[ ! -f "$policy_script" ]]; then
   die "missing policy script at $policy_script"
 fi
+if [[ ! -f "$workflow_file" ]]; then
+  die "missing workflow file at $workflow_file"
+fi
+
+assert_contains "$workflow_file" 'pull_request_target:'
+assert_not_line "$workflow_file" '  pull_request:'
+assert_contains "$workflow_file" 'persist-credentials: false'
+assert_contains "$workflow_file" "ref: \${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || github.ref_name }}"
+assert_not_contains "$workflow_file" 'ref: ${{ github.head_ref || github.ref_name }}'
+assert_not_contains "$workflow_file" 'ref: ${{ github.event.pull_request.head.ref }}'
 
 main_repo="$(setup_repo main)"
 assert_success "$main_repo" \
-  GITHUB_EVENT_NAME=push \
-  GITHUB_REF_NAME='main'
+  GIT_POLICY_EVENT_NAME=push \
+  GIT_POLICY_BRANCH_NAME='main'
 
 valid_repo="$(setup_repo valid)"
-git -C "$valid_repo" checkout -b 'feat/123-valid-name' >/dev/null
 assert_success "$valid_repo" \
-  GITHUB_EVENT_NAME=push \
-  GITHUB_REF_NAME='feat/123-valid-name'
+  GIT_POLICY_EVENT_NAME=push \
+  GIT_POLICY_BRANCH_NAME='feat/123-valid-name'
+
+invalid_issue_repo="$(setup_repo invalid-issue)"
+assert_failure "$invalid_issue_repo" 'branch_naming' \
+  GIT_POLICY_EVENT_NAME=push \
+  GIT_POLICY_BRANCH_NAME='feat/no-issue'
 
 legacy_repo="$(setup_repo legacy)"
-git -C "$legacy_repo" checkout -b 'codex/123-old-name' >/dev/null
 assert_failure "$legacy_repo" 'legacy_codex_branch_forbidden' \
-  GITHUB_EVENT_NAME=push \
-  GITHUB_REF_NAME='codex/123-old-name'
+  GIT_POLICY_EVENT_NAME=push \
+  GIT_POLICY_BRANCH_NAME='codex/123-old-name'
 
 pr_base_repo="$(setup_repo pr-base)"
-git -C "$pr_base_repo" checkout -b 'feat/123-valid-name' >/dev/null
 assert_failure "$pr_base_repo" 'pull requests must target main' \
-  GITHUB_EVENT_NAME=pull_request \
-  GITHUB_HEAD_REF='feat/123-valid-name' \
-  GITHUB_BASE_REF='release/1.0'
+  GIT_POLICY_EVENT_NAME=pull_request_target \
+  GIT_POLICY_BRANCH_NAME='feat/123-valid-name' \
+  GIT_POLICY_BASE_REF='release/1.0' \
+  GIT_POLICY_PR_TITLE='feat: add trusted policy workflow' \
+  GIT_POLICY_PR_BODY=$'## Summary\n- validate trusted base checkout\n\nCloses #123'
+
+pr_issue_repo="$(setup_repo pr-issue)"
+assert_failure "$pr_issue_repo" 'pull request body must include Closes #123' \
+  GIT_POLICY_EVENT_NAME=pull_request_target \
+  GIT_POLICY_BRANCH_NAME='feat/123-valid-name' \
+  GIT_POLICY_BASE_REF='main' \
+  GIT_POLICY_PR_TITLE='feat: add trusted policy workflow' \
+  GIT_POLICY_PR_BODY=$'## Summary\n- validate trusted base checkout\n\nCloses #456'
 
 pr_repo="$(setup_repo pr-valid)"
-git -C "$pr_repo" checkout -b 'feat/123-valid-name' >/dev/null
+head_before="$(git -C "$pr_repo" rev-parse HEAD)"
 assert_success "$pr_repo" \
-  GITHUB_EVENT_NAME=pull_request \
-  GITHUB_HEAD_REF='feat/123-valid-name' \
-  GITHUB_BASE_REF='main' \
-  PR_TITLE='feat: add git policy workflow' \
-  PR_BODY=$'## Summary\n- add a git policy workflow\n\nCloses #123'
+  GIT_POLICY_EVENT_NAME=pull_request_target \
+  GIT_POLICY_BRANCH_NAME='feat/123-valid-name' \
+  GIT_POLICY_HEAD_SHA='deadbeef1234' \
+  GIT_POLICY_BASE_REF='main' \
+  GIT_POLICY_PR_TITLE='feat: add trusted git policy workflow' \
+  GIT_POLICY_PR_BODY=$'## Summary\n- validate trusted base checkout\n\nCloses #123'
+head_after="$(git -C "$pr_repo" rev-parse HEAD)"
+[[ "$head_before" == "$head_after" ]] || die 'trusted PR validation must not change HEAD commit'
+current_branch="$(git -C "$pr_repo" branch --show-current)"
+[[ "$current_branch" == 'feat/123-valid-name' ]] || die "expected local metadata branch context, got $current_branch"
 
 printf 'git policy wrapper tests passed\n'
