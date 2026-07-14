@@ -180,7 +180,7 @@ func (m WorktreeManager) Clean(ctx context.Context) (WorktreeReport, error) {
 	mainCheckout := mainCheckoutPath(allEntries)
 
 	for _, entry := range entries {
-		if entry.Bare || entry.Detached || entry.Branch == "" || !isWithinPath(m.Root, entry.Path) {
+		if entry.Branch == defaultBaseBranch || entry.Bare || entry.Detached || entry.Branch == "" || !isWithinPath(m.Root, entry.Path) {
 			continue
 		}
 		if !entry.Clean || !entry.Merged {
@@ -317,7 +317,7 @@ func (m WorktreeManager) isManagerCheckout(entry WorktreeEntry) bool {
 }
 
 func isManagedEntry(root string, entry WorktreeEntry) bool {
-	return entry.Branch == defaultBaseBranch || isWithinPath(root, entry.Path)
+	return entry.Branch != defaultBaseBranch && isWithinPath(root, entry.Path)
 }
 
 func rejectDuplicateBranches(entries []WorktreeEntry) error {

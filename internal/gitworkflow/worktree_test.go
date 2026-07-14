@@ -151,6 +151,51 @@ func TestLinkedManagerCleansDifferentMergedWorktreeFromMainCheckout(t *testing.T
 	}
 }
 
+func TestLinkedManagerCleanWithBroadRootSkipsMainWithoutDestructiveCommands(t *testing.T) {
+	requireGit(t)
+	repo := initGitRepo(t)
+	defaultRoot, err := DefaultWorktreeRoot(repo)
+	if err != nil {
+		t.Fatalf("DefaultWorktreeRoot() error = %v", err)
+	}
+	manager, err := NewWorktreeManager(repo, defaultRoot, ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager() error = %v", err)
+	}
+	branch := "feat/125-broad-root-manager"
+	if _, err := manager.Create(context.Background(), branch, "main"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	managerPath := filepath.Join(defaultRoot, "feat-125-broad-root-manager")
+	t.Cleanup(func() {
+		runGitForTest(t, repo, "worktree", "remove", "--force", managerPath)
+		runGitForTest(t, repo, "branch", "-D", branch)
+	})
+
+	linkedManager, err := NewWorktreeManager(managerPath, filepath.Dir(repo), ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager(linked manager, broad root) error = %v", err)
+	}
+	report, err := linkedManager.Clean(context.Background())
+	if err != nil {
+		t.Fatalf("linked manager Clean() error = %v", err)
+	}
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatalf("main checkout was removed: %v", err)
+	}
+	if _, err := os.Stat(managerPath); err != nil {
+		t.Fatalf("manager checkout was removed: %v", err)
+	}
+	for _, evidence := range report.Commands {
+		if len(evidence.Argv) >= 5 && evidence.Argv[3] == "worktree" && evidence.Argv[4] == "remove" {
+			t.Fatalf("Clean() attempted destructive worktree removal: %#v", report.Commands)
+		}
+		if len(evidence.Argv) >= 5 && evidence.Argv[3] == "branch" && (evidence.Argv[4] == "-d" || evidence.Argv[4] == "-D") {
+			t.Fatalf("Clean() attempted destructive branch deletion: %#v", report.Commands)
+		}
+	}
+}
+
 func TestCreateDeveloperWorktreeUsesNormalizedBranchDirectory(t *testing.T) {
 	requireGit(t)
 	repo := initGitRepo(t)
