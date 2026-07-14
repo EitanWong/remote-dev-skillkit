@@ -21,21 +21,21 @@ type PRPlan struct {
 	Args   []string `json:"args"`
 }
 
-// GitHubExecutor runs an argv-form GitHub CLI command in a repository.
-// Implementations must execute argv[0] directly; the git-only ExecRunner is
-// not compatible because it prefixes commands with "git -C".
+// GitHubExecutor is a dedicated boundary for approved GitHub PR creation.
+// ExecRunner intentionally cannot satisfy it.
 type GitHubExecutor interface {
-	Run(ctx context.Context, dir string, args ...string) (CommandEvidence, error)
+	executeGitHubPR(ctx context.Context, dir string, plan PRPlan) (CommandEvidence, error)
 }
 
 // GitHubRunner executes gh directly and never prefixes it with git -C.
 type GitHubRunner struct{}
 
-func (GitHubRunner) Run(ctx context.Context, dir string, args ...string) (CommandEvidence, error) {
-	if len(args) == 0 {
-		return CommandEvidence{}, fmt.Errorf("command argv is required")
+func (GitHubRunner) executeGitHubPR(ctx context.Context, dir string, plan PRPlan) (CommandEvidence, error) {
+	args := buildPRArgs(plan)
+	if len(args) < 3 || args[0] != "gh" || args[1] != "pr" || args[2] != "create" {
+		return CommandEvidence{}, fmt.Errorf("github runner only supports gh pr create")
 	}
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := exec.CommandContext(ctx, "gh", args[1:]...)
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	var stdout bytes.Buffer
@@ -100,7 +100,7 @@ func ExecutePR(ctx context.Context, r GitHubExecutor, repoRoot string, plan PRPl
 		return CommandEvidence{}, err
 	}
 
-	evidence, err := r.Run(ctx, repoRoot, normalizedPlan.Args...)
+	evidence, err := r.executeGitHubPR(ctx, repoRoot, normalizedPlan)
 	evidence = redactEvidence(evidence)
 	if err == nil {
 		return evidence, nil
@@ -162,26 +162,61 @@ func normalizePRBody(issue int64, body string) (string, error) {
 		return "", fmt.Errorf("pull request body must not include surrounding whitespace")
 	}
 
-	required := "Closes #" + strconv.FormatInt(issue, 10)
-	matches := issueReferencePattern.FindAllStringSubmatch(body, -1)
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-		if !strings.EqualFold(match[1], "closes") {
-			continue
-		}
-		if match[2] != strconv.FormatInt(issue, 10) {
+	required := canonicalClosure(issue)
+	closures, err := parseClosureReferences(body)
+	if err != nil {
+		return "", err
+	}
+	for _, closure := range closures {
+		if closure != issue {
 			return "", fmt.Errorf("pull request body must include %s", required)
 		}
 	}
-	if strings.Contains(body, required) {
+	if len(closures) > 0 {
 		return body, nil
 	}
 	return body + "\n\n" + required, nil
 }
 
-var issueReferencePattern = regexp.MustCompile(`(?im)\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#([0-9]+)\b`)
+func canonicalClosure(issue int64) string {
+	return "Closes #" + strconv.FormatInt(issue, 10)
+}
+
+var closurePattern = regexp.MustCompile(`(?i)\bcloses\s+#([0-9A-Za-z_-]+)`)
+var malformedEmbeddedClosurePattern = regexp.MustCompile(`(?i)[A-Za-z0-9_]closes\s+#`)
+var malformedClosureStartPattern = regexp.MustCompile(`(?i)\bcloses\s+#(?:$|[^0-9\s])`)
+
+func parseClosureReferences(body string) ([]int64, error) {
+	if malformedEmbeddedClosurePattern.MatchString(body) ||
+		malformedClosureStartPattern.MatchString(body) {
+		return nil, fmt.Errorf("pull request body has malformed closure reference")
+	}
+	matches := closurePattern.FindAllStringSubmatch(body, -1)
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	issues := make([]int64, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		value := match[1]
+		if value == "" {
+			continue
+		}
+		for _, r := range value {
+			if r < '0' || r > '9' {
+				return nil, fmt.Errorf("pull request body has malformed closure reference %q", match[0])
+			}
+		}
+		issue, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("pull request body has malformed closure reference %q", match[0])
+		}
+		issues = append(issues, issue)
+	}
+	return issues, nil
+}
 
 var tokenPattern = regexp.MustCompile(`(?i)(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._~+/=-]+|(?:token|password|secret|authorization)(?:\s*[:=]\s*|\s+)(?:bearer\s+)?[^\s,;]+)`)
 

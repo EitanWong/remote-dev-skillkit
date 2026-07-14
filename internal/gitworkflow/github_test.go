@@ -60,6 +60,25 @@ func TestPlanPRRequiresMatchingIssueText(t *testing.T) {
 	}
 }
 
+func TestPlanPRRejectsMalformedClosureReferences(t *testing.T) {
+	for _, body := range []string{
+		"## Summary\n- add policy reporting\n\nCloses #123abc",
+		"## Summary\n- add policy reporting\n\nnotCloses #123",
+	} {
+		t.Run(strings.ReplaceAll(body, " ", "_"), func(t *testing.T) {
+			_, err := PlanPR(
+				Repo{Root: "/repo"},
+				BranchRef{Name: "feat/123-worktree-governance", Type: "feat", Issue: 123, Slug: "worktree-governance"},
+				"feat: add git policy reports",
+				body,
+			)
+			if err == nil {
+				t.Fatalf("PlanPR() expected malformed closure error for %q", body)
+			}
+		})
+	}
+}
+
 func TestExecutePRUsesArgvAndSanitizesAuthenticationFailure(t *testing.T) {
 	plan := PRPlan{
 		Schema: SchemaVersion,
@@ -166,18 +185,32 @@ func TestGitHubRunnerRunsGHDirectly(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 
-	evidence, err := (GitHubRunner{}).Run(context.Background(), dir, "gh", "pr", "create", "--title", "feat: add policy")
-	if err != nil {
-		t.Fatalf("GitHubRunner.Run() error = %v", err)
+	plan := PRPlan{
+		Schema: SchemaVersion,
+		Base:   "main",
+		Head:   "feat/123-worktree-governance",
+		Title:  "feat: add policy",
+		Body:   "Closes #123",
 	}
-	if got, want := strings.Join(evidence.Argv, " "), "gh pr create --title feat: add policy"; got != want {
+	evidence, err := (GitHubRunner{}).executeGitHubPR(context.Background(), dir, plan)
+	if err != nil {
+		t.Fatalf("GitHubRunner.executeGitHubPR() error = %v", err)
+	}
+	if got, want := strings.Join(evidence.Argv, " "), "gh pr create --base main --head feat/123-worktree-governance --title feat: add policy --body Closes #123"; got != want {
 		t.Fatalf("argv = %q, want %q", got, want)
 	}
 	if strings.Contains(strings.Join(evidence.Argv, " "), "git -C") {
 		t.Fatalf("argv incorrectly used git -C: %#v", evidence.Argv)
 	}
-	if got, want := strings.TrimSpace(evidence.Stdout), "pr\ncreate\n--title\nfeat: add policy"; got != want {
+	if got, want := strings.TrimSpace(evidence.Stdout), "pr\ncreate\n--base\nmain\n--head\nfeat/123-worktree-governance\n--title\nfeat: add policy\n--body\nCloses #123"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecRunnerCannotSatisfyGitHubExecutor(t *testing.T) {
+	var candidate any = ExecRunner{}
+	if _, ok := candidate.(GitHubExecutor); ok {
+		t.Fatal("ExecRunner must not satisfy GitHubExecutor")
 	}
 }
 
@@ -210,7 +243,8 @@ type rawCommandRunner struct {
 	err      error
 }
 
-func (r *rawCommandRunner) Run(_ context.Context, dir string, args ...string) (CommandEvidence, error) {
+func (r *rawCommandRunner) executeGitHubPR(_ context.Context, dir string, plan PRPlan) (CommandEvidence, error) {
+	args := buildPRArgs(plan)
 	r.args = append([]string(nil), args...)
 	if len(r.evidence.Argv) == 0 {
 		r.evidence.Argv = append([]string(nil), args...)
