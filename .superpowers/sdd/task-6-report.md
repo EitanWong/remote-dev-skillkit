@@ -28,3 +28,26 @@ Done. The governance files and scripts are in place and verified.
 
 ## Concerns
 - None.
+
+## Fix report
+
+### Status
+- Applied the requested safety fixes for malformed GitHub API responses, token redaction, repo validation, and CODEOWNERS ownership.
+
+### Files
+- `.github/CODEOWNERS`
+- `scripts/github/apply-git-governance.sh`
+- `scripts/github/git-governance_test.sh`
+
+### Commit
+- Pending after this report update.
+
+### Tests
+- `bash -n scripts/github/plan-git-governance.sh`
+- `bash -n scripts/github/apply-git-governance.sh`
+- `bash -n scripts/github/git-governance_test.sh`
+- `bash scripts/github/git-governance_test.sh`
+- `git diff --check`
+
+### Concerns
+- None.
