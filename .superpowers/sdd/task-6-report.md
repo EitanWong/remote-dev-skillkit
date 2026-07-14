@@ -27,3 +27,27 @@
 ## Notes
 - Tests do not contact GitHub or mutate real settings.
 - The apply script only proceeds with `--execute`.
+
+## Fix report
+
+### Status
+- Implemented the requested review fixes for Task 6.
+- Verified the governance scripts remain read-only in plan mode and fake-gh only in tests.
+
+### Files changed
+- `.github/governance/branch-ruleset.json`
+- `scripts/github/apply-git-governance.sh`
+- `scripts/github/git-governance_test.sh`
+- `.superpowers/sdd/task-6-report.md`
+
+### Commit
+- `715bfef` — `fix: tighten github governance scripts`
+
+### Tests
+- `bash -n scripts/github/plan-git-governance.sh scripts/github/apply-git-governance.sh scripts/github/git-governance_test.sh`
+- `scripts/github/git-governance_test.sh`
+- JSON validation for `.github/governance/branch-ruleset.json` and `.github/governance/commit-policy.json`
+- `git diff --check`
+
+### Concerns
+- None.
