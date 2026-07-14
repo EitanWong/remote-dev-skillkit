@@ -12,3 +12,4 @@
 - Concerns:
   - Cleanup and lifecycle guidance must continue to distinguish the stable/main checkout manager boundary from the external worktree.
   - Draft PRs remain a GitHub UI/manual choice only; the CLI still creates a normal PR.
+  - Lifecycle examples now show `--repo <main-checkout>` consistently alongside `--root` for worktree commands.

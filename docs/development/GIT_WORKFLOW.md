@@ -38,8 +38,9 @@ worktree.
 
 ```bash
 gh issue create --title "Track worktree governance" --body "..."
-go run ./cmd/rdev git worktree create --repo . --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree doctor --repo . --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree list --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
 cd ../.worktrees/remote-dev-skillkit/feat-123-worktree-governance
 go run ./cmd/rdev git policy check
 go run ./cmd/rdev git pr plan
@@ -54,14 +55,14 @@ create a PR.
 
 1. Create or confirm the issue first.
 2. Choose one supported path:
-   - `go run ./cmd/rdev git worktree create --repo . --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit`
+   - `go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit`
      for the external-worktree flow; or
    - `go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main`
      for a local-checkout-only branch.
 3. For the worktree flow, `cd` into the created external worktree before policy
    or PR commands.
 4. Make changes in the worktree, not in the main checkout.
-5. Run `go run ./cmd/rdev git worktree doctor --repo . --root
+5. Run `go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root
    ../.worktrees/remote-dev-skillkit` from the stable/main checkout before
    planning the PR.
 6. Run `go run ./cmd/rdev git policy check` from inside the external worktree
@@ -83,9 +84,9 @@ create a PR.
 Recommended commands:
 
 ```bash
-go run ./cmd/rdev git worktree create --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree list --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree doctor --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree list --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
 ```
 
 `--root` applies only to worktree lifecycle commands. Valid flag shapes:
