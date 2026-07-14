@@ -308,7 +308,7 @@ func resolveCommonRepoRoot(ctx context.Context, dir string, r Runner) (string, C
 	return filepath.Dir(commonDir), evidence, nil
 }
 
-func validateBaseRef(base string) error {
+func ValidateBaseRef(base string) error {
 	if base == "" {
 		return fmt.Errorf("base reference is required")
 	}
@@ -344,6 +344,10 @@ func validateBaseRef(base string) error {
 		}
 	}
 	return nil
+}
+
+func validateBaseRef(base string) error {
+	return ValidateBaseRef(base)
 }
 
 func failPolicy(report PolicyReport, check PolicyCheck) (PolicyReport, error) {

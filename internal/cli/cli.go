@@ -12080,14 +12080,14 @@ Usage:
   rdev workspace prepare-worktree --repo . --host-id hst_... --task-id task_... --adapter codex
   rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main
   rdev git worktree create --branch feat/123-worktree-governance
-  rdev git worktree list
-  rdev git worktree doctor
-  rdev git worktree clean
-  rdev git worktree remove --branch feat/123-worktree-governance
+  rdev git worktree list --root ../.worktrees/remote-dev-skillkit
+  rdev git worktree doctor --root ../.worktrees/remote-dev-skillkit
+  rdev git worktree clean --root ../.worktrees/remote-dev-skillkit
+  rdev git worktree remove --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit
   rdev git policy check
   rdev git sync
-  rdev git pr plan
-  rdev git pr create --execute
+  rdev git pr plan --base origin/main
+  rdev git pr create --execute --base origin/main
   rdev acceptance fresh-agent-support-session --out fresh-agent-support-session
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo . --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify

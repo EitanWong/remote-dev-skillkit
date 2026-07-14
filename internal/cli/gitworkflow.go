@@ -50,13 +50,13 @@ func (a App) gitBranch(ctx context.Context, args []string) error {
 	if *issue <= 0 {
 		return fmt.Errorf("issue is required and must be a positive integer")
 	}
+	if err := gitworkflow.ValidateBaseRef(*base); err != nil {
+		return err
+	}
 	branchName := fmt.Sprintf("%s/%d-%s", *branchType, *issue, *slug)
 	branch, err := gitworkflow.ParseBranch(branchName)
 	if err != nil {
 		return err
-	}
-	if strings.TrimSpace(*base) == "" {
-		return fmt.Errorf("base reference is required")
 	}
 	repo, runner, err := discoverGitWorkflowRepo(ctx, *repoPath)
 	if err != nil {
@@ -110,6 +110,9 @@ func (a App) gitWorktreeCreate(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*branch) == "" {
 		return fmt.Errorf("branch is required")
 	}
+	if err := gitworkflow.ValidateBaseRef(*base); err != nil {
+		return err
+	}
 	repo, runner, err := discoverGitWorkflowRepo(ctx, *repoPath)
 	if err != nil {
 		return err
@@ -134,6 +137,7 @@ func (a App) gitWorktreeList(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git worktree list", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
 	repoPath := fs.String("repo", ".", "repository path")
+	root := fs.String("root", "", "developer worktree root")
 	if err := parseGitWorkflowFlags(fs, args); err != nil {
 		return err
 	}
@@ -141,11 +145,7 @@ func (a App) gitWorktreeList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	root, err := gitworkflow.DefaultWorktreeRoot(repo.Root)
-	if err != nil {
-		return err
-	}
-	manager, err := gitworkflow.NewWorktreeManager(repo.Root, root, runner)
+	manager, err := gitworkflow.NewWorktreeManager(repo.Root, *root, runner)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (a App) gitWorktreeList(ctx context.Context, args []string) error {
 		"ok":        true,
 		"operation": "worktree.list",
 		"repo_root": repo.Root,
-		"root":      root,
+		"root":      manager.Root,
 		"entries":   entries,
 		"commands":  commands,
 	})
@@ -248,6 +248,9 @@ func (a App) gitPolicy(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := gitworkflow.ValidateBaseRef(*base); err != nil {
+		return err
+	}
 	report, err := gitworkflow.CheckPolicy(ctx, repo, runner, *base)
 	if err != nil {
 		return err
@@ -313,6 +316,9 @@ func (a App) gitPRPlan(ctx context.Context, args []string, execute bool) error {
 	if execute && !*executeFlag {
 		return fmt.Errorf("git pr create requires --execute")
 	}
+	if err := gitworkflow.ValidateBaseRef(*base); err != nil {
+		return err
+	}
 	repo, runner, err := discoverGitWorkflowRepo(ctx, *repoPath)
 	if err != nil {
 		return err
@@ -325,7 +331,7 @@ func (a App) gitPRPlan(ctx context.Context, args []string, execute bool) error {
 	if err != nil {
 		return err
 	}
-	plan, err := gitworkflow.PlanPR(repo, branch, *title, *body)
+	plan, err := gitworkflow.PlanPR(repo, branch, defaultPRTitle(branch, *title), defaultPRBody(branch, *body))
 	if err != nil {
 		return err
 	}
@@ -374,7 +380,7 @@ func currentGitBranch(ctx context.Context, runner gitworkflow.Runner, repoRoot s
 func parseGitWorkflowFlags(fs *flag.FlagSet, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return nil
+			return flag.ErrHelp
 		}
 		return err
 	}
@@ -382,6 +388,20 @@ func parseGitWorkflowFlags(fs *flag.FlagSet, args []string) error {
 		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	return nil
+}
+
+func defaultPRTitle(branch gitworkflow.BranchRef, title string) string {
+	if strings.TrimSpace(title) != "" {
+		return title
+	}
+	return fmt.Sprintf("%s: update %s", branch.Type, strings.ReplaceAll(branch.Slug, "-", " "))
+}
+
+func defaultPRBody(branch gitworkflow.BranchRef, body string) string {
+	if strings.TrimSpace(body) != "" {
+		return body
+	}
+	return fmt.Sprintf("Closes #%d", branch.Issue)
 }
 
 func (a App) emitGitWorkflow(value any) error {
