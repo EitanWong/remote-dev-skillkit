@@ -1,15 +1,17 @@
-## Task 8 review fix
+# Task 8 Report
 
-- Status: completed
-- Files:
-  - `docs/development/GIT_WORKFLOW.md`
-  - `CONTRIBUTING.md`
-  - `docs/README.md`
-- Commit: `docs: tighten git workflow command scopes`
-- Tests / checks:
-  - `rtk proxy rg -n "feat/[0-9]+-|rdev git|worktree|Squash|--execute|codex/" CONTRIBUTING.md docs/README.md docs/development/GIT_WORKFLOW.md`
-  - `rtk git diff --check`
-- Concerns:
-  - Cleanup and lifecycle guidance must continue to distinguish the stable/main checkout manager boundary from the external worktree.
-  - Draft PRs remain a GitHub UI/manual choice only; the CLI still creates a normal PR.
-  - Lifecycle examples now show `--repo <main-checkout>` consistently alongside `--root` for worktree commands.
+## Files updated
+- `docs/development/GIT_WORKFLOW.md`
+- `CONTRIBUTING.md`
+- `docs/README.md`
+
+## What changed
+- Documented the issue-first Git branch and external worktree lifecycle.
+- Added strict `<type>/<issue>-<slug>` naming guidance and valid examples.
+- Documented the approved runnable path, including `gh issue create`, `rdev git branch create`, `rdev git worktree create`, `rdev git worktree doctor`, `rdev git pr plan`, and `rdev git pr create --execute`.
+- Clarified multi-worktree use, Draft PR timing, review/merge rules, cleanup/recovery, hotfix/release handling, agent use, GitHub Ruleset boundaries, and legacy `codex/*` migration.
+- Updated cross-links in `CONTRIBUTING.md` and `docs/README.md`.
+
+## Verification
+- `rtk rg -n "feat/[0-9]+-|rdev git|worktree|Squash|--execute|codex/" CONTRIBUTING.md docs/README.md docs/development/GIT_WORKFLOW.md`
+- `rtk git diff --check`

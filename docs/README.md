@@ -24,7 +24,7 @@ the toolkit.
 | Adapter SDK and conformance | [Adapter SDK](operations/ADAPTER_SDK.md) |
 | Dev gateway behavior | [Dev Gateway](operations/DEV_GATEWAY.md) |
 | Acceptance and release evidence | [Acceptance](operations/ACCEPTANCE.md) |
-| Branch, worktree, PR, and recovery workflow | [Git Workflow](development/GIT_WORKFLOW.md) |
+| Issue-linked branch, external worktree, PR, recovery, and migration workflow | [Git Workflow](development/GIT_WORKFLOW.md) |
 | GitHub workflow enforcement, PR template requirements, and local verification commands | [Contributing Guide](../CONTRIBUTING.md) |
 
 ## Architecture

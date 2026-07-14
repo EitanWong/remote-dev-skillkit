@@ -19,15 +19,19 @@ opening a pull request.
 ## Branch and Pull Request Workflow
 
 - See [Git Workflow](docs/development/GIT_WORKFLOW.md) for the exact runnable
-  branch, worktree, PR, recovery, and migration flow.
+  issue, branch, worktree, PR, recovery, hotfix, release, and migration flow.
 - Create issue-linked branches that match `<type>/<issue>-<slug>`, such as
   `feat/123-git-policy-workflow` or `fix/456-main-pr-base`.
 - The parser requires the exact shape
   `^(feat|fix|refactor|docs|test|chore|perf|ci|hotfix|release)/([0-9]+)-([a-z0-9]+(?:-[a-z0-9]+)*)$`.
   The issue must be a positive integer, the slug must be lowercase ASCII, and
   hyphen separators are required between slug words.
-- Use `go run ./cmd/rdev git pr plan` before any external mutation, then use
-  `go run ./cmd/rdev git pr create --execute` only when the branch is ready.
+- Use the approved CLI path: `go run ./cmd/rdev git branch create`, `go run
+  ./cmd/rdev git worktree create`, `go run ./cmd/rdev git worktree doctor`,
+  `go run ./cmd/rdev git pr plan`, then `go run ./cmd/rdev git pr create
+  --execute` only when ready.
+- `--execute` is required for the external PR mutation. Planning commands,
+  branch creation, and local checks are not substitutes for that boundary.
 - Keep developer worktrees outside the repository tree. A shared root such as
   `../.worktrees/remote-dev-skillkit` is valid. `branch create` and `git sync`
   use `--repo` only. Worktree lifecycle commands use `--repo` and optional
@@ -47,7 +51,8 @@ git worktree list --porcelain | sed -n '1,8p'
 ```
 
 - Before opening a PR, run `./scripts/ci/git-policy.sh` to verify the branch,
-  PR base, and PR issue linkage checks enforced in GitHub Actions.
+  PR base, and PR issue linkage checks enforced in GitHub Actions and
+  GitHub Ruleset protection.
 - Before committing CI workflow or wrapper changes, run:
 
 ```bash

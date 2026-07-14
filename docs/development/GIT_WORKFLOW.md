@@ -1,7 +1,7 @@
 # Git Workflow
 
-This guide documents the implemented `rdev git` workflow for issue-first
-branch creation, external worktrees, ready PRs, and recovery.
+This guide documents the approved issue-first Git branch and external worktree
+workflow for Remote Dev Skillkit.
 
 ## Canonical branch format
 
@@ -30,16 +30,15 @@ Examples:
 Do not create new `codex/*` branches for normal work. See the legacy migration
 section for the only acceptable `codex/*` references.
 
-## Canonical runnable path
+## Approved runnable path
 
-For the external-worktree flow, use `worktree create` directly. Do not create a
-branch in the current checkout and then create the same branch again in a new
-worktree.
+The canonical flow is issue first, branch second, external worktree third, PR
+planning fourth, and PR creation last.
 
 ```bash
 gh issue create --title "Track worktree governance" --body "..."
-go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree list --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main
+go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base origin/main --root ../.worktrees/remote-dev-skillkit
 go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
 cd ../.worktrees/remote-dev-skillkit/feat-123-worktree-governance
 go run ./cmd/rdev git policy check
@@ -47,49 +46,77 @@ go run ./cmd/rdev git pr plan
 go run ./cmd/rdev git pr create --execute
 ```
 
-`go run ./cmd/rdev git pr create --execute` is the external-mutation boundary.
-`go run ./cmd/rdev git pr plan` only plans the ready PR payload; it does not
-create a PR.
+Notes:
+
+- `go run ./cmd/rdev git pr plan` is the review checkpoint. It shows the title,
+  body, base, and head without mutating GitHub.
+- `go run ./cmd/rdev git pr create --execute` is the external-mutation
+  boundary for the approved CLI. Do not skip `--execute`.
+- `gh issue create` is also an external mutation and should only be run when the
+  issue creation itself is intended and authorized.
+- The example worktree path uses the actual branch name, with `/` normalized to
+  `-`, so the worktree directory is `feat-123-worktree-governance`.
 
 ## Issue-first lifecycle
 
-1. Create or confirm the issue first.
-2. Choose one supported path:
-   - `go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit`
-     for the external-worktree flow; or
-   - `go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main`
-     for a local-checkout-only branch.
-3. For the worktree flow, `cd` into the created external worktree before policy
-   or PR commands.
-4. Make changes in the worktree, not in the main checkout.
-5. Run `go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root
-   ../.worktrees/remote-dev-skillkit` from the stable/main checkout before
-   planning the PR.
-6. Run `go run ./cmd/rdev git policy check` from inside the external worktree
-   or with `--repo` pointing at that worktree before planning the PR.
-7. Run `go run ./cmd/rdev git pr plan` to inspect the generated ready PR
-   title, body, head, and base.
-8. Run `go run ./cmd/rdev git pr create --execute` only when the branch is
-   clean, reviewed, and ready for the external PR mutation.
+1. Create or confirm the tracking issue first.
+2. Create the conforming branch:
+
+   ```bash
+   go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main
+   ```
+
+3. Create the external worktree from the stable/main checkout:
+
+   ```bash
+   go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base origin/main --root ../.worktrees/remote-dev-skillkit
+   ```
+
+4. Move into the external worktree before making changes:
+
+   ```bash
+   cd ../.worktrees/remote-dev-skillkit/feat-123-worktree-governance
+   ```
+
+5. Verify the worktree mapping from the stable/main checkout:
+
+   ```bash
+   go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
+   ```
+
+6. Run policy checks from the worktree or with `--repo` pointed at the
+   worktree:
+
+   ```bash
+   go run ./cmd/rdev git policy check
+   ```
+
+7. Plan the PR:
+
+   ```bash
+   go run ./cmd/rdev git pr plan
+   ```
+
+8. Create the PR only when the branch is ready and the worktree is clean:
+
+   ```bash
+   go run ./cmd/rdev git pr create --execute
+   ```
 
 ## Multi-worktree use
 
-- Keep one branch per task and one worktree per active branch.
+- Keep one issue-linked branch per task and one worktree per active branch.
 - Use an external shared root such as `../.worktrees/remote-dev-skillkit`.
-- Worktree roots must stay outside the repository tree; the manager rejects
-  roots that live inside the repo.
-- Use `go run ./cmd/rdev git worktree list --root ../.worktrees/remote-dev-skillkit`
-  to confirm which path belongs to which branch.
+- Keep worktree roots outside the repository tree; manager commands reject roots
+  that live inside the repo.
+- Run `go run ./cmd/rdev git worktree list --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit`
+  to see which worktree path belongs to which branch.
+- Use the stable/main checkout as the manager boundary for branch and worktree
+  lifecycle commands.
+- If you are already inside the external worktree, omit `--repo` only for policy
+  and PR commands.
 
-Recommended commands:
-
-```bash
-go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree list --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
-```
-
-`--root` applies only to worktree lifecycle commands. Valid flag shapes:
+Valid flag shapes:
 
 - `go run ./cmd/rdev git branch create --type <type> --issue <n> --slug <slug> [--base <ref>] [--repo <checkout>]`
 - `go run ./cmd/rdev git worktree create --repo <main-checkout> --branch <branch> [--base <ref>] [--root <developer-root>]`
@@ -99,24 +126,27 @@ go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktree
 - `go run ./cmd/rdev git worktree remove --repo <main-checkout> --branch <branch> [--root <developer-root>] [--force]`
 - `go run ./cmd/rdev git sync --repo <main-checkout> [--prune]`
 
-If you are already inside the external worktree, omit `--repo` only for policy
-and PR commands. The stable/main checkout is still the manager boundary for
-lifecycle commands because the current manager checkout is excluded and
-refused.
+Recommended evidence commands for PR notes:
 
-## PR timing
+```bash
+git branch --show-current
+git worktree list --porcelain | sed -n '1,8p'
+```
 
-- Open the ready PR only after the branch name, worktree state, and policy
-  checks are clean.
-- Use `go run ./cmd/rdev git pr plan` as the review point for title, body,
-  base, and head before any external mutation.
-- `go run ./cmd/rdev git pr create --execute` calls `gh pr create` with the exact argv shape
-  `gh pr create --base <base> --head <head> --title <title> --body <body>`.
-- The current implementation creates a normal PR with that exact argv.
-- The CLI has no `--draft` flag. If a Draft PR is desired, mark it manually in
-  the GitHub UI after creation.
-- Squash merge after review. Do not use merge commits or rebase merges for
-  this workflow.
+## PR timing, review, and merge rules
+
+- Treat the branch as draft-ready until `go run ./cmd/rdev git pr plan` has been
+  reviewed and the worktree is clean.
+- Open the PR only after the branch name, worktree state, issue linkage, and
+  policy checks are clean.
+- Include matching issue text in the PR body, for example `Closes #123`.
+- GitHub required checks must remain stable as `git-policy` and `go-checks`.
+- Open pull requests against `main` only.
+- Squash merge after review. Do not use merge commits or rebase merges for this
+  workflow.
+- The approved CLI does not create a Draft PR state directly. If a GitHub Draft
+  PR is required by process, create the PR only after review and then convert it
+  in GitHub before handoff.
 
 ## Cleanup and recovery
 
@@ -125,9 +155,11 @@ from the target external worktree.
 
 - `go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <root>`
   removes eligible merged-clean worktrees and their branches.
-- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch <branch>`
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root>
+  --branch <branch>`
   removes a specific eligible target that was not already cleaned.
-- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch <branch> --force`
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root>
+  --branch <branch> --force`
   is the dirty merged-worktree example. The current implementation still
   rejects unmerged branches even with `--force`.
 
@@ -135,12 +167,9 @@ Recovery rules:
 
 - If the checkout is dirty, finish, stash, or discard local changes before
   `go run ./cmd/rdev git pr create --execute`.
-- `go run ./cmd/rdev git worktree clean` removes eligible merged-clean
-  worktrees and their branches from the stable checkout. Use
-  `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch <branch>`
-  only for a specific eligible target that was not already cleaned.
-- For dirty merged worktrees, use the `--force` form shown above. The current
-  implementation still rejects unmerged branches even with `--force`.
+- Do not let stale local state trigger a remote mutation. Re-run
+  `go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit`
+  before planning the PR if the branch or path moved.
 - If metadata looks stale after branch deletion or a move, use Git’s repair
   path from the main checkout or a linked worktree: `git worktree move
   <old-path> <new-path>` for planned moves, `git worktree repair <path...>` for
@@ -154,18 +183,36 @@ Use the same branch format for urgent and release work:
 - `hotfix/<issue>-<slug>` for production fixes.
 - `release/<issue>-<slug>` for release tracking or stabilization.
 
+Example issue-linked branches:
+
+- `hotfix/456-rollback-bad-release`
+- `release/789-2026-07-15-cut`
+
 The lifecycle stays the same: create the issue, create the branch, create the
 worktree, verify, plan the PR, and only then execute the PR creation step.
+Use the release or maintenance base that matches the issue; the branch name
+still must follow the same strict `<type>/<issue>-<slug>` pattern.
 
 ## Agent use
 
 - Use planner-style reasoning before branch or worktree changes that touch
-  multiple files or release state.
+  multiple files, multiple worktrees, or release state.
 - Use reviewer-style validation before `go run ./cmd/rdev git pr create
   --execute`, especially for hotfix, release, cleanup, and recovery work.
 - For docs-only changes, still run the same verification commands and a
   self-review before committing.
 - Never let an agent bypass the `--execute` boundary for external mutations.
+
+## GitHub Ruleset and external mutation boundaries
+
+- GitHub branch protection or rulesets should continue to gate `main`; this
+  workflow expects the required checks to block unsafe merges.
+- Any command that writes to GitHub, deletes remote refs, or publishes a PR is
+  an external mutation and must be deliberate.
+- Within the approved CLI flow, only `go run ./cmd/rdev git pr create
+  --execute` crosses the external mutation boundary on your behalf.
+- Do not treat planning commands, local checks, or branch creation in the
+  current checkout as a substitute for the external mutation step.
 
 ## Legacy `codex/*` migration only
 
