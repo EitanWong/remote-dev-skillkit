@@ -13,6 +13,9 @@ gh_log="$tmp_dir/gh.log"
 plan_out="$tmp_dir/plan.json"
 apply_out="$tmp_dir/apply.out"
 apply_err="$tmp_dir/apply.err"
+fixed_plan_path="$repo_root/scripts/github/.git-governance.plan.json"
+fixed_plan_backup="$tmp_dir/fixed-plan.backup"
+fixed_plan_existed=0
 gh_token_value="$(python3 - <<'PY'
 import secrets
 
@@ -82,6 +85,16 @@ export PATH="$fake_bin:$PATH"
 plan_script="$repo_root/scripts/github/plan-git-governance.sh"
 apply_script="$repo_root/scripts/github/apply-git-governance.sh"
 
+if [[ -f "$fixed_plan_path" ]]; then
+  fixed_plan_existed=1
+  cp "$fixed_plan_path" "$fixed_plan_backup"
+fi
+
+cat >"$fixed_plan_path" <<'EOF'
+sentinel
+EOF
+fixed_plan_before="$(cat "$fixed_plan_path")"
+
 plan_stdout="$tmp_dir/plan.out"
 "$plan_script" --repo example-org/example-repo >"$plan_stdout"
 python3 - "$plan_stdout" <<'PY'
@@ -93,9 +106,31 @@ payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert payload["schema_version"] == "rdev.github-governance-plan.v1"
 assert payload["repo"] == "example-org/example-repo"
 assert payload["external_mutation"] is False
-assert payload["governance"]["branch_ruleset"]["rules"][0]["type"] == "pull_request"
+branch_ruleset = payload["governance"]["branch_ruleset"]
+pull_request_rule = branch_ruleset["rules"][0]
+required_status_checks_rule = branch_ruleset["rules"][2]
+assert branch_ruleset["conditions"]["ref_name"]["include"] == ["refs/heads/main"]
+assert pull_request_rule["type"] == "pull_request"
+assert pull_request_rule["parameters"]["allowed_merge_methods"] == ["squash"]
+assert pull_request_rule["parameters"]["required_approving_review_count"] == 1
+assert pull_request_rule["parameters"]["require_code_owner_review"] is True
+assert pull_request_rule["parameters"]["required_review_thread_resolution"] is True
+assert pull_request_rule["parameters"]["dismiss_stale_reviews_on_push"] is True
+assert pull_request_rule["parameters"]["require_last_push_approval"] is False
+assert branch_ruleset["rules"][1]["type"] == "required_linear_history"
+assert required_status_checks_rule["type"] == "required_status_checks"
+assert required_status_checks_rule["parameters"]["strict_required_status_checks_policy"] is True
+assert [item["context"] for item in required_status_checks_rule["parameters"]["required_status_checks"]] == ["git-policy", "go-checks"]
+assert branch_ruleset["rules"][3]["type"] == "non_fast_forward"
+assert branch_ruleset["rules"][4]["type"] == "deletion"
 assert payload["governance"]["commit_policy"]["rules"][0]["type"] == "commit_message_pattern"
-assert payload["repo_settings"]["delete_branch_on_merge"] is True
+assert payload["repo_settings"] == {
+    "allow_squash_merge": True,
+    "allow_merge_commit": False,
+    "allow_rebase_merge": False,
+    "delete_branch_on_merge": True,
+    "allow_auto_merge": False,
+}
 PY
 
 if "$apply_script" --repo example-org/example-repo >"$apply_out" 2>"$apply_err"; then
@@ -132,5 +167,20 @@ assert any("repos/example-org/example-repo/rulesets?per_page=100&targets=branch"
 assert any("repos/example-org/example-repo/rulesets" in line for line in normalized)
 assert any("repos/example-org/example-repo" in line for line in normalized)
 PY
+
+python3 - "$repo_root/scripts/github/.git-governance.plan.json" "$fixed_plan_before" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+before = sys.argv[2]
+assert path.read_text().strip() == before.strip()
+PY
+
+if [[ "$fixed_plan_existed" -eq 1 ]]; then
+  cp "$fixed_plan_backup" "$fixed_plan_path"
+else
+  rm -f "$fixed_plan_path"
+fi
 
 printf 'governance tests passed\n'

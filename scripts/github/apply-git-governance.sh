@@ -52,10 +52,10 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
-plan_json="$script_dir/.git-governance.plan.json"
 branch_ruleset_path="$repo_root/.github/governance/branch-ruleset.json"
 commit_policy_path="$repo_root/.github/governance/commit-policy.json"
 repo_settings_tmp="$(mktemp "${TMPDIR:-/tmp}/git-governance-repo-settings.XXXXXX.json")"
+plan_json="$(mktemp "${TMPDIR:-/tmp}/git-governance-plan.XXXXXX.json")"
 trap 'rm -f "$repo_settings_tmp" "$plan_json"' EXIT
 
 if ! command -v gh >/dev/null 2>&1; then
