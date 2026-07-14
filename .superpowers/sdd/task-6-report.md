@@ -40,7 +40,7 @@ Done. The governance files and scripts are in place and verified.
 - `scripts/github/git-governance_test.sh`
 
 ### Commit
-- Pending after this report update.
+- `e72b4ce` — `fix: harden github governance validation`
 
 ### Tests
 - `bash -n scripts/github/plan-git-governance.sh`
