@@ -57,6 +57,48 @@ func TestDefaultWorktreeRootUsesCommonRepositoryNameForLinkedCheckout(t *testing
 	}
 }
 
+func TestLinkedManagerNeverCleansOrRemovesItsOwnCheckout(t *testing.T) {
+	requireGit(t)
+	repo := initGitRepo(t)
+	developerRoot, err := DefaultWorktreeRoot(repo)
+	if err != nil {
+		t.Fatalf("DefaultWorktreeRoot() error = %v", err)
+	}
+	manager, err := NewWorktreeManager(repo, developerRoot, ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager() error = %v", err)
+	}
+	branch := "feat/123-linked-manager"
+	if _, err := manager.Create(context.Background(), branch, "main"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	linkedCheckout := filepath.Join(developerRoot, "feat-123-linked-manager")
+	t.Cleanup(func() {
+		runGitForTest(t, repo, "worktree", "remove", "--force", linkedCheckout)
+	})
+
+	linkedManager, err := NewWorktreeManager(linkedCheckout, "", ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager(linked checkout) error = %v", err)
+	}
+	if _, err := linkedManager.Clean(context.Background()); err != nil {
+		t.Fatalf("linked manager Clean() error = %v", err)
+	}
+	if _, err := os.Stat(linkedCheckout); err != nil {
+		t.Fatalf("linked manager checkout was removed by Clean(): %v", err)
+	}
+
+	if _, err := linkedManager.Remove(context.Background(), branch, false); err == nil {
+		t.Fatal("linked manager Remove() expected manager-checkout rejection")
+	} else if !strings.Contains(err.Error(), "cannot remove manager checkout") {
+		t.Fatalf("linked manager Remove() error = %v, want manager-checkout rejection", err)
+	}
+	if _, err := os.Stat(linkedCheckout); err != nil {
+		t.Fatalf("linked manager checkout was removed by Remove(): %v", err)
+	}
+	runGitForTest(t, repo, "show-ref", "--verify", "refs/heads/"+branch)
+}
+
 func TestCreateDeveloperWorktreeUsesNormalizedBranchDirectory(t *testing.T) {
 	requireGit(t)
 	repo := initGitRepo(t)

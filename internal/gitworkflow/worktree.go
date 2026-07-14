@@ -210,6 +210,10 @@ func (m WorktreeManager) Remove(ctx context.Context, branch string, force bool) 
 		return report, err
 	}
 	for _, entry := range allEntries {
+		if entry.Branch == branch && m.isManagerCheckout(entry) {
+			err := fmt.Errorf("cannot remove manager checkout %q at %q", branch, entry.Path)
+			return m.failReport(report, err.Error()), err
+		}
 		if entry.Branch == branch && !isWithinPath(m.Root, entry.Path) {
 			err := fmt.Errorf("worktree path %q for branch %q is outside developer root %q", entry.Path, branch, m.Root)
 			return m.failReport(report, err.Error()), err
@@ -264,6 +268,9 @@ func (m WorktreeManager) listWorktrees(ctx context.Context) ([]WorktreeEntry, []
 	}
 	var entries []WorktreeEntry
 	for index := range allEntries {
+		if m.isManagerCheckout(allEntries[index]) {
+			continue
+		}
 		if !isManagedEntry(m.Root, allEntries[index]) {
 			continue
 		}
@@ -301,6 +308,10 @@ func (m WorktreeManager) listWorktrees(ctx context.Context) ([]WorktreeEntry, []
 		entries = append(entries, entry)
 	}
 	return allEntries, entries, commands, nil
+}
+
+func (m WorktreeManager) isManagerCheckout(entry WorktreeEntry) bool {
+	return samePath(m.RepoRoot, entry.Path)
 }
 
 func isManagedEntry(root string, entry WorktreeEntry) bool {
@@ -362,6 +373,9 @@ func (m WorktreeManager) removeEntry(ctx context.Context, report *WorktreeReport
 	report.Commands = append(report.Commands, evidence)
 	if err != nil {
 		return err
+	}
+	if err := ensureDirectoryExists(m.RepoRoot); err != nil {
+		return fmt.Errorf("stable checkout %q is unavailable for branch deletion: %w", m.RepoRoot, err)
 	}
 	evidence, err = m.Git.Run(ctx, m.RepoRoot, "branch", "-d", entry.Branch)
 	report.Commands = append(report.Commands, evidence)
@@ -498,6 +512,12 @@ func isWithinPath(root, path string) bool {
 		return false
 	}
 	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
+}
+
+func samePath(left, right string) bool {
+	leftComparable, leftErr := comparablePath(left)
+	rightComparable, rightErr := comparablePath(right)
+	return leftErr == nil && rightErr == nil && filepath.Clean(leftComparable) == filepath.Clean(rightComparable)
 }
 
 func comparablePath(path string) (string, error) {
