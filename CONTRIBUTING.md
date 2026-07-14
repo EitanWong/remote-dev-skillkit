@@ -26,12 +26,14 @@ opening a pull request.
   `^(feat|fix|refactor|docs|test|chore|perf|ci|hotfix|release)/([0-9]+)-([a-z0-9]+(?:-[a-z0-9]+)*)$`.
   The issue must be a positive integer, the slug must be lowercase ASCII, and
   hyphen separators are required between slug words.
-- Use the approved CLI path: `go run ./cmd/rdev git branch create`, `go run
-  ./cmd/rdev git worktree create`, `go run ./cmd/rdev git worktree doctor`,
-  `go run ./cmd/rdev git pr plan`, then `go run ./cmd/rdev git pr create
-  --execute` only when ready.
-- `--execute` is required for the external PR mutation. Planning commands,
-  branch creation, and local checks are not substitutes for that boundary.
+- Use the approved CLI path: `go run ./cmd/rdev git worktree create` for the
+  normal external-worktree flow, or `go run ./cmd/rdev git branch create` only
+  when you intentionally stay in the current checkout. Then run `go run
+  ./cmd/rdev git worktree doctor`, `go run ./cmd/rdev git pr plan`, and `go run
+  ./cmd/rdev git pr create --execute` only when ready.
+- `--execute` is required for the rdev PR/GitHub mutation boundary. Planning
+  commands, branch creation, and local checks are not substitutes for that
+  boundary.
 - Keep developer worktrees outside the repository tree. A shared root such as
   `../.worktrees/remote-dev-skillkit` is valid. `branch create` and `git sync`
   use `--repo` only. Worktree lifecycle commands use `--repo` and optional
@@ -39,6 +41,8 @@ opening a pull request.
   excluded and refused. Only policy and PR commands may omit `--repo` when run
   from inside the external worktree.
 - Open pull requests against `main` only.
+- Release and hotfix branches are maintainer-managed exceptions; ordinary
+  development still targets `main`.
 - GitHub required checks must stay stable as `git-policy` and `go-checks`.
 - Include matching issue text in the PR body, for example `Closes #123`.
 - Prefer Squash merge after review. Do not use merge commits or rebase merges
@@ -60,11 +64,13 @@ bash scripts/ci/git-policy_test.sh
 bash -n scripts/ci/git-policy.sh scripts/ci/git-policy_test.sh
 ```
 - For cleanup, use `go run ./cmd/rdev git worktree clean --repo <main-checkout>
-  --root <root>` for eligible merged-clean worktrees from the stable/main
-  checkout; use `go run ./cmd/rdev git worktree remove --repo <main-checkout>
-  --root <root> --branch <branch> [--force]` only for a specific eligible
-  target that was not already cleaned. `--force` bypasses the dirty check for
-  merged worktrees but does not override the unmerged safety check.
+  --root <root>` for worktrees merged to `main` from the stable/main checkout;
+  use `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root
+  <root> --branch <branch> [--force]` only for a specific eligible target that
+  was not already cleaned. `--force` bypasses the dirty check for merged
+  worktrees but does not override the unmerged safety check. Release and
+  hotfix branches are maintainer-managed exceptions, not ordinary cleanup
+  targets.
 
 ## Contribution Rules
 
@@ -116,6 +122,8 @@ bash -n scripts/ci/git-policy.sh scripts/ci/git-policy_test.sh
   must go through authorization gates.
 - Public adapter integrations must use the adapterkit conformance surfaces when
   possible.
+- `gh issue create` and raw `git push` / `git push --delete` migration commands
+  are manual external mutations and require explicit human authorization.
 
 ## Pull Request Checklist
 

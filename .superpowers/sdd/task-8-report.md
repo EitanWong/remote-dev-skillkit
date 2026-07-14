@@ -15,3 +15,11 @@
 ## Verification
 - `rtk rg -n "feat/[0-9]+-|rdev git|worktree|Squash|--execute|codex/" CONTRIBUTING.md docs/README.md docs/development/GIT_WORKFLOW.md`
 - `rtk git diff --check`
+
+## Review follow-up
+
+- **Status:** Fixed the documented command inconsistencies called out in review.
+- **Files:** `docs/development/GIT_WORKFLOW.md`, `CONTRIBUTING.md`
+- **Commit:** `docs: fix git workflow command consistency`
+- **Tests / checks:** `rtk rg -n "worktree list --root|branch create.*worktree create|worktree create.*branch create|gh issue create|git push --delete|git push -u origin|--execute|main only|maintainer-managed|absolute/path/to/.worktrees/remote-dev-skillkit" CONTRIBUTING.md docs/README.md docs/development/GIT_WORKFLOW.md`; `rtk git diff --check`
+- **Concerns:** No remaining documented `git worktree list --root` calls; release/hotfix cleanup is now described as maintainer-managed, and raw `gh issue create` / `git push` / `git push --delete` actions are explicitly manual external mutations.

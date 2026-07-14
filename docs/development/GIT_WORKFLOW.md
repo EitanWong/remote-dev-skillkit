@@ -32,19 +32,22 @@ section for the only acceptable `codex/*` references.
 
 ## Approved runnable path
 
-The canonical flow is issue first, branch second, external worktree third, PR
-planning fourth, and PR creation last.
+For normal development, keep the main checkout on `main` and let the worktree
+command create the branch and worktree together. Do not run `branch create` and
+`worktree create` for the same branch.
 
 ```bash
 gh issue create --title "Track worktree governance" --body "..."
-go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main
-go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base origin/main --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
-cd ../.worktrees/remote-dev-skillkit/feat-123-worktree-governance
+go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
+cd /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit/feat-123-worktree-governance
 go run ./cmd/rdev git policy check
 go run ./cmd/rdev git pr plan
 go run ./cmd/rdev git pr create --execute
 ```
+
+Use `go run ./cmd/rdev git branch create` only when you intend to stay in the
+current checkout and do not need a new external worktree for that branch.
 
 Notes:
 
@@ -52,65 +55,62 @@ Notes:
   body, base, and head without mutating GitHub.
 - `go run ./cmd/rdev git pr create --execute` is the external-mutation
   boundary for the approved CLI. Do not skip `--execute`.
-- `gh issue create` is also an external mutation and should only be run when the
-  issue creation itself is intended and authorized.
+- `gh issue create` is a manual external mutation and should only be run when
+  the issue creation itself is intended and authorized.
 - The example worktree path uses the actual branch name, with `/` normalized to
   `-`, so the worktree directory is `feat-123-worktree-governance`.
 
 ## Issue-first lifecycle
 
 1. Create or confirm the tracking issue first.
-2. Create the conforming branch:
+2. Prefer the external-worktree path for normal development:
 
    ```bash
-   go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main
+   go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base main --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
    ```
 
-3. Create the external worktree from the stable/main checkout:
+3. Move into the external worktree before making changes:
 
    ```bash
-   go run ./cmd/rdev git worktree create --repo <main-checkout> --branch feat/123-worktree-governance --base origin/main --root ../.worktrees/remote-dev-skillkit
+   cd /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit/feat-123-worktree-governance
    ```
 
-4. Move into the external worktree before making changes:
+4. Verify the worktree mapping from the stable/main checkout:
 
    ```bash
-   cd ../.worktrees/remote-dev-skillkit/feat-123-worktree-governance
+   go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit
    ```
 
-5. Verify the worktree mapping from the stable/main checkout:
-
-   ```bash
-   go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit
-   ```
-
-6. Run policy checks from the worktree or with `--repo` pointed at the
+5. Run policy checks from the worktree or with `--repo` pointed at the
    worktree:
 
    ```bash
    go run ./cmd/rdev git policy check
    ```
 
-7. Plan the PR:
+6. Plan the PR:
 
    ```bash
    go run ./cmd/rdev git pr plan
    ```
 
-8. Create the PR only when the branch is ready and the worktree is clean:
+7. Create the PR only when the branch is ready and the worktree is clean:
 
    ```bash
    go run ./cmd/rdev git pr create --execute
    ```
 
+8. If you are intentionally staying in the current checkout, use the separate
+   `branch create` path instead of creating an external worktree.
+
 ## Multi-worktree use
 
 - Keep one issue-linked branch per task and one worktree per active branch.
-- Use an external shared root such as `../.worktrees/remote-dev-skillkit`.
-- Keep worktree roots outside the repository tree; manager commands reject roots
-  that live inside the repo.
-- Run `go run ./cmd/rdev git worktree list --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit`
-  to see which worktree path belongs to which branch.
+- Use an external shared root such as `/Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit`.
+- Keep worktree roots outside the repository tree; manager commands reject
+  roots that live inside the repo.
+- Run `go run ./cmd/rdev git worktree list --repo <main-checkout>` to see which
+  worktree path belongs to which branch.
 - Use the stable/main checkout as the manager boundary for branch and worktree
   lifecycle commands.
 - If you are already inside the external worktree, omit `--repo` only for policy
@@ -120,7 +120,7 @@ Valid flag shapes:
 
 - `go run ./cmd/rdev git branch create --type <type> --issue <n> --slug <slug> [--base <ref>] [--repo <checkout>]`
 - `go run ./cmd/rdev git worktree create --repo <main-checkout> --branch <branch> [--base <ref>] [--root <developer-root>]`
-- `go run ./cmd/rdev git worktree list --repo <main-checkout> [--root <developer-root>]`
+- `go run ./cmd/rdev git worktree list --repo <main-checkout>`
 - `go run ./cmd/rdev git worktree doctor --repo <main-checkout> [--root <developer-root>]`
 - `go run ./cmd/rdev git worktree clean --repo <main-checkout> [--root <developer-root>]`
 - `go run ./cmd/rdev git worktree remove --repo <main-checkout> --branch <branch> [--root <developer-root>] [--force]`
@@ -141,7 +141,8 @@ git worktree list --porcelain | sed -n '1,8p'
   policy checks are clean.
 - Include matching issue text in the PR body, for example `Closes #123`.
 - GitHub required checks must remain stable as `git-policy` and `go-checks`.
-- Open pull requests against `main` only.
+- Open pull requests against `main` only for ordinary feature, fix, docs,
+  chore, test, perf, and ci work.
 - Squash merge after review. Do not use merge commits or rebase merges for this
   workflow.
 - The approved CLI does not create a Draft PR state directly. If a GitHub Draft
@@ -154,7 +155,7 @@ Run cleanup from the stable/main checkout that owns the manager repository, not
 from the target external worktree.
 
 - `go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <root>`
-  removes eligible merged-clean worktrees and their branches.
+  removes worktrees merged to `main` and their branches.
 - `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root>
   --branch <branch>`
   removes a specific eligible target that was not already cleaned.
@@ -162,13 +163,16 @@ from the target external worktree.
   --branch <branch> --force`
   is the dirty merged-worktree example. The current implementation still
   rejects unmerged branches even with `--force`.
+- Release and hotfix branches are maintainer-managed exceptions. Do not treat
+  them as ordinary cleanup targets unless a maintainer explicitly directs a
+  release or maintenance reconciliation.
 
 Recovery rules:
 
 - If the checkout is dirty, finish, stash, or discard local changes before
   `go run ./cmd/rdev git pr create --execute`.
 - Do not let stale local state trigger a remote mutation. Re-run
-  `go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root ../.worktrees/remote-dev-skillkit`
+  `go run ./cmd/rdev git worktree doctor --repo <main-checkout> --root /Users/eitan/Documents/Projects/Go/.worktrees/remote-dev-skillkit`
   before planning the PR if the branch or path moved.
 - If metadata looks stale after branch deletion or a move, use Git’s repair
   path from the main checkout or a linked worktree: `git worktree move
@@ -190,8 +194,9 @@ Example issue-linked branches:
 
 The lifecycle stays the same: create the issue, create the branch, create the
 worktree, verify, plan the PR, and only then execute the PR creation step.
-Use the release or maintenance base that matches the issue; the branch name
-still must follow the same strict `<type>/<issue>-<slug>` pattern.
+Normal PRs target `main`. Release and maintenance bases are maintainer-managed
+exceptions for release/hotfix work only, and they still must use the same strict
+`<type>/<issue>-<slug>` pattern.
 
 ## Agent use
 
@@ -207,10 +212,13 @@ still must follow the same strict `<type>/<issue>-<slug>` pattern.
 
 - GitHub branch protection or rulesets should continue to gate `main`; this
   workflow expects the required checks to block unsafe merges.
+- `gh issue create` and raw `git push` / `git push --delete` migration commands
+  are manual external mutations and require explicit human authorization.
 - Any command that writes to GitHub, deletes remote refs, or publishes a PR is
   an external mutation and must be deliberate.
 - Within the approved CLI flow, only `go run ./cmd/rdev git pr create
-  --execute` crosses the external mutation boundary on your behalf.
+  --execute` crosses the external mutation boundary on your behalf for rdev PR
+  and GitHub operations.
 - Do not treat planning commands, local checks, or branch creation in the
   current checkout as a substitute for the external mutation step.
 
@@ -238,8 +246,8 @@ still must follow the same strict `<type>/<issue>-<slug>` pattern.
      git push -u origin feat/123-worktree-governance
      ```
 
-     Treat raw pushes as external mutations that require explicit human
-     approval, consistent with the `--execute` boundary.
+     Treat raw pushes as manual external mutations that require explicit human
+     approval. They are outside the `rdev --execute` boundary.
   6. Reassociate or recreate the PR from the conforming branch as needed.
   7. Delete the old remote branch only after human authorization:
 
@@ -247,8 +255,8 @@ still must follow the same strict `<type>/<issue>-<slug>` pattern.
      git push origin --delete codex/123-old-name
      ```
 
-     Treat remote deletion as an external mutation that requires explicit
-     human approval.
+     Treat remote deletion as a manual external mutation that requires explicit
+     human approval. It is outside the `rdev --execute` boundary.
   8. Prune stale refs and worktrees with `git fetch --prune` and
      `git worktree prune`.
 - Keep any `codex/*` reference clearly labeled as migration-only in docs and
