@@ -47,3 +47,11 @@
 - **Commit:** `docs: clarify developer root placeholders` (latest amended docs commit in this workspace)
 - **Tests / checks:** `rtk rg -n "/Users/eitan" docs/development/GIT_WORKFLOW.md CONTRIBUTING.md docs/README.md .superpowers/sdd/task-8-report.md` — pass; `rtk rg -n "<developer-root>" docs/development/GIT_WORKFLOW.md CONTRIBUTING.md docs/README.md .superpowers/sdd/task-8-report.md` — pass; `rtk git diff --check` — pass
 - **Concerns:** Cleanup examples and recovery guidance now consistently use `<developer-root>`, defined as an absolute path outside the repository tree.
+
+## Report-only verification fix
+
+- **Status:** Updated the report to describe verification over docs only, excluding the report file itself.
+- **Files:** `.superpowers/sdd/task-8-report.md`
+- **Commit:** pending
+- **Tests / checks:** `rtk rg -n "/Users/eitan" docs/development/GIT_WORKFLOW.md CONTRIBUTING.md docs/README.md` — pass; `rtk rg -n "<developer-root>" docs/development/GIT_WORKFLOW.md CONTRIBUTING.md docs/README.md` — pass; `rtk git diff --check` — pass
+- **Concerns:** Verification now states the forbidden developer path check and the required placeholder check over only the operational docs.
