@@ -24,7 +24,7 @@ Done. The governance files and scripts are in place and verified.
 - Ruleset targets `main`, requires PRs, one approval, `git-policy` and `go-checks`, conversation resolution, up-to-date branches, no force-push/deletion, squash-only merging, and automatic head-branch deletion.
 
 ## Commit
-- Pending after this report update.
+- `chore: declare github git governance`
 
 ## Concerns
 - None.
