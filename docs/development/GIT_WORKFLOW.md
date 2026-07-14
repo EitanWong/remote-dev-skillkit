@@ -1,7 +1,7 @@
 # Git Workflow
 
-This guide documents the implemented `rdev git` workflow for issue-first branch
-creation, external worktrees, Draft PRs, and recovery.
+This guide documents the implemented `rdev git` workflow for issue-first
+branch creation, external worktrees, ready PRs, and recovery.
 
 ## Canonical branch format
 
@@ -9,6 +9,16 @@ Use `<type>/<issue>-<slug>`.
 
 Allowed types are `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`,
 `ci`, `hotfix`, and `release`.
+
+The parser requires this exact shape:
+
+```text
+^(feat|fix|refactor|docs|test|chore|perf|ci|hotfix|release)/([0-9]+)-([a-z0-9]+(?:-[a-z0-9]+)*)$
+```
+
+- The issue segment must be a positive integer.
+- The slug must be lowercase ASCII.
+- Hyphens must separate slug words.
 
 Examples:
 
@@ -22,29 +32,39 @@ section for the only acceptable `codex/*` references.
 
 ## Canonical runnable path
 
-Run the issue-first flow in this order:
+For the external-worktree flow, use `worktree create` directly. Do not create a
+branch in the current checkout and then create the same branch again in a new
+worktree.
 
 ```bash
 gh issue create --title "Track worktree governance" --body "..."
-go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main
-go run ./cmd/rdev git worktree create --branch feat/123-worktree-governance
+go run ./cmd/rdev git worktree create --repo . --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit
+cd ../.worktrees/remote-dev-skillkit/feat-123-worktree-governance
 go run ./cmd/rdev git worktree doctor
+go run ./cmd/rdev git policy check
 go run ./cmd/rdev git pr plan
 go run ./cmd/rdev git pr create --execute
 ```
 
 `go run ./cmd/rdev git pr create --execute` is the external-mutation boundary.
-`git pr plan` only plans the Draft PR payload; it does not create a PR.
+`git pr plan` only plans the ready PR payload; it does not create a PR.
+If you already built the binary, replace `go run ./cmd/rdev` with `./bin/rdev`
+or another documented local binary path.
 
 ## Issue-first lifecycle
 
 1. Create or confirm the issue first.
-2. Create the branch with the issue number in the branch name.
-3. Create a developer worktree outside the repository tree.
+2. Choose one supported path:
+   - `go run ./cmd/rdev git worktree create --repo . --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit`
+     for the external-worktree flow; or
+   - `go run ./cmd/rdev git branch create --type feat --issue 123 --slug worktree-governance --base origin/main`
+     for a local-checkout-only branch.
+3. For the worktree flow, `cd` into the created external worktree before policy
+   or PR commands.
 4. Make changes in the worktree, not in the main checkout.
 5. Run `go run ./cmd/rdev git worktree doctor` and `go run ./cmd/rdev git
    policy check` before planning the PR.
-6. Run `go run ./cmd/rdev git pr plan` to inspect the generated Draft PR
+6. Run `go run ./cmd/rdev git pr plan` to inspect the generated ready PR
    title, body, head, and base.
 7. Run `go run ./cmd/rdev git pr create --execute` only when the branch is
    clean, reviewed, and ready for the external PR mutation.
@@ -66,14 +86,19 @@ go run ./cmd/rdev git worktree list --root ../.worktrees/remote-dev-skillkit
 go run ./cmd/rdev git worktree doctor --root ../.worktrees/remote-dev-skillkit
 ```
 
-## Draft PR timing
+If you are already inside the external worktree, omit `--repo` and run the same
+commands from that checkout. If you are outside it, pass `--repo` pointing at
+the external worktree path on policy and PR commands.
 
-- Open the Draft PR only after the branch name, worktree state, and policy
+## PR timing
+
+- Open the ready PR only after the branch name, worktree state, and policy
   checks are clean.
 - Use `go run ./cmd/rdev git pr plan` as the review point for title, body,
   base, and head before any external mutation.
-- Keep the PR in Draft until the reviewer has approved the branch and the
-  implementation is complete.
+- `git pr create` calls `gh pr create` with the exact argv shape
+  `gh pr create --base <base> --head <head> --title <title> --body <body>`.
+- The current implementation creates a normal PR with that exact argv.
 - Squash merge after review. Do not use merge commits or rebase merges for
   this workflow.
 
@@ -83,18 +108,22 @@ Clean up in this order when work is finished or abandoned:
 
 ```bash
 go run ./cmd/rdev git worktree clean --root ../.worktrees/remote-dev-skillkit
-go run ./cmd/rdev git worktree remove --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit
 ```
 
 Recovery rules:
 
 - If the checkout is dirty, finish, stash, or discard local changes before
   `go run ./cmd/rdev git pr create --execute`.
-- If local metadata is stale after branch deletion or remote pruning, run
-  `go run ./cmd/rdev git sync --prune` and then `go run ./cmd/rdev git worktree
-  doctor`.
-- Use `go run ./cmd/rdev git worktree clean` to reconcile stale recorded state
-  before removing the worktree entry.
+- `go run ./cmd/rdev git worktree clean` removes eligible merged clean
+  worktrees and their branches. Do not follow it with `worktree remove` for the
+  same target.
+- Use `go run ./cmd/rdev git worktree remove --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit`
+  only when you need to delete a specific managed worktree that is still dirty
+  or otherwise not eligible for clean removal. The current implementation
+  rejects unmerged branches even when `--force` is set.
+- If metadata looks stale after branch deletion or a crash, use the built-in
+  Git repair path: `git fetch --prune`, `git worktree prune`, and then rerun
+  `go run ./cmd/rdev git worktree doctor`.
 
 ## Hotfix and release flow
 
@@ -120,8 +149,18 @@ worktree, verify, plan the PR, and only then execute the PR creation step.
 
 - `codex/*` is legacy migration territory only.
 - Do not create new `codex/*` branches for normal work.
-- If you encounter an old migration branch such as `codex/123-old-name`, treat
-  it as a migration-only case and replace it with a conforming branch before
-  continuing.
+- Migration steps for an existing `codex/*` branch:
+  1. Link or confirm the issue that will own the branch.
+  2. Rename the local branch to a conforming name, for example
+     `git branch -m codex/123-old-name feat/123-worktree-governance`.
+  3. Move the renamed branch into the external worktree flow with
+     `go run ./cmd/rdev git worktree create --repo . --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit`
+     or by recreating the worktree in the new location.
+  4. Push the conforming branch explicitly with `git push -u origin feat/123-worktree-governance`.
+  5. Reassociate the PR by opening a new PR from the conforming branch and
+     cross-linking the old migration PR if it already exists; the current
+     implementation does not retarget PR heads in place.
+  6. Delete the old remote branch with `git push origin --delete codex/123-old-name`.
+  7. Prune stale refs and worktrees with `git fetch --prune` and `git worktree prune`.
 - Keep any `codex/*` reference clearly labeled as migration-only in docs and
   PR notes.
