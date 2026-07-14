@@ -599,6 +599,13 @@ func TestCleanRejectsDuplicateBindingsBeforeDestructiveCommands(t *testing.T) {
 	repo := canonicalPathForTest(t, t.TempDir())
 	root := filepath.Join(t.TempDir(), ".worktrees", "repo")
 	runner := &scriptedRunner{responses: map[string]scriptedResponse{
+		keyFor(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"): {
+			evidence: CommandEvidence{
+				Argv:   []string{"git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"},
+				Dir:    repo,
+				Stdout: filepath.Join(repo, ".git") + "\n",
+			},
+		},
 		keyFor(repo, "worktree", "list", "--porcelain"): {
 			evidence: CommandEvidence{
 				Argv:   []string{"git", "-C", repo, "worktree", "list", "--porcelain"},
@@ -623,6 +630,13 @@ func TestCleanRejectsDuplicateBindingsBeforeDestructiveCommands(t *testing.T) {
 	}
 
 	removeRunner := &scriptedRunner{responses: map[string]scriptedResponse{
+		keyFor(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"): {
+			evidence: CommandEvidence{
+				Argv:   []string{"git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"},
+				Dir:    repo,
+				Stdout: filepath.Join(repo, ".git") + "\n",
+			},
+		},
 		keyFor(repo, "worktree", "list", "--porcelain"): {
 			evidence: CommandEvidence{
 				Argv:   []string{"git", "-C", repo, "worktree", "list", "--porcelain"},
@@ -638,6 +652,37 @@ func TestCleanRejectsDuplicateBindingsBeforeDestructiveCommands(t *testing.T) {
 	for _, call := range removeRunner.calls {
 		if slices.Equal(call.args, []string{"worktree", "remove", "/managed/one"}) || slices.Equal(call.args, []string{"worktree", "remove", "/managed/two"}) {
 			t.Fatalf("Remove() attempted destructive remove: %#v", removeRunner.calls)
+		}
+	}
+}
+
+func TestCommonRootDiscoveryFailureFailsClosedBeforeDestructiveCommands(t *testing.T) {
+	repo := canonicalPathForTest(t, t.TempDir())
+	root := filepath.Join(t.TempDir(), ".worktrees", "repo")
+	runner := &scriptedRunner{responses: map[string]scriptedResponse{
+		keyFor(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"): {
+			evidence: CommandEvidence{
+				Argv: []string{"git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"},
+				Dir:  repo,
+			},
+			err: fmt.Errorf("common dir unavailable"),
+		},
+	}}
+	manager := WorktreeManager{RepoRoot: repo, Root: root, Git: runner}
+
+	_, err := manager.Clean(context.Background())
+	if err == nil {
+		t.Fatal("Clean() expected common-root discovery error")
+	}
+	if !strings.Contains(err.Error(), "common dir unavailable") {
+		t.Fatalf("Clean() error = %v", err)
+	}
+	for _, call := range runner.calls {
+		if len(call.args) >= 2 && call.args[0] == "worktree" && call.args[1] == "remove" {
+			t.Fatalf("Clean() attempted destructive remove after discovery failure: %#v", runner.calls)
+		}
+		if len(call.args) >= 2 && call.args[0] == "branch" && (call.args[1] == "-d" || call.args[1] == "-D") {
+			t.Fatalf("Clean() attempted branch deletion after discovery failure: %#v", runner.calls)
 		}
 	}
 }

@@ -261,6 +261,9 @@ func (m WorktreeManager) listWorktrees(ctx context.Context) ([]WorktreeEntry, []
 	if len(commonEvidence.Argv) > 0 {
 		commands = append(commands, commonEvidence)
 	}
+	if err != nil {
+		return nil, nil, commands, err
+	}
 	evidence, err := m.Git.Run(ctx, m.RepoRoot, "worktree", "list", "--porcelain")
 	commands = append(commands, evidence)
 	if err != nil {
