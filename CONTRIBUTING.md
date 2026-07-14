@@ -29,9 +29,12 @@ opening a pull request.
 - Use `go run ./cmd/rdev git pr plan` before any external mutation, then use
   `go run ./cmd/rdev git pr create --execute` only when the branch is ready.
 - Keep developer worktrees outside the repository tree. A shared root such as
-  `../.worktrees/remote-dev-skillkit` is valid; for worktree-flow policy and PR
-  commands either `cd` into the external worktree or pass `--repo` pointing to
-  that external worktree.
+  `../.worktrees/remote-dev-skillkit` is valid. Lifecycle commands such as
+  `branch create`, `worktree create`, `worktree list`, `worktree doctor`,
+  `worktree clean`, `worktree remove`, and `git sync` must run from the
+  stable/main checkout with `--repo` and `--root` because the manager checkout
+  is excluded and refused. Only policy and PR commands may omit `--repo` when
+  run from inside the external worktree.
 - Open pull requests against `main` only.
 - Include matching issue text in the PR body, for example `Closes #123`.
 - Prefer Squash merge after review. Do not use merge commits or rebase merges
@@ -45,11 +48,12 @@ git worktree list --porcelain | sed -n '1,8p'
 
 - Before opening a PR, run `./scripts/ci/git-policy.sh` to verify the branch,
   PR base, and PR issue linkage checks enforced in GitHub Actions.
-- For cleanup, use `go run ./cmd/rdev git worktree clean` for eligible merged
-  worktrees from the stable/main checkout; use `go run ./cmd/rdev git worktree
-  remove --force` only for a specific dirty merged worktree. `--force`
-  bypasses the dirty check for merged worktrees but does not override the
-  unmerged safety check.
+- For cleanup, use `go run ./cmd/rdev git worktree clean --repo <main-checkout>
+  --root <root>` for eligible merged-clean worktrees from the stable/main
+  checkout; use `go run ./cmd/rdev git worktree remove --repo <main-checkout>
+  --root <root> --branch <branch> [--force]` only for a specific eligible
+  target that was not already cleaned. `--force` bypasses the dirty check for
+  merged worktrees but does not override the unmerged safety check.
 
 ## Contribution Rules
 

@@ -85,9 +85,11 @@ go run ./cmd/rdev git worktree list --root ../.worktrees/remote-dev-skillkit
 go run ./cmd/rdev git worktree doctor --root ../.worktrees/remote-dev-skillkit
 ```
 
-If you are already inside the external worktree, omit `--repo` and run the same
-commands from that checkout. If you are outside it, pass `--repo` pointing at
-the external worktree path on policy and PR commands.
+If you are already inside the external worktree, omit `--repo` only for policy
+and PR commands. Lifecycle commands such as `branch create`, `worktree create`,
+`worktree list`, `worktree doctor`, `worktree clean`, `worktree remove`, and
+`git sync` must run from the stable/main checkout with `--repo` and `--root`
+because the current manager checkout is excluded and refused.
 
 ## PR timing
 
@@ -106,30 +108,26 @@ the external worktree path on policy and PR commands.
 ## Cleanup and recovery
 
 Run cleanup from the stable/main checkout that owns the manager repository, not
-from the target external worktree:
+from the target external worktree. Choose one of these alternatives:
 
-```bash
-go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <root>
-go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance --force
-```
+- `go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <root>`
+  removes eligible merged-clean worktrees and their branches.
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance`
+  removes a specific eligible target that was not already cleaned.
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance --force`
+  is the dirty merged-worktree example. The current implementation still
+  rejects unmerged branches even with `--force`.
 
 Recovery rules:
 
 - If the checkout is dirty, finish, stash, or discard local changes before
   `go run ./cmd/rdev git pr create --execute`.
-- `go run ./cmd/rdev git worktree clean` removes eligible merged clean
-  worktrees and their branches from the stable checkout. Do not follow it with
-  `worktree remove` for the same target.
-- Use `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance`
-  only for a specific managed worktree that is not eligible for `clean`.
-- For dirty merged worktrees, add `--force`:
-
-  ```bash
-  go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance --force
-  ```
-
-  The current implementation still rejects unmerged branches even with
-  `--force`.
+- `go run ./cmd/rdev git worktree clean` removes eligible merged-clean
+  worktrees and their branches from the stable checkout. Use
+  `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance`
+  only for a specific eligible target that was not already cleaned.
+- For dirty merged worktrees, use the `--force` form shown above. The current
+  implementation still rejects unmerged branches even with `--force`.
 - If metadata looks stale after branch deletion or a move, use Git’s repair
   path from the main checkout or a linked worktree: `git worktree move
   <old-path> <new-path>` for planned moves, `git worktree repair <path...>` for
