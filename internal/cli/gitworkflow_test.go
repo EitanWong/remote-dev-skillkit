@@ -85,6 +85,27 @@ func TestRunGitPRPlanDoesNotExecuteGH(t *testing.T) {
 	}
 }
 
+func TestRunGitPRPlanRejectsExecuteFlag(t *testing.T) {
+	repo := initCLIGitWorkflowRepo(t)
+	runCLIGit(t, repo, "checkout", "-b", "feat/123-git-cli")
+	marker := installFakeGHForCLI(t)
+
+	var stdout, stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	err := app.Run(context.Background(), []string{
+		"git", "pr", "plan", "--repo", repo, "--execute", "--title", "feat: add git cli", "--body", "Closes #123",
+	})
+	if err == nil {
+		t.Fatal("App.Run() error = nil, want execute rejection")
+	}
+	if !strings.Contains(err.Error(), "execute") {
+		t.Fatalf("App.Run() error = %v, want execute rejection", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("gh was executed during plan: stat error = %v", err)
+	}
+}
+
 func TestRunGitPRCreateRequiresExecuteBeforeGitHub(t *testing.T) {
 	repo := initCLIGitWorkflowRepo(t)
 	runCLIGit(t, repo, "checkout", "-b", "feat/123-git-cli")
@@ -141,13 +162,9 @@ func TestRunGitWorktreeCommandsHonorCustomRoot(t *testing.T) {
 		t.Fatalf("create worktree = %q, want under %q", worktreePath, root)
 	}
 
-	listPayload := runGitWorkflowCLIJSON(t, repo, []string{"git", "worktree", "list", "--repo", repo, "--root", root})
-	if got := listPayload["root"]; got != root {
-		t.Fatalf("list root = %v, want %q", got, root)
-	}
-	entries := nestedSlice(t, listPayload, "entries")
-	if len(entries) != 1 {
-		t.Fatalf("list entries = %d, want 1", len(entries))
+	listPayload := runGitWorkflowCLIJSON(t, repo, []string{"git", "worktree", "list", "--repo", repo})
+	if got := listPayload["root"]; got == root {
+		t.Fatalf("list root = %v, want default root", got)
 	}
 
 	doctorPayload := runGitWorkflowCLIJSON(t, repo, []string{"git", "worktree", "doctor", "--repo", repo, "--root", root})
@@ -175,6 +192,20 @@ func TestRunGitWorktreeCommandsHonorCustomRoot(t *testing.T) {
 	}
 }
 
+func TestRunGitWorktreeListRejectsRootFlag(t *testing.T) {
+	repo := initCLIGitWorkflowRepo(t)
+	var stdout, stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"git", "worktree", "list", "--repo", repo, "--root", filepath.Join(t.TempDir(), "root")})
+	if err == nil {
+		t.Fatal("App.Run() error = nil, want root flag rejection")
+	}
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("App.Run() error = %v, want root flag rejection", err)
+	}
+}
+
 func TestRunGitPRPlanUsesDeterministicDefaults(t *testing.T) {
 	repo := initCLIGitWorkflowRepo(t)
 	runCLIGit(t, repo, "checkout", "-b", "feat/123-git-cli")
@@ -187,12 +218,18 @@ func TestRunGitPRPlanUsesDeterministicDefaults(t *testing.T) {
 	if body != "Closes #123" {
 		t.Fatalf("body = %q, want %q", body, "Closes #123")
 	}
-	args := anyStrings(nestedSlice(t, payload, "args"))
-	if !slicesContain(args, "--title", "feat: update git cli") {
-		t.Fatalf("args missing default title: %#v", args)
+	if got := payload["base"]; got != "main" {
+		t.Fatalf("base = %v, want main", got)
 	}
-	if !slicesContain(args, "--body", "Closes #123") {
-		t.Fatalf("args missing default body: %#v", args)
+	args := anyStrings(nestedSlice(t, payload, "args"))
+	want := []string{"gh", "pr", "create", "--base", "main", "--head", "feat/123-git-cli", "--title", "feat: update git cli", "--body", "Closes #123"}
+	if len(args) != len(want) {
+		t.Fatalf("args length = %d, want %d; args=%#v", len(args), len(want), args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q; args=%#v", i, args[i], want[i], args)
+		}
 	}
 }
 

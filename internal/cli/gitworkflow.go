@@ -11,7 +11,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/gitworkflow"
 )
 
-const defaultGitWorkflowBase = "origin/main"
+const defaultGitWorkflowBase = "main"
 
 func (a App) git(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -137,7 +137,6 @@ func (a App) gitWorktreeList(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git worktree list", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
 	repoPath := fs.String("repo", ".", "repository path")
-	root := fs.String("root", "", "developer worktree root")
 	if err := parseGitWorkflowFlags(fs, args); err != nil {
 		return err
 	}
@@ -145,7 +144,7 @@ func (a App) gitWorktreeList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	manager, err := gitworkflow.NewWorktreeManager(repo.Root, *root, runner)
+	manager, err := gitworkflow.NewWorktreeManager(repo.Root, "", runner)
 	if err != nil {
 		return err
 	}
@@ -305,7 +304,10 @@ func (a App) gitPR(ctx context.Context, args []string) error {
 func (a App) gitPRPlan(ctx context.Context, args []string, execute bool) error {
 	fs := flag.NewFlagSet("git pr", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
-	executeFlag := fs.Bool("execute", false, "execute gh pr create")
+	var executeFlag *bool
+	if execute {
+		executeFlag = fs.Bool("execute", false, "execute gh pr create")
+	}
 	repoPath := fs.String("repo", ".", "repository path")
 	title := fs.String("title", "", "pull request title")
 	body := fs.String("body", "", "pull request body")
@@ -313,7 +315,7 @@ func (a App) gitPRPlan(ctx context.Context, args []string, execute bool) error {
 	if err := parseGitWorkflowFlags(fs, args); err != nil {
 		return err
 	}
-	if execute && !*executeFlag {
+	if execute && (executeFlag == nil || !*executeFlag) {
 		return fmt.Errorf("git pr create requires --execute")
 	}
 	if err := gitworkflow.ValidateBaseRef(*base); err != nil {

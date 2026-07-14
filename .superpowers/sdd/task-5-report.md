@@ -56,3 +56,22 @@ Existing `internal/workspace` runtime worktree behavior was not changed.
 - Commit: `HEAD (fix: harden git workflow CLI)`
 - Tests: `go test ./internal/cli -run 'TestRunGit|TestGitCommandGroupUsage' -count=1`, `go test ./...`, `go vet ./...`, `git diff --check`
 - Concerns: exported `internal/gitworkflow.ValidateBaseRef` to reuse the existing validation logic across all CLI `--base` paths while preserving the `GitHubExecutor`/runtime-workspace boundaries.
+
+## Task 5 Fix Pass 2
+
+- Status: completed
+- Commit: `feat: expose git workflow commands`
+- Files:
+  - `internal/cli/cli.go`
+  - `internal/cli/gitworkflow.go`
+  - `internal/cli/gitworkflow_test.go`
+- Tests:
+  - `go test ./internal/cli -run 'TestRunGit|TestGitCommandGroupUsage' -count=1`
+  - `go test ./internal/cli -count=1`
+  - `go test ./internal/gitworkflow -count=1`
+  - `go vet ./internal/cli`
+  - `go vet ./internal/gitworkflow`
+  - `go run ./cmd/rdev git --help`
+  - `git diff --check`
+- Concerns:
+  - `git pr plan --execute` is rejected by flag parsing, so the exact error text is Go-version dependent, but execution is still blocked before GitHub invocation.
