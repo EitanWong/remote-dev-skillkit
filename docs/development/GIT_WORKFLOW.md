@@ -47,9 +47,8 @@ go run ./cmd/rdev git pr create --execute
 ```
 
 `go run ./cmd/rdev git pr create --execute` is the external-mutation boundary.
-`git pr plan` only plans the ready PR payload; it does not create a PR.
-If you already built the binary, replace `go run ./cmd/rdev` with `./bin/rdev`
-or another documented local binary path.
+`go run ./cmd/rdev git pr plan` only plans the ready PR payload; it does not
+create a PR.
 
 ## Issue-first lifecycle
 
@@ -99,15 +98,19 @@ the external worktree path on policy and PR commands.
 - `git pr create` calls `gh pr create` with the exact argv shape
   `gh pr create --base <base> --head <head> --title <title> --body <body>`.
 - The current implementation creates a normal PR with that exact argv.
+- The CLI has no `--draft` flag. If a Draft PR is desired, mark it manually in
+  the GitHub UI after creation.
 - Squash merge after review. Do not use merge commits or rebase merges for
   this workflow.
 
 ## Cleanup and recovery
 
-Clean up in this order when work is finished or abandoned:
+Run cleanup from the stable/main checkout that owns the manager repository, not
+from the target external worktree:
 
 ```bash
-go run ./cmd/rdev git worktree clean --root ../.worktrees/remote-dev-skillkit
+go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <root>
+go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance --force
 ```
 
 Recovery rules:
@@ -115,15 +118,23 @@ Recovery rules:
 - If the checkout is dirty, finish, stash, or discard local changes before
   `go run ./cmd/rdev git pr create --execute`.
 - `go run ./cmd/rdev git worktree clean` removes eligible merged clean
-  worktrees and their branches. Do not follow it with `worktree remove` for the
-  same target.
-- Use `go run ./cmd/rdev git worktree remove --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit`
-  only when you need to delete a specific managed worktree that is still dirty
-  or otherwise not eligible for clean removal. The current implementation
-  rejects unmerged branches even when `--force` is set.
-- If metadata looks stale after branch deletion or a crash, use the built-in
-  Git repair path: `git fetch --prune`, `git worktree prune`, and then rerun
-  `go run ./cmd/rdev git worktree doctor`.
+  worktrees and their branches from the stable checkout. Do not follow it with
+  `worktree remove` for the same target.
+- Use `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance`
+  only for a specific managed worktree that is not eligible for `clean`.
+- For dirty merged worktrees, add `--force`:
+
+  ```bash
+  go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root> --branch feat/123-worktree-governance --force
+  ```
+
+  The current implementation still rejects unmerged branches even with
+  `--force`.
+- If metadata looks stale after branch deletion or a move, use Git’s repair
+  path from the main checkout or a linked worktree: `git worktree move
+  <old-path> <new-path>` for planned moves, `git worktree repair <path...>` for
+  moved checkouts, and `git worktree prune` to clean stale administrative
+  records after deletions.
 
 ## Hotfix and release flow
 
@@ -153,14 +164,34 @@ worktree, verify, plan the PR, and only then execute the PR creation step.
   1. Link or confirm the issue that will own the branch.
   2. Rename the local branch to a conforming name, for example
      `git branch -m codex/123-old-name feat/123-worktree-governance`.
-  3. Move the renamed branch into the external worktree flow with
-     `go run ./cmd/rdev git worktree create --repo . --branch feat/123-worktree-governance --base main --root ../.worktrees/remote-dev-skillkit`
-     or by recreating the worktree in the new location.
-  4. Push the conforming branch explicitly with `git push -u origin feat/123-worktree-governance`.
-  5. Reassociate the PR by opening a new PR from the conforming branch and
-     cross-linking the old migration PR if it already exists; the current
-     implementation does not retarget PR heads in place.
-  6. Delete the old remote branch with `git push origin --delete codex/123-old-name`.
-  7. Prune stale refs and worktrees with `git fetch --prune` and `git worktree prune`.
+  3. Move the existing linked worktree instead of recreating the branch with
+     `worktree create -b`:
+
+     ```bash
+     git worktree move <old-path> <new-path>
+     git worktree repair <new-path>
+     ```
+
+  4. Reassociate the branch with the issue’s external worktree path and verify
+     the new location with `git worktree list`.
+  5. Push the conforming branch explicitly after human authorization:
+
+     ```bash
+     git push -u origin feat/123-worktree-governance
+     ```
+
+     Treat raw pushes as external mutations that require explicit human
+     approval, consistent with the `--execute` boundary.
+  6. Reassociate or recreate the PR from the conforming branch as needed.
+  7. Delete the old remote branch only after human authorization:
+
+     ```bash
+     git push origin --delete codex/123-old-name
+     ```
+
+     Treat remote deletion as an external mutation that requires explicit
+     human approval.
+  8. Prune stale refs and worktrees with `git fetch --prune` and
+     `git worktree prune`.
 - Keep any `codex/*` reference clearly labeled as migration-only in docs and
   PR notes.

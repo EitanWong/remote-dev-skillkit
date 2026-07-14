@@ -46,9 +46,10 @@ git worktree list --porcelain | sed -n '1,8p'
 - Before opening a PR, run `./scripts/ci/git-policy.sh` to verify the branch,
   PR base, and PR issue linkage checks enforced in GitHub Actions.
 - For cleanup, use `go run ./cmd/rdev git worktree clean` for eligible merged
-  worktrees; use `go run ./cmd/rdev git worktree remove` only for a specific
-  dirty or otherwise ineligible managed worktree. `--force` bypasses the dirty
-  check for merged worktrees but does not override the unmerged safety check.
+  worktrees from the stable/main checkout; use `go run ./cmd/rdev git worktree
+  remove --force` only for a specific dirty merged worktree. `--force`
+  bypasses the dirty check for merged worktrees but does not override the
+  unmerged safety check.
 
 ## Contribution Rules
 
