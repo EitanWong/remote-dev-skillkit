@@ -4,12 +4,18 @@
 
 ## Issue Linkage
 
+- [ ] Linked issue recorded below
 - Closes #
 
 ## Branch and Worktree Evidence
 
-- Branch: `git branch --show-current`
-- Worktree: `git worktree list --porcelain | sed -n '1,8p'`
+Paste the exact local command output:
+
+```text
+$ git branch --show-current
+
+$ git worktree list --porcelain | sed -n '1,8p'
+```
 
 ## Acceptance Evidence
 

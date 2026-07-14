@@ -35,6 +35,7 @@ opening a pull request.
   excluded and refused. Only policy and PR commands may omit `--repo` when run
   from inside the external worktree.
 - Open pull requests against `main` only.
+- GitHub required checks must stay stable as `git-policy` and `go-checks`.
 - Include matching issue text in the PR body, for example `Closes #123`.
 - Prefer Squash merge after review. Do not use merge commits or rebase merges
   for this workflow.
@@ -47,6 +48,12 @@ git worktree list --porcelain | sed -n '1,8p'
 
 - Before opening a PR, run `./scripts/ci/git-policy.sh` to verify the branch,
   PR base, and PR issue linkage checks enforced in GitHub Actions.
+- Before committing CI workflow or wrapper changes, run:
+
+```bash
+bash scripts/ci/git-policy_test.sh
+bash -n scripts/ci/git-policy.sh scripts/ci/git-policy_test.sh
+```
 - For cleanup, use `go run ./cmd/rdev git worktree clean --repo <main-checkout>
   --root <root>` for eligible merged-clean worktrees from the stable/main
   checkout; use `go run ./cmd/rdev git worktree remove --repo <main-checkout>

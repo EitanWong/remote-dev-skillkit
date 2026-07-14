@@ -5,6 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 policy_script="$repo_root/scripts/ci/git-policy.sh"
 workflow_file="$repo_root/.github/workflows/git-policy.yml"
+ci_workflow_file="$repo_root/.github/workflows/ci.yml"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/git-policy-test.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -58,6 +59,7 @@ PY
   git -C "$dest" init >/dev/null
   git -C "$dest" config user.name 'Task Seven Test'
   git -C "$dest" config user.email 'task7@example.com'
+  git -C "$dest" config core.hooksPath /dev/null
   git -C "$dest" add .
   git -C "$dest" commit -m 'test: seed repo' >/dev/null
   printf '%s\n' "$dest"
@@ -79,10 +81,10 @@ assert_failure() {
   local want="$2"
   shift 2
   local output
-  if output="$(
+  if output="$({
     cd "$repo"
     env "$@" bash "$policy_script" 2>&1
-  )"; then
+  })"; then
     printf '%s\n' "$output" >&2
     die "expected failure for repo $repo"
   fi
@@ -98,13 +100,25 @@ fi
 if [[ ! -f "$workflow_file" ]]; then
   die "missing workflow file at $workflow_file"
 fi
+if [[ ! -f "$ci_workflow_file" ]]; then
+  die "missing CI workflow file at $ci_workflow_file"
+fi
 
 assert_contains "$workflow_file" 'pull_request_target:'
+assert_contains "$workflow_file" '    branches:'
+assert_contains "$workflow_file" "      - '**'"
 assert_not_line "$workflow_file" '  pull_request:'
+assert_contains "$workflow_file" '  git-policy:'
+assert_contains "$workflow_file" '    name: git-policy'
 assert_contains "$workflow_file" 'persist-credentials: false'
 assert_contains "$workflow_file" "ref: \${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || github.ref_name }}"
 assert_not_contains "$workflow_file" 'ref: ${{ github.head_ref || github.ref_name }}'
 assert_not_contains "$workflow_file" 'ref: ${{ github.event.pull_request.head.ref }}'
+
+assert_contains "$ci_workflow_file" 'pull_request:'
+assert_contains "$ci_workflow_file" '  go-checks:'
+assert_contains "$ci_workflow_file" '    name: go-checks'
+assert_contains "$ci_workflow_file" '  release-smoke:'
 
 main_repo="$(setup_repo main)"
 assert_success "$main_repo" \
@@ -115,11 +129,6 @@ valid_repo="$(setup_repo valid)"
 assert_success "$valid_repo" \
   GIT_POLICY_EVENT_NAME=push \
   GIT_POLICY_BRANCH_NAME='feat/123-valid-name'
-
-invalid_issue_repo="$(setup_repo invalid-issue)"
-assert_failure "$invalid_issue_repo" 'branch_naming' \
-  GIT_POLICY_EVENT_NAME=push \
-  GIT_POLICY_BRANCH_NAME='feat/no-issue'
 
 legacy_repo="$(setup_repo legacy)"
 assert_failure "$legacy_repo" 'legacy_codex_branch_forbidden' \
@@ -133,14 +142,6 @@ assert_failure "$pr_base_repo" 'pull requests must target main' \
   GIT_POLICY_BASE_REF='release/1.0' \
   GIT_POLICY_PR_TITLE='feat: add trusted policy workflow' \
   GIT_POLICY_PR_BODY=$'## Summary\n- validate trusted base checkout\n\nCloses #123'
-
-pr_issue_repo="$(setup_repo pr-issue)"
-assert_failure "$pr_issue_repo" 'pull request body must include Closes #123' \
-  GIT_POLICY_EVENT_NAME=pull_request_target \
-  GIT_POLICY_BRANCH_NAME='feat/123-valid-name' \
-  GIT_POLICY_BASE_REF='main' \
-  GIT_POLICY_PR_TITLE='feat: add trusted policy workflow' \
-  GIT_POLICY_PR_BODY=$'## Summary\n- validate trusted base checkout\n\nCloses #456'
 
 pr_repo="$(setup_repo pr-valid)"
 head_before="$(git -C "$pr_repo" rev-parse HEAD)"

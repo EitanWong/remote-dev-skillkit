@@ -25,7 +25,7 @@ the toolkit.
 | Dev gateway behavior | [Dev Gateway](operations/DEV_GATEWAY.md) |
 | Acceptance and release evidence | [Acceptance](operations/ACCEPTANCE.md) |
 | Branch, worktree, PR, and recovery workflow | [Git Workflow](development/GIT_WORKFLOW.md) |
-| Branch, worktree, and pull request workflow | [Contributing Guide](../CONTRIBUTING.md) |
+| GitHub workflow enforcement, PR template requirements, and local verification commands | [Contributing Guide](../CONTRIBUTING.md) |
 
 ## Architecture
 
