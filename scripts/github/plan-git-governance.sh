@@ -12,6 +12,18 @@ The script never calls gh and never mutates local or remote state.
 USAGE
 }
 
+validate_repo() {
+  python3 - "$1" <<'PY'
+import re
+import sys
+
+repo = sys.argv[1]
+if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+    raise SystemExit("invalid --repo value; expected OWNER/REPO")
+print(repo)
+PY
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo)
@@ -39,6 +51,8 @@ if [[ -z "$repo" ]]; then
   usage
   exit 2
 fi
+
+repo="$(validate_repo "$repo")"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"

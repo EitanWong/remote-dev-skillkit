@@ -113,61 +113,6 @@ if not isinstance(payload, dict):
 PY
 }
 
-main() {
-repo=""
-execute=0
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --repo)
-      repo="${2:-}"
-      shift 2
-      ;;
-    --execute)
-      execute=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    -*)
-      echo "unknown option: $1" >&2
-      usage
-      exit 2
-      ;;
-    *)
-      echo "unexpected argument: $1" >&2
-      usage
-      exit 2
-      ;;
-  esac
-done
-
-if [[ -z "$repo" ]]; then
-  usage
-  exit 2
-fi
-
-repo="$(validate_repo "$repo")"
-
-if [[ "$execute" -ne 1 ]]; then
-  echo "refusing to apply governance without --execute" >&2
-  exit 2
-fi
-
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../.." && pwd)"
-branch_ruleset_path="$repo_root/.github/governance/branch-ruleset.json"
-commit_policy_path="$repo_root/.github/governance/commit-policy.json"
-  repo_settings_tmp="$(mktemp "${TMPDIR:-/tmp}/git-governance-repo-settings.XXXXXX")"
-trap 'rm -f "$repo_settings_tmp"' EXIT
-
-if ! command -v gh >/dev/null 2>&1; then
-  echo "gh is required to apply governance" >&2
-  exit 1
-fi
-
 write_plan() {
   python3 - "$repo" "$branch_ruleset_path" "$commit_policy_path" <<'PY'
 import json
@@ -196,35 +141,90 @@ print(json.dumps(plan, indent=2))
 PY
 }
 
-apply_ruleset() {
-  local ruleset_name="$1"
-  local ruleset_path="$2"
-  local rulesets_json ruleset_id response
+main() {
+  repo=""
+  execute=0
 
-  rulesets_json="$(run_gh api "repos/$repo/rulesets?per_page=100&targets=branch")"
-  validate_json_array "$rulesets_json"
-  ruleset_id="$(extract_ruleset_id "$rulesets_json" "$ruleset_name")"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)
+        repo="${2:-}"
+        shift 2
+        ;;
+      --execute)
+        execute=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -*)
+        echo "unknown option: $1" >&2
+        usage
+        exit 2
+        ;;
+      *)
+        echo "unexpected argument: $1" >&2
+        usage
+        exit 2
+        ;;
+    esac
+  done
 
-  if [[ -n "$ruleset_id" ]]; then
-    response="$(run_gh api --method PATCH "repos/$repo/rulesets/$ruleset_id" --input "$ruleset_path")"
-  else
-    response="$(run_gh api --method POST "repos/$repo/rulesets" --input "$ruleset_path")"
+  if [[ -z "$repo" ]]; then
+    usage
+    exit 2
   fi
-  validate_json_object "$response"
-}
 
-plan_path="$(write_plan)"
+  repo="$(validate_repo "$repo")"
 
-apply_ruleset "main-branch-governance" "$branch_ruleset_path"
-apply_ruleset "main-commit-policy" "$commit_policy_path"
+  if [[ "$execute" -ne 1 ]]; then
+    echo "refusing to apply governance without --execute" >&2
+    exit 2
+  fi
 
-cat >"$repo_settings_tmp" <<'JSON'
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$script_dir/../.." && pwd)"
+  branch_ruleset_path="$repo_root/.github/governance/branch-ruleset.json"
+  commit_policy_path="$repo_root/.github/governance/commit-policy.json"
+  repo_settings_tmp="$(mktemp "${TMPDIR:-/tmp}/git-governance-repo-settings.XXXXXX")"
+  trap 'rm -f "$repo_settings_tmp"' EXIT
+
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "gh is required to apply governance" >&2
+    exit 1
+  fi
+
+  plan_json="$(write_plan)"
+
+  apply_ruleset() {
+    local ruleset_name="$1"
+    local ruleset_path="$2"
+    local rulesets_json ruleset_id response
+
+    rulesets_json="$(run_gh api "repos/$repo/rulesets?per_page=100&targets=branch")"
+    validate_json_array "$rulesets_json"
+    ruleset_id="$(extract_ruleset_id "$rulesets_json" "$ruleset_name")"
+
+    if [[ -n "$ruleset_id" ]]; then
+      response="$(run_gh api --method PATCH "repos/$repo/rulesets/$ruleset_id" --input "$ruleset_path")"
+    else
+      response="$(run_gh api --method POST "repos/$repo/rulesets" --input "$ruleset_path")"
+    fi
+    validate_json_object "$response"
+  }
+
+  apply_ruleset "main-branch-governance" "$branch_ruleset_path"
+  apply_ruleset "main-commit-policy" "$commit_policy_path"
+
+  cat >"$repo_settings_tmp" <<'JSON'
 {"allow_squash_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false,"delete_branch_on_merge":true,"allow_auto_merge":false}
 JSON
-response="$(run_gh api --method PATCH "repos/$repo" --input "$repo_settings_tmp")"
-validate_json_object "$response"
+  response="$(run_gh api --method PATCH "repos/$repo" --input "$repo_settings_tmp")"
+  validate_json_object "$response"
 
-printf 'applied governance plan: %s\n' "$plan_path"
+  printf 'applied governance plan JSON:\n%s\n' "$plan_json"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
