@@ -2,18 +2,22 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/git-governance-test.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
+repo_root="$(cd "$script_dir/../.." && pwd)"
+test_repo_root="$tmp_dir/repo"
+mkdir -p "$test_repo_root"
+cp -R "$repo_root/.github" "$test_repo_root/"
+mkdir -p "$test_repo_root/scripts"
+cp -R "$repo_root/scripts/github" "$test_repo_root/scripts/"
 
 fake_bin="$tmp_dir/bin"
 mkdir -p "$fake_bin"
 
 gh_log="$tmp_dir/gh.log"
-plan_out="$tmp_dir/plan.json"
 apply_out="$tmp_dir/apply.out"
 apply_err="$tmp_dir/apply.err"
-fixed_plan_path="$repo_root/scripts/github/.git-governance.plan.json"
+fixed_plan_path="$test_repo_root/scripts/github/.git-governance.plan.json"
 fixed_plan_backup="$tmp_dir/fixed-plan.backup"
 fixed_plan_existed=0
 gh_token_value="$(python3 - <<'PY'
@@ -82,8 +86,8 @@ export GH_LOG="$gh_log"
 export FAKE_GH_TOKEN="$gh_token_value"
 export PATH="$fake_bin:$PATH"
 
-plan_script="$repo_root/scripts/github/plan-git-governance.sh"
-apply_script="$repo_root/scripts/github/apply-git-governance.sh"
+plan_script="$test_repo_root/scripts/github/plan-git-governance.sh"
+apply_script="$test_repo_root/scripts/github/apply-git-governance.sh"
 
 if [[ -f "$fixed_plan_path" ]]; then
   fixed_plan_existed=1
@@ -168,7 +172,7 @@ assert any("repos/example-org/example-repo/rulesets" in line for line in normali
 assert any("repos/example-org/example-repo" in line for line in normalized)
 PY
 
-python3 - "$repo_root/scripts/github/.git-governance.plan.json" "$fixed_plan_before" <<'PY'
+python3 - "$fixed_plan_path" "$fixed_plan_before" <<'PY'
 import pathlib
 import sys
 

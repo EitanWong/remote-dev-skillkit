@@ -51,3 +51,27 @@
 
 ### Concerns
 - None.
+
+## Hygiene fix report
+
+### Status
+- Reworked `scripts/github/git-governance_test.sh` to run against an isolated temporary repository copy.
+- Removed the unused `plan_out` variable.
+- Preserved the original repository tree by avoiding direct writes to the tracked `.git-governance.plan.json` path.
+
+### Files changed
+- `scripts/github/git-governance_test.sh`
+- `.superpowers/sdd/task-6-report.md`
+
+### Commit
+- Pending at time of report append.
+
+### Tests
+- `bash -n scripts/github/plan-git-governance.sh scripts/github/apply-git-governance.sh scripts/github/git-governance_test.sh`
+- `scripts/github/git-governance_test.sh`
+- JSON validation for `.github/governance/branch-ruleset.json` and `.github/governance/commit-policy.json`
+- `shellcheck` on the three governance scripts, when available
+- `git diff --check`
+
+### Concerns
+- None.
