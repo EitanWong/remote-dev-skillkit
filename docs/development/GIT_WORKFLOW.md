@@ -156,12 +156,12 @@ git worktree list --porcelain | sed -n '1,8p'
 Run cleanup from the stable/main checkout that owns the manager repository, not
 from the target external worktree.
 
-- `go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <root>`
+- `go run ./cmd/rdev git worktree clean --repo <main-checkout> --root <developer-root>`
   removes worktrees merged to `main` and their branches.
-- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root>
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <developer-root>
   --branch <branch>`
   removes a specific eligible target that was not already cleaned.
-- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <root>
+- `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root <developer-root>
   --branch <branch> --force`
   is the dirty merged-worktree example. The current implementation still
   rejects unmerged branches even with `--force`.

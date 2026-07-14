@@ -64,9 +64,9 @@ bash scripts/ci/git-policy_test.sh
 bash -n scripts/ci/git-policy.sh scripts/ci/git-policy_test.sh
 ```
 - For cleanup, use `go run ./cmd/rdev git worktree clean --repo <main-checkout>
-  --root <root>` for worktrees merged to `main` from the stable/main checkout;
-  use `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root
-  <root> --branch <branch> [--force]` only for a specific eligible target that
+  --root <developer-root>` for worktrees merged to `main` from the stable/main
+  checkout; use `go run ./cmd/rdev git worktree remove --repo <main-checkout>
+  --root <developer-root> --branch <branch> [--force]` only for a specific eligible target that
   was not already cleaned. `--force` bypasses the dirty check for merged
   worktrees but does not override the unmerged safety check. Any separate
   maintainer release process is outside this local cleanup policy.
