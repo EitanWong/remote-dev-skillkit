@@ -41,8 +41,8 @@ opening a pull request.
   excluded and refused. Only policy and PR commands may omit `--repo` when run
   from inside the external worktree.
 - Open pull requests against `main` only.
-- Release and hotfix branches are maintainer-managed exceptions; ordinary
-  development still targets `main`.
+- Release and hotfix branches still use `main` as the base under this local PR
+  policy; any separate maintainer release process is outside this document.
 - GitHub required checks must stay stable as `git-policy` and `go-checks`.
 - Include matching issue text in the PR body, for example `Closes #123`.
 - Prefer Squash merge after review. Do not use merge commits or rebase merges
@@ -68,9 +68,8 @@ bash -n scripts/ci/git-policy.sh scripts/ci/git-policy_test.sh
   use `go run ./cmd/rdev git worktree remove --repo <main-checkout> --root
   <root> --branch <branch> [--force]` only for a specific eligible target that
   was not already cleaned. `--force` bypasses the dirty check for merged
-  worktrees but does not override the unmerged safety check. Release and
-  hotfix branches are maintainer-managed exceptions, not ordinary cleanup
-  targets.
+  worktrees but does not override the unmerged safety check. Any separate
+  maintainer release process is outside this local cleanup policy.
 
 ## Contribution Rules
 

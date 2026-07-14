@@ -192,11 +192,16 @@ Example issue-linked branches:
 - `hotfix/456-rollback-bad-release`
 - `release/789-2026-07-15-cut`
 
-The lifecycle stays the same: create the issue, create the branch, create the
-worktree, verify, plan the PR, and only then execute the PR creation step.
-Normal PRs target `main`. Release and maintenance bases are maintainer-managed
-exceptions for release/hotfix work only, and they still must use the same strict
-`<type>/<issue>-<slug>` pattern.
+The lifecycle stays the same: create or confirm the issue, then use
+`go run ./cmd/rdev git worktree create` to create the strict branch and the
+external worktree together. `go run ./cmd/rdev git branch create` is only for
+current-checkout work where you are intentionally not creating a new worktree.
+After the worktree exists, verify, plan the PR, and then execute the PR
+creation step.
+Under the implemented local PR policy, normal PRs including hotfix and release
+still target `main` as the base. Any separate maintainer release process is
+outside this local PR policy and is not treated here as a supported base
+exception.
 
 ## Agent use
 
