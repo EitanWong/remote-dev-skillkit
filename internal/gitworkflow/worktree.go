@@ -256,8 +256,13 @@ func (m WorktreeManager) list(ctx context.Context) ([]WorktreeEntry, []CommandEv
 }
 
 func (m WorktreeManager) listWorktrees(ctx context.Context) ([]WorktreeEntry, []WorktreeEntry, []CommandEvidence, error) {
+	commonRoot, commonEvidence, err := m.commonRepositoryRoot(ctx)
+	commands := []CommandEvidence{}
+	if len(commonEvidence.Argv) > 0 {
+		commands = append(commands, commonEvidence)
+	}
 	evidence, err := m.Git.Run(ctx, m.RepoRoot, "worktree", "list", "--porcelain")
-	commands := []CommandEvidence{evidence}
+	commands = append(commands, evidence)
 	if err != nil {
 		return nil, nil, commands, err
 	}
@@ -268,9 +273,13 @@ func (m WorktreeManager) listWorktrees(ctx context.Context) ([]WorktreeEntry, []
 	if err := rejectDuplicateBranches(allEntries); err != nil {
 		return allEntries, nil, commands, err
 	}
+	runtimeRoots := m.runtimeRoots(commonRoot)
 	var entries []WorktreeEntry
 	for index := range allEntries {
 		if m.isManagerCheckout(allEntries[index]) {
+			continue
+		}
+		if isRuntimeEntry(runtimeRoots, allEntries[index]) {
 			continue
 		}
 		if !isManagedEntry(m.Root, allEntries[index]) {
@@ -316,8 +325,47 @@ func (m WorktreeManager) isManagerCheckout(entry WorktreeEntry) bool {
 	return samePath(m.RepoRoot, entry.Path)
 }
 
+func (m WorktreeManager) commonRepositoryRoot(ctx context.Context) (string, CommandEvidence, error) {
+	evidence, err := m.Git.Run(ctx, m.RepoRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", evidence, err
+	}
+	commonDir := strings.TrimSpace(evidence.Stdout)
+	if commonDir == "" {
+		return "", evidence, fmt.Errorf("git rev-parse --git-common-dir returned empty output")
+	}
+	commonRoot, err := filepath.Abs(commonDir)
+	if err != nil {
+		return "", evidence, err
+	}
+	commonRoot = filepath.Clean(commonRoot)
+	if filepath.Base(commonRoot) != ".git" {
+		return "", evidence, fmt.Errorf("git common directory %q must end in .git", commonRoot)
+	}
+	return filepath.Dir(commonRoot), evidence, nil
+}
+
+func (m WorktreeManager) runtimeRoots(commonRoot string) []string {
+	roots := []string{
+		filepath.Join(m.RepoRoot, ".rdev", "worktrees"),
+	}
+	if commonRoot != "" && !samePath(commonRoot, m.RepoRoot) {
+		roots = append(roots, filepath.Join(commonRoot, ".rdev", "worktrees"))
+	}
+	return roots
+}
+
 func isManagedEntry(root string, entry WorktreeEntry) bool {
 	return entry.Branch != defaultBaseBranch && isWithinPath(root, entry.Path)
+}
+
+func isRuntimeEntry(runtimeRoots []string, entry WorktreeEntry) bool {
+	for _, root := range runtimeRoots {
+		if isWithinPath(root, entry.Path) {
+			return true
+		}
+	}
+	return false
 }
 
 func rejectDuplicateBranches(entries []WorktreeEntry) error {

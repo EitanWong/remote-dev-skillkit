@@ -196,6 +196,112 @@ func TestLinkedManagerCleanWithBroadRootSkipsMainWithoutDestructiveCommands(t *t
 	}
 }
 
+func TestLinkedCheckoutRuntimeWorktreesAreIgnoredByDoctorAndClean(t *testing.T) {
+	requireGit(t)
+	repo := initGitRepo(t)
+	defaultRoot, err := DefaultWorktreeRoot(repo)
+	if err != nil {
+		t.Fatalf("DefaultWorktreeRoot() error = %v", err)
+	}
+	manager, err := NewWorktreeManager(repo, defaultRoot, ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager() error = %v", err)
+	}
+	branch := "feat/126-runtime-linked-manager"
+	if _, err := manager.Create(context.Background(), branch, "main"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	managerPath := filepath.Join(defaultRoot, "feat-126-runtime-linked-manager")
+	runtimePath := filepath.Join(managerPath, ".rdev", "worktrees", "task-126")
+	runtimeBranch := "feat/996-runtime-linked"
+	t.Cleanup(func() {
+		runGitForTest(t, repo, "worktree", "remove", "--force", runtimePath)
+		runGitForTest(t, repo, "worktree", "remove", "--force", managerPath)
+		runGitForTest(t, repo, "branch", "-D", branch)
+		runGitForTest(t, repo, "branch", "-D", runtimeBranch)
+	})
+	runGitForTest(t, repo, "worktree", "add", "-b", runtimeBranch, runtimePath, "main")
+
+	linkedManager, err := NewWorktreeManager(managerPath, "", ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager(linked manager) error = %v", err)
+	}
+	doctorReport, err := linkedManager.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	for _, entry := range doctorReport.Entries {
+		if entry.Path == canonicalPathForTest(t, runtimePath) {
+			t.Fatalf("Doctor() reported linked runtime worktree %#v", entry)
+		}
+	}
+	cleanReport, err := linkedManager.Clean(context.Background())
+	if err != nil {
+		t.Fatalf("Clean() error = %v", err)
+	}
+	if _, err := os.Stat(runtimePath); err != nil {
+		t.Fatalf("linked runtime worktree was removed: %v", err)
+	}
+	for _, evidence := range cleanReport.Commands {
+		if len(evidence.Argv) >= 6 && evidence.Argv[3] == "worktree" && evidence.Argv[4] == "remove" && samePath(evidence.Argv[5], runtimePath) {
+			t.Fatalf("Clean() attempted runtime worktree removal: %#v", cleanReport.Commands)
+		}
+	}
+}
+
+func TestBroadRootRuntimeWorktreesAreIgnoredByDoctorAndClean(t *testing.T) {
+	requireGit(t)
+	repo := initGitRepo(t)
+	defaultRoot, err := DefaultWorktreeRoot(repo)
+	if err != nil {
+		t.Fatalf("DefaultWorktreeRoot() error = %v", err)
+	}
+	manager, err := NewWorktreeManager(repo, defaultRoot, ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager() error = %v", err)
+	}
+	branch := "feat/127-runtime-broad-root-manager"
+	if _, err := manager.Create(context.Background(), branch, "main"); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	managerPath := filepath.Join(defaultRoot, "feat-127-runtime-broad-root-manager")
+	runtimePath := filepath.Join(repo, ".rdev", "worktrees", "task-127")
+	runtimeBranch := "feat/997-runtime-broad"
+	t.Cleanup(func() {
+		runGitForTest(t, repo, "worktree", "remove", "--force", runtimePath)
+		runGitForTest(t, repo, "worktree", "remove", "--force", managerPath)
+		runGitForTest(t, repo, "branch", "-D", branch)
+		runGitForTest(t, repo, "branch", "-D", runtimeBranch)
+	})
+	runGitForTest(t, repo, "worktree", "add", "-b", runtimeBranch, runtimePath, "main")
+
+	linkedManager, err := NewWorktreeManager(managerPath, filepath.Dir(repo), ExecRunner{})
+	if err != nil {
+		t.Fatalf("NewWorktreeManager(linked manager, broad root) error = %v", err)
+	}
+	doctorReport, err := linkedManager.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	for _, entry := range doctorReport.Entries {
+		if entry.Path == canonicalPathForTest(t, runtimePath) {
+			t.Fatalf("Doctor() reported broad-root runtime worktree %#v", entry)
+		}
+	}
+	cleanReport, err := linkedManager.Clean(context.Background())
+	if err != nil {
+		t.Fatalf("Clean() error = %v", err)
+	}
+	if _, err := os.Stat(runtimePath); err != nil {
+		t.Fatalf("broad-root runtime worktree was removed: %v", err)
+	}
+	for _, evidence := range cleanReport.Commands {
+		if len(evidence.Argv) >= 6 && evidence.Argv[3] == "worktree" && evidence.Argv[4] == "remove" && samePath(evidence.Argv[5], runtimePath) {
+			t.Fatalf("Clean() attempted runtime worktree removal: %#v", cleanReport.Commands)
+		}
+	}
+}
+
 func TestCreateDeveloperWorktreeUsesNormalizedBranchDirectory(t *testing.T) {
 	requireGit(t)
 	repo := initGitRepo(t)
