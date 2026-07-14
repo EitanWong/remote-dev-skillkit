@@ -18,10 +18,19 @@ opening a pull request.
 
 ## Branch and Pull Request Workflow
 
+- See [Git Workflow](docs/development/GIT_WORKFLOW.md) for the exact runnable
+  branch, worktree, Draft PR, recovery, and migration flow.
 - Create issue-linked branches that match `<type>/<issue>-<slug>`, such as
   `feat/123-git-policy-workflow` or `fix/456-main-pr-base`.
+- Use `go run ./cmd/rdev git pr plan` before any external mutation, then use
+  `go run ./cmd/rdev git pr create --execute` only when the branch is ready.
+- Keep developer worktrees outside the repository tree. A shared root such as
+  `../.worktrees/remote-dev-skillkit` is valid; `go run ./cmd/rdev git worktree
+  doctor` should report a clean state before PR planning.
 - Open pull requests against `main` only.
 - Include matching issue text in the PR body, for example `Closes #123`.
+- Prefer Squash merge after review. Do not use merge commits or rebase merges
+  for this workflow.
 - Capture branch and worktree evidence in the pull request using:
 
 ```bash
