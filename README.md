@@ -173,6 +173,32 @@ and launch preparation. `bytes` is the verified runtime size, not measured
 network transfer volume. No performance target is claimed until real Windows
 cold and warm acceptance evidence is collected.
 
+For acceptance, save the first standalone JSON report emitted by each run as
+`cold-layered-run.json` and `warm-layered-run.json`; do not include subsequent
+foreground host output in either file. Package both reports with the other real
+Windows evidence:
+
+```bash
+rdev acceptance package-windows-temporary \
+  --plan windows-plan/windows-temporary-plan.json \
+  --out windows-evidence \
+  --transcript transcript.txt \
+  --release-verification rdev-verify.json \
+  --audit audit.jsonl \
+  --no-persistence-dir no-persistence \
+  --denial-probes-dir denial-probes \
+  --cold-layered-run cold-layered-run.json \
+  --warm-layered-run warm-layered-run.json
+```
+
+The packager requires a cache miss in the cold report, a cache hit in the warm
+report, the complete ordered verification stages, and nonnegative durations.
+Reports containing ticket, gateway, token, redaction-marker, or private-path
+content are rejected before copying. Synthetic fixture reports are
+non-production and do not satisfy the formal release gate or replace a real
+Windows run. Keep the complete session-bound Windows evidence package private;
+review any report separately before publication.
+
 ### 2. Run Scoped Work
 
 The agent creates signed tasks for specific capabilities: shell, PowerShell,

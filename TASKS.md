@@ -324,6 +324,7 @@
 - [x] Add full production enrollment authority lifecycle beyond the local certificate, dev hosted issuance/renewal primitives, optional dev operator auth token for issuance/renewal/revocation refresh, host-side near-expiry renewal, local renewal, empty/signed revocation baseline, and dev revocation-list distribution primitives: production operator identity and roles, fleet renewal policy, key custody, and emergency drills.
 - [ ] Add real Windows Service managed-mode execution and acceptance proof beyond dry-run plans.
 - [ ] Publish signed per-platform Connection Entry release archives to GitHub Releases and verify real downloads with post-release install transcripts packaged by `rdev acceptance package-post-release-download`.
+- [ ] Collect real Windows temporary layered cold/warm measurements: bytes downloaded, time to host registration, reconnect time, cache hit rate, helper isolation, and rollback result.
 - [ ] Add real restrictive-network acceptance evidence for frp, Chisel, headscale/Tailscale-compatible mesh, WireGuard, and SSH tunnel paths across Windows/macOS/Linux using the standard connectivity adapter packages and `rdev acceptance package-relay-adapter`.
 - [x] Add systemd user-unit mode.
 - [x] Add Linux managed-service acceptance plan verification for systemd user-unit evidence.

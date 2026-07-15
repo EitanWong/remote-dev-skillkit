@@ -475,7 +475,7 @@ func assertNoPartialLayeredOutput(t *testing.T, outDir string) {
 		if readErr != nil {
 			return readErr
 		}
-		if bytes.Contains(content, []byte("layered-run")) {
+		if bytes.Contains(bytes.ToLower(content), []byte("rdev-bootstrap.exe")) && bytes.Contains(content, []byte("layered-run")) {
 			t.Errorf("verification failure wrote a layered launcher to %s", path)
 		}
 		return nil

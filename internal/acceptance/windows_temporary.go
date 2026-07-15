@@ -13,6 +13,23 @@ import (
 
 const WindowsTemporaryPlanSchemaVersion = "rdev.acceptance.windows-temporary-plan.v1"
 
+const (
+	windowsTemporaryColdLayeredRunEvidence = "cold-layered-run.json from a real clean Windows cold run with from_cache=false."
+	windowsTemporaryWarmLayeredRunEvidence = "warm-layered-run.json from the immediate cached Windows rerun with from_cache=true."
+)
+
+func windowsTemporaryRequiredEvidence() []string {
+	return []string{
+		"PowerShell transcript for bootstrap and foreground host startup.",
+		"SHA-256 verification output for the bootstrap script, verifier, and rdev-host binary.",
+		"Signed release manifest or release bundle verification output from rdev-verify.",
+		"Session join, endpoint trust, task, host-denial probe, revoke, and cancellation audit events.",
+		"No-persistence inspection output for services, scheduled tasks, Run keys, startup folders, and firewall rules.",
+		windowsTemporaryColdLayeredRunEvidence,
+		windowsTemporaryWarmLayeredRunEvidence,
+	}
+}
+
 type WindowsTemporaryOptions struct {
 	OutDir                         string
 	GatewayURL                     string
@@ -140,13 +157,7 @@ func RunWindowsTemporaryPlan(opts WindowsTemporaryOptions) (WindowsTemporaryPlan
 			"Run bounded diagnostic and repair tasks, then collect evidence and audit exports.",
 			"Revoke the temporary host and run every no-persistence check before publishing the transcript.",
 		},
-		RequiredEvidence: []string{
-			"PowerShell transcript for bootstrap and foreground host startup.",
-			"SHA-256 verification output for the bootstrap script, verifier, and rdev-host binary.",
-			"Signed release manifest or release bundle verification output from rdev-verify.",
-			"Session join, endpoint trust, task, host-denial probe, revoke, and cancellation audit events.",
-			"No-persistence inspection output for services, scheduled tasks, Run keys, startup folders, and firewall rules.",
-		},
+		RequiredEvidence: windowsTemporaryRequiredEvidence(),
 	}
 	plan.Checks = windowsTemporaryChecks(plan, resolved)
 	if err := writeWindowsTemporaryPlan(filepath.Join(outDir, "windows-temporary-plan.json"), plan); err != nil {

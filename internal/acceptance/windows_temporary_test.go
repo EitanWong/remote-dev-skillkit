@@ -213,6 +213,8 @@ func TestPackageWindowsTemporaryEvidencePackagesAndRedacts(t *testing.T) {
 		AuditPath:               fixture.auditPath,
 		NoPersistenceDir:        fixture.noPersistenceDir,
 		DenialProbesDir:         fixture.denialProbesDir,
+		ColdLayeredRunPath:      fixture.coldLayeredRunPath,
+		WarmLayeredRunPath:      fixture.warmLayeredRunPath,
 		Now:                     time.Date(2026, 6, 29, 13, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -259,6 +261,8 @@ func TestPackageWindowsTemporaryEvidenceRejectsFailedReleaseVerification(t *test
 		AuditPath:               fixture.auditPath,
 		NoPersistenceDir:        fixture.noPersistenceDir,
 		DenialProbesDir:         fixture.denialProbesDir,
+		ColdLayeredRunPath:      fixture.coldLayeredRunPath,
+		WarmLayeredRunPath:      fixture.warmLayeredRunPath,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -282,6 +286,8 @@ type windowsTemporaryPackageFixture struct {
 	auditPath               string
 	noPersistenceDir        string
 	denialProbesDir         string
+	coldLayeredRunPath      string
+	warmLayeredRunPath      string
 }
 
 func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification string) windowsTemporaryPackageFixture {
@@ -335,6 +341,8 @@ func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification strin
 		"gui.control.txt",
 		"credential.change.txt",
 	})
+	coldLayeredRunPath := writeWindowsLayeredRunReportForTest(t, root, "cold-layered-run.json", windowsLayeredRunReportForTest(false))
+	warmLayeredRunPath := writeWindowsLayeredRunReportForTest(t, root, "warm-layered-run.json", windowsLayeredRunReportForTest(true))
 	return windowsTemporaryPackageFixture{
 		root:                    root,
 		planPath:                filepath.Join(planOut, "windows-temporary-plan.json"),
@@ -343,6 +351,8 @@ func writeWindowsTemporaryPackageFixture(t *testing.T, releaseVerification strin
 		auditPath:               auditPath,
 		noPersistenceDir:        noPersistenceDir,
 		denialProbesDir:         denialProbesDir,
+		coldLayeredRunPath:      coldLayeredRunPath,
+		warmLayeredRunPath:      warmLayeredRunPath,
 	}
 }
 

@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +27,8 @@ type WindowsTemporaryPackageOptions struct {
 	NoPersistenceDir        string
 	DenialProbesDir         string
 	NotesPath               string
+	ColdLayeredRunPath      string
+	WarmLayeredRunPath      string
 	Now                     time.Time
 }
 
@@ -125,6 +129,7 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 	files = append(files, copyOptionalEvidence(outDir, "evidence/release-verification.txt", "release-verification", opts.ReleaseVerificationPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/audit.txt", "audit", opts.AuditPath, redactor, add)...)
 	files = append(files, copyNotesEvidence(outDir, opts.NotesPath, redactor, add)...)
+	files = append(files, copyWindowsLayeredRunEvidencePair(outDir, opts.ColdLayeredRunPath, opts.WarmLayeredRunPath, add)...)
 
 	noPersistenceFiles, noPersistenceNames := copyEvidenceDir(outDir, "evidence/no-persistence", "no-persistence", opts.NoPersistenceDir, redactor, add)
 	files = append(files, noPersistenceFiles...)
@@ -206,6 +211,98 @@ func copyNotesEvidence(root, source string, redactor *shelladapter.ArtifactRedac
 	}
 	add("notes_copied", true, entry.Path)
 	return []WindowsTemporaryPackageFile{entry}
+}
+
+func copyWindowsLayeredRunEvidencePair(root, coldSource, warmSource string, add func(string, bool, string)) []WindowsTemporaryPackageFile {
+	coldPresent := strings.TrimSpace(coldSource) != ""
+	warmPresent := strings.TrimSpace(warmSource) != ""
+	add("cold_layered_run_present", coldPresent, layeredRunPresenceDetail(coldPresent))
+	add("warm_layered_run_present", warmPresent, layeredRunPresenceDetail(warmPresent))
+
+	coldContent, coldReport, coldErr := readAndValidateWindowsLayeredRunReport(coldSource, coldPresent, false)
+	warmContent, warmReport, warmErr := readAndValidateWindowsLayeredRunReport(warmSource, warmPresent, true)
+	if coldErr != nil || warmErr != nil {
+		add("cold_layered_run_valid", coldErr == nil, layeredRunValidationDetail(coldErr))
+		add("warm_layered_run_valid", warmErr == nil, layeredRunValidationDetail(warmErr))
+		add("layered_run_pair_valid", false, "both reports must be valid")
+		return nil
+	}
+
+	add("cold_layered_run_valid", true, "validated")
+	add("warm_layered_run_valid", true, "validated")
+	if *coldReport.AssetID != *warmReport.AssetID || *coldReport.Bytes != *warmReport.Bytes {
+		add("layered_run_pair_valid", false, "asset_id and bytes must match")
+		return nil
+	}
+
+	coldEntry, err := writePackageContent(root, "evidence/cold-layered-run.json", "cold-layered-run", coldContent, "")
+	if err != nil {
+		add("layered_run_pair_valid", false, "reports could not be copied")
+		return nil
+	}
+	warmEntry, err := writePackageContent(root, "evidence/warm-layered-run.json", "warm-layered-run", warmContent, "")
+	if err != nil {
+		_ = os.Remove(filepath.Join(root, filepath.FromSlash(coldEntry.Path)))
+		add("layered_run_pair_valid", false, "reports could not be copied")
+		return nil
+	}
+	add("layered_run_pair_valid", true, "asset_id and bytes match")
+	return []WindowsTemporaryPackageFile{coldEntry, warmEntry}
+}
+
+func readAndValidateWindowsLayeredRunReport(source string, present, expectedFromCache bool) ([]byte, windowsLayeredRunReport, error) {
+	if !present {
+		return nil, windowsLayeredRunReport{}, fmt.Errorf("missing")
+	}
+	content, err := readWindowsLayeredRunReport(source)
+	if err != nil {
+		return nil, windowsLayeredRunReport{}, err
+	}
+	report, err := decodeValidatedWindowsLayeredRunReport(content, expectedFromCache)
+	if err != nil {
+		return nil, windowsLayeredRunReport{}, err
+	}
+	return content, report, nil
+}
+
+func layeredRunPresenceDetail(present bool) string {
+	if present {
+		return "provided"
+	}
+	return "missing"
+}
+
+func layeredRunValidationDetail(err error) string {
+	if err == nil {
+		return "validated"
+	}
+	if err.Error() == "missing" {
+		return "missing"
+	}
+	if strings.Contains(err.Error(), "exceeds") {
+		return "report exceeds size limit"
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return "report could not be read"
+	}
+	return err.Error()
+}
+
+func readWindowsLayeredRunReport(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, maxWindowsLayeredRunReportBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > maxWindowsLayeredRunReportBytes {
+		return nil, fmt.Errorf("layered run report exceeds %d bytes", maxWindowsLayeredRunReportBytes)
+	}
+	return content, nil
 }
 
 func copyEvidenceDir(root, bundleDir, kind, sourceDir string, redactor *shelladapter.ArtifactRedactor, add func(string, bool, string)) ([]WindowsTemporaryPackageFile, []string) {

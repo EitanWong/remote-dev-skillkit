@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
@@ -11087,45 +11088,103 @@ func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 	}
 	fakeGitHubToken := "ghp_" + "abcdefghijklmnopqrstuvwx"
 	transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, denialProbesDir := writeWindowsPackageEvidenceForCLITest(t, root, `{"ok": true, "token": "`+fakeGitHubToken+`"}`)
+	coldLayeredRunPath := writeLayeredRunReportForCLITest(t, root, "cold-layered-run.json", false)
+	warmLayeredRunPath := writeLayeredRunReportForCLITest(t, root, "warm-layered-run.json", true)
+	packageArgs := func(out, coldLayeredRun, warmLayeredRun string) []string {
+		args := []string{
+			"acceptance", "package-windows-temporary",
+			"--plan", planPayload.Plan,
+			"--out", out,
+			"--transcript", transcriptPath,
+			"--release-verification", releaseVerificationPath,
+			"--audit", auditPath,
+			"--no-persistence-dir", noPersistenceDir,
+			"--denial-probes-dir", denialProbesDir,
+		}
+		if coldLayeredRun != "" {
+			args = append(args, "--cold-layered-run", coldLayeredRun)
+		}
+		if warmLayeredRun != "" {
+			args = append(args, "--warm-layered-run", warmLayeredRun)
+		}
+		return args
+	}
 
-	var stdout bytes.Buffer
-	app := NewApp(&stdout, &bytes.Buffer{})
-	if err := app.Run(context.Background(), []string{
-		"acceptance", "package-windows-temporary",
-		"--plan", planPayload.Plan,
-		"--out", filepath.Join(root, "windows-evidence"),
-		"--transcript", transcriptPath,
-		"--release-verification", releaseVerificationPath,
-		"--audit", auditPath,
-		"--no-persistence-dir", noPersistenceDir,
-		"--denial-probes-dir", denialProbesDir,
-	}); err != nil {
-		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
-	}
-	var payload struct {
-		OK      bool   `json:"ok"`
-		Schema  string `json:"schema"`
-		Package string `json:"package"`
-		Files   []struct {
-			Path string `json:"path"`
-			Kind string `json:"kind"`
-		} `json:"files"`
-		RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
-	}
-	if !payload.OK {
-		t.Fatalf("expected package ok, got %s", stdout.String())
-	}
-	if payload.Schema != "rdev.acceptance-package.windows-temporary.v1" {
-		t.Fatalf("unexpected schema %q", payload.Schema)
-	}
-	if _, err := os.Stat(payload.Package); err != nil {
-		t.Fatalf("expected package manifest: %v", err)
-	}
-	if payload.RedactionRuleCounts["github_token"] != 1 {
-		t.Fatalf("expected github_token redaction count, got %#v", payload.RedactionRuleCounts)
+	t.Run("packages cold and warm layered run evidence", func(t *testing.T) {
+		out := filepath.Join(root, "windows-evidence")
+		var stdout bytes.Buffer
+		app := NewApp(&stdout, &bytes.Buffer{})
+		if err := app.Run(context.Background(), packageArgs(out, coldLayeredRunPath, warmLayeredRunPath)); err != nil {
+			t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+		}
+		var payload struct {
+			OK      bool   `json:"ok"`
+			Schema  string `json:"schema"`
+			Package string `json:"package"`
+			Files   []struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			} `json:"files"`
+			RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+		}
+		if !payload.OK {
+			t.Fatalf("expected package ok, got %s", stdout.String())
+		}
+		if payload.Schema != "rdev.acceptance-package.windows-temporary.v1" {
+			t.Fatalf("unexpected schema %q", payload.Schema)
+		}
+		if _, err := os.Stat(payload.Package); err != nil {
+			t.Fatalf("expected package manifest: %v", err)
+		}
+		if payload.RedactionRuleCounts["github_token"] != 1 {
+			t.Fatalf("expected github_token redaction count, got %#v", payload.RedactionRuleCounts)
+		}
+		filesByKind := make(map[string]string, len(payload.Files))
+		for _, file := range payload.Files {
+			filesByKind[file.Kind] = file.Path
+		}
+		for kind, wantPath := range map[string]string{
+			"cold-layered-run": "evidence/cold-layered-run.json",
+			"warm-layered-run": "evidence/warm-layered-run.json",
+		} {
+			if got := filesByKind[kind]; got != wantPath {
+				t.Fatalf("packaged %s path = %q, want %q; files = %#v", kind, got, wantPath, payload.Files)
+			}
+			if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(wantPath))); err != nil {
+				t.Fatalf("expected packaged %s evidence: %v", kind, err)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name            string
+		missingEvidence string
+		coldLayeredRun  string
+		warmLayeredRun  string
+	}{
+		{name: "requires cold layered run evidence", missingEvidence: "cold", warmLayeredRun: warmLayeredRunPath},
+		{name: "requires warm layered run evidence", missingEvidence: "warm", coldLayeredRun: coldLayeredRunPath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := NewApp(&stdout, &stderr)
+			err := app.Run(context.Background(), packageArgs(
+				filepath.Join(root, "windows-evidence-missing-"+tc.missingEvidence),
+				tc.coldLayeredRun,
+				tc.warmLayeredRun,
+			))
+			if err == nil {
+				t.Fatalf("expected package command to reject missing %s layered run evidence", tc.missingEvidence)
+			}
+			failure := strings.ToLower(err.Error() + "\n" + stdout.String() + "\n" + stderr.String())
+			if !strings.Contains(failure, tc.missingEvidence) {
+				t.Fatalf("expected missing %s evidence failure, got %s", tc.missingEvidence, failure)
+			}
+		})
 	}
 }
 
@@ -12011,6 +12070,32 @@ func writeWindowsPackageEvidenceForCLITest(t *testing.T, root, releaseVerificati
 		"credential.change.txt",
 	})
 	return transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, denialProbesDir
+}
+
+func writeLayeredRunReportForCLITest(t *testing.T, root, name string, fromCache bool) string {
+	t.Helper()
+	report := bootstrapcmd.LayeredRunReport{
+		SchemaVersion: bootstrapcmd.LayeredRunReportSchemaVersion,
+		AssetID:       "rdev-host-windows-amd64",
+		FromCache:     fromCache,
+		Resumed:       false,
+		Bytes:         4096,
+		Stages: []bootstrapcmd.LayeredRunStage{
+			{Name: "manifest-fetch", DurationMS: 12},
+			{Name: "signature-verification", DurationMS: 3},
+			{Name: "runtime-download", DurationMS: 24},
+			{Name: "runtime-launch-preparation", DurationMS: 2},
+		},
+	}
+	content, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, name)
+	if err := os.WriteFile(path, append(content, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func writeNamedFilesForTest(t *testing.T, dir string, names []string) {

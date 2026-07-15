@@ -1725,6 +1725,8 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		noPersistenceDir := fs.String("no-persistence-dir", "", "directory containing one evidence file per no-persistence check")
 		denialProbesDir := fs.String("denial-probes-dir", "", "directory containing one evidence file per host-denial probe")
 		notes := fs.String("notes", "", "optional operator notes file")
+		coldLayeredRun := fs.String("cold-layered-run", "", "cold Windows layered bootstrap report with from_cache=false")
+		warmLayeredRun := fs.String("warm-layered-run", "", "warm Windows layered bootstrap report with from_cache=true")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1737,6 +1739,8 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 			NoPersistenceDir:        *noPersistenceDir,
 			DenialProbesDir:         *denialProbesDir,
 			NotesPath:               *notes,
+			ColdLayeredRunPath:      *coldLayeredRun,
+			WarmLayeredRunPath:      *warmLayeredRun,
 		})
 	case "package-managed-mac-service":
 		fs := flag.NewFlagSet("acceptance package-managed-mac-service", flag.ContinueOnError)
@@ -12129,7 +12133,7 @@ Usage:
   rdev acceptance scaffold-post-release-download --post-release-install-dir post-release-install --out post-release-download-evidence-input
   rdev acceptance post-release-evidence-status --scaffold post-release-download-evidence-input
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
-  rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --denial-probes-dir denial-probes
+  rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --denial-probes-dir denial-probes --cold-layered-run cold-layered-run.json --warm-layered-run warm-layered-run.json
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --session-evidence-dir session-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --evidence-dir relay-evidence-input
   rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --evidence-dir hosted-runtime-evidence-input
