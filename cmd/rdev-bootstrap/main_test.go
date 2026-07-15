@@ -26,4 +26,7 @@ func TestRdevBootstrapEntrypointAvoidsFullRuntimeImports(t *testing.T) {
 	if !strings.Contains(source, "internal/bootstrapcmd") {
 		t.Fatalf("rdev-bootstrap entrypoint should delegate to internal/bootstrapcmd:\n%s", source)
 	}
+	if !strings.Contains(source, "Stdin: os.Stdin") {
+		t.Fatalf("rdev-bootstrap entrypoint should pass inherited stdin to foreground commands:\n%s", source)
+	}
 }

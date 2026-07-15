@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	app := bootstrapcmd.App{Stdout: os.Stdout, Stderr: os.Stderr}
+	app := bootstrapcmd.App{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 	if err := app.Run(context.Background(), os.Args[1:]); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
