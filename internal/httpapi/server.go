@@ -1575,6 +1575,11 @@ exit $rdevExitCode
 }
 
 func (s Server) asset(w http.ResponseWriter, r *http.Request) {
+	const windowsHostAssetPath = "/assets/rdev-host-windows-amd64.exe"
+	if strings.HasPrefix(r.URL.Path, windowsHostAssetPath) {
+		s.rdevHostWindowsAMD64Asset(w, r)
+		return
+	}
 	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/assets/"), "/")
 	if name == "" || strings.Contains(name, "/") || strings.Contains(name, `\`) {
 		writeError(w, http.StatusNotFound, "unknown asset")
@@ -1597,7 +1602,7 @@ func (s Server) asset(w http.ResponseWriter, r *http.Request) {
 	}
 	sum, err := fileSHA256(path)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "asset is unavailable")
 		return
 	}
 	if shaOnly {
@@ -1613,10 +1618,40 @@ func (s Server) asset(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+func (s Server) rdevHostWindowsAMD64Asset(w http.ResponseWriter, r *http.Request) {
+	const assetPath = "/assets/rdev-host-windows-amd64.exe"
+	shaOnly := false
+	switch {
+	case r.URL.EscapedPath() == assetPath && r.URL.RawQuery == "" && !r.URL.ForceQuery:
+	case r.URL.EscapedPath() == assetPath+".sha256" && r.URL.RawQuery == "" && !r.URL.ForceQuery:
+		shaOnly = true
+	default:
+		writeError(w, http.StatusNotFound, "unknown asset")
+		return
+	}
+	path, ok := configuredAssetPath(s.Assets.RdevHostWindowsAMD64Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "asset is not configured")
+		return
+	}
+	sum, err := fileSHA256(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "asset is unavailable")
+		return
+	}
+	if shaOnly {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintln(w, sum)
+		return
+	}
+	http.ServeFile(w, r, path)
+}
+
 func (s Server) serveGzipAsset(w http.ResponseWriter, path string) {
 	file, err := os.Open(path)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "asset is unavailable")
 		return
 	}
 	defer file.Close()
@@ -1632,8 +1667,6 @@ func (s Server) serveGzipAsset(w http.ResponseWriter, path string) {
 
 func (s Server) assetPath(name string) (string, bool) {
 	switch name {
-	case "rdev-host-windows-amd64.exe":
-		return configuredAssetPath(s.Assets.RdevHostWindowsAMD64Path)
 	case "rdev-windows-amd64.exe":
 		return configuredAssetPath(s.Assets.RdevWindowsAMD64Path)
 	case "rdev-darwin-arm64":

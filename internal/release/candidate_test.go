@@ -344,6 +344,168 @@ func TestPrepareCandidateWritesSignedWindowsLayeredAssets(t *testing.T) {
 	}
 }
 
+func TestVerifyCandidateRequiresLayeredManifestForSignedWindowsCore(t *testing.T) {
+	out, candidate, _, now := prepareWindowsLayeredCandidateForTest(t)
+	root, err := parseCandidateRootPublicKey(candidate.RootPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleVerification, err := VerifyBundle(filepath.Join(out, candidate.ReleaseBundlePath), root, nil)
+	if err != nil || !bundleVerification.OK() {
+		t.Fatalf("signed release bundle should verify: %#v, %v", bundleVerification.Checks, err)
+	}
+	signedCorePresent := false
+	for _, artifact := range bundleVerification.Artifacts {
+		if artifact.Name == rdevHostWindowsAMD64AssetName && artifact.Artifact == rdevHostWindowsAMD64AssetName {
+			signedCorePresent = true
+			break
+		}
+	}
+	if !signedCorePresent {
+		t.Fatal("test fixture signed bundle does not contain the Windows core runtime")
+	}
+
+	downgraded := candidate
+	downgraded.LayeredAssetManifestPath = ""
+	downgraded.Files = make([]CandidateFile, 0, len(candidate.Files)-1)
+	for _, file := range candidate.Files {
+		if file.Path != layeredAssetManifestPath {
+			downgraded.Files = append(downgraded.Files, file)
+		}
+	}
+	if err := os.Remove(filepath.Join(out, layeredAssetManifestPath)); err != nil {
+		t.Fatal(err)
+	}
+	rewriteCandidateChecksumsForTest(t, out, &downgraded)
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected signed Windows core bundle to require its layered manifest despite unsigned metadata removal")
+	}
+	if !strings.Contains(failedCandidateVerificationNames(verification), "layered_asset_manifest_path") {
+		t.Fatalf("expected missing layered manifest path failure, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
+func TestVerifyCandidateRejectsLayeredDeclarationWithoutSignedWindowsCore(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	candidate, err := PrepareCandidate(CandidateOptions{
+		SourceRoot:    filepath.Join("..", ".."),
+		OutDir:        out,
+		Version:       "v0.2.0",
+		ArtifactPaths: []string{writeCandidateArtifactForTest(t, input, "rdev-host.exe", "legacy-host-runtime")},
+		Key:           key,
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := candidate
+	declared.LayeredAssetManifestPath = layeredAssetManifestPath
+	if err := writeCandidate(filepath.Join(out, "release-candidate.json"), declared); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected layered declaration without a signed Windows core artifact to fail verification")
+	}
+	if !strings.Contains(failedCandidateVerificationNames(verification), "layered_asset_manifest_has_signed_windows_core") {
+		t.Fatalf("expected signed Windows core requirement failure, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
+func TestVerifyCandidateRejectsSignedLayeredManifestWithExtraAsset(t *testing.T) {
+	out, candidate, key, now := prepareWindowsLayeredCandidateForTest(t)
+	manifest := readLayeredAssetManifestForTest(t, filepath.Join(out, layeredAssetManifestPath))
+	var helper CandidateArtifact
+	for _, artifact := range candidate.Artifacts {
+		if artifact.Name == "rdev-verify.exe" {
+			helper = artifact
+			break
+		}
+	}
+	manifest.Assets = append(manifest.Assets, LayeredAsset{
+		ID:           "rdev-verify-windows-amd64",
+		Platform:     "windows/amd64",
+		Kind:         layeredAssetKindOptionalHelper,
+		RelativePath: "assets/rdev-verify.exe",
+		SHA256:       "sha256:" + helper.SHA256,
+		SizeBytes:    helper.SizeBytes,
+	})
+	signed, err := SignLayeredAssetManifest(manifest, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewritten := candidate
+	rewritten.Files = append([]CandidateFile(nil), candidate.Files...)
+	writeLayeredAssetManifestForTest(t, filepath.Join(out, layeredAssetManifestPath), signed)
+	refreshCandidateFileForTest(t, out, &rewritten, layeredAssetManifestPath)
+	rewriteCandidateChecksumsForTest(t, out, &rewritten)
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected candidate verification to reject a signed layered manifest with an extra asset")
+	}
+	if !strings.Contains(failedCandidateVerificationNames(verification), "layered_asset_manifest_windows_core_contract") {
+		t.Fatalf("expected exact layered manifest contract failure, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
+func TestVerifyCandidateRejectsDuplicateLayeredManifestChecksum(t *testing.T) {
+	out, candidate, _, now := prepareWindowsLayeredCandidateForTest(t)
+	checksumsPath := filepath.Join(out, candidate.ChecksumsPath)
+	content, err := os.ReadFile(checksumsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var layeredLine string
+	for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		if strings.HasSuffix(line, "  "+layeredAssetManifestPath) {
+			layeredLine = line
+			break
+		}
+	}
+	if layeredLine == "" {
+		t.Fatal("layered manifest checksum line missing from fixture")
+	}
+	if err := os.WriteFile(checksumsPath, append(content, []byte(layeredLine+"\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rewritten := candidate
+	rewritten.Files = append([]CandidateFile(nil), candidate.Files...)
+	refreshCandidateFileForTest(t, out, &rewritten, candidate.ChecksumsPath)
+	if err := writeCandidate(filepath.Join(out, "release-candidate.json"), rewritten); err != nil {
+		t.Fatal(err)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("expected duplicate layered manifest checksum line to fail verification")
+	}
+	if !strings.Contains(failedCandidateVerificationNames(verification), "checksums_paths_unique") {
+		t.Fatalf("expected duplicate checksum path failure, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
 func TestVerifyCandidatePassesAfterDirectoryMove(t *testing.T) {
 	input := t.TempDir()
 	root := t.TempDir()
@@ -657,6 +819,96 @@ func failedCandidateVerificationNames(verification CandidateVerification) string
 		}
 	}
 	return strings.Join(failed, ",")
+}
+
+func prepareWindowsLayeredCandidateForTest(t *testing.T) (string, Candidate, signing.Key, time.Time) {
+	t.Helper()
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	candidate, err := PrepareCandidate(CandidateOptions{
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     out,
+		Version:    "v0.2.0",
+		ArtifactPaths: []string{
+			writeCandidateArtifactForTest(t, input, rdevHostWindowsAMD64AssetName, "windows-core-runtime"),
+			writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary"),
+		},
+		Key: key,
+		Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out, candidate, key, now
+}
+
+func readLayeredAssetManifestForTest(t *testing.T, path string) LayeredAssetManifest {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest LayeredAssetManifest
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	return manifest
+}
+
+func writeLayeredAssetManifestForTest(t *testing.T, path string, manifest LayeredAssetManifest) {
+	t.Helper()
+	content, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(content, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func refreshCandidateFileForTest(t *testing.T, out string, candidate *Candidate, path string) {
+	t.Helper()
+	sha, size, err := fileDigest(filepath.Join(out, filepath.FromSlash(path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range candidate.Files {
+		if candidate.Files[index].Path == path {
+			candidate.Files[index].SHA256 = "sha256:" + sha
+			candidate.Files[index].SizeBytes = size
+			return
+		}
+	}
+	t.Fatalf("candidate file %s not found", path)
+}
+
+func rewriteCandidateChecksumsForTest(t *testing.T, out string, candidate *Candidate) {
+	t.Helper()
+	files := make([]CandidateFile, 0, len(candidate.Files)-1)
+	for _, file := range candidate.Files {
+		if file.Path != candidate.ChecksumsPath {
+			files = append(files, file)
+		}
+	}
+	checksumEntry, err := writeCandidateChecksums(filepath.Join(out, candidate.ChecksumsPath), files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range candidate.Files {
+		if candidate.Files[index].Path == candidate.ChecksumsPath {
+			candidate.Files[index] = checksumEntry
+			if err := writeCandidate(filepath.Join(out, "release-candidate.json"), *candidate); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatal("candidate checksums file metadata not found")
 }
 
 func writeCandidateArtifactForTest(t *testing.T, dir, name, content string) string {

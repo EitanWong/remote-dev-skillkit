@@ -1009,6 +1009,14 @@ func TestRdevHostWindowsAMD64AssetServesExactBinaryAndHashOnly(t *testing.T) {
 		"/assets/rdev-host-windows-amd64.exe.extra",
 		"/assets/nested/rdev-host-windows-amd64.exe",
 		"/assets/../rdev-host-windows-amd64.exe",
+		"/assets/rdev-host-windows-amd64.exe.gz",
+		"/assets/rdev-host-windows-amd64.exe.gz.sha256",
+		"/assets/rdev-host-windows-amd64.exe/",
+		"/assets/rdev-host-windows-amd64.exe.sha256/",
+		"/assets/rdev-host-windows-amd64.exe?download=1",
+		"/assets/rdev-host-windows-amd64.exe.sha256?download=1",
+		"/assets/%2Frdev-host-windows-amd64.exe",
+		"/assets/%2Frdev-host-windows-amd64.exe.sha256",
 	} {
 		req = httptest.NewRequest(http.MethodGet, requestPath, nil)
 		rec = httptest.NewRecorder()
@@ -1016,6 +1024,21 @@ func TestRdevHostWindowsAMD64AssetServesExactBinaryAndHashOnly(t *testing.T) {
 		if rec.Code == http.StatusOK || bytes.Contains(rec.Body.Bytes(), binaryContent) {
 			t.Fatalf("unexpected Windows host asset exposure for %q: %d %q", requestPath, rec.Code, rec.Body.Bytes())
 		}
+	}
+}
+
+func TestAssetErrorsDoNotExposeConfiguredFilesystemPath(t *testing.T) {
+	privatePath := filepath.Join(t.TempDir(), "private", "rdev-host-windows-amd64.exe")
+	rec := httptest.NewRecorder()
+	NewServer(gateway.NewMemoryGateway()).serveGzipAsset(rec, privatePath)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected asset read failure, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), privatePath) || strings.Contains(rec.Body.String(), filepath.Dir(privatePath)) {
+		t.Fatalf("asset error exposed configured filesystem path: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"error":"asset is unavailable"`) {
+		t.Fatalf("expected generic asset error, got %s", rec.Body.String())
 	}
 }
 

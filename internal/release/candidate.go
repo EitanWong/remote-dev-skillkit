@@ -393,9 +393,6 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 	root, rootErr := parseCandidateRootPublicKey(candidate.RootPublicKey)
 	add("candidate_root_public_key_valid", rootErr == nil, errorDetail(rootErr))
 	if rootErr == nil {
-		if candidate.LayeredAssetManifestPath != "" {
-			verification.Checks = append(verification.Checks, verifyCandidateLayeredAssetManifest(candidateDir, candidate, root, now)...)
-		}
 		releaseBundlePath := filepath.Join(candidateDir, "release-bundle.json")
 		add("release_bundle_exists", pathExists(releaseBundlePath), "release-bundle.json")
 		bundleVerification, err := VerifyBundle(releaseBundlePath, root, opts.RequiredArtifacts)
@@ -405,6 +402,16 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 			verification.BundleVerification = bundleVerification
 			verification.BundleVerification = publicCandidateBundleVerification(verification.BundleVerification)
 			add("release_bundle_verified", bundleVerification.OK(), failedBundleCheckNames(bundleVerification))
+			if bundleVerification.OK() {
+				signedWindowsCoreCount := verifiedBundleWindowsCoreRuntimeCount(bundleVerification)
+				add("signed_bundle_windows_core_unique", signedWindowsCoreCount <= 1, fmt.Sprintf("%d", signedWindowsCoreCount))
+				switch {
+				case signedWindowsCoreCount == 1:
+					verification.Checks = append(verification.Checks, verifyCandidateLayeredAssetManifest(candidateDir, candidate, root, now)...)
+				case candidate.LayeredAssetManifestPath != "":
+					add("layered_asset_manifest_has_signed_windows_core", false, candidate.LayeredAssetManifestPath)
+				}
+			}
 		}
 	} else if candidate.LayeredAssetManifestPath != "" {
 		add("layered_asset_manifest_verified", false, "candidate root public key is invalid")
@@ -719,8 +726,8 @@ func verifyCandidateLayeredWindowsCore(candidateDir string, candidate Candidate,
 		checks = append(checks, CandidateCheck{Name: name, Passed: passed, Detail: detail})
 	}
 	asset, err := SelectLayeredAsset(manifest, "windows/amd64", layeredAssetKindCoreRuntime, nil)
-	contractValid := err == nil && asset.ID == "rdev-host-windows-amd64" && asset.RelativePath == "assets/"+rdevHostWindowsAMD64AssetName
-	add("layered_asset_manifest_windows_core_contract", contractValid, errorDetail(err))
+	contractValid := len(manifest.Assets) == 1 && err == nil && asset.ID == "rdev-host-windows-amd64" && asset.RelativePath == "assets/"+rdevHostWindowsAMD64AssetName
+	add("layered_asset_manifest_windows_core_contract", contractValid, firstNonEmpty(errorDetail(err), fmt.Sprintf("assets=%d", len(manifest.Assets))))
 	if !contractValid {
 		return checks
 	}
@@ -749,6 +756,16 @@ func candidateWindowsCoreRuntime(candidate Candidate) (CandidateArtifact, int) {
 		}
 	}
 	return match, count
+}
+
+func verifiedBundleWindowsCoreRuntimeCount(verification BundleVerification) int {
+	count := 0
+	for _, artifact := range verification.Artifacts {
+		if artifact.Name == rdevHostWindowsAMD64AssetName && artifact.Artifact == rdevHostWindowsAMD64AssetName {
+			count++
+		}
+	}
+	return count
 }
 
 func candidateHasFile(files []CandidateFile, path string) bool {
@@ -1320,6 +1337,8 @@ func verifyCandidateChecksumFile(candidateDir string, files []CandidateFile) []C
 	}
 	listed := map[string]string{}
 	var malformed []string
+	var duplicate []string
+	seen := map[string]bool{}
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -1331,6 +1350,11 @@ func verifyCandidateChecksumFile(candidateDir string, files []CandidateFile) []C
 			malformed = append(malformed, line)
 			continue
 		}
+		if seen[parts[1]] {
+			duplicate = append(duplicate, parts[1])
+			continue
+		}
+		seen[parts[1]] = true
 		listed[parts[1]] = parts[0]
 	}
 	var missing []string
@@ -1352,11 +1376,13 @@ func verifyCandidateChecksumFile(candidateDir string, files []CandidateFile) []C
 		}
 	}
 	sort.Strings(malformed)
+	sort.Strings(duplicate)
 	sort.Strings(missing)
 	sort.Strings(mismatch)
 	sort.Strings(unexpected)
 	checks = append(checks,
 		CandidateCheck{Name: "checksums_lines_valid", Passed: len(malformed) == 0, Detail: strings.Join(malformed, ",")},
+		CandidateCheck{Name: "checksums_paths_unique", Passed: len(duplicate) == 0, Detail: strings.Join(duplicate, ",")},
 		CandidateCheck{Name: "checksums_cover_candidate_files", Passed: len(missing) == 0, Detail: strings.Join(missing, ",")},
 		CandidateCheck{Name: "checksums_match_candidate_files", Passed: len(mismatch) == 0, Detail: strings.Join(mismatch, ",")},
 		CandidateCheck{Name: "checksums_have_no_unexpected_files", Passed: len(unexpected) == 0, Detail: strings.Join(unexpected, ",")},
