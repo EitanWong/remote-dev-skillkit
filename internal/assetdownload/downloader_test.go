@@ -152,6 +152,77 @@ func TestDownloadRejectsChecksumMismatch(t *testing.T) {
 	}
 }
 
+func TestDownloadRejectsResponseLargerThanExpectedSize(t *testing.T) {
+	tests := []struct {
+		name          string
+		contentLength int64
+	}{
+		{name: "declared content length", contentLength: 9},
+		{name: "chunked body", contentLength: -1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			outPath := filepath.Join(dir, "runtime.exe")
+			body := &countingReadCloser{Reader: bytes.NewReader(bytes.Repeat([]byte("x"), 64))}
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				response := testResponse(req, http.StatusOK, nil)
+				response.Body = body
+				response.ContentLength = test.contentLength
+				return response, nil
+			})}
+
+			_, err := Download(context.Background(), Options{
+				Mirrors:        []Mirror{{URL: "https://mirror.example.invalid/runtime.exe"}},
+				OutputPath:     outPath,
+				ExpectedSHA256: sha256String([]byte("xxxxxxxx")),
+				ExpectedSize:   8,
+				Client:         client,
+				MaxAttempts:    1,
+			})
+			if err == nil || !strings.Contains(err.Error(), "exceeds expected size") {
+				t.Fatalf("expected signed size limit failure, got %v", err)
+			}
+			if test.contentLength > 0 && body.BytesRead != 0 {
+				t.Fatalf("declared oversized response should be rejected before reading, read %d bytes", body.BytesRead)
+			}
+			if test.contentLength < 0 && body.BytesRead > 9 {
+				t.Fatalf("chunked oversized response read beyond the one-byte limit probe: %d", body.BytesRead)
+			}
+			if _, statErr := os.Stat(outPath + ".part"); !os.IsNotExist(statErr) {
+				t.Fatalf("oversized partial file must be removed, stat err=%v", statErr)
+			}
+		})
+	}
+}
+
+func TestDownloadRejectsOversizedExistingPartialBeforeRequest(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "runtime.exe")
+	if err := os.WriteFile(outPath+".part", []byte("123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("oversized existing partial must fail before requesting %s", req.URL)
+		return nil, nil
+	})}
+
+	_, err := Download(context.Background(), Options{
+		Mirrors:        []Mirror{{URL: "https://mirror.example.invalid/runtime.exe"}},
+		OutputPath:     outPath,
+		ExpectedSHA256: sha256String([]byte("12345678")),
+		ExpectedSize:   8,
+		Client:         client,
+		MaxAttempts:    1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds expected size") {
+		t.Fatalf("expected oversized partial failure, got %v", err)
+	}
+	if _, statErr := os.Stat(outPath + ".part"); !os.IsNotExist(statErr) {
+		t.Fatalf("oversized existing partial must be removed, stat err=%v", statErr)
+	}
+}
+
 func TestDefaultCachePathUsesUserCache(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
@@ -184,6 +255,19 @@ func testResponse(req *http.Request, status int, body []byte) *http.Response {
 		Request:    req,
 	}
 }
+
+type countingReadCloser struct {
+	*bytes.Reader
+	BytesRead int
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.BytesRead += n
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error { return nil }
 
 func sha256String(data []byte) string {
 	sum := sha256.Sum256(data)

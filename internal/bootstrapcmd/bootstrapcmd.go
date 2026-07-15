@@ -158,6 +158,7 @@ func RunLayeredTemporary(ctx context.Context, opts LayeredRunOptions) (LayeredRu
 	result, err := assetdownload.Download(ctx, assetdownload.Options{
 		Mirrors:        []assetdownload.Mirror{{URL: assetURL.String()}},
 		ExpectedSHA256: asset.SHA256,
+		ExpectedSize:   asset.SizeBytes,
 		OutputPath:     paths.output,
 		CachePath:      paths.content,
 		Client:         client,

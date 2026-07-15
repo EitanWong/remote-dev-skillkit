@@ -25,6 +25,7 @@ type Options struct {
 	OutputPath     string
 	CachePath      string
 	ExpectedSHA256 string
+	ExpectedSize   int64
 	Client         *http.Client
 	MaxAttempts    int
 }
@@ -70,12 +71,15 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 	if outputPath == "" {
 		return Result{}, fmt.Errorf("output path is required")
 	}
+	if opts.ExpectedSize < 0 {
+		return Result{}, fmt.Errorf("expected size must not be negative")
+	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
 		return Result{}, err
 	}
 	result := Result{OutputPath: outputPath}
 	if cachePath := strings.TrimSpace(opts.CachePath); cachePath != "" {
-		if sha, size, ok := verifiedFile(cachePath, expected); ok {
+		if sha, size, ok := verifiedFile(cachePath, expected, opts.ExpectedSize); ok {
 			if err := copyVerifiedFile(cachePath, outputPath); err != nil {
 				return Result{}, err
 			}
@@ -87,7 +91,7 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 			return result, nil
 		}
 	}
-	if sha, size, ok := verifiedFile(outputPath, expected); ok {
+	if sha, size, ok := verifiedFile(outputPath, expected, opts.ExpectedSize); ok {
 		result.SourceURL = "output"
 		result.FromCache = true
 		result.Bytes = size
@@ -115,7 +119,7 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 					return Result{}, err
 				}
 			}
-			resumed, err := downloadOnce(ctx, client, mirror.URL, outputPath)
+			resumed, err := downloadOnce(ctx, client, mirror.URL, outputPath, opts.ExpectedSize)
 			if err != nil {
 				lastErr = err
 				result.Transcript = append(result.Transcript, Event{Phase: "download-error", URL: mirror.URL, Message: err.Error()})
@@ -124,12 +128,20 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 				}
 				continue
 			}
-			sha, size, ok := verifiedFile(outputPath+".part", expected)
-			if !ok {
+			partPath := outputPath + ".part"
+			sha, size, verifyErr := fileSHA256(partPath)
+			if verifyErr != nil {
+				return Result{}, verifyErr
+			}
+			if opts.ExpectedSize > 0 && size != opts.ExpectedSize {
+				_ = os.Remove(partPath)
+				return Result{}, fmt.Errorf("downloaded size does not match expected size: got %d bytes, expected %d", size, opts.ExpectedSize)
+			}
+			if normalizeSHA256(sha) != expected {
 				_ = os.Remove(outputPath + ".part")
 				return Result{}, fmt.Errorf("checksum mismatch for %s", mirror.URL)
 			}
-			if err := promotePart(outputPath+".part", outputPath); err != nil {
+			if err := promotePart(partPath, outputPath); err != nil {
 				return Result{}, err
 			}
 			if cachePath := strings.TrimSpace(opts.CachePath); cachePath != "" && !sameCleanPath(cachePath, outputPath) {
@@ -163,11 +175,15 @@ func normalizedMirrors(values []Mirror) []Mirror {
 	return out
 }
 
-func downloadOnce(ctx context.Context, client *http.Client, rawURL, outputPath string) (bool, error) {
+func downloadOnce(ctx context.Context, client *http.Client, rawURL, outputPath string, expectedSize int64) (bool, error) {
 	partPath := outputPath + ".part"
 	var offset int64
 	if info, err := os.Stat(partPath); err == nil {
 		offset = info.Size()
+	}
+	if expectedSize > 0 && offset > expectedSize {
+		_ = os.Remove(partPath)
+		return false, fmt.Errorf("partial download exceeds expected size: got %d bytes, expected %d", offset, expectedSize)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -192,6 +208,10 @@ func downloadOnce(ctx context.Context, client *http.Client, rawURL, outputPath s
 		}
 		return false, err
 	}
+	if expectedSize > 0 && resp.ContentLength >= 0 && offset+resp.ContentLength > expectedSize {
+		_ = os.Remove(partPath)
+		return false, fmt.Errorf("download exceeds expected size: got at least %d bytes, expected %d", offset+resp.ContentLength, expectedSize)
+	}
 	flags := os.O_CREATE | os.O_WRONLY
 	if appendMode {
 		flags |= os.O_APPEND
@@ -202,9 +222,21 @@ func downloadOnce(ctx context.Context, client *http.Client, rawURL, outputPath s
 	if err != nil {
 		return false, err
 	}
-	if _, err := io.Copy(file, resp.Body); err != nil {
+	reader := io.Reader(resp.Body)
+	remaining := int64(0)
+	if expectedSize > 0 {
+		remaining = expectedSize - offset
+		reader = io.LimitReader(resp.Body, remaining+1)
+	}
+	written, err := io.Copy(file, reader)
+	if err != nil {
 		_ = file.Close()
 		return appendMode, err
+	}
+	if expectedSize > 0 && written > remaining {
+		_ = file.Close()
+		_ = os.Remove(partPath)
+		return appendMode, fmt.Errorf("download exceeds expected size: expected %d bytes", expectedSize)
 	}
 	if err := file.Close(); err != nil {
 		return appendMode, err
@@ -247,12 +279,12 @@ func copyVerifiedFile(src, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
-func verifiedFile(path, expected string) (string, int64, bool) {
+func verifiedFile(path, expected string, expectedSize int64) (string, int64, bool) {
 	sha, size, err := fileSHA256(path)
 	if err != nil {
 		return "", 0, false
 	}
-	if normalizeSHA256(sha) != expected {
+	if normalizeSHA256(sha) != expected || expectedSize > 0 && size != expectedSize {
 		return sha, size, false
 	}
 	return sha, size, true
