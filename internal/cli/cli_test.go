@@ -321,6 +321,17 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+func TestGitCommandGroupUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), []string{"git", "--help"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "branch, worktree, policy, sync, pr") {
+		t.Fatalf("git usage missing command groups: %s", stdout.String())
+	}
+}
+
 func TestTopLevelHelpLeadsWithSupportSessionConnect(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

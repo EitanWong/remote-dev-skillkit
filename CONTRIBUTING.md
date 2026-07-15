@@ -16,6 +16,61 @@ go vet ./...
 Use focused tests while developing, then run the full verification set before
 opening a pull request.
 
+## Branch and Pull Request Workflow
+
+- See [Git Workflow](docs/development/GIT_WORKFLOW.md) for the exact runnable
+  issue, branch, worktree, PR, recovery, hotfix, release, and migration flow.
+- Create issue-linked branches that match `<type>/<issue>-<slug>`, such as
+  `feat/123-git-policy-workflow` or `fix/456-main-pr-base`.
+- The parser requires the exact shape
+  `^(feat|fix|refactor|docs|test|chore|perf|ci|hotfix|release)/([0-9]+)-([a-z0-9]+(?:-[a-z0-9]+)*)$`.
+  The issue must be a positive integer, the slug must be lowercase ASCII, and
+  hyphen separators are required between slug words.
+- Use the approved CLI path: `go run ./cmd/rdev git worktree create` for the
+  normal external-worktree flow, or `go run ./cmd/rdev git branch create` only
+  when you intentionally stay in the current checkout. Then run `go run
+  ./cmd/rdev git worktree doctor`, `go run ./cmd/rdev git pr plan`, and `go run
+  ./cmd/rdev git pr create --execute` only when ready.
+- `--execute` is required for the rdev PR/GitHub mutation boundary. Planning
+  commands, branch creation, and local checks are not substitutes for that
+  boundary.
+- Keep developer worktrees outside the repository tree. A shared root such as
+  `../.worktrees/remote-dev-skillkit` is valid. `branch create` and `git sync`
+  use `--repo` only. Worktree lifecycle commands use `--repo` and optional
+  `--root` from the stable/main checkout because the manager checkout is
+  excluded and refused. Only policy and PR commands may omit `--repo` when run
+  from inside the external worktree.
+- Open pull requests against `main` only.
+- Release and hotfix branches still use `main` as the base under this local PR
+  policy; any separate maintainer release process is outside this document.
+- GitHub required checks must stay stable as `git-policy` and `go-checks`.
+- Include matching issue text in the PR body, for example `Closes #123`.
+- Prefer Squash merge after review. Do not use merge commits or rebase merges
+  for this workflow.
+- Capture branch and worktree evidence in the pull request using:
+
+```bash
+git branch --show-current
+git worktree list --porcelain | sed -n '1,8p'
+```
+
+- Before opening a PR, run `./scripts/ci/git-policy.sh` to verify the branch,
+  PR base, and PR issue linkage checks enforced in GitHub Actions and
+  GitHub Ruleset protection.
+- Before committing CI workflow or wrapper changes, run:
+
+```bash
+bash scripts/ci/git-policy_test.sh
+bash -n scripts/ci/git-policy.sh scripts/ci/git-policy_test.sh
+```
+- For cleanup, use `go run ./cmd/rdev git worktree clean --repo <main-checkout>
+  --root <developer-root>` for worktrees merged to `main` from the stable/main
+  checkout; use `go run ./cmd/rdev git worktree remove --repo <main-checkout>
+  --root <developer-root> --branch <branch> [--force]` only for a specific eligible target that
+  was not already cleaned. `--force` bypasses the dirty check for merged
+  worktrees but does not override the unmerged safety check. Any separate
+  maintainer release process is outside this local cleanup policy.
+
 ## Contribution Rules
 
 - Follow the Agent engineering discipline:
@@ -66,6 +121,8 @@ opening a pull request.
   must go through authorization gates.
 - Public adapter integrations must use the adapterkit conformance surfaces when
   possible.
+- `gh issue create` and raw `git push` / `git push --delete` migration commands
+  are manual external mutations and require explicit human authorization.
 
 ## Pull Request Checklist
 
@@ -74,6 +131,7 @@ opening a pull request.
 - [ ] `go test ./...` passes.
 - [ ] `go vet ./...` passes.
 - [ ] `./scripts/check.sh` passes.
+- [ ] `./scripts/ci/git-policy.sh` passes for the branch and PR metadata.
 - [ ] `./scripts/ci/release-smoke.sh` passes when release, Skillkit, GitHub,
       enrollment, or adapter behavior changes.
 - [ ] Documentation, Skillkit notes, and release checklists are updated when user

@@ -1,0 +1,26 @@
+{
+  "schema_version": "rdev.github-governance.ruleset.v1",
+  "name": "main-commit-policy",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "commit_message_pattern",
+      "parameters": {
+        "name": "conventional commits",
+        "negate": false,
+        "operator": "regex",
+        "pattern": "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([\\w\\-.]+\\))?(!)?: ([\\w ])+([\\s\\S]*)$"
+      }
+    }
+  ],
+  "bypass_actors": []
+}

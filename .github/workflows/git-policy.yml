@@ -1,0 +1,61 @@
+name: Git Policy
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request_target:
+    branches:
+      - '**'
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  git-policy:
+    name: git-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted policy code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || github.ref_name }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate shell syntax
+        run: bash -n scripts/ci/git-policy.sh scripts/ci/git-policy_test.sh
+
+      - name: Run actionlint when available
+        run: |
+          if command -v actionlint >/dev/null 2>&1; then
+            actionlint
+          else
+            echo "actionlint not installed; skipping"
+          fi
+
+      - name: Run git policy wrapper tests
+        run: bash scripts/ci/git-policy_test.sh
+
+      - name: Enforce git workflow policy from trusted base code
+        env:
+          GIT_POLICY_EVENT_NAME: ${{ github.event_name }}
+          GIT_POLICY_BRANCH_NAME: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.ref || github.ref_name }}
+          GIT_POLICY_HEAD_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+          GIT_POLICY_BASE_REF: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || '' }}
+          GIT_POLICY_PR_TITLE: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.title || '' }}
+          GIT_POLICY_PR_BODY: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.body || '' }}
+        run: ./scripts/ci/git-policy.sh

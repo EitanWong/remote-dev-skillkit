@@ -156,6 +156,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.skillkit(args[1:])
 	case "workspace":
 		return a.workspace(ctx, args[1:])
+	case "git":
+		return a.git(ctx, args[1:])
 	case "acceptance":
 		return a.acceptance(ctx, args[1:])
 	case "adapter":
@@ -12076,6 +12078,16 @@ Usage:
   rdev trust verify --bundle .rdev/trust/trust-bundle-revoked.json --root-public-key trust-root:...
   rdev workspace lock --repo . --host-id hst_... --task-id task_... --adapter codex
   rdev workspace prepare-worktree --repo . --host-id hst_... --task-id task_... --adapter codex
+  rdev git branch create --type feat --issue 123 --slug worktree-governance --base main
+  rdev git worktree create --branch feat/123-worktree-governance
+  rdev git worktree list
+  rdev git worktree doctor --root ../.worktrees/remote-dev-skillkit
+  rdev git worktree clean --root ../.worktrees/remote-dev-skillkit
+  rdev git worktree remove --branch feat/123-worktree-governance --root ../.worktrees/remote-dev-skillkit
+  rdev git policy check
+  rdev git sync
+  rdev git pr plan --base main
+  rdev git pr create --execute --base main
   rdev acceptance fresh-agent-support-session --out fresh-agent-support-session
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo . --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
@@ -12182,6 +12194,7 @@ func (a App) printCommandGroupUsage(command string) bool {
 		"trust":            "init, rotate, revoke, verify",
 		"update":           "check, plan",
 		"workspace":        "lock, status, unlock, prepare-worktree",
+		"git":              "branch, worktree, policy, sync, pr",
 	}
 	available, ok := subcommands[command]
 	if !ok {
