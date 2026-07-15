@@ -163,6 +163,7 @@ func initGitRepo(t *testing.T) string {
 	}
 	runGitForTest(t, repo, "add", "README.md")
 	runGitForTest(t, repo, "commit", "-m", "initial")
+	runGitForTest(t, repo, "branch", "-M", "main")
 	return repo
 }
 
