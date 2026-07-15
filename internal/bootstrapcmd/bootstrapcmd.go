@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -37,14 +38,15 @@ type App struct {
 }
 
 type LayeredRunOptions struct {
-	ManifestURL string
-	Root        model.TrustBundle
-	Platform    string
-	CacheDir    string
-	Mode        string
-	Args        []string
-	Client      *http.Client
-	Now         time.Time
+	ManifestURL            string
+	Root                   model.TrustBundle
+	ExpectedReleaseVersion string
+	Platform               string
+	CacheDir               string
+	Mode                   string
+	Args                   []string
+	Client                 *http.Client
+	Now                    time.Time
 }
 
 type LayeredRunReport struct {
@@ -61,6 +63,12 @@ type LayeredRunStage struct {
 	DurationMS int64  `json:"duration_ms"`
 }
 
+type layeredRuntime struct {
+	path   string
+	digest [sha256.Size]byte
+	size   int64
+}
+
 func (a App) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("missing rdev-bootstrap subcommand")
@@ -72,7 +80,7 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.layeredRun(ctx, args[1:])
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprintln(a.stdout(), "usage: rdev-bootstrap upgrade --gateway-url URL --ticket-code CODE --asset NAME --out PATH [--mirror URL] [--cache PATH] [--no-exec] [-- full-helper-args...]")
-		_, _ = fmt.Fprintln(a.stdout(), "       rdev-bootstrap layered-run --manifest-url URL --root-public-key KEY --platform windows/amd64 --cache-dir PATH --mode temporary [-- rdev-host-args...]")
+		_, _ = fmt.Fprintln(a.stdout(), "       rdev-bootstrap layered-run --manifest-url URL --root-public-key KEY --expected-release-version VERSION --platform windows/amd64 --cache-dir PATH --mode temporary [-- rdev-host-args...]")
 		return nil
 	default:
 		return fmt.Errorf("unknown rdev-bootstrap subcommand %q", args[0])
@@ -84,6 +92,7 @@ func (a App) layeredRun(ctx context.Context, args []string) error {
 	fs.SetOutput(a.stderr())
 	manifestURL := fs.String("manifest-url", "", "signed layered asset manifest URL")
 	rootPublicKey := fs.String("root-public-key", "", "pinned release root, formatted key_id:base64url_public_key")
+	expectedReleaseVersion := fs.String("expected-release-version", "", "required signed layered asset release version")
 	platform := fs.String("platform", "", "layered runtime platform; must be windows/amd64")
 	cacheDir := fs.String("cache-dir", "", "user-scoped verified runtime cache directory")
 	mode := fs.String("mode", "", "bootstrap mode; must be temporary")
@@ -96,26 +105,41 @@ func (a App) layeredRun(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*platform) != "windows/amd64" {
 		return fmt.Errorf("layered-run requires --platform windows/amd64")
 	}
+	if strings.TrimSpace(*expectedReleaseVersion) == "" {
+		return fmt.Errorf("layered-run requires expected release version via --expected-release-version")
+	}
 	root, err := trustref.Parse(*rootPublicKey)
 	if err != nil {
 		return fmt.Errorf("root public key: %w", err)
 	}
-	report, executablePath, err := RunLayeredTemporary(ctx, LayeredRunOptions{
-		ManifestURL: strings.TrimSpace(*manifestURL),
-		Root:        root,
-		Platform:    strings.TrimSpace(*platform),
-		CacheDir:    strings.TrimSpace(*cacheDir),
-		Mode:        strings.TrimSpace(*mode),
-		Args:        append([]string(nil), fs.Args()...),
-		Client:      a.client(),
+	report, runtime, err := runLayeredTemporary(ctx, LayeredRunOptions{
+		ManifestURL:            strings.TrimSpace(*manifestURL),
+		Root:                   root,
+		ExpectedReleaseVersion: strings.TrimSpace(*expectedReleaseVersion),
+		Platform:               strings.TrimSpace(*platform),
+		CacheDir:               strings.TrimSpace(*cacheDir),
+		Mode:                   strings.TrimSpace(*mode),
+		Args:                   append([]string(nil), fs.Args()...),
+		Client:                 a.client(),
 	})
 	if err != nil {
 		return err
 	}
+	executable, err := openVerifiedLayeredRuntime(runtime)
+	if err != nil {
+		return fmt.Errorf("lock verified layered runtime: %w", err)
+	}
+	defer executable.Close()
+	cmd := a.commandContext(ctx, runtime.path, fs.Args()...)
+	if cmd == nil {
+		return fmt.Errorf("layered runtime command is nil")
+	}
+	if err := recheckVerifiedLayeredRuntime(executable, runtime); err != nil {
+		return fmt.Errorf("layered runtime changed before execution: %w", err)
+	}
 	if err := json.NewEncoder(a.stdout()).Encode(report); err != nil {
 		return err
 	}
-	cmd := a.commandContext(ctx, executablePath, fs.Args()...)
 	cmd.Stdout = a.stdout()
 	cmd.Stderr = a.stderr()
 	cmd.Stdin = a.stdin()
@@ -123,37 +147,45 @@ func (a App) layeredRun(ctx context.Context, args []string) error {
 }
 
 func RunLayeredTemporary(ctx context.Context, opts LayeredRunOptions) (LayeredRunReport, string, error) {
+	report, runtime, err := runLayeredTemporary(ctx, opts)
+	return report, runtime.path, err
+}
+
+func runLayeredTemporary(ctx context.Context, opts LayeredRunOptions) (LayeredRunReport, layeredRuntime, error) {
 	manifestURL, origin, client, now, err := prepareLayeredRequest(opts)
 	if err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	report := LayeredRunReport{SchemaVersion: LayeredRunReportSchemaVersion}
 
 	started := time.Now()
 	manifest, finalManifestURL, err := fetchLayeredManifest(ctx, client, manifestURL)
 	if err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	report.Stages = append(report.Stages, layeredStage("manifest-fetch", started))
 
 	started = time.Now()
 	if err := release.VerifyLayeredAssetManifest(manifest, opts.Root, now); err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
+	}
+	if manifest.Version != opts.ExpectedReleaseVersion {
+		return LayeredRunReport{}, layeredRuntime{}, fmt.Errorf("layered manifest release version %q does not match expected release version %q", manifest.Version, opts.ExpectedReleaseVersion)
 	}
 	asset, err := release.SelectLayeredAsset(manifest, opts.Platform, "core-runtime", nil)
 	if err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	assetURL, err := resolveLayeredAssetURL(finalManifestURL, asset.RelativePath, origin)
 	if err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	report.Stages = append(report.Stages, layeredStage("signature-verification", started))
 
 	started = time.Now()
 	paths, err := prepareLayeredCachePaths(opts.CacheDir, asset)
 	if err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	result, err := assetdownload.Download(ctx, assetdownload.Options{
 		Mirrors:        []assetdownload.Mirror{{URL: assetURL.String()}},
@@ -164,28 +196,83 @@ func RunLayeredTemporary(ctx context.Context, opts LayeredRunOptions) (LayeredRu
 		Client:         client,
 	})
 	if err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	if result.Bytes != asset.SizeBytes {
-		return LayeredRunReport{}, "", fmt.Errorf("downloaded runtime size does not match signed manifest")
+		return LayeredRunReport{}, layeredRuntime{}, fmt.Errorf("downloaded runtime size does not match signed manifest")
 	}
 	report.Stages = append(report.Stages, layeredStage("runtime-download", started))
 
 	started = time.Now()
 	if err := secureLayeredResultFiles(paths, asset); err != nil {
-		return LayeredRunReport{}, "", err
+		return LayeredRunReport{}, layeredRuntime{}, err
+	}
+	runtime, err := layeredRuntimeForAsset(paths.output, asset)
+	if err != nil {
+		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	report.Stages = append(report.Stages, layeredStage("runtime-launch-preparation", started))
 	report.AssetID = asset.ID
 	report.FromCache = result.FromCache
 	report.Resumed = result.Resumed
 	report.Bytes = result.Bytes
-	return report, paths.output, nil
+	return report, runtime, nil
 }
 
 type layeredCachePaths struct {
 	output  string
 	content string
+}
+
+func layeredRuntimeForAsset(path string, asset release.LayeredAsset) (layeredRuntime, error) {
+	digestBytes, err := hex.DecodeString(strings.TrimPrefix(asset.SHA256, "sha256:"))
+	if err != nil || len(digestBytes) != sha256.Size {
+		return layeredRuntime{}, fmt.Errorf("signed layered runtime digest is invalid")
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], digestBytes)
+	return layeredRuntime{path: path, digest: digest, size: asset.SizeBytes}, nil
+}
+
+func recheckVerifiedLayeredRuntime(file *os.File, runtime layeredRuntime) error {
+	if file == nil {
+		return fmt.Errorf("protected layered runtime handle is required")
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	pathInfo, err := os.Lstat(runtime.path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, pathInfo) || info.Size() != runtime.size {
+		return fmt.Errorf("protected layered runtime path or size changed")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	digest := sha256.New()
+	written, err := io.Copy(digest, io.LimitReader(file, runtime.size+1))
+	if err != nil {
+		return err
+	}
+	if written != runtime.size || subtle.ConstantTimeCompare(digest.Sum(nil), runtime.digest[:]) != 1 {
+		return fmt.Errorf("protected layered runtime digest or size changed")
+	}
+	postInfo, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	postPathInfo, err := os.Lstat(runtime.path)
+	if err != nil {
+		return err
+	}
+	if !postInfo.Mode().IsRegular() || postPathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(postInfo, postPathInfo) || postInfo.Size() != runtime.size {
+		return fmt.Errorf("protected layered runtime changed during final verification")
+	}
+	_, err = file.Seek(0, io.SeekStart)
+	return err
 }
 
 func prepareLayeredRequest(opts LayeredRunOptions) (*url.URL, *url.URL, *http.Client, time.Time, error) {
@@ -194,6 +281,9 @@ func prepareLayeredRequest(opts LayeredRunOptions) (*url.URL, *url.URL, *http.Cl
 	}
 	if opts.Platform != "windows/amd64" {
 		return nil, nil, nil, time.Time{}, fmt.Errorf("layered run requires platform windows/amd64")
+	}
+	if strings.TrimSpace(opts.ExpectedReleaseVersion) == "" {
+		return nil, nil, nil, time.Time{}, fmt.Errorf("expected release version is required")
 	}
 	if strings.TrimSpace(opts.CacheDir) == "" {
 		return nil, nil, nil, time.Time{}, fmt.Errorf("cache directory is required")
@@ -313,10 +403,13 @@ func prepareLayeredCachePaths(cacheDir string, asset release.LayeredAsset) (laye
 			return layeredCachePaths{}, err
 		}
 	}
-	for _, path := range []string{paths.output, paths.output + ".part", paths.output + ".tmp", paths.content, paths.content + ".tmp"} {
+	for _, path := range []string{paths.output, paths.output + ".tmp", paths.content, paths.content + ".tmp"} {
 		if err := secureLayeredFileIfExists(path, asset.SizeBytes); err != nil {
 			return layeredCachePaths{}, err
 		}
+	}
+	if err := secureLayeredPartialFileIfExists(paths.output+".part", asset.SizeBytes); err != nil {
+		return layeredCachePaths{}, err
 	}
 	return paths, nil
 }
@@ -351,6 +444,23 @@ func secureLayeredFileIfExists(path string, maxBytes int64) error {
 	}
 	if info.Size() > maxBytes {
 		return fmt.Errorf("layered cache file exceeds signed runtime size")
+	}
+	return os.Chmod(path, 0o600)
+}
+
+func secureLayeredPartialFileIfExists(path string, maxBytes int64) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("layered cache partial must be regular and not a symlink")
+	}
+	if info.Size() > maxBytes {
+		return os.Remove(path)
 	}
 	return os.Chmod(path, 0o600)
 }

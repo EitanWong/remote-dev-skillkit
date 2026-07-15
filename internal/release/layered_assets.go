@@ -27,6 +27,7 @@ type LayeredAssetManifest struct {
 	SchemaVersion string         `json:"schema_version"`
 	Version       string         `json:"version"`
 	GeneratedAt   time.Time      `json:"generated_at"`
+	ExpiresAt     time.Time      `json:"expires_at"`
 	SigningKeyID  string         `json:"signing_key_id"`
 	Assets        []LayeredAsset `json:"assets"`
 	Signature     string         `json:"signature"`
@@ -68,8 +69,15 @@ func VerifyLayeredAssetManifest(manifest LayeredAssetManifest, root model.TrustB
 	if manifest.Signature == "" {
 		return fmt.Errorf("%w: layered asset manifest signature is required", ErrManifestSignature)
 	}
-	if now.IsZero() || manifest.GeneratedAt.After(now.UTC()) {
+	if now.IsZero() {
+		return fmt.Errorf("%w: layered asset manifest verification time is required", ErrManifestInvalid)
+	}
+	verificationTime := now.UTC()
+	if manifest.GeneratedAt.After(verificationTime) {
 		return fmt.Errorf("%w: layered asset manifest generated_at is in the future", ErrManifestInvalid)
+	}
+	if verificationTime.After(manifest.ExpiresAt) {
+		return fmt.Errorf("%w: layered asset manifest expired", ErrManifestInvalid)
 	}
 	if root.SigningKeyID != manifest.SigningKeyID {
 		return fmt.Errorf("%w: layered asset manifest trust root key id mismatch", ErrManifestInvalid)
@@ -121,6 +129,9 @@ func validateLayeredAssetManifest(manifest LayeredAssetManifest) error {
 	}
 	if manifest.GeneratedAt.IsZero() {
 		return fmt.Errorf("%w: layered asset manifest generated_at is required", ErrManifestInvalid)
+	}
+	if manifest.ExpiresAt.IsZero() || !manifest.GeneratedAt.Before(manifest.ExpiresAt) {
+		return fmt.Errorf("%w: layered asset manifest validity window is invalid", ErrManifestInvalid)
 	}
 	if strings.TrimSpace(manifest.SigningKeyID) == "" {
 		return fmt.Errorf("%w: layered asset manifest signing key id is required", ErrManifestInvalid)

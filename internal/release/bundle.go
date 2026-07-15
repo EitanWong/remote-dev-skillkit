@@ -21,6 +21,8 @@ const (
 
 type Bundle struct {
 	SchemaVersion     string           `json:"schema_version"`
+	Version           string           `json:"version,omitempty"`
+	TargetPlatform    string           `json:"target_platform,omitempty"`
 	GeneratedAt       time.Time        `json:"generated_at"`
 	SigningAlg        string           `json:"signing_alg"`
 	SigningKeyID      string           `json:"signing_key_id"`
@@ -41,6 +43,8 @@ type BundleArtifact struct {
 
 type BundleOptions struct {
 	Dir               string
+	Version           string
+	TargetPlatform    string
 	ArtifactPaths     []string
 	RequiredArtifacts []string
 	Key               signing.Key
@@ -49,6 +53,8 @@ type BundleOptions struct {
 
 type BundleVerification struct {
 	SchemaVersion      string                       `json:"schema_version"`
+	Version            string                       `json:"version,omitempty"`
+	TargetPlatform     string                       `json:"target_platform,omitempty"`
 	BundlePath         string                       `json:"bundle_path"`
 	RootKeyID          string                       `json:"root_key_id"`
 	GeneratedAt        time.Time                    `json:"generated_at"`
@@ -134,6 +140,12 @@ func CreateBundle(opts BundleOptions) (Bundle, error) {
 		if err := manifest.VerifyArtifact(artifactPath, root); err != nil {
 			return Bundle{}, err
 		}
+		if manifest.ReleaseVersion != strings.TrimSpace(opts.Version) {
+			return Bundle{}, fmt.Errorf("release manifest version %q does not match bundle version %q", manifest.ReleaseVersion, strings.TrimSpace(opts.Version))
+		}
+		if manifest.TargetPlatform != strings.TrimSpace(opts.TargetPlatform) {
+			return Bundle{}, fmt.Errorf("release manifest target platform %q does not match bundle target platform %q", manifest.TargetPlatform, strings.TrimSpace(opts.TargetPlatform))
+		}
 		if manifest.ArtifactName != filepath.Base(rel) {
 			return Bundle{}, fmt.Errorf("release manifest artifact name %q does not match %q", manifest.ArtifactName, filepath.Base(rel))
 		}
@@ -157,6 +169,8 @@ func CreateBundle(opts BundleOptions) (Bundle, error) {
 	}
 	bundle := Bundle{
 		SchemaVersion:     BundleSchemaVersion,
+		Version:           strings.TrimSpace(opts.Version),
+		TargetPlatform:    strings.TrimSpace(opts.TargetPlatform),
 		GeneratedAt:       now.UTC(),
 		SigningAlg:        model.SigningAlgEd25519,
 		SigningKeyID:      opts.Key.ID,
@@ -224,10 +238,12 @@ func VerifyBundle(bundlePath string, root model.TrustBundle, requiredArtifacts [
 	}
 	baseDir := filepath.Dir(abs)
 	verification := BundleVerification{
-		SchemaVersion: BundleVerificationSchemaVersion,
-		BundlePath:    abs,
-		RootKeyID:     root.SigningKeyID,
-		GeneratedAt:   time.Now().UTC(),
+		SchemaVersion:  BundleVerificationSchemaVersion,
+		Version:        bundle.Version,
+		TargetPlatform: bundle.TargetPlatform,
+		BundlePath:     abs,
+		RootKeyID:      root.SigningKeyID,
+		GeneratedAt:    time.Now().UTC(),
 	}
 	add := func(name string, passed bool, detail string) {
 		verification.Checks = append(verification.Checks, BundleCheck{Name: name, Passed: passed, Detail: detail})
@@ -249,7 +265,7 @@ func VerifyBundle(bundlePath string, root model.TrustBundle, requiredArtifacts [
 			}
 			seen[id] = true
 		}
-		verification.Artifacts = append(verification.Artifacts, verifyBundleArtifact(baseDir, artifact, root))
+		verification.Artifacts = append(verification.Artifacts, verifyBundleArtifact(baseDir, artifact, root, bundle.Version, bundle.TargetPlatform))
 	}
 	add("bundle_artifact_ids_unique", duplicate == "", duplicate)
 	missing := missingBundleRequiredArtifacts(seen, append(cleanStringList(bundle.RequiredArtifacts), cleanStringList(requiredArtifacts)...))
@@ -286,7 +302,7 @@ func WriteBundle(path string, bundle Bundle) error {
 	return os.WriteFile(path, content, 0o644)
 }
 
-func verifyBundleArtifact(baseDir string, artifact BundleArtifact, root model.TrustBundle) BundleArtifactVerification {
+func verifyBundleArtifact(baseDir string, artifact BundleArtifact, root model.TrustBundle, version, targetPlatform string) BundleArtifactVerification {
 	result := BundleArtifactVerification{
 		Name:     firstNonEmpty(artifact.Name, filepath.Base(artifact.Path)),
 		Artifact: artifact.Path,
@@ -316,6 +332,8 @@ func verifyBundleArtifact(baseDir string, artifact BundleArtifact, root model.Tr
 	manifest, manifestErr := ReadManifest(manifestPath)
 	add("manifest_readable", manifestErr == nil, errorDetail(manifestErr))
 	add("manifest_artifact_name_matches", manifestErr == nil && manifest.ArtifactName == filepath.Base(artifact.Path), manifest.ArtifactName)
+	add("manifest_release_version_matches_bundle", manifestErr == nil && manifest.ReleaseVersion == version, manifest.ReleaseVersion)
+	add("manifest_target_platform_matches_bundle", manifestErr == nil && manifest.TargetPlatform == targetPlatform, manifest.TargetPlatform)
 	verifyErr := manifestErr
 	if verifyErr == nil {
 		verifyErr = manifest.VerifyArtifact(artifactPath, root)

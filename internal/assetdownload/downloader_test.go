@@ -93,6 +93,43 @@ func TestDownloadResumesPartialFileWithRange(t *testing.T) {
 	}
 }
 
+func TestDownloadPromotesCompleteVerifiedPartialWithoutRequest(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("complete verified partial")
+	outPath := filepath.Join(dir, "runtime.exe")
+	if err := os.WriteFile(outPath+".part", payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("complete verified partial must not request %s", req.URL)
+		return nil, nil
+	})}
+
+	result, err := Download(context.Background(), Options{
+		Mirrors:        []Mirror{{URL: "https://mirror.example.invalid/runtime.exe"}},
+		OutputPath:     outPath,
+		ExpectedSHA256: sha256String(payload),
+		ExpectedSize:   int64(len(payload)),
+		Client:         client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Resumed || result.FromCache || result.SourceURL != "partial" {
+		t.Fatalf("unexpected complete partial result: %#v", result)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("promoted partial changed content: %q", got)
+	}
+	if _, statErr := os.Stat(outPath + ".part"); !os.IsNotExist(statErr) {
+		t.Fatalf("verified partial was not atomically promoted, stat err=%v", statErr)
+	}
+}
+
 func TestDownloadFallsBackToSecondMirrorAfterEOF(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

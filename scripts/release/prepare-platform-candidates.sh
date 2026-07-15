@@ -241,6 +241,7 @@ PY
       --source-root "$source_root" \
       --out "$candidate_dir" \
       --version "$selected_version" \
+      --target-platform "$target" \
       --gateway-url "$gateway_url" \
       --artifacts "$artifacts_csv" \
       --require-artifacts "$required_csv" \

@@ -2,6 +2,7 @@ package connectionentry
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -254,6 +255,196 @@ func TestFromInviteRejectsManagedEntryForThirdParty(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "ownership=owned") {
 		t.Fatalf("expected managed third-party rejection, got %v", err)
+	}
+}
+
+func TestFromInviteMaterializationFailureLeavesNoPrivateOutput(t *testing.T) {
+	tests := []struct {
+		name              string
+		failurePhase      string
+		createEmptyOutDir bool
+	}{
+		{name: "before top-level files", failurePhase: "before_top_level_files"},
+		{name: "after top-level files", failurePhase: "after_top_level_files", createEmptyOutDir: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newWindowsLayeredFixture(t)
+			parentDir := t.TempDir()
+			outDir := filepath.Join(parentDir, "entry")
+			if test.createEmptyOutDir {
+				if err := os.Mkdir(outDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fixture.options.OutDir = outDir
+
+			sentinel := errors.New("injected materialization failure")
+			previousHook := connectionEntryMaterializationFailureHook
+			connectionEntryMaterializationFailureHook = func(phase string) error {
+				if phase == test.failurePhase {
+					return sentinel
+				}
+				return nil
+			}
+			t.Cleanup(func() { connectionEntryMaterializationFailureHook = previousHook })
+
+			if _, err := FromInvite(fixture.options); !errors.Is(err, sentinel) {
+				t.Fatalf("expected injected failure, got %v", err)
+			}
+			assertConnectionEntryOutputAbsentOrEmpty(t, outDir)
+			assertNoConnectionEntryStagingDirs(t, parentDir, filepath.Base(outDir))
+		})
+	}
+}
+
+func TestFromInviteMaterializationPublishesOnlyFinalPaths(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	parentDir := t.TempDir()
+	outDir := filepath.Join(parentDir, "entry")
+	if err := os.Mkdir(outDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fixture.options.OutDir = outDir
+
+	plan, err := FromInvite(fixture.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertConnectionEntryPlanUsesFinalPaths(t, plan, outDir)
+	assertNoConnectionEntryStagingDirs(t, parentDir, filepath.Base(outDir))
+
+	planJSONPath := filepath.Join(outDir, "connection-entry-plan.json")
+	content, err := os.ReadFile(planJSONPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), ".entry.staging-") {
+		t.Fatalf("persisted materialization plan leaked a staging path:\n%s", content)
+	}
+	var persisted Plan
+	if err := json.Unmarshal(content, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	assertConnectionEntryPlanUsesFinalPaths(t, persisted, outDir)
+
+	err = filepath.WalkDir(outDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(path), ".json") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(content), ".entry.staging-") {
+			t.Errorf("persisted JSON %s leaked a staging path:\n%s", path, content)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFromInviteRejectsNonEmptyOutputWithoutCreatingStaging(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	parentDir := t.TempDir()
+	outDir := filepath.Join(parentDir, "entry")
+	if err := os.Mkdir(outDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(outDir, "keep.txt")
+	if err := os.WriteFile(markerPath, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.options.OutDir = outDir
+
+	if _, err := FromInvite(fixture.options); err == nil || !strings.Contains(err.Error(), "out directory must be empty") {
+		t.Fatalf("expected non-empty output rejection, got %v", err)
+	}
+	if !fileExists(markerPath) {
+		t.Fatal("non-empty output rejection removed the existing file")
+	}
+	assertNoConnectionEntryStagingDirs(t, parentDir, filepath.Base(outDir))
+}
+
+func assertConnectionEntryOutputAbsentOrEmpty(t *testing.T, outDir string) {
+	t.Helper()
+	entries, err := os.ReadDir(outDir)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed materialization left private output in %s: %#v", outDir, entries)
+	}
+}
+
+func assertNoConnectionEntryStagingDirs(t *testing.T, parentDir, outBase string) {
+	t.Helper()
+	entries, err := os.ReadDir(parentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefixes := []string{"." + outBase + ".staging-", "." + outBase + ".empty-"}
+	for _, entry := range entries {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				t.Fatalf("materialization left temporary directory %s", filepath.Join(parentDir, entry.Name()))
+			}
+		}
+	}
+}
+
+func assertConnectionEntryPlanUsesFinalPaths(t *testing.T, plan Plan, outDir string) {
+	t.Helper()
+	finalDir, err := filepath.Abs(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.OutDir != finalDir {
+		t.Fatalf("plan out_dir = %q, want %q", plan.OutDir, finalDir)
+	}
+	paths := map[string]string{
+		"human_message": plan.HumanMessagePath,
+	}
+	if plan.RunnerPlan == nil {
+		t.Fatal("expected runner plan")
+	}
+	paths["runner_manifest"] = plan.RunnerPlan.ManifestPath
+	paths["runner_launcher"] = plan.RunnerPlan.LauncherPath
+	paths["runner_plan"] = plan.RunnerPlan.PlanPath
+	if plan.EntryPackagePlan == nil {
+		t.Fatal("expected entry package plan")
+	}
+	paths["entry_plan"] = plan.EntryPackagePlan.PlanPath
+	paths["entry_launcher"] = plan.EntryPackagePlan.LauncherPath
+	for _, file := range plan.GeneratedFiles {
+		paths["generated:"+file.Path] = file.Path
+	}
+	for name, path := range paths {
+		if path == "" {
+			t.Fatalf("%s path is empty", name)
+		}
+		relative, err := filepath.Rel(finalDir, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			t.Fatalf("%s path %q is outside final out dir %q", name, path, finalDir)
+		}
+		if strings.Contains(path, ".entry.staging-") {
+			t.Fatalf("%s path leaked staging directory: %q", name, path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s final path is not published: %v", name, err)
+		}
 	}
 }
 

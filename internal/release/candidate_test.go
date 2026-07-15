@@ -2,6 +2,7 @@ package release
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -91,7 +92,7 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		"connection-entry-release.json",
 		"connection-entry-runner.template.json",
 		"connection-entry-checksums.txt",
-		"release/release-bundle.json",
+		"bin/release-bundle.json",
 		"release/sbom.spdx.json",
 		"release/provenance.json",
 		"launchers/start-connection-entry.sh",
@@ -344,6 +345,258 @@ func TestPrepareCandidateWritesSignedWindowsLayeredAssets(t *testing.T) {
 	}
 }
 
+func TestPrepareCandidateStagesWindowsAMD64CoreFromNormalHostArtifact(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	hostContent := "normal-windows-host-runtime"
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", hostContent)
+
+	candidate, err := PrepareCandidate(CandidateOptions{
+		SourceRoot:     filepath.Join("..", ".."),
+		OutDir:         out,
+		Version:        "v0.2.0",
+		TargetPlatform: "windows/amd64",
+		ArtifactPaths:  []string{host},
+		Key:            key,
+		Now:            now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := parseCandidateRootPublicKey(candidate.RootPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostManifest, err := ReadManifest(filepath.Join(out, "rdev-host.exe.rdev-release.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hostManifest.VerifyArtifact(filepath.Join(out, "rdev-host.exe"), root); err != nil {
+		t.Fatalf("normal Windows host artifact is not signed by the candidate root: %v", err)
+	}
+
+	stagedAssetPath := filepath.Join(out, "assets", rdevHostWindowsAMD64AssetName)
+	stagedContent, err := os.ReadFile(stagedAssetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stagedContent) != hostContent {
+		t.Fatalf("staged Windows core differs from normal host artifact: %q", stagedContent)
+	}
+	inputContent, err := os.ReadFile(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stagedContent, inputContent) {
+		t.Fatal("staged Windows core must be a byte-identical copy of rdev-host.exe")
+	}
+
+	if candidate.LayeredAssetManifestPath != layeredAssetManifestPath {
+		t.Fatalf("unexpected layered asset manifest path %q", candidate.LayeredAssetManifestPath)
+	}
+	manifest := readLayeredAssetManifestForTest(t, filepath.Join(out, candidate.LayeredAssetManifestPath))
+	if err := VerifyLayeredAssetManifest(manifest, root, now); err != nil {
+		t.Fatalf("layered asset manifest did not verify with candidate root: %v", err)
+	}
+	selected, err := SelectLayeredAsset(manifest, "windows/amd64", layeredAssetKindCoreRuntime, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetSHA, assetSize, err := fileDigest(stagedAssetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.ID != "rdev-host-windows-amd64" ||
+		selected.Platform != "windows/amd64" ||
+		selected.RelativePath != "assets/"+rdevHostWindowsAMD64AssetName ||
+		selected.SHA256 != "sha256:"+assetSHA ||
+		selected.SizeBytes != assetSize {
+		t.Fatalf("unexpected selected Windows core runtime: %#v", selected)
+	}
+
+	stagedFileCount := 0
+	for _, file := range candidate.Files {
+		if file.Path == "assets/"+rdevHostWindowsAMD64AssetName {
+			stagedFileCount++
+			if file.SHA256 != "sha256:"+assetSHA || file.SizeBytes != assetSize {
+				t.Fatalf("staged candidate file metadata differs from the asset: %#v", file)
+			}
+		}
+	}
+	if stagedFileCount != 1 {
+		t.Fatalf("expected one staged canonical Windows core file, got %d", stagedFileCount)
+	}
+	for _, artifact := range candidate.Artifacts {
+		if artifact.Name == rdevHostWindowsAMD64AssetName || artifact.ArtifactPath == "assets/"+rdevHostWindowsAMD64AssetName {
+			t.Fatalf("staged canonical Windows core must not become a second full-archive artifact: %#v", artifact)
+		}
+	}
+
+	archiveEntries := readConnectionEntryArchiveForTest(t, filepath.Join(out, candidate.ConnectionEntryPath))
+	if _, ok := archiveEntries["bin/rdev-host.exe"]; !ok {
+		t.Fatal("full archive fallback omitted the normal rdev-host.exe artifact")
+	}
+	if _, ok := archiveEntries["bin/rdev-host.exe.rdev-release.json"]; !ok {
+		t.Fatal("full archive fallback omitted the normal rdev-host.exe signed manifest")
+	}
+	for path := range archiveEntries {
+		if filepath.Base(path) == rdevHostWindowsAMD64AssetName {
+			t.Fatalf("full archive fallback duplicated the staged canonical asset at %q", path)
+		}
+	}
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("platform-staged Windows candidate did not verify: %#v", verification.Checks)
+	}
+}
+
+func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(t *testing.T) {
+	input := t.TempDir()
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	rdev := writeCandidateArtifactForTest(t, input, "rdev.exe", "cli-binary")
+	host := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "host-binary")
+	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+	bootstrap := writeCandidateArtifactForTest(t, input, "rdev-bootstrap.exe", "bootstrap-binary")
+
+	t.Run("layered prerequisites prefer bootstrap and retain verified archive command", func(t *testing.T) {
+		out := filepath.Join(t.TempDir(), "candidate")
+		candidate, err := PrepareCandidate(CandidateOptions{
+			SourceRoot:     filepath.Join("..", ".."),
+			OutDir:         out,
+			Version:        "v0.2.0",
+			TargetPlatform: windowsAMD64TargetPlatform,
+			ArtifactPaths:  []string{rdev, host, verify, bootstrap},
+			Key:            key,
+			Now:            now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries := readConnectionEntryArchiveForTest(t, filepath.Join(out, candidate.ConnectionEntryPath))
+		launcher := string(entries["launchers/Start-ConnectionEntry.ps1"])
+		for _, want := range []string{
+			"rdev-bootstrap.exe",
+			"layered-run",
+			"layered-assets.json",
+			candidate.RootPublicKey,
+			"--expected-release-version",
+			candidate.Version,
+			"windows/amd64",
+			"LocalApplicationData",
+			"ArchiveFallback",
+			"exit $layeredExitCode",
+			"connection-entry run",
+		} {
+			if !strings.Contains(launcher, want) {
+				t.Fatalf("layered Windows launcher missing %q:\n%s", want, launcher)
+			}
+		}
+		if layered := strings.Index(launcher, "layered-run"); layered < 0 || strings.Index(launcher[layered:], "connection-entry run") < 0 {
+			t.Fatalf("verified archive command must remain after the layered attempt:\n%s", launcher)
+		}
+		if !strings.Contains(launcher, "if (-not $ArchiveFallback)") {
+			t.Fatalf("archive fallback must require an explicit launcher switch after layered startup:\n%s", launcher)
+		}
+		for _, want := range []string{
+			"[Guid]::NewGuid",
+			"[IO.FileMode]::CreateNew",
+			"CopyTo($privateBootstrapWriter)",
+			"Protect-PrivatePath $privateBootstrap",
+			"& $privateBootstrap layered-run",
+		} {
+			if !strings.Contains(launcher, want) {
+				t.Fatalf("archive launcher must execute a reverified private bootstrap copy; missing %q:\n%s", want, launcher)
+			}
+		}
+		if strings.Contains(launcher, "& $Bootstrap layered-run") {
+			t.Fatalf("archive launcher must not execute the original package path after verification:\n%s", launcher)
+		}
+
+		extracted := t.TempDir()
+		bundlePath := ""
+		for archivePath, content := range entries {
+			path := filepath.Join(extracted, filepath.FromSlash(archivePath))
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Base(archivePath) == "release-bundle.json" {
+				bundlePath = path
+			}
+		}
+		if bundlePath == "" {
+			t.Fatal("archive fallback omitted release-bundle.json")
+		}
+		root, err := parseCandidateRootPublicKey(candidate.RootPublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verification, err := VerifyBundle(bundlePath, root, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !verification.OK() {
+			t.Fatalf("archive fallback bundle does not verify from its packaged layout: %s", failedBundleCheckNames(verification))
+		}
+	})
+
+	tests := []struct {
+		name           string
+		targetPlatform string
+		artifacts      []string
+	}{
+		{
+			name:           "missing bootstrap",
+			targetPlatform: windowsAMD64TargetPlatform,
+			artifacts:      []string{rdev, host, verify},
+		},
+		{
+			name:      "missing layered manifest",
+			artifacts: []string{rdev, host, verify, bootstrap},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name+" uses archive launcher", func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "candidate")
+			candidate, err := PrepareCandidate(CandidateOptions{
+				SourceRoot:     filepath.Join("..", ".."),
+				OutDir:         out,
+				Version:        "v0.2.0",
+				TargetPlatform: test.targetPlatform,
+				ArtifactPaths:  test.artifacts,
+				Key:            key,
+				Now:            now,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries := readConnectionEntryArchiveForTest(t, filepath.Join(out, candidate.ConnectionEntryPath))
+			launcher, ok := entries["launchers/Start-ConnectionEntry.ps1"]
+			if !ok {
+				t.Fatal("archive fallback omitted Start-ConnectionEntry.ps1")
+			}
+			if strings.Contains(string(launcher), "layered-run") || !strings.Contains(string(launcher), "connection-entry run") {
+				t.Fatalf("incomplete layered prerequisites must retain the archive launcher:\n%s", launcher)
+			}
+		})
+	}
+}
+
 func TestVerifyCandidateRequiresLayeredManifestForSignedWindowsCore(t *testing.T) {
 	out, candidate, _, now := prepareWindowsLayeredCandidateForTest(t)
 	root, err := parseCandidateRootPublicKey(candidate.RootPublicKey)
@@ -387,6 +640,66 @@ func TestVerifyCandidateRequiresLayeredManifestForSignedWindowsCore(t *testing.T
 	}
 	if !strings.Contains(failedCandidateVerificationNames(verification), "layered_asset_manifest_path") {
 		t.Fatalf("expected missing layered manifest path failure, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
+func TestVerifyCandidateRejectsWindowsLayeredDowngradeWithUnsignedMetadataCleared(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	candidate, err := PrepareCandidate(CandidateOptions{
+		SourceRoot:     filepath.Join("..", ".."),
+		OutDir:         out,
+		Version:        "v0.2.0",
+		TargetPlatform: "windows/amd64",
+		ArtifactPaths: []string{
+			writeCandidateArtifactForTest(t, input, "rdev-host.exe", "windows-core-runtime"),
+			writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary"),
+		},
+		Key: key,
+		Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := ReadBundle(filepath.Join(out, candidate.ReleaseBundlePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Version != candidate.Version || bundle.TargetPlatform != candidate.TargetPlatform {
+		t.Fatalf("prepared candidate bundle omitted signed version/platform: %#v", bundle)
+	}
+	for _, artifact := range candidate.Artifacts {
+		manifest, err := ReadManifest(filepath.Join(out, artifact.ManifestPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if manifest.ReleaseVersion != candidate.Version || manifest.TargetPlatform != candidate.TargetPlatform {
+			t.Fatalf("artifact %s omitted signed version/platform: %#v", artifact.Name, manifest)
+		}
+	}
+
+	downgraded := candidate
+	downgraded.TargetPlatform = ""
+	downgraded.LayeredAssetManifestPath = ""
+	if err := writeCandidate(filepath.Join(out, "release-candidate.json"), downgraded); err != nil {
+		t.Fatal(err)
+	}
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() {
+		t.Fatal("clearing unsigned candidate target/layered metadata bypassed signed Windows layered enforcement")
+	}
+	failed := failedCandidateVerificationNames(verification)
+	if !strings.Contains(failed, "signed_bundle_target_platform_matches_candidate") ||
+		!strings.Contains(failed, "layered_asset_manifest_path") {
+		t.Fatalf("expected signed target and layered path downgrade checks, got %s", failed)
 	}
 }
 

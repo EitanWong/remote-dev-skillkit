@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,8 +44,11 @@ type Server struct {
 var gatewayInstanceFallbackCounter atomic.Uint64
 
 const permanentHostFailureExitCode = 78
+const layeredAssetManifestHTTPPath = "/layered-assets.json"
+const layeredAssetManifestFileName = "layered-assets.json"
 
 type AssetConfig struct {
+	LayeredAssetManifestPath string
 	RdevHostWindowsAMD64Path string
 	RdevWindowsAMD64Path     string
 	RdevDarwinARM64Path      string
@@ -128,11 +132,32 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tickets", s.createTicket)
 	mux.HandleFunc("GET /v1/tickets/", s.ticketSubresource)
 	mux.HandleFunc("GET /join/", s.join)
+	mux.HandleFunc("GET "+layeredAssetManifestHTTPPath, s.layeredAssetManifest)
 	mux.HandleFunc("GET /assets/", s.asset)
 	mux.HandleFunc("POST /v1/support-session/preconnect", s.supportSessionPreconnect)
 	mux.HandleFunc("GET /v1/support-session/status", s.supportSessionStatus)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isLayeredAssetTraversalAlias(r) {
+			writeError(w, http.StatusNotFound, "unknown asset")
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func isLayeredAssetTraversalAlias(r *http.Request) bool {
+	cleanPath := path.Clean(r.URL.Path)
+	for _, exactPath := range []string{
+		layeredAssetManifestHTTPPath,
+		"/assets/rdev-host-windows-amd64.exe",
+		"/assets/rdev-host-windows-amd64.exe.sha256",
+	} {
+		if cleanPath == exactPath && r.URL.Path != exactPath {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Server) bootstrapProbeTemplate(w http.ResponseWriter, r *http.Request) {
@@ -1618,12 +1643,44 @@ func (s Server) asset(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+func (s Server) layeredAssetManifest(w http.ResponseWriter, r *http.Request) {
+	if !exactAssetRequest(r, layeredAssetManifestHTTPPath) {
+		writeError(w, http.StatusNotFound, "unknown asset")
+		return
+	}
+	path, ok := configuredAssetPath(s.Assets.LayeredAssetManifestPath)
+	if !ok {
+		writeError(w, http.StatusNotFound, "asset is not configured")
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "asset is unavailable")
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		writeError(w, http.StatusInternalServerError, "asset is unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	http.ServeContent(w, r, layeredAssetManifestFileName, info.ModTime(), file)
+}
+
+func exactAssetRequest(r *http.Request, path string) bool {
+	return r.URL.EscapedPath() == path &&
+		r.URL.RawQuery == "" &&
+		!r.URL.ForceQuery &&
+		r.URL.Fragment == ""
+}
+
 func (s Server) rdevHostWindowsAMD64Asset(w http.ResponseWriter, r *http.Request) {
 	const assetPath = "/assets/rdev-host-windows-amd64.exe"
 	shaOnly := false
 	switch {
-	case r.URL.EscapedPath() == assetPath && r.URL.RawQuery == "" && !r.URL.ForceQuery:
-	case r.URL.EscapedPath() == assetPath+".sha256" && r.URL.RawQuery == "" && !r.URL.ForceQuery:
+	case exactAssetRequest(r, assetPath):
+	case exactAssetRequest(r, assetPath+".sha256"):
 		shaOnly = true
 	default:
 		writeError(w, http.StatusNotFound, "unknown asset")

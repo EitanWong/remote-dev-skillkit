@@ -153,6 +153,30 @@ func TestRunLayeredTemporaryRejectsBadSignatureBeforeAssetRequest(t *testing.T) 
 	}
 }
 
+func TestRunLayeredTemporaryRejectsUnexpectedReleaseVersionBeforeAssetRequest(t *testing.T) {
+	fixture := newLayeredTestFixture(t, []byte("runtime must not download for wrong release"))
+	assetHits := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/layered-assets.json" {
+			_, _ = w.Write(fixture.manifestJSON(t))
+			return
+		}
+		assetHits++
+		_, _ = w.Write(fixture.payload)
+	}))
+	defer server.Close()
+
+	opts := fixture.options(server.URL+"/layered-assets.json", t.TempDir(), server.Client())
+	opts.ExpectedReleaseVersion = "v0.1.0"
+	report, executablePath, err := RunLayeredTemporary(t.Context(), opts)
+	if err == nil || !strings.Contains(err.Error(), "release version") {
+		t.Fatalf("expected release version mismatch rejection, report=%#v path=%q err=%v", report, executablePath, err)
+	}
+	if assetHits != 0 || executablePath != "" {
+		t.Fatalf("release version mismatch reached asset download, hits=%d path=%q", assetHits, executablePath)
+	}
+}
+
 func TestRunLayeredTemporaryRejectsSignedSizeMismatch(t *testing.T) {
 	fixture := newLayeredTestFixture(t, []byte("runtime with signed size contract"))
 	fixture.manifest.Assets[0].SizeBytes++
@@ -242,7 +266,7 @@ func TestRunLayeredTemporaryRejectsOversizedManagedFilesBeforeAssetRequest(t *te
 	}))
 	defer server.Close()
 
-	for _, fileName := range []string{"output", "content", "output.part", "output.tmp", "content.tmp"} {
+	for _, fileName := range []string{"output", "content", "output.tmp", "content.tmp"} {
 		t.Run(fileName, func(t *testing.T) {
 			assetHits = 0
 			cacheDir := t.TempDir()
@@ -267,6 +291,27 @@ func TestRunLayeredTemporaryRejectsOversizedManagedFilesBeforeAssetRequest(t *te
 			}
 		})
 	}
+
+	t.Run("oversized output partial is discarded and downloaded again", func(t *testing.T) {
+		assetHits = 0
+		cacheDir := t.TempDir()
+		paths := fixture.cachePaths(cacheDir)
+		if err := os.MkdirAll(filepath.Dir(paths.output), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(paths.output+".part", bytes.Repeat([]byte("x"), len(fixture.payload)+1), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := RunLayeredTemporary(t.Context(), fixture.options(server.URL+"/layered-assets.json", cacheDir, server.Client())); err != nil {
+			t.Fatal(err)
+		}
+		if assetHits != 1 {
+			t.Fatalf("expected one clean asset download after discarding oversized partial, got %d", assetHits)
+		}
+		if _, statErr := os.Stat(paths.output + ".part"); !os.IsNotExist(statErr) {
+			t.Fatalf("oversized partial was not removed, stat err=%v", statErr)
+		}
+	})
 }
 
 func TestRunLayeredTemporaryAcceptsVerifiedOutputWithoutContentCache(t *testing.T) {
@@ -423,6 +468,7 @@ func TestLayeredRunCLIExecutesVerifiedRuntimeInForeground(t *testing.T) {
 		"layered-run",
 		"--manifest-url", server.URL + "/layered-assets.json",
 		"--root-public-key", trustref.Encode(fixture.key.ID, fixture.key.PublicKey),
+		"--expected-release-version", fixture.manifest.Version,
 		"--platform", "windows/amd64",
 		"--cache-dir", cacheDir,
 		"--mode", "temporary",
@@ -446,6 +492,69 @@ func TestLayeredRunCLIExecutesVerifiedRuntimeInForeground(t *testing.T) {
 	}
 }
 
+func TestLayeredRunCLIRejectsInjectedPreExecRuntimeSwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows denies the injected rename while the executable handle is locked")
+	}
+	fixture := newLayeredTestFixture(t, []byte("runtime verified before injected replacement"))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/layered-assets.json":
+			_, _ = w.Write(fixture.manifestJSON(t))
+		case "/assets/rdev-host-windows-amd64.exe":
+			_, _ = w.Write(fixture.payload)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	markerPath := filepath.Join(t.TempDir(), "runtime-executed")
+	commandContextCalls := 0
+	app := App{
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+		Stdin:  strings.NewReader(""),
+		Client: server.Client(),
+		CommandContext: func(ctx context.Context, path string, args ...string) *exec.Cmd {
+			commandContextCalls++
+			replacementPath := path + ".injected-swap"
+			replacement := bytes.Repeat([]byte("x"), len(fixture.payload))
+			if err := os.WriteFile(replacementPath, replacement, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(replacementPath, path); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLayeredRunCLIHelperProcess$")
+			cmd.Env = append(os.Environ(),
+				"RDEV_LAYERED_RUN_HELPER_PROCESS=1",
+				"RDEV_LAYERED_RUN_HELPER_MARKER="+markerPath,
+			)
+			return cmd
+		},
+	}
+	err := app.Run(t.Context(), []string{
+		"layered-run",
+		"--manifest-url", server.URL + "/layered-assets.json",
+		"--root-public-key", trustref.Encode(fixture.key.ID, fixture.key.PublicKey),
+		"--expected-release-version", fixture.manifest.Version,
+		"--platform", "windows/amd64",
+		"--cache-dir", filepath.Join(t.TempDir(), "cache"),
+		"--mode", "temporary",
+		"--", "host", "serve",
+	})
+	if err == nil || !strings.Contains(err.Error(), "changed before execution") {
+		t.Fatalf("pre-exec runtime swap error = %v, want fail-closed rejection", err)
+	}
+	if commandContextCalls != 1 {
+		t.Fatalf("CommandContext calls = %d, want 1 injected swap attempt", commandContextCalls)
+	}
+	if _, statErr := os.Stat(markerPath); !os.IsNotExist(statErr) {
+		t.Fatalf("swapped runtime command executed, marker stat error = %v", statErr)
+	}
+}
+
 func TestLayeredRunCLIRequiresTemporaryWindowsAMD64Contract(t *testing.T) {
 	fixture := newLayeredTestFixture(t, []byte("runtime"))
 	root := trustref.Encode(fixture.key.ID, fixture.key.PublicKey)
@@ -455,9 +564,10 @@ func TestLayeredRunCLIRequiresTemporaryWindowsAMD64Contract(t *testing.T) {
 		want string
 	}{
 		{name: "missing mode", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", root, "--platform", "windows/amd64", "--cache-dir", t.TempDir()}, want: "mode temporary"},
-		{name: "managed mode", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", root, "--platform", "windows/amd64", "--cache-dir", t.TempDir(), "--mode", "managed"}, want: "mode temporary"},
-		{name: "wrong platform", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", root, "--platform", "windows-amd64", "--cache-dir", t.TempDir(), "--mode", "temporary"}, want: "platform windows/amd64"},
-		{name: "invalid root", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", "invalid", "--platform", "windows/amd64", "--cache-dir", t.TempDir(), "--mode", "temporary"}, want: "root public key"},
+		{name: "managed mode", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", root, "--expected-release-version", fixture.manifest.Version, "--platform", "windows/amd64", "--cache-dir", t.TempDir(), "--mode", "managed"}, want: "mode temporary"},
+		{name: "missing expected release version", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", root, "--platform", "windows/amd64", "--cache-dir", t.TempDir(), "--mode", "temporary"}, want: "expected release version"},
+		{name: "wrong platform", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", root, "--expected-release-version", fixture.manifest.Version, "--platform", "windows-amd64", "--cache-dir", t.TempDir(), "--mode", "temporary"}, want: "platform windows/amd64"},
+		{name: "invalid root", args: []string{"--manifest-url", "https://gateway.test/layered-assets.json", "--root-public-key", "invalid", "--expected-release-version", fixture.manifest.Version, "--platform", "windows/amd64", "--cache-dir", t.TempDir(), "--mode", "temporary"}, want: "root public key"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -476,6 +586,11 @@ func TestLayeredRunCLIRequiresTemporaryWindowsAMD64Contract(t *testing.T) {
 func TestLayeredRunCLIHelperProcess(t *testing.T) {
 	if os.Getenv("RDEV_LAYERED_RUN_HELPER_PROCESS") != "1" {
 		return
+	}
+	if markerPath := os.Getenv("RDEV_LAYERED_RUN_HELPER_MARKER"); markerPath != "" {
+		if err := os.WriteFile(markerPath, []byte("executed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	content, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -504,6 +619,7 @@ func newLayeredTestFixture(t *testing.T, payload []byte) layeredTestFixture {
 		SchemaVersion: release.LayeredAssetManifestSchemaVersion,
 		Version:       "v0.2.0",
 		GeneratedAt:   now,
+		ExpiresAt:     now.Add(24 * time.Hour),
 		Assets: []release.LayeredAsset{{
 			ID:           "rdev-host-windows-amd64",
 			Platform:     "windows/amd64",
@@ -530,13 +646,14 @@ func (f layeredTestFixture) manifestJSON(t *testing.T) []byte {
 
 func (f layeredTestFixture) options(manifestURL, cacheDir string, client *http.Client) LayeredRunOptions {
 	return LayeredRunOptions{
-		ManifestURL: manifestURL,
-		Root:        model.NewTrustBundle(f.key.ID, f.key.PublicKey),
-		Platform:    "windows/amd64",
-		CacheDir:    cacheDir,
-		Mode:        "temporary",
-		Client:      client,
-		Now:         f.now,
+		ManifestURL:            manifestURL,
+		Root:                   model.NewTrustBundle(f.key.ID, f.key.PublicKey),
+		ExpectedReleaseVersion: f.manifest.Version,
+		Platform:               "windows/amd64",
+		CacheDir:               cacheDir,
+		Mode:                   "temporary",
+		Client:                 client,
+		Now:                    f.now,
 	}
 }
 

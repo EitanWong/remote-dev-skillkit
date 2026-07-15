@@ -99,6 +99,27 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 		result.Transcript = append(result.Transcript, Event{Phase: "output-hit", Bytes: size})
 		return result, nil
 	}
+	partPath := outputPath + ".part"
+	if opts.ExpectedSize > 0 {
+		if info, err := os.Stat(partPath); err == nil && info.Size() == opts.ExpectedSize {
+			sha, size, ok := verifiedFile(partPath, expected, opts.ExpectedSize)
+			if ok {
+				if err := promotePart(partPath, outputPath); err != nil {
+					return Result{}, err
+				}
+				if cachePath := strings.TrimSpace(opts.CachePath); cachePath != "" && !sameCleanPath(cachePath, outputPath) {
+					_ = copyVerifiedFile(outputPath, cachePath)
+				}
+				result.SourceURL = "partial"
+				result.Resumed = true
+				result.Bytes = size
+				result.SHA256 = sha
+				result.Transcript = append(result.Transcript, Event{Phase: "partial-hit", Bytes: size})
+				return result, nil
+			}
+			_ = os.Remove(partPath)
+		}
+	}
 	mirrors := normalizedMirrors(opts.Mirrors)
 	if len(mirrors) == 0 {
 		return Result{}, fmt.Errorf("at least one mirror is required")
@@ -128,7 +149,6 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 				}
 				continue
 			}
-			partPath := outputPath + ".part"
 			sha, size, verifyErr := fileSHA256(partPath)
 			if verifyErr != nil {
 				return Result{}, verifyErr

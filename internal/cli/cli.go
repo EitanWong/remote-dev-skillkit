@@ -913,6 +913,7 @@ type gatewayServeOptions struct {
 	SAMLOperatorAuthPath     string
 	RdevAssetsDir            string
 	AutoBuildRdevAssets      bool
+	LayeredAssetManifestPath string
 	RdevHostWindowsAMD64Path string
 	RdevWindowsAMD64Path     string
 	RdevDarwinARM64Path      string
@@ -8055,6 +8056,10 @@ func (a App) connectionEntry(args []string) error {
 		windowsBootstrapScriptURL := fs.String("windows-bootstrap-script-url", "", "optional URL for downloading windows-temporary.ps1 on the target host")
 		windowsBootstrapScriptSHA256 := fs.String("windows-bootstrap-script-sha256", "", "expected SHA-256 for windows-temporary.ps1")
 		windowsBootstrapScriptPath := fs.String("windows-bootstrap-script", "", "local windows-temporary.ps1 path; defaults to scripts/bootstrap/windows-temporary.ps1")
+		windowsBootstrapBinaryPath := fs.String("windows-bootstrap-binary", "", "verified rdev-bootstrap.exe path for layered Windows temporary entry materialization")
+		windowsBootstrapReleaseManifestPath := fs.String("windows-bootstrap-release-manifest", "", "signed release manifest path for --windows-bootstrap-binary")
+		layeredAssetsManifestURL := fs.String("layered-assets-manifest-url", "", "HTTPS layered asset manifest URL for Windows temporary entry materialization")
+		layeredReleaseVersion := fs.String("layered-release-version", "", "expected signed release version for Windows layered assets")
 		hostName := fs.String("host-name", "", "optional target host display name")
 		targetArch := fs.String("target-arch", runtime.GOARCH, "target architecture: amd64 or arm64")
 		rdevCommand := fs.String("rdev-command", "rdev", "rdev command embedded in the generated Connection Entry runner launcher")
@@ -8063,31 +8068,35 @@ func (a App) connectionEntry(args []string) error {
 			return err
 		}
 		plan, err := connectionentry.FromInvite(connectionentry.Options{
-			InviteJSON:                     *inviteJSON,
-			InvitePath:                     *invitePath,
-			OutDir:                         *out,
-			TargetOS:                       *targetOS,
-			Ownership:                      *ownership,
-			SessionMode:                    *sessionMode,
-			ReleaseBundleURL:               *releaseBundleURL,
-			ReleaseBundleRequiredArtifacts: *releaseBundleRequiredArtifacts,
-			ReleaseBundlePath:              *releaseBundlePath,
-			ReleaseRootPublicKey:           *releaseRootPublicKey,
-			ManagedBinaryPath:              *managedBinaryPath,
-			ManagedServiceName:             *managedServiceName,
-			ManagedServiceLabel:            *managedServiceLabel,
-			ManagedUnitName:                *managedUnitName,
-			WindowsHostDownloadURL:         *windowsHostDownloadURL,
-			WindowsHostExpectedSHA256:      *windowsHostSHA256,
-			WindowsVerifierDownloadURL:     *windowsVerifierDownloadURL,
-			WindowsVerifierExpectedSHA256:  *windowsVerifierSHA256,
-			WindowsBootstrapScriptURL:      *windowsBootstrapScriptURL,
-			WindowsBootstrapScriptSHA256:   *windowsBootstrapScriptSHA256,
-			WindowsBootstrapScriptPath:     *windowsBootstrapScriptPath,
-			HostName:                       *hostName,
-			TargetArch:                     *targetArch,
-			RdevCommand:                    *rdevCommand,
-			Force:                          *force,
+			InviteJSON:                          *inviteJSON,
+			InvitePath:                          *invitePath,
+			OutDir:                              *out,
+			TargetOS:                            *targetOS,
+			Ownership:                           *ownership,
+			SessionMode:                         *sessionMode,
+			ReleaseBundleURL:                    *releaseBundleURL,
+			ReleaseBundleRequiredArtifacts:      *releaseBundleRequiredArtifacts,
+			ReleaseBundlePath:                   *releaseBundlePath,
+			ReleaseRootPublicKey:                *releaseRootPublicKey,
+			ManagedBinaryPath:                   *managedBinaryPath,
+			ManagedServiceName:                  *managedServiceName,
+			ManagedServiceLabel:                 *managedServiceLabel,
+			ManagedUnitName:                     *managedUnitName,
+			WindowsHostDownloadURL:              *windowsHostDownloadURL,
+			WindowsHostExpectedSHA256:           *windowsHostSHA256,
+			WindowsVerifierDownloadURL:          *windowsVerifierDownloadURL,
+			WindowsVerifierExpectedSHA256:       *windowsVerifierSHA256,
+			WindowsBootstrapScriptURL:           *windowsBootstrapScriptURL,
+			WindowsBootstrapScriptSHA256:        *windowsBootstrapScriptSHA256,
+			WindowsBootstrapScriptPath:          *windowsBootstrapScriptPath,
+			WindowsBootstrapBinaryPath:          *windowsBootstrapBinaryPath,
+			WindowsBootstrapReleaseManifestPath: *windowsBootstrapReleaseManifestPath,
+			LayeredAssetsManifestURL:            *layeredAssetsManifestURL,
+			LayeredReleaseVersion:               *layeredReleaseVersion,
+			HostName:                            *hostName,
+			TargetArch:                          *targetArch,
+			RdevCommand:                         *rdevCommand,
+			Force:                               *force,
 		})
 		if err != nil {
 			return err
@@ -8565,6 +8574,7 @@ func (a App) gateway(args []string) error {
 		samlOperatorAuth := fs.String("saml-operator-auth", "", "optional SAML operator auth JSON file for signed SAMLResponse bearer tokens")
 		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-host-windows-amd64.exe plus rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
 		autoBuildRdevAssets := fs.Bool("auto-build-rdev-assets", true, "auto-build missing platform rdev helpers for dev gateway Connection Entry bootstraps when a checkout and Go are available")
+		layeredAssetsManifest := fs.String("layered-assets-manifest", "", "optional layered-assets.json manifest served to layered Connection Entry bootstraps")
 		rdevHostWindowsAMD64 := fs.String("rdev-host-windows-amd64", "", "optional rdev-host.exe core runtime served to Windows amd64 layered Connection Entry bootstraps")
 		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
 		rdevDarwinARM64 := fs.String("rdev-darwin-arm64", "", "optional rdev helper served to macOS arm64 Connection Entry bootstraps")
@@ -8600,6 +8610,7 @@ func (a App) gateway(args []string) error {
 			SAMLOperatorAuthPath:     *samlOperatorAuth,
 			RdevAssetsDir:            *rdevAssetsDir,
 			AutoBuildRdevAssets:      *autoBuildRdevAssets,
+			LayeredAssetManifestPath: *layeredAssetsManifest,
 			RdevHostWindowsAMD64Path: *rdevHostWindowsAMD64,
 			RdevWindowsAMD64Path:     *rdevWindowsAMD64,
 			RdevDarwinARM64Path:      *rdevDarwinARM64,
@@ -9543,6 +9554,7 @@ func (a App) release(args []string) error {
 		out := fs.String("out", "", "empty output directory for the release candidate")
 		version := fs.String("version", "", "release version, for example v0.1.0")
 		gatewayURL := fs.String("gateway-url", "", "default gateway URL to include in Skillkit install docs")
+		targetPlatform := fs.String("target-platform", "", "target platform for platform-specific release assets, for example windows/amd64")
 		artifacts := fs.String("artifacts", "", "comma-separated built artifact paths to stage, sign, and include")
 		requiredArtifacts := fs.String("require-artifacts", "", "comma-separated artifact ids that must be present in the release bundle")
 		keyPath := fs.String("key", "", "Ed25519 release signing key file")
@@ -9550,7 +9562,7 @@ func (a App) release(args []string) error {
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		return a.releasePrepareCandidate(*sourceRoot, *out, *version, *gatewayURL, splitCapabilities(*artifacts), splitCapabilities(*requiredArtifacts), *keyPath, *keyID)
+		return a.releasePrepareCandidate(*sourceRoot, *out, *version, *gatewayURL, *targetPlatform, splitCapabilities(*artifacts), splitCapabilities(*requiredArtifacts), *keyPath, *keyID)
 	case "verify-candidate":
 		fs := flag.NewFlagSet("release verify-candidate", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
@@ -9742,11 +9754,22 @@ func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 	assets := httpapi.AssetConfig{}
 	if dir := strings.TrimSpace(opts.RdevAssetsDir); dir != "" {
 		assets.RdevHostWindowsAMD64Path = filepath.Join(dir, "rdev-host-windows-amd64.exe")
+		candidateManifestPath := filepath.Join(dir, "layered-assets.json")
+		candidateCorePath := filepath.Join(dir, "assets", "rdev-host-windows-amd64.exe")
+		if pathExists(candidateManifestPath) {
+			assets.LayeredAssetManifestPath = candidateManifestPath
+		}
+		if pathExists(candidateCorePath) {
+			assets.RdevHostWindowsAMD64Path = candidateCorePath
+		}
 		assets.RdevWindowsAMD64Path = filepath.Join(dir, "rdev-windows-amd64.exe")
 		assets.RdevDarwinARM64Path = filepath.Join(dir, "rdev-darwin-arm64")
 		assets.RdevDarwinAMD64Path = filepath.Join(dir, "rdev-darwin-amd64")
 		assets.RdevLinuxAMD64Path = filepath.Join(dir, "rdev-linux-amd64")
 		assets.RdevLinuxARM64Path = filepath.Join(dir, "rdev-linux-arm64")
+	}
+	if strings.TrimSpace(opts.LayeredAssetManifestPath) != "" {
+		assets.LayeredAssetManifestPath = opts.LayeredAssetManifestPath
 	}
 	if strings.TrimSpace(opts.RdevHostWindowsAMD64Path) != "" {
 		assets.RdevHostWindowsAMD64Path = opts.RdevHostWindowsAMD64Path
@@ -9771,6 +9794,7 @@ func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 
 func gatewayHasExplicitAssetConfig(opts gatewayServeOptions) bool {
 	return strings.TrimSpace(opts.RdevAssetsDir) != "" ||
+		strings.TrimSpace(opts.LayeredAssetManifestPath) != "" ||
 		strings.TrimSpace(opts.RdevHostWindowsAMD64Path) != "" ||
 		strings.TrimSpace(opts.RdevWindowsAMD64Path) != "" ||
 		strings.TrimSpace(opts.RdevDarwinARM64Path) != "" ||
@@ -10840,7 +10864,7 @@ func (a App) releaseVerifyBundle(bundlePath, rootPublicKey string, requiredArtif
 	return nil
 }
 
-func (a App) releasePrepareCandidate(sourceRoot, outPath, version, gatewayURL string, artifactPaths, requiredArtifacts []string, keyPath, keyID string) error {
+func (a App) releasePrepareCandidate(sourceRoot, outPath, version, gatewayURL, targetPlatform string, artifactPaths, requiredArtifacts []string, keyPath, keyID string) error {
 	if outPath == "" {
 		return fmt.Errorf("out is required")
 	}
@@ -10862,6 +10886,7 @@ func (a App) releasePrepareCandidate(sourceRoot, outPath, version, gatewayURL st
 		OutDir:            outPath,
 		Version:           version,
 		GatewayURL:        gatewayURL,
+		TargetPlatform:    targetPlatform,
 		ArtifactPaths:     artifactPaths,
 		RequiredArtifacts: requiredArtifacts,
 		Key:               key,

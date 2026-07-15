@@ -44,6 +44,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
+	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
@@ -4469,6 +4470,53 @@ func TestGatewayAssetConfigUsesDirectoryWithExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestGatewayServeConfiguresLayeredCandidateAssets(t *testing.T) {
+	candidateDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(candidateDir, "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFileForCLITest(t, filepath.Join(candidateDir, "layered-assets.json"), "{}\n")
+	writeFileForCLITest(t, filepath.Join(candidateDir, "assets", "rdev-host-windows-amd64.exe"), "host\n")
+	override := filepath.Join(t.TempDir(), "layered-assets.json")
+
+	assets := gatewayAssetConfig(gatewayServeOptions{RdevAssetsDir: candidateDir})
+	if assets.LayeredAssetManifestPath != filepath.Join(candidateDir, "layered-assets.json") {
+		t.Fatalf("candidate assets dir should configure layered manifest: %#v", assets)
+	}
+	if assets.RdevHostWindowsAMD64Path != filepath.Join(candidateDir, "assets", "rdev-host-windows-amd64.exe") {
+		t.Fatalf("candidate assets dir should configure staged Windows core runtime: %#v", assets)
+	}
+
+	assets = gatewayAssetConfig(gatewayServeOptions{
+		RdevAssetsDir:            candidateDir,
+		LayeredAssetManifestPath: override,
+	})
+	if assets.LayeredAssetManifestPath != override {
+		t.Fatalf("explicit layered manifest should override candidate assets dir: %#v", assets)
+	}
+
+	legacyCandidateDir := t.TempDir()
+	writeFileForCLITest(t, filepath.Join(legacyCandidateDir, "layered-assets.json"), "{}\n")
+	writeFileForCLITest(t, filepath.Join(legacyCandidateDir, "rdev-host-windows-amd64.exe"), "host\n")
+	assets = gatewayAssetConfig(gatewayServeOptions{RdevAssetsDir: legacyCandidateDir})
+	if assets.LayeredAssetManifestPath != filepath.Join(legacyCandidateDir, "layered-assets.json") ||
+		assets.RdevHostWindowsAMD64Path != filepath.Join(legacyCandidateDir, "rdev-host-windows-amd64.exe") {
+		t.Fatalf("explicit canonical candidate layout should retain the flat core and configure its manifest: %#v", assets)
+	}
+
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"gateway", "serve",
+		"--dev",
+		"--state", filepath.Join(t.TempDir(), "state.json"),
+		"--rdev-assets-dir", candidateDir,
+		"--layered-assets-manifest", override,
+	})
+	if err == nil || !strings.Contains(err.Error(), "persistent storage requires --signing-key") {
+		t.Fatalf("gateway serve did not accept layered candidate asset flags: %v", err)
+	}
+}
+
 func TestGatewayServeConfiguresRdevHostWindowsAMD64Asset(t *testing.T) {
 	coreRuntime := filepath.Join(t.TempDir(), "rdev-host-windows-amd64.exe")
 	opts := gatewayServeOptions{RdevHostWindowsAMD64Path: coreRuntime}
@@ -5248,6 +5296,130 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 		strings.Contains(stdout.String(), "connector_package_plan") {
 		t.Fatalf("connection entry output should not use legacy customer/connector names: %s", stdout.String())
 	}
+}
+
+func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var inviteOut bytes.Buffer
+	if err := NewApp(&inviteOut, &bytes.Buffer{}).Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--reason", "repair target host",
+		"--transport", "long-poll",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	releaseDir := t.TempDir()
+	keyPath := filepath.Join(releaseDir, "release-root.json")
+	releaseRoot := signReleaseArtifactWithCLIForTest(t, releaseDir, keyPath, "rdev-bootstrap.exe", "bootstrap-binary")
+	bootstrapPath := filepath.Join(releaseDir, "rdev-bootstrap.exe")
+	bootstrapManifestPath := bootstrapPath + ".rdev-release.json"
+	releaseKey, _, err := signing.LoadOrCreate(keyPath, "release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapManifest, err := release.SignArtifactForRelease(bootstrapPath, releaseKey, time.Now(), "v0.2.0", "windows/amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := release.WriteManifest(bootstrapManifestPath, bootstrapManifest); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("layered prerequisites", func(t *testing.T) {
+		outDir := filepath.Join(t.TempDir(), "entry")
+		var stdout bytes.Buffer
+		err := NewApp(&stdout, &bytes.Buffer{}).Run(context.Background(), []string{
+			"connection-entry", "plan",
+			"--invite-json", inviteOut.String(),
+			"--out", outDir,
+			"--target-os", "windows",
+			"--target-arch", "amd64",
+			"--ownership", "third-party",
+			"--windows-bootstrap-binary", bootstrapPath,
+			"--windows-bootstrap-release-manifest", bootstrapManifestPath,
+			"--layered-assets-manifest-url", "https://downloads.example.com/layered-assets.json",
+			"--layered-release-version", "v0.2.0",
+			"--windows-bootstrap-script", filepath.Join("..", "..", "scripts", "bootstrap", "windows-temporary.ps1"),
+			"--windows-host-download-url", "https://downloads.example.com/rdev-host.exe",
+			"--windows-host-sha256", strings.Repeat("a", 64),
+			"--release-bundle-url", "https://downloads.example.com/release-bundle.json",
+			"--release-root-public-key", releaseRoot,
+			"--windows-verifier-download-url", "https://downloads.example.com/rdev-verify.exe",
+			"--windows-verifier-sha256", strings.Repeat("b", 64),
+		})
+		if err != nil {
+			t.Fatalf("expected valid layered inputs to materialize: %v\n%s", err, stdout.String())
+		}
+		var payload struct {
+			OK               bool `json:"ok"`
+			EntryPackagePlan struct {
+				PackageMode      string `json:"package_mode"`
+				PlatformPlanKind string `json:"platform_plan_kind"`
+				LauncherPath     string `json:"launcher_path"`
+			} `json:"entry_package_plan"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid layered connection entry output: %v\n%s", err, stdout.String())
+		}
+		if !payload.OK ||
+			!strings.Contains(payload.EntryPackagePlan.PackageMode, "layered") ||
+			!strings.Contains(payload.EntryPackagePlan.PlatformPlanKind, "layered") ||
+			!fileExistsForCLITest(payload.EntryPackagePlan.LauncherPath) {
+			t.Fatalf("expected layered Windows handoff selection, got %#v\n%s", payload.EntryPackagePlan, stdout.String())
+		}
+		launcher, err := os.ReadFile(payload.EntryPackagePlan.LauncherPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(launcher), "--expected-release-version") || !strings.Contains(string(launcher), "v0.2.0") {
+			t.Fatalf("layered launcher did not pin the expected release version:\n%s", launcher)
+		}
+	})
+
+	t.Run("legacy fallback", func(t *testing.T) {
+		bootstrapScript := filepath.Join(t.TempDir(), "windows-temporary.ps1")
+		writeFileForCLITest(t, bootstrapScript, "Write-Host 'bootstrap'\n")
+		outDir := filepath.Join(t.TempDir(), "entry")
+		var stdout bytes.Buffer
+		err := NewApp(&stdout, &bytes.Buffer{}).Run(context.Background(), []string{
+			"connection-entry", "plan",
+			"--invite-json", inviteOut.String(),
+			"--out", outDir,
+			"--target-os", "windows",
+			"--target-arch", "amd64",
+			"--ownership", "third-party",
+			"--windows-bootstrap-script", bootstrapScript,
+			"--windows-host-download-url", "https://downloads.example.com/rdev-host.exe",
+			"--windows-host-sha256", strings.Repeat("a", 64),
+			"--release-bundle-url", "https://downloads.example.com/release-bundle.json",
+			"--release-root-public-key", releaseRoot,
+			"--windows-verifier-download-url", "https://downloads.example.com/rdev-verify.exe",
+			"--windows-verifier-sha256", strings.Repeat("b", 64),
+		})
+		if err != nil {
+			t.Fatalf("expected legacy Windows fallback to remain available: %v\n%s", err, stdout.String())
+		}
+		var payload struct {
+			OK               bool `json:"ok"`
+			EntryPackagePlan struct {
+				PlatformPlanKind string `json:"platform_plan_kind"`
+				LauncherPath     string `json:"launcher_path"`
+			} `json:"entry_package_plan"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid legacy connection entry output: %v\n%s", err, stdout.String())
+		}
+		if !payload.OK ||
+			payload.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" ||
+			filepath.Base(payload.EntryPackagePlan.LauncherPath) != "Start-ConnectionEntry.ps1" {
+			t.Fatalf("expected legacy Windows fallback, got %#v\n%s", payload.EntryPackagePlan, stdout.String())
+		}
+	})
 }
 
 func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
@@ -9827,6 +9999,42 @@ func TestReleasePrepareCandidateStagesBundleAndSkillkit(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(path))); err != nil {
 			t.Fatalf("expected release candidate file %s: %v", path, err)
 		}
+	}
+}
+
+func TestReleasePrepareCandidateStagesLayeredWindowsCoreForTargetPlatform(t *testing.T) {
+	dir := t.TempDir()
+	artifactsDir := filepath.Join(dir, "artifacts")
+	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hostBytes := "windows-host-binary"
+	host := writeCLIArtifactForTest(t, artifactsDir, "rdev-host.exe", hostBytes)
+	out := filepath.Join(dir, "candidate")
+	var stdout bytes.Buffer
+	err := NewApp(&stdout, &bytes.Buffer{}).Run(context.Background(), []string{
+		"release", "prepare-candidate",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", out,
+		"--version", "v0.2.0",
+		"--artifacts", host,
+		"--target-platform", "windows/amd64",
+		"--key", filepath.Join(dir, "release-root.json"),
+	})
+	if err != nil {
+		t.Fatalf("expected target platform to reach candidate preparation: %v\n%s", err, stdout.String())
+	}
+	stagedPath := filepath.Join(out, "assets", "rdev-host-windows-amd64.exe")
+	staged, err := os.ReadFile(stagedPath)
+	if err != nil {
+		t.Fatalf("expected staged Windows core runtime: %v", err)
+	}
+	if string(staged) != hostBytes {
+		t.Fatalf("staged Windows core runtime changed bytes: got %q", staged)
+	}
+	if !fileExistsForCLITest(filepath.Join(out, "layered-assets.json")) ||
+		!fileExistsForCLITest(filepath.Join(out, "connection-entry-release.zip")) {
+		t.Fatalf("expected layered candidate plus archive fallback in %s", out)
 	}
 }
 

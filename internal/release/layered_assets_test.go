@@ -21,6 +21,7 @@ func TestLayeredAssetManifestSignsVerifiesAndSelectsWindowsCore(t *testing.T) {
 		SchemaVersion: LayeredAssetManifestSchemaVersion,
 		Version:       "v0.2.0",
 		GeneratedAt:   now,
+		ExpiresAt:     now.Add(24 * time.Hour),
 		Assets: []LayeredAsset{
 			{
 				ID:           "rdev-host-windows-amd64",
@@ -136,6 +137,18 @@ func TestLayeredAssetManifestSignsVerifiesAndSelectsWindowsCore(t *testing.T) {
 			},
 		},
 		{
+			name: "missing expiry",
+			mutate: func(candidate *LayeredAssetManifest) {
+				candidate.ExpiresAt = time.Time{}
+			},
+		},
+		{
+			name: "expiry before generation",
+			mutate: func(candidate *LayeredAssetManifest) {
+				candidate.ExpiresAt = candidate.GeneratedAt
+			},
+		},
+		{
 			name: "absolute path",
 			mutate: func(candidate *LayeredAssetManifest) {
 				candidate.Assets[0].RelativePath = "/tmp/rdev-host.exe"
@@ -246,6 +259,16 @@ func TestLayeredAssetManifestSignsVerifiesAndSelectsWindowsCore(t *testing.T) {
 	}
 	if err := VerifyLayeredAssetManifest(futureSigned, root, now); err == nil {
 		t.Fatal("expected future generated_at to fail verification")
+	}
+	expired := cloneLayeredAssetManifestForTest(manifest)
+	expired.GeneratedAt = now.Add(-2 * time.Hour)
+	expired.ExpiresAt = now.Add(-time.Hour)
+	expiredSigned, err := SignLayeredAssetManifest(expired, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyLayeredAssetManifest(expiredSigned, root, now); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired signed manifest to fail verification, got %v", err)
 	}
 	if err := VerifyLayeredAssetManifest(signed, model.NewTrustBundle("other-root", key.PublicKey), now); err == nil {
 		t.Fatal("expected trust root key id mismatch to fail verification")
