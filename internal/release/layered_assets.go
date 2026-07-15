@@ -173,7 +173,7 @@ func validateLayeredAsset(asset LayeredAsset) error {
 
 func validRelativeAssetPath(value string) bool {
 	u, err := url.Parse(value)
-	if err != nil || value == "" || u.IsAbs() || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery || strings.Contains(value, "#") {
+	if err != nil || value == "" || u.IsAbs() || path.IsAbs(u.Path) || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery || strings.Contains(value, "#") {
 		return false
 	}
 	if strings.Contains(value, "\\") || strings.HasPrefix(value, "/") {

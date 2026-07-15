@@ -142,6 +142,12 @@ func TestLayeredAssetManifestSignsVerifiesAndSelectsWindowsCore(t *testing.T) {
 			},
 		},
 		{
+			name: "encoded leading slash",
+			mutate: func(candidate *LayeredAssetManifest) {
+				candidate.Assets[0].RelativePath = "%2Fwindows/amd64/rdev-host.exe"
+			},
+		},
+		{
 			name: "parent traversal",
 			mutate: func(candidate *LayeredAssetManifest) {
 				candidate.Assets[0].RelativePath = "../rdev-host.exe"
