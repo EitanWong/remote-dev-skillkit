@@ -978,6 +978,47 @@ func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
 	}
 }
 
+func TestRdevHostWindowsAMD64AssetServesExactBinaryAndHashOnly(t *testing.T) {
+	dir := t.TempDir()
+	binaryContent := []byte("fake Windows host core runtime\n")
+	binaryPath := filepath.Join(dir, "rdev-host-windows-amd64.exe")
+	if err := os.WriteFile(binaryPath, binaryContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(gateway.NewMemoryGateway())
+	server.Assets.RdevHostWindowsAMD64Path = binaryPath
+	handler := server.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-host-windows-amd64.exe", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), binaryContent) {
+		t.Fatalf("expected configured Windows host runtime, got %d: %q", rec.Code, rec.Body.Bytes())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/assets/rdev-host-windows-amd64.exe.sha256", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	sum := sha256.Sum256(binaryContent)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != hex.EncodeToString(sum[:]) {
+		t.Fatalf("expected Windows host runtime checksum, got %d: %q", rec.Code, rec.Body.String())
+	}
+
+	for _, requestPath := range []string{
+		"/assets/rdev-host-windows-arm64.exe",
+		"/assets/rdev-host-windows-amd64.exe.extra",
+		"/assets/nested/rdev-host-windows-amd64.exe",
+		"/assets/../rdev-host-windows-amd64.exe",
+	} {
+		req = httptest.NewRequest(http.MethodGet, requestPath, nil)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK || bytes.Contains(rec.Body.Bytes(), binaryContent) {
+			t.Fatalf("unexpected Windows host asset exposure for %q: %d %q", requestPath, rec.Code, rec.Body.Bytes())
+		}
+	}
+}
+
 func TestJoinAssetsServeGzipBinary(t *testing.T) {
 	dir := t.TempDir()
 	binaryPath := filepath.Join(dir, "rdev.exe")

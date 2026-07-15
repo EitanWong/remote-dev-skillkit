@@ -45,11 +45,12 @@ var gatewayInstanceFallbackCounter atomic.Uint64
 const permanentHostFailureExitCode = 78
 
 type AssetConfig struct {
-	RdevWindowsAMD64Path string
-	RdevDarwinARM64Path  string
-	RdevDarwinAMD64Path  string
-	RdevLinuxAMD64Path   string
-	RdevLinuxARM64Path   string
+	RdevHostWindowsAMD64Path string
+	RdevWindowsAMD64Path     string
+	RdevDarwinARM64Path      string
+	RdevDarwinAMD64Path      string
+	RdevLinuxAMD64Path       string
+	RdevLinuxARM64Path       string
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
@@ -1631,6 +1632,8 @@ func (s Server) serveGzipAsset(w http.ResponseWriter, path string) {
 
 func (s Server) assetPath(name string) (string, bool) {
 	switch name {
+	case "rdev-host-windows-amd64.exe":
+		return configuredAssetPath(s.Assets.RdevHostWindowsAMD64Path)
 	case "rdev-windows-amd64.exe":
 		return configuredAssetPath(s.Assets.RdevWindowsAMD64Path)
 	case "rdev-darwin-arm64":

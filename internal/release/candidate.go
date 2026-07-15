@@ -25,6 +25,9 @@ const CandidateSchemaVersion = "rdev.release-candidate.v1"
 const CandidateVerificationSchemaVersion = "rdev.release-candidate-verification.v1"
 const ConnectionEntryReleasePackageSchemaVersion = "rdev.connection-entry-release-package.v1"
 const connectionEntryReleaseArchivePath = "connection-entry-release.zip"
+const layeredAssetManifestPath = "layered-assets.json"
+
+const rdevHostWindowsAMD64AssetName = "rdev-host-windows-amd64.exe"
 
 type CandidateOptions struct {
 	SourceRoot        string
@@ -38,23 +41,24 @@ type CandidateOptions struct {
 }
 
 type Candidate struct {
-	SchemaVersion        string                      `json:"schema_version"`
-	Version              string                      `json:"version"`
-	GeneratedAt          time.Time                   `json:"generated_at"`
-	OutDir               string                      `json:"out_dir"`
-	RootPublicKey        string                      `json:"root_public_key"`
-	ReleaseBundlePath    string                      `json:"release_bundle_path"`
-	SkillkitPath         string                      `json:"skillkit_path"`
-	SBOMPath             string                      `json:"sbom_path"`
-	ProvenancePath       string                      `json:"provenance_path"`
-	ConnectionEntryPath  string                      `json:"connection_entry_path"`
-	ChecksumsPath        string                      `json:"checksums_path"`
-	Artifacts            []CandidateArtifact         `json:"artifacts"`
-	SkillkitVerification skillkit.VerificationReport `json:"skillkit_verification"`
-	BundleVerification   BundleVerification          `json:"bundle_verification"`
-	Checks               []CandidateCheck            `json:"checks"`
-	Files                []CandidateFile             `json:"files"`
-	RecommendedActions   []string                    `json:"recommended_actions,omitempty"`
+	SchemaVersion            string                      `json:"schema_version"`
+	Version                  string                      `json:"version"`
+	GeneratedAt              time.Time                   `json:"generated_at"`
+	OutDir                   string                      `json:"out_dir"`
+	RootPublicKey            string                      `json:"root_public_key"`
+	ReleaseBundlePath        string                      `json:"release_bundle_path"`
+	SkillkitPath             string                      `json:"skillkit_path"`
+	SBOMPath                 string                      `json:"sbom_path"`
+	ProvenancePath           string                      `json:"provenance_path"`
+	ConnectionEntryPath      string                      `json:"connection_entry_path"`
+	LayeredAssetManifestPath string                      `json:"layered_asset_manifest_path,omitempty"`
+	ChecksumsPath            string                      `json:"checksums_path"`
+	Artifacts                []CandidateArtifact         `json:"artifacts"`
+	SkillkitVerification     skillkit.VerificationReport `json:"skillkit_verification"`
+	BundleVerification       BundleVerification          `json:"bundle_verification"`
+	Checks                   []CandidateCheck            `json:"checks"`
+	Files                    []CandidateFile             `json:"files"`
+	RecommendedActions       []string                    `json:"recommended_actions,omitempty"`
 }
 
 type CandidateArtifact struct {
@@ -219,6 +223,15 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 	candidate.Artifacts = artifacts
 	add("artifacts_staged", len(artifacts) == len(opts.ArtifactPaths), fmt.Sprintf("%d", len(artifacts)))
 	add("artifact_manifests_written", artifactManifestsWritten(artifacts), "")
+	if candidateHasWindowsCoreRuntime(candidate) {
+		candidate.LayeredAssetManifestPath = layeredAssetManifestPath
+		layeredAssetPath := filepath.Join(outDir, candidate.LayeredAssetManifestPath)
+		layeredAssetEntry, err := WriteLayeredAssetManifest(layeredAssetPath, candidate, opts.Key, now)
+		if err != nil {
+			return Candidate{}, err
+		}
+		add("layered_asset_manifest_written", pathExists(layeredAssetPath), layeredAssetEntry.Path)
+	}
 
 	required := cleanStringList(opts.RequiredArtifacts)
 	if len(required) == 0 {
@@ -380,6 +393,9 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 	root, rootErr := parseCandidateRootPublicKey(candidate.RootPublicKey)
 	add("candidate_root_public_key_valid", rootErr == nil, errorDetail(rootErr))
 	if rootErr == nil {
+		if candidate.LayeredAssetManifestPath != "" {
+			verification.Checks = append(verification.Checks, verifyCandidateLayeredAssetManifest(candidateDir, candidate, root, now)...)
+		}
 		releaseBundlePath := filepath.Join(candidateDir, "release-bundle.json")
 		add("release_bundle_exists", pathExists(releaseBundlePath), "release-bundle.json")
 		bundleVerification, err := VerifyBundle(releaseBundlePath, root, opts.RequiredArtifacts)
@@ -390,6 +406,8 @@ func VerifyCandidate(opts CandidateVerifyOptions) (CandidateVerification, error)
 			verification.BundleVerification = publicCandidateBundleVerification(verification.BundleVerification)
 			add("release_bundle_verified", bundleVerification.OK(), failedBundleCheckNames(bundleVerification))
 		}
+	} else if candidate.LayeredAssetManifestPath != "" {
+		add("layered_asset_manifest_verified", false, "candidate root public key is invalid")
 	}
 
 	skillkitDir := filepath.Join(candidateDir, "skillkit")
@@ -573,6 +591,8 @@ func candidateFileKind(path string) string {
 	switch {
 	case path == "release-bundle.json":
 		return "release-bundle"
+	case path == layeredAssetManifestPath:
+		return "layered-asset-manifest"
 	case path == "sbom.spdx.json":
 		return "sbom"
 	case path == "provenance.json":
@@ -586,6 +606,149 @@ func candidateFileKind(path string) string {
 	default:
 		return "artifact"
 	}
+}
+
+func WriteLayeredAssetManifest(path string, candidate Candidate, key signing.Key, now time.Time) (CandidateFile, error) {
+	if candidate.RootPublicKey != encodeReleaseRoot(key) {
+		return CandidateFile{}, fmt.Errorf("candidate root public key does not match layered asset signing key")
+	}
+	assets := make([]LayeredAsset, 0, 1)
+	for _, artifact := range candidate.Artifacts {
+		if artifact.Name != rdevHostWindowsAMD64AssetName || artifact.ArtifactPath != rdevHostWindowsAMD64AssetName {
+			continue
+		}
+		sha, size, err := fileDigest(filepath.Join(filepath.Dir(path), artifact.ArtifactPath))
+		if err != nil {
+			return CandidateFile{}, err
+		}
+		if artifact.SHA256 != sha || artifact.SizeBytes != size {
+			return CandidateFile{}, fmt.Errorf("staged artifact metadata mismatch for %s", rdevHostWindowsAMD64AssetName)
+		}
+		assets = append(assets, LayeredAsset{
+			ID:           "rdev-host-windows-amd64",
+			Platform:     "windows/amd64",
+			Kind:         layeredAssetKindCoreRuntime,
+			RelativePath: "assets/" + rdevHostWindowsAMD64AssetName,
+			SHA256:       "sha256:" + sha,
+			SizeBytes:    size,
+		})
+	}
+	manifest, err := SignLayeredAssetManifest(LayeredAssetManifest{
+		SchemaVersion: LayeredAssetManifestSchemaVersion,
+		Version:       candidate.Version,
+		GeneratedAt:   now.UTC(),
+		Assets:        assets,
+	}, key)
+	if err != nil {
+		return CandidateFile{}, err
+	}
+	content, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return CandidateFile{}, err
+	}
+	content = append(content, '\n')
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return CandidateFile{}, err
+	}
+	sha, size, err := fileDigest(path)
+	if err != nil {
+		return CandidateFile{}, err
+	}
+	return CandidateFile{
+		Path:      layeredAssetManifestPath,
+		SHA256:    "sha256:" + sha,
+		SizeBytes: size,
+		Kind:      "layered-asset-manifest",
+	}, nil
+}
+
+func candidateHasWindowsCoreRuntime(candidate Candidate) bool {
+	for _, artifact := range candidate.Artifacts {
+		if artifact.Name == rdevHostWindowsAMD64AssetName && artifact.ArtifactPath == rdevHostWindowsAMD64AssetName {
+			return true
+		}
+	}
+	return false
+}
+
+func verifyCandidateLayeredAssetManifest(candidateDir string, candidate Candidate, root model.TrustBundle, now time.Time) []CandidateCheck {
+	var checks []CandidateCheck
+	add := func(name string, passed bool, detail string) {
+		checks = append(checks, CandidateCheck{Name: name, Passed: passed, Detail: detail})
+	}
+	pathValid := candidate.LayeredAssetManifestPath == layeredAssetManifestPath
+	add("layered_asset_manifest_path", pathValid, candidate.LayeredAssetManifestPath)
+	listed := 0
+	listedWithKind := false
+	for _, file := range candidate.Files {
+		if file.Path == layeredAssetManifestPath {
+			listed++
+			listedWithKind = listedWithKind || file.Kind == "layered-asset-manifest"
+		}
+	}
+	add("layered_asset_manifest_listed", listed == 1 && listedWithKind, fmt.Sprintf("%d", listed))
+	if !pathValid {
+		return checks
+	}
+
+	content, err := os.ReadFile(filepath.Join(candidateDir, layeredAssetManifestPath))
+	add("layered_asset_manifest_exists", err == nil, layeredAssetManifestPath)
+	if err != nil {
+		return checks
+	}
+	var manifest LayeredAssetManifest
+	err = json.Unmarshal(content, &manifest)
+	add("layered_asset_manifest_json_valid", err == nil, errorDetail(err))
+	if err != nil {
+		return checks
+	}
+	err = VerifyLayeredAssetManifest(manifest, root, now)
+	add("layered_asset_manifest_verified", err == nil, errorDetail(err))
+	if err != nil {
+		return checks
+	}
+	add("layered_asset_manifest_version_matches_candidate", manifest.Version == candidate.Version, manifest.Version)
+	add("layered_asset_manifest_time_matches_candidate", manifest.GeneratedAt.Equal(candidate.GeneratedAt), manifest.GeneratedAt.UTC().Format(time.RFC3339Nano))
+	checks = append(checks, verifyCandidateLayeredWindowsCore(candidateDir, candidate, manifest)...)
+	return checks
+}
+
+func verifyCandidateLayeredWindowsCore(candidateDir string, candidate Candidate, manifest LayeredAssetManifest) []CandidateCheck {
+	var checks []CandidateCheck
+	add := func(name string, passed bool, detail string) {
+		checks = append(checks, CandidateCheck{Name: name, Passed: passed, Detail: detail})
+	}
+	asset, err := SelectLayeredAsset(manifest, "windows/amd64", layeredAssetKindCoreRuntime, nil)
+	contractValid := err == nil && asset.ID == "rdev-host-windows-amd64" && asset.RelativePath == "assets/"+rdevHostWindowsAMD64AssetName
+	add("layered_asset_manifest_windows_core_contract", contractValid, errorDetail(err))
+	if !contractValid {
+		return checks
+	}
+	artifact, artifactCount := candidateWindowsCoreRuntime(candidate)
+	add("layered_asset_manifest_windows_core_artifact", artifactCount == 1, fmt.Sprintf("%d", artifactCount))
+	if artifactCount != 1 {
+		return checks
+	}
+	sha, size, err := fileDigest(filepath.Join(candidateDir, rdevHostWindowsAMD64AssetName))
+	add("layered_asset_manifest_windows_core_readable", err == nil, publicCandidateDetail(errorDetail(err), candidateDir))
+	if err != nil {
+		return checks
+	}
+	matches := asset.SHA256 == "sha256:"+sha && asset.SizeBytes == size && artifact.SHA256 == sha && artifact.SizeBytes == size
+	add("layered_asset_manifest_windows_core_matches_staged", matches, rdevHostWindowsAMD64AssetName)
+	return checks
+}
+
+func candidateWindowsCoreRuntime(candidate Candidate) (CandidateArtifact, int) {
+	var match CandidateArtifact
+	count := 0
+	for _, artifact := range candidate.Artifacts {
+		if artifact.Name == rdevHostWindowsAMD64AssetName && artifact.ArtifactPath == rdevHostWindowsAMD64AssetName {
+			match = artifact
+			count++
+		}
+	}
+	return match, count
 }
 
 func candidateHasFile(files []CandidateFile, path string) bool {

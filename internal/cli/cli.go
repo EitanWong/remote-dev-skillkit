@@ -913,6 +913,7 @@ type gatewayServeOptions struct {
 	SAMLOperatorAuthPath     string
 	RdevAssetsDir            string
 	AutoBuildRdevAssets      bool
+	RdevHostWindowsAMD64Path string
 	RdevWindowsAMD64Path     string
 	RdevDarwinARM64Path      string
 	RdevDarwinAMD64Path      string
@@ -8562,8 +8563,9 @@ func (a App) gateway(args []string) error {
 		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
 		oidcJWKSOperatorAuth := fs.String("oidc-jwks-operator-auth", "", "optional OIDC JWKS operator auth JSON file for RS256 JWT role tokens")
 		samlOperatorAuth := fs.String("saml-operator-auth", "", "optional SAML operator auth JSON file for signed SAMLResponse bearer tokens")
-		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
+		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-host-windows-amd64.exe plus rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
 		autoBuildRdevAssets := fs.Bool("auto-build-rdev-assets", true, "auto-build missing platform rdev helpers for dev gateway Connection Entry bootstraps when a checkout and Go are available")
+		rdevHostWindowsAMD64 := fs.String("rdev-host-windows-amd64", "", "optional rdev-host.exe core runtime served to Windows amd64 layered Connection Entry bootstraps")
 		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
 		rdevDarwinARM64 := fs.String("rdev-darwin-arm64", "", "optional rdev helper served to macOS arm64 Connection Entry bootstraps")
 		rdevDarwinAMD64 := fs.String("rdev-darwin-amd64", "", "optional rdev helper served to macOS amd64 Connection Entry bootstraps")
@@ -8598,6 +8600,7 @@ func (a App) gateway(args []string) error {
 			SAMLOperatorAuthPath:     *samlOperatorAuth,
 			RdevAssetsDir:            *rdevAssetsDir,
 			AutoBuildRdevAssets:      *autoBuildRdevAssets,
+			RdevHostWindowsAMD64Path: *rdevHostWindowsAMD64,
 			RdevWindowsAMD64Path:     *rdevWindowsAMD64,
 			RdevDarwinARM64Path:      *rdevDarwinARM64,
 			RdevDarwinAMD64Path:      *rdevDarwinAMD64,
@@ -9738,11 +9741,15 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 	assets := httpapi.AssetConfig{}
 	if dir := strings.TrimSpace(opts.RdevAssetsDir); dir != "" {
+		assets.RdevHostWindowsAMD64Path = filepath.Join(dir, "rdev-host-windows-amd64.exe")
 		assets.RdevWindowsAMD64Path = filepath.Join(dir, "rdev-windows-amd64.exe")
 		assets.RdevDarwinARM64Path = filepath.Join(dir, "rdev-darwin-arm64")
 		assets.RdevDarwinAMD64Path = filepath.Join(dir, "rdev-darwin-amd64")
 		assets.RdevLinuxAMD64Path = filepath.Join(dir, "rdev-linux-amd64")
 		assets.RdevLinuxARM64Path = filepath.Join(dir, "rdev-linux-arm64")
+	}
+	if strings.TrimSpace(opts.RdevHostWindowsAMD64Path) != "" {
+		assets.RdevHostWindowsAMD64Path = opts.RdevHostWindowsAMD64Path
 	}
 	if strings.TrimSpace(opts.RdevWindowsAMD64Path) != "" {
 		assets.RdevWindowsAMD64Path = opts.RdevWindowsAMD64Path
@@ -9764,6 +9771,7 @@ func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 
 func gatewayHasExplicitAssetConfig(opts gatewayServeOptions) bool {
 	return strings.TrimSpace(opts.RdevAssetsDir) != "" ||
+		strings.TrimSpace(opts.RdevHostWindowsAMD64Path) != "" ||
 		strings.TrimSpace(opts.RdevWindowsAMD64Path) != "" ||
 		strings.TrimSpace(opts.RdevDarwinARM64Path) != "" ||
 		strings.TrimSpace(opts.RdevDarwinAMD64Path) != "" ||

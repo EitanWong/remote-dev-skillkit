@@ -43,6 +43,12 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	if candidate.SchemaVersion != CandidateSchemaVersion {
 		t.Fatalf("unexpected schema %q", candidate.SchemaVersion)
 	}
+	if candidate.LayeredAssetManifestPath != "" {
+		t.Fatalf("nonmatching Windows artifact unexpectedly produced a layered manifest: %q", candidate.LayeredAssetManifestPath)
+	}
+	if _, err := os.Stat(filepath.Join(out, layeredAssetManifestPath)); !os.IsNotExist(err) {
+		t.Fatalf("nonmatching Windows artifact should not write %s: %v", layeredAssetManifestPath, err)
+	}
 	for _, path := range []string{
 		"release-candidate.json",
 		"release-bundle.json",
@@ -155,6 +161,186 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	}
 	if !strings.Contains(candidateJSON, `"connection_entry_path": "connection-entry-release.zip"`) {
 		t.Fatalf("expected candidate summary to include Connection Entry archive path, got %s", candidateJSON)
+	}
+}
+
+func TestPrepareCandidateWritesSignedWindowsLayeredAssets(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	core := writeCandidateArtifactForTest(t, input, "rdev-host-windows-amd64.exe", "windows-core-runtime")
+	helper := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+	nearMatch := writeCandidateArtifactForTest(t, input, "rdev-host-windows-amd64.exe.bak", "not-a-core-runtime")
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+
+	candidate, err := PrepareCandidate(CandidateOptions{
+		SourceRoot:    filepath.Join("..", ".."),
+		OutDir:        out,
+		Version:       "v0.2.0",
+		ArtifactPaths: []string{core, helper, nearMatch},
+		Key:           key,
+		Now:           now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.LayeredAssetManifestPath != layeredAssetManifestPath {
+		t.Fatalf("unexpected layered asset manifest path %q", candidate.LayeredAssetManifestPath)
+	}
+
+	manifestContent, err := os.ReadFile(filepath.Join(out, layeredAssetManifestPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(manifestContent), input) || strings.Contains(string(manifestContent), out) {
+		t.Fatalf("layered asset manifest leaked a private input or output path: %s", manifestContent)
+	}
+	var manifest LayeredAssetManifest
+	if err := json.Unmarshal(manifestContent, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	root, err := parseCandidateRootPublicKey(candidate.RootPublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyLayeredAssetManifest(manifest, root, now); err != nil {
+		t.Fatalf("layered asset manifest did not verify with candidate root: %v", err)
+	}
+	if len(manifest.Assets) != 1 {
+		t.Fatalf("expected only the exact Windows host artifact in layered manifest, got %#v", manifest.Assets)
+	}
+	selected, err := SelectLayeredAsset(manifest, "windows/amd64", layeredAssetKindCoreRuntime, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.ID != "rdev-host-windows-amd64" ||
+		selected.Platform != "windows/amd64" ||
+		selected.RelativePath != "assets/rdev-host-windows-amd64.exe" ||
+		selected.Kind != layeredAssetKindCoreRuntime {
+		t.Fatalf("unexpected Windows core runtime selection: %#v", selected)
+	}
+	var coreSHA256 string
+	for _, artifact := range candidate.Artifacts {
+		if artifact.Name == "rdev-host-windows-amd64.exe" {
+			coreSHA256 = artifact.SHA256
+			break
+		}
+	}
+	if coreSHA256 == "" || selected.SHA256 != "sha256:"+coreSHA256 {
+		t.Fatalf("selected runtime digest does not match staged core runtime: %q", selected.SHA256)
+	}
+
+	var manifestFile CandidateFile
+	manifestFileCount := 0
+	for _, file := range candidate.Files {
+		if file.Path == layeredAssetManifestPath {
+			manifestFile = file
+			manifestFileCount++
+		}
+	}
+	if manifestFileCount != 1 || manifestFile.Kind != "layered-asset-manifest" || manifestFile.SHA256 == "" || manifestFile.SizeBytes <= 0 {
+		t.Fatalf("candidate files missing layered manifest metadata: %#v", manifestFile)
+	}
+	checksums, err := os.ReadFile(filepath.Join(out, candidate.ChecksumsPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(checksums), "  "+layeredAssetManifestPath+"\n") != 1 {
+		t.Fatalf("candidate checksums omitted layered manifest: %s", checksums)
+	}
+
+	archiveEntries := readConnectionEntryArchiveForTest(t, filepath.Join(out, candidate.ConnectionEntryPath))
+	bundleContent := readReleaseCandidateTestFile(t, filepath.Join(out, candidate.ReleaseBundlePath))
+	sbomContent := readReleaseCandidateTestFile(t, filepath.Join(out, candidate.SBOMPath))
+	for _, artifact := range []string{
+		"rdev-host-windows-amd64.exe",
+		"rdev-host-windows-amd64.exe.bak",
+		"rdev-verify.exe",
+	} {
+		if !strings.Contains(bundleContent, `"name": "`+artifact+`"`) || !strings.Contains(sbomContent, `"fileName": "./`+artifact+`"`) {
+			t.Fatalf("bundle or SBOM omitted staged artifact %s", artifact)
+		}
+		for _, archivePath := range []string{"bin/" + artifact, "bin/" + artifact + ".rdev-release.json"} {
+			if _, ok := archiveEntries[archivePath]; !ok {
+				t.Fatalf("existing archive omitted staged artifact %s", archivePath)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out, rdevHostWindowsAMD64AssetName)); err != nil {
+		t.Fatalf("core runtime moved from existing root staging layout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "assets", rdevHostWindowsAMD64AssetName)); !os.IsNotExist(err) {
+		t.Fatalf("public asset URL path should not duplicate the staged runtime: %v", err)
+	}
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("candidate with layered Windows runtime did not verify: %#v", verification.Checks)
+	}
+
+	manifest.Assets[0].RelativePath = "assets/rdev-host-windows-amd64.exe.bak"
+	tamperedManifest, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(out, layeredAssetManifestPath)
+	if err := os.WriteFile(manifestPath, append(tamperedManifest, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestSHA, manifestSize, err := fileDigest(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filesForChecksums := make([]CandidateFile, 0, len(candidate.Files)-1)
+	for index := range candidate.Files {
+		switch candidate.Files[index].Path {
+		case layeredAssetManifestPath:
+			candidate.Files[index].SHA256 = "sha256:" + manifestSHA
+			candidate.Files[index].SizeBytes = manifestSize
+		case candidate.ChecksumsPath:
+			continue
+		}
+		filesForChecksums = append(filesForChecksums, candidate.Files[index])
+	}
+	checksumEntry, err := writeCandidateChecksums(filepath.Join(out, candidate.ChecksumsPath), filesForChecksums)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range candidate.Files {
+		if candidate.Files[index].Path == candidate.ChecksumsPath {
+			candidate.Files[index] = checksumEntry
+			break
+		}
+	}
+	if err := writeCandidate(filepath.Join(out, "release-candidate.json"), candidate); err != nil {
+		t.Fatal(err)
+	}
+	tamperedVerification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tamperedVerification.OK() {
+		t.Fatal("expected candidate verification to reject a tampered layered manifest even when unsigned checksums were updated")
+	}
+	if !strings.Contains(failedCandidateVerificationNames(tamperedVerification), "layered_asset_manifest_verified") {
+		t.Fatalf("expected layered signature failure, got %s", failedCandidateVerificationNames(tamperedVerification))
+	}
+
+	wrongRoot := candidate
+	wrongRoot.RootPublicKey = "other-root:" + strings.SplitN(candidate.RootPublicKey, ":", 2)[1]
+	if _, err := WriteLayeredAssetManifest(filepath.Join(out, "wrong-root-layered-assets.json"), wrongRoot, key, now); err == nil {
+		t.Fatal("expected layered manifest writer to reject a candidate root that does not match the signing key")
+	}
+	if err := os.WriteFile(filepath.Join(out, rdevHostWindowsAMD64AssetName), []byte("tampered-runtime"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteLayeredAssetManifest(filepath.Join(out, "tampered-layered-assets.json"), candidate, key, now); err == nil {
+		t.Fatal("expected layered manifest writer to reject staged runtime metadata mismatch")
 	}
 }
 

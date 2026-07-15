@@ -4460,11 +4460,37 @@ func TestGatewayAssetConfigUsesDirectoryWithExplicitOverrides(t *testing.T) {
 	if assets.RdevWindowsAMD64Path != override {
 		t.Fatalf("explicit Windows helper should override assets dir: %#v", assets)
 	}
-	if assets.RdevDarwinARM64Path != filepath.Join(dir, "rdev-darwin-arm64") ||
+	if assets.RdevHostWindowsAMD64Path != filepath.Join(dir, "rdev-host-windows-amd64.exe") ||
+		assets.RdevDarwinARM64Path != filepath.Join(dir, "rdev-darwin-arm64") ||
 		assets.RdevDarwinAMD64Path != filepath.Join(dir, "rdev-darwin-amd64") ||
 		assets.RdevLinuxAMD64Path != filepath.Join(dir, "rdev-linux-amd64") ||
 		assets.RdevLinuxARM64Path != filepath.Join(dir, "rdev-linux-arm64") {
 		t.Fatalf("assets dir should populate platform helper paths: %#v", assets)
+	}
+}
+
+func TestGatewayServeConfiguresRdevHostWindowsAMD64Asset(t *testing.T) {
+	coreRuntime := filepath.Join(t.TempDir(), "rdev-host-windows-amd64.exe")
+	opts := gatewayServeOptions{RdevHostWindowsAMD64Path: coreRuntime}
+	assets := gatewayAssetConfig(opts)
+	if assets.RdevHostWindowsAMD64Path != coreRuntime {
+		t.Fatalf("gateway did not configure Windows host core runtime: %#v", assets)
+	}
+	if !gatewayHasExplicitAssetConfig(opts) {
+		t.Fatal("Windows host core runtime should count as explicit gateway asset configuration")
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	err := app.Run(context.Background(), []string{
+		"gateway", "serve",
+		"--dev",
+		"--state", filepath.Join(t.TempDir(), "state.json"),
+		"--rdev-host-windows-amd64", coreRuntime,
+	})
+	if err == nil || !strings.Contains(err.Error(), "persistent storage requires --signing-key") {
+		t.Fatalf("gateway serve did not recognize Windows host runtime flag: %v", err)
 	}
 }
 
