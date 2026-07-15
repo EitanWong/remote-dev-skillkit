@@ -98,15 +98,21 @@ if name == "main-branch-governance":
     pr_params = pull_request.get("parameters", {})
     if pr_params.get("allowed_merge_methods") != ["squash"]:
         raise SystemExit("squash-only merge enforcement missing")
-    forbidden_review_keys = {
+    review_keys = {
         "dismiss_stale_reviews_on_push",
         "require_code_owner_review",
         "require_last_push_approval",
         "required_approving_review_count",
         "required_review_thread_resolution",
     }
-    if forbidden_review_keys & pr_params.keys():
-        raise SystemExit("single-maintainer review requirements must remain optional")
+    if set(review_keys) - pr_params.keys():
+        raise SystemExit("single-maintainer review settings must be explicit")
+    if pr_params.get("required_approving_review_count") != 0:
+        raise SystemExit("single-maintainer ruleset must require zero approvals")
+    if pr_params.get("require_code_owner_review") is not False:
+        raise SystemExit("single-maintainer ruleset must not require code owner review")
+    if pr_params.get("required_review_thread_resolution") is not False:
+        raise SystemExit("single-maintainer ruleset must not require review threads")
 
     status_checks = next(rule for rule in rules if rule.get("type") == "required_status_checks")
     status_params = status_checks.get("parameters", {})
@@ -334,8 +340,12 @@ if branch_ruleset['conditions']['ref_name']['include'] != ['refs/heads/main']:
 pull_request = next(rule for rule in branch_ruleset['rules'] if rule['type'] == 'pull_request')
 if pull_request['parameters']['allowed_merge_methods'] != ['squash']:
     raise SystemExit('branch ruleset must be squash-only')
-if set(pull_request['parameters']) != {'allowed_merge_methods'}:
-    raise SystemExit('single-maintainer review requirements must remain optional')
+if pull_request['parameters']['required_approving_review_count'] != 0:
+    raise SystemExit('single-maintainer ruleset must require zero approvals')
+if pull_request['parameters']['require_code_owner_review'] is not False:
+    raise SystemExit('single-maintainer ruleset must not require code owner review')
+if pull_request['parameters']['required_review_thread_resolution'] is not False:
+    raise SystemExit('single-maintainer ruleset must not require review threads')
 status_checks = next(rule for rule in branch_ruleset['rules'] if rule['type'] == 'required_status_checks')
 if status_checks['parameters']['strict_required_status_checks_policy'] is not True:
     raise SystemExit('branch ruleset must require up-to-date branches')
