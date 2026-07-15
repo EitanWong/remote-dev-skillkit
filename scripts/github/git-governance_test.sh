@@ -98,12 +98,21 @@ if name == "main-branch-governance":
     pr_params = pull_request.get("parameters", {})
     if pr_params.get("allowed_merge_methods") != ["squash"]:
         raise SystemExit("squash-only merge enforcement missing")
-    if pr_params.get("required_approving_review_count") != 1:
-        raise SystemExit("approval count must be 1")
-    if pr_params.get("required_review_thread_resolution") is not True:
-        raise SystemExit("conversation resolution required")
-    if pr_params.get("require_code_owner_review") is not True:
-        raise SystemExit("code owner review required")
+    review_keys = {
+        "dismiss_stale_reviews_on_push",
+        "require_code_owner_review",
+        "require_last_push_approval",
+        "required_approving_review_count",
+        "required_review_thread_resolution",
+    }
+    if set(review_keys) - pr_params.keys():
+        raise SystemExit("single-maintainer review settings must be explicit")
+    if pr_params.get("required_approving_review_count") != 0:
+        raise SystemExit("single-maintainer ruleset must require zero approvals")
+    if pr_params.get("require_code_owner_review") is not False:
+        raise SystemExit("single-maintainer ruleset must not require code owner review")
+    if pr_params.get("required_review_thread_resolution") is not False:
+        raise SystemExit("single-maintainer ruleset must not require review threads")
 
     status_checks = next(rule for rule in rules if rule.get("type") == "required_status_checks")
     status_params = status_checks.get("parameters", {})
@@ -112,13 +121,6 @@ if name == "main-branch-governance":
     contexts = {check.get("context") for check in status_params.get("required_status_checks", []) if isinstance(check, dict)}
     if contexts != {"git-policy", "go-checks"}:
         raise SystemExit(f"unexpected status check contexts: {sorted(contexts)}")
-elif name == "main-commit-policy":
-    commit_rule = next(rule for rule in rules if rule.get("type") == "commit_message_pattern")
-    pattern = commit_rule.get("parameters", {}).get("pattern", "")
-    if "conventional commits" not in commit_rule.get("parameters", {}).get("name", ""):
-        raise SystemExit("commit policy must enforce conventional commits")
-    if not pattern.startswith("^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)"):
-        raise SystemExit("commit policy regex missing")
 else:
     raise SystemExit(f"unexpected ruleset name: {name}")
 PY
@@ -167,7 +169,7 @@ case "${FAKE_GH_MODE:-happy}" in
     ;;
   bad-ruleset-id)
     if [[ "$method" == "GET" && "$path" == repos/*/rulesets* ]]; then
-      printf '[{"name":"main-branch-governance","id":"abc"},{"name":"main-commit-policy","id":202}]\n'
+      printf '[{"name":"main-branch-governance","id":"abc"}]\n'
     else
       printf '{"ok":true,"path":"%s"}\n' "$path"
     fi
@@ -192,7 +194,7 @@ case "${FAKE_GH_MODE:-happy}" in
     ;;
   happy|*)
     if [[ "$method" == "GET" && "$path" == repos/*/rulesets* ]]; then
-      printf '[{"name":"main-branch-governance","id":101},{"name":"main-commit-policy","id":"202"}]\n'
+      printf '[{"name":"main-branch-governance","id":101}]\n'
     elif [[ "$method" == "POST" && "$path" == repos/*/rulesets ]]; then
       assert_rule_body "$body_json"
       printf '{"ok":true,"kind":"create","path":"%s"}\n' "$path"
@@ -325,13 +327,12 @@ for method, path, body in entries:
     if method == 'PATCH' and path == 'repos/example-org/example-repo':
         settings_bodies.append(json.loads(body))
 
-if len(rule_bodies) != 2:
-    raise SystemExit(f'expected two ruleset mutations, got {len(rule_bodies)}')
+if len(rule_bodies) != 1:
+    raise SystemExit(f'expected one ruleset mutation, got {len(rule_bodies)}')
 if len(settings_bodies) != 1:
     raise SystemExit('expected one repo settings mutation')
 
 branch_ruleset = next(data for _, _, data in rule_bodies if data.get('name') == 'main-branch-governance')
-commit_policy = next(data for _, _, data in rule_bodies if data.get('name') == 'main-commit-policy')
 settings = settings_bodies[0]
 
 if branch_ruleset['conditions']['ref_name']['include'] != ['refs/heads/main']:
@@ -339,12 +340,12 @@ if branch_ruleset['conditions']['ref_name']['include'] != ['refs/heads/main']:
 pull_request = next(rule for rule in branch_ruleset['rules'] if rule['type'] == 'pull_request')
 if pull_request['parameters']['allowed_merge_methods'] != ['squash']:
     raise SystemExit('branch ruleset must be squash-only')
-if pull_request['parameters']['required_approving_review_count'] != 1:
-    raise SystemExit('branch ruleset must require one approval')
-if pull_request['parameters']['required_review_thread_resolution'] is not True:
-    raise SystemExit('branch ruleset must require resolved conversations')
-if pull_request['parameters']['require_code_owner_review'] is not True:
-    raise SystemExit('branch ruleset must require code owner review')
+if pull_request['parameters']['required_approving_review_count'] != 0:
+    raise SystemExit('single-maintainer ruleset must require zero approvals')
+if pull_request['parameters']['require_code_owner_review'] is not False:
+    raise SystemExit('single-maintainer ruleset must not require code owner review')
+if pull_request['parameters']['required_review_thread_resolution'] is not False:
+    raise SystemExit('single-maintainer ruleset must not require review threads')
 status_checks = next(rule for rule in branch_ruleset['rules'] if rule['type'] == 'required_status_checks')
 if status_checks['parameters']['strict_required_status_checks_policy'] is not True:
     raise SystemExit('branch ruleset must require up-to-date branches')
@@ -357,12 +358,6 @@ for required in {'required_linear_history', 'non_fast_forward', 'deletion'}:
         raise SystemExit(f'missing branch rule: {required}')
 if branch_ruleset['target'] != 'branch' or branch_ruleset['conditions']['ref_name']['include'] != ['refs/heads/main']:
     raise SystemExit('branch ruleset target/main mismatch')
-
-commit_types = {rule['type'] for rule in commit_policy['rules']}
-if 'commit_message_pattern' not in commit_types:
-    raise SystemExit('commit policy must require conventional commits')
-if commit_policy['conditions']['ref_name']['include'] != ['refs/heads/main']:
-    raise SystemExit('commit policy must target main')
 
 expected_settings = {
     'allow_squash_merge': True,

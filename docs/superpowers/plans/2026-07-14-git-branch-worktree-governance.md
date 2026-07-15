@@ -244,9 +244,10 @@ apply-git-governance.sh, and git-governance_test.sh.
 JSON without mutation. Apply without --execute must fail without calling gh.
 Apply with --execute must call only the fake gh and redact fake credentials.
 - [ ] Step 2: Run bash scripts/github/git-governance_test.sh and verify RED.
-- [ ] Step 3: Encode PR-only main, one approval, required git-policy and
-go-checks, conversation resolution, up-to-date branch, no force-push/deletion,
-squash-only merge, and automatic head deletion. Use set -euo pipefail.
+- [ ] Step 3: Encode PR-only main, required git-policy and go-checks,
+up-to-date branch, no force-push/deletion, squash-only merge, and automatic
+head deletion. Keep human review optional for the single-maintainer project.
+Use set -euo pipefail.
 plan-git-governance.sh is read-only. apply-git-governance.sh rejects missing
 --execute and uses gh api only after that flag.
 - [ ] Step 4: Run the shell test and bash -n on both scripts; expect PASS.

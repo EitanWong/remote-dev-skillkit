@@ -110,9 +110,7 @@ plan = {
     "guarantees": [
         "main-only",
         "pull-request-only",
-        "one-approval",
         "required-checks: git-policy, go-checks",
-        "conversation-resolution",
         "strict-up-to-date-branches",
         "no-force-push",
         "no-branch-deletion",

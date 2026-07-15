@@ -195,9 +195,8 @@ must never be emitted.
 Use a Ruleset or equivalent branch protection for `main` with:
 
 - pull request required;
-- one or more approvals required;
 - required status checks;
-- conversation resolution required;
+- human review optional for the single-maintainer project;
 - branch must be up to date before merge;
 - force-push and deletion disabled;
 - squash merge only;

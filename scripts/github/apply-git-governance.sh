@@ -64,6 +64,10 @@ run_gh() {
   return "$status"
 }
 
+log() {
+  printf '%s\n' "$*"
+}
+
 validate_json_array() {
   python3 - "$1" <<'PY'
 import json
@@ -216,7 +220,7 @@ main() {
   }
 
   apply_ruleset "main-branch-governance" "$branch_ruleset_path"
-  apply_ruleset "main-commit-policy" "$commit_policy_path"
+  log "Commit policy is enforced by the required git-policy status check; GitHub commit_message_pattern rulesets are not supported for this repository."
 
   cat >"$repo_settings_tmp" <<'JSON'
 {"allow_squash_merge":true,"allow_merge_commit":false,"allow_rebase_merge":false,"delete_branch_on_merge":true,"allow_auto_merge":false}
