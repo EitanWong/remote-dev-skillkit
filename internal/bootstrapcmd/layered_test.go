@@ -153,6 +153,42 @@ func TestRunLayeredTemporaryRejectsBadSignatureBeforeAssetRequest(t *testing.T) 
 	}
 }
 
+func TestRunLayeredTemporaryRejectsManifestThatExpiresDuringFetch(t *testing.T) {
+	fixture := newLayeredTestFixture(t, []byte("runtime must not download after manifest expiry"))
+	assetHits := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/layered-assets.json":
+			manifest := fixture.manifest
+			manifest.GeneratedAt = time.Now().UTC().Add(-time.Minute)
+			manifest.ExpiresAt = time.Now().UTC().Add(100 * time.Millisecond)
+			signed, err := release.SignLayeredAssetManifest(manifest, fixture.key)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			time.Sleep(150 * time.Millisecond)
+			_ = json.NewEncoder(w).Encode(signed)
+		case "/assets/rdev-host-windows-amd64.exe":
+			assetHits++
+			_, _ = w.Write(fixture.payload)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	opts := fixture.options(server.URL+"/layered-assets.json", t.TempDir(), server.Client())
+	opts.Now = time.Time{}
+	report, executablePath, err := RunLayeredTemporary(t.Context(), opts)
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected post-fetch expiry rejection, report=%#v path=%q err=%v", report, executablePath, err)
+	}
+	if assetHits != 0 || executablePath != "" {
+		t.Fatalf("expired manifest reached asset download, hits=%d path=%q", assetHits, executablePath)
+	}
+}
+
 func TestRunLayeredTemporaryRejectsUnexpectedReleaseVersionBeforeAssetRequest(t *testing.T) {
 	fixture := newLayeredTestFixture(t, []byte("runtime must not download for wrong release"))
 	assetHits := 0
@@ -232,6 +268,37 @@ func TestRunLayeredTemporaryRejectsHTTPAndInvalidManifestResponses(t *testing.T)
 			_, _, err := RunLayeredTemporary(t.Context(), fixture.options(server.URL+"/layered-assets.json", t.TempDir(), server.Client()))
 			if err == nil {
 				t.Fatal("expected manifest response rejection")
+			}
+		})
+	}
+}
+
+func TestRunLayeredTemporaryRejectsManifestJSONAmbiguityBeforeAssetRequest(t *testing.T) {
+	fixture := newLayeredTestFixture(t, []byte("runtime must not download for ambiguous JSON"))
+	content := fixture.manifestJSON(t)
+	tests := map[string][]byte{
+		"unknown field": append(append([]byte(nil), content[:len(content)-1]...), []byte(`,"unsigned_field":true}`)...),
+		"duplicate key": []byte(strings.Replace(string(content), `{"schema_version":`, `{"version":"v0.2.0","schema_version":`, 1)),
+	}
+	for name, ambiguous := range tests {
+		t.Run(name, func(t *testing.T) {
+			assetHits := 0
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/layered-assets.json" {
+					_, _ = w.Write(ambiguous)
+					return
+				}
+				assetHits++
+				_, _ = w.Write(fixture.payload)
+			}))
+			defer server.Close()
+
+			_, executablePath, err := RunLayeredTemporary(t.Context(), fixture.options(server.URL+"/layered-assets.json", t.TempDir(), server.Client()))
+			if err == nil {
+				t.Fatal("expected ambiguous layered manifest rejection")
+			}
+			if assetHits != 0 || executablePath != "" {
+				t.Fatalf("ambiguous manifest reached asset download, hits=%d path=%q", assetHits, executablePath)
 			}
 		})
 	}

@@ -653,8 +653,9 @@ assert build["ok"] is True, build
 build_manifest = json.loads(pathlib.Path(build["manifest"]).read_text())
 assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_manifest
 assert build_manifest["out_dir"] == ".", build_manifest
-assert len(build_manifest["artifacts"]) == 8, build_manifest["artifacts"]
+assert len(build_manifest["artifacts"]) == 7, build_manifest["artifacts"]
 assert any(artifact["command"] == "rdev-bootstrap" and artifact["target"] == "windows/amd64" for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
+assert not any(artifact["command"] == "rdev-bootstrap" and artifact["target"] != "windows/amd64" for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert all(artifact["cgo_enabled"] is False for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 build_sbom_path = pathlib.Path(build["sbom"])

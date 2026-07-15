@@ -164,6 +164,9 @@ func runLayeredTemporary(ctx context.Context, opts LayeredRunOptions) (LayeredRu
 		return LayeredRunReport{}, layeredRuntime{}, err
 	}
 	report.Stages = append(report.Stages, layeredStage("manifest-fetch", started))
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	started = time.Now()
 	if err := release.VerifyLayeredAssetManifest(manifest, opts.Root, now); err != nil {
@@ -292,11 +295,7 @@ func prepareLayeredRequest(opts LayeredRunOptions) (*url.URL, *url.URL, *http.Cl
 	if err != nil {
 		return nil, nil, nil, time.Time{}, err
 	}
-	now := opts.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
-	return manifestURL, manifestURL, cloneLayeredHTTPClient(opts.Client, manifestURL), now, nil
+	return manifestURL, manifestURL, cloneLayeredHTTPClient(opts.Client, manifestURL), opts.Now, nil
 }
 
 func parseLayeredHTTPSURL(rawURL string) (*url.URL, error) {
@@ -365,8 +364,8 @@ func fetchLayeredManifest(ctx context.Context, client *http.Client, manifestURL 
 	if len(content) > maxLayeredManifestBytes {
 		return release.LayeredAssetManifest{}, nil, fmt.Errorf("layered manifest exceeds %d bytes", maxLayeredManifestBytes)
 	}
-	var manifest release.LayeredAssetManifest
-	if err := json.Unmarshal(content, &manifest); err != nil {
+	manifest, err := release.DecodeLayeredAssetManifest(content)
+	if err != nil {
 		return release.LayeredAssetManifest{}, nil, fmt.Errorf("decode layered manifest: %w", err)
 	}
 	finalURL := manifestURL

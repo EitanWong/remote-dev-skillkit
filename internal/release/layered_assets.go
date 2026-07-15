@@ -76,7 +76,7 @@ func VerifyLayeredAssetManifest(manifest LayeredAssetManifest, root model.TrustB
 	if manifest.GeneratedAt.After(verificationTime) {
 		return fmt.Errorf("%w: layered asset manifest generated_at is in the future", ErrManifestInvalid)
 	}
-	if verificationTime.After(manifest.ExpiresAt) {
+	if !verificationTime.Before(manifest.ExpiresAt) {
 		return fmt.Errorf("%w: layered asset manifest expired", ErrManifestInvalid)
 	}
 	if root.SigningKeyID != manifest.SigningKeyID {

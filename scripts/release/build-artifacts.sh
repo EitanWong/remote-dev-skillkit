@@ -17,7 +17,7 @@ Options:
   --out DIR             Output directory. Default: dist/artifacts
   --version VERSION     Version embedded in binaries. Default: RDEV_BUILD_VERSION or 0.0.1-dev
   --targets LIST        Comma-separated GOOS/GOARCH list. Default: current Go target
-  --commands LIST       Comma-separated command list. Default: rdev,rdev-host,rdev-bootstrap,rdev-gateway,rdev-mcp,rdev-verify
+  --commands LIST       Comma-separated command list. Default: rdev,rdev-host,rdev-bootstrap,rdev-gateway,rdev-mcp,rdev-verify. rdev-bootstrap is emitted only for windows/amd64.
   --clean               Remove output directory before building
   -h, --help            Show this help
 
@@ -103,6 +103,9 @@ for target in "${target_list[@]}"; do
   for command in "${command_list[@]}"; do
     command="${command//[[:space:]]/}"
     [[ -n "$command" ]] || continue
+    if [[ "$command" == "rdev-bootstrap" && "$target" != "windows/amd64" ]]; then
+      continue
+    fi
     package="./cmd/$command"
     if [[ ! -d "$package" ]]; then
       echo "command package does not exist: $package" >&2

@@ -459,6 +459,49 @@ func TestPrepareCandidateStagesWindowsAMD64CoreFromNormalHostArtifact(t *testing
 	}
 }
 
+func TestVerifyCandidatePrefersExplicitWindowsCoreOverGenericHost(t *testing.T) {
+	input := t.TempDir()
+	out := filepath.Join(t.TempDir(), "candidate")
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	explicit := writeCandidateArtifactForTest(t, input, rdevHostWindowsAMD64AssetName, "explicit-windows-core")
+	generic := writeCandidateArtifactForTest(t, input, "rdev-host.exe", "generic-archive-host")
+	verifier := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
+
+	candidate, err := PrepareCandidate(CandidateOptions{
+		SourceRoot:     filepath.Join("..", ".."),
+		OutDir:         out,
+		Version:        "v0.2.0",
+		TargetPlatform: windowsAMD64TargetPlatform,
+		ArtifactPaths:  []string{explicit, generic, verifier},
+		Key:            key,
+		Now:            now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := readLayeredAssetManifestForTest(t, filepath.Join(out, candidate.LayeredAssetManifestPath))
+	asset, err := SelectLayeredAsset(manifest, windowsAMD64TargetPlatform, layeredAssetKindCoreRuntime, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitArtifact, count := candidateArtifact(candidate, rdevHostWindowsAMD64AssetName)
+	if count != 1 || asset.SHA256 != "sha256:"+explicitArtifact.SHA256 {
+		t.Fatalf("layered manifest did not select the explicit Windows core: asset=%#v artifact=%#v", asset, explicitArtifact)
+	}
+
+	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("candidate verifier disagreed with explicit core selection: %s", failedCandidateVerificationNames(verification))
+	}
+}
+
 func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(t *testing.T) {
 	input := t.TempDir()
 	key, err := signing.Generate("release-root")
@@ -777,6 +820,41 @@ func TestVerifyCandidateRejectsSignedLayeredManifestWithExtraAsset(t *testing.T)
 	}
 	if !strings.Contains(failedCandidateVerificationNames(verification), "layered_asset_manifest_windows_core_contract") {
 		t.Fatalf("expected exact layered manifest contract failure, got %s", failedCandidateVerificationNames(verification))
+	}
+}
+
+func TestVerifyCandidateRejectsLayeredManifestJSONAmbiguity(t *testing.T) {
+	for _, name := range []string{"unknown field", "duplicate key"} {
+		t.Run(name, func(t *testing.T) {
+			out, candidate, _, now := prepareWindowsLayeredCandidateForTest(t)
+			manifestPath := filepath.Join(out, layeredAssetManifestPath)
+			content, err := os.ReadFile(manifestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content = bytes.TrimSpace(content)
+			switch name {
+			case "unknown field":
+				content = append(append([]byte(nil), content[:len(content)-1]...), []byte(`,"unsigned_field":true}`)...)
+			case "duplicate key":
+				content = append([]byte(`{"version":"v0.2.0",`), content[1:]...)
+			}
+			if err := os.WriteFile(manifestPath, append(content, '\n'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			rewritten := candidate
+			rewritten.Files = append([]CandidateFile(nil), candidate.Files...)
+			refreshCandidateFileForTest(t, out, &rewritten, layeredAssetManifestPath)
+			rewriteCandidateChecksumsForTest(t, out, &rewritten)
+
+			verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verification.OK() || !strings.Contains(failedCandidateVerificationNames(verification), "layered_asset_manifest_json_valid") {
+				t.Fatalf("expected ambiguous layered manifest JSON failure, got %s", failedCandidateVerificationNames(verification))
+			}
+		})
 	}
 }
 

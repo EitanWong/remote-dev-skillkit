@@ -795,8 +795,7 @@ func verifyCandidateLayeredAssetManifest(candidateDir string, candidate Candidat
 	if err != nil {
 		return checks
 	}
-	var manifest LayeredAssetManifest
-	err = json.Unmarshal(content, &manifest)
+	manifest, err := DecodeLayeredAssetManifest(content)
 	add("layered_asset_manifest_json_valid", err == nil, errorDetail(err))
 	if err != nil {
 		return checks
@@ -854,9 +853,16 @@ func verifiedBundleWindowsCoreRuntime(verification BundleVerification, targetPla
 	var match BundleArtifactVerification
 	count := 0
 	for _, artifact := range verification.Artifacts {
-		explicit := artifact.Name == rdevHostWindowsAMD64AssetName && artifact.Artifact == rdevHostWindowsAMD64AssetName
-		platformHost := targetPlatform == windowsAMD64TargetPlatform && artifact.Name == "rdev-host.exe" && artifact.Artifact == "rdev-host.exe"
-		if explicit || platformHost {
+		if artifact.Name == rdevHostWindowsAMD64AssetName && artifact.Artifact == rdevHostWindowsAMD64AssetName {
+			match = artifact
+			count++
+		}
+	}
+	if count > 0 || targetPlatform != windowsAMD64TargetPlatform {
+		return match, count
+	}
+	for _, artifact := range verification.Artifacts {
+		if artifact.Name == "rdev-host.exe" && artifact.Artifact == "rdev-host.exe" {
 			match = artifact
 			count++
 		}
@@ -1040,11 +1046,7 @@ func readLayeredAssetManifest(path string) (LayeredAssetManifest, error) {
 	if err != nil {
 		return LayeredAssetManifest{}, err
 	}
-	var manifest LayeredAssetManifest
-	if err := json.Unmarshal(content, &manifest); err != nil {
-		return LayeredAssetManifest{}, err
-	}
-	return manifest, nil
+	return DecodeLayeredAssetManifest(content)
 }
 
 func buildConnectionEntryReleasePackage(candidate Candidate, files []ConnectionEntryReleasePackageFile, generatedAt time.Time) ConnectionEntryReleasePackage {

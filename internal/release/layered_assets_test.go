@@ -1,6 +1,7 @@
 package release
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -270,6 +271,16 @@ func TestLayeredAssetManifestSignsVerifiesAndSelectsWindowsCore(t *testing.T) {
 	if err := VerifyLayeredAssetManifest(expiredSigned, root, now); err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("expected expired signed manifest to fail verification, got %v", err)
 	}
+	expiresNow := cloneLayeredAssetManifestForTest(manifest)
+	expiresNow.GeneratedAt = now.Add(-time.Hour)
+	expiresNow.ExpiresAt = now
+	expiresNowSigned, err := SignLayeredAssetManifest(expiresNow, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyLayeredAssetManifest(expiresNowSigned, root, now); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected manifest to expire at expires_at, got %v", err)
+	}
 	if err := VerifyLayeredAssetManifest(signed, model.NewTrustBundle("other-root", key.PublicKey), now); err == nil {
 		t.Fatal("expected trust root key id mismatch to fail verification")
 	}
@@ -283,6 +294,48 @@ func TestLayeredAssetManifestSignsVerifiesAndSelectsWindowsCore(t *testing.T) {
 	invalidKey.PublicKey = invalidKey.PublicKey[:len(invalidKey.PublicKey)-1]
 	if _, err := SignLayeredAssetManifest(manifest, invalidKey); err == nil {
 		t.Fatal("expected invalid Ed25519 public key length to fail signing")
+	}
+}
+
+func TestDecodeLayeredAssetManifestRejectsUnsignedJSONAmbiguity(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := SignLayeredAssetManifest(LayeredAssetManifest{
+		SchemaVersion: LayeredAssetManifestSchemaVersion,
+		Version:       "v0.2.0",
+		GeneratedAt:   now,
+		ExpiresAt:     now.Add(time.Hour),
+		Assets: []LayeredAsset{{
+			ID:           "rdev-host-windows-amd64",
+			Platform:     "windows/amd64",
+			Kind:         "core-runtime",
+			RelativePath: "assets/rdev-host-windows-amd64.exe",
+			SHA256:       "sha256:" + strings.Repeat("a", 64),
+			SizeBytes:    4096,
+		}},
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string][]byte{
+		"unknown field":       append(append([]byte(nil), content[:len(content)-1]...), []byte(`,"unsigned_field":true}`)...),
+		"unknown asset field": []byte(strings.Replace(string(content), `"size_bytes":4096`, `"size_bytes":4096,"unsigned_asset_field":true`, 1)),
+		"case variant field":  []byte(strings.Replace(string(content), `"schema_version":`, `"Schema_Version":`, 1)),
+		"duplicate key":       []byte(strings.Replace(string(content), `{"schema_version":`, `{"version":"v0.2.0","schema_version":`, 1)),
+	}
+	for name, ambiguous := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeLayeredAssetManifest(ambiguous); err == nil {
+				t.Fatal("expected strict layered manifest decoding to fail")
+			}
+		})
 	}
 }
 
