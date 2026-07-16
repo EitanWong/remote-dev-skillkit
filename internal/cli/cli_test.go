@@ -4518,6 +4518,134 @@ func TestGatewayServeConfiguresLayeredCandidateAssets(t *testing.T) {
 	}
 }
 
+func TestSupportSessionAssetConfigServesVerifiedPreSignedWindowsCore(t *testing.T) {
+	fixture := newSupportSessionLayeredCandidateFixture(t)
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	assets, err := supportSessionAssetConfig(workDir, supportSessionLayeredCandidateOptions{
+		AssetsDir:       fixture.dir,
+		RootPublicKey:   fixture.rootPublicKey,
+		ExpectedVersion: fixture.version,
+	}, fixture.now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateDir, err := canonicalPathThroughExistingAncestor(fixture.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assets.LayeredAssetManifestPath != filepath.Join(candidateDir, "layered-assets.json") ||
+		assets.RdevHostWindowsAMD64Path != filepath.Join(candidateDir, "assets", "rdev-host-windows-amd64.exe") {
+		t.Fatalf("layered support-session asset config = %#v", assets)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "bin", "layered-assets.json")); !os.IsNotExist(err) {
+		t.Fatalf("support session unexpectedly synthesized a layered manifest: %v", err)
+	}
+
+	server := httpapi.NewServer(gateway.NewMemoryGateway())
+	server.Assets = assets
+	for requestPath, want := range map[string][]byte{
+		"/layered-assets.json":                fixture.manifestContent,
+		"/assets/rdev-host-windows-amd64.exe": fixture.coreContent,
+	} {
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, requestPath, nil))
+		if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), want) {
+			t.Fatalf("served layered asset %q = %d %q, want 200 and %q", requestPath, rec.Code, rec.Body.Bytes(), want)
+		}
+	}
+}
+
+func TestSupportSessionAssetConfigRejectsTamperedPreSignedWindowsCore(t *testing.T) {
+	fixture := newSupportSessionLayeredCandidateFixture(t)
+	if err := os.WriteFile(fixture.corePath, []byte("tampered runtime\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := supportSessionAssetConfig(t.TempDir(), supportSessionLayeredCandidateOptions{
+		AssetsDir:       fixture.dir,
+		RootPublicKey:   fixture.rootPublicKey,
+		ExpectedVersion: fixture.version,
+	}, fixture.now.Add(time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "does not match signed manifest") {
+		t.Fatalf("tampered Windows core runtime error = %v", err)
+	}
+}
+
+type supportSessionLayeredCandidateFixture struct {
+	dir             string
+	manifestPath    string
+	corePath        string
+	rootPublicKey   string
+	version         string
+	now             time.Time
+	manifestContent []byte
+	coreContent     []byte
+}
+
+func newSupportSessionLayeredCandidateFixture(t *testing.T) supportSessionLayeredCandidateFixture {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	assetsDir := filepath.Join(dir, "assets")
+	if err := os.MkdirAll(assetsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	coreContent := []byte("pre-signed Windows core runtime\n")
+	corePath := filepath.Join(assetsDir, "rdev-host-windows-amd64.exe")
+	if err := os.WriteFile(corePath, coreContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := signing.Generate("support-session-release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, time.UTC)
+	version := "v0.2.0-support-session-test"
+	sum := sha256.Sum256(coreContent)
+	manifest, err := release.SignLayeredAssetManifest(release.LayeredAssetManifest{
+		SchemaVersion: release.LayeredAssetManifestSchemaVersion,
+		Version:       version,
+		GeneratedAt:   now,
+		ExpiresAt:     now.Add(time.Hour),
+		Assets: []release.LayeredAsset{{
+			ID:           "rdev-host-windows-amd64",
+			Platform:     "windows/amd64",
+			Kind:         "core-runtime",
+			RelativePath: "assets/rdev-host-windows-amd64.exe",
+			SHA256:       "sha256:" + hex.EncodeToString(sum[:]),
+			SizeBytes:    int64(len(coreContent)),
+		}},
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestContent, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestContent = append(manifestContent, '\n')
+	manifestPath := filepath.Join(dir, "layered-assets.json")
+	if err := os.WriteFile(manifestPath, manifestContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return supportSessionLayeredCandidateFixture{
+		dir:             dir,
+		manifestPath:    manifestPath,
+		corePath:        corePath,
+		rootPublicKey:   encodeRootPublicKey(key.ID, key.PublicKey),
+		version:         version,
+		now:             now,
+		manifestContent: manifestContent,
+		coreContent:     coreContent,
+	}
+}
+
 func TestGatewayServeConfiguresRdevHostWindowsAMD64Asset(t *testing.T) {
 	coreRuntime := filepath.Join(t.TempDir(), "rdev-host-windows-amd64.exe")
 	opts := gatewayServeOptions{RdevHostWindowsAMD64Path: coreRuntime}

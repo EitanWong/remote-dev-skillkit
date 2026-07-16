@@ -3465,6 +3465,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
 		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
 		allowDegradedDirectHandoff := fs.Bool("allow-degraded-direct-handoff", false, "allow sending a single-entry direct tunnel handoff for an attended session")
+		layeredAssetsDir := fs.String("layered-assets-dir", "", "protected pre-signed layered release directory containing layered-assets.json and the Windows core runtime")
+		layeredReleaseRoot := fs.String("layered-release-root-public-key", "", "pinned Ed25519 release root for --layered-assets-dir")
+		layeredReleaseVersion := fs.String("layered-release-version", "", "expected signed layered release version for --layered-assets-dir")
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil
@@ -3472,26 +3475,29 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.supportSessionConnect(ctx, supportSessionConnectOptions{
-			RepoRoot:                   *repoRoot,
-			WorkDir:                    *workDir,
-			Addr:                       *addr,
-			GatewayURL:                 *gatewayURL,
-			Target:                     *target,
-			Reason:                     *reason,
-			TTLSeconds:                 *ttl,
-			AutoActivate:               *autoActivate,
-			Capabilities:               splitCapabilities(*capabilities),
-			Locale:                     *locale,
-			OperatorTokenFile:          *operatorTokenFile,
-			RdevCommand:                *rdevCommand,
-			Start:                      *start,
-			ReadyFile:                  *readyFile,
-			StatusFile:                 *statusFile,
-			HandoffTextFile:            *handoffTextFile,
-			ConnectedReportFile:        *connectedReportFile,
-			Region:                     *region,
-			ProviderPolicyPath:         *providerPolicyPath,
-			AllowDegradedDirectHandoff: *allowDegradedDirectHandoff,
+			RepoRoot:                    *repoRoot,
+			WorkDir:                     *workDir,
+			Addr:                        *addr,
+			GatewayURL:                  *gatewayURL,
+			Target:                      *target,
+			Reason:                      *reason,
+			TTLSeconds:                  *ttl,
+			AutoActivate:                *autoActivate,
+			Capabilities:                splitCapabilities(*capabilities),
+			Locale:                      *locale,
+			OperatorTokenFile:           *operatorTokenFile,
+			RdevCommand:                 *rdevCommand,
+			Start:                       *start,
+			ReadyFile:                   *readyFile,
+			StatusFile:                  *statusFile,
+			HandoffTextFile:             *handoffTextFile,
+			ConnectedReportFile:         *connectedReportFile,
+			Region:                      *region,
+			ProviderPolicyPath:          *providerPolicyPath,
+			AllowDegradedDirectHandoff:  *allowDegradedDirectHandoff,
+			LayeredAssetsDir:            *layeredAssetsDir,
+			LayeredReleaseRootPublicKey: *layeredReleaseRoot,
+			LayeredReleaseVersion:       *layeredReleaseVersion,
 		})
 	case "handoff":
 		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
@@ -3573,6 +3579,9 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		region := fs.String("region", string(tunnel.RegionGlobal), "tunnel region policy: global or cn-mainland")
 		providerPolicyPath := fs.String("provider-policy", "", "path to a protected tunnel provider policy JSON file")
 		allowDegradedDirectHandoff := fs.Bool("allow-degraded-direct-handoff", false, "allow sending a single-entry direct tunnel handoff for an attended session")
+		layeredAssetsDir := fs.String("layered-assets-dir", "", "protected pre-signed layered release directory containing layered-assets.json and the Windows core runtime")
+		layeredReleaseRoot := fs.String("layered-release-root-public-key", "", "pinned Ed25519 release root for --layered-assets-dir")
+		layeredReleaseVersion := fs.String("layered-release-version", "", "expected signed layered release version for --layered-assets-dir")
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil
@@ -3580,24 +3589,27 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
-			RepoRoot:                   *repoRoot,
-			Addr:                       *addr,
-			GatewayURL:                 *gatewayURL,
-			WorkDir:                    *workDir,
-			Target:                     *target,
-			Reason:                     *reason,
-			TTLSeconds:                 *ttl,
-			AutoActivate:               *autoActivate,
-			Capabilities:               splitCapabilities(*capabilities),
-			Locale:                     *locale,
-			RdevCommand:                *rdevCommand,
-			ReadyFile:                  *readyFile,
-			StatusFile:                 *statusFile,
-			HandoffTextFile:            *handoffTextFile,
-			ConnectedReportFile:        *connectedReportFile,
-			Region:                     *region,
-			ProviderPolicyPath:         *providerPolicyPath,
-			AllowDegradedDirectHandoff: *allowDegradedDirectHandoff,
+			RepoRoot:                    *repoRoot,
+			Addr:                        *addr,
+			GatewayURL:                  *gatewayURL,
+			WorkDir:                     *workDir,
+			Target:                      *target,
+			Reason:                      *reason,
+			TTLSeconds:                  *ttl,
+			AutoActivate:                *autoActivate,
+			Capabilities:                splitCapabilities(*capabilities),
+			Locale:                      *locale,
+			RdevCommand:                 *rdevCommand,
+			ReadyFile:                   *readyFile,
+			StatusFile:                  *statusFile,
+			HandoffTextFile:             *handoffTextFile,
+			ConnectedReportFile:         *connectedReportFile,
+			Region:                      *region,
+			ProviderPolicyPath:          *providerPolicyPath,
+			AllowDegradedDirectHandoff:  *allowDegradedDirectHandoff,
+			LayeredAssetsDir:            *layeredAssetsDir,
+			LayeredReleaseRootPublicKey: *layeredReleaseRoot,
+			LayeredReleaseVersion:       *layeredReleaseVersion,
 		})
 	case "create":
 		fs := flag.NewFlagSet("support-session create", flag.ContinueOnError)
@@ -3846,47 +3858,59 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 }
 
 type supportSessionStartOptions struct {
-	RepoRoot                   string
-	Addr                       string
-	GatewayURL                 string
-	WorkDir                    string
-	Target                     string
-	Reason                     string
-	TTLSeconds                 int
-	AutoActivate               bool
-	Capabilities               []string
-	Locale                     string
-	RdevCommand                string
-	ReadyFile                  string
-	StatusFile                 string
-	HandoffTextFile            string
-	ConnectedReportFile        string
-	Region                     string
-	ProviderPolicyPath         string
-	AllowDegradedDirectHandoff bool
+	RepoRoot                    string
+	Addr                        string
+	GatewayURL                  string
+	WorkDir                     string
+	Target                      string
+	Reason                      string
+	TTLSeconds                  int
+	AutoActivate                bool
+	Capabilities                []string
+	Locale                      string
+	RdevCommand                 string
+	ReadyFile                   string
+	StatusFile                  string
+	HandoffTextFile             string
+	ConnectedReportFile         string
+	Region                      string
+	ProviderPolicyPath          string
+	AllowDegradedDirectHandoff  bool
+	LayeredAssetsDir            string
+	LayeredReleaseRootPublicKey string
+	LayeredReleaseVersion       string
 }
 
 type supportSessionConnectOptions struct {
-	RepoRoot                   string
-	WorkDir                    string
-	Addr                       string
-	GatewayURL                 string
-	Target                     string
-	Reason                     string
-	TTLSeconds                 int
-	AutoActivate               bool
-	Capabilities               []string
-	Locale                     string
-	OperatorTokenFile          string
-	RdevCommand                string
-	Start                      bool
-	ReadyFile                  string
-	StatusFile                 string
-	HandoffTextFile            string
-	ConnectedReportFile        string
-	Region                     string
-	ProviderPolicyPath         string
-	AllowDegradedDirectHandoff bool
+	RepoRoot                    string
+	WorkDir                     string
+	Addr                        string
+	GatewayURL                  string
+	Target                      string
+	Reason                      string
+	TTLSeconds                  int
+	AutoActivate                bool
+	Capabilities                []string
+	Locale                      string
+	OperatorTokenFile           string
+	RdevCommand                 string
+	Start                       bool
+	ReadyFile                   string
+	StatusFile                  string
+	HandoffTextFile             string
+	ConnectedReportFile         string
+	Region                      string
+	ProviderPolicyPath          string
+	AllowDegradedDirectHandoff  bool
+	LayeredAssetsDir            string
+	LayeredReleaseRootPublicKey string
+	LayeredReleaseVersion       string
+}
+
+type supportSessionLayeredCandidateOptions struct {
+	AssetsDir       string
+	RootPublicKey   string
+	ExpectedVersion string
 }
 
 type supportSessionPrepareOptions struct {
@@ -3939,24 +3963,27 @@ func (a App) supportSessionConnect(ctx context.Context, opts supportSessionConne
 	}
 	if opts.Start {
 		return a.supportSessionStart(ctx, supportSessionStartOptions{
-			RepoRoot:                   opts.RepoRoot,
-			Addr:                       opts.Addr,
-			GatewayURL:                 opts.GatewayURL,
-			WorkDir:                    opts.WorkDir,
-			Target:                     opts.Target,
-			Reason:                     opts.Reason,
-			TTLSeconds:                 opts.TTLSeconds,
-			AutoActivate:               opts.AutoActivate,
-			Capabilities:               opts.Capabilities,
-			Locale:                     opts.Locale,
-			RdevCommand:                opts.RdevCommand,
-			ReadyFile:                  opts.ReadyFile,
-			StatusFile:                 opts.StatusFile,
-			HandoffTextFile:            opts.HandoffTextFile,
-			ConnectedReportFile:        opts.ConnectedReportFile,
-			Region:                     opts.Region,
-			ProviderPolicyPath:         opts.ProviderPolicyPath,
-			AllowDegradedDirectHandoff: opts.AllowDegradedDirectHandoff,
+			RepoRoot:                    opts.RepoRoot,
+			Addr:                        opts.Addr,
+			GatewayURL:                  opts.GatewayURL,
+			WorkDir:                     opts.WorkDir,
+			Target:                      opts.Target,
+			Reason:                      opts.Reason,
+			TTLSeconds:                  opts.TTLSeconds,
+			AutoActivate:                opts.AutoActivate,
+			Capabilities:                opts.Capabilities,
+			Locale:                      opts.Locale,
+			RdevCommand:                 opts.RdevCommand,
+			ReadyFile:                   opts.ReadyFile,
+			StatusFile:                  opts.StatusFile,
+			HandoffTextFile:             opts.HandoffTextFile,
+			ConnectedReportFile:         opts.ConnectedReportFile,
+			Region:                      opts.Region,
+			ProviderPolicyPath:          opts.ProviderPolicyPath,
+			AllowDegradedDirectHandoff:  opts.AllowDegradedDirectHandoff,
+			LayeredAssetsDir:            opts.LayeredAssetsDir,
+			LayeredReleaseRootPublicKey: opts.LayeredReleaseRootPublicKey,
+			LayeredReleaseVersion:       opts.LayeredReleaseVersion,
 		})
 	}
 	gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
@@ -4573,13 +4600,13 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	auditStore := audit.NewJSONLStore(auditLogPath)
 	gw.WithAuditSink(&auditStore)
 	server := httpapi.NewServerWithStateStore(gw, store)
-	server.Assets = httpapi.AssetConfig{
-		RdevWindowsAMD64Path: filepath.Join(workDir, "bin", "rdev-windows-amd64.exe"),
-		RdevDarwinARM64Path:  filepath.Join(workDir, "bin", "rdev-darwin-arm64"),
-		RdevDarwinAMD64Path:  filepath.Join(workDir, "bin", "rdev-darwin-amd64"),
-		RdevLinuxAMD64Path:   filepath.Join(workDir, "bin", "rdev-linux-amd64"),
-		RdevLinuxARM64Path:   filepath.Join(workDir, "bin", "rdev-linux-arm64"),
+	assets, err := supportSessionAssetConfig(workDir, supportSessionLayeredCandidateOptions{
+		AssetsDir: opts.LayeredAssetsDir, RootPublicKey: opts.LayeredReleaseRootPublicKey, ExpectedVersion: opts.LayeredReleaseVersion,
+	}, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("prepare verified Windows layered release assets: %w", err)
 	}
+	server.Assets = assets
 	gatewayServer := startGatewayServer(addr, server.Handler(), nil)
 	defer func() { _ = shutdownGatewayServer(gatewayServer) }()
 	a.recordSupportSessionStartEvent("local_gateway_started")
@@ -9794,6 +9821,86 @@ func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 		assets.RdevLinuxARM64Path = opts.RdevLinuxARM64Path
 	}
 	return assets
+}
+
+func supportSessionAssetConfig(workDir string, layered supportSessionLayeredCandidateOptions, now time.Time) (httpapi.AssetConfig, error) {
+	binDir := filepath.Join(strings.TrimSpace(workDir), "bin")
+	assets := httpapi.AssetConfig{
+		RdevWindowsAMD64Path: filepath.Join(binDir, "rdev-windows-amd64.exe"),
+		RdevDarwinARM64Path:  filepath.Join(binDir, "rdev-darwin-arm64"),
+		RdevDarwinAMD64Path:  filepath.Join(binDir, "rdev-darwin-amd64"),
+		RdevLinuxAMD64Path:   filepath.Join(binDir, "rdev-linux-amd64"),
+		RdevLinuxARM64Path:   filepath.Join(binDir, "rdev-linux-arm64"),
+	}
+	values := []string{strings.TrimSpace(layered.AssetsDir), strings.TrimSpace(layered.RootPublicKey), strings.TrimSpace(layered.ExpectedVersion)}
+	configured := 0
+	for _, value := range values {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured == 0 {
+		return assets, nil
+	}
+	if configured != len(values) {
+		return httpapi.AssetConfig{}, fmt.Errorf("layered release directory, root public key, and version must be configured together")
+	}
+	candidateDir, err := canonicalPathThroughExistingAncestor(layered.AssetsDir)
+	if err != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("resolve layered release directory: %w", err)
+	}
+	if err := tunnel.ValidateProtectedDirectory(candidateDir); err != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("unsafe layered release directory: %w", err)
+	}
+	manifestPath := filepath.Join(candidateDir, "layered-assets.json")
+	corePath := filepath.Join(candidateDir, "assets", "rdev-host-windows-amd64.exe")
+	for _, path := range []string{manifestPath, corePath} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return httpapi.AssetConfig{}, fmt.Errorf("inspect layered release asset: %w", err)
+		}
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return httpapi.AssetConfig{}, fmt.Errorf("layered release assets must be regular files")
+		}
+	}
+	root, err := parseRootPublicKey(layered.RootPublicKey)
+	if err != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("parse layered release root: %w", err)
+	}
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("read layered release manifest: %w", err)
+	}
+	manifest, err := release.DecodeLayeredAssetManifest(content)
+	if err != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("decode layered release manifest: %w", err)
+	}
+	if err := release.VerifyLayeredAssetManifest(manifest, root, now); err != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("verify layered release manifest: %w", err)
+	}
+	if manifest.Version != layered.ExpectedVersion {
+		return httpapi.AssetConfig{}, fmt.Errorf("layered release version does not match expected version")
+	}
+	asset, err := release.SelectLayeredAsset(manifest, "windows/amd64", "core-runtime", nil)
+	if err != nil || asset.ID != "rdev-host-windows-amd64" || asset.RelativePath != "assets/rdev-host-windows-amd64.exe" {
+		return httpapi.AssetConfig{}, fmt.Errorf("layered release manifest does not contain the required Windows core runtime")
+	}
+	file, err := os.Open(corePath)
+	if err != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("open Windows core runtime: %w", err)
+	}
+	digest := sha256.New()
+	size, copyErr := io.Copy(digest, file)
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil {
+		return httpapi.AssetConfig{}, fmt.Errorf("hash Windows core runtime")
+	}
+	if size != asset.SizeBytes || asset.SHA256 != "sha256:"+hex.EncodeToString(digest.Sum(nil)) {
+		return httpapi.AssetConfig{}, fmt.Errorf("Windows core runtime does not match signed manifest")
+	}
+	assets.LayeredAssetManifestPath = manifestPath
+	assets.RdevHostWindowsAMD64Path = corePath
+	return assets, nil
 }
 
 func gatewayHasExplicitAssetConfig(opts gatewayServeOptions) bool {
