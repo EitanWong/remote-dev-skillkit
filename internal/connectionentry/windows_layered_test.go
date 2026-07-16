@@ -33,8 +33,8 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			t.Fatalf("expected the verified layered handoff to be preferred: %#v", plan.EntryPackagePlan)
 		}
 
-		launcherPath := plan.EntryPackagePlan.LauncherPath
-		launcher := readTestFile(t, launcherPath)
+		legacyLauncherPath := filepath.Join(fixture.options.OutDir, "windows-layered", windowsLayeredLauncherName)
+		launcher := readTestFile(t, legacyLauncherPath)
 		normalizedLauncher := normalizePowerShellForTest(string(launcher))
 		assertStringsInOrder(t, normalizedLauncher,
 			"rdev-bootstrap.exe",
@@ -93,7 +93,7 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			}
 		}
 
-		handoffDir := filepath.Dir(launcherPath)
+		handoffDir := filepath.Dir(legacyLauncherPath)
 		if filepath.Base(handoffDir) != "windows-layered" {
 			t.Fatalf("expected a focused windows-layered handoff, got %q", handoffDir)
 		}
@@ -124,6 +124,52 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			t.Fatalf("packaged bootstrap is not an exact copy: got %d bytes, want %d", len(got), len(fixture.bootstrap))
 		}
 		assertPrivateLayeredHandoff(t, handoffDir, fixture)
+	})
+
+	t.Run("native command launcher avoids PowerShell execution policy", func(t *testing.T) {
+		fixture := newWindowsLayeredFixture(t)
+
+		plan, err := FromInvite(fixture.options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handoffDir := filepath.Join(fixture.options.OutDir, "windows-layered")
+		cmdPath := filepath.Join(handoffDir, "Start-ConnectionEntry.cmd")
+		if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != cmdPath {
+			t.Fatalf("native command launcher must be the primary entry point: %#v", plan.EntryPackagePlan)
+		}
+		launcher := strings.ToLower(string(readTestFile(t, cmdPath)))
+		for _, want := range []string{
+			"rdev-bootstrap.exe",
+			"layered-run",
+			"certutil.exe",
+			"icacls.exe",
+			"/reset",
+			"/setowner",
+			"--manifest-url",
+			"--root-public-key",
+			"--expected-release-version",
+			"--platform",
+			"windows/amd64",
+			"--cache-dir",
+			"--mode",
+			"temporary",
+			"run the verified archive fallback explicitly",
+		} {
+			if !strings.Contains(launcher, want) {
+				t.Fatalf("native command launcher missing %q:\n%s", want, launcher)
+			}
+		}
+		for _, forbidden := range []string{"powershell", "executionpolicy", "start-process", "start-job", "where.exe"} {
+			if strings.Contains(launcher, forbidden) {
+				t.Fatalf("native command launcher must not bypass or depend on PowerShell policy; found %q:\n%s", forbidden, launcher)
+			}
+		}
+		for _, forbidden := range []string{`call "%fallback_path%"`, `start "" "%fallback_path%"`} {
+			if strings.Contains(launcher, forbidden) {
+				t.Fatalf("native command launcher must not automatically execute the archive fallback; found %q:\n%s", forbidden, launcher)
+			}
+		}
 	})
 
 	t.Run("missing layered prerequisites retains archive launcher", func(t *testing.T) {
@@ -299,6 +345,34 @@ func TestWindowsLayeredConnectionEntryRejectsUnverifiedControllerHandoff(t *test
 			assertNoPartialLayeredOutput(t, fixture.options.OutDir)
 		})
 	}
+}
+
+func TestWindowsLayeredCommandArgumentRejectsShellSyntax(t *testing.T) {
+	for _, value := range []string{
+		"https://downloads.example.com/layered-assets.json&whoami",
+		"v0.2.0|whoami",
+		"release-root:abc%PATH%",
+		"https://gateway.example.com/manifest\" --unexpected",
+		"line\r\nbreak",
+	} {
+		if err := validateWindowsLayeredCommandArgument("test", value); err == nil {
+			t.Fatalf("expected Windows command argument validation to reject %q", value)
+		}
+	}
+	if err := validateWindowsLayeredCommandArgument("test", "https://downloads.example.com/layered-assets.json"); err != nil {
+		t.Fatalf("expected a safe Windows command argument to be accepted: %v", err)
+	}
+}
+
+func TestWindowsLayeredConnectionEntryRejectsCommandSyntaxBeforeMaterialization(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	fixture.options.ReleaseRootPublicKey += "&whoami"
+
+	_, err := FromInvite(fixture.options)
+	if err == nil || !strings.Contains(err.Error(), "unsupported Windows command syntax") {
+		t.Fatalf("expected Windows command argument rejection, got %v", err)
+	}
+	assertNoPartialLayeredOutput(t, fixture.options.OutDir)
 }
 
 type windowsLayeredFixture struct {

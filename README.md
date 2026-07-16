@@ -154,10 +154,12 @@ The first run downloads and SHA-256 verifies the core runtime. A warm run
 revalidates and reuses the digest cache without fetching the runtime again.
 The user-scoped cache is rooted below
 `%LOCALAPPDATA%\RemoteDevSkillkit\cache`; managed directories and files use
-private `0700`/`0600` permissions. On Windows, the visible launcher restricts
-the handoff and cache ACLs to the current user, SYSTEM, and Administrators,
-rejects reparse or UNC paths, and holds a read-only bootstrap handle across
-verification and foreground execution.
+private `0700`/`0600` permissions. On Windows, the primary visible launcher is
+`Start-ConnectionEntry.cmd`: it does not invoke PowerShell or change execution
+policy. It restricts the handoff and cache ACLs to the current user, SYSTEM,
+and Administrators; rejects reparse or UNC paths; rechecks bootstrap size and
+SHA-256; and then starts the verified bootstrap in the foreground. The
+PowerShell launcher remains available for review and compatibility.
 
 Temporary mode runs the selected host in the foreground. It does not install a
 service, create a scheduled task or registry persistence, or start a background

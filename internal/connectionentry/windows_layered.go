@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 	windowsLayeredVerificationPlanName = "windows-layered-verification.json"
 	windowsLayeredChecksumName         = "rdev-bootstrap.exe.sha256"
 	windowsLayeredLauncherName         = "Start-ConnectionEntry.ps1"
+	windowsLayeredCommandLauncherName  = "Start-ConnectionEntry.cmd"
 )
 
 type windowsLayeredHandoff struct {
@@ -80,6 +82,20 @@ func prepareWindowsLayeredHandoff(plan Plan, invite agentinvite.Invite, opts Opt
 	}
 	if err := validateLayeredAssetsManifestURL(layeredManifestURL); err != nil {
 		return nil, err
+	}
+	for _, argument := range []struct {
+		name  string
+		value string
+	}{
+		{name: "layered assets manifest URL", value: layeredManifestURL},
+		{name: "layered release version", value: releaseVersion},
+		{name: "release root public key", value: rootPublicKey},
+		{name: "join manifest URL", value: strings.TrimSpace(invite.ManifestURL)},
+		{name: "join manifest root public key", value: strings.TrimSpace(invite.ManifestRootPublicKey)},
+	} {
+		if err := validateWindowsLayeredCommandArgument(argument.name, argument.value); err != nil {
+			return nil, err
+		}
 	}
 
 	root, err := trustref.Parse(rootPublicKey)
@@ -150,6 +166,13 @@ func validateLayeredAssetsManifestURL(value string) error {
 	return nil
 }
 
+func validateWindowsLayeredCommandArgument(name, value string) error {
+	if strings.ContainsAny(value, "\r\n\"%&|<>()^!") {
+		return fmt.Errorf("%s contains unsupported Windows command syntax", name)
+	}
+	return nil
+}
+
 func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff, outDir, fallbackLauncherPath string) error {
 	fallbackInfo, err := os.Stat(fallbackLauncherPath)
 	if err != nil || !fallbackInfo.Mode().IsRegular() {
@@ -195,6 +218,7 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 	verificationJSON = append(verificationJSON, '\n')
 	checksum := []byte(handoff.manifest.ArtifactSHA256 + "  " + windowsLayeredBootstrapName + "\n")
 	launcher := []byte(renderWindowsLayeredLauncher(handoff, fallbackRelative))
+	commandLauncher := []byte(renderWindowsLayeredCommandLauncher(handoff, fallbackRelative))
 
 	files := []struct {
 		name    string
@@ -205,6 +229,7 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 		{name: windowsLayeredVerificationPlanName, content: verificationJSON},
 		{name: windowsLayeredChecksumName, content: checksum},
 		{name: windowsLayeredLauncherName, content: launcher},
+		{name: windowsLayeredCommandLauncherName, content: commandLauncher},
 	}
 	for _, file := range files {
 		if err := writePrivateWindowsLayeredFile(filepath.Join(stagingDir, file.name), file.content); err != nil {
@@ -222,7 +247,7 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 	}
 
 	verificationPath := filepath.Join(handoffDir, windowsLayeredVerificationPlanName)
-	launcherPath := filepath.Join(handoffDir, windowsLayeredLauncherName)
+	launcherPath := filepath.Join(handoffDir, windowsLayeredCommandLauncherName)
 	checks := []acceptance.Check{
 		{Name: "windows_layered_platform", Passed: true, Detail: "windows/amd64 attended-temporary"},
 		{Name: "windows_layered_release_version", Passed: true, Detail: handoff.releaseVersion},
@@ -240,7 +265,7 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 		LauncherPath:       launcherPath,
 		PlatformPlanSchema: windowsLayeredHandoffSchemaVersion,
 		PlatformPlanKind:   "windows-layered-handoff",
-		HumanEntryPoint:    "run the visible PowerShell launcher from the private Windows layered handoff",
+		HumanEntryPoint:    "run the visible native Command Prompt launcher from the private Windows layered handoff",
 		AgentOnlyParameters: []string{
 			"layered_assets_manifest_url",
 			"expected_release_version",
@@ -256,6 +281,7 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 		GeneratedFile{Path: verificationPath, Purpose: "non-sensitive Windows layered handoff verification record"},
 		GeneratedFile{Path: filepath.Join(handoffDir, windowsLayeredChecksumName), Purpose: "bootstrap SHA-256 pin checked again by the launcher"},
 		GeneratedFile{Path: launcherPath, Purpose: "visible foreground-only Windows layered connection entry launcher"},
+		GeneratedFile{Path: filepath.Join(handoffDir, windowsLayeredLauncherName), Purpose: "PowerShell review launcher with equivalent Windows ACL and reparse-point checks"},
 	)
 	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: verificationPath})
 	return nil
@@ -376,6 +402,94 @@ try {
 		powerShellSingleQuoted(handoff.joinManifestURL),
 		powerShellSingleQuoted(handoff.joinManifestRoot),
 	)
+}
+
+func renderWindowsLayeredCommandLauncher(handoff *windowsLayeredHandoff, fallbackRelative string) string {
+	launcher := `@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+
+set "HANDOFF_DIR=%~dp0"
+set "HANDOFF_DIR=%HANDOFF_DIR:~0,-1%"
+set "BOOTSTRAP=%HANDOFF_DIR%\__BOOTSTRAP__"
+set "FALLBACK_PATH=%HANDOFF_DIR%\__FALLBACK__"
+set "EXPECTED_SHA256=__SHA256__"
+set "EXPECTED_SIZE=__SIZE__"
+if not defined LOCALAPPDATA goto failure
+set "CACHE_DIR=%LOCALAPPDATA%\RemoteDevSkillkit\cache"
+
+call :protect_directory "%HANDOFF_DIR%" || goto failure
+if not exist "%CACHE_DIR%" mkdir "%CACHE_DIR%" >nul 2>&1
+if not exist "%CACHE_DIR%" goto failure
+call :protect_directory "%CACHE_DIR%" || goto failure
+if not exist "%BOOTSTRAP%" goto failure
+call :protect_file "%BOOTSTRAP%" || goto failure
+
+for %%I in ("%BOOTSTRAP%") do set "ACTUAL_SIZE=%%~zI"
+if not "%ACTUAL_SIZE%"=="%EXPECTED_SIZE%" goto failure
+set "ACTUAL_SHA256="
+for /f "skip=1 tokens=1" %%H in ('%SystemRoot%\System32\certutil.exe -hashfile "%BOOTSTRAP%" SHA256') do if not defined ACTUAL_SHA256 set "ACTUAL_SHA256=%%H"
+if not defined ACTUAL_SHA256 goto failure
+if /I not "%ACTUAL_SHA256%"=="%EXPECTED_SHA256%" goto failure
+
+"%BOOTSTRAP%" "layered-run" "--manifest-url" __LAYERED_MANIFEST_URL__ "--root-public-key" __RELEASE_ROOT__ "--expected-release-version" __RELEASE_VERSION__ "--platform" "windows/amd64" "--cache-dir" "%CACHE_DIR%" "--mode" "temporary" "--" "serve" "--mode" "temporary" "--manifest-url" __JOIN_MANIFEST_URL__ "--manifest-root-public-key" __JOIN_MANIFEST_ROOT__ "--transport" "auto" "--once=false" "--max-tasks" "0"
+set "LAYERED_EXIT=%ERRORLEVEL%"
+if "%LAYERED_EXIT%"=="0" exit /b 0
+echo [rdev] Layered bootstrap failed verification or execution; refusing automatic archive fallback.
+echo [rdev] Run the verified archive fallback explicitly: "%FALLBACK_PATH%"
+exit /b %LAYERED_EXIT%
+
+:failure
+echo [rdev] Layered bootstrap preparation failed; refusing automatic archive fallback.
+echo [rdev] Run the verified archive fallback explicitly: "%FALLBACK_PATH%"
+exit /b 1
+
+:protect_directory
+set "TARGET=%~1"
+call :reject_unsafe_path "%TARGET%" || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /reset >nul || exit /b 1
+call :reject_unsafe_path "%TARGET%" || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" >nul || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /setowner "%USERNAME%" >nul
+exit /b %ERRORLEVEL%
+
+:protect_file
+set "TARGET=%~1"
+call :reject_unsafe_path "%TARGET%" || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /reset >nul || exit /b 1
+call :reject_unsafe_path "%TARGET%" || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /inheritance:r /grant:r "%USERNAME%:F" "*S-1-5-18:F" "*S-1-5-32-544:F" >nul || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /setowner "%USERNAME%" >nul
+exit /b %ERRORLEVEL%
+
+:reject_unsafe_path
+set "TARGET=%~1"
+if "%TARGET:~0,2%"=="\\" exit /b 1
+if not exist "%SystemRoot%\System32\fsutil.exe" exit /b 1
+for %%I in ("%TARGET%") do set "CURSOR=%%~fI"
+
+:reject_unsafe_path_loop
+"%SystemRoot%\System32\fsutil.exe" reparsepoint query "%CURSOR%" >nul 2>&1
+if not errorlevel 1 exit /b 1
+for %%I in ("%CURSOR%\..") do set "PARENT=%%~fI"
+if /I "%PARENT%"=="%CURSOR%" exit /b 0
+set "CURSOR=%PARENT%"
+goto :reject_unsafe_path_loop
+`
+	return strings.NewReplacer(
+		"__BOOTSTRAP__", windowsLayeredBootstrapName,
+		"__FALLBACK__", fallbackRelative,
+		"__SHA256__", handoff.manifest.ArtifactSHA256,
+		"__SIZE__", strconv.FormatInt(handoff.manifest.ArtifactSize, 10),
+		"__LAYERED_MANIFEST_URL__", quoteValidatedWindowsCommandArgument(handoff.layeredAssetsManifestURL),
+		"__RELEASE_ROOT__", quoteValidatedWindowsCommandArgument(handoff.releaseRootPublicKey),
+		"__RELEASE_VERSION__", quoteValidatedWindowsCommandArgument(handoff.releaseVersion),
+		"__JOIN_MANIFEST_URL__", quoteValidatedWindowsCommandArgument(handoff.joinManifestURL),
+		"__JOIN_MANIFEST_ROOT__", quoteValidatedWindowsCommandArgument(handoff.joinManifestRoot),
+	).Replace(launcher)
+}
+
+func quoteValidatedWindowsCommandArgument(value string) string {
+	return `"` + value + `"`
 }
 
 func powerShellSingleQuoted(value string) string {
