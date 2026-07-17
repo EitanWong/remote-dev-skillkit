@@ -378,7 +378,7 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		assertPrivateLayeredHandoff(t, handoffDir, fixture)
 	})
 
-	t.Run("native command launcher avoids PowerShell execution policy", func(t *testing.T) {
+	t.Run("visible command broker falls back without automatic archive execution", func(t *testing.T) {
 		fixture := newWindowsLayeredFixture(t)
 
 		plan, err := FromInvite(fixture.options)
@@ -387,11 +387,12 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		}
 		handoffDir := filepath.Join(fixture.options.OutDir, "windows-layered")
 		cmdPath := filepath.Join(handoffDir, "Start-ConnectionEntry.cmd")
-		if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != windowsLayeredDirName+"/"+windowsLayeredCommandLauncherName {
-			t.Fatalf("native command launcher must be the primary entry point: %#v", plan.EntryPackagePlan)
+		if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != windowsLayeredDirName+"/"+windowsLayeredLauncherName {
+			t.Fatalf("PowerShell launcher must be the primary entry point: %#v", plan.EntryPackagePlan)
 		}
 		launcher := strings.ToLower(string(readTestFile(t, cmdPath)))
 		for _, want := range []string{
+			"start-connectionentry.ps1",
 			"rdev-bootstrap.exe",
 			"layered-run",
 			"certutil.exe",
@@ -404,17 +405,34 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			"--platform",
 			"windows/amd64",
 			"--cache-dir",
+			"--attempt-dir",
+			"--launcher",
 			"--mode",
 			"temporary",
-			"run the verified archive fallback explicitly",
+			"--native",
+			"powershell-bypass",
+			"signed archive recovery profile",
 		} {
 			if !strings.Contains(launcher, want) {
-				t.Fatalf("native command launcher missing %q:\n%s", want, launcher)
+				t.Fatalf("command broker missing %q:\n%s", want, launcher)
 			}
 		}
-		for _, forbidden := range []string{"powershell", "executionpolicy", "start-process", "start-job", "where.exe"} {
+		assertStringsInOrder(t, launcher,
+			"powershell.exe",
+			"-file",
+			"powershell",
+			"-executionpolicy", "bypass",
+			"-file",
+			"powershell-bypass",
+			"--native", "--attempt-dir",
+			"--launcher", "cmd",
+		)
+		if strings.Count(launcher, `"--transport" "auto"`) != 1 {
+			t.Fatalf("native broker path must preserve exactly one core transport selection:\n%s", launcher)
+		}
+		for _, forbidden := range []string{"start-process", "start-job", "windowstyle hidden"} {
 			if strings.Contains(launcher, forbidden) {
-				t.Fatalf("native command launcher must not bypass or depend on PowerShell policy; found %q:\n%s", forbidden, launcher)
+				t.Fatalf("command broker must keep every attempt visible and foreground; found %q:\n%s", forbidden, launcher)
 			}
 		}
 		for _, forbidden := range []string{`call "%fallback_path%"`, `start "" "%fallback_path%"`} {
@@ -490,6 +508,101 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			}
 			assertNoPartialLayeredOutput(t, fixture.options.OutDir)
 		})
+	}
+}
+
+func TestWindowsConnectionEntryPrefersPowerShell(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+
+	plan, err := FromInvite(fixture.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.EntryPackagePlan == nil {
+		t.Fatal("expected Windows layered entry package plan")
+	}
+	wantLauncher := windowsLayeredDirName + "/" + windowsLayeredLauncherName
+	if plan.EntryPackagePlan.LauncherPath != wantLauncher {
+		t.Fatalf("preferred launcher = %q, want %q", plan.EntryPackagePlan.LauncherPath, wantLauncher)
+	}
+	if !strings.Contains(strings.ToLower(plan.EntryPackagePlan.HumanEntryPoint), "powershell") {
+		t.Fatalf("human entry point must prefer the visible PowerShell launcher: %#v", plan.EntryPackagePlan)
+	}
+	generated := make(map[string]bool)
+	for _, file := range plan.GeneratedFiles {
+		generated[filepath.Base(file.Path)] = true
+	}
+	for _, name := range []string{windowsLayeredLauncherName, windowsLayeredCommandLauncherName} {
+		if !generated[name] {
+			t.Fatalf("package plan omitted visible launcher %q: %#v", name, plan.GeneratedFiles)
+		}
+	}
+
+	powerShell := normalizePowerShellForTest(string(readTestFile(t, filepath.Join(fixture.options.OutDir, windowsLayeredDirName, windowsLayeredLauncherName))))
+	for _, want := range []string{
+		"AttemptDir",
+		"Launcher",
+		"powershell",
+		"--attempt-dir",
+		"--launcher",
+		"Protect-PrivatePath $AttemptDir",
+		"rdev-bootstrap.exe",
+		"layered-run",
+		"signed archive recovery profile",
+	} {
+		if !strings.Contains(powerShell, want) {
+			t.Fatalf("preferred PowerShell launcher missing %q:\n%s", want, powerShell)
+		}
+	}
+	if strings.Count(powerShell, "--transport auto") != 1 {
+		t.Fatalf("PowerShell path must preserve exactly one core transport selection:\n%s", powerShell)
+	}
+	for _, forbidden := range []string{"Start-Process", "Start-Job", "WindowStyle Hidden", "& $fallbackPath"} {
+		if strings.Contains(powerShell, forbidden) {
+			t.Fatalf("preferred launcher must stay foreground and must not execute archive recovery; found %q:\n%s", forbidden, powerShell)
+		}
+	}
+}
+
+func TestWindowsLayeredBrokerFallbackContract(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	if _, err := FromInvite(fixture.options); err != nil {
+		t.Fatal(err)
+	}
+
+	launcher := strings.ToLower(string(readTestFile(t, filepath.Join(fixture.options.OutDir, windowsLayeredDirName, windowsLayeredCommandLauncherName))))
+	for _, want := range []string{
+		"attempt_dir",
+		"state.json",
+		"pre_core",
+		"core_started",
+		"core_exited",
+		"attempt.lock",
+		"--native",
+		"--attempt-dir",
+		"--launcher",
+		"powershell-bypass",
+		"signed archive recovery profile",
+	} {
+		if !strings.Contains(launcher, want) {
+			t.Fatalf("broker fallback contract missing %q:\n%s", want, launcher)
+		}
+	}
+	assertStringsInOrder(t, launcher,
+		"powershell.exe",
+		"-file",
+		"powershell",
+		"-executionpolicy", "bypass",
+		"-file",
+		"powershell-bypass",
+		"--native", "--attempt-dir",
+		"--launcher", "cmd",
+	)
+	if strings.Count(launcher, `"%attempt_dir%"`) < 3 {
+		t.Fatalf("all broker paths must share the one allocated attempt directory:\n%s", launcher)
+	}
+	if strings.Contains(launcher, `call "%fallback_path%"`) || strings.Contains(launcher, `start "" "%fallback_path%"`) {
+		t.Fatalf("broker must never execute archive recovery:\n%s", launcher)
 	}
 }
 
