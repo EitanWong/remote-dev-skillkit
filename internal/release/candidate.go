@@ -1,3 +1,5 @@
+//go:build !rdev_bootstrap_focused
+
 package release
 
 import (

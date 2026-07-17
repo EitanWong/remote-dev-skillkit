@@ -4,16 +4,9 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"net/url"
-	"path"
-	"sort"
 	"strings"
 	"time"
-
-	"github.com/EitanWong/remote-dev-skillkit/internal/model"
-	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 )
 
 const LayeredAssetManifestSchemaVersion = "rdev.layered-assets.v1"
@@ -43,29 +36,34 @@ type LayeredAsset struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
-func SignLayeredAssetManifest(manifest LayeredAssetManifest, key signing.Key) (LayeredAssetManifest, error) {
-	if err := validateLayeredAssetSigningKey(key); err != nil {
-		return LayeredAssetManifest{}, err
-	}
-
-	signed := cloneLayeredAssetManifest(manifest)
-	signed.SigningKeyID = key.ID
-	signed.Signature = ""
-	if err := validateLayeredAssetManifest(signed); err != nil {
-		return LayeredAssetManifest{}, err
-	}
-	message, err := canonicalUnsignedLayeredAssetManifest(signed)
-	if err != nil {
-		return LayeredAssetManifest{}, err
-	}
-	signed.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(key.PrivateKey, message))
-	return signed, nil
+type LayeredTrustRoot struct {
+	SigningKeyID string
+	PublicKey    ed25519.PublicKey
 }
 
-func VerifyLayeredAssetManifest(manifest LayeredAssetManifest, root model.TrustBundle, now time.Time) error {
+func ParseLayeredTrustRoot(value string) (LayeredTrustRoot, error) {
+	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return LayeredTrustRoot{}, fmt.Errorf("trust root public key must be formatted key_id:base64url_public_key")
+	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return LayeredTrustRoot{}, fmt.Errorf("invalid trust root public key")
+	}
+	return LayeredTrustRoot{SigningKeyID: parts[0], PublicKey: append(ed25519.PublicKey(nil), publicKey...)}, nil
+}
+
+func VerifyLayeredAssetManifestRoot(manifest LayeredAssetManifest, root LayeredTrustRoot, now time.Time) error {
 	if err := validateLayeredAssetManifest(manifest); err != nil {
 		return err
 	}
+	if len(root.PublicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("%w: layered asset manifest trust root is invalid", ErrManifestInvalid)
+	}
+	return verifyLayeredAssetManifest(manifest, root, now)
+}
+
+func verifyLayeredAssetManifest(manifest LayeredAssetManifest, root LayeredTrustRoot, now time.Time) error {
 	if manifest.Signature == "" {
 		return fmt.Errorf("%w: layered asset manifest signature is required", ErrManifestSignature)
 	}
@@ -82,10 +80,6 @@ func VerifyLayeredAssetManifest(manifest LayeredAssetManifest, root model.TrustB
 	if root.SigningKeyID != manifest.SigningKeyID {
 		return fmt.Errorf("%w: layered asset manifest trust root key id mismatch", ErrManifestInvalid)
 	}
-	publicKey, err := root.Ed25519PublicKey()
-	if err != nil {
-		return fmt.Errorf("%w: layered asset manifest trust root: %v", ErrManifestInvalid, err)
-	}
 	signature, err := base64.RawURLEncoding.DecodeString(manifest.Signature)
 	if err != nil || len(signature) != ed25519.SignatureSize {
 		return fmt.Errorf("%w: malformed layered asset manifest signature", ErrManifestSignature)
@@ -94,7 +88,7 @@ func VerifyLayeredAssetManifest(manifest LayeredAssetManifest, root model.TrustB
 	if err != nil {
 		return err
 	}
-	if !ed25519.Verify(publicKey, message, signature) {
+	if !ed25519.Verify(root.PublicKey, message, signature) {
 		return fmt.Errorf("%w: layered asset manifest signature mismatch", ErrManifestSignature)
 	}
 	return nil
@@ -182,33 +176,6 @@ func validateLayeredAsset(asset LayeredAsset) error {
 	return nil
 }
 
-func validRelativeAssetPath(value string) bool {
-	u, err := url.Parse(value)
-	if err != nil || value == "" || u.IsAbs() || path.IsAbs(u.Path) || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery || strings.Contains(value, "#") {
-		return false
-	}
-	if strings.Contains(value, "\\") || strings.HasPrefix(value, "/") {
-		return false
-	}
-	clean := path.Clean(value)
-	decodedClean := path.Clean(u.Path)
-	return clean == value && clean != "." && clean != ".." && !strings.HasPrefix(clean, "../") &&
-		decodedClean == u.Path && decodedClean != "." && decodedClean != ".." &&
-		!strings.HasPrefix(decodedClean, "../") && !strings.Contains(u.Path, "\\")
-}
-
-func canonicalUnsignedLayeredAssetManifest(manifest LayeredAssetManifest) ([]byte, error) {
-	canonical := cloneLayeredAssetManifest(manifest)
-	canonical.Signature = ""
-	sort.Slice(canonical.Assets, func(i, j int) bool {
-		return canonical.Assets[i].ID < canonical.Assets[j].ID
-	})
-	for index := range canonical.Assets {
-		sort.Strings(canonical.Assets[index].Capabilities)
-	}
-	return json.Marshal(canonical)
-}
-
 func cloneLayeredAssetManifest(manifest LayeredAssetManifest) LayeredAssetManifest {
 	cloned := manifest
 	cloned.Assets = make([]LayeredAsset, len(manifest.Assets))
@@ -222,17 +189,6 @@ func cloneLayeredAsset(asset LayeredAsset) LayeredAsset {
 	cloned := asset
 	cloned.Capabilities = append([]string(nil), asset.Capabilities...)
 	return cloned
-}
-
-func validateLayeredAssetSigningKey(key signing.Key) error {
-	if strings.TrimSpace(key.ID) == "" || len(key.PublicKey) != ed25519.PublicKeySize || len(key.PrivateKey) != ed25519.PrivateKeySize {
-		return fmt.Errorf("valid Ed25519 release signing key is required")
-	}
-	derived, ok := key.PrivateKey.Public().(ed25519.PublicKey)
-	if !ok || !derived.Equal(key.PublicKey) {
-		return fmt.Errorf("valid Ed25519 release signing key is required")
-	}
-	return nil
 }
 
 func validLayeredAssetKind(kind string) bool {

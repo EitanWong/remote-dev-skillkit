@@ -113,9 +113,19 @@ for target in "${target_list[@]}"; do
     fi
     artifact="$target_dir/$command$suffix"
     echo "building $command for $goos/$goarch cgo=$cgo_enabled -> $artifact" >&2
+    build_gcflags=()
+    build_tags=()
+    ldflags="-s -w -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at"
+    if [[ "$command" == "rdev-bootstrap" ]]; then
+      build_gcflags=(-gcflags=all=-l)
+      build_tags=(-tags=rdev_bootstrap_focused)
+      ldflags="-s -w -buildid= -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at"
+    fi
     CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" go build \
       -trimpath \
-      -ldflags "-s -w -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at" \
+      "${build_gcflags[@]}" \
+      "${build_tags[@]}" \
+      -ldflags "$ldflags" \
       -o "$artifact" "$package"
     sha="$(shasum -a 256 "$artifact" | awk '{print $1}')"
     size="$(wc -c < "$artifact" | tr -d ' ')"
