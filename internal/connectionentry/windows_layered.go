@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -29,6 +30,8 @@ const (
 	windowsLayeredChecksumName         = "rdev-bootstrap.exe.sha256"
 	windowsLayeredLauncherName         = "Start-ConnectionEntry.ps1"
 	windowsLayeredCommandLauncherName  = "Start-ConnectionEntry.cmd"
+	windowsLayeredArchiveName          = "Windows-ConnectionEntry.zip"
+	windowsLayeredArchiveRecoveryName  = "ARCHIVE-RECOVERY.txt"
 )
 
 type windowsLayeredHandoff struct {
@@ -173,30 +176,30 @@ func validateWindowsLayeredCommandArgument(name, value string) error {
 	return nil
 }
 
-func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff, outDir, fallbackLauncherPath string) error {
+func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff, outDir, fallbackLauncherPath string) (*pendingWindowsLayeredArchive, error) {
 	fallbackInfo, err := os.Stat(fallbackLauncherPath)
 	if err != nil || !fallbackInfo.Mode().IsRegular() {
-		return fmt.Errorf("verified Windows archive fallback is unavailable")
+		return nil, fmt.Errorf("verified Windows archive fallback is unavailable")
 	}
 	handoffDir := filepath.Join(outDir, windowsLayeredDirName)
 	fallbackRelative, err := filepath.Rel(handoffDir, fallbackLauncherPath)
 	if err != nil || filepath.IsAbs(fallbackRelative) || strings.HasPrefix(filepath.ToSlash(fallbackRelative), "../../") {
-		return fmt.Errorf("verified Windows archive fallback path is invalid")
+		return nil, fmt.Errorf("verified Windows archive fallback path is invalid")
 	}
 	fallbackRelative = strings.ReplaceAll(filepath.ToSlash(fallbackRelative), "/", `\`)
 
 	stagingDir, err := os.MkdirTemp(outDir, ".windows-layered-")
 	if err != nil {
-		return fmt.Errorf("create Windows layered handoff staging directory: %w", err)
+		return nil, fmt.Errorf("create Windows layered handoff staging directory: %w", err)
 	}
 	defer os.RemoveAll(stagingDir)
 	if err := os.Chmod(stagingDir, 0o700); err != nil {
-		return fmt.Errorf("secure Windows layered handoff staging directory: %w", err)
+		return nil, fmt.Errorf("secure Windows layered handoff staging directory: %w", err)
 	}
 
 	manifestJSON, err := json.MarshalIndent(handoff.manifest, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode Windows bootstrap release manifest: %w", err)
+		return nil, fmt.Errorf("encode Windows bootstrap release manifest: %w", err)
 	}
 	manifestJSON = append(manifestJSON, '\n')
 	verification := windowsLayeredVerification{
@@ -213,17 +216,14 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 	}
 	verificationJSON, err := json.MarshalIndent(verification, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode Windows layered verification plan: %w", err)
+		return nil, fmt.Errorf("encode Windows layered verification plan: %w", err)
 	}
 	verificationJSON = append(verificationJSON, '\n')
 	checksum := []byte(handoff.manifest.ArtifactSHA256 + "  " + windowsLayeredBootstrapName + "\n")
 	launcher := []byte(renderWindowsLayeredLauncher(handoff, fallbackRelative))
 	commandLauncher := []byte(renderWindowsLayeredCommandLauncher(handoff, fallbackRelative))
 
-	files := []struct {
-		name    string
-		content []byte
-	}{
+	files := []windowsLayeredArchiveFile{
 		{name: windowsLayeredBootstrapName, content: handoff.bootstrap},
 		{name: windowsLayeredReleaseManifestName, content: manifestJSON},
 		{name: windowsLayeredVerificationPlanName, content: verificationJSON},
@@ -233,27 +233,46 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 	}
 	for _, file := range files {
 		if err := writePrivateWindowsLayeredFile(filepath.Join(stagingDir, file.name), file.content); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if _, err := os.Lstat(handoffDir); err == nil {
-		return fmt.Errorf("Windows layered handoff directory already exists: %s", handoffDir)
+		return nil, fmt.Errorf("Windows layered handoff directory already exists: %s", handoffDir)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect Windows layered handoff destination: %w", err)
+		return nil, fmt.Errorf("inspect Windows layered handoff destination: %w", err)
 	}
+	archiveFiles := append([]windowsLayeredArchiveFile(nil), files...)
+	archiveFiles = append(archiveFiles, windowsLayeredArchiveFile{
+		name:    windowsLayeredArchiveRecoveryName,
+		content: []byte(renderWindowsLayeredArchiveRecovery()),
+	})
+	pendingArchive, archiveReport, err := prepareWindowsLayeredArchive(filepath.Dir(plan.OutDir), windowsLayeredArchiveName, handoff.generatedAt, archiveFiles)
+	if err != nil {
+		return nil, err
+	}
+	archiveReport.Path = filepath.Join(plan.OutDir, windowsLayeredArchiveName)
 	if err := os.Rename(stagingDir, handoffDir); err != nil {
-		return fmt.Errorf("publish Windows layered handoff: %w", err)
+		publishErr := fmt.Errorf("publish Windows layered handoff: %w", err)
+		cleanupErr := pendingArchive.discard()
+		if cleanupErr != nil {
+			cleanupErr = fmt.Errorf("clean up archive after handoff publication failure: %w", cleanupErr)
+		}
+		return nil, errors.Join(publishErr, cleanupErr)
 	}
 
 	verificationPath := filepath.Join(handoffDir, windowsLayeredVerificationPlanName)
 	launcherPath := filepath.Join(handoffDir, windowsLayeredCommandLauncherName)
+	verificationArtifactPath := windowsLayeredDirName + "/" + windowsLayeredVerificationPlanName
+	launcherArtifactPath := windowsLayeredDirName + "/" + windowsLayeredCommandLauncherName
 	checks := []acceptance.Check{
 		{Name: "windows_layered_platform", Passed: true, Detail: "windows/amd64 attended-temporary"},
 		{Name: "windows_layered_release_version", Passed: true, Detail: handoff.releaseVersion},
-		{Name: "windows_layered_manifest_url", Passed: true, Detail: handoff.layeredAssetsManifestURL},
+		{Name: "windows_layered_manifest_url", Passed: true, Detail: "valid"},
 		{Name: "windows_bootstrap_release_verification", Passed: true, Detail: handoff.manifest.ArtifactSHA256},
-		{Name: "windows_layered_private_handoff", Passed: true, Detail: "directory mode 0700; file modes 0600"},
+		{Name: "windows_layered_archive_private", Passed: archiveReport.Private, Detail: archiveReport.PrivacyDetail},
+		{Name: "windows_layered_archive_sha256", Passed: archiveReport.SHA256 != "", Detail: archiveReport.SHA256},
+		{Name: "windows_layered_archive_size", Passed: archiveReport.SizeBytes <= maxWindowsLayeredHandoffBytes, Detail: strconv.FormatInt(archiveReport.SizeBytes, 10)},
 	}
 	plan.EntryPackagePlan = &EntryPackagePlan{
 		SchemaVersion:      EntryPackagePlanSchemaVersion,
@@ -261,8 +280,11 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 		SessionMode:        plan.SessionMode,
 		PackageMode:        "private-windows-layered-handoff",
 		OK:                 allAcceptanceChecksPassed(checks),
-		PlanPath:           verificationPath,
-		LauncherPath:       launcherPath,
+		PlanPath:           verificationArtifactPath,
+		LauncherPath:       launcherArtifactPath,
+		ArchivePath:        windowsLayeredArchiveName,
+		ArchiveSHA256:      archiveReport.SHA256,
+		ArchiveSizeBytes:   archiveReport.SizeBytes,
 		PlatformPlanSchema: windowsLayeredHandoffSchemaVersion,
 		PlatformPlanKind:   "windows-layered-handoff",
 		HumanEntryPoint:    "run the visible native Command Prompt launcher from the private Windows layered handoff",
@@ -282,9 +304,16 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 		GeneratedFile{Path: filepath.Join(handoffDir, windowsLayeredChecksumName), Purpose: "bootstrap SHA-256 pin checked again by the launcher"},
 		GeneratedFile{Path: launcherPath, Purpose: "visible foreground-only Windows layered connection entry launcher"},
 		GeneratedFile{Path: filepath.Join(handoffDir, windowsLayeredLauncherName), Purpose: "PowerShell review launcher with equivalent Windows ACL and reparse-point checks"},
+		GeneratedFile{Path: archiveReport.Path, Purpose: "deterministic private Windows Connection Entry delivery archive"},
 	)
-	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: verificationPath})
-	return nil
+	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: "ready"})
+	return pendingArchive, nil
+}
+
+func renderWindowsLayeredArchiveRecovery() string {
+	return `Archive recovery is explicit and never automatic.
+Run rdev-bootstrap.exe layered-run with the separately signed archive recovery profile supplied through private connection metadata.
+`
 }
 
 func writePrivateWindowsLayeredFile(path string, content []byte) error {

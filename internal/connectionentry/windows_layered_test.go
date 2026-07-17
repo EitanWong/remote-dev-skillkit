@@ -1,12 +1,15 @@
 package connectionentry
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +19,255 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 )
+
+func TestWindowsLayeredHandoffArchive(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+
+	plan, err := FromInvite(fixture.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.EntryPackagePlan == nil {
+		t.Fatalf("expected Windows layered entry package plan: %#v", plan)
+	}
+	archivePath := filepath.Join(fixture.options.OutDir, "Windows-ConnectionEntry.zip")
+	archiveGeneratedFileFound := false
+	for _, generatedFile := range plan.GeneratedFiles {
+		if generatedFile.Path == archivePath {
+			archiveGeneratedFileFound = true
+			break
+		}
+	}
+	if !archiveGeneratedFileFound {
+		t.Fatalf("generated files do not include final archive path %q: %#v", archivePath, plan.GeneratedFiles)
+	}
+	for name, artifactPath := range map[string]string{
+		"plan":     plan.EntryPackagePlan.PlanPath,
+		"launcher": plan.EntryPackagePlan.LauncherPath,
+		"archive":  plan.EntryPackagePlan.ArchivePath,
+	} {
+		if filepath.IsAbs(artifactPath) || artifactPath == "" || strings.Contains(artifactPath, `\`) {
+			t.Fatalf("entry package %s path must be a non-empty artifact-relative slash path, got %q", name, artifactPath)
+		}
+	}
+	archive := readTestFile(t, archivePath)
+	archiveInfo, err := os.Stat(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWindowsLayeredArchivePrivate(t, archivePath)
+	if archiveInfo.Size() > maxWindowsLayeredHandoffBytes {
+		t.Fatalf("Windows handoff archive exceeds 1 MiB: %d", archiveInfo.Size())
+	}
+	digest := sha256.Sum256(archive)
+	wantSHA256 := hex.EncodeToString(digest[:])
+	if plan.EntryPackagePlan.ArchiveSHA256 != wantSHA256 || plan.EntryPackagePlan.ArchiveSizeBytes != archiveInfo.Size() {
+		t.Fatalf("archive report mismatch: %#v", plan.EntryPackagePlan)
+	}
+	assertLayeredArchiveCheck(t, plan.EntryPackagePlan, "windows_layered_archive_sha256", wantSHA256)
+	assertLayeredArchiveCheck(t, plan.EntryPackagePlan, "windows_layered_archive_size", strconv.FormatInt(archiveInfo.Size(), 10))
+	assertLayeredArchivePrivateCheck(t, plan.EntryPackagePlan)
+
+	reader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	wantNames := []string{
+		"ARCHIVE-RECOVERY.txt",
+		windowsLayeredCommandLauncherName,
+		windowsLayeredLauncherName,
+		windowsLayeredBootstrapName,
+		windowsLayeredReleaseManifestName,
+		windowsLayeredChecksumName,
+		windowsLayeredVerificationPlanName,
+	}
+	if len(reader.File) != len(wantNames) {
+		t.Fatalf("archive entries = %d, want %d", len(reader.File), len(wantNames))
+	}
+	for index, file := range reader.File {
+		if file.Name != wantNames[index] {
+			t.Errorf("archive entry %d = %q, want %q", index, file.Name, wantNames[index])
+		}
+		if file.Mode().Perm() != 0o600 {
+			t.Errorf("archive entry %q must be private, got mode %o", file.Name, file.Mode().Perm())
+		}
+	}
+	recovery := readZipEntryForTest(t, reader, "ARCHIVE-RECOVERY.txt")
+	for _, want := range []string{"rdev-bootstrap.exe", "layered-run", "signed archive recovery profile"} {
+		if !strings.Contains(strings.ToLower(string(recovery)), strings.ToLower(want)) {
+			t.Errorf("archive recovery instruction missing %q:\n%s", want, recovery)
+		}
+	}
+	for _, file := range reader.File {
+		content := readZipEntryForTest(t, reader, file.Name)
+		forbidden := []string{
+			fixture.controllerDir,
+			filepath.ToSlash(fixture.controllerDir),
+			"controller-source-private-token-do-not-publish",
+		}
+		if file.Name != windowsLayeredLauncherName && file.Name != windowsLayeredCommandLauncherName {
+			forbidden = append(forbidden, fixture.invite.Ticket.Code, fixture.invite.GatewayURL)
+		}
+		for _, marker := range forbidden {
+			if bytes.Contains(content, []byte(marker)) {
+				t.Errorf("archive entry %q leaked %q", file.Name, marker)
+			}
+		}
+	}
+
+	metadata, err := json.Marshal(plan.EntryPackagePlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata = append(metadata, recovery...)
+	for _, forbidden := range []string{
+		fixture.invite.Ticket.Code,
+		fixture.invite.GatewayURL,
+		fixture.controllerDir,
+		filepath.ToSlash(fixture.controllerDir),
+		"controller-source-private-token-do-not-publish",
+	} {
+		if bytes.Contains(metadata, []byte(forbidden)) {
+			t.Errorf("archive report or recovery metadata leaked %q: %s", forbidden, metadata)
+		}
+	}
+	topLevelChecks, err := json.Marshal(plan.Checks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		fixture.invite.ConnectionEntry.EntryURL,
+		fixture.invite.ManifestURL,
+		fixture.invite.ManifestRootPublicKey,
+		fixture.invite.Ticket.Code,
+		fixture.invite.GatewayURL,
+		"controller-source-private-token-do-not-publish",
+	} {
+		if bytes.Contains(topLevelChecks, []byte(forbidden)) {
+			t.Errorf("top-level plan checks leaked %q: %s", forbidden, topLevelChecks)
+		}
+	}
+	packageMetadata, err := json.Marshal(struct {
+		Package *EntryPackagePlan `json:"entry_package_plan"`
+		Checks  []Check           `json:"checks"`
+	}{Package: plan.EntryPackagePlan, Checks: plan.Checks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		fixture.options.OutDir,
+		fixture.controllerDir,
+		filepath.ToSlash(fixture.options.OutDir),
+		filepath.ToSlash(fixture.controllerDir),
+	} {
+		if bytes.Contains(packageMetadata, []byte(forbidden)) {
+			t.Errorf("serialized entry package metadata leaked controller-local path %q: %s", forbidden, packageMetadata)
+		}
+	}
+	for _, check := range plan.Checks {
+		if check.Name == "entry_package_plan" && check.Detail != "ready" {
+			t.Errorf("entry package plan check detail = %q, want status-only detail ready", check.Detail)
+		}
+	}
+}
+
+func TestWindowsLayeredCheckTreeRedactsPrivateDetails(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+
+	plan, err := FromInvite(fixture.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RunnerPlan == nil || plan.EntryPackagePlan == nil {
+		t.Fatalf("expected complete Windows layered plan: %#v", plan)
+	}
+
+	checkTree, err := json.Marshal(struct {
+		Checks             []Check `json:"checks"`
+		RunnerPlanChecks   any     `json:"runner_plan_checks"`
+		EntryPackageChecks any     `json:"entry_package_checks"`
+	}{
+		Checks:             plan.Checks,
+		RunnerPlanChecks:   plan.RunnerPlan.Checks,
+		EntryPackageChecks: plan.EntryPackagePlan.Checks,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{
+		fixture.invite.ConnectionEntry.EntryURL,
+		fixture.invite.ManifestURL,
+		fixture.invite.ManifestRootPublicKey,
+		fixture.invite.Ticket.Code,
+		fixture.invite.GatewayURL,
+		fixture.options.OutDir,
+		filepath.ToSlash(fixture.options.OutDir),
+		fixture.controllerDir,
+		filepath.ToSlash(fixture.controllerDir),
+		"controller-source-private-token-do-not-publish",
+	} {
+		if bytes.Contains(checkTree, []byte(forbidden)) {
+			t.Errorf("serialized check tree leaked %q: %s", forbidden, checkTree)
+		}
+	}
+	for _, check := range plan.RunnerPlan.Checks {
+		want := "failed"
+		if check.Passed {
+			want = "ready"
+		}
+		if check.Detail != want {
+			t.Errorf("runner check %q detail = %q, want status-only %q", check.Name, check.Detail, want)
+		}
+	}
+}
+
+func assertLayeredArchivePrivateCheck(t *testing.T, plan *EntryPackagePlan) {
+	t.Helper()
+	for _, check := range plan.Checks {
+		if check.Name == "windows_layered_archive_private" {
+			if !check.Passed || check.Detail == "" {
+				t.Fatalf("archive private check = %#v, want verified detail", check)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing archive private check: %#v", plan.Checks)
+}
+
+func assertLayeredArchiveCheck(t *testing.T, plan *EntryPackagePlan, name, detail string) {
+	t.Helper()
+	for _, check := range plan.Checks {
+		if check.Name == name {
+			if !check.Passed || check.Detail != detail {
+				t.Fatalf("archive check %q = %#v, want passed detail %q", name, check, detail)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing archive check %q: %#v", name, plan.Checks)
+}
+
+func readZipEntryForTest(t *testing.T, reader *zip.ReadCloser, name string) []byte {
+	t.Helper()
+	for _, file := range reader.File {
+		if file.Name != name {
+			continue
+		}
+		entry, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer entry.Close()
+		content := new(bytes.Buffer)
+		if _, err := content.ReadFrom(entry); err != nil {
+			t.Fatal(err)
+		}
+		return content.Bytes()
+	}
+	t.Fatalf("missing ZIP entry %q", name)
+	return nil
+}
 
 func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(t *testing.T) {
 	t.Run("verified layered bootstrap is the primary handoff", func(t *testing.T) {
@@ -135,7 +387,7 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		}
 		handoffDir := filepath.Join(fixture.options.OutDir, "windows-layered")
 		cmdPath := filepath.Join(handoffDir, "Start-ConnectionEntry.cmd")
-		if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != cmdPath {
+		if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != windowsLayeredDirName+"/"+windowsLayeredCommandLauncherName {
 			t.Fatalf("native command launcher must be the primary entry point: %#v", plan.EntryPackagePlan)
 		}
 		launcher := strings.ToLower(string(readTestFile(t, cmdPath)))

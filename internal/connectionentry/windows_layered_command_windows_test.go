@@ -23,7 +23,7 @@ func TestWindowsLayeredCommandLauncherFailsClosedWithoutArchiveExecution(t *test
 	}
 
 	launcherPath := filepath.Join(fixture.options.OutDir, windowsLayeredDirName, windowsLayeredCommandLauncherName)
-	if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != launcherPath {
+	if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != windowsLayeredDirName+"/"+windowsLayeredCommandLauncherName {
 		t.Fatalf("expected the native command launcher to be primary: %#v", plan.EntryPackagePlan)
 	}
 
@@ -70,7 +70,7 @@ func TestWindowsLayeredCommandLauncherRejectsReparseAncestor(t *testing.T) {
 		t.Fatal(err)
 	}
 	launcherPath := filepath.Join(fixture.options.OutDir, windowsLayeredDirName, windowsLayeredCommandLauncherName)
-	if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != launcherPath {
+	if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != windowsLayeredDirName+"/"+windowsLayeredCommandLauncherName {
 		t.Fatalf("expected the native command launcher to be primary: %#v", plan.EntryPackagePlan)
 	}
 
@@ -103,7 +103,7 @@ func TestWindowsLayeredCommandLauncherHandlesUnicodePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	launcherPath := filepath.Join(fixture.options.OutDir, windowsLayeredDirName, windowsLayeredCommandLauncherName)
-	if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != launcherPath {
+	if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.LauncherPath != windowsLayeredDirName+"/"+windowsLayeredCommandLauncherName {
 		t.Fatalf("expected the native command launcher to be primary: %#v", plan.EntryPackagePlan)
 	}
 
