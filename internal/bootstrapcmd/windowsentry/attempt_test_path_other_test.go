@@ -5,6 +5,7 @@ package windowsentry
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -15,6 +16,15 @@ func privateAttemptDirForTest(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return directory
+}
+
+func attemptProcessRunningForTest(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}
+
+func killAttemptProcessForTest(pid int) error {
+	return syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func assertPrivateAttemptPathForTest(t *testing.T, path string, directory bool) {

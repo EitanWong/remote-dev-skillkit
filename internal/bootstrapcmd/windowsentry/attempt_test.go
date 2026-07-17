@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -252,7 +253,7 @@ func TestLayeredRunStartsCoreOnceRejectsSecondStart(t *testing.T) {
 	}
 }
 
-func TestLayeredRunCancellationReapsChildBeforeCoreExited(t *testing.T) {
+func TestLayeredRunCancellationReapsProcessTreeBeforeCoreExited(t *testing.T) {
 	fixture := newWindowsEntryFixture(t)
 	attemptDir := privateAttemptDirForTest(t)
 	readyPath := filepath.Join(t.TempDir(), "child-ready")
@@ -269,7 +270,11 @@ func TestLayeredRunCancellationReapsChildBeforeCoreExited(t *testing.T) {
 		Now: fixture.now,
 		CommandContext: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			command = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAttemptBlockingHelperProcess$")
-			command.Env = append(os.Environ(), "RDEV_ATTEMPT_BLOCKING_HELPER=1", "RDEV_ATTEMPT_READY="+readyPath)
+			command.Env = append(os.Environ(),
+				"RDEV_ATTEMPT_BLOCKING_HELPER=1",
+				"RDEV_ATTEMPT_READY="+readyPath,
+				"RDEV_ATTEMPT_SPAWN_GRANDCHILD=1",
+			)
 			return command
 		},
 	}
@@ -283,17 +288,25 @@ func TestLayeredRunCancellationReapsChildBeforeCoreExited(t *testing.T) {
 			return false
 		}
 		state, err := decodeAttemptState(content)
-		return err == nil && state.Stage == attemptStageCoreStarted && fileExistsForAttemptTest(readyPath)
+		return err == nil && state.Stage == attemptStageCoreStarted && attemptPIDFileReady(readyPath)
 	})
 	if command == nil {
 		t.Fatal("child command was not created")
 	}
+	pids := attemptPIDsForTest(t, readyPath)
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled layered run error = %v, want context canceled", err)
 	}
 	if command.ProcessState == nil {
 		t.Fatal("layered run returned before canceled child was reaped")
+	}
+	for _, pid := range pids {
+		if waitForAttemptProcessExit(pid, time.Second) {
+			continue
+		}
+		_ = killAttemptProcessForTest(pid)
+		t.Fatalf("attempt process %d remained alive after core_exited", pid)
 	}
 	content, err := os.ReadFile(filepath.Join(attemptDir, attemptStateFilename))
 	if err != nil {
@@ -384,6 +397,158 @@ func TestLayeredRunPreCoreCancellationPreservesContext(t *testing.T) {
 	}
 }
 
+func TestLayeredRunVerifiesManifestAtPostFetchTime(t *testing.T) {
+	fixture := newWindowsEntryFixture(t)
+	var nowNanos atomic.Int64
+	nowNanos.Store(fixture.now.UnixNano())
+	downloadCalls := 0
+	transport := transportFunc(func(_ context.Context, request assetdownload.TransportRequest) (assetdownload.TransportResponse, error) {
+		if request.URL != fixture.manifestURL {
+			t.Fatalf("request after expired manifest: %s", request.URL)
+		}
+		nowNanos.Store(fixture.now.Add(2 * time.Hour).UnixNano())
+		return assetdownload.TransportResponse{
+			StatusCode:    200,
+			ContentLength: int64(len(fixture.manifestJSON)),
+			Body:          io.NopCloser(bytes.NewReader(fixture.manifestJSON)),
+		}, nil
+	})
+	attemptDir := privateAttemptDirForTest(t)
+	err := (App{
+		Stdout:    io.Discard,
+		Stderr:    io.Discard,
+		Transport: transport,
+		Clock: func() time.Time {
+			return time.Unix(0, nowNanos.Load()).UTC()
+		},
+		download: func(context.Context, assetdownload.Options) (assetdownload.Result, error) {
+			downloadCalls++
+			return assetdownload.Result{}, nil
+		},
+	}).Run(t.Context(), windowsEntryAttemptArgs(fixture, windowsEntryTestCacheDir(t), attemptDir, launcherPowerShell))
+	if err == nil || !strings.Contains(err.Error(), "manifest_verify") {
+		t.Fatalf("post-fetch expired manifest error = %v", err)
+	}
+	if downloadCalls != 0 {
+		t.Fatalf("expired manifest reached runtime download %d times", downloadCalls)
+	}
+	content, readErr := os.ReadFile(filepath.Join(attemptDir, attemptStateFilename))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	state, decodeErr := decodeAttemptState(content)
+	if decodeErr != nil || state.Stage != attemptStagePreCore || state.UpdatedAt != fixture.now.Format(time.RFC3339Nano) {
+		t.Fatalf("expired manifest attempt state = %#v, %v", state, decodeErr)
+	}
+}
+
+func TestLayeredRunTransitionsUseFreshClock(t *testing.T) {
+	fixture := newWindowsEntryFixture(t)
+	times := []time.Time{
+		fixture.now,
+		fixture.now.Add(time.Second),
+		fixture.now.Add(2 * time.Second),
+		fixture.now.Add(3 * time.Second),
+	}
+	var clockIndex atomic.Int32
+	attemptDir := privateAttemptDirForTest(t)
+	startedStatePath := filepath.Join(t.TempDir(), "core-started.json")
+	app := App{
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+		Transport: &recordingTransport{responses: map[string]transportFixture{
+			fixture.manifestURL: {status: 200, content: fixture.manifestJSON},
+			fixture.coreURL:     {status: 200, content: fixture.core},
+		}},
+		Clock: func() time.Time {
+			index := int(clockIndex.Add(1)) - 1
+			if index >= len(times) {
+				return times[len(times)-1]
+			}
+			return times[index]
+		},
+		CommandContext: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAttemptStateCaptureHelperProcess$")
+			cmd.Env = append(os.Environ(),
+				"RDEV_ATTEMPT_STATE_CAPTURE_HELPER=1",
+				"RDEV_ATTEMPT_STATE_PATH="+filepath.Join(attemptDir, attemptStateFilename),
+				"RDEV_ATTEMPT_STATE_CAPTURE="+startedStatePath,
+			)
+			return cmd
+		},
+	}
+	if err := app.Run(t.Context(), windowsEntryAttemptArgs(fixture, windowsEntryTestCacheDir(t), attemptDir, launcherPowerShell)); err != nil {
+		t.Fatal(err)
+	}
+	startedContent, err := os.ReadFile(startedStatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := decodeAttemptState(startedContent)
+	if err != nil || started.Stage != attemptStageCoreStarted || started.UpdatedAt != times[2].Format(time.RFC3339Nano) {
+		t.Fatalf("captured started state = %#v, %v", started, err)
+	}
+	exitedContent, err := os.ReadFile(filepath.Join(attemptDir, attemptStateFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exited, err := decodeAttemptState(exitedContent)
+	if err != nil || exited.Stage != attemptStageCoreExited || exited.UpdatedAt != times[3].Format(time.RFC3339Nano) {
+		t.Fatalf("final exited state = %#v, %v", exited, err)
+	}
+	if clockIndex.Load() != 4 {
+		t.Fatalf("clock calls = %d, want 4 lifecycle boundaries", clockIndex.Load())
+	}
+}
+
+func TestLayeredRunLifecycleFailuresExitOnlyAfterCleanup(t *testing.T) {
+	fixture := newWindowsEntryFixture(t)
+	for _, testCase := range []struct {
+		name    string
+		command func(context.Context, string, ...string) *exec.Cmd
+	}{
+		{
+			name: "start",
+			command: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+				return exec.CommandContext(ctx, filepath.Join(t.TempDir(), "missing-core.exe"))
+			},
+		},
+		{
+			name: "wait",
+			command: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+				cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAttemptFailingHelperProcess$")
+				cmd.Env = append(os.Environ(), "RDEV_ATTEMPT_FAILING_HELPER=1")
+				return cmd
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			attemptDir := privateAttemptDirForTest(t)
+			err := (App{
+				Stdout: io.Discard,
+				Stderr: io.Discard,
+				Transport: &recordingTransport{responses: map[string]transportFixture{
+					fixture.manifestURL: {status: 200, content: fixture.manifestJSON},
+					fixture.coreURL:     {status: 200, content: fixture.core},
+				}},
+				Now:            fixture.now,
+				CommandContext: testCase.command,
+			}).Run(t.Context(), windowsEntryAttemptArgs(fixture, windowsEntryTestCacheDir(t), attemptDir, launcherPowerShell))
+			if err == nil || strings.Contains(err.Error(), attemptDir) {
+				t.Fatalf("lifecycle %s error = %v", testCase.name, err)
+			}
+			content, readErr := os.ReadFile(filepath.Join(attemptDir, attemptStateFilename))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			state, decodeErr := decodeAttemptState(content)
+			if decodeErr != nil || state.Stage != attemptStageCoreExited {
+				t.Fatalf("lifecycle %s state = %#v, %v", testCase.name, state, decodeErr)
+			}
+		})
+	}
+}
+
 func TestAttemptProcessLockAcrossProcesses(t *testing.T) {
 	if os.Getenv("RDEV_ATTEMPT_PROCESS_HELPER") == "1" {
 		guard, err := acquireAttempt(os.Getenv("RDEV_ATTEMPT_DIR"), launcherPowerShell, time.Now())
@@ -429,11 +594,48 @@ func TestAttemptBlockingHelperProcess(t *testing.T) {
 	if os.Getenv("RDEV_ATTEMPT_BLOCKING_HELPER") != "1" {
 		return
 	}
-	if err := os.WriteFile(os.Getenv("RDEV_ATTEMPT_READY"), []byte("ready"), 0o600); err != nil {
+	pids := []string{strconv.Itoa(os.Getpid())}
+	if os.Getenv("RDEV_ATTEMPT_SPAWN_GRANDCHILD") == "1" {
+		grandchild := exec.Command(os.Args[0], "-test.run=^TestAttemptGrandchildHelperProcess$")
+		grandchild.Env = append(os.Environ(), "RDEV_ATTEMPT_GRANDCHILD_HELPER=1")
+		if err := grandchild.Start(); err != nil {
+			t.Fatal(err)
+		}
+		pids = append(pids, strconv.Itoa(grandchild.Process.Pid))
+	}
+	if err := os.WriteFile(os.Getenv("RDEV_ATTEMPT_READY"), []byte(strings.Join(pids, " ")), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for {
 		time.Sleep(time.Hour)
+	}
+}
+
+func TestAttemptGrandchildHelperProcess(t *testing.T) {
+	if os.Getenv("RDEV_ATTEMPT_GRANDCHILD_HELPER") != "1" {
+		return
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+func TestAttemptStateCaptureHelperProcess(t *testing.T) {
+	if os.Getenv("RDEV_ATTEMPT_STATE_CAPTURE_HELPER") != "1" {
+		return
+	}
+	content, err := os.ReadFile(os.Getenv("RDEV_ATTEMPT_STATE_PATH"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("RDEV_ATTEMPT_STATE_CAPTURE"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAttemptFailingHelperProcess(t *testing.T) {
+	if os.Getenv("RDEV_ATTEMPT_FAILING_HELPER") == "1" {
+		os.Exit(7)
 	}
 }
 
@@ -457,4 +659,38 @@ func waitForAttemptTest(t *testing.T, condition func() bool) {
 func fileExistsForAttemptTest(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func attemptPIDsForTest(t *testing.T, path string) []int {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Fields(string(content))
+	if len(fields) != 2 {
+		t.Fatalf("attempt helper PIDs = %q, want direct and grandchild", content)
+	}
+	pids := make([]int, len(fields))
+	for index, field := range fields {
+		pid, err := strconv.Atoi(field)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pids[index] = pid
+	}
+	return pids
+}
+
+func attemptPIDFileReady(path string) bool {
+	content, err := os.ReadFile(path)
+	return err == nil && len(strings.Fields(string(content))) == 2
+}
+
+func waitForAttemptProcessExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for attemptProcessRunningForTest(pid) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	return !attemptProcessRunningForTest(pid)
 }

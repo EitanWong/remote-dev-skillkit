@@ -30,6 +30,7 @@ type App struct {
 	Stdin          io.Reader
 	Transport      assetdownload.Transport
 	Now            time.Time
+	Clock          func() time.Time
 	CommandContext func(context.Context, string, ...string) *exec.Cmd
 	download       func(context.Context, assetdownload.Options) (assetdownload.Result, error)
 }
@@ -68,11 +69,7 @@ func (a App) Run(ctx context.Context, args []string) (resultErr error) {
 	if !validCoreTransport(opts.args) {
 		return newPreCoreError("invalid_input")
 	}
-	now := a.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
-	attempt, err := acquireAttempt(opts.attemptDir, opts.launcher, now)
+	attempt, err := acquireAttempt(opts.attemptDir, opts.launcher, a.now())
 	if err != nil {
 		if errors.Is(err, errAttemptClosed) {
 			return newPreCoreError("attempt_closed")
@@ -110,7 +107,7 @@ func (a App) Run(ctx context.Context, args []string) (resultErr error) {
 		}
 		return newPreCoreError("manifest_fetch")
 	}
-	if err := release.VerifyLayeredAssetManifestRoot(manifest, root, now); err != nil {
+	if err := release.VerifyLayeredAssetManifestRoot(manifest, root, a.now()); err != nil {
 		return newPreCoreError("manifest_verify")
 	}
 	if manifest.Version != strings.TrimSpace(opts.expectedVersion) {
@@ -179,30 +176,34 @@ func (a App) Run(ctx context.Context, args []string) (resultErr error) {
 	cmd.Stdin = a.stdin()
 	cmd.Stdout = a.stdout()
 	cmd.Stderr = a.stderr()
+	lifecycle, err := newCoreLifecycle(cmd)
+	if err != nil {
+		return newPreCoreError("runtime_prepare")
+	}
+	defer lifecycle.close()
 	if err := recheckVerifiedRuntime(runtimeFile, result.OutputPath, asset.SizeBytes, asset.SHA256); err != nil {
 		return newPreCoreError("runtime_prepare")
 	}
 	if err := writeRunReport(a.stdout(), report); err != nil {
 		return newPreCoreError("report_output")
 	}
-	if err := attempt.transition(attemptStageCoreStarted, now); err != nil {
+	if err := attempt.transition(attemptStageCoreStarted, a.now()); err != nil {
 		return newPreCoreError("attempt_state")
 	}
-	startErr := cmd.Start()
-	waitErr := startErr
-	if startErr == nil {
-		waitErr = cmd.Wait()
+	cleaned, runErr := lifecycle.run(ctx, cmd)
+	if !cleaned {
+		return errors.New("layered core containment failed")
 	}
-	if err := attempt.transition(attemptStageCoreExited, time.Time{}); err != nil {
+	if err := attempt.transition(attemptStageCoreExited, a.now()); err != nil {
 		return errors.New("layered core exit state failed")
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if startErr != nil {
-		return errors.New("layered core start failed")
+	if runErr != nil {
+		return errors.New("layered core lifecycle failed")
 	}
-	return waitErr
+	return nil
 }
 
 func writeRunReport(destination io.Writer, report RunReport) error {
@@ -559,6 +560,18 @@ func (a App) stdin() io.Reader {
 		return a.Stdin
 	}
 	return os.Stdin
+}
+
+func (a App) now() time.Time {
+	if a.Clock != nil {
+		if now := a.Clock(); !now.IsZero() {
+			return now
+		}
+	}
+	if !a.Now.IsZero() {
+		return a.Now
+	}
+	return time.Now()
 }
 
 func (a App) commandContext(ctx context.Context, path string, args ...string) *exec.Cmd {
