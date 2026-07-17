@@ -42,67 +42,91 @@ type RunReport struct {
 	Bytes         int64  `json:"bytes"`
 }
 
-func (a App) Run(ctx context.Context, args []string) error {
+func (a App) Run(ctx context.Context, args []string) (resultErr error) {
 	if len(args) == 0 || args[0] != "layered-run" {
-		return fmt.Errorf("focused Windows bootstrap requires layered-run")
+		return newPreCoreError("invalid_input")
 	}
 	opts, err := parseRunArgs(args[1:])
 	if err != nil {
-		return err
+		return newPreCoreError("invalid_input")
 	}
 	if opts.mode != "temporary" {
-		return fmt.Errorf("layered-run requires --mode temporary")
+		return newPreCoreError("invalid_input")
 	}
 	if opts.platform != "windows/amd64" {
-		return fmt.Errorf("layered-run requires --platform windows/amd64")
+		return newPreCoreError("invalid_input")
 	}
 	if strings.TrimSpace(opts.expectedVersion) == "" {
-		return fmt.Errorf("layered-run requires --expected-release-version")
+		return newPreCoreError("invalid_input")
 	}
 	if strings.TrimSpace(opts.cacheDir) == "" {
-		return fmt.Errorf("layered-run requires --cache-dir")
+		return newPreCoreError("invalid_input")
 	}
-
-	parsedManifestURL, err := strictHTTPSURL(opts.manifestURL)
-	if err != nil {
-		return err
+	if strings.TrimSpace(opts.attemptDir) == "" || !opts.launcher.valid() {
+		return newPreCoreError("invalid_input")
 	}
-	root, err := release.ParseLayeredTrustRoot(opts.rootPublicKey)
-	if err != nil {
-		return fmt.Errorf("root public key: %w", err)
-	}
-	transport := a.Transport
-	if transport == nil {
-		transport, err = defaultTransport()
-		if err != nil {
-			return err
-		}
-	}
-	manifest, err := fetchManifest(ctx, transport, parsedManifestURL.String())
-	if err != nil {
-		return err
+	if !validCoreTransport(opts.args) {
+		return newPreCoreError("invalid_input")
 	}
 	now := a.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
+	attempt, err := acquireAttempt(opts.attemptDir, opts.launcher, now)
+	if err != nil {
+		if errors.Is(err, errAttemptClosed) {
+			return newPreCoreError("attempt_closed")
+		}
+		if errors.Is(err, errAttemptBusy) {
+			return newPreCoreError("attempt_busy")
+		}
+		return newPreCoreError("attempt_invalid")
+	}
+	defer func() {
+		if closeErr := attempt.close(); closeErr != nil && resultErr == nil {
+			resultErr = errors.New("layered attempt lock release failed")
+		}
+	}()
+
+	parsedManifestURL, err := strictHTTPSURL(opts.manifestURL)
+	if err != nil {
+		return newPreCoreError("invalid_input")
+	}
+	root, err := release.ParseLayeredTrustRoot(opts.rootPublicKey)
+	if err != nil {
+		return newPreCoreError("invalid_input")
+	}
+	transport := a.Transport
+	if transport == nil {
+		transport, err = defaultTransport()
+		if err != nil {
+			return newPreCoreError("transport_unavailable")
+		}
+	}
+	manifest, err := fetchManifest(ctx, transport, parsedManifestURL.String())
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return newPreCoreError("manifest_fetch")
+	}
 	if err := release.VerifyLayeredAssetManifestRoot(manifest, root, now); err != nil {
-		return err
+		return newPreCoreError("manifest_verify")
 	}
 	if manifest.Version != strings.TrimSpace(opts.expectedVersion) {
-		return fmt.Errorf("layered manifest release version does not match expected version")
+		return newPreCoreError("manifest_verify")
 	}
 	asset, err := release.SelectLayeredAsset(manifest, opts.platform, "core-runtime", nil)
 	if err != nil {
-		return err
+		return newPreCoreError("manifest_verify")
 	}
 	assetURL, err := resolveAssetURL(parsedManifestURL, asset.RelativePath)
 	if err != nil {
-		return err
+		return newPreCoreError("manifest_verify")
 	}
 	outputPath, contentPath, err := cachePaths(opts.cacheDir, asset)
 	if err != nil {
-		return err
+		return newPreCoreError("runtime_prepare")
 	}
 
 	download := a.download
@@ -118,23 +142,26 @@ func (a App) Run(ctx context.Context, args []string) error {
 		Transport:      transport,
 	})
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return newPreCoreError("runtime_prepare")
 	}
 	if result.Bytes != asset.SizeBytes {
-		return fmt.Errorf("downloaded runtime size does not match signed manifest")
+		return newPreCoreError("runtime_prepare")
 	}
 	if err := os.Chmod(result.OutputPath, 0o600); err != nil {
-		return err
+		return newPreCoreError("runtime_prepare")
 	}
 	if err := validatePrivateCacheFile(result.OutputPath, asset.SizeBytes); err != nil {
-		return err
+		return newPreCoreError("runtime_prepare")
 	}
 	if err := validateOptionalPrivateCacheFile(contentPath, asset.SizeBytes); err != nil {
-		return err
+		return newPreCoreError("runtime_prepare")
 	}
 	runtimeFile, err := openVerifiedRuntime(result.OutputPath, asset.SizeBytes, asset.SHA256)
 	if err != nil {
-		return err
+		return newPreCoreError("runtime_prepare")
 	}
 	defer runtimeFile.Close()
 
@@ -147,18 +174,35 @@ func (a App) Run(ctx context.Context, args []string) error {
 	}
 	cmd := a.commandContext(ctx, result.OutputPath, opts.args...)
 	if cmd == nil {
-		return fmt.Errorf("layered runtime command is nil")
+		return newPreCoreError("runtime_prepare")
 	}
 	cmd.Stdin = a.stdin()
 	cmd.Stdout = a.stdout()
 	cmd.Stderr = a.stderr()
 	if err := recheckVerifiedRuntime(runtimeFile, result.OutputPath, asset.SizeBytes, asset.SHA256); err != nil {
-		return err
+		return newPreCoreError("runtime_prepare")
 	}
 	if err := writeRunReport(a.stdout(), report); err != nil {
-		return err
+		return newPreCoreError("report_output")
 	}
-	return cmd.Run()
+	if err := attempt.transition(attemptStageCoreStarted, now); err != nil {
+		return newPreCoreError("attempt_state")
+	}
+	startErr := cmd.Start()
+	waitErr := startErr
+	if startErr == nil {
+		waitErr = cmd.Wait()
+	}
+	if err := attempt.transition(attemptStageCoreExited, time.Time{}); err != nil {
+		return errors.New("layered core exit state failed")
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if startErr != nil {
+		return errors.New("layered core start failed")
+	}
+	return waitErr
 }
 
 func writeRunReport(destination io.Writer, report RunReport) error {
@@ -369,6 +413,8 @@ type runOptions struct {
 	expectedVersion string
 	platform        string
 	cacheDir        string
+	attemptDir      string
+	launcher        attemptLauncher
 	mode            string
 	args            []string
 }
@@ -399,6 +445,10 @@ func parseRunArgs(args []string) (runOptions, error) {
 			opts.platform = value
 		case "--cache-dir":
 			opts.cacheDir = value
+		case "--attempt-dir":
+			opts.attemptDir = value
+		case "--launcher":
+			opts.launcher = attemptLauncher(value)
 		case "--mode":
 			opts.mode = value
 		default:
@@ -406,6 +456,24 @@ func parseRunArgs(args []string) (runOptions, error) {
 		}
 	}
 	return opts, nil
+}
+
+func validCoreTransport(args []string) bool {
+	found := false
+	for index := 0; index < len(args); index++ {
+		if args[index] == "--transport" {
+			if found || index+1 >= len(args) || args[index+1] != "auto" {
+				return false
+			}
+			found = true
+			index++
+			continue
+		}
+		if strings.HasPrefix(args[index], "--transport=") {
+			return false
+		}
+	}
+	return found
 }
 
 func validateRuntime(path string, expectedSize int64) error {

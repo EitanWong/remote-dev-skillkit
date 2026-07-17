@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestWindowsEntryVerifiesManifestBeforeCoreAndDownloadsOnlyCore(t *testing.T
 			return assetdownload.Download(ctx, opts)
 		},
 	}
-	if err := app.Run(t.Context(), fixture.args(windowsEntryTestCacheDir(t))); err != nil {
+	if err := app.Run(t.Context(), fixture.args(t, windowsEntryTestCacheDir(t))); err != nil {
 		t.Fatal(err)
 	}
 	if downloadCalls != 1 {
@@ -113,7 +114,7 @@ func TestWindowsEntryRejectsBadSignatureBeforeAnyCoreRequest(t *testing.T) {
 			return assetdownload.Result{}, nil
 		},
 	}
-	if err := app.Run(t.Context(), fixture.args(windowsEntryTestCacheDir(t))); err == nil {
+	if err := app.Run(t.Context(), fixture.args(t, windowsEntryTestCacheDir(t))); err == nil {
 		t.Fatal("invalid signed manifest was accepted")
 	}
 	if downloadCalls != 0 {
@@ -149,7 +150,7 @@ func TestWindowsEntryRejectsCoreChangedAfterDownload(t *testing.T) {
 			return successfulTestCommand(ctx, path, args...)
 		},
 	}
-	if err := app.Run(t.Context(), fixture.args(windowsEntryTestCacheDir(t))); err == nil {
+	if err := app.Run(t.Context(), fixture.args(t, windowsEntryTestCacheDir(t))); err == nil {
 		t.Fatal("same-size core replacement was accepted")
 	}
 	if commandCalled {
@@ -187,7 +188,7 @@ func TestWindowsEntryRejectsCoreReplacedAfterCommandCreation(t *testing.T) {
 			return successfulTestCommand(ctx, runtimePath, args...)
 		},
 	}
-	err := app.Run(t.Context(), fixture.args(windowsEntryTestCacheDir(t)))
+	err := app.Run(t.Context(), fixture.args(t, windowsEntryTestCacheDir(t)))
 	if replacementBlocked {
 		if err != nil {
 			t.Fatalf("locked core failed after replacement was blocked: %v", err)
@@ -235,7 +236,7 @@ func TestWindowsEntryRejectsUnsafeCacheBeforeCoreDownload(t *testing.T) {
 					return assetdownload.Result{}, fmt.Errorf("unexpected download")
 				},
 			}
-			if err := app.Run(t.Context(), fixture.args(cacheDir)); err == nil {
+			if err := app.Run(t.Context(), fixture.args(t, cacheDir)); err == nil {
 				t.Fatalf("unsafe cache path %q was accepted", cacheDir)
 			}
 			if downloadCalls != 0 {
@@ -261,7 +262,7 @@ func TestWindowsEntryRejectsUnsafeManifestURLsBeforeTransport(t *testing.T) {
 	for _, rawURL := range unsafeURLs {
 		t.Run(rawURL, func(t *testing.T) {
 			transport := &recordingTransport{}
-			args := fixture.args(windowsEntryTestCacheDir(t))
+			args := fixture.args(t, windowsEntryTestCacheDir(t))
 			args[2] = rawURL
 			app := App{Transport: transport, Now: fixture.now}
 			if err := app.Run(t.Context(), args); err == nil {
@@ -285,11 +286,13 @@ func TestWindowsEntryRejectsInvalidRequiredFlagsBeforeTransport(t *testing.T) {
 		{name: "platform", flag: "--platform", value: "linux/amd64"},
 		{name: "version", flag: "--expected-release-version", value: ""},
 		{name: "cache", flag: "--cache-dir", value: ""},
+		{name: "attempt", flag: "--attempt-dir", value: ""},
+		{name: "launcher", flag: "--launcher", value: "pwsh"},
 		{name: "root", flag: "--root-public-key", value: "invalid"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			transport := &recordingTransport{}
-			args := replaceWindowsEntryFlag(t, fixture.args(windowsEntryTestCacheDir(t)), testCase.flag, testCase.value)
+			args := replaceWindowsEntryFlag(t, fixture.args(t, windowsEntryTestCacheDir(t)), testCase.flag, testCase.value)
 			if err := (App{Transport: transport, Now: fixture.now}).Run(t.Context(), args); err == nil {
 				t.Fatalf("invalid %s was accepted", testCase.flag)
 			}
@@ -302,8 +305,8 @@ func TestWindowsEntryRejectsInvalidRequiredFlagsBeforeTransport(t *testing.T) {
 
 func TestWindowsEntryRejectsAmbiguousLayeredArguments(t *testing.T) {
 	fixture := newWindowsEntryFixture(t)
-	duplicateMode := fixture.args(windowsEntryTestCacheDir(t))
-	separator := len(duplicateMode) - 4
+	duplicateMode := fixture.args(t, windowsEntryTestCacheDir(t))
+	separator := slices.Index(duplicateMode, "--")
 	duplicateMode = append(append(append([]string(nil), duplicateMode[:separator]...), "--mode", "temporary"), duplicateMode[separator:]...)
 	for _, args := range [][]string{
 		duplicateMode,
@@ -516,7 +519,12 @@ func newWindowsEntryFixture(t *testing.T) windowsEntryFixture {
 	}
 }
 
-func (fixture windowsEntryFixture) args(cacheDir string) []string {
+func (fixture windowsEntryFixture) args(t *testing.T, cacheDir string) []string {
+	t.Helper()
+	return windowsEntryAttemptArgs(fixture, cacheDir, privateAttemptDirForTest(t), launcherPowerShell)
+}
+
+func (fixture windowsEntryFixture) baseArgs(cacheDir string) []string {
 	return []string{
 		"layered-run",
 		"--manifest-url", fixture.manifestURL,
@@ -525,7 +533,7 @@ func (fixture windowsEntryFixture) args(cacheDir string) []string {
 		"--platform", "windows/amd64",
 		"--cache-dir", cacheDir,
 		"--mode", "temporary",
-		"--", "serve", "--mode", "temporary",
+		"--", "serve", "--mode", "temporary", "--transport", "auto",
 	}
 }
 

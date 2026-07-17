@@ -522,6 +522,13 @@ func parseCanonicalUTC(value string) (time.Time, error) {
 	return parsed, nil
 }
 
+// IsCanonicalUTCTimestamp reports whether value is the canonical UTC form used
+// by signed layered manifests and local layered-attempt state.
+func IsCanonicalUTCTimestamp(value string) bool {
+	_, err := parseCanonicalUTC(value)
+	return err == nil
+}
+
 func fixedDecimal(value string) (int, bool) {
 	result := 0
 	for index := 0; index < len(value); index++ {

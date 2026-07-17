@@ -38,7 +38,7 @@ func TestWindowsEntryRejectsCacheFileReplacedDuringDownload(t *testing.T) {
 			return successfulTestCommand(ctx, path, args...)
 		},
 	}
-	if err := app.Run(t.Context(), fixture.args(windowsEntryTestCacheDir(t))); err == nil {
+	if err := app.Run(t.Context(), fixture.args(t, windowsEntryTestCacheDir(t))); err == nil {
 		t.Fatal("cache file replacement during download was accepted")
 	}
 	if commandCalled {
