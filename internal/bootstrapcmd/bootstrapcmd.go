@@ -196,7 +196,7 @@ func runLayeredTemporary(ctx context.Context, opts LayeredRunOptions) (LayeredRu
 		ExpectedSize:   asset.SizeBytes,
 		OutputPath:     paths.output,
 		CachePath:      paths.content,
-		Client:         client,
+		Transport:      assetdownload.HTTPTransport{Client: client},
 	})
 	if err != nil {
 		return LayeredRunReport{}, layeredRuntime{}, err
@@ -659,7 +659,7 @@ func (a App) downloadVerifiedHelper(ctx context.Context, opts upgradeOptions) (a
 		OutputPath:     opts.Out,
 		CachePath:      cachePath,
 		ExpectedSHA256: strings.TrimSpace(expected),
-		Client:         a.client(),
+		Transport:      assetdownload.HTTPTransport{Client: a.client()},
 	})
 	if rawErr == nil {
 		return result, nil

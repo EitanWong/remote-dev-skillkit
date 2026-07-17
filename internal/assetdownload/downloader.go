@@ -7,11 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+)
+
+const (
+	downloadStatusOK              = 200
+	downloadStatusPartialContent  = 206
+	downloadStatusRequestTimeout  = 408
+	downloadStatusTooManyRequests = 429
 )
 
 type Mirror struct {
@@ -26,7 +32,7 @@ type Options struct {
 	CachePath      string
 	ExpectedSHA256 string
 	ExpectedSize   int64
-	Client         *http.Client
+	Transport      Transport
 	MaxAttempts    int
 }
 
@@ -73,6 +79,9 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 	}
 	if opts.ExpectedSize < 0 {
 		return Result{}, fmt.Errorf("expected size must not be negative")
+	}
+	if opts.Transport == nil {
+		return Result{}, fmt.Errorf("transport is required")
 	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
 		return Result{}, err
@@ -124,10 +133,6 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 	if len(mirrors) == 0 {
 		return Result{}, fmt.Errorf("at least one mirror is required")
 	}
-	client := opts.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
 	maxAttempts := opts.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 3
@@ -140,7 +145,7 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 					return Result{}, err
 				}
 			}
-			resumed, err := downloadOnce(ctx, client, mirror.URL, outputPath, opts.ExpectedSize)
+			resumed, err := downloadOnce(ctx, opts.Transport, mirror.URL, outputPath, opts.ExpectedSize)
 			if err != nil {
 				lastErr = err
 				result.Transcript = append(result.Transcript, Event{Phase: "download-error", URL: mirror.URL, Message: err.Error()})
@@ -195,7 +200,7 @@ func normalizedMirrors(values []Mirror) []Mirror {
 	return out
 }
 
-func downloadOnce(ctx context.Context, client *http.Client, rawURL, outputPath string, expectedSize int64) (bool, error) {
+func downloadOnce(ctx context.Context, transport Transport, rawURL, outputPath string, expectedSize int64) (_ bool, resultErr error) {
 	partPath := outputPath + ".part"
 	var offset int64
 	if info, err := os.Stat(partPath); err == nil {
@@ -205,24 +210,29 @@ func downloadOnce(ctx context.Context, client *http.Client, rawURL, outputPath s
 		_ = os.Remove(partPath)
 		return false, fmt.Errorf("partial download exceeds expected size: got %d bytes, expected %d", offset, expectedSize)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	resp, err := transport.Fetch(ctx, TransportRequest{
+		URL:      rawURL,
+		Offset:   offset,
+		MaxBytes: expectedSize,
+	})
 	if err != nil {
+		if resp.Body != nil {
+			err = errors.Join(err, wrapResponseBodyCloseError(resp.Body.Close()))
+		}
 		return false, err
 	}
-	if offset > 0 {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+	if resp.Body == nil {
+		return false, fmt.Errorf("download response body is required")
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-	appendMode := offset > 0 && resp.StatusCode == http.StatusPartialContent
-	if offset > 0 && resp.StatusCode == http.StatusOK {
+	defer func() {
+		resultErr = errors.Join(resultErr, wrapResponseBodyCloseError(resp.Body.Close()))
+	}()
+	appendMode := offset > 0 && resp.StatusCode == downloadStatusPartialContent
+	if offset > 0 && resp.StatusCode == downloadStatusOK {
 		offset = 0
 	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		err := fmt.Errorf("download failed: %s", resp.Status)
+	if resp.StatusCode != downloadStatusOK && resp.StatusCode != downloadStatusPartialContent {
+		err := fmt.Errorf("download failed: status %d", resp.StatusCode)
 		if retryableStatus(resp.StatusCode) {
 			return false, retryableError{err: err}
 		}
@@ -264,9 +274,15 @@ func downloadOnce(ctx context.Context, client *http.Client, rawURL, outputPath s
 	return appendMode, nil
 }
 
+func wrapResponseBodyCloseError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("close download response body: %w", err)
+}
+
 func promotePart(partPath, outputPath string) error {
-	_ = os.Remove(outputPath)
-	return os.Rename(partPath, outputPath)
+	return atomicReplace(partPath, outputPath)
 }
 
 func copyVerifiedFile(src, dst string) error {
@@ -295,8 +311,11 @@ func copyVerifiedFile(src, dst string) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	_ = os.Remove(dst)
-	return os.Rename(tmp, dst)
+	if err := atomicReplace(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func verifiedFile(path, expected string, expectedSize int64) (string, int64, bool) {
@@ -370,8 +389,8 @@ func retryable(err error) bool {
 }
 
 func retryableStatus(status int) bool {
-	return status == http.StatusRequestTimeout ||
-		status == http.StatusTooManyRequests ||
+	return status == downloadStatusRequestTimeout ||
+		status == downloadStatusTooManyRequests ||
 		status >= 500
 }
 
