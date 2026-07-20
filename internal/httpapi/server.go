@@ -334,6 +334,11 @@ func (s Server) joinSession(w http.ResponseWriter, r *http.Request, sessionID st
 }
 
 func (s Server) sessionEventsAfter(w http.ResponseWriter, r *http.Request, sessionID string) {
+	wait, err := parseLongPollWait(r)
+	if err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrTooManyEvents, err.Error(), true))
+		return
+	}
 	afterSeq, err := parseOptionalUint(r.URL.Query().Get("after_seq"), "after_seq")
 	if err != nil {
 		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrStaleCursor, err.Error(), true))
@@ -354,13 +359,56 @@ func (s Server) sessionEventsAfter(w http.ResponseWriter, r *http.Request, sessi
 		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrTooManyEvents, err.Error(), true))
 		return
 	}
-	events, lease, replay, err := s.Gateway.SessionEventsAfter(sessionID, controlplane.EventCursor{
+	cursor := controlplane.EventCursor{
 		EndpointID:   r.URL.Query().Get("endpoint_id"),
 		LeaseSecret:  extractBearerToken(r),
 		AfterSeq:     afterSeq,
 		ReceivedSeq:  receivedSeq,
 		ProcessedSeq: processedSeq,
-	}, limit)
+	}
+	if wait > 0 {
+		preview, currentLease, peekReplay, peekErr := s.Gateway.PeekSessionEventsAfter(sessionID, cursor, limit)
+		if peekErr != nil {
+			writeControlPlaneErrorWithReplay(w, peekErr, peekReplay)
+			return
+		}
+		deadline := time.Now().Add(wait)
+		if !currentLease.RenewAfter.IsZero() {
+			renewalDeadline := currentLease.RenewAfter.Add(-time.Second)
+			if renewalDeadline.Before(deadline) {
+				deadline = renewalDeadline
+			}
+		}
+		if len(preview) == 0 && time.Now().Before(deadline) {
+			timer := time.NewTimer(time.Until(deadline))
+			ticker := time.NewTicker(100 * time.Millisecond)
+		waitLoop:
+			for {
+				select {
+				case <-r.Context().Done():
+					timer.Stop()
+					ticker.Stop()
+					return
+				case <-timer.C:
+					break waitLoop
+				case <-ticker.C:
+					preview, _, peekReplay, peekErr = s.Gateway.PeekSessionEventsAfter(sessionID, cursor, limit)
+					if peekErr != nil {
+						timer.Stop()
+						ticker.Stop()
+						writeControlPlaneErrorWithReplay(w, peekErr, peekReplay)
+						return
+					}
+					if len(preview) > 0 {
+						timer.Stop()
+						break waitLoop
+					}
+				}
+			}
+			ticker.Stop()
+		}
+	}
+	events, lease, replay, err := s.Gateway.SessionEventsAfter(sessionID, cursor, limit)
 	if err != nil {
 		writeControlPlaneErrorWithReplay(w, err, replay)
 		return

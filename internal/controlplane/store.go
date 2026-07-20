@@ -322,6 +322,47 @@ func (s *MemoryStore) EventsAfter(sessionID string, cursor EventCursor, limit in
 	return events, lease, replay, nil
 }
 
+// PeekEventsAfter validates the endpoint lease and returns visible events
+// without renewing the lease or mutating endpoint cursor state.
+func (s *MemoryStore) PeekEventsAfter(sessionID string, cursor EventCursor, limit int) ([]Event, Lease, EventReplayState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.sessions[sessionID]
+	if !ok {
+		return nil, Lease{}, EventReplayState{}, s.err(ErrInvalidJoinCode, "session not found", false)
+	}
+	replay := EventReplayState{
+		SnapshotSeq:  session.SnapshotSeq,
+		LastSeq:      session.LastSeq,
+		RetryAfterMS: session.RetryAfterMS,
+	}
+	if s.sessionExpired(session) {
+		return nil, Lease{}, replay, s.err(ErrTerminalSession, "session is expired", false)
+	}
+	if sessionTerminal(session.Status) {
+		return nil, Lease{}, replay, s.err(ErrTerminalSession, "session is terminal", false)
+	}
+	if cursor.AfterSeq < session.SnapshotSeq {
+		replay.SnapshotRequired = true
+		return nil, Lease{}, replay, s.err(ErrSnapshotRequired, "event cursor is older than compacted snapshot", true)
+	}
+	endpointIndex := s.endpointIndexLocked(session, cursor.EndpointID)
+	if endpointIndex < 0 {
+		return nil, Lease{}, replay, s.err(ErrEndpointNotFound, "endpoint not found", true)
+	}
+	endpoint := session.Endpoints[endpointIndex]
+	reconnecting, err := s.authorizeLeaseLocked(session, endpoint.ID, cursor.LeaseSecret)
+	if err != nil {
+		return nil, Lease{}, replay, err
+	}
+	replay.Reconnecting = reconnecting
+	if limit <= 0 || limit > session.Limits.EventBatch {
+		limit = session.Limits.EventBatch
+	}
+	return s.visibleEventsLocked(sessionID, endpoint, cursor.AfterSeq, limit), s.leases[endpoint.ID].Current, replay, nil
+}
+
 func (s *MemoryStore) EventsAfterForAgent(sessionID string, afterSeq uint64, limit int) ([]Event, EventReplayState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -196,6 +197,119 @@ func TestHTTPSessionCreateJoinEventsAndSnapshot(t *testing.T) {
 	decodeHTTP(t, snapshotRec, &snapshot)
 	if snapshot.Snapshot.Session.ID != created.Session.ID || snapshot.Snapshot.Limits.EventBatch == 0 {
 		t.Fatalf("snapshot missing session recovery fields: %#v", snapshot.Snapshot)
+	}
+}
+
+func TestHTTPSessionEventsLongPollWaitsForNewEvent(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "long poll fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, _, err := gw.JoinSessionByCode(session.JoinCode, controlplane.EndpointSpec{
+		Role:      controlplane.EndpointRoleTarget,
+		Transport: controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := gw.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServer(gw).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/v1/sessions/"+url.PathEscape(session.ID)+"/events?endpoint_id="+url.QueryEscape(endpoint.ID)+"&after_seq="+fmt.Sprint(joined.LastSeq)+"&wait_ms=300", nil)
+	request.Header.Set("Authorization", "Bearer "+lease.Secret)
+	recorder := httptest.NewRecorder()
+	started := time.Now()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(recorder, request)
+		close(done)
+	}()
+	time.Sleep(40 * time.Millisecond)
+	appended, err := gw.AppendSessionEvent(session.ID, controlplane.Event{
+		Type:           controlplane.EventType("status"),
+		ToEndpointID:   endpoint.ID,
+		IdempotencyKey: "long-poll-event",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("long-poll event request did not finish")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("long-poll status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if elapsed := time.Since(started); elapsed < 30*time.Millisecond || elapsed >= 300*time.Millisecond {
+		t.Fatalf("long-poll elapsed = %v, want response after appended event", elapsed)
+	}
+	var response struct {
+		Events []controlplane.Event `json:"events"`
+		Lease  controlplane.Lease   `json:"lease"`
+	}
+	decodeHTTP(t, recorder, &response)
+	if len(response.Events) != 1 || response.Events[0].Seq != appended.Seq {
+		t.Fatalf("long-poll events = %#v, want appended event", response.Events)
+	}
+	if response.Lease.Generation != lease.Generation+1 {
+		t.Fatalf("long-poll lease generation = %d, want exactly one renewal from %d", response.Lease.Generation, lease.Generation)
+	}
+}
+
+func TestHTTPSessionEventsLongPollIgnoresInvisibleEvent(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "long poll visibility fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, _, err := gw.JoinSessionByCode(session.JoinCode, controlplane.EndpointSpec{
+		Role:      controlplane.EndpointRoleTarget,
+		Transport: controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := gw.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServer(gw).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/v1/sessions/"+url.PathEscape(session.ID)+"/events?endpoint_id="+url.QueryEscape(endpoint.ID)+"&after_seq="+fmt.Sprint(joined.LastSeq)+"&wait_ms=180", nil)
+	request.Header.Set("Authorization", "Bearer "+lease.Secret)
+	recorder := httptest.NewRecorder()
+	started := time.Now()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(recorder, request)
+		close(done)
+	}()
+	time.Sleep(30 * time.Millisecond)
+	if _, err := gw.AppendSessionEvent(session.ID, controlplane.Event{
+		Type:           controlplane.EventType("status"),
+		ToEndpointID:   "different-endpoint",
+		IdempotencyKey: "invisible-long-poll-event",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("long-poll visibility request did not finish")
+	}
+	if elapsed := time.Since(started); elapsed < 150*time.Millisecond {
+		t.Fatalf("invisible event ended long-poll early after %v", elapsed)
+	}
+	var response struct {
+		Events []controlplane.Event `json:"events"`
+		Lease  controlplane.Lease   `json:"lease"`
+	}
+	decodeHTTP(t, recorder, &response)
+	if len(response.Events) != 0 || response.Lease.Generation != lease.Generation+1 {
+		t.Fatalf("invisible long-poll response events=%#v generation=%d", response.Events, response.Lease.Generation)
 	}
 }
 
