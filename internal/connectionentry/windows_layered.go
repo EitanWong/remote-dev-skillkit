@@ -46,16 +46,9 @@ type windowsLayeredHandoff struct {
 }
 
 type windowsLayeredVerification struct {
-	SchemaVersion            string    `json:"schema_version"`
-	GeneratedAt              time.Time `json:"generated_at"`
-	Platform                 string    `json:"platform"`
-	ArtifactName             string    `json:"artifact_name"`
-	ArtifactSHA256           string    `json:"artifact_sha256"`
-	ArtifactSize             int64     `json:"artifact_size"`
-	ReleaseManifest          string    `json:"release_manifest"`
-	LayeredAssetsManifestURL string    `json:"layered_assets_manifest_url"`
-	ReleaseVersion           string    `json:"release_version"`
-	Verification             string    `json:"verification"`
+	SchemaVersion string `json:"schema_version"`
+	Platform      string `json:"platform"`
+	Verification  string `json:"verification"`
 }
 
 func prepareWindowsLayeredHandoff(plan Plan, invite agentinvite.Invite, opts Options, outDir string) (*windowsLayeredHandoff, error) {
@@ -202,16 +195,9 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 		return nil, fmt.Errorf("encode Windows bootstrap release manifest: %w", err)
 	}
 	verification := windowsLayeredVerification{
-		SchemaVersion:            windowsLayeredHandoffSchemaVersion,
-		GeneratedAt:              handoff.generatedAt.UTC(),
-		Platform:                 "windows/amd64",
-		ArtifactName:             windowsLayeredBootstrapName,
-		ArtifactSHA256:           handoff.manifest.ArtifactSHA256,
-		ArtifactSize:             handoff.manifest.ArtifactSize,
-		ReleaseManifest:          windowsLayeredReleaseManifestName,
-		LayeredAssetsManifestURL: handoff.layeredAssetsManifestURL,
-		ReleaseVersion:           handoff.releaseVersion,
-		Verification:             "verified",
+		SchemaVersion: windowsLayeredHandoffSchemaVersion,
+		Platform:      "windows/amd64",
+		Verification:  "verified",
 	}
 	verificationJSON, err := json.Marshal(verification)
 	if err != nil {
@@ -219,7 +205,13 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 	}
 	checksum := []byte(handoff.manifest.ArtifactSHA256 + "  " + windowsLayeredBootstrapName)
 	launcher := []byte(renderWindowsLayeredLauncher(handoff, fallbackRelative))
-	commandLauncher := []byte(renderWindowsLayeredCommandLauncher(handoff, fallbackRelative))
+	launcherDigest := sha256.Sum256(launcher)
+	commandLauncher := []byte(renderWindowsLayeredCommandLauncher(
+		handoff,
+		fallbackRelative,
+		hex.EncodeToString(launcherDigest[:]),
+		len(launcher),
+	))
 
 	files := []windowsLayeredArchiveFile{
 		{name: windowsLayeredBootstrapName, content: handoff.bootstrap},
@@ -325,7 +317,7 @@ func writePrivateWindowsLayeredFile(path string, content []byte) error {
 func renderWindowsLayeredLauncher(handoff *windowsLayeredHandoff, fallbackRelative string) string {
 	return fmt.Sprintf(`param(
     [string] $AttemptDir = '',
-    [ValidateSet('powershell', 'powershell-bypass')] [string] $Launcher = 'powershell',
+    [string] $Launcher = 'powershell',
     [switch] $Brokered
 )
 
@@ -333,15 +325,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Assert-NoReparsePoint([string] $Path) {
-    if ($Path.StartsWith('\\')) {
-        throw 'UNC paths are not allowed.'
-    }
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) { throw 1 }
     $cursor = [IO.Path]::GetFullPath($Path)
+    if ($cursor.StartsWith('\\') -or $cursor.StartsWith('//')) { throw 'UNC paths are not allowed.' }
+    $root = [IO.Path]::GetPathRoot($cursor)
+    if (([IO.DriveInfo]::new($root)).DriveType -ne [IO.DriveType]::Fixed) { throw 1 }
     while ($true) {
         $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw 'Reparse rejected.'
-        }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 1 }
         $parent = [IO.Directory]::GetParent($cursor)
         if ($null -eq $parent) { break }
         $cursor = $parent.FullName
@@ -355,155 +346,128 @@ function Protect-PrivatePath([string] $Path) {
     $admin = 'S-1-5-32-544'
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     $perm = if ($item.PSIsContainer) { '(OI)(CI)F' } else { 'F' }
-    $aclTool = Join-Path $env:SystemRoot 'System32\icacls.exe'
+    $aclTool = "$env:SystemRoot\System32\icacls.exe"
+    & $aclTool $Path '/reset' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 1 }
     & $aclTool $Path '/inheritance:r' '/grant:r' "*${user}:$perm" "*${sys}:$perm" "*${admin}:$perm" | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'ACL setup failed.'
-    }
+    if ($LASTEXITCODE -ne 0) { throw 1 }
     $trusted = @($user, $sys, $admin)
     $acl = Get-Acl -LiteralPath $Path
     $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-    if ($trusted -notcontains $owner) {
-        throw 'Untrusted owner.'
-    }
+    if ($trusted -notcontains $owner) { throw 1 }
     foreach ($rule in $acl.Access) {
-        if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) {
-            continue
-        }
-        try {
-            $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-        } catch {
-            throw 'Invalid ACL identity.'
-        }
-        if ($trusted -notcontains $sid) {
-            throw 'ACL grants access to an untrusted identity.'
-        }
+        if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
+        try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { throw 1 }
+        if ($trusted -notcontains $sid) { throw 'ACL grants access to an untrusted identity.' }
     }
 }
 
-function New-Attempt {
-    $root = Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RemoteDevSkillkit') 'attempts'
-    [IO.Directory]::CreateDirectory($root) | Out-Null
-    Protect-PrivatePath $root
-    for ($attempt = 0; $attempt -lt 32; $attempt++) {
-        $path = Join-Path $root ([IO.Path]::GetRandomFileName())
-        try {
-            New-Item -ItemType Directory -Path $path -ErrorAction Stop | Out-Null
-        } catch [IO.IOException] {
-            continue
-        }
-        Protect-PrivatePath $path
-        return $path
-    }
-    throw 'No attempt.'
+function Invoke-AttemptCheck([string] $Path, [string] $Launch, [switch] $Create) {
+    $check = @('layered-run', 'attempt-check', '--attempt-dir', $Path, '--launcher', $Launch)
+    if ($Create) { $check += '--create' }
+    & $bootstrapPath @check
+    $LASTEXITCODE
 }
 
-function Test-PreCore([string] $Path) {
-    Assert-NoReparsePoint $Path
-    if (Test-Path -LiteralPath (Join-Path $Path 'attempt.lock')) { return $false }
-    $statePath = Join-Path $Path 'state.json'
-    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { return $true }
-    Assert-NoReparsePoint $statePath
-    if ((Get-Item -LiteralPath $statePath -Force -ErrorAction Stop).Length -gt 1024) { return $false }
-    return ([IO.File]::ReadAllText($statePath)).Contains('"stage":"pre_core"')
+function Assert-PrivatePath([string] $Path, [string] $Kind) {
+    & $bootstrapPath 'layered-run' 'private-path-check' '--path' $Path '--kind' $Kind
+    if ($LASTEXITCODE -ne 0) { throw 1 }
 }
 
-$bootstrapPath = Join-Path $PSScriptRoot '%s'
-$nativePath = Join-Path $PSScriptRoot '%s'
-$fallbackPath = Join-Path $PSScriptRoot %s
-$expectedSHA256 = '%s'
-$expectedSize = %d
+function Invoke-Layered([string] $Launch) {
+    $run = @('layered-run', '--manifest-url', %s, '--root-public-key', %s, '--expected-release-version', %s, '--platform', 'windows/amd64', '--cache-dir', $cacheDir, '--attempt-dir', $AttemptDir, '--launcher', $Launch, '--mode', 'temporary', '--', 'serve', '--mode', 'temporary', '--manifest-url', %s, '--manifest-root-public-key', %s, '--transport', 'auto', '--once=false', '--max-tasks', '0')
+    & $bootstrapPath @run
+    $script:layeredExitCode = $LASTEXITCODE
+}
+
+$bootstrapPath = "$PSScriptRoot\%s"
+$commandLauncher = "$PSScriptRoot\%s"
+$powerShellLauncher = $PSCommandPath
+$attemptRoot = [IO.Path]::GetFullPath("$env:LOCALAPPDATA\RemoteDevSkillkit\attempts")
+$cacheDir = [IO.Path]::GetFullPath("$env:LOCALAPPDATA\RemoteDevSkillkit\cache")
 $layeredExitCode = 1
-$ready = $false
 try {
-    if (-not (Test-Path -LiteralPath $bootstrapPath -PathType Leaf)) {
-        throw 'No bootstrap.'
-    }
-    if (-not (Test-Path -LiteralPath $nativePath -PathType Leaf)) {
-        throw 'No CMD.'
-    }
-    $cacheDir = Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RemoteDevSkillkit') 'cache'
-    [IO.Directory]::CreateDirectory($cacheDir) | Out-Null
+    if (-not (Test-Path -LiteralPath $bootstrapPath -PathType Leaf) -or -not (Test-Path -LiteralPath $commandLauncher -PathType Leaf)) { throw 1 }
     Protect-PrivatePath $PSScriptRoot
     Protect-PrivatePath $bootstrapPath
-    Protect-PrivatePath $nativePath
-    Protect-PrivatePath $cacheDir
+    Protect-PrivatePath $commandLauncher
+    Protect-PrivatePath $powerShellLauncher
     if ([string]::IsNullOrWhiteSpace($AttemptDir)) {
-        $AttemptDir = New-Attempt
+        $createAttempt = $true
     } else {
         $AttemptDir = [IO.Path]::GetFullPath($AttemptDir)
-        Protect-PrivatePath $AttemptDir
+        $createAttempt = $false
     }
-    $ready = $true
-    Assert-NoReparsePoint $bootstrapPath
     $bootstrapLock = [IO.File]::Open($bootstrapPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     try {
-        Assert-NoReparsePoint $bootstrapPath
         $sha = [Security.Cryptography.SHA256]::Create()
-        try {
-            $actualSHA256 = ([BitConverter]::ToString($sha.ComputeHash($bootstrapLock)) -replace '-', '').ToLowerInvariant()
-        } finally {
-            $sha.Dispose()
+        try { $actualSHA256 = ([BitConverter]::ToString($sha.ComputeHash($bootstrapLock)) -replace '-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+        if ($actualSHA256 -ne '%s' -or $bootstrapLock.Length -ne %d) { throw 1 }
+        Assert-PrivatePath $PSScriptRoot 'directory'
+        Assert-PrivatePath $bootstrapPath 'file'
+        Assert-PrivatePath $commandLauncher 'file'
+        Assert-PrivatePath $powerShellLauncher 'file'
+        if ($createAttempt) {
+            $created = $false
+            for ($tries = 0; $tries -lt 32; $tries++) {
+                $AttemptDir = [IO.Path]::Combine($attemptRoot, [IO.Path]::GetRandomFileName())
+                $checkExit = Invoke-AttemptCheck $AttemptDir $Launcher -Create
+                if ($checkExit -eq 0) { $created = $true; break }
+                if ($checkExit -ne 2) { throw 1 }
+            }
+            if (-not $created) { throw 1 }
+        } elseif ((Invoke-AttemptCheck $AttemptDir $Launcher) -ne 0) { throw 1 }
+        Invoke-Layered $Launcher
+        $layeredExitCode = $script:layeredExitCode
+        if ($layeredExitCode -eq 0) { exit 0 }
+        if (-not $Brokered) {
+            if ((Invoke-AttemptCheck $AttemptDir 'cmd') -eq 0) {
+                & $commandLauncher '--native' '--attempt-dir' $AttemptDir
+                exit $LASTEXITCODE
+            }
         }
-        if ($actualSHA256 -ne $expectedSHA256 -or $bootstrapLock.Length -ne $expectedSize) {
-            throw 'Bad bootstrap.'
-        }
-        & $bootstrapPath 'layered-run' '--manifest-url' %s '--root-public-key' %s '--expected-release-version' %s '--platform' 'windows/amd64' '--cache-dir' $cacheDir '--attempt-dir' $AttemptDir '--launcher' $Launcher '--mode' 'temporary' '--' 'serve' '--mode' 'temporary' '--manifest-url' %s '--manifest-root-public-key' %s '--transport' 'auto' '--once=false' '--max-tasks' '0'
-        $layeredExitCode = $LASTEXITCODE
-    } finally {
-        $bootstrapLock.Dispose()
-    }
-    if ($layeredExitCode -eq 0) {
-        exit 0
-    }
-    if ((-not $Brokered) -and (Test-PreCore $AttemptDir)) {
-        & $nativePath '--native' '--attempt-dir' $AttemptDir '--launcher' 'cmd'
-        exit $LASTEXITCODE
-    }
-    Write-Warning 'Layered bootstrap failed verification or execution; refusing automatic archive fallback.'
-    Write-Warning ('Run the verified archive fallback explicitly: signed archive recovery profile "{0}"' -f $fallbackPath)
+    } finally { $bootstrapLock.Dispose() }
+    Write-Warning 'Run the signed archive recovery profile: ARCHIVE-RECOVERY.txt.'
     exit $layeredExitCode
 } catch {
-    $fallback = $false
-    if ($ready -and (-not $Brokered)) {
-        try { $fallback = Test-PreCore $AttemptDir } catch { $fallback = $false }
-    }
-    if ($fallback) {
-        & $nativePath '--native' '--attempt-dir' $AttemptDir '--launcher' 'cmd'
-        exit $LASTEXITCODE
-    }
     Write-Warning 'Layered bootstrap preparation failed; refusing automatic archive fallback.'
-    Write-Warning ('Run the verified archive fallback explicitly: signed archive recovery profile "{0}"' -f $fallbackPath)
+    Write-Warning 'Run the signed archive recovery profile: ARCHIVE-RECOVERY.txt.'
     exit 1
 }
-`, windowsLayeredBootstrapName,
-		windowsLayeredCommandLauncherName,
-		powerShellSingleQuoted(fallbackRelative),
-		handoff.manifest.ArtifactSHA256,
-		handoff.manifest.ArtifactSize,
-		powerShellSingleQuoted(handoff.layeredAssetsManifestURL),
+`, powerShellSingleQuoted(handoff.layeredAssetsManifestURL),
 		powerShellSingleQuoted(handoff.releaseRootPublicKey),
 		powerShellSingleQuoted(handoff.releaseVersion),
 		powerShellSingleQuoted(handoff.joinManifestURL),
 		powerShellSingleQuoted(handoff.joinManifestRoot),
+		windowsLayeredBootstrapName,
+		windowsLayeredCommandLauncherName,
+		handoff.manifest.ArtifactSHA256,
+		handoff.manifest.ArtifactSize,
 	)
 }
 
-func renderWindowsLayeredCommandLauncher(handoff *windowsLayeredHandoff, fallbackRelative string) string {
+func renderWindowsLayeredCommandLauncher(handoff *windowsLayeredHandoff, _ string, expectedPowerShellSHA256 string, expectedPowerShellSize int) string {
 	launcher := `@echo off
 setlocal EnableExtensions DisableDelayedExpansion
 
 set "HANDOFF_DIR=%~dp0"
 set "HANDOFF_DIR=%HANDOFF_DIR:~0,-1%"
-set "BOOTSTRAP=%HANDOFF_DIR%\__BOOTSTRAP__"
-set "PS_LAUNCHER=%HANDOFF_DIR%\__POWERSHELL_LAUNCHER__"
+set "SOURCE_BOOTSTRAP=%HANDOFF_DIR%\__BOOTSTRAP__"
+set "BOOTSTRAP="
+set "STAGED_BOOTSTRAP="
+set "SOURCE_PS_LAUNCHER=%HANDOFF_DIR%\__POWERSHELL_LAUNCHER__"
+set "PS_LAUNCHER="
+set "STAGED_PS_LAUNCHER="
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-set "FALLBACK_PATH=%HANDOFF_DIR%\__FALLBACK__"
 set "EXPECTED_SHA256=__SHA256__"
 set "EXPECTED_SIZE=__SIZE__"
+set "EXPECTED_PS_SHA256=__PS_SHA256__"
+set "EXPECTED_PS_SIZE=__PS_SIZE__"
+set "COMMAND_LAUNCHER=%HANDOFF_DIR%\__COMMAND_LAUNCHER__"
 if not defined LOCALAPPDATA goto failure
 set "CACHE_DIR=%LOCALAPPDATA%\RemoteDevSkillkit\cache"
 set "ATTEMPT_ROOT=%LOCALAPPDATA%\RemoteDevSkillkit\attempts"
+call :load_sid || goto failure
 
 if /I "%~1"=="--native" goto native_arguments
 if not "%~1"=="" goto failure
@@ -513,126 +477,261 @@ goto broker
 if /I not "%~2"=="--attempt-dir" goto failure
 set "ATTEMPT_DIR=%~3"
 if not defined ATTEMPT_DIR goto failure
-if /I not "%~4"=="--launcher" goto failure
-if /I not "%~5"=="cmd" goto failure
-if not "%~6"=="" goto failure
+if not "%~4"=="" goto failure
 goto native
 
 :broker
-call :protect_directory "%HANDOFF_DIR%" || goto failure
-if not exist "%ATTEMPT_ROOT%" mkdir "%ATTEMPT_ROOT%" >nul 2>&1
-if not exist "%ATTEMPT_ROOT%" goto failure
-call :protect_directory "%ATTEMPT_ROOT%" || goto failure
+call :prepare_bootstrap || goto failure
+set "TARGET=%COMMAND_LAUNCHER%"
+set "TARGET_KIND=file"
+call :reject_unsafe_path || goto failure
+call :protect_file || goto failure
+call :verify_private_target || goto failure
 set "ATTEMPT_TRIES=0"
 
 :create_attempt
 set /a ATTEMPT_TRIES+=1 >nul
 if %ATTEMPT_TRIES% GTR 32 goto failure
 set "ATTEMPT_DIR=%ATTEMPT_ROOT%\%RANDOM%-%RANDOM%-%RANDOM%"
-mkdir "%ATTEMPT_DIR%" >nul 2>&1 || goto create_attempt
-call :protect_directory "%ATTEMPT_DIR%" || goto failure
-if not exist "%POWERSHELL%" goto native
+"%BOOTSTRAP%" layered-run attempt-check --attempt-dir "%ATTEMPT_DIR%" --launcher powershell --create >nul 2>&1
+if errorlevel 2 goto create_attempt
+if errorlevel 1 goto failure
+set "BROKER_EXIT=1"
+set "SKIP_PS="
+call :prepare_powershell
+if errorlevel 1 set "SKIP_PS=1"
+if not exist "%POWERSHELL%" set "SKIP_PS=1"
+if not defined SKIP_PS call :verify_powershell
+if not defined SKIP_PS if errorlevel 1 set "SKIP_PS=1"
 
-"%POWERSHELL%" -NoLogo -NoProfile -File "%PS_LAUNCHER%" -AttemptDir "%ATTEMPT_DIR%" -Launcher "powershell" -Brokered
-set "BROKER_EXIT=%ERRORLEVEL%"
-if "%BROKER_EXIT%"=="0" exit /b 0
-call :may_fallback || goto broker_exhausted
+if not defined SKIP_PS "%POWERSHELL%" -NoLogo -NoProfile -File "%PS_LAUNCHER%" -AttemptDir "%ATTEMPT_DIR%" -Launcher "powershell" -Brokered
+if not defined SKIP_PS set "BROKER_EXIT=%ERRORLEVEL%"
+if not defined SKIP_PS if "%BROKER_EXIT%"=="0" goto success
+if not defined SKIP_PS call :verify_bootstrap
+if not defined SKIP_PS if errorlevel 1 goto broker_exhausted
+if not defined SKIP_PS "%BOOTSTRAP%" layered-run attempt-check --attempt-dir "%ATTEMPT_DIR%" --launcher powershell-bypass >nul 2>&1
+if not defined SKIP_PS if errorlevel 1 goto broker_exhausted
 
-"%POWERSHELL%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%PS_LAUNCHER%" -AttemptDir "%ATTEMPT_DIR%" -Launcher "powershell-bypass" -Brokered
-set "BROKER_EXIT=%ERRORLEVEL%"
-if "%BROKER_EXIT%"=="0" exit /b 0
-call :may_fallback || goto broker_exhausted
-
-call "%~f0" "--native" "--attempt-dir" "%ATTEMPT_DIR%" "--launcher" "cmd"
-exit /b %ERRORLEVEL%
+if not defined SKIP_PS call :verify_powershell
+if not defined SKIP_PS if errorlevel 1 set "SKIP_PS=1"
+if not defined SKIP_PS "%POWERSHELL%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%PS_LAUNCHER%" -AttemptDir "%ATTEMPT_DIR%" -Launcher "powershell-bypass" -Brokered
+if not defined SKIP_PS set "BROKER_EXIT=%ERRORLEVEL%"
+if not defined SKIP_PS if "%BROKER_EXIT%"=="0" goto success
+call :verify_bootstrap || goto broker_exhausted
+goto native
 
 :broker_exhausted
+call :cleanup_bootstrap >nul 2>&1
+if errorlevel 1 set "BROKER_EXIT=1"
 echo [rdev] core_started core_exited; no second core.
-echo [rdev] Run the verified archive fallback explicitly: signed archive recovery profile "%FALLBACK_PATH%"
+echo [rdev] Run the signed archive recovery profile: ARCHIVE-RECOVERY.txt.
 exit /b %BROKER_EXIT%
 
 :native
-
-call :protect_directory "%HANDOFF_DIR%" || goto failure
-call :protect_directory "%ATTEMPT_DIR%" || goto failure
-if not exist "%CACHE_DIR%" mkdir "%CACHE_DIR%" >nul 2>&1
-if not exist "%CACHE_DIR%" goto failure
-call :protect_directory "%CACHE_DIR%" || goto failure
-if not exist "%BOOTSTRAP%" goto failure
-call :protect_file "%BOOTSTRAP%" || goto failure
-
-for %%I in ("%BOOTSTRAP%") do set "ACTUAL_SIZE=%%~zI"
-if not "%ACTUAL_SIZE%"=="%EXPECTED_SIZE%" goto failure
-set "ACTUAL_SHA256="
-for /f "skip=1 tokens=1" %%H in ('%SystemRoot%\System32\certutil.exe -hashfile "%BOOTSTRAP%" SHA256') do if not defined ACTUAL_SHA256 set "ACTUAL_SHA256=%%H"
-if not defined ACTUAL_SHA256 goto failure
-if /I not "%ACTUAL_SHA256%"=="%EXPECTED_SHA256%" goto failure
-
-"%BOOTSTRAP%" "layered-run" "--manifest-url" __LAYERED_MANIFEST_URL__ "--root-public-key" __RELEASE_ROOT__ "--expected-release-version" __RELEASE_VERSION__ "--platform" "windows/amd64" "--cache-dir" "%CACHE_DIR%" "--attempt-dir" "%ATTEMPT_DIR%" "--launcher" "cmd" "--mode" "temporary" "--" "serve" "--mode" "temporary" "--manifest-url" __JOIN_MANIFEST_URL__ "--manifest-root-public-key" __JOIN_MANIFEST_ROOT__ "--transport" "auto" "--once=false" "--max-tasks" "0"
+call :prepare_bootstrap || goto failure
+call :verify_bootstrap || goto failure
+"%BOOTSTRAP%" layered-run attempt-check --attempt-dir "%ATTEMPT_DIR%" --launcher cmd >nul 2>&1 || goto failure
+set "TARGET=%HANDOFF_DIR%"
+set "TARGET_KIND=directory"
+call :reject_unsafe_path || goto failure
+call :protect_directory || goto failure
+call :verify_bootstrap || goto failure
+set "TARGET=%COMMAND_LAUNCHER%"
+set "TARGET_KIND=file"
+call :reject_unsafe_path || goto failure
+call :protect_file || goto failure
+call :verify_private_target || goto failure
+call :verify_bootstrap || goto failure
+"%BOOTSTRAP%" layered-run attempt-check --attempt-dir "%ATTEMPT_DIR%" --launcher cmd >nul 2>&1 || goto failure
+"%BOOTSTRAP%" layered-run --manifest-url __LAYERED_MANIFEST_URL__ --root-public-key __RELEASE_ROOT__ --expected-release-version __RELEASE_VERSION__ --platform windows/amd64 --cache-dir "%CACHE_DIR%" --attempt-dir "%ATTEMPT_DIR%" --launcher cmd --mode temporary -- serve --mode temporary --manifest-url __JOIN_MANIFEST_URL__ --manifest-root-public-key __JOIN_MANIFEST_ROOT__ --transport auto --once=false --max-tasks 0
 set "LAYERED_EXIT=%ERRORLEVEL%"
-if not "%LAYERED_EXIT%"=="0" echo [rdev] Layered bootstrap failed verification or execution; refusing automatic archive fallback.
-if not "%LAYERED_EXIT%"=="0" echo [rdev] Run the verified archive fallback explicitly: signed archive recovery profile "%FALLBACK_PATH%"
+call :cleanup_bootstrap >nul 2>&1
+if errorlevel 1 set "LAYERED_EXIT=1"
+if not "%LAYERED_EXIT%"=="0" echo [rdev] Run the signed archive recovery profile: ARCHIVE-RECOVERY.txt.
 exit /b %LAYERED_EXIT%
 
+:success
+call :cleanup_bootstrap >nul 2>&1 || goto failure
+exit /b 0
+
 :failure
+call :cleanup_bootstrap >nul 2>&1
 echo [rdev] Layered bootstrap preparation failed; refusing automatic archive fallback.
-echo [rdev] Run the verified archive fallback explicitly: signed archive recovery profile "%FALLBACK_PATH%"
+echo [rdev] Run the signed archive recovery profile: ARCHIVE-RECOVERY.txt.
 exit /b 1
 
-:may_fallback
-if exist "%ATTEMPT_DIR%\attempt.lock" exit /b 1
-set "STATE_PATH=%ATTEMPT_DIR%\state.json"
-if not exist "%STATE_PATH%" exit /b 0
-call :reject_unsafe_path "%STATE_PATH%" || exit /b 1
-for %%I in ("%STATE_PATH%") do if %%~zI GTR 1024 exit /b 1
-"%SystemRoot%\System32\findstr.exe" /l /c:"\"stage\":\"core_" "%STATE_PATH%" >nul 2>&1 && exit /b 1
-"%SystemRoot%\System32\findstr.exe" /l /c:"\"stage\":\"pre_core\"" "%STATE_PATH%" >nul 2>&1 || exit /b 1
+:prepare_bootstrap
+if defined BOOTSTRAP exit /b 0
+set "TARGET=%HANDOFF_DIR%"
+set "TARGET_KIND=directory"
+call :protect_directory || exit /b 1
+set "TARGET=%SOURCE_BOOTSTRAP%"
+set "EXPECTED_FILE_SHA=%EXPECTED_SHA256%"
+set "EXPECTED_FILE_SIZE=%EXPECTED_SIZE%"
+call :verify_digest || exit /b 1
+set "STAGE_TRIES=0"
+:stage_bootstrap
+set /a STAGE_TRIES+=1 >nul
+if %STAGE_TRIES% GTR 32 exit /b 1
+set "STAGED_BOOTSTRAP=%HANDOFF_DIR%\.rdev-bootstrap-%RANDOM%-%RANDOM%.exe"
+if exist "%STAGED_BOOTSTRAP%" goto stage_bootstrap
+copy /b "%SOURCE_BOOTSTRAP%" "%STAGED_BOOTSTRAP%" >nul 2>&1 || goto prepare_bootstrap_failure
+set "TARGET=%STAGED_BOOTSTRAP%"
+set "EXPECTED_FILE_SHA=%EXPECTED_SHA256%"
+set "EXPECTED_FILE_SIZE=%EXPECTED_SIZE%"
+call :verify_digest || goto prepare_bootstrap_failure
+set "BOOTSTRAP=%STAGED_BOOTSTRAP%"
+set "TARGET=%BOOTSTRAP%"
+call :verify_private_target || goto prepare_bootstrap_failure
+exit /b 0
+
+:prepare_bootstrap_failure
+call :cleanup_bootstrap >nul 2>&1
+exit /b 1
+
+:cleanup_bootstrap
+set "CLEANUP_EXIT=0"
+call :cleanup_powershell >nul 2>&1
+if errorlevel 1 set "CLEANUP_EXIT=1"
+if not defined STAGED_BOOTSTRAP exit /b %CLEANUP_EXIT%
+del /f /q "%STAGED_BOOTSTRAP%" >nul 2>&1
+if exist "%STAGED_BOOTSTRAP%" exit /b 1
+set "BOOTSTRAP="
+set "STAGED_BOOTSTRAP="
+exit /b %CLEANUP_EXIT%
+
+:prepare_powershell
+if defined PS_LAUNCHER exit /b 0
+set "TARGET=%SOURCE_PS_LAUNCHER%"
+set "EXPECTED_FILE_SHA=%EXPECTED_PS_SHA256%"
+set "EXPECTED_FILE_SIZE=%EXPECTED_PS_SIZE%"
+call :verify_digest || exit /b 1
+set "PS_STAGE_TRIES=0"
+:stage_powershell
+set /a PS_STAGE_TRIES+=1 >nul
+if %PS_STAGE_TRIES% GTR 32 exit /b 1
+set "STAGED_PS_LAUNCHER=%HANDOFF_DIR%\.Start-ConnectionEntry-%RANDOM%-%RANDOM%.ps1"
+if exist "%STAGED_PS_LAUNCHER%" goto stage_powershell
+copy /b "%SOURCE_PS_LAUNCHER%" "%STAGED_PS_LAUNCHER%" >nul 2>&1 || goto prepare_powershell_failure
+set "TARGET=%STAGED_PS_LAUNCHER%"
+set "EXPECTED_FILE_SHA=%EXPECTED_PS_SHA256%"
+set "EXPECTED_FILE_SIZE=%EXPECTED_PS_SIZE%"
+call :verify_digest || goto prepare_powershell_failure
+set "PS_LAUNCHER=%STAGED_PS_LAUNCHER%"
+exit /b 0
+
+:prepare_powershell_failure
+call :cleanup_powershell >nul 2>&1
+exit /b 1
+
+:cleanup_powershell
+if not defined STAGED_PS_LAUNCHER exit /b 0
+del /f /q "%STAGED_PS_LAUNCHER%" >nul 2>&1
+if exist "%STAGED_PS_LAUNCHER%" exit /b 1
+set "PS_LAUNCHER="
+set "STAGED_PS_LAUNCHER="
+exit /b 0
+
+:verify_bootstrap
+set "TARGET=%BOOTSTRAP%"
+set "EXPECTED_FILE_SHA=%EXPECTED_SHA256%"
+set "EXPECTED_FILE_SIZE=%EXPECTED_SIZE%"
+call :verify_file
+exit /b %ERRORLEVEL%
+
+:verify_powershell
+set "TARGET=%PS_LAUNCHER%"
+set "EXPECTED_FILE_SHA=%EXPECTED_PS_SHA256%"
+set "EXPECTED_FILE_SIZE=%EXPECTED_PS_SIZE%"
+call :verify_file
+exit /b %ERRORLEVEL%
+
+:verify_file
+call :verify_digest || exit /b 1
+call :verify_private_target || exit /b 1
+exit /b 0
+
+:verify_digest
+set "TARGET_KIND=file"
+call :reject_unsafe_path || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /reset >nul || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /inheritance:r /grant:r "*%CURRENT_SID%:F" "*S-1-5-18:F" "*S-1-5-32-544:F" >nul || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /setowner "*%CURRENT_SID%" >nul || exit /b 1
+set "ACTUAL_SIZE="
+for %%I in ("%TARGET%") do set "ACTUAL_SIZE=%%~zI"
+if not "%ACTUAL_SIZE%"=="%EXPECTED_FILE_SIZE%" exit /b 1
+"%SystemRoot%\System32\certutil.exe" -hashfile "%TARGET%" SHA256 2>nul | "%SystemRoot%\System32\findstr.exe" /i /x /c:"%EXPECTED_FILE_SHA%" >nul
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :protect_directory
-set "TARGET=%~1"
-call :reject_unsafe_path "%TARGET%" || exit /b 1
+set "TARGET_KIND=directory"
+call :reject_unsafe_path || exit /b 1
 "%SystemRoot%\System32\icacls.exe" "%TARGET%" /reset >nul || exit /b 1
-call :reject_unsafe_path "%TARGET%" || exit /b 1
-"%SystemRoot%\System32\icacls.exe" "%TARGET%" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" >nul || exit /b 1
-"%SystemRoot%\System32\icacls.exe" "%TARGET%" /setowner "%USERNAME%" >nul
-exit /b %ERRORLEVEL%
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /inheritance:r /grant:r "*%CURRENT_SID%:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" >nul || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /setowner "*%CURRENT_SID%" >nul || exit /b 1
+exit /b 0
 
 :protect_file
-set "TARGET=%~1"
-call :reject_unsafe_path "%TARGET%" || exit /b 1
+set "TARGET_KIND=file"
+call :reject_unsafe_path || exit /b 1
 "%SystemRoot%\System32\icacls.exe" "%TARGET%" /reset >nul || exit /b 1
-call :reject_unsafe_path "%TARGET%" || exit /b 1
-"%SystemRoot%\System32\icacls.exe" "%TARGET%" /inheritance:r /grant:r "%USERNAME%:F" "*S-1-5-18:F" "*S-1-5-32-544:F" >nul || exit /b 1
-"%SystemRoot%\System32\icacls.exe" "%TARGET%" /setowner "%USERNAME%" >nul
-exit /b %ERRORLEVEL%
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /inheritance:r /grant:r "*%CURRENT_SID%:F" "*S-1-5-18:F" "*S-1-5-32-544:F" >nul || exit /b 1
+"%SystemRoot%\System32\icacls.exe" "%TARGET%" /setowner "*%CURRENT_SID%" >nul || exit /b 1
+exit /b 0
+
+:verify_private_target
+"%BOOTSTRAP%" layered-run private-path-check --path "%TARGET%" --kind file >nul 2>&1 || exit /b 1
+if /I not "%TARGET%"=="%BOOTSTRAP%" exit /b 0
+"%BOOTSTRAP%" layered-run private-path-check --path "%HANDOFF_DIR%" --kind directory >nul 2>&1 || exit /b 1
+exit /b 0
 
 :reject_unsafe_path
-set "TARGET=%~1"
 if "%TARGET:~0,2%"=="\\" exit /b 1
-if not exist "%SystemRoot%\System32\fsutil.exe" exit /b 1
-for %%I in ("%TARGET%") do set "CURSOR=%%~fI"
-
+if /I not "%TARGET_KIND%"=="file" if /I not "%TARGET_KIND%"=="directory" exit /b 1
+if not exist "%TARGET%" exit /b 1
+set "CURSOR="
+set "ATTRS="
+for %%I in ("%TARGET%") do set "CURSOR=%%~fI"& set "ATTRS=%%~aI"
+if not defined CURSOR exit /b 1
+if not defined ATTRS exit /b 1
+if not "%ATTRS:l=%"=="%ATTRS%" exit /b 1
+if /I "%TARGET_KIND%"=="directory" if /I not "%ATTRS:~0,1%"=="d" exit /b 1
+if /I "%TARGET_KIND%"=="file" if /I "%ATTRS:~0,1%"=="d" exit /b 1
 :reject_unsafe_path_loop
-"%SystemRoot%\System32\fsutil.exe" reparsepoint query "%CURSOR%" >nul 2>&1
-if not errorlevel 1 exit /b 1
+set "PARENT="
 for %%I in ("%CURSOR%\..") do set "PARENT=%%~fI"
+if not defined PARENT exit /b 1
 if /I "%PARENT%"=="%CURSOR%" exit /b 0
 set "CURSOR=%PARENT%"
+set "ATTRS="
+for %%I in ("%CURSOR%") do set "ATTRS=%%~aI"
+if not defined ATTRS exit /b 1
+if not "%ATTRS:l=%"=="%ATTRS%" exit /b 1
 goto :reject_unsafe_path_loop
+
+:load_sid
+set "CURRENT_SID="
+for /f "tokens=2 delims=," %%S in ('"%SystemRoot%\System32\whoami.exe" /user /fo csv /nh') do if not defined CURRENT_SID set "CURRENT_SID=%%~S"
+if not defined CURRENT_SID exit /b 1
+if not "%CURRENT_SID:~0,4%"=="S-1-" exit /b 1
+exit /b 0
 `
-	return strings.NewReplacer(
+	rendered := strings.NewReplacer(
 		"__BOOTSTRAP__", windowsLayeredBootstrapName,
 		"__POWERSHELL_LAUNCHER__", windowsLayeredLauncherName,
-		"__FALLBACK__", fallbackRelative,
+		"__COMMAND_LAUNCHER__", windowsLayeredCommandLauncherName,
 		"__SHA256__", handoff.manifest.ArtifactSHA256,
 		"__SIZE__", strconv.FormatInt(handoff.manifest.ArtifactSize, 10),
+		"__PS_SHA256__", expectedPowerShellSHA256,
+		"__PS_SIZE__", strconv.Itoa(expectedPowerShellSize),
 		"__LAYERED_MANIFEST_URL__", quoteValidatedWindowsCommandArgument(handoff.layeredAssetsManifestURL),
 		"__RELEASE_ROOT__", quoteValidatedWindowsCommandArgument(handoff.releaseRootPublicKey),
 		"__RELEASE_VERSION__", quoteValidatedWindowsCommandArgument(handoff.releaseVersion),
 		"__JOIN_MANIFEST_URL__", quoteValidatedWindowsCommandArgument(handoff.joinManifestURL),
 		"__JOIN_MANIFEST_ROOT__", quoteValidatedWindowsCommandArgument(handoff.joinManifestRoot),
 	).Replace(launcher)
+	return strings.ReplaceAll(rendered, "\n", "\r\n")
 }
 
 func quoteValidatedWindowsCommandArgument(value string) string {

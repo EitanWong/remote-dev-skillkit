@@ -289,7 +289,7 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		launcher := readTestFile(t, legacyLauncherPath)
 		normalizedLauncher := normalizePowerShellForTest(string(launcher))
 		assertStringsInOrder(t, normalizedLauncher,
-			"rdev-bootstrap.exe",
+			"function Invoke-Layered",
 			"layered-run",
 			"--manifest-url", fixture.options.LayeredAssetsManifestURL,
 			"--root-public-key", fixture.options.ReleaseRootPublicKey,
@@ -305,7 +305,7 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			"--once=false",
 			"--max-tasks", "0",
 		)
-		if !strings.Contains(normalizedLauncher, "LocalApplicationData") ||
+		if !strings.Contains(normalizedLauncher, "LOCALAPPDATA") ||
 			!strings.Contains(normalizedLauncher, "RemoteDevSkillkit") ||
 			!strings.Contains(normalizedLauncher, "cache") {
 			t.Fatalf("launcher must use the current user's LocalApplicationData cache:\n%s", launcher)
@@ -331,10 +331,10 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		if strings.Contains(normalizedLauncher, "$writeMask") {
 			t.Fatalf("private handoff ACL validation must reject untrusted read ACEs as well as write ACEs:\n%s", launcher)
 		}
-		if !strings.Contains(normalizedLauncher, "--transport auto") || strings.Contains(normalizedLauncher, "--transport long-poll") {
+		if strings.Count(normalizedLauncher, "--transport") != 1 || strings.Contains(normalizedLauncher, "--transport long-poll") {
 			t.Fatalf("layered launcher must preserve the runtime's transport fallback policy:\n%s", launcher)
 		}
-		for _, fallback := range []string{"archive fallback explicitly", "Start-ConnectionEntry.ps1", "verified"} {
+		for _, fallback := range []string{"signed archive recovery profile", "ARCHIVE-RECOVERY.txt"} {
 			if !strings.Contains(normalizedLauncher, fallback) {
 				t.Fatalf("layered failure must name the separately verified archive recovery command %q:\n%s", fallback, launcher)
 			}
@@ -356,19 +356,16 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 				t.Fatalf("verified archive fallback missing %q:\n%s", want, fallback)
 			}
 		}
-		if !strings.Contains(normalizedLauncher, `..\windows-temporary\Start-ConnectionEntry.ps1`) {
-			t.Fatalf("layered launcher must pin the sibling fallback path:\n%s", launcher)
-		}
 		if strings.Contains(normalizedLauncher, "& $fallbackPath") {
 			t.Fatalf("layered verification/runtime failures must not automatically execute the archive fallback:\n%s", launcher)
 		}
 		assertStringsInOrder(t, normalizedLauncher,
 			"try {",
 			"ComputeHash($bootstrapLock)",
-			"layered-run",
+			"Invoke-Layered $Launcher",
 			"exit $layeredExitCode",
 			"} catch {",
-			"Run the verified archive fallback explicitly",
+			"Run the signed archive recovery profile",
 			"exit 1",
 		)
 		packagedBootstrap := filepath.Join(handoffDir, "rdev-bootstrap.exe")
@@ -397,7 +394,8 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			"layered-run",
 			"certutil.exe",
 			"icacls.exe",
-			"/reset",
+			"private-path-check",
+			"whoami.exe",
 			"/setowner",
 			"--manifest-url",
 			"--root-public-key",
@@ -409,7 +407,8 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			"--launcher",
 			"--mode",
 			"temporary",
-			"--native",
+			"attempt-check",
+			"--create",
 			"powershell-bypass",
 			"signed archive recovery profile",
 		} {
@@ -418,22 +417,50 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			}
 		}
 		assertStringsInOrder(t, launcher,
+			":reject_unsafe_path",
+			"icacls.exe",
+			"private-path-check",
+		)
+		normalizedCMD := strings.ReplaceAll(launcher, "\r\n", "\n")
+		rejectStart := strings.LastIndex(normalizedCMD, "\n:reject_unsafe_path\n")
+		rejectEnd := strings.Index(normalizedCMD[rejectStart+1:], "\n:load_sid\n")
+		if rejectStart < 0 || rejectEnd < 0 {
+			t.Fatalf("command broker is missing the early path-validation block:\n%s", launcher)
+		}
+		if strings.Contains(normalizedCMD[rejectStart:rejectStart+1+rejectEnd], "private-path-check") {
+			t.Fatalf("early CMD path checks must not execute the bootstrap before its digest check:\n%s", launcher)
+		}
+		rejectBlock := normalizedCMD[rejectStart : rejectStart+1+rejectEnd]
+		for _, want := range []string{"%%~aI", "if not defined ATTRS", `if not "%ATTRS:l=%"=="%ATTRS%"`} {
+			if !strings.Contains(rejectBlock, strings.ToLower(want)) {
+				t.Fatalf("early CMD path checks must fail closed on unreadable or reparse attributes with %q:\n%s", want, launcher)
+			}
+		}
+		if strings.Contains(rejectBlock, "fsutil") {
+			t.Fatalf("CMD path checks must not classify every fsutil query error as a non-reparse path:\n%s", launcher)
+		}
+		assertStringsInOrder(t, launcher,
 			"powershell.exe",
 			"-file",
 			"powershell",
 			"-executionpolicy", "bypass",
 			"-file",
 			"powershell-bypass",
-			"--native", "--attempt-dir",
+			"attempt-check", "--attempt-dir",
 			"--launcher", "cmd",
 		)
-		if strings.Count(launcher, `"--transport" "auto"`) != 1 {
-			t.Fatalf("native broker path must preserve exactly one core transport selection:\n%s", launcher)
+		if strings.Count(launcher, `--transport auto`) != 1 {
+			t.Fatalf("the broker and direct-native paths must share exactly one core transport selection:\n%s", launcher)
 		}
 		for _, forbidden := range []string{"start-process", "start-job", "windowstyle hidden"} {
 			if strings.Contains(launcher, forbidden) {
 				t.Fatalf("command broker must keep every attempt visible and foreground; found %q:\n%s", forbidden, launcher)
 			}
+		}
+		if reset := strings.Index(launcher, "/reset"); reset < 0 {
+			t.Fatalf("command broker must clear unrelated explicit ACL entries before granting its exact private trustees:\n%s", launcher)
+		} else if reject := strings.Index(launcher, ":reject_unsafe_path"); reject < 0 || reset < reject {
+			t.Fatalf("command broker must reject reparse paths before ACL reset:\n%s", launcher)
 		}
 		for _, forbidden := range []string{`call "%fallback_path%"`, `start "" "%fallback_path%"`} {
 			if strings.Contains(launcher, forbidden) {
@@ -545,7 +572,9 @@ func TestWindowsConnectionEntryPrefersPowerShell(t *testing.T) {
 		"powershell",
 		"--attempt-dir",
 		"--launcher",
-		"Protect-PrivatePath $AttemptDir",
+		"Invoke-AttemptCheck",
+		"attempt-check",
+		"--create",
 		"rdev-bootstrap.exe",
 		"layered-run",
 		"signed archive recovery profile",
@@ -554,7 +583,7 @@ func TestWindowsConnectionEntryPrefersPowerShell(t *testing.T) {
 			t.Fatalf("preferred PowerShell launcher missing %q:\n%s", want, powerShell)
 		}
 	}
-	if strings.Count(powerShell, "--transport auto") != 1 {
+	if strings.Count(powerShell, "--transport") != 1 {
 		t.Fatalf("PowerShell path must preserve exactly one core transport selection:\n%s", powerShell)
 	}
 	for _, forbidden := range []string{"Start-Process", "Start-Job", "WindowStyle Hidden", "& $fallbackPath"} {
@@ -573,11 +602,8 @@ func TestWindowsLayeredBrokerFallbackContract(t *testing.T) {
 	launcher := strings.ToLower(string(readTestFile(t, filepath.Join(fixture.options.OutDir, windowsLayeredDirName, windowsLayeredCommandLauncherName))))
 	for _, want := range []string{
 		"attempt_dir",
-		"state.json",
-		"pre_core",
+		"attempt-check",
 		"core_started",
-		"core_exited",
-		"attempt.lock",
 		"--native",
 		"--attempt-dir",
 		"--launcher",
@@ -595,14 +621,92 @@ func TestWindowsLayeredBrokerFallbackContract(t *testing.T) {
 		"-executionpolicy", "bypass",
 		"-file",
 		"powershell-bypass",
-		"--native", "--attempt-dir",
-		"--launcher", "cmd",
+		":native",
 	)
 	if strings.Count(launcher, `"%attempt_dir%"`) < 3 {
 		t.Fatalf("all broker paths must share the one allocated attempt directory:\n%s", launcher)
 	}
 	if strings.Contains(launcher, `call "%fallback_path%"`) || strings.Contains(launcher, `start "" "%fallback_path%"`) {
 		t.Fatalf("broker must never execute archive recovery:\n%s", launcher)
+	}
+}
+
+func TestWindowsLayeredBrokerAuthenticatesPowerShellAndAvoidsRuntimeCallArguments(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	if _, err := FromInvite(fixture.options); err != nil {
+		t.Fatal(err)
+	}
+
+	handoffDir := filepath.Join(fixture.options.OutDir, windowsLayeredDirName)
+	powerShell := readTestFile(t, filepath.Join(handoffDir, windowsLayeredLauncherName))
+	digest := sha256.Sum256(powerShell)
+	wantDigest := hex.EncodeToString(digest[:])
+	command := string(readTestFile(t, filepath.Join(handoffDir, windowsLayeredCommandLauncherName)))
+	for _, want := range []string{
+		`set "EXPECTED_PS_SHA256=` + wantDigest + `"`,
+		`set "EXPECTED_PS_SIZE=` + strconv.Itoa(len(powerShell)) + `"`,
+		":verify_powershell",
+		`set "SOURCE_BOOTSTRAP=`,
+		`set "STAGED_BOOTSTRAP=`,
+		":prepare_bootstrap",
+		`copy /b "%SOURCE_BOOTSTRAP%" "%STAGED_BOOTSTRAP%"`,
+		":cleanup_bootstrap",
+		`set "CLEANUP_EXIT=0"`,
+		`if errorlevel 1 set "CLEANUP_EXIT=1"`,
+		`if errorlevel 1 set "LAYERED_EXIT=1"`,
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("command broker must authenticate the packaged PowerShell content with %q:\n%s", want, command)
+		}
+	}
+	if strings.Count(command, "call :verify_powershell") < 2 {
+		t.Fatalf("command broker must authenticate PowerShell before both policy attempts:\n%s", command)
+	}
+	normalizedCommand := strings.ReplaceAll(command, "\r\n", "\n")
+	nativeStart := strings.Index(normalizedCommand, "\n:native\n")
+	if nativeStart < 0 {
+		t.Fatalf("command broker is missing the shared native block:\n%s", command)
+	}
+	nativeBlock := normalizedCommand[nativeStart:]
+	assertStringsInOrder(t, nativeBlock,
+		"call :verify_bootstrap",
+		`"%BOOTSTRAP%" layered-run attempt-check`,
+		`set "TARGET=%COMMAND_LAUNCHER%"`,
+		"call :verify_private_target",
+		"call :verify_bootstrap",
+		"layered-run --manifest-url",
+	)
+	if strings.Contains(nativeBlock, `findstr.exe" /l /c:"\"stage\":\"pre_core\""`) {
+		t.Fatalf("native entry must use the verified bootstrap parser instead of substring-classifying attempt state:\n%s", command)
+	}
+	for _, forbidden := range []string{
+		`call "%~f0"`,
+		`call :protect_directory "%`,
+		`call :protect_file "%`,
+		`call :reject_unsafe_path "%`,
+	} {
+		if strings.Contains(strings.ToLower(command), strings.ToLower(forbidden)) {
+			t.Fatalf("command broker must not pass runtime paths through CALL reparsing; found %q:\n%s", forbidden, command)
+		}
+	}
+
+	powerShellText := string(powerShell)
+	for _, want := range []string{windowsLayeredCommandLauncherName, "$commandLauncher", "& $commandLauncher", "--native"} {
+		if !strings.Contains(powerShellText, want) {
+			t.Fatalf("direct PowerShell fallback must enter the shared native CMD block with %q:\n%s", want, powerShellText)
+		}
+	}
+	assertStringsInOrder(t, powerShellText,
+		"Invoke-Layered $Launcher",
+		"if (-not $Brokered) {",
+		"Invoke-AttemptCheck $AttemptDir 'cmd'",
+		"& $commandLauncher '--native' '--attempt-dir' $AttemptDir",
+	)
+	if strings.Contains(powerShellText, "'--attempt-dir' $AttemptDir '--launcher' 'cmd'") {
+		t.Fatalf("private native PowerShell handoff must use the exact --native --attempt-dir grammar:\n%s", powerShellText)
+	}
+	if strings.Contains(powerShellText, "$cmdPath") {
+		t.Fatalf("direct PowerShell fallback must not maintain a second native execution block:\n%s", powerShellText)
 	}
 }
 

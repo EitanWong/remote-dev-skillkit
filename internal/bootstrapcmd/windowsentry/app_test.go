@@ -42,6 +42,104 @@ func TestWindowsEntryRejectsEveryNonLayeredSubcommand(t *testing.T) {
 	}
 }
 
+func TestWindowsEntryAttemptCheckInitializesAndReusesPreCoreState(t *testing.T) {
+	directory := privateAttemptDirForTest(t)
+	if err := os.Remove(directory); err != nil {
+		t.Fatal(err)
+	}
+	app := App{Now: time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)}
+	args := []string{"layered-run", "attempt-check", "--attempt-dir", directory, "--launcher", "powershell", "--create"}
+	if err := app.Run(t.Context(), args); err != nil {
+		t.Fatal(err)
+	}
+	state, err := readAttemptState(filepath.Join(directory, attemptStateFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.AttemptID != filepath.Base(directory) || state.Stage != attemptStagePreCore || state.Launcher != launcherPowerShell {
+		t.Fatalf("unexpected initialized attempt state: %#v", state)
+	}
+	if _, err := os.Stat(filepath.Join(directory, attemptLockFilename)); !os.IsNotExist(err) {
+		t.Fatalf("attempt-check left its lock behind: %v", err)
+	}
+	if err := app.Run(t.Context(), []string{"layered-run", "attempt-check", "--attempt-dir", directory, "--launcher", "cmd"}); err != nil {
+		t.Fatalf("canonical pre_core state was not reusable: %v", err)
+	}
+	if err := app.Run(t.Context(), args); err == nil {
+		t.Fatal("attempt-check reused an existing directory with --create")
+	}
+}
+
+func TestWindowsEntryAttemptCheckRejectsInvalidGrammarAndClosedState(t *testing.T) {
+	directory := privateAttemptDirForTest(t)
+	app := App{Now: time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)}
+	for _, args := range [][]string{
+		{"layered-run", "attempt-check"},
+		{"layered-run", "attempt-check", "--attempt-dir", directory},
+		{"layered-run", "attempt-check", "--attempt-dir", directory, "--launcher", "cmd", "extra"},
+		{"layered-run", "attempt-check", "--attempt-dir", directory, "--attempt-dir", directory, "--launcher", "cmd"},
+		{"layered-run", "attempt-check", "--attempt-dir", directory, "--launcher", "invalid"},
+		{"layered-run", "attempt-check", "--unknown", "value", "--attempt-dir", directory, "--launcher", "cmd"},
+		{"layered-run", "attempt-check", "--path", directory, "--kind", "directory"},
+	} {
+		if err := app.Run(t.Context(), args); err == nil {
+			t.Fatalf("attempt-check accepted invalid arguments %q", args)
+		}
+	}
+	if err := writeAttemptState(directory, attemptState{
+		SchemaVersion: AttemptStateSchemaVersion,
+		AttemptID:     filepath.Base(directory),
+		Stage:         attemptStageCoreExited,
+		Launcher:      launcherPowerShell,
+		UpdatedAt:     "2026-07-17T08:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run(t.Context(), []string{"layered-run", "attempt-check", "--attempt-dir", directory, "--launcher", "cmd"}); err == nil {
+		t.Fatal("attempt-check accepted core_exited state")
+	}
+}
+
+func TestWindowsEntryAttemptCheckWithoutCreateRejectsMissingDirectory(t *testing.T) {
+	directory := privateAttemptDirForTest(t)
+	if err := os.Remove(directory); err != nil {
+		t.Fatal(err)
+	}
+	app := App{Now: time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)}
+	if err := app.Run(t.Context(), []string{"layered-run", "attempt-check", "--attempt-dir", directory, "--launcher", "cmd"}); err == nil {
+		t.Fatal("attempt-check without --create accepted a missing directory")
+	}
+	if _, err := os.Stat(directory); !os.IsNotExist(err) {
+		t.Fatalf("attempt-check without --create mutated the missing directory: %v", err)
+	}
+}
+
+func TestWindowsEntryPrivatePathCheckAcceptsOnlyExactGrammarAndPrivateObjects(t *testing.T) {
+	directory := privateAttemptDirForTest(t)
+	filePath := privateLauncherFileForTest(t, directory, "launcher.cmd")
+	app := App{}
+	for _, args := range [][]string{
+		{"layered-run", "private-path-check", "--path", directory, "--kind", "directory"},
+		{"layered-run", "private-path-check", "--path", filePath, "--kind", "file"},
+	} {
+		if err := app.Run(t.Context(), args); err != nil {
+			t.Fatalf("private path check rejected %q: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"layered-run", "private-path-check"},
+		{"layered-run", "private-path-check", "--path", directory, "--kind", "other"},
+		{"layered-run", "private-path-check", "--path", directory, "--kind", "shape-directory"},
+		{"layered-run", "private-path-check", "--kind", "directory", "--path", directory},
+		{"layered-run", "private-path-check", "--path", directory, "--kind", "directory", "extra"},
+		{"layered-run", "private-path-check", "--attempt-dir", directory, "--launcher", "cmd"},
+	} {
+		if err := app.Run(t.Context(), args); err == nil {
+			t.Fatalf("private path check accepted invalid arguments %q", args)
+		}
+	}
+}
+
 func TestWindowsEntryVerifiesManifestBeforeCoreAndDownloadsOnlyCore(t *testing.T) {
 	fixture := newWindowsEntryFixture(t)
 	transport := &recordingTransport{responses: map[string]transportFixture{

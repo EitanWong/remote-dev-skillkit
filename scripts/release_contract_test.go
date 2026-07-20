@@ -36,13 +36,14 @@ func TestReleaseBootstrapUsesOnlyDocumentedSizeFlags(t *testing.T) {
 		"-trimpath",
 		"-gcflags=all=-l",
 		"-buildid=",
+		"-funcalign=1",
 		"-tags=rdev_bootstrap_focused",
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("focused bootstrap build is missing documented flag %q", required)
 		}
 	}
-	for _, undocumented := range []string{"-funcalign=1", "rdev_bootstrap_focused,purego"} {
+	for _, undocumented := range []string{"rdev_bootstrap_focused,purego"} {
 		if strings.Contains(script, undocumented) {
 			t.Errorf("focused bootstrap build uses undocumented tuning %q", undocumented)
 		}

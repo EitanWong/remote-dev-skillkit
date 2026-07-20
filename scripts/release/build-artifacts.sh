@@ -119,7 +119,9 @@ for target in "${target_list[@]}"; do
     if [[ "$command" == "rdev-bootstrap" ]]; then
       build_gcflags=(-gcflags=all=-l)
       build_tags=(-tags=rdev_bootstrap_focused)
-      ldflags="-s -w -buildid= -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at"
+      # Focused bootstrap delivery is size-gated; reduced function padding does
+      # not change the ABI or runtime behavior and keeps the closed ZIP bounded.
+      ldflags="-s -w -buildid= -funcalign=1 -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at"
     fi
     CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" go build \
       -trimpath \

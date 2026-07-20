@@ -21,6 +21,10 @@ func preparePrivateCache(root string, directories []string, files []managedCache
 	if err := validateWindowsCacheRoot(root); err != nil {
 		return err
 	}
+	return prepareWindowsPrivateState(directories, files)
+}
+
+func prepareWindowsPrivateState(directories []string, files []managedCacheFile) error {
 	descriptor, trustees, err := windowsPrivateSecurityDescriptor()
 	if err != nil {
 		return err
@@ -32,11 +36,31 @@ func preparePrivateCache(root string, directories []string, files []managedCache
 		}
 	}
 	for _, file := range files {
-		if err := validateExistingWindowsManagedFile(file, trustees); err != nil {
+		if err := ensureWindowsPrivateManagedFile(file, trustees); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func ensureWindowsPrivateManagedFile(file managedCacheFile, trustees windowsPrivateTrustees) error {
+	_, err := windowsPathAttributes(file.path)
+	if windowsPathMissing(err) {
+		created, createErr := createPrivateWindowsFile(filepath.Dir(file.path), filepath.Base(file.path), syscall.FILE_ATTRIBUTE_NORMAL)
+		if createErr != nil && !errors.Is(createErr, syscall.ERROR_ALREADY_EXISTS) && !errors.Is(createErr, syscall.ERROR_FILE_EXISTS) {
+			return createErr
+		}
+		if createErr == nil {
+			if closeErr := created.Close(); closeErr != nil {
+				return closeErr
+			}
+		}
+		return validateExistingWindowsManagedFile(file, trustees)
+	}
+	if err != nil {
+		return err
+	}
+	return validateExistingWindowsManagedFile(file, trustees)
 }
 
 func validateWindowsCacheRoot(root string) error {
@@ -263,7 +287,7 @@ func openWindowsPrivateFile(path string, lock bool, trustees windowsPrivateTrust
 	if err != nil {
 		return nil, err
 	}
-	if err := validateWindowsPrivateHandle(handle, false, false, trustees); err != nil {
+	if err := validateWindowsPrivateHandle(handle, false, true, 3, trustees); err != nil {
 		syscall.CloseHandle(handle)
 		return nil, err
 	}
@@ -300,10 +324,47 @@ func validateWindowsPrivatePath(path string, directory, requireProtected bool, t
 		return err
 	}
 	defer syscall.CloseHandle(handle)
-	return validateWindowsPrivateHandle(handle, directory, requireProtected, trustees)
+	return validateWindowsPrivateHandle(handle, directory, requireProtected, 3, trustees)
 }
 
-func validateWindowsPrivateHandle(handle syscall.Handle, directory, requireProtected bool, trustees windowsPrivateTrustees) error {
+func validateWindowsPrivateHandle(handle syscall.Handle, directory, requireProtected bool, expectedFlags int, trustees windowsPrivateTrustees) error {
+	if err := validateWindowsPathType(handle, directory); err != nil {
+		return err
+	}
+	state, err := readWinSecurityState(handle)
+	if err != nil {
+		return err
+	}
+	return validateWindowsPrivateSecurityState(state, requireProtected, expectedFlags, trustees)
+}
+
+func validateWindowsPrivateSecurityState(state winSecurityState, requireProtected bool, expectedFlags int, trustees windowsPrivateTrustees) error {
+	if state.control&winSEDACLPresent == 0 || requireProtected && state.control&winSEDACLProtected == 0 {
+		return fmt.Errorf("private Windows path must have a present protected DACL")
+	}
+	if !trustees.contains(state.owner) {
+		return fmt.Errorf("private Windows path owner is not trusted")
+	}
+	if len(state.aces) != 3 {
+		return fmt.Errorf("private Windows path DACL must contain exactly three ACEs")
+	}
+	seen := make(map[string]bool, 3)
+	for _, ace := range state.aces {
+		if ace.typeID != winAccessAllowedACEType || ace.mask != winPrivateFullControl || expectedFlags >= 0 && int(ace.flags) != expectedFlags {
+			return fmt.Errorf("private Windows DACL contains an unsupported ACE")
+		}
+		if !trustees.contains(ace.sid) || seen[ace.sid] {
+			return fmt.Errorf("private Windows DACL grants an untrusted SID")
+		}
+		seen[ace.sid] = true
+	}
+	if !seen[trustees.current] || !seen[trustees.administrators] || !seen[trustees.system] {
+		return fmt.Errorf("private Windows DACL is missing a trusted trustee")
+	}
+	return nil
+}
+
+func validateWindowsPathType(handle syscall.Handle, directory bool) error {
 	var information syscall.ByHandleFileInformation
 	if err := syscall.GetFileInformationByHandle(handle, &information); err != nil {
 		return err
@@ -311,32 +372,6 @@ func validateWindowsPrivateHandle(handle syscall.Handle, directory, requireProte
 	isDirectory := information.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY != 0
 	if information.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0 || isDirectory != directory {
 		return fmt.Errorf("private Windows path has unsafe file attributes")
-	}
-	state, err := readWinSecurityState(handle)
-	if err != nil {
-		return err
-	}
-	if state.control&winSEDACLPresent == 0 || requireProtected && state.control&winSEDACLProtected == 0 {
-		return fmt.Errorf("private Windows path must have a present protected DACL")
-	}
-	if !trustees.contains(state.owner) {
-		return fmt.Errorf("private Windows path owner is not trusted")
-	}
-	if len(state.aces) == 0 {
-		return fmt.Errorf("private Windows path DACL is missing")
-	}
-	seen := make(map[string]bool, 3)
-	for _, ace := range state.aces {
-		if ace.typeID != winAccessAllowedACEType || ace.mask&winPrivateFullControl != winPrivateFullControl {
-			return fmt.Errorf("private Windows DACL contains an unsupported ACE")
-		}
-		if !trustees.contains(ace.sid) {
-			return fmt.Errorf("private Windows DACL grants an untrusted SID")
-		}
-		seen[ace.sid] = true
-	}
-	if !seen[trustees.current] || !seen[trustees.administrators] || !seen[trustees.system] {
-		return fmt.Errorf("private Windows DACL is missing a trusted trustee")
 	}
 	return nil
 }

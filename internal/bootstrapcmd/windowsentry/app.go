@@ -47,6 +47,9 @@ func (a App) Run(ctx context.Context, args []string) (resultErr error) {
 	if len(args) == 0 || args[0] != "layered-run" {
 		return newPreCoreError("invalid_input")
 	}
+	if len(args) > 1 && (args[1] == "attempt-check" || args[1] == "private-path-check") {
+		return a.runCheck(args[1] == "attempt-check", args[2:])
+	}
 	opts, err := parseRunArgs(args[1:])
 	if err != nil {
 		return newPreCoreError("invalid_input")
@@ -204,6 +207,40 @@ func (a App) Run(ctx context.Context, args []string) (resultErr error) {
 		return errors.New("layered core lifecycle failed")
 	}
 	return nil
+}
+
+func (a App) runCheck(attemptCommand bool, args []string) error {
+	if !attemptCommand {
+		if len(args) != 4 || args[0] != "--path" || args[2] != "--kind" {
+			return errInvalidAttemptState
+		}
+		directory := args[3] == "directory"
+		if args[1] == "" || args[3] != "directory" && args[3] != "file" {
+			return errInvalidAttemptState
+		}
+		return validatePrivateLauncherPath(args[1], directory)
+	}
+	create := len(args) == 5 && args[4] == "--create"
+	if len(args) != 4 && !create || args[0] != "--attempt-dir" || args[2] != "--launcher" {
+		return errInvalidAttemptState
+	}
+	directory := args[1]
+	launcher := attemptLauncher(args[3])
+	if directory == "" || !launcher.valid() {
+		return errInvalidAttemptState
+	}
+	if create {
+		if err := preparePrivateAttemptDirectory(directory); err != nil {
+			return err
+		}
+	} else if _, err := validatePrivateAttemptDirectory(directory); err != nil {
+		return err
+	}
+	attempt, err := acquireAttempt(directory, launcher, a.now())
+	if err != nil {
+		return err
+	}
+	return attempt.close()
 }
 
 func writeRunReport(destination io.Writer, report RunReport) error {

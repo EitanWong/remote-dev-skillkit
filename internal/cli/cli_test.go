@@ -5495,13 +5495,17 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 			t.Fatalf("invalid layered connection entry output: %v\n%s", err, stdout.String())
 		}
+		launcherPath := payload.EntryPackagePlan.LauncherPath
+		if !filepath.IsAbs(launcherPath) {
+			launcherPath = filepath.Join(outDir, filepath.FromSlash(launcherPath))
+		}
 		if !payload.OK ||
 			!strings.Contains(payload.EntryPackagePlan.PackageMode, "layered") ||
 			!strings.Contains(payload.EntryPackagePlan.PlatformPlanKind, "layered") ||
-			!fileExistsForCLITest(payload.EntryPackagePlan.LauncherPath) {
+			!fileExistsForCLITest(launcherPath) {
 			t.Fatalf("expected layered Windows handoff selection, got %#v\n%s", payload.EntryPackagePlan, stdout.String())
 		}
-		launcher, err := os.ReadFile(payload.EntryPackagePlan.LauncherPath)
+		launcher, err := os.ReadFile(launcherPath)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func validatePrivateAttemptDirectory(path string) (os.FileInfo, error) {
@@ -25,6 +26,34 @@ func validatePrivateAttemptDirectory(path string) (os.FileInfo, error) {
 			return os.Lstat(path)
 		}
 	}
+}
+
+func preparePrivateAttemptDirectory(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o700)
+}
+
+func validatePrivateLauncherPath(path string, directory bool) error {
+	if path == "" || strings.TrimSpace(path) != path || filepath.Clean(path) != path || !filepath.IsAbs(path) {
+		return errInvalidAttemptState
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	mode := os.FileMode(0o600)
+	if directory {
+		mode = 0o700
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() != directory || info.Mode().Perm() != mode {
+		return errInvalidAttemptState
+	}
+	return nil
 }
 
 func createPrivateAttemptFile(directory, name string) (*os.File, error) {

@@ -72,8 +72,15 @@ func TestAttemptStateIsPrivateAndAtomicallyReplaced(t *testing.T) {
 	defer guard.close()
 
 	statePath := filepath.Join(directory, attemptStateFilename)
-	before, err := os.Lstat(statePath)
+	beforeFile, err := openPrivateAttemptFile(statePath, maxAttemptStateBytes)
 	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := beforeFile.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := beforeFile.Close(); err != nil {
 		t.Fatal(err)
 	}
 	assertPrivateAttemptPathForTest(t, directory, true)

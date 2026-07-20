@@ -18,6 +18,18 @@ func privateAttemptDirForTest(t *testing.T) string {
 	return directory
 }
 
+func privateLauncherFileForTest(t *testing.T, directory, name string) string {
+	t.Helper()
+	file, err := createPrivateAttemptFile(directory, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(directory, name)
+}
+
 func attemptProcessRunningForTest(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM

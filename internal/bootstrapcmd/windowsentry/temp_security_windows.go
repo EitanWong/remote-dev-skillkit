@@ -100,8 +100,12 @@ func createPrivateTemporaryDirectory(prefix string) (string, error) {
 }
 
 func createPrivateTemporaryFile(directory, name string) (*os.File, error) {
+	return createPrivateWindowsFile(directory, name, winFileAttributeTemporary)
+}
+
+func createPrivateWindowsFile(directory, name string, attributes uint32) (*os.File, error) {
 	if filepath.Base(name) != name || name == "" {
-		return nil, fmt.Errorf("invalid private temporary filename")
+		return nil, fmt.Errorf("invalid private Windows filename")
 	}
 	descriptor, trustees, err := windowsPrivateSecurityDescriptor()
 	if err != nil {
@@ -122,13 +126,13 @@ func createPrivateTemporaryFile(directory, name string) (*os.File, error) {
 		syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE,
 		descriptor.attributes(),
 		syscall.CREATE_NEW,
-		winFileAttributeTemporary,
+		attributes,
 		0,
 	)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateWindowsPrivateHandle(handle, false, true, trustees); err != nil {
+	if err := validateWindowsPrivateHandle(handle, false, true, 3, trustees); err != nil {
 		syscall.CloseHandle(handle)
 		_ = os.Remove(path)
 		return nil, err
@@ -150,7 +154,7 @@ func validatePrivateTemporaryFile(file *os.File, path string, maxBytes int64) er
 	if err != nil {
 		return err
 	}
-	if err := validateWindowsPrivateHandle(syscall.Handle(file.Fd()), false, true, trustees); err != nil {
+	if err := validateWindowsPrivateHandle(syscall.Handle(file.Fd()), false, true, 3, trustees); err != nil {
 		return err
 	}
 	info, err := file.Stat()
