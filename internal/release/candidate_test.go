@@ -32,7 +32,7 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		OutDir:            out,
 		Version:           "v0.1.0",
 		GatewayURL:        "https://api.example.com/v1",
-		ArtifactPaths:     []string{rdev, host, verify},
+		ArtifactPaths:     withBootstrapArtifactForTest(t, input, rdev, host, verify),
 		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
 		Key:               key,
 		Now:               time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC),
@@ -58,6 +58,7 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		"sbom.spdx.json",
 		"provenance.json",
 		"connection-entry-release.zip",
+		"connection-entry-release-bundle.json",
 		"checksums.txt",
 		"rdev",
 		"rdev.rdev-release.json",
@@ -98,10 +99,8 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		"release/sbom.spdx.json",
 		"release/provenance.json",
 		"launchers/start-connection-entry.sh",
-		"bin/rdev",
-		"bin/rdev.rdev-release.json",
-		"bin/rdev-host.exe",
-		"bin/rdev-host.exe.rdev-release.json",
+		"bin/rdev-bootstrap",
+		"bin/rdev-bootstrap.rdev-release.json",
 		"bin/rdev-verify.exe",
 		"bin/rdev-verify.exe.rdev-release.json",
 	} {
@@ -116,9 +115,9 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	if entryPackage.SchemaVersion != ConnectionEntryReleasePackageSchemaVersion ||
 		!entryPackage.NoPrivateParameters ||
 		entryPackage.ExecutionMode != "runtime-invite-required" ||
-		strings.Join(entryPackage.RequiredReleaseArtifacts, ",") != "rdev,rdev-host.exe,rdev-verify.exe" ||
+		strings.Join(entryPackage.RequiredReleaseArtifacts, ",") != "rdev-bootstrap,rdev-verify.exe" ||
 		len(entryPackage.Launchers) < 1 ||
-		len(entryPackage.Artifacts) < len(candidate.Artifacts) {
+		len(entryPackage.Artifacts) != connectionEntryAllowedArtifactCount(candidate)*2 {
 		t.Fatalf("unexpected Connection Entry release package: %#v", entryPackage)
 	}
 	launcher := string(archiveEntries["launchers/start-connection-entry.sh"])
@@ -128,10 +127,22 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 		"--root-public-key",
 		"--require-artifacts",
 		candidate.RootPublicKey,
-		"rdev,rdev-host.exe,rdev-verify.exe",
+		"rdev-bootstrap,rdev-verify.exe",
+		"rdev-bootstrap",
+		"layered-run",
 	} {
 		if !strings.Contains(launcher, want) {
 			t.Fatalf("expected Connection Entry launcher to contain %q, got %s", want, launcher)
+		}
+	}
+	for path, content := range archiveEntries {
+		if path == "bin/rdev" || strings.HasPrefix(path, "bin/rdev-host") {
+			t.Fatalf("Connection Entry archive retained legacy artifact %s", path)
+		}
+		for _, forbidden := range []string{"host serve", "connection-entry run", "rdev-bootstrap upgrade"} {
+			if strings.Contains(string(content), forbidden) {
+				t.Fatalf("Connection Entry archive retained legacy path %q in %s", forbidden, path)
+			}
 		}
 	}
 	if strings.Contains(string(archiveEntries["connection-entry-release.json"]), filepath.Dir(out)) ||
@@ -167,6 +178,45 @@ func TestPrepareCandidateStagesSignedReleaseAndSkillkit(t *testing.T) {
 	}
 }
 
+func TestGeneratedConnectionLaunchersUseBootstrapOnly(t *testing.T) {
+	candidate := Candidate{
+		Version:       "v2.0.0",
+		RootPublicKey: "release-root:key",
+		Artifacts: []CandidateArtifact{
+			{Name: "rdev-bootstrap.exe", ArtifactPath: "rdev-bootstrap.exe", ManifestPath: "rdev-bootstrap.exe.rdev-release.json", SHA256: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10},
+			{Name: "rdev.exe", ArtifactPath: "rdev.exe", ManifestPath: "rdev.exe.rdev-release.json", SHA256: "sha256:" + strings.Repeat("b", 64), SizeBytes: 10},
+		},
+	}
+	for name, content := range map[string]string{
+		"shell":      renderConnectionEntryShellLauncher(candidate),
+		"powershell": renderConnectionEntryPowerShellLauncher(candidate),
+	} {
+		if !strings.Contains(content, "rdev-bootstrap") || !strings.Contains(content, "layered-run") {
+			t.Fatalf("%s launcher must invoke rdev-bootstrap:\n%s", name, content)
+		}
+		for _, forbidden := range []string{"host serve", "rdev-host", "Get-Command rdev", "command -v rdev", "rdev-bootstrap upgrade", "RDEV=", "$RDEV connection-entry", "& $Rdev connection-entry"} {
+			if strings.Contains(content, forbidden) {
+				t.Fatalf("%s launcher contains legacy path %q:\n%s", name, forbidden, content)
+			}
+		}
+	}
+}
+
+func TestWindowsARM64ConnectionLauncherUsesCandidatePlatform(t *testing.T) {
+	candidate := Candidate{
+		Version:        "v2.0.0",
+		TargetPlatform: "windows/arm64",
+		RootPublicKey:  "release-root:key",
+		Artifacts: []CandidateArtifact{
+			{Name: "rdev-bootstrap.exe", ArtifactPath: "rdev-bootstrap.exe", SHA256: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10},
+		},
+	}
+	launcher := renderConnectionEntryPowerShellLauncher(candidate)
+	if !strings.Contains(launcher, "--platform 'windows/arm64'") || strings.Contains(launcher, "--platform 'windows/amd64'") {
+		t.Fatalf("Windows ARM64 launcher used the wrong layered platform:\n%s", launcher)
+	}
+}
+
 func TestPrepareCandidateWritesSignedWindowsLayeredAssets(t *testing.T) {
 	input := t.TempDir()
 	out := filepath.Join(t.TempDir(), "candidate")
@@ -183,7 +233,7 @@ func TestPrepareCandidateWritesSignedWindowsLayeredAssets(t *testing.T) {
 		SourceRoot:    filepath.Join("..", ".."),
 		OutDir:        out,
 		Version:       "v0.2.0",
-		ArtifactPaths: []string{core, helper, nearMatch},
+		ArtifactPaths: withWindowsBootstrapArtifactForTest(t, input, core, helper, nearMatch),
 		Key:           key,
 		Now:           now,
 	})
@@ -266,10 +316,20 @@ func TestPrepareCandidateWritesSignedWindowsLayeredAssets(t *testing.T) {
 		if !strings.Contains(bundleContent, `"name": "`+artifact+`"`) || !strings.Contains(sbomContent, `"fileName": "./`+artifact+`"`) {
 			t.Fatalf("bundle or SBOM omitted staged artifact %s", artifact)
 		}
-		for _, archivePath := range []string{"bin/" + artifact, "bin/" + artifact + ".rdev-release.json"} {
-			if _, ok := archiveEntries[archivePath]; !ok {
-				t.Fatalf("existing archive omitted staged artifact %s", archivePath)
-			}
+	}
+	for _, archivePath := range []string{
+		"bin/rdev-bootstrap.exe",
+		"bin/rdev-bootstrap.exe.rdev-release.json",
+		"bin/rdev-verify.exe",
+		"bin/rdev-verify.exe.rdev-release.json",
+	} {
+		if _, ok := archiveEntries[archivePath]; !ok {
+			t.Fatalf("connection archive omitted bootstrap boundary artifact %s", archivePath)
+		}
+	}
+	for archivePath := range archiveEntries {
+		if strings.HasPrefix(archivePath, "bin/rdev-host") {
+			t.Fatalf("connection archive published legacy full helper artifact %s", archivePath)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(out, rdevHostWindowsAMD64AssetName)); err != nil {
@@ -363,9 +423,12 @@ func TestPrepareCandidateStagesWindowsAMD64CoreFromNormalHostArtifact(t *testing
 		OutDir:         out,
 		Version:        "v0.2.0",
 		TargetPlatform: "windows/amd64",
-		ArtifactPaths:  []string{host},
-		Key:            key,
-		Now:            now,
+		ArtifactPaths: withWindowsBootstrapArtifactForTest(t, input,
+			host,
+			writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary"),
+		),
+		Key: key,
+		Now: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -441,15 +504,12 @@ func TestPrepareCandidateStagesWindowsAMD64CoreFromNormalHostArtifact(t *testing
 	}
 
 	archiveEntries := readConnectionEntryArchiveForTest(t, filepath.Join(out, candidate.ConnectionEntryPath))
-	if _, ok := archiveEntries["bin/rdev-host.exe"]; !ok {
-		t.Fatal("full archive fallback omitted the normal rdev-host.exe artifact")
-	}
-	if _, ok := archiveEntries["bin/rdev-host.exe.rdev-release.json"]; !ok {
-		t.Fatal("full archive fallback omitted the normal rdev-host.exe signed manifest")
+	if _, ok := archiveEntries["bin/rdev-bootstrap.exe"]; !ok {
+		t.Fatal("connection archive omitted rdev-bootstrap.exe")
 	}
 	for path := range archiveEntries {
-		if filepath.Base(path) == rdevHostWindowsAMD64AssetName {
-			t.Fatalf("full archive fallback duplicated the staged canonical asset at %q", path)
+		if strings.HasPrefix(path, "bin/rdev-host") {
+			t.Fatalf("connection archive published a full helper artifact at %q", path)
 		}
 	}
 	verification, err := VerifyCandidate(CandidateVerifyOptions{CandidatePath: out, GeneratedAt: now})
@@ -478,7 +538,7 @@ func TestVerifyCandidatePrefersExplicitWindowsCoreOverGenericHost(t *testing.T) 
 		OutDir:         out,
 		Version:        "v0.2.0",
 		TargetPlatform: windowsAMD64TargetPlatform,
-		ArtifactPaths:  []string{explicit, generic, verifier},
+		ArtifactPaths:  withWindowsBootstrapArtifactForTest(t, input, explicit, generic, verifier),
 		Key:            key,
 		Now:            now,
 	})
@@ -504,7 +564,7 @@ func TestVerifyCandidatePrefersExplicitWindowsCoreOverGenericHost(t *testing.T) 
 	}
 }
 
-func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(t *testing.T) {
+func TestWindowsConnectionEntryUsesBootstrapOnly(t *testing.T) {
 	input := t.TempDir()
 	key, err := signing.Generate("release-root")
 	if err != nil {
@@ -516,7 +576,7 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 	verify := writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary")
 	bootstrap := writeCandidateArtifactForTest(t, input, "rdev-bootstrap.exe", "bootstrap-binary")
 
-	t.Run("layered prerequisites prefer bootstrap and retain verified archive command", func(t *testing.T) {
+	t.Run("layered prerequisites invoke the verified bootstrap", func(t *testing.T) {
 		out := filepath.Join(t.TempDir(), "candidate")
 		candidate, err := PrepareCandidate(CandidateOptions{
 			SourceRoot:     filepath.Join("..", ".."),
@@ -541,19 +601,20 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			candidate.Version,
 			"windows/amd64",
 			"LocalApplicationData",
-			"ArchiveFallback",
+			"archive recovery profile",
 			"exit $layeredExitCode",
-			"connection-entry run",
 		} {
 			if !strings.Contains(launcher, want) {
 				t.Fatalf("layered Windows launcher missing %q:\n%s", want, launcher)
 			}
 		}
-		if layered := strings.Index(launcher, "layered-run"); layered < 0 || strings.Index(launcher[layered:], "connection-entry run") < 0 {
-			t.Fatalf("verified archive command must remain after the layered attempt:\n%s", launcher)
+		for _, forbidden := range []string{"connection-entry run", "host serve", "rdev-host", "Get-Command rdev"} {
+			if strings.Contains(launcher, forbidden) {
+				t.Fatalf("Windows launcher retained legacy connection path %q:\n%s", forbidden, launcher)
+			}
 		}
-		if !strings.Contains(launcher, "if (-not $ArchiveFallback)") {
-			t.Fatalf("archive fallback must require an explicit launcher switch after layered startup:\n%s", launcher)
+		if strings.Contains(launcher, "ArchiveFallback") {
+			t.Fatalf("release launcher retained a legacy archive fallback switch:\n%s", launcher)
 		}
 		for _, want := range []string{
 			"[Guid]::NewGuid",
@@ -600,46 +661,40 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		}
 	})
 
-	tests := []struct {
-		name           string
-		targetPlatform string
-		artifacts      []string
-	}{
-		{
-			name:           "missing bootstrap",
-			targetPlatform: windowsAMD64TargetPlatform,
-			artifacts:      []string{rdev, host, verify},
-		},
-		{
-			name:      "missing layered manifest",
-			artifacts: []string{rdev, host, verify, bootstrap},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name+" uses archive launcher", func(t *testing.T) {
-			out := filepath.Join(t.TempDir(), "candidate")
-			candidate, err := PrepareCandidate(CandidateOptions{
-				SourceRoot:     filepath.Join("..", ".."),
-				OutDir:         out,
-				Version:        "v0.2.0",
-				TargetPlatform: test.targetPlatform,
-				ArtifactPaths:  test.artifacts,
-				Key:            key,
-				Now:            now,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			entries := readConnectionEntryArchiveForTest(t, filepath.Join(out, candidate.ConnectionEntryPath))
-			launcher, ok := entries["launchers/Start-ConnectionEntry.ps1"]
-			if !ok {
-				t.Fatal("archive fallback omitted Start-ConnectionEntry.ps1")
-			}
-			if strings.Contains(string(launcher), "layered-run") || !strings.Contains(string(launcher), "connection-entry run") {
-				t.Fatalf("incomplete layered prerequisites must retain the archive launcher:\n%s", launcher)
-			}
+	t.Run("missing bootstrap fails closed", func(t *testing.T) {
+		_, err := PrepareCandidate(CandidateOptions{
+			SourceRoot:     filepath.Join("..", ".."),
+			OutDir:         filepath.Join(t.TempDir(), "candidate"),
+			Version:        "v0.2.0",
+			TargetPlatform: windowsAMD64TargetPlatform,
+			ArtifactPaths:  []string{rdev, host, verify},
+			Key:            key,
+			Now:            now,
 		})
-	}
+		if err == nil || !strings.Contains(err.Error(), "exactly one rdev-bootstrap") {
+			t.Fatalf("missing bootstrap must fail closed, got %v", err)
+		}
+	})
+
+	t.Run("runner manifest supplies layered asset location", func(t *testing.T) {
+		out := filepath.Join(t.TempDir(), "candidate")
+		candidate, err := PrepareCandidate(CandidateOptions{
+			SourceRoot:    filepath.Join("..", ".."),
+			OutDir:        out,
+			Version:       "v0.2.0",
+			ArtifactPaths: []string{rdev, host, verify, bootstrap},
+			Key:           key,
+			Now:           now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries := readConnectionEntryArchiveForTest(t, filepath.Join(out, candidate.ConnectionEntryPath))
+		launcher := string(entries["launchers/Start-ConnectionEntry.ps1"])
+		if !strings.Contains(launcher, "layered-run") || strings.Contains(launcher, "connection-entry run") {
+			t.Fatalf("Windows release launcher must remain bootstrap-only:\n%s", launcher)
+		}
+	})
 }
 
 func TestVerifyCandidateRequiresLayeredManifestForSignedWindowsCore(t *testing.T) {
@@ -701,10 +756,10 @@ func TestVerifyCandidateRejectsWindowsLayeredDowngradeWithUnsignedMetadataCleare
 		OutDir:         out,
 		Version:        "v0.2.0",
 		TargetPlatform: "windows/amd64",
-		ArtifactPaths: []string{
+		ArtifactPaths: withWindowsBootstrapArtifactForTest(t, input,
 			writeCandidateArtifactForTest(t, input, "rdev-host.exe", "windows-core-runtime"),
 			writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary"),
-		},
+		),
 		Key: key,
 		Now: now,
 	})
@@ -757,12 +812,15 @@ func TestVerifyCandidateRejectsLayeredDeclarationWithoutSignedWindowsCore(t *tes
 	}
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	candidate, err := PrepareCandidate(CandidateOptions{
-		SourceRoot:    filepath.Join("..", ".."),
-		OutDir:        out,
-		Version:       "v0.2.0",
-		ArtifactPaths: []string{writeCandidateArtifactForTest(t, input, "rdev-host.exe", "legacy-host-runtime")},
-		Key:           key,
-		Now:           now,
+		SourceRoot: filepath.Join("..", ".."),
+		OutDir:     out,
+		Version:    "v0.2.0",
+		ArtifactPaths: withBootstrapArtifactForTest(t, input,
+			writeCandidateArtifactForTest(t, input, "rdev-host.exe", "legacy-host-runtime"),
+			writeCandidateArtifactForTest(t, input, "rdev-verify", "verify-binary"),
+		),
+		Key: key,
+		Now: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -917,7 +975,7 @@ func TestVerifyCandidatePassesAfterDirectoryMove(t *testing.T) {
 		OutDir:            out,
 		Version:           "v0.1.0",
 		GatewayURL:        "https://api.example.com/v1",
-		ArtifactPaths:     []string{rdev, host, verify},
+		ArtifactPaths:     withBootstrapArtifactForTest(t, input, rdev, host, verify),
 		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
 		Key:               key,
 		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
@@ -961,7 +1019,7 @@ func TestVerifyCandidateDetectsTamperedArtifact(t *testing.T) {
 		OutDir:            out,
 		Version:           "v0.1.0",
 		GatewayURL:        "https://api.example.com/v1",
-		ArtifactPaths:     []string{rdev, host, verify},
+		ArtifactPaths:     withBootstrapArtifactForTest(t, input, rdev, host, verify),
 		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
 		Key:               key,
 		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
@@ -1005,7 +1063,7 @@ func TestVerifyCandidateRejectsUnlistedFiles(t *testing.T) {
 		OutDir:            out,
 		Version:           "v0.1.0",
 		GatewayURL:        "https://api.example.com/v1",
-		ArtifactPaths:     []string{rdev, host, verify},
+		ArtifactPaths:     withBootstrapArtifactForTest(t, input, rdev, host, verify),
 		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
 		Key:               key,
 		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
@@ -1045,7 +1103,7 @@ func TestVerifyCandidateDetectsTamperedSBOM(t *testing.T) {
 		OutDir:            out,
 		Version:           "v0.1.0",
 		GatewayURL:        "https://api.example.com/v1",
-		ArtifactPaths:     []string{rdev, host, verify},
+		ArtifactPaths:     withBootstrapArtifactForTest(t, input, rdev, host, verify),
 		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
 		Key:               key,
 		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
@@ -1092,7 +1150,7 @@ func TestVerifyCandidateDetectsTamperedProvenance(t *testing.T) {
 		OutDir:            out,
 		Version:           "v0.1.0",
 		GatewayURL:        "https://api.example.com/v1",
-		ArtifactPaths:     []string{rdev, host, verify},
+		ArtifactPaths:     withBootstrapArtifactForTest(t, input, rdev, host, verify),
 		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
 		Key:               key,
 		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
@@ -1139,7 +1197,7 @@ func TestVerifyCandidateDetectsTamperedConnectionEntryReleaseArchive(t *testing.
 		OutDir:            out,
 		Version:           "v0.1.0",
 		GatewayURL:        "https://api.example.com/v1",
-		ArtifactPaths:     []string{rdev, host, verify},
+		ArtifactPaths:     withBootstrapArtifactForTest(t, input, rdev, host, verify),
 		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
 		Key:               key,
 		Now:               time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
@@ -1227,10 +1285,10 @@ func prepareWindowsLayeredCandidateForTest(t *testing.T) (string, Candidate, sig
 		SourceRoot: filepath.Join("..", ".."),
 		OutDir:     out,
 		Version:    "v0.2.0",
-		ArtifactPaths: []string{
+		ArtifactPaths: withWindowsBootstrapArtifactForTest(t, input,
 			writeCandidateArtifactForTest(t, input, rdevHostWindowsAMD64AssetName, "windows-core-runtime"),
 			writeCandidateArtifactForTest(t, input, "rdev-verify.exe", "verify-binary"),
-		},
+		),
 		Key: key,
 		Now: now,
 	})
@@ -1311,6 +1369,18 @@ func writeCandidateArtifactForTest(t *testing.T, dir, name, content string) stri
 		t.Fatal(err)
 	}
 	return path
+}
+
+func withBootstrapArtifactForTest(t *testing.T, dir string, paths ...string) []string {
+	t.Helper()
+	bootstrap := writeCandidateArtifactForTest(t, dir, "rdev-bootstrap", "bootstrap-binary")
+	return append(append([]string(nil), paths...), bootstrap)
+}
+
+func withWindowsBootstrapArtifactForTest(t *testing.T, dir string, paths ...string) []string {
+	t.Helper()
+	bootstrap := writeCandidateArtifactForTest(t, dir, "rdev-bootstrap.exe", "bootstrap-binary")
+	return append(append([]string(nil), paths...), bootstrap)
 }
 
 func readReleaseCandidateTestFile(t *testing.T, path string) string {

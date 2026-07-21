@@ -169,18 +169,8 @@ func validateWindowsLayeredCommandArgument(name, value string) error {
 	return nil
 }
 
-func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff, outDir, fallbackLauncherPath string) (*pendingWindowsLayeredArchive, error) {
-	fallbackInfo, err := os.Stat(fallbackLauncherPath)
-	if err != nil || !fallbackInfo.Mode().IsRegular() {
-		return nil, fmt.Errorf("verified Windows archive fallback is unavailable")
-	}
+func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff, outDir string) (*pendingWindowsLayeredArchive, error) {
 	handoffDir := filepath.Join(outDir, windowsLayeredDirName)
-	fallbackRelative, err := filepath.Rel(handoffDir, fallbackLauncherPath)
-	if err != nil || filepath.IsAbs(fallbackRelative) || strings.HasPrefix(filepath.ToSlash(fallbackRelative), "../../") {
-		return nil, fmt.Errorf("verified Windows archive fallback path is invalid")
-	}
-	fallbackRelative = strings.ReplaceAll(filepath.ToSlash(fallbackRelative), "/", `\`)
-
 	stagingDir, err := os.MkdirTemp(outDir, ".windows-layered-")
 	if err != nil {
 		return nil, fmt.Errorf("create Windows layered handoff staging directory: %w", err)
@@ -204,11 +194,10 @@ func materializeWindowsLayeredHandoff(plan *Plan, handoff *windowsLayeredHandoff
 		return nil, fmt.Errorf("encode Windows layered verification plan: %w", err)
 	}
 	checksum := []byte(handoff.manifest.ArtifactSHA256 + "  " + windowsLayeredBootstrapName)
-	launcher := []byte(renderWindowsLayeredLauncher(handoff, fallbackRelative))
+	launcher := []byte(renderWindowsLayeredLauncher(handoff))
 	launcherDigest := sha256.Sum256(launcher)
 	commandLauncher := []byte(renderWindowsLayeredCommandLauncher(
 		handoff,
-		fallbackRelative,
 		hex.EncodeToString(launcherDigest[:]),
 		len(launcher),
 	))
@@ -314,7 +303,7 @@ func writePrivateWindowsLayeredFile(path string, content []byte) error {
 	return nil
 }
 
-func renderWindowsLayeredLauncher(handoff *windowsLayeredHandoff, fallbackRelative string) string {
+func renderWindowsLayeredLauncher(handoff *windowsLayeredHandoff) string {
 	return fmt.Sprintf(`param(
     [string] $AttemptDir = '',
     [string] $Launcher = 'powershell',
@@ -446,7 +435,7 @@ try {
 	)
 }
 
-func renderWindowsLayeredCommandLauncher(handoff *windowsLayeredHandoff, _ string, expectedPowerShellSHA256 string, expectedPowerShellSize int) string {
+func renderWindowsLayeredCommandLauncher(handoff *windowsLayeredHandoff, expectedPowerShellSHA256 string, expectedPowerShellSize int) string {
 	launcher := `@echo off
 setlocal EnableExtensions DisableDelayedExpansion
 

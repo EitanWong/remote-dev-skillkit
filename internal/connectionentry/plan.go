@@ -32,7 +32,6 @@ type Options struct {
 	TargetOS                            string
 	Ownership                           string
 	SessionMode                         string
-	ReleaseBundleURL                    string
 	ReleaseBundleRequiredArtifacts      string
 	ReleaseBundlePath                   string
 	ReleaseRootPublicKey                string
@@ -40,20 +39,13 @@ type Options struct {
 	ManagedServiceName                  string
 	ManagedServiceLabel                 string
 	ManagedUnitName                     string
-	WindowsHostDownloadURL              string
-	WindowsHostExpectedSHA256           string
-	WindowsVerifierDownloadURL          string
-	WindowsVerifierExpectedSHA256       string
-	WindowsBootstrapScriptURL           string
-	WindowsBootstrapScriptSHA256        string
-	WindowsBootstrapScriptPath          string
 	WindowsBootstrapBinaryPath          string
 	WindowsBootstrapReleaseManifestPath string
 	LayeredAssetsManifestURL            string
 	LayeredReleaseVersion               string
 	HostName                            string
 	TargetArch                          string
-	RdevCommand                         string
+	BootstrapCommand                    string
 	Force                               bool
 	Now                                 time.Time
 }
@@ -211,13 +203,11 @@ func FromInvite(opts Options) (_ Plan, resultErr error) {
 	}
 	addRunnerPlan(&plan, invite, opts, materializationDir)
 	if targetOS == "windows" && sessionMode == string(model.HostModeAttendedTemporary) {
-		addWindowsEntryPackagePlan(&plan, invite, opts, materializationDir)
-		if layeredHandoff != nil {
-			if plan.EntryPackagePlan == nil || !plan.EntryPackagePlan.OK {
-				return Plan{}, fmt.Errorf("Windows layered handoff requires a verified archive fallback")
-			}
-			fallbackLauncherPath := plan.EntryPackagePlan.LauncherPath
-			pendingArchive, err = materializeWindowsLayeredHandoff(&plan, layeredHandoff, materializationDir, fallbackLauncherPath)
+		if layeredHandoff == nil {
+			plan.MissingInputs = append(plan.MissingInputs, windowsLayeredMissingInputs(opts)...)
+			plan.Checks = append(plan.Checks, Check{Name: "windows_layered_handoff", Passed: false, Detail: "missing_inputs"})
+		} else {
+			pendingArchive, err = materializeWindowsLayeredHandoff(&plan, layeredHandoff, materializationDir)
 			if err != nil {
 				return Plan{}, err
 			}
@@ -452,15 +442,18 @@ func validURL(value string) bool {
 
 func addRunnerPlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
 	pkg, err := connectionrunner.Build(connectionrunner.Options{
-		Invite:       invite,
-		OutDir:       runnerOutDir(outDir),
-		TargetOS:     plan.TargetOS,
-		TargetArch:   opts.TargetArch,
-		SessionMode:  plan.SessionMode,
-		RdevCommand:  opts.RdevCommand,
-		HostName:     opts.HostName,
-		GeneratedAt:  plan.GeneratedAt,
-		WritePackage: outDir != "",
+		Invite:                      invite,
+		OutDir:                      runnerOutDir(outDir),
+		TargetOS:                    plan.TargetOS,
+		TargetArch:                  opts.TargetArch,
+		SessionMode:                 plan.SessionMode,
+		BootstrapCommand:            opts.BootstrapCommand,
+		LayeredAssetsManifestURL:    opts.LayeredAssetsManifestURL,
+		LayeredReleaseRootPublicKey: opts.ReleaseRootPublicKey,
+		LayeredReleaseVersion:       opts.LayeredReleaseVersion,
+		HostName:                    opts.HostName,
+		GeneratedAt:                 plan.GeneratedAt,
+		WritePackage:                outDir != "",
 	})
 	if err != nil {
 		plan.MissingInputs = append(plan.MissingInputs, "connection_entry_runner_error: "+err.Error())
@@ -529,82 +522,6 @@ func runnerChecksToAcceptance(checks []connectionrunner.Check) []acceptance.Chec
 		values = append(values, acceptance.Check{Name: check.Name, Passed: check.Passed, Detail: planArtifactStatus(check.Passed)})
 	}
 	return values
-}
-
-func addWindowsEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
-	missing := windowsMissingInputs(opts)
-	plan.MissingInputs = append(plan.MissingInputs, missing...)
-	if outDir == "" || len(missing) > 0 {
-		plan.Checks = append(plan.Checks, Check{
-			Name:   "windows_temporary_acceptance_plan",
-			Passed: false,
-			Detail: "missing_inputs",
-		})
-		return
-	}
-	winPlan, err := acceptance.RunWindowsTemporaryPlan(acceptance.WindowsTemporaryOptions{
-		OutDir:                         filepath.Join(outDir, "windows-temporary"),
-		GatewayURL:                     invite.GatewayURL,
-		TicketCode:                     invite.Ticket.Code,
-		DownloadURL:                    strings.TrimSpace(opts.WindowsHostDownloadURL),
-		ExpectedSHA256:                 strings.TrimSpace(opts.WindowsHostExpectedSHA256),
-		BootstrapScriptPath:            strings.TrimSpace(opts.WindowsBootstrapScriptPath),
-		BootstrapScriptURL:             strings.TrimSpace(opts.WindowsBootstrapScriptURL),
-		BootstrapScriptExpectedSHA256:  strings.TrimSpace(opts.WindowsBootstrapScriptSHA256),
-		ManifestURL:                    invite.ManifestURL,
-		ManifestRootPublicKey:          invite.ManifestRootPublicKey,
-		ReleaseBundleURL:               strings.TrimSpace(opts.ReleaseBundleURL),
-		ReleaseBundleRequiredArtifacts: firstNonEmpty(strings.TrimSpace(opts.ReleaseBundleRequiredArtifacts), "rdev-host.exe,rdev-verify.exe"),
-		ReleaseRootPublicKey:           strings.TrimSpace(opts.ReleaseRootPublicKey),
-		VerifierDownloadURL:            strings.TrimSpace(opts.WindowsVerifierDownloadURL),
-		VerifierExpectedSHA256:         strings.TrimSpace(opts.WindowsVerifierExpectedSHA256),
-		HostName:                       strings.TrimSpace(opts.HostName),
-		Force:                          opts.Force,
-		Now:                            plan.GeneratedAt,
-	})
-	if err != nil {
-		plan.MissingInputs = append(plan.MissingInputs, "entry_package_plan_error: "+err.Error())
-		plan.Checks = append(plan.Checks, Check{Name: "windows_temporary_acceptance_plan", Passed: false, Detail: "failed"})
-		return
-	}
-	fallbackLauncherPath := filepath.Join(winPlan.OutDir, "Start-ConnectionEntry.ps1")
-	fallbackLauncher, err := os.ReadFile(winPlan.LauncherPath)
-	if err == nil {
-		err = os.WriteFile(fallbackLauncherPath, fallbackLauncher, 0o600)
-	}
-	if err != nil {
-		plan.MissingInputs = append(plan.MissingInputs, "entry_package_plan_error: "+err.Error())
-		plan.Checks = append(plan.Checks, Check{Name: "windows_temporary_acceptance_plan", Passed: false, Detail: "failed"})
-		return
-	}
-	plan.EntryPackagePlan = &EntryPackagePlan{
-		SchemaVersion:      EntryPackagePlanSchemaVersion,
-		TargetOS:           plan.TargetOS,
-		SessionMode:        plan.SessionMode,
-		PackageMode:        "visible-self-contained-connection-entry",
-		OK:                 allAcceptanceChecksPassed(winPlan.Checks),
-		PlanPath:           filepath.Join(winPlan.OutDir, "windows-temporary-plan.json"),
-		LauncherPath:       fallbackLauncherPath,
-		PlatformPlanSchema: winPlan.SchemaVersion,
-		PlatformPlanKind:   "windows-temporary-acceptance-plan",
-		HumanEntryPoint:    "run the visible PowerShell launcher from this package plan",
-		AgentOnlyParameters: []string{
-			"manifest_url",
-			"manifest_root_public_key",
-			"gateway_url",
-			"ticket_code",
-			"transport",
-			"release_bundle_url",
-			"release_root_public_key",
-		},
-		Checks: winPlan.Checks,
-	}
-	plan.GeneratedFiles = append(plan.GeneratedFiles,
-		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable Windows temporary acceptance plan inside the generic connection entry package plan"},
-		GeneratedFile{Path: winPlan.LauncherPath, Purpose: "Windows temporary acceptance launcher retained for evidence packaging"},
-		GeneratedFile{Path: plan.EntryPackagePlan.LauncherPath, Purpose: "visible verified Windows temporary fallback launcher"},
-	)
-	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: planArtifactStatus(plan.EntryPackagePlan.OK)})
 }
 
 func addManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
@@ -758,19 +675,21 @@ func planArtifactStatus(passed bool) string {
 	return "failed"
 }
 
-func windowsMissingInputs(opts Options) []string {
-	var missing []string
-	required := map[string]string{
-		"windows_host_download_url":        opts.WindowsHostDownloadURL,
-		"windows_host_expected_sha256":     opts.WindowsHostExpectedSHA256,
-		"release_bundle_url":               opts.ReleaseBundleURL,
-		"release_root_public_key":          opts.ReleaseRootPublicKey,
-		"windows_verifier_download_url":    opts.WindowsVerifierDownloadURL,
-		"windows_verifier_expected_sha256": opts.WindowsVerifierExpectedSHA256,
+func windowsLayeredMissingInputs(opts Options) []string {
+	required := []struct {
+		name  string
+		value string
+	}{
+		{name: "windows_bootstrap_binary", value: opts.WindowsBootstrapBinaryPath},
+		{name: "windows_bootstrap_release_manifest", value: opts.WindowsBootstrapReleaseManifestPath},
+		{name: "layered_assets_manifest_url", value: opts.LayeredAssetsManifestURL},
+		{name: "layered_release_version", value: opts.LayeredReleaseVersion},
+		{name: "release_root_public_key", value: opts.ReleaseRootPublicKey},
 	}
-	for name, value := range required {
-		if strings.TrimSpace(value) == "" {
-			missing = append(missing, name)
+	missing := make([]string, 0, len(required))
+	for _, input := range required {
+		if strings.TrimSpace(input.value) == "" {
+			missing = append(missing, input.name)
 		}
 	}
 	return missing

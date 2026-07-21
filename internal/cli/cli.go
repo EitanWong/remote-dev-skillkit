@@ -891,35 +891,38 @@ type trustRevokeOptions struct {
 }
 
 type gatewayServeOptions struct {
-	Addr                     string
-	AuditLog                 string
-	StatePath                string
-	StorageProvider          string
-	StoragePath              string
-	SigningKeyPath           string
-	SigningKeyID             string
-	ManifestSigningKeyPath   string
-	ManifestSigningKeyID     string
-	EnrollmentRootPublicKey  string
-	EnrollmentKeyPath        string
-	EnrollmentKeyID          string
-	EnrollmentRevocations    string
-	TLSCertPath              string
-	TLSKeyPath               string
-	ClientCAPath             string
-	OperatorAuthPath         string
-	HostedOperatorAuthPath   string
-	OIDCJWKSOperatorAuthPath string
-	SAMLOperatorAuthPath     string
-	RdevAssetsDir            string
-	AutoBuildRdevAssets      bool
-	LayeredAssetManifestPath string
-	RdevHostWindowsAMD64Path string
-	RdevWindowsAMD64Path     string
-	RdevDarwinARM64Path      string
-	RdevDarwinAMD64Path      string
-	RdevLinuxAMD64Path       string
-	RdevLinuxARM64Path       string
+	Addr                          string
+	AuditLog                      string
+	StatePath                     string
+	StorageProvider               string
+	StoragePath                   string
+	SigningKeyPath                string
+	SigningKeyID                  string
+	ManifestSigningKeyPath        string
+	ManifestSigningKeyID          string
+	EnrollmentRootPublicKey       string
+	EnrollmentKeyPath             string
+	EnrollmentKeyID               string
+	EnrollmentRevocations         string
+	TLSCertPath                   string
+	TLSKeyPath                    string
+	ClientCAPath                  string
+	OperatorAuthPath              string
+	HostedOperatorAuthPath        string
+	OIDCJWKSOperatorAuthPath      string
+	SAMLOperatorAuthPath          string
+	RdevAssetsDir                 string
+	AutoBuildRdevAssets           bool
+	LayeredAssetManifestPath      string
+	LayeredReleaseRootPublicKey   string
+	LayeredReleaseVersion         string
+	RdevHostWindowsAMD64Path      string
+	RdevBootstrapWindowsAMD64Path string
+	RdevBootstrapWindowsARM64Path string
+	RdevBootstrapDarwinARM64Path  string
+	RdevBootstrapDarwinAMD64Path  string
+	RdevBootstrapLinuxAMD64Path   string
+	RdevBootstrapLinuxARM64Path   string
 }
 
 func (a App) operatorAuth(args []string) error {
@@ -3446,7 +3449,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		fs := flag.NewFlagSet("support-session connect", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
 		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
-		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and bootstrap assets")
 		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
 		gatewayURL := fs.String("gateway-url", "", "already reachable gateway URL; omit to use configured RDEV_*_GATEWAY_URL or return cli_start_now_command")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
@@ -3503,7 +3506,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		fs := flag.NewFlagSet("support-session handoff", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
 		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
-		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and bootstrap assets")
 		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
 		gatewayURL := fs.String("gateway-url", "", "already reachable gateway URL; omit when no gateway is running")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
@@ -3537,11 +3540,11 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		fs := flag.NewFlagSet("support-session prepare", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
 		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
-		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and bootstrap assets")
 		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
 		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to the best local candidate for --addr")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
-		buildAssets := fs.Bool("build-assets", false, "build missing platform rdev helper assets from the checkout")
+		buildAssets := fs.Bool("build-assets", false, "build missing platform rdev-bootstrap assets from the checkout")
 		rdevCommand := fs.String("rdev-command", "", "command name or absolute path for generated local Agent commands; default auto-detects a stable rdev binary")
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
@@ -3564,7 +3567,7 @@ func (a App) supportSession(ctx context.Context, args []string) error {
 		repoRoot := fs.String("repo-root", ".", "checked-out remote-dev-skillkit repository root")
 		addr := fs.String("addr", "0.0.0.0:8787", "foreground gateway listen address")
 		gatewayURL := fs.String("gateway-url", "", "gateway URL reachable by the target host; defaults to the best local candidate for --addr")
-		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and helper assets")
+		workDir := fs.String("work-dir", "", "session working directory for gateway state, keys, audit, and bootstrap assets")
 		target := fs.String("target", "auto", "target platform hint: auto, windows, macos, linux")
 		reason := fs.String("reason", "visible temporary remote support", "support session reason")
 		ttl := fs.Int("ttl-seconds", 7200, "temporary invite TTL in seconds")
@@ -4520,7 +4523,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 	}
 	gatewayCandidates, _ := prepared["gateway_url_candidates"].([]supportsession.GatewayURLCandidate)
 
-	// Pre-check: verify that platform helper binaries were actually built into
+	// Pre-check: verify that platform bootstrap binaries were actually built into
 	// workDir/bin before the gateway starts serving /assets/* routes.
 	//
 	// This catches the common mistake of running `prepare --build-assets` with
@@ -4539,11 +4542,12 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 				path string
 			}
 			checks := []platformCheck{
-				{"windows-amd64", filepath.Join(binDir, "rdev-windows-amd64.exe")},
-				{"darwin-arm64", filepath.Join(binDir, "rdev-darwin-arm64")},
-				{"darwin-amd64", filepath.Join(binDir, "rdev-darwin-amd64")},
-				{"linux-amd64", filepath.Join(binDir, "rdev-linux-amd64")},
-				{"linux-arm64", filepath.Join(binDir, "rdev-linux-arm64")},
+				{"windows-amd64", filepath.Join(binDir, "rdev-bootstrap-windows-amd64.exe")},
+				{"windows-arm64", filepath.Join(binDir, "rdev-bootstrap-windows-arm64.exe")},
+				{"darwin-arm64", filepath.Join(binDir, "rdev-bootstrap-darwin-arm64")},
+				{"darwin-amd64", filepath.Join(binDir, "rdev-bootstrap-darwin-amd64")},
+				{"linux-amd64", filepath.Join(binDir, "rdev-bootstrap-linux-amd64")},
+				{"linux-arm64", filepath.Join(binDir, "rdev-bootstrap-linux-arm64")},
 			}
 			var missing []string
 			for _, c := range checks {
@@ -4551,7 +4555,7 @@ func (a App) supportSessionStart(ctx context.Context, opts supportSessionStartOp
 					missing = append(missing, c.name)
 				}
 			}
-			return fmt.Errorf("support-session connect cannot generate a target handoff until helper assets are ready; missing platform helpers %v in %s; rerun the standard recovery command: rdev support-session connect --start --repo-root %s --work-dir %s", missing, binDir, repoRoot, workDir)
+			return fmt.Errorf("support-session connect cannot generate a target handoff until bootstrap assets are ready; missing platform bootstraps %v in %s; rerun the standard recovery command: rdev support-session connect --start --repo-root %s --work-dir %s", missing, binDir, repoRoot, workDir)
 		}
 	}
 
@@ -5073,7 +5077,6 @@ func createSupportSessionPayload(ctx context.Context, opts supportSessionCreateO
 		NetworkScope:      "auto",
 		AuthorityProfile:  "standard",
 		OperatorTokenFile: opts.OperatorTokenFile,
-		RdevCommand:       opts.RdevCommand,
 		Once:              false,
 		AutoActivate:      opts.AutoActivate,
 	})
@@ -5114,20 +5117,20 @@ func probeTargetBootstrapReadiness(ctx context.Context, client *http.Client, gat
 		"all_ready":      allReady,
 		"probed":         len(assets) > 0,
 		"assets":         results,
-		"agent_rule":     "if all_ready is false for a platform terminal command, run rdev support-session connect --start or prepare --build-assets instead of asking the target user to install rdev manually",
+		"agent_rule":     "if all_ready is false for a platform terminal command, run rdev support-session connect --start or prepare --build-assets to publish rdev-bootstrap",
 	}
 }
 
 func supportSessionRequiredAssets(target string) []string {
 	switch target {
 	case "windows":
-		return []string{"rdev-windows-amd64.exe.sha256"}
+		return []string{"rdev-bootstrap-windows-amd64.exe.sha256"}
 	case "macos":
-		return []string{"rdev-darwin-arm64.sha256", "rdev-darwin-amd64.sha256"}
+		return []string{"rdev-bootstrap-darwin-arm64.sha256", "rdev-bootstrap-darwin-amd64.sha256"}
 	case "linux":
-		return []string{"rdev-linux-amd64.sha256", "rdev-linux-arm64.sha256"}
+		return []string{"rdev-bootstrap-linux-amd64.sha256", "rdev-bootstrap-linux-arm64.sha256"}
 	default:
-		return []string{"rdev-windows-amd64.exe.sha256", "rdev-darwin-arm64.sha256", "rdev-darwin-amd64.sha256", "rdev-linux-amd64.sha256", "rdev-linux-arm64.sha256"}
+		return []string{"rdev-bootstrap-windows-amd64.exe.sha256", "rdev-bootstrap-darwin-arm64.sha256", "rdev-bootstrap-darwin-amd64.sha256", "rdev-bootstrap-linux-amd64.sha256", "rdev-bootstrap-linux-arm64.sha256"}
 	}
 }
 
@@ -5193,7 +5196,7 @@ func prepareSupportSessionEnvironment(ctx context.Context, opts supportSessionPr
 	repoRootTrusted := repoRootSource != "hint" && repoRootSource != "hint-unverified" && repoRootSource != "default"
 	report["repo_root_trusted"] = repoRootTrusted
 	if !repoRootTrusted {
-		report["repo_root_warning"] = "repo root came only from --repo-root; set RDEV_SOURCE_ROOT or run from the active checkout to avoid stale helper assets"
+		report["repo_root_warning"] = "repo root came only from --repo-root; set RDEV_SOURCE_ROOT or run from the active checkout to avoid stale bootstrap assets"
 	}
 	return report, nil
 }
@@ -8072,7 +8075,6 @@ func (a App) connectionEntry(args []string) error {
 		targetOS := fs.String("target-os", runtime.GOOS, "target OS: windows, darwin, or linux")
 		ownership := fs.String("ownership", "", "target ownership: owned or third-party; inferred from invite mode when omitted")
 		sessionMode := fs.String("session-mode", "", "session mode override: attended-temporary, managed, or break-glass")
-		releaseBundleURL := fs.String("release-bundle-url", "", "signed release bundle index URL for target-side package verification")
 		releaseBundlePath := fs.String("release-bundle", "", "target-local signed release bundle path for owned managed-service entries")
 		releaseBundleRequiredArtifacts := fs.String("release-bundle-required-artifacts", "", "comma-separated artifact ids required in the release bundle")
 		releaseRootPublicKey := fs.String("release-root-public-key", "", "pinned release root public key")
@@ -8080,20 +8082,13 @@ func (a App) connectionEntry(args []string) error {
 		managedServiceName := fs.String("managed-service-name", "", "optional Windows managed service name")
 		managedServiceLabel := fs.String("managed-service-label", "", "optional macOS LaunchAgent label")
 		managedUnitName := fs.String("managed-unit-name", "", "optional Linux systemd user unit name")
-		windowsHostDownloadURL := fs.String("windows-host-download-url", "", "rdev-host.exe download URL for Windows temporary entry materialization")
-		windowsHostSHA256 := fs.String("windows-host-sha256", "", "expected SHA-256 for rdev-host.exe")
-		windowsVerifierDownloadURL := fs.String("windows-verifier-download-url", "", "rdev-verify.exe download URL")
-		windowsVerifierSHA256 := fs.String("windows-verifier-sha256", "", "expected SHA-256 for rdev-verify.exe")
-		windowsBootstrapScriptURL := fs.String("windows-bootstrap-script-url", "", "optional URL for downloading windows-temporary.ps1 on the target host")
-		windowsBootstrapScriptSHA256 := fs.String("windows-bootstrap-script-sha256", "", "expected SHA-256 for windows-temporary.ps1")
-		windowsBootstrapScriptPath := fs.String("windows-bootstrap-script", "", "local windows-temporary.ps1 path; defaults to scripts/bootstrap/windows-temporary.ps1")
 		windowsBootstrapBinaryPath := fs.String("windows-bootstrap-binary", "", "verified rdev-bootstrap.exe path for layered Windows temporary entry materialization")
 		windowsBootstrapReleaseManifestPath := fs.String("windows-bootstrap-release-manifest", "", "signed release manifest path for --windows-bootstrap-binary")
 		layeredAssetsManifestURL := fs.String("layered-assets-manifest-url", "", "HTTPS layered asset manifest URL for Windows temporary entry materialization")
 		layeredReleaseVersion := fs.String("layered-release-version", "", "expected signed release version for Windows layered assets")
 		hostName := fs.String("host-name", "", "optional target host display name")
 		targetArch := fs.String("target-arch", runtime.GOARCH, "target architecture: amd64 or arm64")
-		rdevCommand := fs.String("rdev-command", "rdev", "rdev command embedded in the generated Connection Entry runner launcher")
+		bootstrapCommand := fs.String("bootstrap-command", "rdev-bootstrap", "rdev-bootstrap command embedded in the generated Connection Entry runner launcher")
 		force := fs.Bool("force", false, "overwrite generated nested Windows launcher files when supported")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -8105,7 +8100,6 @@ func (a App) connectionEntry(args []string) error {
 			TargetOS:                            *targetOS,
 			Ownership:                           *ownership,
 			SessionMode:                         *sessionMode,
-			ReleaseBundleURL:                    *releaseBundleURL,
 			ReleaseBundleRequiredArtifacts:      *releaseBundleRequiredArtifacts,
 			ReleaseBundlePath:                   *releaseBundlePath,
 			ReleaseRootPublicKey:                *releaseRootPublicKey,
@@ -8113,20 +8107,13 @@ func (a App) connectionEntry(args []string) error {
 			ManagedServiceName:                  *managedServiceName,
 			ManagedServiceLabel:                 *managedServiceLabel,
 			ManagedUnitName:                     *managedUnitName,
-			WindowsHostDownloadURL:              *windowsHostDownloadURL,
-			WindowsHostExpectedSHA256:           *windowsHostSHA256,
-			WindowsVerifierDownloadURL:          *windowsVerifierDownloadURL,
-			WindowsVerifierExpectedSHA256:       *windowsVerifierSHA256,
-			WindowsBootstrapScriptURL:           *windowsBootstrapScriptURL,
-			WindowsBootstrapScriptSHA256:        *windowsBootstrapScriptSHA256,
-			WindowsBootstrapScriptPath:          *windowsBootstrapScriptPath,
 			WindowsBootstrapBinaryPath:          *windowsBootstrapBinaryPath,
 			WindowsBootstrapReleaseManifestPath: *windowsBootstrapReleaseManifestPath,
 			LayeredAssetsManifestURL:            *layeredAssetsManifestURL,
 			LayeredReleaseVersion:               *layeredReleaseVersion,
 			HostName:                            *hostName,
 			TargetArch:                          *targetArch,
-			RdevCommand:                         *rdevCommand,
+			BootstrapCommand:                    *bootstrapCommand,
 			Force:                               *force,
 		})
 		if err != nil {
@@ -8147,10 +8134,10 @@ func (a App) connectionEntry(args []string) error {
 		fs := flag.NewFlagSet("connection-entry run", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
 		manifestPath := fs.String("runner-manifest", "", "Connection Entry runner manifest path")
-		rdevCommand := fs.String("rdev-command", "rdev", "rdev command to execute for host serve")
-		dryRun := fs.Bool("dry-run", false, "probe and print selected path without starting host serve")
+		bootstrapCommand := fs.String("bootstrap-command", "rdev-bootstrap", "rdev-bootstrap command used to verify and start the core runtime")
+		dryRun := fs.Bool("dry-run", false, "probe and print selected path without starting the core runtime")
 		probeTimeout := fs.Duration("probe-timeout", 5*time.Second, "per-path gateway probe timeout")
-		extraHostArgs := fs.String("host-args", "", "optional comma-separated extra rdev host serve args")
+		extraHostArgs := fs.String("host-args", "", "optional comma-separated extra bootstrap-started core args")
 		resultOut := fs.String("result-out", "", "optional path to write the raw Connection Entry runner result JSON for acceptance evidence")
 		helperTranscriptOut := fs.String("helper-transcript-out", "", "optional path to write standard helper transcript evidence for relay/connectivity acceptance")
 		evidenceDir := fs.String("evidence-dir", "", "optional directory to write runner-result.json, helper-transcript.txt, gateway-status.json, host-status.json, connection-status.json, and audit.jsonl")
@@ -8158,11 +8145,11 @@ func (a App) connectionEntry(args []string) error {
 			return err
 		}
 		result, err := connectionrunner.Run(connectionrunner.RunOptions{
-			ManifestPath:  *manifestPath,
-			RdevCommand:   *rdevCommand,
-			DryRun:        *dryRun,
-			ProbeTimeout:  *probeTimeout,
-			ExtraHostArgs: splitCapabilities(*extraHostArgs),
+			ManifestPath:     *manifestPath,
+			BootstrapCommand: *bootstrapCommand,
+			DryRun:           *dryRun,
+			ProbeTimeout:     *probeTimeout,
+			ExtraHostArgs:    splitCapabilities(*extraHostArgs),
 		})
 		if err != nil {
 			return err
@@ -8242,7 +8229,6 @@ func (a App) invite(ctx context.Context, args []string) error {
 		networkScope := fs.String("network-scope", "auto", "network scope hint: auto, internet, lan, relay, mesh, or ssh")
 		authorityProfile := fs.String("authority-profile", "max-control", "agent authority profile: standard or max-control")
 		operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
-		rdevCommand := fs.String("rdev-command", "rdev", "command name or absolute path to run on the target host")
 		once := fs.Bool("once", false, "ask the target host process to exit after one task")
 		autoActivate := fs.Bool("auto-activate", false, "auto-activate the first attended-temporary host created by this standard Connection Entry")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -8258,7 +8244,6 @@ func (a App) invite(ctx context.Context, args []string) error {
 			NetworkScope:      *networkScope,
 			AuthorityProfile:  *authorityProfile,
 			OperatorTokenFile: *operatorTokenFile,
-			RdevCommand:       *rdevCommand,
 			Once:              *once,
 			AutoActivate:      *autoActivate,
 		})
@@ -8278,7 +8263,6 @@ type inviteCreateOptions struct {
 	NetworkScope      string
 	AuthorityProfile  string
 	OperatorTokenFile string
-	RdevCommand       string
 	Once              bool
 	AutoActivate      bool
 }
@@ -8311,7 +8295,6 @@ func (a App) inviteCreate(ctx context.Context, opts inviteCreateOptions) error {
 		AuthorityProfile:      opts.AuthorityProfile,
 		Once:                  opts.Once,
 		RequireHostActivation: !opts.AutoActivate,
-		RdevCommand:           opts.RdevCommand,
 	})
 	if err != nil {
 		return err
@@ -8603,15 +8586,18 @@ func (a App) gateway(args []string) error {
 		hostedOperatorAuth := fs.String("hosted-operator-auth", "", "optional hosted operator auth JSON file for EdDSA JWT role tokens")
 		oidcJWKSOperatorAuth := fs.String("oidc-jwks-operator-auth", "", "optional OIDC JWKS operator auth JSON file for RS256 JWT role tokens")
 		samlOperatorAuth := fs.String("saml-operator-auth", "", "optional SAML operator auth JSON file for signed SAMLResponse bearer tokens")
-		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing rdev-host-windows-amd64.exe plus rdev-windows-amd64.exe, rdev-darwin-arm64, rdev-darwin-amd64, rdev-linux-amd64, and rdev-linux-arm64 helpers")
-		autoBuildRdevAssets := fs.Bool("auto-build-rdev-assets", true, "auto-build missing platform rdev helpers for dev gateway Connection Entry bootstraps when a checkout and Go are available")
+		rdevAssetsDir := fs.String("rdev-assets-dir", "", "optional directory containing layered assets and platform rdev-bootstrap binaries")
+		autoBuildRdevAssets := fs.Bool("auto-build-rdev-assets", true, "auto-build missing platform rdev-bootstrap assets for dev gateway Connection Entry when a checkout and Go are available")
 		layeredAssetsManifest := fs.String("layered-assets-manifest", "", "optional layered-assets.json manifest served to layered Connection Entry bootstraps")
+		layeredReleaseRoot := fs.String("layered-release-root-public-key", "", "pinned Ed25519 release root for the layered asset manifest")
+		layeredReleaseVersion := fs.String("layered-release-version", "", "expected signed layered release version")
 		rdevHostWindowsAMD64 := fs.String("rdev-host-windows-amd64", "", "optional rdev-host.exe core runtime served to Windows amd64 layered Connection Entry bootstraps")
-		rdevWindowsAMD64 := fs.String("rdev-windows-amd64", "", "optional rdev.exe helper served to Windows amd64 Connection Entry bootstraps")
-		rdevDarwinARM64 := fs.String("rdev-darwin-arm64", "", "optional rdev helper served to macOS arm64 Connection Entry bootstraps")
-		rdevDarwinAMD64 := fs.String("rdev-darwin-amd64", "", "optional rdev helper served to macOS amd64 Connection Entry bootstraps")
-		rdevLinuxAMD64 := fs.String("rdev-linux-amd64", "", "optional rdev helper served to Linux amd64 Connection Entry bootstraps")
-		rdevLinuxARM64 := fs.String("rdev-linux-arm64", "", "optional rdev helper served to Linux arm64 Connection Entry bootstraps")
+		rdevBootstrapWindowsAMD64 := fs.String("rdev-bootstrap-windows-amd64", "", "optional Windows amd64 rdev-bootstrap executable")
+		rdevBootstrapWindowsARM64 := fs.String("rdev-bootstrap-windows-arm64", "", "optional Windows arm64 rdev-bootstrap executable")
+		rdevBootstrapDarwinARM64 := fs.String("rdev-bootstrap-darwin-arm64", "", "optional macOS arm64 rdev-bootstrap executable")
+		rdevBootstrapDarwinAMD64 := fs.String("rdev-bootstrap-darwin-amd64", "", "optional macOS amd64 rdev-bootstrap executable")
+		rdevBootstrapLinuxAMD64 := fs.String("rdev-bootstrap-linux-amd64", "", "optional Linux amd64 rdev-bootstrap executable")
+		rdevBootstrapLinuxARM64 := fs.String("rdev-bootstrap-linux-arm64", "", "optional Linux arm64 rdev-bootstrap executable")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -8619,35 +8605,38 @@ func (a App) gateway(args []string) error {
 			return fmt.Errorf("gateway serve currently requires --dev")
 		}
 		return a.gatewayServeDev(gatewayServeOptions{
-			Addr:                     *addr,
-			AuditLog:                 *auditLog,
-			StatePath:                *statePath,
-			StorageProvider:          *storageProvider,
-			StoragePath:              *storagePath,
-			SigningKeyPath:           *signingKey,
-			SigningKeyID:             *signingKeyID,
-			ManifestSigningKeyPath:   *manifestSigningKey,
-			ManifestSigningKeyID:     *manifestSigningKeyID,
-			EnrollmentRootPublicKey:  *enrollmentRootPublicKey,
-			EnrollmentKeyPath:        *enrollmentKey,
-			EnrollmentKeyID:          *enrollmentKeyID,
-			EnrollmentRevocations:    *enrollmentRevocations,
-			TLSCertPath:              *tlsCert,
-			TLSKeyPath:               *tlsKey,
-			ClientCAPath:             *clientCA,
-			OperatorAuthPath:         *operatorAuth,
-			HostedOperatorAuthPath:   *hostedOperatorAuth,
-			OIDCJWKSOperatorAuthPath: *oidcJWKSOperatorAuth,
-			SAMLOperatorAuthPath:     *samlOperatorAuth,
-			RdevAssetsDir:            *rdevAssetsDir,
-			AutoBuildRdevAssets:      *autoBuildRdevAssets,
-			LayeredAssetManifestPath: *layeredAssetsManifest,
-			RdevHostWindowsAMD64Path: *rdevHostWindowsAMD64,
-			RdevWindowsAMD64Path:     *rdevWindowsAMD64,
-			RdevDarwinARM64Path:      *rdevDarwinARM64,
-			RdevDarwinAMD64Path:      *rdevDarwinAMD64,
-			RdevLinuxAMD64Path:       *rdevLinuxAMD64,
-			RdevLinuxARM64Path:       *rdevLinuxARM64,
+			Addr:                          *addr,
+			AuditLog:                      *auditLog,
+			StatePath:                     *statePath,
+			StorageProvider:               *storageProvider,
+			StoragePath:                   *storagePath,
+			SigningKeyPath:                *signingKey,
+			SigningKeyID:                  *signingKeyID,
+			ManifestSigningKeyPath:        *manifestSigningKey,
+			ManifestSigningKeyID:          *manifestSigningKeyID,
+			EnrollmentRootPublicKey:       *enrollmentRootPublicKey,
+			EnrollmentKeyPath:             *enrollmentKey,
+			EnrollmentKeyID:               *enrollmentKeyID,
+			EnrollmentRevocations:         *enrollmentRevocations,
+			TLSCertPath:                   *tlsCert,
+			TLSKeyPath:                    *tlsKey,
+			ClientCAPath:                  *clientCA,
+			OperatorAuthPath:              *operatorAuth,
+			HostedOperatorAuthPath:        *hostedOperatorAuth,
+			OIDCJWKSOperatorAuthPath:      *oidcJWKSOperatorAuth,
+			SAMLOperatorAuthPath:          *samlOperatorAuth,
+			RdevAssetsDir:                 *rdevAssetsDir,
+			AutoBuildRdevAssets:           *autoBuildRdevAssets,
+			LayeredAssetManifestPath:      *layeredAssetsManifest,
+			LayeredReleaseRootPublicKey:   *layeredReleaseRoot,
+			LayeredReleaseVersion:         *layeredReleaseVersion,
+			RdevHostWindowsAMD64Path:      *rdevHostWindowsAMD64,
+			RdevBootstrapWindowsAMD64Path: *rdevBootstrapWindowsAMD64,
+			RdevBootstrapWindowsARM64Path: *rdevBootstrapWindowsARM64,
+			RdevBootstrapDarwinARM64Path:  *rdevBootstrapDarwinARM64,
+			RdevBootstrapDarwinAMD64Path:  *rdevBootstrapDarwinAMD64,
+			RdevBootstrapLinuxAMD64Path:   *rdevBootstrapLinuxAMD64,
+			RdevBootstrapLinuxARM64Path:   *rdevBootstrapLinuxARM64,
 		})
 	case "storage":
 		if len(args) < 2 {
@@ -9751,7 +9740,7 @@ func (a App) gatewayServeDev(opts gatewayServeOptions) error {
 		}
 		if ready && strings.TrimSpace(assetsDir) != "" {
 			opts.RdevAssetsDir = assetsDir
-			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev auto-built rdev helper assets at %s\n", assetsDir)
+			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev auto-built rdev-bootstrap assets at %s\n", assetsDir)
 		} else {
 			_, _ = fmt.Fprintf(a.Stderr, "rdev gateway dev warning: target bootstrap self-repair assets are not all ready; use rdev support-session connect --start or --rdev-assets-dir for one-command target setup\n")
 		}
@@ -9793,32 +9782,38 @@ func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 		if pathExists(candidateCorePath) {
 			assets.RdevHostWindowsAMD64Path = candidateCorePath
 		}
-		assets.RdevWindowsAMD64Path = filepath.Join(dir, "rdev-windows-amd64.exe")
-		assets.RdevDarwinARM64Path = filepath.Join(dir, "rdev-darwin-arm64")
-		assets.RdevDarwinAMD64Path = filepath.Join(dir, "rdev-darwin-amd64")
-		assets.RdevLinuxAMD64Path = filepath.Join(dir, "rdev-linux-amd64")
-		assets.RdevLinuxARM64Path = filepath.Join(dir, "rdev-linux-arm64")
+		assets.RdevBootstrapWindowsAMD64Path = filepath.Join(dir, "rdev-bootstrap-windows-amd64.exe")
+		assets.RdevBootstrapWindowsARM64Path = filepath.Join(dir, "rdev-bootstrap-windows-arm64.exe")
+		assets.RdevBootstrapDarwinARM64Path = filepath.Join(dir, "rdev-bootstrap-darwin-arm64")
+		assets.RdevBootstrapDarwinAMD64Path = filepath.Join(dir, "rdev-bootstrap-darwin-amd64")
+		assets.RdevBootstrapLinuxAMD64Path = filepath.Join(dir, "rdev-bootstrap-linux-amd64")
+		assets.RdevBootstrapLinuxARM64Path = filepath.Join(dir, "rdev-bootstrap-linux-arm64")
 	}
+	assets.LayeredReleaseRootPublicKey = strings.TrimSpace(opts.LayeredReleaseRootPublicKey)
+	assets.LayeredReleaseVersion = strings.TrimSpace(opts.LayeredReleaseVersion)
 	if strings.TrimSpace(opts.LayeredAssetManifestPath) != "" {
 		assets.LayeredAssetManifestPath = opts.LayeredAssetManifestPath
 	}
 	if strings.TrimSpace(opts.RdevHostWindowsAMD64Path) != "" {
 		assets.RdevHostWindowsAMD64Path = opts.RdevHostWindowsAMD64Path
 	}
-	if strings.TrimSpace(opts.RdevWindowsAMD64Path) != "" {
-		assets.RdevWindowsAMD64Path = opts.RdevWindowsAMD64Path
+	if strings.TrimSpace(opts.RdevBootstrapWindowsAMD64Path) != "" {
+		assets.RdevBootstrapWindowsAMD64Path = opts.RdevBootstrapWindowsAMD64Path
 	}
-	if strings.TrimSpace(opts.RdevDarwinARM64Path) != "" {
-		assets.RdevDarwinARM64Path = opts.RdevDarwinARM64Path
+	if strings.TrimSpace(opts.RdevBootstrapWindowsARM64Path) != "" {
+		assets.RdevBootstrapWindowsARM64Path = opts.RdevBootstrapWindowsARM64Path
 	}
-	if strings.TrimSpace(opts.RdevDarwinAMD64Path) != "" {
-		assets.RdevDarwinAMD64Path = opts.RdevDarwinAMD64Path
+	if strings.TrimSpace(opts.RdevBootstrapDarwinARM64Path) != "" {
+		assets.RdevBootstrapDarwinARM64Path = opts.RdevBootstrapDarwinARM64Path
 	}
-	if strings.TrimSpace(opts.RdevLinuxAMD64Path) != "" {
-		assets.RdevLinuxAMD64Path = opts.RdevLinuxAMD64Path
+	if strings.TrimSpace(opts.RdevBootstrapDarwinAMD64Path) != "" {
+		assets.RdevBootstrapDarwinAMD64Path = opts.RdevBootstrapDarwinAMD64Path
 	}
-	if strings.TrimSpace(opts.RdevLinuxARM64Path) != "" {
-		assets.RdevLinuxARM64Path = opts.RdevLinuxARM64Path
+	if strings.TrimSpace(opts.RdevBootstrapLinuxAMD64Path) != "" {
+		assets.RdevBootstrapLinuxAMD64Path = opts.RdevBootstrapLinuxAMD64Path
+	}
+	if strings.TrimSpace(opts.RdevBootstrapLinuxARM64Path) != "" {
+		assets.RdevBootstrapLinuxARM64Path = opts.RdevBootstrapLinuxARM64Path
 	}
 	return assets
 }
@@ -9826,11 +9821,12 @@ func gatewayAssetConfig(opts gatewayServeOptions) httpapi.AssetConfig {
 func supportSessionAssetConfig(workDir string, layered supportSessionLayeredCandidateOptions, now time.Time) (httpapi.AssetConfig, error) {
 	binDir := filepath.Join(strings.TrimSpace(workDir), "bin")
 	assets := httpapi.AssetConfig{
-		RdevWindowsAMD64Path: filepath.Join(binDir, "rdev-windows-amd64.exe"),
-		RdevDarwinARM64Path:  filepath.Join(binDir, "rdev-darwin-arm64"),
-		RdevDarwinAMD64Path:  filepath.Join(binDir, "rdev-darwin-amd64"),
-		RdevLinuxAMD64Path:   filepath.Join(binDir, "rdev-linux-amd64"),
-		RdevLinuxARM64Path:   filepath.Join(binDir, "rdev-linux-arm64"),
+		RdevBootstrapWindowsAMD64Path: filepath.Join(binDir, "rdev-bootstrap-windows-amd64.exe"),
+		RdevBootstrapWindowsARM64Path: filepath.Join(binDir, "rdev-bootstrap-windows-arm64.exe"),
+		RdevBootstrapDarwinARM64Path:  filepath.Join(binDir, "rdev-bootstrap-darwin-arm64"),
+		RdevBootstrapDarwinAMD64Path:  filepath.Join(binDir, "rdev-bootstrap-darwin-amd64"),
+		RdevBootstrapLinuxAMD64Path:   filepath.Join(binDir, "rdev-bootstrap-linux-amd64"),
+		RdevBootstrapLinuxARM64Path:   filepath.Join(binDir, "rdev-bootstrap-linux-arm64"),
 	}
 	values := []string{strings.TrimSpace(layered.AssetsDir), strings.TrimSpace(layered.RootPublicKey), strings.TrimSpace(layered.ExpectedVersion)}
 	configured := 0
@@ -9899,6 +9895,8 @@ func supportSessionAssetConfig(workDir string, layered supportSessionLayeredCand
 		return httpapi.AssetConfig{}, fmt.Errorf("Windows core runtime does not match signed manifest")
 	}
 	assets.LayeredAssetManifestPath = manifestPath
+	assets.LayeredReleaseRootPublicKey = strings.TrimSpace(layered.RootPublicKey)
+	assets.LayeredReleaseVersion = strings.TrimSpace(layered.ExpectedVersion)
 	assets.RdevHostWindowsAMD64Path = corePath
 	return assets, nil
 }
@@ -9906,12 +9904,15 @@ func supportSessionAssetConfig(workDir string, layered supportSessionLayeredCand
 func gatewayHasExplicitAssetConfig(opts gatewayServeOptions) bool {
 	return strings.TrimSpace(opts.RdevAssetsDir) != "" ||
 		strings.TrimSpace(opts.LayeredAssetManifestPath) != "" ||
+		strings.TrimSpace(opts.LayeredReleaseRootPublicKey) != "" ||
+		strings.TrimSpace(opts.LayeredReleaseVersion) != "" ||
 		strings.TrimSpace(opts.RdevHostWindowsAMD64Path) != "" ||
-		strings.TrimSpace(opts.RdevWindowsAMD64Path) != "" ||
-		strings.TrimSpace(opts.RdevDarwinARM64Path) != "" ||
-		strings.TrimSpace(opts.RdevDarwinAMD64Path) != "" ||
-		strings.TrimSpace(opts.RdevLinuxAMD64Path) != "" ||
-		strings.TrimSpace(opts.RdevLinuxARM64Path) != ""
+		strings.TrimSpace(opts.RdevBootstrapWindowsAMD64Path) != "" ||
+		strings.TrimSpace(opts.RdevBootstrapWindowsARM64Path) != "" ||
+		strings.TrimSpace(opts.RdevBootstrapDarwinARM64Path) != "" ||
+		strings.TrimSpace(opts.RdevBootstrapDarwinAMD64Path) != "" ||
+		strings.TrimSpace(opts.RdevBootstrapLinuxAMD64Path) != "" ||
+		strings.TrimSpace(opts.RdevBootstrapLinuxARM64Path) != ""
 }
 
 func prepareGatewayAutoBuildRdevAssets(ctx context.Context, addr string) (string, bool, error) {

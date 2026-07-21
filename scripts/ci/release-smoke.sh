@@ -287,14 +287,14 @@ echo "fake wg helper started" >&2
 sleep 1
 SH
 chmod +x "$fake_bin/wg"
-cat > "$fake_bin/rdev-host-smoke" <<'SH'
+cat > "$fake_bin/rdev-bootstrap" <<'SH'
 #!/bin/sh
 if [ -n "${RDEV_FAKE_RDEV_TRANSCRIPT:-}" ]; then
-  printf 'fake rdev host serve %s\n' "$*" >> "$RDEV_FAKE_RDEV_TRANSCRIPT"
+  printf 'fake rdev-bootstrap %s\n' "$*" >> "$RDEV_FAKE_RDEV_TRANSCRIPT"
 fi
 exit 0
 SH
-chmod +x "$fake_bin/rdev-host-smoke"
+chmod +x "$fake_bin/rdev-bootstrap"
 PATH="$fake_bin:$PATH" \
 HTTP_PROXY= \
 HTTPS_PROXY= \
@@ -309,7 +309,7 @@ RDEV_VPN_START_ARGV_JSON='["wg","show"]' \
 RDEV_FAKE_RDEV_TRANSCRIPT="$relay_acceptance_input/fake-rdev-transcript.txt" \
 go run ./cmd/rdev connection-entry run \
 	--runner-manifest "$relay_acceptance_input/connection-entry/connection-entry-runner/connection-entry-runner.json" \
-	--rdev-command "$fake_bin/rdev-host-smoke" \
+	--bootstrap-command "$fake_bin/rdev-bootstrap" \
 	--probe-timeout 1s \
 	--evidence-dir "$relay_acceptance_input" \
 	> "$relay_acceptance_input/runner-output.json"

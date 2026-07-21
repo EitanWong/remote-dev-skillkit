@@ -535,7 +535,7 @@ func freshAgentSupportSessionChecks(input freshAgentSupportSessionCheckInput) []
 		{Name: "created_session_has_agent_connection_runbook", Passed: stringFromAny(runbook["schema_version"]) == supportsession.AgentConnectionRunbookSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(runbook["sequence"]), "\n"), "target_handoff_envelope.full_text") && strings.Contains(strings.Join(stringSliceFromAny(runbook["forbidden"]), "\n"), "Agent-authored PowerShell"), Detail: stringFromAny(runbook["phase"])},
 		{Name: "agent_runbook_starts_with_sessions_connect", Passed: stringFromAny(runbookStandardEntry["mcp_tool"]) == "rdev.sessions.connect" && strings.Contains(strings.Join(stringSliceFromAny(runbookStandardEntry["cli_command"]), " "), "support-session connect"), Detail: fmt.Sprintf("%v", runbookStandardEntry)},
 		{Name: "agent_runbook_forbids_low_level_invite_first", Passed: strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.invites.create") && strings.Contains(strings.Join(stringSliceFromAny(runbookLowLevelRule["do_not_start_with"]), "\n"), "rdev.connection_entry.plan"), Detail: fmt.Sprintf("%v", runbookLowLevelRule)},
-		{Name: "agent_runbook_contains_real_failure_prevention", Passed: stringFromAny(runbookFailurePrevention["schema_version"]) == supportsession.FreshAgentFailurePreventionSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["known_failure_pattern"]), "\n"), "rdev is required") && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["required_standard_path"]), "\n"), "cli_start_now_command") && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["forbidden_agent_generated_workarounds"]), "\n"), "ExecutionPolicy Bypass"), Detail: fmt.Sprintf("%v", runbookFailurePrevention)},
+		{Name: "agent_runbook_contains_real_failure_prevention", Passed: stringFromAny(runbookFailurePrevention["schema_version"]) == supportsession.FreshAgentFailurePreventionSchemaVersion && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["known_failure_pattern"]), "\n"), "bootstrap assets") && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["required_standard_path"]), "\n"), "cli_start_now_command") && strings.Contains(strings.Join(stringSliceFromAny(runbookFailurePrevention["forbidden_agent_generated_workarounds"]), "\n"), "ExecutionPolicy Bypass"), Detail: fmt.Sprintf("%v", runbookFailurePrevention)},
 		{Name: "started_payload_has_top_level_handoff", Passed: input.StartedSession["ready_to_send_to_human"] == false && input.StartedSession["ready_to_send"] == false && input.StartedSession["ready_to_activate"] == false && input.StartedSession["ready_to_execute"] == false && stringFromAny(startedHandoff["schema_version"]) == supportsession.UserHandoffSchemaVersion && stringFromAny(startedHandoff["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]), Detail: stringFromAny(startedHandoff["copy_paste_kind"])},
 		{Name: "started_payload_has_top_level_forwardable_envelope", Passed: stringFromAny(startedEnvelope["schema_version"]) == supportsession.TargetHandoffEnvelopeSchemaVersion && !boolFromAny(startedEnvelope["ready_to_forward"]) && stringFromAny(startedEnvelope["copy_paste"]) == stringFromAny(input.StartedSession["target_command"]) && strings.Contains(strings.ToLower(stringFromAny(startedEnvelope["after_send"])), "do not send"), Detail: stringFromAny(startedEnvelope["copy_paste_kind"])},
 		{Name: "started_payload_has_top_level_supervision", Passed: stringFromAny(startedSupervision["schema_version"]) == supportsession.ConnectionSupervisionSchemaVersion && stringFromAny(startedSupervision["ticket_code"]) == input.Ticket.Code, Detail: stringFromAny(startedSupervision["continuity_assessment"])},
@@ -572,11 +572,11 @@ func buildBootstrapSelfRepairContract(outDir string, now time.Time, bootstrapCon
 		return nil, nil, err
 	}
 	assets := map[string]string{
-		"rdev-windows-amd64.exe": "fake windows rdev helper\n",
-		"rdev-darwin-arm64":      "fake darwin arm64 rdev helper\n",
-		"rdev-darwin-amd64":      "fake darwin amd64 rdev helper\n",
-		"rdev-linux-amd64":       "fake linux amd64 rdev helper\n",
-		"rdev-linux-arm64":       "fake linux arm64 rdev helper\n",
+		"rdev-bootstrap-windows-amd64.exe": "fake windows bootstrap\n",
+		"rdev-bootstrap-darwin-arm64":      "fake darwin arm64 bootstrap\n",
+		"rdev-bootstrap-darwin-amd64":      "fake darwin amd64 bootstrap\n",
+		"rdev-bootstrap-linux-amd64":       "fake linux amd64 bootstrap\n",
+		"rdev-bootstrap-linux-arm64":       "fake linux arm64 bootstrap\n",
 	}
 	assetPaths := map[string]string{}
 	assetSHA256 := map[string]string{}
@@ -606,11 +606,13 @@ func buildBootstrapSelfRepairContract(outDir string, now time.Time, bootstrapCon
 	}
 	server := httpapi.NewServer(gw)
 	server.Assets = httpapi.AssetConfig{
-		RdevWindowsAMD64Path: assetPaths["rdev-windows-amd64.exe"],
-		RdevDarwinARM64Path:  assetPaths["rdev-darwin-arm64"],
-		RdevDarwinAMD64Path:  assetPaths["rdev-darwin-amd64"],
-		RdevLinuxAMD64Path:   assetPaths["rdev-linux-amd64"],
-		RdevLinuxARM64Path:   assetPaths["rdev-linux-arm64"],
+		LayeredReleaseRootPublicKey:   "release-root:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		LayeredReleaseVersion:         "v2.0.0-acceptance",
+		RdevBootstrapWindowsAMD64Path: assetPaths["rdev-bootstrap-windows-amd64.exe"],
+		RdevBootstrapDarwinARM64Path:  assetPaths["rdev-bootstrap-darwin-arm64"],
+		RdevBootstrapDarwinAMD64Path:  assetPaths["rdev-bootstrap-darwin-amd64"],
+		RdevBootstrapLinuxAMD64Path:   assetPaths["rdev-bootstrap-linux-amd64"],
+		RdevBootstrapLinuxARM64Path:   assetPaths["rdev-bootstrap-linux-arm64"],
 	}
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
@@ -665,15 +667,13 @@ func buildBootstrapSelfRepairContract(outDir string, now time.Time, bootstrapCon
 		"shell_script_bytes":                       len(shellBootstrap),
 		"windows_within_budget":                    bootstrapTargetBytes > 0 && len(windowsBootstrap) < bootstrapTargetBytes,
 		"shell_within_budget":                      bootstrapTargetBytes > 0 && len(shellBootstrap) < bootstrapTargetBytes,
-		"preconnect_endpoint":                      bootstrapConnector["preconnect_endpoint"],
-		"preconnect_source":                        bootstrapConnector["source"],
-		"preconnect_grants_host_access":            boolFromAny(bootstrapConnector["grants_host_access"]),
+		"bootstrap_grants_host_access":             boolFromAny(bootstrapConnector["grants_host_access"]),
 		"can_run_session_tasks_before_full_runner": boolFromAny(bootstrapConnector["can_run_session_tasks"]),
 		"full_runner_phase":                        bootstrapConnector["full_runner_phase"],
-		"must_not_skip_full_helper_verification": boolFromAny(
-			bootstrapConnector["must_not_skip_full_helper_verification"],
+		"must_not_skip_core_verification": boolFromAny(
+			bootstrapConnector["must_not_skip_core_verification"],
 		),
-		"staged_upgrade_rule": "preconnect is a sub-1MB first-contact signal only; session task execution requires downloading the full helper with retry/backoff, verifying SHA-256, then starting host serve",
+		"staged_upgrade_rule": "the sub-1MiB bootstrap verifies signed release metadata, downloads the platform core, and starts it exactly once",
 	}
 	report := map[string]any{
 		"schema_version":          "rdev.acceptance.bootstrap-self-repair.v1",
@@ -688,15 +688,15 @@ func buildBootstrapSelfRepairContract(outDir string, now time.Time, bootstrapCon
 	forbidden := joinPage + "\n" + windowsBootstrap + "\n" + shellBootstrap
 	checks := []Check{
 		{Name: "bootstrap_self_repair_join_page_available", Passed: strings.Contains(joinPage, "bootstrap.ps1") && strings.Contains(joinPage, "bootstrap.sh") && strings.Contains(joinPage, "rdev.connection-entry.package-catalog.v1"), Detail: joinBase},
-		{Name: "bootstrap_self_repair_windows_downloads_verified_helper", Passed: strings.Contains(windowsBootstrap, "Downloading verified rdev helper") && strings.Contains(windowsBootstrap, "Invoke-RdevWebRequestWithRetry") && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(windowsBootstrap, ".sha256"), Detail: "PowerShell downloads with retry/backoff and verifies rdev-windows-amd64.exe when rdev is absent"},
-		{Name: "bootstrap_self_repair_shell_downloads_verified_helper", Passed: strings.Contains(shellBootstrap, "Downloading verified rdev helper") && strings.Contains(shellBootstrap, "rdev_curl_retry_flags") && strings.Contains(shellBootstrap, "curl $rdev_curl_retry_flags -fsSL") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(shellBootstrap, ".sha256"), Detail: "shell downloads with retry/backoff and verifies target OS/arch helper when rdev is absent"},
+		{Name: "bootstrap_self_repair_windows_downloads_verified_bootstrap", Passed: strings.Contains(windowsBootstrap, "rdev-bootstrap") && strings.Contains(windowsBootstrap, "AllowAutoRedirect = $false") && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(windowsBootstrap, ".sha256") && strings.Contains(windowsBootstrap, "attempt-check"), Detail: "PowerShell verifies the platform bootstrap before layered startup"},
+		{Name: "bootstrap_self_repair_shell_downloads_verified_bootstrap", Passed: strings.Contains(shellBootstrap, "rdev-bootstrap") && strings.Contains(shellBootstrap, "--proto '=https'") && strings.Contains(shellBootstrap, "--retry 3") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(shellBootstrap, ".sha256"), Detail: "shell verifies the platform bootstrap before layered startup"},
 		{Name: "bootstrap_self_repair_pins_manifest_root", Passed: strings.Contains(windowsBootstrap, "--manifest-root-public-key") && strings.Contains(shellBootstrap, "--manifest-root-public-key"), Detail: "bootstrap scripts pin the join manifest trust root"},
-		{Name: "bootstrap_self_repair_starts_visible_host", Passed: strings.Contains(windowsBootstrap, "host serve") && strings.Contains(shellBootstrap, "host serve") && strings.Contains(windowsBootstrap, "--transport long-poll") && strings.Contains(shellBootstrap, "--transport long-poll") && strings.Contains(windowsBootstrap, "--once=false") && strings.Contains(shellBootstrap, "--once=false"), Detail: "bootstrap scripts start attended host serve with stable long-poll transport"},
+		{Name: "bootstrap_self_repair_starts_visible_host", Passed: strings.Contains(windowsBootstrap, "layered-run") && strings.Contains(shellBootstrap, "layered-run") && strings.Contains(windowsBootstrap, "'auto'") && strings.Contains(shellBootstrap, "--transport auto") && strings.Contains(windowsBootstrap, "--once=false") && strings.Contains(shellBootstrap, "--once=false") && !strings.Contains(windowsBootstrap, "host serve") && !strings.Contains(shellBootstrap, "host serve"), Detail: "bootstrap scripts start one attended core through the layered boundary"},
 		{Name: "bootstrap_self_repair_assets_have_hashes", Passed: allAssetsOK, Detail: fmt.Sprintf("%v", assetResults)},
 		{Name: "bootstrap_self_repair_no_manual_rdev_requirement", Passed: !strings.Contains(forbidden, "rdev is required") && !strings.Contains(forbidden, "Install the verified rdev release package") && !strings.Contains(forbidden, "ExecutionPolicy Bypass"), Detail: "join/bootstrap surface must not ask the target user to manually install rdev or bypass execution policy"},
 		{Name: "bootstrap_first_connect_scripts_under_budget", Passed: boolFromAny(bootstrapFirstConnect["windows_within_budget"]) && boolFromAny(bootstrapFirstConnect["shell_within_budget"]), Detail: fmt.Sprintf("windows=%d shell=%d target=%d", len(windowsBootstrap), len(shellBootstrap), bootstrapTargetBytes)},
-		{Name: "bootstrap_first_connect_preconnect_does_not_grant_host_access", Passed: stringFromAny(bootstrapConnector["schema_version"]) == supportsession.BootstrapConnectorSchemaVersion && stringFromAny(bootstrapConnector["preconnect_endpoint"]) == "/v1/support-session/preconnect" && !boolFromAny(bootstrapConnector["grants_host_access"]) && !boolFromAny(bootstrapConnector["can_run_session_tasks"]), Detail: fmt.Sprintf("%v", bootstrapConnector)},
-		{Name: "bootstrap_first_connect_requires_verified_full_helper_upgrade", Passed: stringFromAny(bootstrapConnector["full_runner_phase"]) == "download-verified-rdev-host" && boolFromAny(bootstrapConnector["must_not_skip_full_helper_verification"]) && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(windowsBootstrap, "Invoke-RdevWebRequestWithRetry") && strings.Contains(shellBootstrap, "curl $rdev_curl_retry_flags -fsSL"), Detail: "full helper upgrade must use retry/backoff plus SHA-256 verification before host serve can run session tasks"},
+		{Name: "bootstrap_first_connect_bootstrap_does_not_grant_host_access", Passed: stringFromAny(bootstrapConnector["schema_version"]) == supportsession.BootstrapConnectorSchemaVersion && !boolFromAny(bootstrapConnector["grants_host_access"]) && !boolFromAny(bootstrapConnector["can_run_session_tasks"]), Detail: fmt.Sprintf("%v", bootstrapConnector)},
+		{Name: "bootstrap_first_connect_uses_verified_core_handoff", Passed: stringFromAny(bootstrapConnector["full_runner_phase"]) == "download-signed-core-after-registration" && boolFromAny(bootstrapConnector["must_not_skip_core_verification"]) && strings.Contains(windowsBootstrap, "Get-FileHash") && strings.Contains(shellBootstrap, "shasum -a 256") && strings.Contains(windowsBootstrap, "--root-public-key") && strings.Contains(shellBootstrap, "--root-public-key"), Detail: "bootstrap verifies signed core metadata before the single core launch"},
 	}
 	return report, checks, nil
 }

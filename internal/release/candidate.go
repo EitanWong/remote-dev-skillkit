@@ -27,6 +27,7 @@ const CandidateSchemaVersion = "rdev.release-candidate.v1"
 const CandidateVerificationSchemaVersion = "rdev.release-candidate-verification.v1"
 const ConnectionEntryReleasePackageSchemaVersion = "rdev.connection-entry-release-package.v1"
 const connectionEntryReleaseArchivePath = "connection-entry-release.zip"
+const connectionEntryReleaseBundlePath = "connection-entry-release-bundle.json"
 const layeredAssetManifestValidity = 30 * 24 * time.Hour
 const layeredAssetManifestPath = "layered-assets.json"
 
@@ -278,6 +279,27 @@ func PrepareCandidate(opts CandidateOptions) (Candidate, error) {
 	candidate.BundleVerification = bundleVerification
 	candidate.BundleVerification = publicCandidateBundleVerification(candidate.BundleVerification)
 	add("release_bundle_verified", bundleVerification.OK(), failedBundleCheckNames(bundleVerification))
+
+	connectionEntryArtifactPaths := connectionEntryReleaseArtifactPaths(candidate)
+	if connectionEntryBootstrapArtifactCount(candidate) != 1 || connectionEntryVerifierArtifactCount(candidate) != 1 {
+		return Candidate{}, fmt.Errorf("connection entry release requires exactly one rdev-bootstrap and one rdev-verify artifact")
+	}
+	connectionEntryBundle, err := CreateBundle(BundleOptions{
+		Dir:               outDir,
+		Version:           candidate.Version,
+		TargetPlatform:    candidate.TargetPlatform,
+		ArtifactPaths:     connectionEntryArtifactPaths,
+		RequiredArtifacts: connectionEntryRequiredReleaseArtifacts(candidate),
+		Key:               opts.Key,
+		Now:               now,
+	})
+	if err != nil {
+		return Candidate{}, err
+	}
+	if err := WriteBundle(filepath.Join(outDir, connectionEntryReleaseBundlePath), connectionEntryBundle); err != nil {
+		return Candidate{}, err
+	}
+	add("connection_entry_release_bundle_written", pathExists(filepath.Join(outDir, connectionEntryReleaseBundlePath)), connectionEntryReleaseBundlePath)
 
 	skillManifest, err := skillkit.Export(skillkit.ExportOptions{
 		SourceRoot:  sourceRootAbs,
@@ -938,6 +960,9 @@ func WriteConnectionEntryReleaseArchive(path, candidateDir string, candidate Can
 }
 
 func buildConnectionEntryReleaseEntries(candidateDir string, candidate Candidate, generatedAt time.Time) ([]connectionEntryArchiveEntry, error) {
+	if connectionEntryBootstrapArtifactCount(candidate) != 1 || connectionEntryVerifierArtifactCount(candidate) != 1 {
+		return nil, fmt.Errorf("connection entry release requires exactly one rdev-bootstrap and one rdev-verify artifact")
+	}
 	var entries []connectionEntryArchiveEntry
 	addContent := func(path, kind string, content []byte) {
 		entries = append(entries, connectionEntryArchiveEntry{Path: path, Kind: kind, Content: append([]byte(nil), content...)})
@@ -955,6 +980,9 @@ func buildConnectionEntryReleaseEntries(candidateDir string, candidate Candidate
 	}
 
 	for _, artifact := range candidate.Artifacts {
+		if !connectionEntryReleaseArtifactAllowed(artifact) {
+			continue
+		}
 		if err := addCandidateFile(artifact.ArtifactPath, "bin/"+filepath.Base(artifact.ArtifactPath), "artifact"); err != nil {
 			return nil, err
 		}
@@ -967,23 +995,33 @@ func buildConnectionEntryReleaseEntries(candidateDir string, candidate Candidate
 		target string
 		kind   string
 	}{
-		{candidate.ReleaseBundlePath, "bin/release-bundle.json", "release-bundle"},
-		{candidate.SBOMPath, "release/sbom.spdx.json", "sbom"},
-		{candidate.ProvenancePath, "release/provenance.json", "provenance"},
+		{connectionEntryReleaseBundlePath, "bin/release-bundle.json", "release-bundle"},
 	} {
 		if err := addCandidateFile(item.source, item.target, item.kind); err != nil {
 			return nil, err
 		}
 	}
-
-	useLayeredWindows, err := verifiedLayeredWindowsEntryAvailable(candidateDir, candidate)
+	connectionEntryCandidate := candidate
+	connectionEntryCandidate.Artifacts = connectionEntryReleaseArtifacts(candidate)
+	connectionEntryCandidate.Files = nil
+	sbomContent, err := json.MarshalIndent(BuildCandidateSBOM(candidate.Version, connectionEntryCandidate.Artifacts, generatedAt), "", "  ")
 	if err != nil {
+		return nil, err
+	}
+	addContent("release/sbom.spdx.json", "sbom", append(sbomContent, '\n'))
+	provenanceContent, err := json.MarshalIndent(BuildCandidateProvenance(connectionEntryCandidate, nil, generatedAt), "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	addContent("release/provenance.json", "provenance", append(provenanceContent, '\n'))
+
+	if _, err := verifiedLayeredWindowsEntryAvailable(candidateDir, candidate); err != nil {
 		return nil, err
 	}
 	addContent("CONNECTION_ENTRY_RELEASE.md", "documentation", []byte(renderConnectionEntryReleaseReadme(candidate)))
 	addContent("connection-entry-runner.template.json", "runner-template", []byte(renderConnectionEntryRunnerTemplate(candidate, generatedAt)))
 	if connectionEntryReleaseUsesWindows(candidate) {
-		addContent("launchers/Start-ConnectionEntry.ps1", "launcher", []byte(renderConnectionEntryPowerShellLauncher(candidate, useLayeredWindows)))
+		addContent("launchers/Start-ConnectionEntry.ps1", "launcher", []byte(renderConnectionEntryPowerShellLauncher(candidate)))
 	} else {
 		addContent("launchers/start-connection-entry.sh", "launcher", []byte(renderConnectionEntryShellLauncher(candidate)))
 	}
@@ -1084,7 +1122,7 @@ func buildConnectionEntryReleasePackage(candidate Candidate, files []ConnectionE
 		Launchers:                launchers,
 		ChecksumsPath:            "connection-entry-checksums.txt",
 		AgentRules: []string{
-			"Run the visible launcher; it verifies bin/release-bundle.json with the packaged rdev-verify binary before running any packaged rdev binary.",
+			"Run the visible launcher; it verifies bin/release-bundle.json before invoking the packaged rdev-bootstrap.",
 			"Verify connection-entry-checksums.txt before redistributing this archive.",
 			"Do not ask humans to assemble ticket, gateway, transport, or root-key values by hand.",
 			"Use rdev support-session connect or rdev connection-entry plan to produce the runtime invite data before execution.",
@@ -1120,17 +1158,16 @@ func renderConnectionEntryArchiveChecksums(files []ConnectionEntryReleasePackage
 }
 
 func connectionEntryReleaseUsesWindows(candidate Candidate) bool {
-	for _, artifact := range candidate.Artifacts {
-		if strings.EqualFold(filepath.Base(artifact.ArtifactPath), "rdev.exe") {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(candidate.TargetPlatform)), "windows/") ||
+		strings.EqualFold(filepath.Ext(connectionEntryArtifactBase(candidate, "rdev-bootstrap")), ".exe")
 }
 
 func connectionEntryRequiredReleaseArtifacts(candidate Candidate) []string {
 	var required []string
 	for _, artifact := range candidate.Artifacts {
+		if !connectionEntryReleaseArtifactAllowed(artifact) {
+			continue
+		}
 		name := strings.TrimSpace(artifact.Name)
 		if name == "" {
 			name = filepath.Base(artifact.ArtifactPath)
@@ -1140,6 +1177,63 @@ func connectionEntryRequiredReleaseArtifacts(candidate Candidate) []string {
 		}
 	}
 	return cleanStringList(required)
+}
+
+func connectionEntryReleaseArtifactAllowed(artifact CandidateArtifact) bool {
+	name := strings.ToLower(filepath.Base(firstNonEmpty(artifact.Name, artifact.ArtifactPath)))
+	name = strings.TrimSuffix(name, ".exe")
+	return name == "rdev-bootstrap" || name == "rdev-verify"
+}
+
+func connectionEntryReleaseArtifacts(candidate Candidate) []CandidateArtifact {
+	artifacts := make([]CandidateArtifact, 0, len(candidate.Artifacts))
+	for _, artifact := range candidate.Artifacts {
+		if connectionEntryReleaseArtifactAllowed(artifact) {
+			artifacts = append(artifacts, artifact)
+		}
+	}
+	return artifacts
+}
+
+func connectionEntryReleaseArtifactPaths(candidate Candidate) []string {
+	artifacts := connectionEntryReleaseArtifacts(candidate)
+	paths := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		paths = append(paths, artifact.ArtifactPath)
+	}
+	return paths
+}
+
+func connectionEntryAllowedArtifactCount(candidate Candidate) int {
+	count := 0
+	for _, artifact := range candidate.Artifacts {
+		if connectionEntryReleaseArtifactAllowed(artifact) {
+			count++
+		}
+	}
+	return count
+}
+
+func connectionEntryBootstrapArtifactCount(candidate Candidate) int {
+	count := 0
+	for _, artifact := range candidate.Artifacts {
+		name := strings.ToLower(filepath.Base(firstNonEmpty(artifact.Name, artifact.ArtifactPath)))
+		if strings.TrimSuffix(name, ".exe") == "rdev-bootstrap" {
+			count++
+		}
+	}
+	return count
+}
+
+func connectionEntryVerifierArtifactCount(candidate Candidate) int {
+	count := 0
+	for _, artifact := range candidate.Artifacts {
+		name := strings.ToLower(filepath.Base(firstNonEmpty(artifact.Name, artifact.ArtifactPath)))
+		if strings.TrimSuffix(name, ".exe") == "rdev-verify" {
+			count++
+		}
+	}
+	return count
 }
 
 func connectionEntryArtifactBase(candidate Candidate, preferred string) string {
@@ -1226,7 +1320,7 @@ Agent flow:
    join manifest.
 4. Run the visible launcher from launchers/. The launcher first verifies
    bin/release-bundle.json with the packaged rdev-verify binary and pinned
-   release root before it runs packaged rdev:
+   release root before it invokes packaged rdev-bootstrap:
 
    rdev-verify --bundle bin/release-bundle.json --root-public-key <pinned-root> --require-artifacts <packaged-artifacts>
 
@@ -1253,7 +1347,7 @@ func renderConnectionEntryRunnerTemplate(candidate Candidate, generatedAt time.T
 		"standard_tools": []string{
 			"rdev support-session connect",
 			"rdev connection-entry plan",
-			"rdev connection-entry run --runner-manifest connection-entry-runner.json",
+			"rdev-bootstrap layered-run --runner-manifest connection-entry-runner.json",
 		},
 		"private_parameter_policy": "release archive must stay generic; runtime values come from signed invite or join manifest metadata",
 	}
@@ -1262,14 +1356,14 @@ func renderConnectionEntryRunnerTemplate(candidate Candidate, generatedAt time.T
 }
 
 func renderConnectionEntryShellLauncher(candidate Candidate) string {
-	rdevName := connectionEntryArtifactBase(candidate, "rdev")
+	bootstrapName := connectionEntryArtifactBase(candidate, "rdev-bootstrap")
 	verifyName := connectionEntryArtifactBase(candidate, "rdev-verify")
 	return fmt.Sprintf(`#!/bin/sh
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 MANIFEST="${1:-$PACKAGE_DIR/connection-entry-runner.json}"
-RDEV="$PACKAGE_DIR/bin/%s"
+BOOTSTRAP="$PACKAGE_DIR/bin/%s"
 VERIFY="$PACKAGE_DIR/bin/%s"
 BUNDLE="$PACKAGE_DIR/bin/release-bundle.json"
 ROOT_PUBLIC_KEY=%s
@@ -1279,8 +1373,8 @@ if [ ! -f "$MANIFEST" ]; then
   echo "Ask your Agent to run rdev support-session connect or rdev connection-entry plan first." >&2
   exit 2
 fi
-if [ ! -x "$RDEV" ]; then
-  echo "Missing packaged rdev binary: $RDEV" >&2
+if [ ! -x "$BOOTSTRAP" ]; then
+  echo "Missing packaged rdev-bootstrap binary: $BOOTSTRAP" >&2
   exit 2
 fi
 if [ ! -x "$VERIFY" ]; then
@@ -1292,15 +1386,21 @@ if [ ! -f "$BUNDLE" ]; then
   exit 2
 fi
 "$VERIFY" --bundle "$BUNDLE" --root-public-key "$ROOT_PUBLIC_KEY" --require-artifacts "$REQUIRED_ARTIFACTS" >/dev/null
-exec "$RDEV" connection-entry run --runner-manifest "$MANIFEST"
-`, rdevName, verifyName, singleQuoteShell(candidate.RootPublicKey), singleQuoteShell(connectionEntryRequiredArtifactsCSV(candidate)))
+cache_base="${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}"
+cache_dir="$cache_base/RemoteDevSkillkit/cache"
+mkdir -p "$cache_dir"
+chmod 700 "$cache_dir"
+exec "$BOOTSTRAP" layered-run --runner-manifest "$MANIFEST" --root-public-key "$ROOT_PUBLIC_KEY" --expected-release-version %s --cache-dir "$cache_dir" --mode temporary
+`, bootstrapName, verifyName, singleQuoteShell(candidate.RootPublicKey), singleQuoteShell(connectionEntryRequiredArtifactsCSV(candidate)), singleQuoteShell(candidate.Version))
 }
 
-func renderConnectionEntryPowerShellLauncher(candidate Candidate, layered bool) string {
-	layeredCommand := ""
-	if layered {
-		bootstrap, _ := candidateArtifact(candidate, "rdev-bootstrap.exe")
-		layeredCommand = fmt.Sprintf(`function Assert-NoReparsePoint([string] $Path) {
+func renderConnectionEntryPowerShellLauncher(candidate Candidate) string {
+	bootstrap, _ := candidateArtifact(candidate, "rdev-bootstrap.exe")
+	platform := windowsAMD64TargetPlatform
+	if candidate.TargetPlatform == "windows/arm64" {
+		platform = candidate.TargetPlatform
+	}
+	bootstrapCommand := fmt.Sprintf(`function Assert-NoReparsePoint([string] $Path) {
   if ($Path.StartsWith('\\')) {
     throw "UNC paths are not allowed for layered bootstrap files: $Path"
   }
@@ -1349,19 +1449,17 @@ $Bootstrap = Join-Path $PackageDir 'bin\rdev-bootstrap.exe'
 $CacheDir = Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RemoteDevSkillkit') 'cache'
 $ExpectedBootstrapSHA256 = '%s'
 $ExpectedBootstrapSize = %d
-if (-not $ArchiveFallback) {
-  if (-not (Test-Path -LiteralPath $Bootstrap -PathType Leaf)) {
-    Write-Error 'Verified archive is missing rdev-bootstrap.exe; refusing automatic fallback.'
-    exit 2
-  }
-  $privateRunDir = $null
-  $privateBootstrap = $null
-  try {
+if (-not (Test-Path -LiteralPath $Bootstrap -PathType Leaf)) {
+  Write-Error 'Verified archive is missing rdev-bootstrap.exe.'
+  exit 2
+}
+$privateRunDir = $null
+$privateBootstrap = $null
+try {
     Assert-NoReparsePoint $Bootstrap
     $Runner = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
     $JoinManifestUri = [Uri]$Runner.manifest_url
-    $LayeredManifestURL = [Uri]::new($JoinManifestUri, '/layered-assets.json').AbsoluteUri
-    $Transport = if ($Runner.transport_preference) { $Runner.transport_preference } else { 'auto' }
+    $LayeredManifestURL = if ($Runner.layered_assets_manifest_url) { [string]$Runner.layered_assets_manifest_url } else { [Uri]::new($JoinManifestUri, '/layered-assets.json').AbsoluteUri }
     [IO.Directory]::CreateDirectory($CacheDir) | Out-Null
     Protect-PrivatePath $CacheDir
     $executionRoot = Join-Path $CacheDir 'bootstrap-exec'
@@ -1405,7 +1503,10 @@ if (-not $ArchiveFallback) {
       if ($actualPrivateSHA256 -ne $ExpectedBootstrapSHA256 -or $privateBootstrapLock.Length -ne $ExpectedBootstrapSize) {
         throw 'Private rdev-bootstrap.exe copy failed SHA-256 or size verification.'
       }
-      & $privateBootstrap layered-run --manifest-url $LayeredManifestURL --root-public-key '%s' --expected-release-version '%s' --platform windows/amd64 --cache-dir $CacheDir --mode temporary -- serve --mode temporary --manifest-url $Runner.manifest_url --manifest-root-public-key $Runner.manifest_root_public_key --transport $Transport --once=false --max-tasks 0
+      $attemptDir = Join-Path (Join-Path $CacheDir 'attempts') ([Guid]::NewGuid().ToString('N'))
+      & $privateBootstrap layered-run attempt-check --attempt-dir $attemptDir --launcher powershell --create
+      if ($LASTEXITCODE -ne 0) { throw 'rdev-bootstrap attempt initialization failed' }
+      & $privateBootstrap layered-run --manifest-url $LayeredManifestURL --root-public-key '%s' --expected-release-version '%s' --platform '%s' --cache-dir $CacheDir --attempt-dir $attemptDir --launcher powershell --mode temporary -- --mode temporary --gateway $Runner.gateway_url --manifest-url $Runner.manifest_url --manifest-root-public-key $Runner.manifest_root_public_key --transport auto --once=false
       $layeredExitCode = $LASTEXITCODE
     } finally {
       $privateBootstrapLock.Dispose()
@@ -1413,32 +1514,29 @@ if (-not $ArchiveFallback) {
     if ($layeredExitCode -eq 0) {
       exit 0
     }
-    Write-Warning 'Layered bootstrap failed verification or execution; refusing automatic archive fallback.'
-    Write-Warning ('Rerun explicitly with the verified archive fallback: powershell -File "{0}" -RunnerManifestPath "{1}" -ArchiveFallback' -f $PSCommandPath, $ManifestPath)
+    Write-Warning 'Layered bootstrap failed verification or execution.'
+    Write-Warning 'Run the signed rdev-bootstrap archive recovery profile explicitly.'
     exit $layeredExitCode
-  } catch {
-    Write-Warning 'Layered bootstrap preparation failed; refusing automatic archive fallback.'
-    Write-Warning ('Rerun explicitly with the verified archive fallback: powershell -File "{0}" -RunnerManifestPath "{1}" -ArchiveFallback' -f $PSCommandPath, $ManifestPath)
-    exit 1
-  } finally {
+} catch {
+  Write-Warning 'Layered bootstrap preparation failed.'
+  Write-Warning 'Run the signed rdev-bootstrap archive recovery profile explicitly.'
+  exit 1
+} finally {
     if ($privateBootstrap -and (Test-Path -LiteralPath $privateBootstrap -PathType Leaf)) {
       Remove-Item -LiteralPath $privateBootstrap -Force -ErrorAction SilentlyContinue
     }
     if ($privateRunDir -and (Test-Path -LiteralPath $privateRunDir -PathType Container)) {
       Remove-Item -LiteralPath $privateRunDir -Force -ErrorAction SilentlyContinue
     }
-  }
 }
-`, bootstrap.SHA256, bootstrap.SizeBytes, strings.ReplaceAll(candidate.RootPublicKey, "'", "''"), strings.ReplaceAll(candidate.Version, "'", "''"))
-	}
+`, bootstrap.SHA256, bootstrap.SizeBytes, strings.ReplaceAll(candidate.RootPublicKey, "'", "''"), strings.ReplaceAll(candidate.Version, "'", "''"), platform)
 	return fmt.Sprintf(`param(
-  [Parameter(Position=0)] [string] $RunnerManifestPath = '',
-  [switch] $ArchiveFallback
+  [Parameter(Position=0)] [string] $RunnerManifestPath = ''
 )
 $ErrorActionPreference = 'Stop'
 $PackageDir = Split-Path -Parent $PSScriptRoot
 $ManifestPath = if ($RunnerManifestPath) { $RunnerManifestPath } else { Join-Path $PackageDir 'connection-entry-runner.json' }
-$Rdev = Join-Path $PackageDir 'bin\rdev.exe'
+$Bootstrap = Join-Path $PackageDir 'bin\rdev-bootstrap.exe'
 $Verifier = Join-Path $PackageDir 'bin\rdev-verify.exe'
 $Bundle = Join-Path $PackageDir 'bin\release-bundle.json'
 $RootPublicKey = '%s'
@@ -1447,8 +1545,8 @@ if (-not (Test-Path -LiteralPath $ManifestPath)) {
   Write-Error 'Missing runtime connection-entry-runner.json. Ask your Agent to run rdev support-session connect or rdev connection-entry plan first.'
   exit 2
 }
-if (-not (Test-Path -LiteralPath $Rdev)) {
-  Write-Error "Missing packaged rdev binary: $Rdev"
+if (-not (Test-Path -LiteralPath $Bootstrap)) {
+  Write-Error "Missing packaged rdev-bootstrap binary: $Bootstrap"
   exit 2
 }
 if (-not (Test-Path -LiteralPath $Verifier)) {
@@ -1461,13 +1559,11 @@ if (-not (Test-Path -LiteralPath $Bundle)) {
 }
 & $Verifier --bundle $Bundle --root-public-key $RootPublicKey --require-artifacts $RequiredArtifacts | Out-Null
 if ($LASTEXITCODE -ne 0) {
-  Write-Error 'Release bundle verification failed; refusing to run packaged rdev.'
+  Write-Error 'Release bundle verification failed; packaged bootstrap was not started.'
   exit $LASTEXITCODE
 }
 %s
-& $Rdev connection-entry run --runner-manifest $ManifestPath
-exit $LASTEXITCODE
-`, strings.ReplaceAll(candidate.RootPublicKey, "'", "''"), strings.ReplaceAll(connectionEntryRequiredArtifactsCSV(candidate), "'", "''"), layeredCommand)
+`, strings.ReplaceAll(candidate.RootPublicKey, "'", "''"), strings.ReplaceAll(connectionEntryRequiredArtifactsCSV(candidate), "'", "''"), bootstrapCommand)
 }
 
 func publicCandidateBundleVerification(verification BundleVerification) BundleVerification {
@@ -1742,6 +1838,9 @@ func VerifyConnectionEntryReleaseArchive(candidateDir string, candidate Candidat
 		}
 	}
 	for _, artifact := range candidate.Artifacts {
+		if !connectionEntryReleaseArtifactAllowed(artifact) {
+			continue
+		}
 		for _, path := range []string{
 			"bin/" + filepath.Base(artifact.ArtifactPath),
 			"bin/" + filepath.Base(artifact.ManifestPath),
@@ -1772,7 +1871,7 @@ func VerifyConnectionEntryReleaseArchive(candidateDir string, candidate Candidat
 		CandidateCheck{Name: "connection_entry_release_requires_runtime_invite", Passed: manifest.ExecutionMode == "runtime-invite-required" && len(manifest.RequiredRuntimeData) > 0, Detail: manifest.ExecutionMode},
 		CandidateCheck{Name: "connection_entry_release_required_artifacts_present", Passed: len(manifest.RequiredReleaseArtifacts) > 0, Detail: strings.Join(manifest.RequiredReleaseArtifacts, ",")},
 		CandidateCheck{Name: "connection_entry_release_launchers_present", Passed: len(manifest.Launchers) >= 1, Detail: fmt.Sprintf("%d", len(manifest.Launchers))},
-		CandidateCheck{Name: "connection_entry_release_artifacts_present", Passed: len(manifest.Artifacts) >= len(candidate.Artifacts), Detail: fmt.Sprintf("%d", len(manifest.Artifacts))},
+		CandidateCheck{Name: "connection_entry_release_artifacts_present", Passed: len(manifest.Artifacts) >= connectionEntryAllowedArtifactCount(candidate)*2, Detail: fmt.Sprintf("%d", len(manifest.Artifacts))},
 	)
 
 	checks = append(checks, verifyConnectionEntryArchiveChecksums(entries)...)

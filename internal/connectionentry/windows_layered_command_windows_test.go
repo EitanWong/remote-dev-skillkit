@@ -175,11 +175,6 @@ func TestWindowsLayeredPowerShellDirectFallsBackToNativeCMD(t *testing.T) {
 
 func TestWindowsLayeredCommandLauncherRejectsReparseAncestor(t *testing.T) {
 	fixture := newWindowsLayeredFixture(t)
-	fallbackBootstrap := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(fallbackBootstrap, []byte("Write-Output 'fixture archive fallback'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fixture.options.WindowsBootstrapScriptPath = fallbackBootstrap
 
 	junctionTarget := filepath.Join(t.TempDir(), "junction-target")
 	if err := os.Mkdir(junctionTarget, 0o700); err != nil {
@@ -633,11 +628,6 @@ func newExecutableWindowsLayeredFixtureAt(t *testing.T, outDir string) windowsLa
 		outDir = filepath.Join(shortRoot, "entry")
 	}
 	fixture.options.OutDir = outDir
-	fallback := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(fallback, []byte("Write-Output 'archive fixture must stay explicit'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fixture.options.WindowsBootstrapScriptPath = fallback
 	plan, err := FromInvite(fixture.options)
 	if err != nil {
 		t.Fatal(err)

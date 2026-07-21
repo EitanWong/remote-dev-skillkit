@@ -81,7 +81,7 @@ func TestReleaseWindowsBootstrapFocusedDependencyBoundary(t *testing.T) {
 	}
 }
 
-func TestReleaseBuildLimitsBootstrapToWindowsAMD64(t *testing.T) {
+func TestReleaseBuildEmitsBootstrapForRequestedTargets(t *testing.T) {
 	repoRoot, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
@@ -136,8 +136,28 @@ exit 2
 	if err := json.Unmarshal(content, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Artifacts) != 1 || manifest.Artifacts[0].Command != "rdev-bootstrap" || manifest.Artifacts[0].Target != "windows/amd64" {
-		t.Fatalf("rdev-bootstrap must be emitted only for windows/amd64: %+v", manifest.Artifacts)
+	if len(manifest.Artifacts) != 2 {
+		t.Fatalf("rdev-bootstrap must be emitted for every requested target: %+v", manifest.Artifacts)
+	}
+	targets := map[string]bool{}
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Command != "rdev-bootstrap" {
+			t.Fatalf("unexpected command in bootstrap-only build: %+v", manifest.Artifacts)
+		}
+		targets[artifact.Target] = true
+	}
+	if !targets["linux/amd64"] || !targets["windows/amd64"] {
+		t.Fatalf("rdev-bootstrap targets = %+v", targets)
+	}
+}
+
+func TestReleaseBuildEmitsBootstrapForEveryRequestedTarget(t *testing.T) {
+	script := readReleaseScriptForTest(t, "release/build-artifacts.sh")
+	if strings.Contains(script, "command\" == \"rdev-bootstrap\" && \"$target\" != \"windows/amd64\"") {
+		t.Fatal("release script must not restrict rdev-bootstrap to Windows amd64")
+	}
+	if !strings.Contains(script, "rdev-bootstrap") || !strings.Contains(script, "bootstrap") {
+		t.Fatal("release script must declare bootstrap artifact handling")
 	}
 }
 
@@ -212,13 +232,7 @@ func TestReleaseWindowsLayeredHandoffSize(t *testing.T) {
 		WindowsBootstrapReleaseManifestPath: manifestPath,
 		LayeredAssetsManifestURL:            "https://downloads.example.test/layered-assets.json",
 		LayeredReleaseVersion:               "v2.0.0-size-test",
-		WindowsBootstrapScriptPath:          filepath.Join(repoRoot, "scripts", "bootstrap", "windows-temporary.ps1"),
-		WindowsHostDownloadURL:              "https://downloads.example.test/rdev-host.exe",
-		WindowsHostExpectedSHA256:           strings.Repeat("a", 64),
-		ReleaseBundleURL:                    "https://downloads.example.test/release-bundle.json",
 		ReleaseRootPublicKey:                rootPublicKey,
-		WindowsVerifierDownloadURL:          "https://downloads.example.test/rdev-verify.exe",
-		WindowsVerifierExpectedSHA256:       strings.Repeat("b", 64),
 		Now:                                 generatedAt,
 	})
 	if err != nil {
@@ -230,7 +244,7 @@ func TestReleaseWindowsLayeredHandoffSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	closedSize := archiveInfo.Size()
-	t.Logf("Windows focused bootstrap PE size_bytes=%d; closed representative ZIP size_bytes=%d", bootstrapInfo.Size(), closedSize)
+	t.Logf("Windows focused bootstrap PE size_bytes=%d; closed representative ZIP size_bytes=%d sha256=%s", bootstrapInfo.Size(), closedSize, plan.EntryPackagePlan.ArchiveSHA256)
 	if closedSize > maxReleaseWindowsLayeredHandoffBytes {
 		t.Fatalf("closed Windows-ConnectionEntry.zip size %d exceeds %d bytes (PE %d bytes)", closedSize, maxReleaseWindowsLayeredHandoffBytes, bootstrapInfo.Size())
 	}

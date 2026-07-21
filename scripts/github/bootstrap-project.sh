@@ -149,7 +149,7 @@ Verification:
 create_issue_if_missing "Build Windows foreground temporary host no-persistence acceptance" "v0.2 Temporary Windows Host" "area:bootstrap,area:host,area:evidence,kind:test,priority:p1" \
 "Context:
 - docs/project/ACCEPTANCE_TESTS.md Gate A
-- scripts/bootstrap/windows-temporary.ps1
+- Windows-ConnectionEntry.zip from the signed layered handoff materializer
 - docs/security/RELEASE_KEY_LIFECYCLE.md
 
 Acceptance:

@@ -48,13 +48,16 @@ const layeredAssetManifestHTTPPath = "/layered-assets.json"
 const layeredAssetManifestFileName = "layered-assets.json"
 
 type AssetConfig struct {
-	LayeredAssetManifestPath string
-	RdevHostWindowsAMD64Path string
-	RdevWindowsAMD64Path     string
-	RdevDarwinARM64Path      string
-	RdevDarwinAMD64Path      string
-	RdevLinuxAMD64Path       string
-	RdevLinuxARM64Path       string
+	LayeredAssetManifestPath      string
+	LayeredReleaseRootPublicKey   string
+	LayeredReleaseVersion         string
+	RdevHostWindowsAMD64Path      string
+	RdevBootstrapWindowsAMD64Path string
+	RdevBootstrapWindowsARM64Path string
+	RdevBootstrapDarwinARM64Path  string
+	RdevBootstrapDarwinAMD64Path  string
+	RdevBootstrapLinuxAMD64Path   string
+	RdevBootstrapLinuxARM64Path   string
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
@@ -854,11 +857,12 @@ func (s Server) helperAssetContracts(gatewayURL string) map[string]model.HelperA
 		name string
 		path string
 	}{
-		{id: "windows-amd64", name: "rdev-windows-amd64.exe", path: s.Assets.RdevWindowsAMD64Path},
-		{id: "darwin-arm64", name: "rdev-darwin-arm64", path: s.Assets.RdevDarwinARM64Path},
-		{id: "darwin-amd64", name: "rdev-darwin-amd64", path: s.Assets.RdevDarwinAMD64Path},
-		{id: "linux-amd64", name: "rdev-linux-amd64", path: s.Assets.RdevLinuxAMD64Path},
-		{id: "linux-arm64", name: "rdev-linux-arm64", path: s.Assets.RdevLinuxARM64Path},
+		{id: "windows-amd64", name: "rdev-bootstrap-windows-amd64.exe", path: s.Assets.RdevBootstrapWindowsAMD64Path},
+		{id: "windows-arm64", name: "rdev-bootstrap-windows-arm64.exe", path: s.Assets.RdevBootstrapWindowsARM64Path},
+		{id: "darwin-arm64", name: "rdev-bootstrap-darwin-arm64", path: s.Assets.RdevBootstrapDarwinARM64Path},
+		{id: "darwin-amd64", name: "rdev-bootstrap-darwin-amd64", path: s.Assets.RdevBootstrapDarwinAMD64Path},
+		{id: "linux-amd64", name: "rdev-bootstrap-linux-amd64", path: s.Assets.RdevBootstrapLinuxAMD64Path},
+		{id: "linux-arm64", name: "rdev-bootstrap-linux-arm64", path: s.Assets.RdevBootstrapLinuxARM64Path},
 	} {
 		contracts[asset.id] = helperAssetContract(gatewayURL, asset.name, asset.path)
 	}
@@ -1136,8 +1140,8 @@ func joinCopy(locale string) joinPageCopy {
 			SelectedCommand:       "如果无法自动识别，请使用下面的 macOS/Linux 或 Windows 命令。",
 			PackageCatalogHeading: "Agent 包目录",
 			NextHeading:           "接下来会发生什么",
-			StepCheck:             `启动脚本会检查 <code>rdev</code>。`,
-			StepStart:             `它会用 <code>--transport long-poll</code> 启动一个可见、稳定的协助式主机会话。`,
+			StepCheck:             `启动脚本会下载并校验 <code>rdev-bootstrap</code>。`,
+			StepStart:             `<code>rdev-bootstrap</code> 会校验签名 core，并只启动一个使用自动通道选择的可见协助式主机会话。`,
 			StepAgent:             "Agent 会等待主机上线，在策略需要时完成批准，然后运行受限的修复任务。",
 		})
 	case "es":
@@ -1146,8 +1150,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "Conectar Esta Maquina",
 			Note:        "Ejecuta un comando en el equipo que necesita ayuda. La conexion es visible, solo saliente, revocable y limitada a este ticket.",
 			NextHeading: "Que pasa despues",
-			StepCheck:   `El bootstrap comprueba <code>rdev</code>.`,
-			StepStart:   `Inicia una sesion visible y estable con <code>--transport long-poll</code>.`,
+			StepCheck:   `El script descarga y verifica <code>rdev-bootstrap</code>.`,
+			StepStart:   `<code>rdev-bootstrap</code> verifica el core firmado e inicia una sola sesion visible con seleccion automatica de canal.`,
 			StepAgent:   "El Agent espera el host, lo aprueba si la politica lo requiere y ejecuta trabajos de reparacion limitados.",
 		})
 	case "fr":
@@ -1156,8 +1160,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "Connecter Cette Machine",
 			Note:        "Executez une commande sur l'ordinateur a aider. La connexion est visible, sortante uniquement, revocable et limitee a ce ticket.",
 			NextHeading: "Et ensuite",
-			StepCheck:   `Le bootstrap verifie <code>rdev</code>.`,
-			StepStart:   `Il demarre une session visible et stable avec <code>--transport long-poll</code>.`,
+			StepCheck:   `Le script telecharge et verifie <code>rdev-bootstrap</code>.`,
+			StepStart:   `<code>rdev-bootstrap</code> verifie le core signe et demarre une seule session visible avec selection automatique du canal.`,
 			StepAgent:   "L'Agent attend le host, l'approuve si la politique l'exige, puis execute des reparations limitees.",
 		})
 	case "de":
@@ -1166,8 +1170,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "Diese Maschine Verbinden",
 			Note:        "Fuhre einen Befehl auf dem Computer aus, der Hilfe braucht. Die Verbindung ist sichtbar, nur ausgehend, widerrufbar und auf dieses Ticket begrenzt.",
 			NextHeading: "Was als Nachstes passiert",
-			StepCheck:   `Der Bootstrap pruft <code>rdev</code>.`,
-			StepStart:   `Er startet eine sichtbare, stabile Sitzung mit <code>--transport long-poll</code>.`,
+			StepCheck:   `Das Skript ladt <code>rdev-bootstrap</code> herunter und pruft es.`,
+			StepStart:   `<code>rdev-bootstrap</code> pruft den signierten Core und startet genau eine sichtbare Sitzung mit automatischer Kanalwahl.`,
 			StepAgent:   "Der Agent wartet auf den Host, genehmigt ihn falls erforderlich und startet begrenzte Reparaturjobs.",
 		})
 	case "ja":
@@ -1176,8 +1180,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "このマシンを接続",
 			Note:        "サポートが必要なコンピューターで 1 つのコマンドを実行します。接続は可視、アウトバウンドのみ、取り消し可能で、このサポートチケットに限定されます。",
 			NextHeading: "次に行われること",
-			StepCheck:   `bootstrap は <code>rdev</code> を確認します。`,
-			StepStart:   `<code>--transport long-poll</code> で可視で安定したホストセッションを開始します。`,
+			StepCheck:   `スクリプトは <code>rdev-bootstrap</code> をダウンロードして検証します。`,
+			StepStart:   `<code>rdev-bootstrap</code> は署名済み core を検証し、自動チャネル選択で可視セッションを 1 つだけ開始します。`,
 			StepAgent:   "Agent はホストを待ち、ポリシーが必要とする場合に承認し、限定された修復ジョブを実行します。",
 		})
 	case "ko":
@@ -1186,8 +1190,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "이 머신 연결",
 			Note:        "도움이 필요한 컴퓨터에서 명령 하나를 실행합니다. 연결은 보이는 방식이며, 아웃바운드 전용이고, 철회 가능하며, 이 지원 티켓 범위로 제한됩니다.",
 			NextHeading: "다음 단계",
-			StepCheck:   `bootstrap 이 <code>rdev</code> 를 확인합니다.`,
-			StepStart:   `<code>--transport long-poll</code> 로 보이고 안정적인 호스트 세션을 시작합니다.`,
+			StepCheck:   `스크립트가 <code>rdev-bootstrap</code> 을 다운로드하고 검증합니다.`,
+			StepStart:   `<code>rdev-bootstrap</code> 이 서명된 core 를 검증하고 자동 채널 선택으로 보이는 세션 하나만 시작합니다.`,
 			StepAgent:   "Agent 는 호스트를 기다리고, 정책상 필요하면 승인한 뒤 제한된 복구 작업을 실행합니다.",
 		})
 	case "pt-BR":
@@ -1196,8 +1200,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "Conectar Esta Maquina",
 			Note:        "Execute um comando no computador que precisa de ajuda. A conexao e visivel, somente de saida, revogavel e limitada a este ticket.",
 			NextHeading: "O que acontece depois",
-			StepCheck:   `O bootstrap verifica <code>rdev</code>.`,
-			StepStart:   `Ele inicia uma sessao visivel e estavel com <code>--transport long-poll</code>.`,
+			StepCheck:   `O script baixa e verifica <code>rdev-bootstrap</code>.`,
+			StepStart:   `<code>rdev-bootstrap</code> verifica o core assinado e inicia uma unica sessao visivel com selecao automatica de canal.`,
 			StepAgent:   "O Agent aguarda o host, aprova quando a politica exige e executa tarefas de reparo limitadas.",
 		})
 	case "hi":
@@ -1206,8 +1210,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "इस मशीन को कनेक्ट करें",
 			Note:        "जिस कंप्यूटर को मदद चाहिए उस पर एक कमांड चलाएं। कनेक्शन दिखने वाला, केवल outbound, revoke करने योग्य, और इस support ticket तक सीमित है।",
 			NextHeading: "आगे क्या होगा",
-			StepCheck:   `bootstrap <code>rdev</code> जांचता है।`,
-			StepStart:   `यह <code>--transport long-poll</code> के साथ visible और stable host session शुरू करता है।`,
+			StepCheck:   `स्क्रिप्ट <code>rdev-bootstrap</code> डाउनलोड करके सत्यापित करती है।`,
+			StepStart:   `<code>rdev-bootstrap</code> signed core सत्यापित करके automatic channel selection के साथ केवल एक visible session शुरू करता है।`,
 			StepAgent:   "Agent host का इंतजार करता है, policy की जरूरत पर authorize करता है, और scoped session tasks चलाता है।",
 		})
 	case "ar":
@@ -1216,8 +1220,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "توصيل هذا الجهاز",
 			Note:        "شغّل أمرا واحدا على الكمبيوتر الذي يحتاج إلى مساعدة. الاتصال ظاهر، صادر فقط، قابل للإلغاء، ومحدود بتذكرة الدعم هذه.",
 			NextHeading: "ماذا يحدث بعد ذلك",
-			StepCheck:   `يتحقق bootstrap من <code>rdev</code>.`,
-			StepStart:   `يبدأ جلسة host مرئية ومستقرة باستخدام <code>--transport long-poll</code>.`,
+			StepCheck:   `يقوم البرنامج النصي بتنزيل <code>rdev-bootstrap</code> والتحقق منه.`,
+			StepStart:   `يتحقق <code>rdev-bootstrap</code> من core الموقع ويبدأ جلسة مرئية واحدة مع اختيار تلقائي للقناة.`,
 			StepAgent:   "ينتظر Agent ظهور host، ويوافق عليه عند الحاجة حسب السياسة، ثم يشغل مهام إصلاح محددة النطاق.",
 		})
 	case "ru":
@@ -1226,8 +1230,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "Подключить Эту Машину",
 			Note:        "Выполните одну команду на компьютере, которому нужна помощь. Подключение видимое, только исходящее, отзывное и ограничено этим тикетом.",
 			NextHeading: "Что будет дальше",
-			StepCheck:   `bootstrap проверит <code>rdev</code>.`,
-			StepStart:   `Он запустит видимую и стабильную сессию host с <code>--transport long-poll</code>.`,
+			StepCheck:   `Сценарий загружает и проверяет <code>rdev-bootstrap</code>.`,
+			StepStart:   `<code>rdev-bootstrap</code> проверяет подписанный core и запускает один видимый сеанс с автоматическим выбором канала.`,
 			StepAgent:   "Agent дождется host, выполнит authorization при необходимости и запустит ограниченные session tasks.",
 		})
 	default:
@@ -1236,8 +1240,8 @@ func joinCopy(locale string) joinPageCopy {
 			Heading:     "Connect This Machine",
 			Note:        "Run one command on the computer that needs help. The connection is visible, outbound-only, revocable, and scoped to this support ticket.",
 			NextHeading: "What Happens Next",
-			StepCheck:   `The bootstrap checks for <code>rdev</code>.`,
-			StepStart:   `It starts a visible, stable attended host session with <code>--transport long-poll</code>.`,
+			StepCheck:   `The script downloads and verifies <code>rdev-bootstrap</code>.`,
+			StepStart:   `<code>rdev-bootstrap</code> verifies the signed core and starts exactly one visible session with automatic channel selection.`,
 			StepAgent:   "The Agent waits for the host, authorizes it when policy requires, and runs scoped session tasks.",
 		})
 	}
@@ -1297,354 +1301,188 @@ func (s Server) writeShellBootstrap(w http.ResponseWriter, ticketCode, baseURL, 
 	s.setTicketBootstrapHeaders(w, ticketCode)
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	rootArg := ""
-	if strings.TrimSpace(manifestRootPublicKey) != "" {
-		rootArg = " --manifest-root-public-key " + shellQuote(manifestRootPublicKey)
-	}
-	assetBase := shellQuote(strings.TrimRight(baseURL, "/") + "/assets")
-	preconnectURL := shellQuote(strings.TrimRight(baseURL, "/") + "/v1/support-session/preconnect")
 	_, _ = fmt.Fprintf(w, `#!/bin/sh
 set -eu
+bootstrap_base=%s
+layered_manifest_url=%s
+release_root=%s
+release_version=%s
+join_manifest_url=%s
+join_manifest_root=%s
+gateway_url=%s
+
+case "$bootstrap_base:$layered_manifest_url:$join_manifest_url:$gateway_url" in
+  *http://*|*ftp://*) echo "Connection Entry requires HTTPS assets and manifests." >&2; exit 78 ;;
+esac
+if [ -z "$release_root" ] || [ -z "$release_version" ] || [ -z "$join_manifest_root" ]; then
+  echo "Signed Connection Entry release metadata is unavailable." >&2
+  exit 78
+fi
+command -v curl >/dev/null 2>&1 || { echo "curl is required to obtain rdev-bootstrap." >&2; exit 127; }
+
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
-asset=""
-rdev_preconnect_url=%s
-rdev_preconnect() {
-  phase="$1"
-  message="${2:-}"
-  if command -v curl >/dev/null 2>&1; then
-	    curl -fsS -m 3 -X POST "$rdev_preconnect_url" \
-	      -H 'Content-Type: application/json' \
-	      --data "{\"ticket_code\":\"%s\",\"phase\":\"$phase\",\"os\":\"$os\",\"arch\":\"$arch\",\"asset\":\"$asset\",\"source\":\"rdev-bootstrap-preconnect\",\"message\":\"$message\"}" >/dev/null 2>&1 || true
-	  fi
-	}
-	rdev_curl_retry_flags="--retry 3 --retry-delay 2 --connect-timeout 10"
-	if ! command -v rdev >/dev/null 2>&1; then
-	  case "$arch" in
-    x86_64|amd64) arch="amd64" ;;
-    arm64|aarch64) arch="arm64" ;;
-    *) echo "unsupported architecture: $arch" >&2; exit 127 ;;
-  esac
-  case "$os" in
-    darwin|linux) ;;
-    *) echo "unsupported operating system: $os" >&2; exit 127 ;;
-  esac
-  asset="rdev-${os}-${arch}"
-	  expected="$(curl $rdev_curl_retry_flags -fsSL %s"/${asset}.sha256")"
-	  cache_base="${XDG_CACHE_HOME:-}"
-	  if [ -z "$cache_base" ]; then
-	    if [ -n "${HOME:-}" ]; then
-	      cache_base="$HOME/.cache"
-	    else
-	      cache_base="${TMPDIR:-/tmp}"
-	    fi
-	  fi
-	  cache_dir="$cache_base/remote-dev-skillkit/helpers"
-	  mkdir -p "$cache_dir"
-	  cache_path="$cache_dir/${asset}"
-	  if [ -f "$cache_path" ]; then
-	    rdev_preconnect "verifying-helper" "checking cached verified helper"
-	    cache_actual="$(shasum -a 256 "$cache_path" | awk '{print $1}')"
-	    if [ "$cache_actual" = "$expected" ]; then
-	      rdev_preconnect "using-cached-helper" "using cached verified helper"
-	      chmod 700 "$cache_path"
-	      out="$cache_path"
-	      rdev_cmd="$out"
-	    else
-	      rm -f "$cache_path"
-	    fi
-	  fi
-	  if [ -z "${rdev_cmd:-}" ]; then
-	    rdev_preconnect "downloading-helper" "downloading verified helper"
-	    mkdir -p "${TMPDIR:-/tmp}/rdev-connection-entry"
-	    out="${TMPDIR:-/tmp}/rdev-connection-entry/rdev"
-		    echo "Downloading verified rdev helper ${asset}..."
-		  gz_status="000"
-		  if command -v gzip >/dev/null 2>&1; then
-		    gz_status="$(curl $rdev_curl_retry_flags -fsS -o /dev/null -w "%%{http_code}" %s"/${asset}.gz" 2>/dev/null || true)"
-		  fi
-		  if [ "$gz_status" = "200" ]; then
-		    tmp_gz="$out.gz"
-		    curl $rdev_curl_retry_flags -fsSL %s"/${asset}.gz" -o "$tmp_gz"
-		    gzip -dc "$tmp_gz" > "$out"
-		    rm -f "$tmp_gz"
-		  else
-		    http_status="$(curl $rdev_curl_retry_flags -fsS -o /dev/null -w "%%{http_code}" %s"/${asset}" 2>/dev/null || true)"
-		    if [ "$http_status" != "200" ]; then
-		      echo "rdev helper binary not available at gateway (HTTP $http_status) — the gateway may still be starting. Wait a moment and retry." >&2
-		      exit 127
-		    fi
-		    curl $rdev_curl_retry_flags -fsSL %s"/${asset}" -o "$out"
-		  fi
-	    rdev_preconnect "verifying-helper" "verifying downloaded helper"
-		  actual="$(shasum -a 256 "$out" | awk '{print $1}')"
-  if [ "$actual" != "$expected" ]; then
-    echo "rdev helper SHA-256 mismatch" >&2
-    rm -f "$out"
-    exit 127
-  fi
-	    cp "$out" "$cache_path"
-  chmod 700 "$out"
-  rdev_cmd="$out"
-	  fi
+case "$arch" in
+  x86_64|amd64) arch="amd64" ;;
+  arm64|aarch64) arch="arm64" ;;
+  *) echo "unsupported architecture: $arch" >&2; exit 127 ;;
+esac
+case "$os" in
+  darwin|linux) ;;
+  *) echo "unsupported operating system: $os" >&2; exit 127 ;;
+esac
+bootstrap_asset="rdev-bootstrap-$os-$arch"
+bootstrap_url="$bootstrap_base/$bootstrap_asset"
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/rdev-bootstrap.XXXXXX")"
+chmod 700 "$work_dir"
+trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
+bootstrap_path="$work_dir/$bootstrap_asset"
+expected="$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --connect-timeout 10 --retry 3 "$bootstrap_url.sha256" | awk 'NR == 1 { print $1 }')"
+case "$expected" in
+  [0-9a-fA-F][0-9a-fA-F]*) ;;
+  *) echo "rdev-bootstrap checksum is invalid." >&2; exit 78 ;;
+esac
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error --connect-timeout 10 --retry 3 "$bootstrap_url" -o "$bootstrap_path"
+if command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "$bootstrap_path" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$bootstrap_path" | awk '{print $1}')"
 else
-  rdev_preconnect "using-installed-helper" "using installed rdev helper"
-  rdev_cmd="$(command -v rdev)"
+  echo "SHA-256 verification tool is required." >&2
+  exit 127
 fi
-rdev_identity_base="${XDG_STATE_HOME:-}"
-if [ -z "$rdev_identity_base" ]; then
-  if [ -n "${HOME:-}" ]; then
-    rdev_identity_base="$HOME/.local/state"
-  else
-    rdev_identity_base="${TMPDIR:-/tmp}"
-  fi
+if [ "$(printf '%%s' "$actual" | tr '[:upper:]' '[:lower:]')" != "$(printf '%%s' "$expected" | tr '[:upper:]' '[:lower:]')" ]; then
+  echo "rdev-bootstrap SHA-256 mismatch." >&2
+  exit 78
 fi
-rdev_identity_dir="$rdev_identity_base/remote-dev-skillkit"
-mkdir -p "$rdev_identity_dir"
-rdev_identity_store="$rdev_identity_dir/host-identity.json"
-echo "Starting visible Remote Dev Skillkit host session..."
-echo "[rdev] Persistent support identity: $rdev_identity_store"
-rdev_preconnect "starting-full-helper" "starting verified full helper"
-# Prevent idle/display/system sleep while the rdev session is active when the
-# platform exposes a standard inhibitor. This does not bypass lock-screen
-# policy or enterprise security controls. Kill the inhibitor when the runner
-# exits.
-rdev_caffeinate_pid=""
-rdev_inhibit_pid=""
-if [ "$os" = "darwin" ] && command -v caffeinate >/dev/null 2>&1; then
-  caffeinate -dimsu &
-  rdev_caffeinate_pid=$!
-  echo "[rdev] Sleep prevention enabled via caffeinate (pid $rdev_caffeinate_pid)"
-elif [ "$os" = "linux" ] && command -v systemd-inhibit >/dev/null 2>&1; then
-  systemd-inhibit --what=sleep:idle --why="Remote Dev Skillkit host session is active" --mode=block sleep infinity &
-  rdev_inhibit_pid=$!
-  echo "[rdev] Sleep prevention enabled via systemd-inhibit (pid $rdev_inhibit_pid)"
-else
-  echo "[rdev] Sleep prevention unavailable — keep this visible session active to avoid disconnection"
-fi
-rdev_permanent_exit=`+strconv.Itoa(permanentHostFailureExitCode)+`
-rdev_max_retries=5
-	rdev_retry_delay=5
-	rdev_attempt=0
-	while true; do
-	  if "$rdev_cmd" host serve --manifest-url %s%s --transport long-poll --once=false --max-tasks 0 --identity-store "$rdev_identity_store"; then
-	    rdev_exit=0
-	  else
-	    rdev_exit=$?
-	  fi
-	  rdev_attempt=$((rdev_attempt + 1))
-	  echo "[rdev] host process exited with code $rdev_exit"
-  if [ "$rdev_exit" -eq 0 ] || [ "$rdev_exit" -eq "$rdev_permanent_exit" ] || [ "$rdev_attempt" -gt "$rdev_max_retries" ]; then
-    break
-  fi
-  echo "[rdev] Retrying (attempt $rdev_attempt of $rdev_max_retries) after ${rdev_retry_delay}s..."
-  sleep $rdev_retry_delay
-done
-if [ -n "$rdev_caffeinate_pid" ]; then
-  kill "$rdev_caffeinate_pid" 2>/dev/null || true
-fi
-if [ -n "$rdev_inhibit_pid" ]; then
-  kill "$rdev_inhibit_pid" 2>/dev/null || true
-fi
-exit $rdev_exit
-	`, preconnectURL, ticketCode, assetBase, assetBase, assetBase, assetBase, assetBase, shellQuote(manifestURL), rootArg)
+chmod 700 "$bootstrap_path"
+cache_base="${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}"
+cache_dir="$cache_base/RemoteDevSkillkit/cache"
+state_base="${XDG_STATE_HOME:-${HOME}/.local/state}"
+identity_dir="$state_base/RemoteDevSkillkit"
+mkdir -p "$cache_dir" "$identity_dir"
+chmod 700 "$cache_dir" "$identity_dir"
+identity_store="$identity_dir/host-identity.json"
+
+set +e
+"$bootstrap_path" layered-run \
+  --manifest-url "$layered_manifest_url" \
+  --root-public-key "$release_root" \
+  --expected-release-version "$release_version" \
+  --platform "$os/$arch" \
+  --cache-dir "$cache_dir" \
+  --mode temporary \
+  -- \
+  --mode temporary \
+  --gateway "$gateway_url" \
+  --manifest-url "$join_manifest_url" \
+  --manifest-root-public-key "$join_manifest_root" \
+  --transport auto \
+  --once=false \
+  --max-tasks 0 \
+  --identity-store "$identity_store"
+status=$?
+set -e
+exit "$status"
+`, shellQuote(strings.TrimRight(baseURL, "/")+"/assets"), shellQuote(strings.TrimRight(baseURL, "/")+layeredAssetManifestHTTPPath), shellQuote(s.Assets.LayeredReleaseRootPublicKey), shellQuote(s.Assets.LayeredReleaseVersion), shellQuote(manifestURL), shellQuote(manifestRootPublicKey), shellQuote(baseURL))
 }
 
 func (s Server) writePowerShellBootstrap(w http.ResponseWriter, ticketCode, baseURL, manifestURL, manifestRootPublicKey string) {
 	s.setTicketBootstrapHeaders(w, ticketCode)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	rootArg := ""
-	if strings.TrimSpace(manifestRootPublicKey) != "" {
-		rootArg = " --manifest-root-public-key '" + powerShellSingleQuoteValue(manifestRootPublicKey) + "'"
-	}
-	assetBase := powerShellSingleQuoteValue(strings.TrimRight(baseURL, "/") + "/assets")
-	preconnectURL := powerShellSingleQuoteValue(strings.TrimRight(baseURL, "/") + "/v1/support-session/preconnect")
 	_, _ = fmt.Fprintf(w, `$ErrorActionPreference = 'Stop'
-$asset = ''
-$preconnectUrl = '%s'
-function Send-RdevPreconnect([string]$phase, [string]$message) {
-  try {
-    $body = @{
-      ticket_code = '%s'
-      phase = $phase
-      os = 'windows'
-      arch = 'amd64'
-      asset = $asset
-      source = 'rdev-bootstrap-preconnect'
-      message = $message
-    } | ConvertTo-Json -Compress
-    Invoke-WebRequest -Uri $preconnectUrl -Method Post -Body $body -ContentType 'application/json' -UseBasicParsing -TimeoutSec 3 | Out-Null
-  } catch {
-    Write-Host "[rdev] preconnect status update skipped: $($_.Exception.Message)"
+$bootstrapBase = '%s'
+$layeredManifestUrl = '%s'
+$releaseRoot = '%s'
+$releaseVersion = '%s'
+$joinManifestUrl = '%s'
+$joinManifestRoot = '%s'
+$gatewayUrl = '%s'
+
+foreach ($rawUrl in @($bootstrapBase, $layeredManifestUrl, $joinManifestUrl, $gatewayUrl)) {
+  $uri = [Uri]$rawUrl
+  if ($uri.Scheme -ne 'https' -or -not [string]::IsNullOrEmpty($uri.UserInfo) -or -not [string]::IsNullOrEmpty($uri.Query) -or -not [string]::IsNullOrEmpty($uri.Fragment)) {
+    throw 'Connection Entry requires HTTPS URLs without credentials, query strings, or fragments.'
   }
 }
-function Invoke-RdevWebRequestWithRetry([string]$Uri, [string]$OutFile = '', [int]$MaxAttempts = 3, [int]$DelaySeconds = 2) {
-	if ([string]::IsNullOrWhiteSpace($OutFile)) {
-		for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-			try {
-				return Invoke-WebRequest -Uri $Uri -UseBasicParsing -ErrorAction Stop -TimeoutSec 30
-			} catch {
-				if ($attempt -ge $MaxAttempts) { throw }
-				Write-Host "[rdev] download attempt $attempt failed: $($_.Exception.Message). Retrying..."
-				Start-Sleep -Seconds $DelaySeconds
-			}
-		}
-		return
-	}
-	$partialPath = $OutFile + '.part'
-	for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-		try {
-			$offset = [int64]0
-			if (Test-Path -LiteralPath $partialPath) {
-				$offset = (Get-Item -LiteralPath $partialPath).Length
-			}
-			$request = [System.Net.HttpWebRequest]::Create($Uri)
-			$request.Method = 'GET'
-			$request.Timeout = 30000
-			$request.ReadWriteTimeout = 30000
-			$request.AutomaticDecompression = [System.Net.DecompressionMethods]::None
-			if ($offset -gt 0) { $request.AddRange($offset) }
-			$response = $request.GetResponse()
-			try {
-				$append = $offset -gt 0 -and $response.StatusCode -eq [System.Net.HttpStatusCode]::PartialContent
-				$mode = [System.IO.FileMode]::Create
-				if ($append) { $mode = [System.IO.FileMode]::Append }
-				$inputStream = $response.GetResponseStream()
-				try {
-					$outputStream = [System.IO.File]::Open($partialPath, $mode, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-					try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose() }
-				} finally { $inputStream.Dispose() }
-			} finally { $response.Dispose() }
-			Move-Item -Force -LiteralPath $partialPath -Destination $OutFile
-			return
-		} catch {
-			if ($attempt -ge $MaxAttempts) { throw }
-      Write-Host "[rdev] download attempt $attempt failed: $($_.Exception.Message). Retrying..."
-      Start-Sleep -Seconds $DelaySeconds
-    }
-  }
+if ([string]::IsNullOrWhiteSpace($releaseRoot) -or [string]::IsNullOrWhiteSpace($releaseVersion) -or [string]::IsNullOrWhiteSpace($joinManifestRoot)) {
+  throw 'Signed Connection Entry release metadata is unavailable.'
 }
-$rdevCmd = Get-Command rdev -ErrorAction SilentlyContinue
-if ($rdevCmd) {
-  Send-RdevPreconnect 'using-installed-helper' 'using installed rdev helper'
-  $rdevPath = $rdevCmd.Source
-} else {
-  if (-not [Environment]::Is64BitOperatingSystem) {
-    throw "unsupported Windows architecture: 32-bit"
-  }
-  $asset = "rdev-windows-amd64.exe"
-  $expected = (Invoke-RdevWebRequestWithRetry -Uri ('%s/' + $asset + '.sha256')).Content.Trim()
-  $cacheBase = [Environment]::GetFolderPath('LocalApplicationData')
-  if ([string]::IsNullOrWhiteSpace($cacheBase)) { $cacheBase = $env:TEMP }
-  $cacheDir = Join-Path $cacheBase "RemoteDevSkillkit\cache\helpers"
-  New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
-  $cachePath = Join-Path $cacheDir $asset
-  if (Test-Path -LiteralPath $cachePath) {
-    Send-RdevPreconnect 'verifying-helper' 'checking cached verified helper'
-    $cacheActual = (Get-FileHash -Algorithm SHA256 -Path $cachePath).Hash.ToLowerInvariant()
-    if ($cacheActual -eq $expected.ToLowerInvariant()) {
-      Send-RdevPreconnect 'using-cached-helper' 'using cached verified helper'
-      $rdevPath = $cachePath
-    } else {
-      Remove-Item -Force $cachePath -ErrorAction SilentlyContinue
-    }
-  }
-  if ([string]::IsNullOrWhiteSpace($rdevPath)) {
-    Send-RdevPreconnect 'downloading-helper' 'downloading verified helper'
-    $dir = Join-Path $env:TEMP "rdev-connection-entry"
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
-	    $rdevPath = Join-Path $dir "rdev.exe"
-	    Write-Host "Downloading verified rdev helper $asset..."
-			$compressedPath = $rdevPath + ".gz"
-			$usedCompressed = $false
-			try {
-		    Invoke-RdevWebRequestWithRetry -Uri ('%s/' + $asset + '.gz') -OutFile $compressedPath
-		    $inputStream = [System.IO.File]::OpenRead($compressedPath)
-	    try {
-	      $outputStream = [System.IO.File]::Create($rdevPath)
-	      try {
-	        $gzipStream = [System.IO.Compression.GzipStream]::new($inputStream, [System.IO.Compression.CompressionMode]::Decompress)
-	        try {
-	          $gzipStream.CopyTo($outputStream)
-	        } finally {
-	          $gzipStream.Dispose()
-	        }
-	      } finally {
-	        $outputStream.Dispose()
-	      }
-	    } finally {
-	      $inputStream.Dispose()
-	    }
-	    Remove-Item -Force $compressedPath -ErrorAction SilentlyContinue
-	    $usedCompressed = $true
-		  } catch {
-		    Remove-Item -Force $compressedPath -ErrorAction SilentlyContinue
-		    Remove-Item -Force ($compressedPath + '.part') -ErrorAction SilentlyContinue
-		    Write-Host "Compressed rdev helper unavailable; falling back to uncompressed download."
-		  }
-		  if (-not $usedCompressed) {
-		    try {
-		      Invoke-RdevWebRequestWithRetry -Uri ('%s/' + $asset) -OutFile $rdevPath
-		    } catch {
-		    $errMsg = $_.Exception.Message
-		    throw ("Failed to download rdev helper from gateway. The asset binary may not be configured yet — ensure the gateway has finished starting, then run the command again. Detail: " + $errMsg)
-			    }
-			  }
-    Send-RdevPreconnect 'verifying-helper' 'verifying downloaded helper'
-	  $actual = (Get-FileHash -Algorithm SHA256 -Path $rdevPath).Hash.ToLowerInvariant()
-	  if ($actual -ne $expected.ToLowerInvariant()) {
-	    Remove-Item -Force $rdevPath -ErrorAction SilentlyContinue
-	    throw "rdev helper SHA-256 mismatch"
-	  }
-    Copy-Item -Force -Path $rdevPath -Destination $cachePath
-  }
+if (-not [Environment]::Is64BitOperatingSystem) {
+  throw 'Unsupported Windows architecture.'
 }
-Write-Host "Starting visible Remote Dev Skillkit host session..."
-$identityBase = [Environment]::GetFolderPath('LocalApplicationData')
-if ([string]::IsNullOrWhiteSpace($identityBase)) { $identityBase = $env:TEMP }
-$identityDir = Join-Path $identityBase "RemoteDevSkillkit"
-New-Item -ItemType Directory -Force -Path $identityDir | Out-Null
-$identityStore = Join-Path $identityDir "host-identity.json"
-Write-Host "[rdev] Persistent support identity: $identityStore"
-Send-RdevPreconnect 'starting-full-helper' 'starting verified full helper'
-# Prevent Windows idle sleep/display sleep while rdev is running. This does not
-# bypass lock-screen policy or enterprise security controls.
-# SetThreadExecutionState keeps the session awake so the runner can continue to
-# poll for and execute session tasks.
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+$asset = "rdev-bootstrap-windows-$arch.exe"
+$bootstrapUrl = "$bootstrapBase/$asset"
+$cacheDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RemoteDevSkillkit\cache'
+$downloadRoot = Join-Path $cacheDir 'bootstrap-download'
+$downloadDir = Join-Path $downloadRoot ([Guid]::NewGuid().ToString('N'))
+$bootstrapPath = Join-Path $downloadDir 'rdev-bootstrap.exe'
+$attemptDir = Join-Path (Join-Path $cacheDir 'attempts') ([Guid]::NewGuid().ToString('N'))
+
+function Protect-RdevPath([string]$Path) {
+  $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+  & $icacls $Path '/inheritance:r' '/grant:r' "*$userSid:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Failed to protect Connection Entry path: $Path" }
+}
+
+[IO.Directory]::CreateDirectory($cacheDir) | Out-Null
+[IO.Directory]::CreateDirectory($downloadRoot) | Out-Null
+[IO.Directory]::CreateDirectory($downloadDir) | Out-Null
+Protect-RdevPath $cacheDir
+Protect-RdevPath $downloadRoot
+Protect-RdevPath $downloadDir
+
+$handler = [System.Net.Http.HttpClientHandler]::new()
+$handler.AllowAutoRedirect = $false
+$handler.UseDefaultCredentials = $false
+$client = [System.Net.Http.HttpClient]::new($handler)
+$client.Timeout = [TimeSpan]::FromSeconds(30)
 try {
-  Add-Type -TypeDefinition @'
-using System.Runtime.InteropServices;
-public static class RdevSleepPrevention {
-  [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);
-  public const uint ES_CONTINUOUS      = 0x80000000u;
-  public const uint ES_SYSTEM_REQUIRED = 0x00000001u;
-  public const uint ES_DISPLAY_REQUIRED = 0x00000002u;
+  $checksumResponse = $client.GetAsync("$bootstrapUrl.sha256").GetAwaiter().GetResult()
+  if (-not $checksumResponse.IsSuccessStatusCode) { throw 'rdev-bootstrap checksum download failed.' }
+  $expected = ($checksumResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult() -split '\s+')[0].ToLowerInvariant()
+  if ($expected -notmatch '^[0-9a-f]{64}$') { throw 'rdev-bootstrap checksum is invalid.' }
+
+  $binaryResponse = $client.GetAsync($bootstrapUrl).GetAwaiter().GetResult()
+  if (-not $binaryResponse.IsSuccessStatusCode) { throw 'rdev-bootstrap download failed.' }
+  $bytes = $binaryResponse.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+  [IO.File]::WriteAllBytes($bootstrapPath, $bytes)
+  $actual = (Get-FileHash -LiteralPath $bootstrapPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($actual -ne $expected) { throw 'rdev-bootstrap SHA-256 mismatch.' }
+  Protect-RdevPath $bootstrapPath
+
+  & $bootstrapPath layered-run attempt-check --attempt-dir $attemptDir --launcher powershell --create
+  if ($LASTEXITCODE -ne 0) { throw 'rdev-bootstrap attempt initialization failed.' }
+  $bootstrapArgs = @(
+    'layered-run',
+    '--manifest-url', $layeredManifestUrl,
+    '--root-public-key', $releaseRoot,
+    '--expected-release-version', $releaseVersion,
+    '--platform', "windows/$arch",
+    '--cache-dir', $cacheDir,
+    '--attempt-dir', $attemptDir,
+    '--launcher', 'powershell',
+    '--mode', 'temporary',
+    '--',
+    '--mode', 'temporary',
+    '--gateway', $gatewayUrl,
+    '--manifest-url', $joinManifestUrl,
+    '--manifest-root-public-key', $joinManifestRoot,
+    '--transport', 'auto',
+    '--once=false',
+    '--max-tasks', '0'
+  )
+  & $bootstrapPath @bootstrapArgs
+  exit $LASTEXITCODE
+} finally {
+  $client.Dispose()
+  $handler.Dispose()
+  Remove-Item -LiteralPath $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
 }
-'@ -ErrorAction SilentlyContinue
-  [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS -bor [RdevSleepPrevention]::ES_SYSTEM_REQUIRED -bor [RdevSleepPrevention]::ES_DISPLAY_REQUIRED)
-  Write-Host "[rdev] Sleep prevention enabled (SetThreadExecutionState)"
-} catch {
-  Write-Host "[rdev] Sleep prevention unavailable — keep this window active to avoid disconnection"
-}
-$rdevPermanentExitCode = `+strconv.Itoa(permanentHostFailureExitCode)+`
-$rdevMaxRetries = 5
-$rdevRetryDelaySec = 5
-$rdevAttempt = 0
-do {
-  if ($rdevAttempt -gt 0) {
-    Write-Host ("[rdev] Retrying host registration (attempt $($rdevAttempt + 1) of $($rdevMaxRetries + 1)) after ${rdevRetryDelaySec}s...")
-    Start-Sleep -Seconds $rdevRetryDelaySec
-  }
-  & $rdevPath host serve --manifest-url '%s'%s --transport long-poll --once=false --max-tasks 0 --identity-store $identityStore
-  $rdevExitCode = $LASTEXITCODE
-  $rdevAttempt++
-  Write-Host "[rdev] host process exited with code $rdevExitCode"
-} while ($rdevExitCode -ne 0 -and $rdevExitCode -ne $rdevPermanentExitCode -and $rdevAttempt -le $rdevMaxRetries)
-# Restore normal sleep policy before exiting.
-try { [void][RdevSleepPrevention]::SetThreadExecutionState([RdevSleepPrevention]::ES_CONTINUOUS) } catch { }
-exit $rdevExitCode
-	`, preconnectURL, powerShellSingleQuoteValue(ticketCode), assetBase, assetBase, assetBase, powerShellSingleQuoteValue(manifestURL), rootArg)
+`, powerShellSingleQuoteValue(strings.TrimRight(baseURL, "/")+"/assets"), powerShellSingleQuoteValue(strings.TrimRight(baseURL, "/")+layeredAssetManifestHTTPPath), powerShellSingleQuoteValue(s.Assets.LayeredReleaseRootPublicKey), powerShellSingleQuoteValue(s.Assets.LayeredReleaseVersion), powerShellSingleQuoteValue(manifestURL), powerShellSingleQuoteValue(manifestRootPublicKey), powerShellSingleQuoteValue(baseURL))
 }
 
 func (s Server) asset(w http.ResponseWriter, r *http.Request) {
@@ -1772,16 +1610,18 @@ func (s Server) serveGzipAsset(w http.ResponseWriter, path string) {
 
 func (s Server) assetPath(name string) (string, bool) {
 	switch name {
-	case "rdev-windows-amd64.exe":
-		return configuredAssetPath(s.Assets.RdevWindowsAMD64Path)
-	case "rdev-darwin-arm64":
-		return configuredAssetPath(s.Assets.RdevDarwinARM64Path)
-	case "rdev-darwin-amd64":
-		return configuredAssetPath(s.Assets.RdevDarwinAMD64Path)
-	case "rdev-linux-amd64":
-		return configuredAssetPath(s.Assets.RdevLinuxAMD64Path)
-	case "rdev-linux-arm64":
-		return configuredAssetPath(s.Assets.RdevLinuxARM64Path)
+	case "rdev-bootstrap-windows-amd64.exe":
+		return configuredAssetPath(s.Assets.RdevBootstrapWindowsAMD64Path)
+	case "rdev-bootstrap-windows-arm64.exe":
+		return configuredAssetPath(s.Assets.RdevBootstrapWindowsARM64Path)
+	case "rdev-bootstrap-darwin-arm64":
+		return configuredAssetPath(s.Assets.RdevBootstrapDarwinARM64Path)
+	case "rdev-bootstrap-darwin-amd64":
+		return configuredAssetPath(s.Assets.RdevBootstrapDarwinAMD64Path)
+	case "rdev-bootstrap-linux-amd64":
+		return configuredAssetPath(s.Assets.RdevBootstrapLinuxAMD64Path)
+	case "rdev-bootstrap-linux-arm64":
+		return configuredAssetPath(s.Assets.RdevBootstrapLinuxARM64Path)
 	default:
 		return "", false
 	}

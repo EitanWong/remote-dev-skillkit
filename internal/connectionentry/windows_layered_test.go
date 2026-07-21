@@ -269,7 +269,7 @@ func readZipEntryForTest(t *testing.T, reader *zip.ReadCloser, name string) []by
 	return nil
 }
 
-func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(t *testing.T) {
+func TestWindowsConnectionEntryPrefersLayeredBootstrapAndFailsClosedWithoutIt(t *testing.T) {
 	t.Run("verified layered bootstrap is the primary handoff", func(t *testing.T) {
 		fixture := newWindowsLayeredFixture(t)
 
@@ -285,8 +285,8 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			t.Fatalf("expected the verified layered handoff to be preferred: %#v", plan.EntryPackagePlan)
 		}
 
-		legacyLauncherPath := filepath.Join(fixture.options.OutDir, "windows-layered", windowsLayeredLauncherName)
-		launcher := readTestFile(t, legacyLauncherPath)
+		launcherPath := filepath.Join(fixture.options.OutDir, "windows-layered", windowsLayeredLauncherName)
+		launcher := readTestFile(t, launcherPath)
 		normalizedLauncher := normalizePowerShellForTest(string(launcher))
 		assertStringsInOrder(t, normalizedLauncher,
 			"function Invoke-Layered",
@@ -345,19 +345,12 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 			}
 		}
 
-		handoffDir := filepath.Dir(legacyLauncherPath)
+		handoffDir := filepath.Dir(launcherPath)
 		if filepath.Base(handoffDir) != "windows-layered" {
 			t.Fatalf("expected a focused windows-layered handoff, got %q", handoffDir)
 		}
-		fallbackPath := filepath.Join(fixture.options.OutDir, "windows-temporary", "Start-ConnectionEntry.ps1")
-		fallback := readTestFile(t, fallbackPath)
-		for _, want := range []string{"rdev-verify", fixture.options.ReleaseBundleURL, fixture.options.ReleaseRootPublicKey} {
-			if !strings.Contains(string(fallback), want) {
-				t.Fatalf("verified archive fallback missing %q:\n%s", want, fallback)
-			}
-		}
-		if strings.Contains(normalizedLauncher, "& $fallbackPath") {
-			t.Fatalf("layered verification/runtime failures must not automatically execute the archive fallback:\n%s", launcher)
+		if fileExists(filepath.Join(fixture.options.OutDir, "windows-temporary", "Start-ConnectionEntry.ps1")) {
+			t.Fatal("layered materialization must not retain a legacy full-helper launcher")
 		}
 		assertStringsInOrder(t, normalizedLauncher,
 			"try {",
@@ -469,7 +462,7 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		}
 	})
 
-	t.Run("missing layered prerequisites retains archive launcher", func(t *testing.T) {
+	t.Run("missing layered prerequisites fail closed", func(t *testing.T) {
 		fixture := newWindowsLayeredFixture(t)
 		fixture.options.WindowsBootstrapBinaryPath = ""
 		fixture.options.WindowsBootstrapReleaseManifestPath = ""
@@ -479,16 +472,13 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		if err != nil {
 			t.Fatal(err)
 		}
-		if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" {
-			t.Fatalf("expected the existing self-contained runner fallback: %#v", plan.EntryPackagePlan)
+		if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.PlatformPlanKind != "connection-entry-runner" || len(plan.MissingInputs) == 0 {
+			t.Fatalf("expected only a failed bootstrap runner plan: %#v", plan.EntryPackagePlan)
 		}
-		if filepath.Base(plan.EntryPackagePlan.LauncherPath) != "Start-ConnectionEntry.ps1" {
-			t.Fatalf("expected Start-ConnectionEntry.ps1 fallback, got %#v", plan.EntryPackagePlan)
+		if fileExists(filepath.Join(fixture.options.OutDir, "windows-temporary", "Start-ConnectionEntry.ps1")) {
+			t.Fatal("missing layered inputs must not generate a legacy helper launcher")
 		}
-		launcher := readTestFile(t, plan.EntryPackagePlan.LauncherPath)
-		if strings.Contains(string(launcher), "layered-run") {
-			t.Fatalf("missing layered inputs must select the existing fallback, not a partial layered launcher:\n%s", launcher)
-		}
+		assertNoPartialLayeredOutput(t, fixture.options.OutDir)
 	})
 
 	partial := []struct {
@@ -522,16 +512,19 @@ func TestWindowsConnectionEntryPrefersLayeredBootstrapAndRetainsArchiveFallback(
 		},
 	}
 	for _, test := range partial {
-		t.Run(test.name+" retains archive launcher", func(t *testing.T) {
+		t.Run(test.name+" fails closed", func(t *testing.T) {
 			fixture := newWindowsLayeredFixture(t)
 			test.mutate(&fixture.options)
 
 			plan, err := FromInvite(fixture.options)
 			if err != nil {
-				t.Fatalf("partial layered inputs must use the verified archive fallback: %v", err)
+				t.Fatal(err)
 			}
-			if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" {
-				t.Fatalf("partial layered inputs did not select the verified archive fallback: %#v", plan.EntryPackagePlan)
+			if plan.EntryPackagePlan == nil || plan.EntryPackagePlan.PlatformPlanKind != "connection-entry-runner" || len(plan.MissingInputs) == 0 {
+				t.Fatalf("partial layered inputs must retain only a failed bootstrap runner plan: %#v", plan.EntryPackagePlan)
+			}
+			if fileExists(filepath.Join(fixture.options.OutDir, "windows-temporary", "Start-ConnectionEntry.ps1")) {
+				t.Fatal("partial layered inputs generated a legacy helper launcher")
 			}
 			assertNoPartialLayeredOutput(t, fixture.options.OutDir)
 		})
@@ -892,13 +885,7 @@ func newWindowsLayeredFixture(t *testing.T) windowsLayeredFixture {
 			WindowsBootstrapReleaseManifestPath: manifestPath,
 			LayeredAssetsManifestURL:            "https://downloads.example.com/layered-assets.json",
 			LayeredReleaseVersion:               "v0.2.0",
-			WindowsBootstrapScriptPath:          filepath.Join("..", "..", "scripts", "bootstrap", "windows-temporary.ps1"),
-			WindowsHostDownloadURL:              "https://downloads.example.com/rdev-host.exe",
-			WindowsHostExpectedSHA256:           strings.Repeat("a", 64),
-			ReleaseBundleURL:                    "https://downloads.example.com/release-bundle.json",
 			ReleaseRootPublicKey:                root,
-			WindowsVerifierDownloadURL:          "https://downloads.example.com/rdev-verify.exe",
-			WindowsVerifierExpectedSHA256:       strings.Repeat("b", 64),
 			Now:                                 now,
 		},
 		invite:          invite,

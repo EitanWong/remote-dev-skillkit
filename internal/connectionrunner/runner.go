@@ -29,41 +29,47 @@ const (
 )
 
 type Options struct {
-	Invite       agentinvite.Invite
-	OutDir       string
-	TargetOS     string
-	TargetArch   string
-	SessionMode  string
-	RdevCommand  string
-	HostName     string
-	GeneratedAt  time.Time
-	WritePackage bool
+	Invite                      agentinvite.Invite
+	OutDir                      string
+	TargetOS                    string
+	TargetArch                  string
+	SessionMode                 string
+	BootstrapCommand            string
+	LayeredAssetsManifestURL    string
+	LayeredReleaseRootPublicKey string
+	LayeredReleaseVersion       string
+	HostName                    string
+	GeneratedAt                 time.Time
+	WritePackage                bool
 }
 
 type Manifest struct {
-	SchemaVersion          string           `json:"schema_version"`
-	GeneratedAt            time.Time        `json:"generated_at"`
-	ConnectionEntryName    string           `json:"connection_entry_name"`
-	TargetOS               string           `json:"target_os"`
-	TargetArch             string           `json:"target_arch"`
-	SessionMode            string           `json:"session_mode"`
-	Mode                   model.HostMode   `json:"mode"`
-	HostName               string           `json:"host_name,omitempty"`
-	ManifestURL            string           `json:"manifest_url"`
-	ManifestRootPublicKey  string           `json:"manifest_root_public_key"`
-	GatewayURL             string           `json:"gateway_url"`
-	JoinURL                string           `json:"join_url"`
-	TransportPreference    string           `json:"transport_preference"`
-	Once                   bool             `json:"once"`
-	ConnectionPaths        []ConnectionPath `json:"connection_paths"`
-	RuntimeProbes          []RuntimeProbe   `json:"runtime_probes"`
-	HelperPolicy           HelperPolicy     `json:"helper_policy"`
-	HumanConsent           []string         `json:"human_consent"`
-	AgentOnlyParameters    []string         `json:"agent_only_parameters"`
-	StopAndCleanup         []string         `json:"stop_and_cleanup"`
-	MissingInputs          []string         `json:"missing_inputs,omitempty"`
-	NoManualAssembly       bool             `json:"no_manual_assembly"`
-	NoPersistenceByDefault bool             `json:"no_persistence_by_default"`
+	SchemaVersion               string           `json:"schema_version"`
+	GeneratedAt                 time.Time        `json:"generated_at"`
+	ConnectionEntryName         string           `json:"connection_entry_name"`
+	TargetOS                    string           `json:"target_os"`
+	TargetArch                  string           `json:"target_arch"`
+	SessionMode                 string           `json:"session_mode"`
+	Mode                        model.HostMode   `json:"mode"`
+	HostName                    string           `json:"host_name,omitempty"`
+	ManifestURL                 string           `json:"manifest_url"`
+	ManifestRootPublicKey       string           `json:"manifest_root_public_key"`
+	LayeredAssetsManifestURL    string           `json:"layered_assets_manifest_url"`
+	LayeredReleaseRootPublicKey string           `json:"layered_release_root_public_key"`
+	LayeredReleaseVersion       string           `json:"layered_release_version"`
+	GatewayURL                  string           `json:"gateway_url"`
+	JoinURL                     string           `json:"join_url"`
+	TransportPreference         string           `json:"transport_preference"`
+	Once                        bool             `json:"once"`
+	ConnectionPaths             []ConnectionPath `json:"connection_paths"`
+	RuntimeProbes               []RuntimeProbe   `json:"runtime_probes"`
+	HelperPolicy                HelperPolicy     `json:"helper_policy"`
+	HumanConsent                []string         `json:"human_consent"`
+	AgentOnlyParameters         []string         `json:"agent_only_parameters"`
+	StopAndCleanup              []string         `json:"stop_and_cleanup"`
+	MissingInputs               []string         `json:"missing_inputs,omitempty"`
+	NoManualAssembly            bool             `json:"no_manual_assembly"`
+	NoPersistenceByDefault      bool             `json:"no_persistence_by_default"`
 }
 
 type ConnectionPath struct {
@@ -77,7 +83,7 @@ type ConnectionPath struct {
 	GatewayEnvVars                 []string `json:"gateway_env_vars,omitempty"`
 	DependencyInstallActionEnvVars []string `json:"dependency_install_action_env_vars,omitempty"`
 	HelperStartArgvEnvVars         []string `json:"helper_start_argv_env_vars,omitempty"`
-	UsesHostServe                  bool     `json:"uses_host_serve"`
+	UsesBootstrap                  bool     `json:"uses_bootstrap"`
 	GatewayOverride                string   `json:"gateway_override,omitempty"`
 	TransportOverride              string   `json:"transport_override,omitempty"`
 	ExecuteWhen                    []string `json:"execute_when"`
@@ -155,7 +161,7 @@ type Check struct {
 
 type RunOptions struct {
 	ManifestPath        string
-	RdevCommand         string
+	BootstrapCommand    string
 	DryRun              bool
 	ProbeTimeout        time.Duration
 	ExtraHostArgs       []string
@@ -175,7 +181,7 @@ type RunResult struct {
 	SelectedPath                string        `json:"selected_path,omitempty"`
 	SelectedTransport           string        `json:"selected_transport,omitempty"`
 	SelectedGatewayURL          string        `json:"selected_gateway_url,omitempty"`
-	HostServeArgs               []string      `json:"host_serve_args,omitempty"`
+	BootstrapArgs               []string      `json:"bootstrap_args,omitempty"`
 	Executed                    bool          `json:"executed"`
 	DependencyInstallConfigured bool          `json:"dependency_install_configured"`
 	DependencyInstalled         bool          `json:"dependency_installed"`
@@ -246,28 +252,35 @@ func Build(opts Options) (Package, error) {
 	if generatedAt.IsZero() {
 		generatedAt = time.Now().UTC()
 	}
-	rdevCommand := strings.TrimSpace(opts.RdevCommand)
-	if rdevCommand == "" {
-		rdevCommand = "rdev"
+	bootstrapCommand := strings.TrimSpace(opts.BootstrapCommand)
+	if bootstrapCommand == "" {
+		bootstrapCommand = "rdev-bootstrap"
+	}
+	base := strings.TrimSuffix(strings.ToLower(filepath.Base(bootstrapCommand)), ".exe")
+	if base != "rdev-bootstrap" {
+		return Package{}, fmt.Errorf("bootstrap command must name rdev-bootstrap")
 	}
 	manifest := Manifest{
-		SchemaVersion:         ManifestSchemaVersion,
-		GeneratedAt:           generatedAt.UTC(),
-		ConnectionEntryName:   "Connection Entry",
-		TargetOS:              targetOS,
-		TargetArch:            targetArch,
-		SessionMode:           sessionMode,
-		Mode:                  mode,
-		HostName:              strings.TrimSpace(opts.HostName),
-		ManifestURL:           opts.Invite.ManifestURL,
-		ManifestRootPublicKey: opts.Invite.ManifestRootPublicKey,
-		GatewayURL:            opts.Invite.GatewayURL,
-		JoinURL:               opts.Invite.JoinURL,
-		TransportPreference:   firstNonEmpty(opts.Invite.Transport, "auto"),
-		Once:                  false,
-		ConnectionPaths:       connectionPaths(opts.Invite),
-		RuntimeProbes:         runtimeProbes(targetOS),
-		HelperPolicy:          helperPolicy(),
+		SchemaVersion:               ManifestSchemaVersion,
+		GeneratedAt:                 generatedAt.UTC(),
+		ConnectionEntryName:         "Connection Entry",
+		TargetOS:                    targetOS,
+		TargetArch:                  targetArch,
+		SessionMode:                 sessionMode,
+		Mode:                        mode,
+		HostName:                    strings.TrimSpace(opts.HostName),
+		ManifestURL:                 opts.Invite.ManifestURL,
+		ManifestRootPublicKey:       opts.Invite.ManifestRootPublicKey,
+		LayeredAssetsManifestURL:    firstNonEmpty(opts.LayeredAssetsManifestURL, opts.Invite.LayeredAssetsManifestURL),
+		LayeredReleaseRootPublicKey: firstNonEmpty(opts.LayeredReleaseRootPublicKey, opts.Invite.LayeredReleaseRootPublicKey),
+		LayeredReleaseVersion:       firstNonEmpty(opts.LayeredReleaseVersion, opts.Invite.LayeredReleaseVersion),
+		GatewayURL:                  opts.Invite.GatewayURL,
+		JoinURL:                     opts.Invite.JoinURL,
+		TransportPreference:         firstNonEmpty(opts.Invite.Transport, "auto"),
+		Once:                        false,
+		ConnectionPaths:             connectionPaths(opts.Invite),
+		RuntimeProbes:               runtimeProbes(targetOS),
+		HelperPolicy:                helperPolicy(),
 		HumanConsent: []string{
 			"This visible Connection Entry starts an rdev host session for the support or development request.",
 			"Closing the launcher stops an attended temporary session.",
@@ -276,6 +289,9 @@ func Build(opts Options) (Package, error) {
 		AgentOnlyParameters: []string{
 			"manifest_url",
 			"manifest_root_public_key",
+			"layered_assets_manifest_url",
+			"layered_release_root_public_key",
+			"layered_release_version",
 			"gateway_url",
 			"ticket_code",
 			"transport_preference",
@@ -299,6 +315,15 @@ func Build(opts Options) (Package, error) {
 	if manifest.GatewayURL == "" {
 		manifest.MissingInputs = append(manifest.MissingInputs, "gateway_url")
 	}
+	if manifest.LayeredAssetsManifestURL == "" {
+		manifest.MissingInputs = append(manifest.MissingInputs, "layered_assets_manifest_url")
+	}
+	if manifest.LayeredReleaseRootPublicKey == "" {
+		manifest.MissingInputs = append(manifest.MissingInputs, "layered_release_root_public_key")
+	}
+	if manifest.LayeredReleaseVersion == "" {
+		manifest.MissingInputs = append(manifest.MissingInputs, "layered_release_version")
+	}
 
 	plan := RunnerPlan{
 		SchemaVersion: PlanSchemaVersion,
@@ -309,8 +334,8 @@ func Build(opts Options) (Package, error) {
 			"the target side runs one visible launcher or package runner",
 			"the runner verifies and consumes the signed join manifest before host registration",
 			"the runner probes direct gateway reachability before trying helper connectivity",
-			"the runner invokes rdev host serve with --transport auto unless a selected path requires a narrower fallback",
-			"connectivity helpers provide routing only; rdev ticket, host activation, signed session tasks, and policy authorize work",
+			"the runner invokes rdev-bootstrap layered-run exactly once and passes --transport auto to the verified core",
+			"connectivity helpers provide routing only; the signed ticket, session tasks, and policy authorize work",
 		},
 		SelectionOrder: []string{
 			"native-direct-gateway",
@@ -323,7 +348,7 @@ func Build(opts Options) (Package, error) {
 		},
 		ConnectivityHelpers: connectivityTools(),
 		FallbackBehavior: []string{
-			"start with WSS, then HTTPS long-poll, then short polling through rdev host serve --transport auto",
+			"the single verified core starts with WSS and can switch to HTTPS long-poll or short polling without another registration",
 			"use proxy environment variables automatically when present",
 			"use existing non-privileged relay, mesh, VPN, or SSH tooling only when the route and credential choice are unambiguous",
 			"report a machine-readable manual_action_required item instead of guessing when route, credential, enrollment, or privilege is unclear",
@@ -334,7 +359,7 @@ func Build(opts Options) (Package, error) {
 			"gateway probe result",
 			"helper tool detection result",
 			"host registration result",
-			"transport fallback attempts from rdev host serve",
+			"transport selections and in-core route changes",
 		},
 	}
 
@@ -348,7 +373,7 @@ func Build(opts Options) (Package, error) {
 	if !opts.WritePackage || strings.TrimSpace(opts.OutDir) == "" {
 		return pkg, nil
 	}
-	if err := writePackage(&pkg, rdevCommand); err != nil {
+	if err := writePackage(&pkg, bootstrapCommand); err != nil {
 		return Package{}, err
 	}
 	return pkg, nil
@@ -385,6 +410,15 @@ func ValidateManifest(manifest Manifest) error {
 	if strings.TrimSpace(manifest.GatewayURL) == "" {
 		return fmt.Errorf("runner manifest missing gateway_url")
 	}
+	if strings.TrimSpace(manifest.LayeredAssetsManifestURL) == "" {
+		return fmt.Errorf("runner manifest missing layered_assets_manifest_url")
+	}
+	if strings.TrimSpace(manifest.LayeredReleaseRootPublicKey) == "" {
+		return fmt.Errorf("runner manifest missing layered_release_root_public_key")
+	}
+	if strings.TrimSpace(manifest.LayeredReleaseVersion) == "" {
+		return fmt.Errorf("runner manifest missing layered_release_version")
+	}
 	if !manifest.Mode.Valid() {
 		return fmt.Errorf("runner manifest has invalid mode %q", manifest.Mode)
 	}
@@ -415,9 +449,13 @@ func Run(opts RunOptions) (RunResult, error) {
 	if httpProbe == nil {
 		httpProbe = probeGatewayHTTP
 	}
-	rdevCommand := strings.TrimSpace(opts.RdevCommand)
-	if rdevCommand == "" {
-		rdevCommand = "rdev"
+	bootstrapCommand := strings.TrimSpace(opts.BootstrapCommand)
+	if bootstrapCommand == "" {
+		bootstrapCommand = "rdev-bootstrap"
+	}
+	base := strings.TrimSuffix(strings.ToLower(filepath.Base(bootstrapCommand)), ".exe")
+	if base != "rdev-bootstrap" {
+		return RunResult{}, fmt.Errorf("bootstrap command must name rdev-bootstrap")
 	}
 	result := RunResult{
 		SchemaVersion: "rdev.connection-entry.runner-result.v1",
@@ -439,10 +477,14 @@ func Run(opts RunOptions) (RunResult, error) {
 		return result, nil
 	}
 	result.SelectedPath = selected.ID
-	result.SelectedTransport = firstNonEmpty(selected.TransportOverride, manifest.TransportPreference, "auto")
+	result.SelectedTransport = "auto"
 	result.SelectedGatewayURL = firstNonEmpty(selected.GatewayOverride, manifest.GatewayURL)
 	result.AuthorizationRequired = append(result.AuthorizationRequired, selected.AuthorizationRequired...)
-	result.HostServeArgs = hostServeArgs(manifest, result.SelectedGatewayURL, result.SelectedTransport, opts.ExtraHostArgs)
+	cacheDir, err := defaultBootstrapCacheDir()
+	if err != nil {
+		return result, err
+	}
+	result.BootstrapArgs = bootstrapRunArgs(manifest, result.SelectedGatewayURL, cacheDir, opts.ExtraHostArgs)
 	appendHelperTranscript(&result, "selected_path "+selected.ID)
 	appendHelperTranscript(&result, "selected_transport "+result.SelectedTransport)
 	installAction, installTool, installConfigured, err := dependencyInstallAction(*selected, manifest.Mode)
@@ -516,13 +558,13 @@ func Run(opts RunOptions) (RunResult, error) {
 		}
 		appendHelperTranscript(&result, "helper_gateway_reachable selected_path="+result.SelectedPath)
 	}
-	appendHelperTranscript(&result, "host_serve_invoked")
-	if err := commandRunner(rdevCommand, result.HostServeArgs); err != nil {
+	appendHelperTranscript(&result, "bootstrap_invoked")
+	if err := commandRunner(bootstrapCommand, result.BootstrapArgs); err != nil {
 		cleanupHelper(&result, cleanup, helperTool)
 		return result, err
 	}
 	result.Executed = true
-	appendHelperTranscript(&result, "host_serve_completed")
+	appendHelperTranscript(&result, "bootstrap_completed")
 	cleanupHelper(&result, cleanup, helperTool)
 	return result, nil
 }
@@ -627,12 +669,12 @@ func hostStatusEvidence(result RunResult) map[string]any {
 		status = "manual-action-required"
 	}
 	return map[string]any{
-		"schema_version":     "rdev.connection-entry.host-status.v1",
-		"ok":                 result.Executed,
-		"host_status":        status,
-		"selected_path":      result.SelectedPath,
-		"host_serve_invoked": helperTranscriptHas(result, "host_serve_invoked"),
-		"host_serve_done":    result.Executed,
+		"schema_version":    "rdev.connection-entry.host-status.v1",
+		"ok":                result.Executed,
+		"host_status":       status,
+		"selected_path":     result.SelectedPath,
+		"bootstrap_invoked": helperTranscriptHas(result, "bootstrap_invoked"),
+		"bootstrap_done":    result.Executed,
 	}
 }
 
@@ -653,7 +695,7 @@ func auditEvidenceJSONL(result RunResult, generatedAt time.Time) string {
 	events := []map[string]any{
 		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "selected_path", "selected_path": result.SelectedPath},
 		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "helper_start", "configured": result.HelperStartConfigured, "started": result.HelperStarted, "tool": result.HelperStartTool},
-		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "host_serve", "executed": result.Executed},
+		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "bootstrap", "executed": result.Executed},
 		{"schema_version": "rdev.connection-entry.runner-audit-event.v1", "generated_at": generatedAt, "event": "cleanup", "attempted": result.HelperCleanupAttempted, "succeeded": result.HelperCleanupSucceeded},
 	}
 	var builder strings.Builder
@@ -702,7 +744,7 @@ func writeTextFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
 
-func writePackage(pkg *Package, rdevCommand string) error {
+func writePackage(pkg *Package, bootstrapCommand string) error {
 	outDir, err := filepath.Abs(pkg.OutDir)
 	if err != nil {
 		return err
@@ -723,7 +765,7 @@ func writePackage(pkg *Package, rdevCommand string) error {
 	pkg.ManifestPath = manifestPath
 	pkg.Plan.ManifestPath = manifestPath
 	launcherPath := filepath.Join(outDir, launcherName(pkg.Manifest.TargetOS))
-	launcherContent := renderLauncher(pkg.Manifest.TargetOS, rdevCommand, manifestPath)
+	launcherContent := renderLauncher(pkg.Manifest, bootstrapCommand)
 	if err := os.WriteFile(launcherPath, []byte(launcherContent), 0o700); err != nil {
 		return err
 	}
@@ -753,10 +795,10 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			Status:            "implemented",
 			BestFor:           "target can reach the gateway URL directly over outbound HTTP(S)/WSS",
 			Probe:             []string{"GET gateway /healthz", "GET signed join manifest", "verify manifest root"},
-			UsesHostServe:     true,
+			UsesBootstrap:     true,
 			TransportOverride: "auto",
 			ExecuteWhen:       []string{"gateway health check succeeds", "signed join manifest is reachable"},
-			Evidence:          []string{"gateway health probe", "manifest verification", "rdev host serve transport fallback output"},
+			Evidence:          []string{"gateway health probe", "manifest verification", "bootstrap and in-core route output"},
 		},
 		{
 			ID:                "native-lan-gateway",
@@ -765,7 +807,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			Status:            lanStatus(gatewayURL),
 			BestFor:           "agent and target share a LAN, VPN, or routed private subnet",
 			Probe:             []string{"resolve gateway host", "probe gateway port", "GET gateway /healthz"},
-			UsesHostServe:     true,
+			UsesBootstrap:     true,
 			TransportOverride: "auto",
 			ExecuteWhen:       []string{"gateway host is private or local and reachable from the target"},
 			Evidence:          []string{"selected LAN/private gateway URL", "port probe", "health probe"},
@@ -777,7 +819,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			Status:            "implemented-via-standard-http-proxy-environment",
 			BestFor:           "corporate network where HTTPS egress requires HTTP_PROXY, HTTPS_PROXY, or NO_PROXY",
 			Probe:             []string{"inspect proxy environment variables", "GET signed join manifest through default HTTP client"},
-			UsesHostServe:     true,
+			UsesBootstrap:     true,
 			TransportOverride: "auto",
 			ExecuteWhen:       []string{"proxy environment variables are present and manifest fetch succeeds"},
 			Evidence:          []string{"proxy variable names only", "manifest fetch result"},
@@ -793,10 +835,10 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			GatewayEnvVars:                 []string{"RDEV_SSH_GATEWAY_URL"},
 			DependencyInstallActionEnvVars: []string{"RDEV_SSH_INSTALL_ACTION_JSON"},
 			HelperStartArgvEnvVars:         []string{"RDEV_SSH_TUNNEL_START_ARGV_JSON"},
-			UsesHostServe:                  true,
+			UsesBootstrap:                  true,
 			ExecuteWhen:                    []string{"SSH route and local forward are already configured by operator policy"},
 			AuthorizationRequired:          []string{"ask before creating new SSH keys, editing SSH config, or selecting among ambiguous SSH identities"},
-			Evidence:                       []string{"ssh tool detection", "local forward endpoint", "host serve through forwarded gateway"},
+			Evidence:                       []string{"ssh tool detection", "local forward endpoint", "bootstrap through forwarded gateway"},
 		},
 		{
 			ID:                             "existing-frp-or-chisel-relay",
@@ -809,7 +851,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			GatewayEnvVars:                 []string{"RDEV_RELAY_GATEWAY_URL"},
 			DependencyInstallActionEnvVars: []string{"RDEV_RELAY_INSTALL_ACTION_JSON"},
 			HelperStartArgvEnvVars:         []string{"RDEV_RELAY_START_ARGV_JSON"},
-			UsesHostServe:                  true,
+			UsesBootstrap:                  true,
 			ExecuteWhen:                    []string{"relay config exists and credential choice is unambiguous"},
 			AuthorizationRequired:          []string{"ask before downloading relay binaries, editing relay config, creating relay accounts, opening firewall ports, or using paid relay services"},
 			Evidence:                       []string{"relay tool detection", "redacted relay config identity", "selected forwarded gateway"},
@@ -825,7 +867,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			GatewayEnvVars:                 []string{"RDEV_MESH_GATEWAY_URL"},
 			DependencyInstallActionEnvVars: []string{"RDEV_MESH_INSTALL_ACTION_JSON"},
 			HelperStartArgvEnvVars:         []string{"RDEV_MESH_START_ARGV_JSON"},
-			UsesHostServe:                  true,
+			UsesBootstrap:                  true,
 			ExecuteWhen:                    []string{"mesh route to gateway exists and no new enrollment is needed"},
 			AuthorizationRequired:          []string{"ask before mesh enrollment, auth-key use, ACL changes, DNS changes, or persistent service changes"},
 			Evidence:                       []string{"mesh tool detection", "redacted mesh route status", "selected mesh gateway"},
@@ -841,7 +883,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			GatewayEnvVars:                 []string{"RDEV_VPN_GATEWAY_URL"},
 			DependencyInstallActionEnvVars: []string{"RDEV_VPN_INSTALL_ACTION_JSON"},
 			HelperStartArgvEnvVars:         []string{"RDEV_VPN_START_ARGV_JSON"},
-			UsesHostServe:                  true,
+			UsesBootstrap:                  true,
 			ExecuteWhen:                    []string{"WireGuard route is active and gateway health check succeeds"},
 			AuthorizationRequired:          []string{"ask before creating keys, importing profiles, starting persistent VPN tunnels, changing DNS, or editing firewall routes"},
 			Evidence:                       []string{"WireGuard tool detection", "active route proof", "selected VPN gateway"},
@@ -853,7 +895,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			Status:            "implemented",
 			BestFor:           "gateway health endpoint is unavailable but signed join manifest can still be fetched",
 			Probe:             []string{"GET signed join manifest", "verify manifest root"},
-			UsesHostServe:     true,
+			UsesBootstrap:     true,
 			TransportOverride: "auto",
 			ExecuteWhen:       []string{"manifest URL is reachable and root is pinned"},
 			Evidence:          []string{"manifest URL", "manifest root verification"},
@@ -865,7 +907,7 @@ func connectionPaths(invite agentinvite.Invite) []ConnectionPath {
 			Status:        "not-executable",
 			BestFor:       "carrying agent-only values so target-side humans never assemble flags",
 			Probe:         []string{"manifest_url=" + manifestURL, "manifest_root_public_key_present=" + fmt.Sprint(root != ""), "gateway_url_present=" + fmt.Sprint(gatewayURL != "")},
-			UsesHostServe: false,
+			UsesBootstrap: false,
 			ExecuteWhen:   []string{"never selected as a connection path"},
 			Evidence:      []string{"runner manifest checksum"},
 		},
@@ -926,11 +968,21 @@ func runnerChecks(manifest Manifest) []Check {
 		{Name: "runner_schema", Passed: manifest.SchemaVersion == ManifestSchemaVersion, Detail: manifest.SchemaVersion},
 		{Name: "manifest_url", Passed: strings.TrimSpace(manifest.ManifestURL) != "", Detail: manifest.ManifestURL},
 		{Name: "manifest_root_public_key", Passed: strings.TrimSpace(manifest.ManifestRootPublicKey) != "", Detail: manifest.ManifestRootPublicKey},
+		{Name: "layered_assets_manifest_url", Passed: strings.TrimSpace(manifest.LayeredAssetsManifestURL) != "", Detail: manifest.LayeredAssetsManifestURL},
+		{Name: "layered_release_root_public_key", Passed: strings.TrimSpace(manifest.LayeredReleaseRootPublicKey) != "", Detail: presenceDetail(manifest.LayeredReleaseRootPublicKey)},
+		{Name: "layered_release_version", Passed: strings.TrimSpace(manifest.LayeredReleaseVersion) != "", Detail: manifest.LayeredReleaseVersion},
 		{Name: "gateway_url", Passed: strings.TrimSpace(manifest.GatewayURL) != "", Detail: manifest.GatewayURL},
 		{Name: "connection_paths", Passed: len(manifest.ConnectionPaths) >= 7, Detail: fmt.Sprint(len(manifest.ConnectionPaths))},
 		{Name: "no_manual_assembly", Passed: manifest.NoManualAssembly, Detail: "runner carries ticket/root/gateway/transport metadata"},
 		{Name: "helper_policy_requires_authorization_for_mutation", Passed: len(manifest.HelperPolicy.AuthorizationRequired) > 0, Detail: manifest.HelperPolicy.SchemaVersion},
 	}
+}
+
+func presenceDetail(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "missing"
+	}
+	return "present"
 }
 
 func connectivityTools() []ConnectivityTool {
@@ -1019,7 +1071,7 @@ func selectPath(manifest Manifest, tools []ToolResult, httpProbe func(string, ti
 	})
 	var probes []ProbeResult
 	for _, path := range paths {
-		if !path.UsesHostServe {
+		if !path.UsesBootstrap {
 			continue
 		}
 		ok := false
@@ -1089,21 +1141,42 @@ func selectPath(manifest Manifest, tools []ToolResult, httpProbe func(string, ti
 	return nil, probes
 }
 
-func hostServeArgs(manifest Manifest, gatewayURL, transport string, extra []string) []string {
+func bootstrapRunArgs(manifest Manifest, gatewayURL, cacheDir string, extraCoreArgs []string) []string {
+	args := []string{
+		"layered-run",
+		"--manifest-url", manifest.LayeredAssetsManifestURL,
+		"--root-public-key", manifest.LayeredReleaseRootPublicKey,
+		"--expected-release-version", manifest.LayeredReleaseVersion,
+		"--platform", manifest.TargetOS + "/" + manifest.TargetArch,
+		"--cache-dir", cacheDir,
+		"--mode", "temporary",
+		"--",
+	}
+	return append(args, coreRunArgs(manifest, gatewayURL, extraCoreArgs)...)
+}
+
+func coreRunArgs(manifest Manifest, gatewayURL string, extra []string) []string {
 	manifestURL := manifestURLForGateway(manifest.ManifestURL, gatewayURL)
 	args := []string{
-		"host", "serve",
 		"--mode", hostModeArg(manifest.Mode),
 		"--gateway", gatewayURL,
 		"--manifest-url", manifestURL,
 		"--manifest-root-public-key", manifest.ManifestRootPublicKey,
-		"--transport", firstNonEmpty(transport, "auto"),
+		"--transport", "auto",
 		"--once=false",
 	}
 	if manifest.HostName != "" {
 		args = append(args, "--name", manifest.HostName)
 	}
 	return append(args, extra...)
+}
+
+func defaultBootstrapCacheDir() (string, error) {
+	root, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(root) == "" {
+		return "", fmt.Errorf("resolve user cache directory")
+	}
+	return filepath.Join(root, "RemoteDevSkillkit", "cache"), nil
 }
 
 func manifestURLForGateway(manifestURL, gatewayURL string) string {
@@ -1491,21 +1564,45 @@ func waitForGateway(gatewayURL string, httpProbe func(string, time.Duration) err
 	}
 }
 
-func renderLauncher(targetOS, rdevCommand, manifestPath string) string {
-	if targetOS == "windows" {
+func renderLauncher(manifest Manifest, bootstrapCommand string) string {
+	if manifest.TargetOS == "windows" {
 		return fmt.Sprintf(`$ErrorActionPreference = 'Stop'
-$ManifestPath = Join-Path $PSScriptRoot 'connection-entry-runner.json'
-Write-Host "Starting Remote Dev Skillkit Connection Entry..."
-& %s connection-entry run --runner-manifest "$ManifestPath"
-`, psCommand(rdevCommand))
+	$CacheDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'RemoteDevSkillkit\cache'
+	$AttemptDir = Join-Path (Join-Path $CacheDir 'attempts') ([Guid]::NewGuid().ToString('N'))
+	& %s layered-run attempt-check --attempt-dir $AttemptDir --launcher powershell --create
+	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+	Write-Host "Starting Remote Dev Skillkit Connection Entry through rdev-bootstrap..."
+	& %s layered-run --manifest-url '%s' --root-public-key '%s' --expected-release-version '%s' --platform '%s/%s' --cache-dir $CacheDir --attempt-dir $AttemptDir --launcher powershell --mode temporary -- --mode %s --gateway '%s' --manifest-url '%s' --manifest-root-public-key '%s' --transport auto --once=false%s
+	exit $LASTEXITCODE
+	`, psCommand(bootstrapCommand), psCommand(bootstrapCommand), psValue(manifest.LayeredAssetsManifestURL), psValue(manifest.LayeredReleaseRootPublicKey), psValue(manifest.LayeredReleaseVersion), psValue(manifest.TargetOS), psValue(manifest.TargetArch), psValue(hostModeArg(manifest.Mode)), psValue(manifest.GatewayURL), psValue(manifest.ManifestURL), psValue(manifest.ManifestRootPublicKey), renderPowerShellHostNameArg(manifest.HostName))
 	}
 	return fmt.Sprintf(`#!/bin/sh
-set -eu
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MANIFEST="$SCRIPT_DIR/connection-entry-runner.json"
-echo "Starting Remote Dev Skillkit Connection Entry..."
-exec %s connection-entry run --runner-manifest "$MANIFEST"
-`, shellToken(rdevCommand))
+	set -eu
+	cache_base="${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}"
+	cache_dir="$cache_base/RemoteDevSkillkit/cache"
+	mkdir -p "$cache_dir"
+	chmod 700 "$cache_dir"
+	echo "Starting Remote Dev Skillkit Connection Entry through rdev-bootstrap..."
+	exec %s layered-run --manifest-url %s --root-public-key %s --expected-release-version %s --platform %s --cache-dir "$cache_dir" --mode temporary -- --mode %s --gateway %s --manifest-url %s --manifest-root-public-key %s --transport auto --once=false%s
+	`, shellToken(bootstrapCommand), shellToken(manifest.LayeredAssetsManifestURL), shellToken(manifest.LayeredReleaseRootPublicKey), shellToken(manifest.LayeredReleaseVersion), shellToken(manifest.TargetOS+"/"+manifest.TargetArch), shellToken(hostModeArg(manifest.Mode)), shellToken(manifest.GatewayURL), shellToken(manifest.ManifestURL), shellToken(manifest.ManifestRootPublicKey), renderShellHostNameArg(manifest.HostName))
+}
+
+func psValue(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
+}
+
+func renderPowerShellHostNameArg(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	return " --name '" + psValue(name) + "'"
+}
+
+func renderShellHostNameArg(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	return " --name " + shellToken(name)
 }
 
 func launcherName(targetOS string) string {

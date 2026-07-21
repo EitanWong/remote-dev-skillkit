@@ -57,7 +57,7 @@ func (a App) Run(ctx context.Context, args []string) (resultErr error) {
 	if opts.mode != "temporary" {
 		return newPreCoreError("invalid_input")
 	}
-	if opts.platform != "windows/amd64" {
+	if opts.platform != "windows/amd64" && opts.platform != "windows/arm64" {
 		return newPreCoreError("invalid_input")
 	}
 	if strings.TrimSpace(opts.expectedVersion) == "" {

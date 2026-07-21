@@ -5,14 +5,39 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
+	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
+
+func TestConnectionEntryExecutableSelectorsAreBootstrapOnly(t *testing.T) {
+	allOptions := map[string]reflect.Type{
+		"agent invite options":          reflect.TypeOf(agentinvite.Options{}),
+		"connection entry plan options": reflect.TypeOf(Options{}),
+		"runner build options":          reflect.TypeOf(connectionrunner.Options{}),
+		"runner run options":            reflect.TypeOf(connectionrunner.RunOptions{}),
+	}
+	for name, typ := range allOptions {
+		if _, ok := typ.FieldByName("RdevCommand"); ok {
+			t.Fatalf("%s retains legacy RdevCommand selector", name)
+		}
+	}
+	for name, typ := range map[string]reflect.Type{
+		"connection entry plan options": allOptions["connection entry plan options"],
+		"runner build options":          allOptions["runner build options"],
+		"runner run options":            allOptions["runner run options"],
+	} {
+		if _, ok := typ.FieldByName("BootstrapCommand"); !ok {
+			t.Fatalf("%s must expose BootstrapCommand", name)
+		}
+	}
+}
 
 func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	invite := testInvite(t, model.HostModeAttendedTemporary)
@@ -41,8 +66,10 @@ func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	if !strings.Contains(plan.EntryCommand, "powershell") || !strings.Contains(plan.EntryCommand, "bootstrap.ps1") {
 		t.Fatalf("expected Windows entry command, got %q", plan.EntryCommand)
 	}
-	if len(plan.MissingInputs) == 0 || !slices.Contains(plan.MissingInputs, "release_bundle_url") {
-		t.Fatalf("expected release input gaps, got %#v", plan.MissingInputs)
+	if len(plan.MissingInputs) == 0 ||
+		!slices.Contains(plan.MissingInputs, "windows_bootstrap_binary") ||
+		!slices.Contains(plan.MissingInputs, "layered_assets_manifest_url") {
+		t.Fatalf("expected layered bootstrap input gaps, got %#v", plan.MissingInputs)
 	}
 	if plan.ModeDecision == "" || !strings.Contains(plan.ModeDecision, "attended-temporary") {
 		t.Fatalf("expected attended temporary mode decision, got %#v", plan)
@@ -158,26 +185,10 @@ func TestConnectionEntryPlanSelectionEdges(t *testing.T) {
 	}
 }
 
-func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
-	bootstrap := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(bootstrap, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out := filepath.Join(t.TempDir(), "entry")
-	plan, err := FromInvite(Options{
-		InviteJSON:                    mustJSON(t, testInvite(t, model.HostModeAttendedTemporary)),
-		OutDir:                        out,
-		TargetOS:                      "windows",
-		Ownership:                     "third-party",
-		WindowsBootstrapScriptPath:    bootstrap,
-		WindowsHostDownloadURL:        "https://agent.example.com/rdev-host.exe",
-		WindowsHostExpectedSHA256:     strings.Repeat("a", 64),
-		ReleaseBundleURL:              "https://agent.example.com/release-bundle.json",
-		ReleaseRootPublicKey:          "release-root:" + strings.Repeat("b", 43),
-		WindowsVerifierDownloadURL:    "https://agent.example.com/rdev-verify.exe",
-		WindowsVerifierExpectedSHA256: strings.Repeat("c", 64),
-		Now:                           time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
-	})
+func TestFromInviteGeneratesWindowsLayeredMaterialization(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	out := fixture.options.OutDir
+	plan, err := FromInvite(fixture.options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +198,7 @@ func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
 	if plan.HumanMessagePath == "" || !fileExists(plan.HumanMessagePath) {
 		t.Fatalf("expected human message file: %#v", plan)
 	}
-	if plan.EntryPackagePlan == nil || !plan.EntryPackagePlan.OK || !fileExists(plan.EntryPackagePlan.LauncherPath) {
+	if plan.EntryPackagePlan == nil || !plan.EntryPackagePlan.OK {
 		t.Fatalf("expected generated entry package plan: %#v", plan.EntryPackagePlan)
 	}
 	if plan.RunnerPlan == nil ||
@@ -203,19 +214,25 @@ func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
 	}
 	if plan.EntryPackagePlan.SchemaVersion != EntryPackagePlanSchemaVersion ||
 		plan.EntryPackagePlan.TargetOS != "windows" ||
-		plan.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" {
-		t.Fatalf("expected generic entry package wrapper around Windows plan: %#v", plan.EntryPackagePlan)
+		plan.EntryPackagePlan.PlatformPlanKind != "windows-layered-handoff" {
+		t.Fatalf("expected generic entry package wrapper around Windows layered handoff: %#v", plan.EntryPackagePlan)
 	}
 	if !slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "manifest_root_public_key") ||
-		!slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "ticket_code") {
+		!slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "layered_assets_manifest_url") {
 		t.Fatalf("expected raw connection parameters to stay agent-only: %#v", plan.EntryPackagePlan.AgentOnlyParameters)
 	}
-	launcher, err := os.ReadFile(plan.EntryPackagePlan.LauncherPath)
+	launcherPath := plan.EntryPackagePlan.LauncherPath
+	if !filepath.IsAbs(launcherPath) {
+		launcherPath = filepath.Join(out, filepath.FromSlash(launcherPath))
+	}
+	launcher, err := os.ReadFile(launcherPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(launcher), "-ManifestRootPublicKey") || strings.Contains(string(launcher), "ticket, root, gateway") {
-		t.Fatalf("launcher should carry manifest root and avoid human flag assembly text:\n%s", string(launcher))
+	if !strings.Contains(string(launcher), "--manifest-root-public-key") ||
+		!strings.Contains(string(launcher), "rdev-bootstrap") ||
+		strings.Contains(string(launcher), "ticket, root, gateway") {
+		t.Fatalf("launcher should use bootstrap with pinned manifest metadata and avoid human flag assembly text:\n%s", string(launcher))
 	}
 	if !fileExists(filepath.Join(out, "connection-entry-plan.json")) {
 		t.Fatalf("expected materialization plan JSON in out dir")

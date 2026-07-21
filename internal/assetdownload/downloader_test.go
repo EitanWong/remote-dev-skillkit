@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,6 +231,59 @@ func TestDownloadResumesPartialFileWithRange(t *testing.T) {
 	}
 	if !bytes.Equal(got, payload) {
 		t.Fatalf("unexpected resumed content %q", string(got))
+	}
+}
+
+func TestDownloadHTTPTransportResumesAfterInterruptedResponse(t *testing.T) {
+	payload := bytes.Repeat([]byte("range-resume-fixture-"), 4096)
+	half := len(payload) / 2
+	requests := 0
+	var ranges []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		requests++
+		ranges = append(ranges, request.Header.Get("Range"))
+		if requests == 1 {
+			connection, buffer, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_, _ = fmt.Fprintf(buffer, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: application/octet-stream\r\n\r\n", len(payload))
+			_, _ = buffer.Write(payload[:half])
+			_ = buffer.Flush()
+			_ = connection.Close()
+			return
+		}
+		if request.Header.Get("Range") != fmt.Sprintf("bytes=%d-", half) {
+			t.Errorf("Range = %q, want bytes=%d-", request.Header.Get("Range"), half)
+		}
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)-half))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload[half:])
+	}))
+	defer server.Close()
+
+	outPath := filepath.Join(t.TempDir(), "runtime.exe")
+	result, err := Download(context.Background(), Options{
+		Mirrors:        []Mirror{{URL: server.URL + "/runtime.exe"}},
+		OutputPath:     outPath,
+		ExpectedSHA256: sha256String(payload),
+		ExpectedSize:   int64(len(payload)),
+		Transport:      HTTPTransport{Client: server.Client()},
+		MaxAttempts:    2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Resumed || requests != 2 || len(ranges) != 2 || ranges[0] != "" || ranges[1] != fmt.Sprintf("bytes=%d-", half) {
+		t.Fatalf("unexpected Range recovery: result=%#v requests=%d ranges=%#v", result, requests, ranges)
+	}
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, payload) {
+		t.Fatal("resumed HTTP download bytes changed")
 	}
 }
 
@@ -633,13 +687,13 @@ func TestDefaultCachePathUsesUserCache(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "xdg-cache"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(dir, "local-app-data"))
 
-	path, ok := DefaultCachePath("rdev-windows-amd64.exe")
+	path, ok := DefaultCachePath("rdev-host-windows-amd64.exe")
 	if !ok {
 		t.Fatal("expected default cache path")
 	}
 	if !strings.Contains(path, "remote-dev-skillkit") ||
 		!strings.Contains(path, "helpers") ||
-		filepath.Base(path) != "rdev-windows-amd64.exe" {
+		filepath.Base(path) != "rdev-host-windows-amd64.exe" {
 		t.Fatalf("unexpected cache path %q", path)
 	}
 	if _, ok := DefaultCachePath("../rdev.exe"); ok {
