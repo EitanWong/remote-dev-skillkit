@@ -174,7 +174,6 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	workDir := strings.TrimSpace(opts.WorkDir)
 	selectedPath := "start-foreground-gateway"
 	agentNextStep := "run cli_start_now_command in a visible terminal, then prefer handoff_text_file.path when present; otherwise send the returned target_handoff_envelope.full_text"
-	mcpNextTool := ""
 	resolvedCreateGatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
 	if resolvedCreateGatewayURL == "" {
 		resolvedCreateGatewayURL, _ = ConfiguredGatewayURLCandidate()
@@ -182,8 +181,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	if resolvedCreateGatewayURL != "" && !opts.RequireForeground {
 		gatewayURL = resolvedCreateGatewayURL
 		selectedPath = "create-with-reachable-gateway"
-		agentNextStep = "call rdev.support_session.create with mcp_next_arguments, then send the returned target_handoff_envelope.full_text"
-		mcpNextTool = "rdev.support_session.create"
+		agentNextStep = "run cli_create_command exactly, then send the returned target_handoff_envelope.full_text"
 	}
 	// Only explicit or configured stable gateways are safe to thread into
 	// generated foreground-start commands. Opportunistic LAN/loopback candidates
@@ -191,17 +189,25 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 	// explicit operator-provided gateways and can suppress managed tunnel
 	// selection in connect --start.
 	startGatewayURL := resolvedCreateGatewayURL
-	createArgs := map[string]any{
-		"gateway_url":   resolvedCreateGatewayURL,
-		"target":        target,
-		"reason":        reason,
-		"ttl_seconds":   ttl,
-		"auto_activate": opts.AutoActivate,
-		"locale":        locale,
-		"rdev_command":  rdevCommand,
-	}
-	if len(opts.Capabilities) > 0 {
-		createArgs["capabilities"] = append([]string(nil), opts.Capabilities...)
+	createCommand := []string{}
+	if resolvedCreateGatewayURL != "" {
+		createCommand = []string{
+			rdevCommand, "support-session", "create",
+			"--gateway-url", resolvedCreateGatewayURL,
+			"--target", target,
+			"--reason", reason,
+			"--ttl-seconds", strconv.Itoa(ttl),
+			"--locale", locale,
+			"--rdev-command", rdevCommand,
+		}
+		if opts.AutoActivate {
+			createCommand = append(createCommand, "--auto-activate")
+		} else {
+			createCommand = append(createCommand, "--auto-activate=false")
+		}
+		if len(opts.Capabilities) > 0 {
+			createCommand = append(createCommand, "--capabilities", strings.Join(opts.Capabilities, ","))
+		}
 	}
 	startCommand := []string{
 		rdevCommand, "support-session", "start",
@@ -258,13 +264,16 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		"intent":                   "single-agent-decision-for-one-command-visible-support-session",
 		"selected_path":            selectedPath,
 		"agent_next_step":          agentNextStep,
-		"mcp_next_tool":            mcpNextTool,
-		"mcp_next_arguments":       createArgs,
+		"next_interface":           "cli-only",
+		"mcp_next_tool":            "",
+		"mcp_next_arguments":       map[string]any{},
+		"cli_create_command":       createCommand,
 		"cli_start_now_command":    connectStartCommand,
 		"foreground_start_command": startCommand,
 		"prepare_command":          supportSessionPrepareCommand(rdevCommand, repoRoot, addr, startGatewayURL, target),
-		"status_watch_rule":        "after sending the returned user_handoff to the human, call rdev.support_session.status with wait=true; when connected=true, proactively report the connection is established",
-		"recovery_rule":            "if create/start/status fails or times out, read connection_recovery or rerun rdev.support_session.prepare; do not write custom recovery scripts",
+		"status_watch_rule":        "after sending the returned user_handoff to the human, run the returned CLI status watcher; when connected=true, proactively report the connection is established",
+		"recovery_rule":            "if create/start/status fails or times out, read connection_recovery or rerun rdev support-session prepare; do not write custom recovery scripts",
+		"rdev_bootstrap_connector": rdevBootstrapConnectorContract(),
 		"agent_connection_runbook": agentConnectionRunbook(agentConnectionRunbookOptions{
 			Phase:        selectedPath,
 			Status:       "not-created",
@@ -289,7 +298,7 @@ func BuildHandoff(opts HandoffOptions) map[string]any {
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
 			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install",
 			"UAC or sudo bypass",
 			"service, firewall, DNS, route, credential, paid relay, or cloud changes without explicit authorization",
@@ -324,7 +333,7 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
 			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install",
 		},
 	}
@@ -333,16 +342,20 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 		RdevCommand:  rdevCommandFromHandoff(handoff),
 		AutoActivate: autoActivateFromHandoff(handoff),
 	})
+	payload["rdev_bootstrap_connector"] = handoff["rdev_bootstrap_connector"]
 	if selectedPath == "create-with-reachable-gateway" {
 		payload["ready_to_send_to_human"] = false
-		payload["mcp_next_tool"] = handoff["mcp_next_tool"]
-		payload["mcp_next_arguments"] = handoff["mcp_next_arguments"]
+		payload["next_interface"] = "cli-only"
+		payload["mcp_next_tool"] = ""
+		payload["mcp_next_arguments"] = map[string]any{}
+		payload["cli_next_command"] = handoff["cli_create_command"]
 		payload["agent_connection_runbook"] = handoff["agent_connection_runbook"]
-		payload["agent_next_step"] = "call mcp_next_tool with mcp_next_arguments; then send only the returned target_handoff_envelope.full_text and wait for connected=true"
+		payload["agent_next_step"] = "run cli_next_command exactly; then send only the returned target_handoff_envelope.full_text and wait for connected=true"
 		return payload
 	}
 	payload["ready_to_send_to_human"] = false
 	payload["cli_start_now_command"] = handoff["cli_start_now_command"]
+	payload["cli_next_command"] = handoff["cli_start_now_command"]
 	payload["foreground_start_command"] = handoff["foreground_start_command"]
 	payload["prepare_command"] = handoff["prepare_command"]
 	payload["agent_connection_runbook"] = handoff["agent_connection_runbook"]
@@ -384,7 +397,7 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 	readiness := availabilityReadinessFromMap(created)
 	userHandoff := userHandoffWithReadiness(created["user_handoff"], readiness)
 	envelope := targetHandoffEnvelopeWithReadiness(created["target_handoff_envelope"], readiness)
-	agentNextStep := "send target_handoff_envelope.full_text to the target human, wait with rdev.support_session.status, then proactively report connected_next_steps.user_report when connected=true"
+	agentNextStep := "send target_handoff_envelope.full_text to the target human, wait with the returned CLI status watcher, then proactively report connected_next_steps.user_report when connected=true"
 	humanSurfaceRule := "humans receive only target_handoff_envelope.full_text; user_handoff remains a compatibility fallback"
 	if !readiness.ReadyToSend {
 		agentNextStep = blockedHandoffInstruction(readiness.DegradedReason)
@@ -421,13 +434,14 @@ func BuildConnectFromCreated(created map[string]any) map[string]any {
 			AutoActivate:          boolFromMap(created, "auto_activate"),
 		}),
 		"mcp_follow_up":      created["mcp_follow_up"],
+		"cli_follow_up":      created["cli_follow_up"],
 		"agent_next_step":    agentNextStep,
 		"human_surface_rule": humanSurfaceRule,
 		"agent_rule":         "Agents should call rdev.sessions.connect first when a human asks to connect a computer; do not manually choose handoff/create/start/status when this payload is available.",
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport assembly for target humans",
 			"Agent-authored PowerShell or shell bootstrap/recovery scripts",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install",
 		},
 	}
@@ -498,7 +512,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	agentFlow := []string{
 		"keep this process running while the target host connects",
 		"give the target-side human only target_handoff_envelope.full_text",
-		"watch connection status with status_file.path, foreground_feedback, watch_connection_status, or rdev.support_session.status",
+		"watch connection status with status_file.path, foreground_feedback, watch_connection_status, or the returned CLI status command",
 		"when connected=true, proactively report that the connection is established",
 		"if connection_readiness.ready is false, follow standard_recovery_actions instead of writing ad hoc bootstrap or relay code",
 	}
@@ -543,6 +557,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 			"agent_rule":                      "parse foreground feedback events from stderr when this command is kept open; read status_file.path or use the status watcher as fallback sources of truth",
 		},
 		"mcp_follow_up":         session["mcp_follow_up"],
+		"cli_follow_up":         session["cli_follow_up"],
 		"session":               session,
 		"asset_report":          opts.AssetReport,
 		"connection_readiness":  opts.ConnectionReadiness,
@@ -579,7 +594,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 		"human_surface_rule":        humanSurfaceRule,
 		"forbidden": []string{
 			"background hidden gateway",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"manual ticket/root/gateway/transport assembly for target user",
 			"ad hoc bootstrap script generated by the Agent",
 		},
@@ -873,7 +888,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"missing_inputs":           missingInputs,
 		"standard_recovery":        recoveryActions,
 		"target_handoff_policy":    "give the target-side human only target_handoff_envelope.full_text when present; use generated target_command or join_url only as compatibility fallback fields",
-		"forbidden":                []string{"ExecutionPolicy Bypass", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
+		"forbidden":                []string{"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry", "hidden install", "manual ticket/root/gateway/transport assembly", "ad hoc bootstrap code"},
 		"recommended_next_step":    recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady),
 		"command_to_connect_start": supportSessionConnectStartCommand(rdevCommand, addr, opts.GatewayURL, target),
 		"command_to_start":         supportSessionStartCommand(rdevCommand, addr, opts.GatewayURL, target),
@@ -966,7 +981,7 @@ func gatewayCandidatePreflight(gatewayURL, target string, gatewayCandidates []Ga
 			"call rdev.sessions.connect or run rdev support-session connect first",
 			"send only returned target_handoff_envelope.full_text",
 			"wait with returned connection_supervision or foreground_feedback",
-			"if all candidates fail, rerun rdev.support_session.prepare or rdev support-session prepare --build-assets before asking the human",
+			"if all candidates fail, rerun rdev support-session prepare --build-assets before asking the human",
 		},
 		"ask_human_only_for": []string{
 			"authorization or company policy",
@@ -980,7 +995,7 @@ func gatewayCandidatePreflight(gatewayURL, target string, gatewayCandidates []Ga
 			"Agent-authored PowerShell or shell network probes",
 			"custom relay, mesh, VPN, SSH, or polling scripts",
 			"manual ticket/root/gateway/transport/checksum assembly",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install or persistence",
 		},
 	}
@@ -1083,10 +1098,10 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 	ticketCode := strings.TrimSpace(opts.TicketCode)
 	sequence := []string{
 		"start with rdev.sessions.connect or rdev support-session connect",
-		"if ready_to_send_to_human=false, run cli_start_now_command exactly in a visible foreground terminal",
+		"if ready_to_send_to_human=false, run cli_next_command or cli_start_now_command exactly in a visible foreground terminal",
 		"send only target_handoff_envelope.full_text to the target-side human",
 		"keep the target-side command/page and the local foreground gateway open while waiting",
-		"watch with foreground_feedback, connection_supervision.mcp_watch_call, or rdev.support_session.status wait=true",
+		"watch with foreground_feedback, connection_supervision.cli_watch_command, or rdev support-session status --wait",
 		"when connected=true, immediately report connected_next_steps.user_report before submitting session tasks",
 		"inspect capabilities, submit the smallest scoped session task, then review evidence before declaring work complete",
 	}
@@ -1095,21 +1110,16 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 	}
 	watch := map[string]any{
 		"foreground_feedback_event": "connected",
-		"mcp_tool":                  "rdev.support_session.status",
-		"mcp_arguments": map[string]any{
-			"ticket_code": ticketCode,
-			"locale":      opts.Locale,
-			"wait":        true,
-		},
-		"cli_command": []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", opts.Locale},
-		"rule":        "use returned watcher fields when present; do not write a polling loop",
+		"interface":                 "cli-only",
+		"mcp_tool":                  "",
+		"mcp_arguments":             map[string]any{},
+		"cli_command":               []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", opts.Locale},
+		"rule":                      "use returned watcher fields when present; do not write a polling loop",
 	}
 	if gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"); gatewayURL != "" {
-		watch["mcp_arguments"].(map[string]any)["gateway_url"] = gatewayURL
 		watch["cli_command"] = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait", "--locale", opts.Locale}
 	}
 	if ticketCode == "" {
-		watch["mcp_arguments"] = map[string]any{"wait": true}
 		watch["cli_command"] = []string{rdevCommand, "support-session", "status", "--ticket-code", "<ticket-code>", "--wait"}
 	}
 	return map[string]any{
@@ -1128,7 +1138,8 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 			"rule":        "for a human request like connect this computer, call this first; it chooses create-via-reachable-gateway or foreground start and returns the only human handoff to send",
 		},
 		"fallback_entry_tool": map[string]any{
-			"mcp_tool":    "rdev.support_session.prepare",
+			"interface":   "cli-only",
+			"mcp_tool":    "",
 			"cli_command": []string{rdevCommand, "support-session", "prepare", "--build-assets"},
 			"rule":        "use only to repair missing local bootstrap assets or inspect gateway candidates before creating a fresh support-session entry",
 		},
@@ -1150,7 +1161,7 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 			"read connection_recovery and gateway_candidate_preflight from the returned payload",
 			"check gateway_candidate_summary.needs_public_tunnel: if true, run the standard foreground `rdev support-session connect --start` flow; rdev owns cloudflared/localhost.run selection and tunnel lifetime",
 			"if tunnel helpers are missing or blocked, report the standard manual_action_required output instead of writing cloudflared, SSH, or relay scripts",
-			"rerun rdev.support_session.prepare or rdev support-session prepare --build-assets",
+			"rerun rdev support-session prepare --build-assets",
 			"create a fresh Connection Entry with configured hosted/relay/mesh/VPN/SSH/cloudflared fallback when LAN-only paths are insufficient",
 			"ask one short question only for authorization, persistence authorization, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
 		},
@@ -1167,13 +1178,13 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 			"allowed_when": []string{
 				"an operator explicitly asks for package materialization",
 				"managed owned-host service planning has been explicitly authorized",
-				"rdev.sessions.connect or rdev.support_session.prepare returns a standard recovery instruction that names Connection Entry planning",
+				"rdev.sessions.connect or rdev support-session prepare returns a standard recovery instruction that names Connection Entry planning",
 			},
 		},
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport/checksum assembly",
 			"Agent-authored PowerShell or shell bootstrap, relay, authorization, or polling scripts",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install or persistence",
 			"UAC or sudo bypass",
 			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit authorization",
@@ -1202,7 +1213,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 	ticketCode := strings.TrimSpace(opts.TicketCode)
 	readiness := normalizeAvailabilityReadiness(opts.AvailabilityReadiness)
 	humanSurface := "send handoff_text_file.path verbatim when present; otherwise send only target_handoff_envelope.full_text verbatim; use user_handoff.message plus user_handoff.copy_paste only for older payloads"
-	statusRule := "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision, foreground_feedback, status_file.path, connected_report_file.path, or rdev.support_session.status wait=true; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately"
+	statusRule := "after sending handoff_text_file.path or target_handoff_envelope.full_text to the human, wait with returned connection_supervision.cli_watch_command, foreground_feedback, status_file.path, connected_report_file.path, or rdev support-session status --wait; when connected=true, report connected_report_file.path or connected_next_steps.user_report immediately"
 	if !readiness.ReadyToSend {
 		humanSurface = blockedHandoffInstruction(readiness.DegradedReason)
 		statusRule = blockedHandoffInstruction(readiness.DegradedReason) + "; wait for a new payload whose ready_to_send=true before beginning status supervision"
@@ -1243,7 +1254,7 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 			"shell bootstrap code",
 			"ticket/root/gateway substitution scripts",
 			"relay, mesh, VPN, SSH, or polling scripts",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install or persistence",
 		},
 		"status_rule": statusRule,
@@ -1255,18 +1266,14 @@ func freshAgentConnectContract(opts freshAgentConnectContractOptions) map[string
 	if ticketCode != "" {
 		contract["ticket_code"] = ticketCode
 		statusCLI := []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait"}
-		statusArgs := map[string]any{
-			"ticket_code": ticketCode,
-			"wait":        true,
-		}
 		if gatewayURL := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/"); gatewayURL != "" {
 			statusCLI = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait"}
-			statusArgs["gateway_url"] = gatewayURL
 		}
 		contract["status_cli"] = statusCLI
 		contract["status_mcp"] = map[string]any{
-			"tool":      "rdev.support_session.status",
-			"arguments": statusArgs,
+			"available": false,
+			"tool":      "",
+			"reason":    "support-session ticket status is CLI-only; rdev.sessions.status requires a Control Plane session_id",
 		}
 	}
 	if strings.TrimSpace(opts.ReadyFile) != "" {
@@ -1332,9 +1339,9 @@ func freshAgentFailurePrevention() map[string]any {
 		},
 		"required_standard_path": []string{
 			"start ordinary connect-this-computer requests with rdev.sessions.connect or rdev support-session connect",
-			"when ready_to_send_to_human=false, run cli_start_now_command exactly in a visible foreground terminal",
+			"when ready_to_send_to_human=false, run cli_next_command or cli_start_now_command exactly in a visible foreground terminal",
 			"send handoff_text_file.path when present; otherwise send only target_handoff_envelope.full_text to the human",
-			"watch foreground_feedback, status_file.path, connected_report_file.path, connection_supervision, or rdev.support_session.status wait=true",
+			"watch foreground_feedback, status_file.path, connected_report_file.path, connection_supervision, or the returned CLI status watcher",
 			"report connected_report_file.path when present; otherwise report connected_next_steps.user_report immediately when connected=true",
 			"when cloudflared QUIC fails, rdev support-session connect --start automatically retries with --protocol http2 and then falls back to localhost.run SSH tunnel; do not manually restart cloudflared",
 		},
@@ -1352,7 +1359,7 @@ func freshAgentFailurePrevention() map[string]any {
 			"manually starting cloudflared tunnel in a background terminal and passing --gateway-url separately",
 			"using removed --public-tunnel flags or manually disabling managed tunnel selection",
 			"custom relay, mesh, SSH, VPN, or polling scripts outside standard rdev tools",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install or persistence",
 			"manual activation polling loops",
 		},
@@ -1673,10 +1680,10 @@ func connectivityHelperPreflight() map[string]any {
 		"configured_helper_ids": configured,
 		"ready_helper_count":    readyCount,
 		"auto_execute":          false,
-		"standard_next_step":    "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run when helper execution is needed; do not write custom SSH, relay, mesh, VPN, shell, or PowerShell startup code",
+		"standard_next_step":    "use CLI-only rdev connection-entry plan plus rdev connection-entry run --dry-run when helper execution is needed; do not write custom SSH, relay, mesh, VPN, shell, or PowerShell startup code",
 		"agent_rule":            "read this before asking network questions or writing tunnel commands; if a helper is configured, use standard Connection Entry runner metadata and authorization boundaries",
 		"forbidden": []string{
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"encoded shell commands",
 			"shell command-string wrappers",
 			"printing credentials or private keys",
@@ -1705,11 +1712,6 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		RequireHostActivation: !opts.AutoActivate,
 	})
 	targetOS := connectionEntryRunnerTargetOS(target)
-	mcpPlanArguments := map[string]any{
-		"invite_json":  "",
-		"ownership":    "third-party",
-		"session_mode": string(model.HostModeAttendedTemporary),
-	}
 	cliPlanArgv := []string{
 		rdevCommand, "connection-entry", "plan",
 		"--invite-json", "<invite_json>",
@@ -1717,7 +1719,6 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		"--session-mode", string(model.HostModeAttendedTemporary),
 	}
 	if targetOS != "auto" {
-		mcpPlanArguments["target_os"] = targetOS
 		cliPlanArgv = append(cliPlanArgv, "--target-os", targetOS)
 	}
 	recommendation := map[string]any{
@@ -1731,7 +1732,8 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 			"the Agent needs a package that probes direct, proxy, relay, mesh, VPN, or SSH-assisted paths before invoking rdev-bootstrap",
 		},
 		"default_human_surface":                 "keep using target_handoff_envelope.full_text for the simplest attended temporary session; user_handoff remains a compatibility fallback; use the runner package when durable or restrictive-network connectivity is needed",
-		"standard_tool":                         "rdev.connection_entry.plan",
+		"standard_interface":                    "cli-only",
+		"standard_tool":                         "",
 		"standard_cli":                          "rdev connection-entry plan",
 		"runner_schema":                         "rdev.connection-entry.runner.v1",
 		"runner_plan_schema":                    "rdev.connection-entry.runner-plan.v1",
@@ -1746,11 +1748,12 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		"auto_execute":                          false,
 		"dry_run_first":                         true,
 		"mcp_plan_call": map[string]any{
-			"tool":          "rdev.connection_entry.plan",
-			"arguments":     mcpPlanArguments,
-			"argument_rule": "set invite_json to invite_json below; when target_os_required_for_remote_package is true, add exactly one target_os from target_os_choices after probing the target OS family",
+			"available": false,
+			"tool":      "",
+			"reason":    "Connection Entry materialization is CLI-only in the current eight-tool MCP boundary",
 		},
-		"cli_plan_argv": cliPlanArgv,
+		"cli_plan_argv":          cliPlanArgv,
+		"cli_plan_argument_rule": "set <invite_json> from invite_json below; when target_os_required_for_remote_package is true, add exactly one target_os from target_os_choices after probing the target OS family",
 		"cli_dry_run_argv_template": []string{
 			rdevCommand, "connection-entry", "run",
 			"--runner-manifest", "<runner_plan.manifest_path>",
@@ -1758,7 +1761,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		},
 		"agent_sequence": []string{
 			"use target_handoff_envelope.full_text first for ordinary attended temporary support; user_handoff remains a compatibility fallback",
-			"when durable or restrictive-network connectivity is required, materialize this invite with rdev.connection_entry.plan",
+			"when durable or restrictive-network connectivity is required, materialize this invite with cli_plan_argv",
 			"dry-run the generated runner before execution so direct/LAN/proxy/helper paths are selected by rdev, not by model-authored scripts",
 			"give the target-side human only the generated visible launcher or package entry point",
 			"after handoff, wait with connection_supervision and report connected_next_steps.user_report when connected=true",
@@ -1766,7 +1769,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		"forbidden": []string{
 			"manual ticket/root/gateway/transport/checksum assembly",
 			"Agent-authored SSH, relay, mesh, VPN, PowerShell, shell, or polling scripts",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install or persistence",
 			"firewall, DNS, route, service, driver, credential, cloud, or paid relay changes without explicit authorization",
 		},
@@ -1785,10 +1788,6 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 	recommendation["ok"] = true
 	recommendation["invite_schema_version"] = invite.SchemaVersion
 	recommendation["invite_json"] = string(inviteJSON)
-	mcpCall := recommendation["mcp_plan_call"].(map[string]any)
-	args := mcpCall["arguments"].(map[string]any)
-	args["invite_json"] = string(inviteJSON)
-	recommendation["mcp_plan_call"] = mcpCall
 	recommendation["recommended_now"] = helperReadyCount(helperPreflight) > 0 || !boolFromMap(continuityPolicy, "stable_after_lan_change")
 	return recommendation
 }
@@ -2279,7 +2278,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"target_command is the human-safe primary command; signed join-manifest gateway candidates are embedded for rdev runtime failover after bootstrap; do not write your own fallback script",
 		"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
 		"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
-		"watch connection status with watch_connection_status or rdev.support_session.status",
+		"watch connection status with watch_connection_status or the returned CLI status watcher",
 		"read rdev_bootstrap_connector before interpreting target_preconnects; bootstrap activity is not a connected core and session tasks wait for connected=true",
 		"when connected=true, proactively report that the connection is established",
 		"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
@@ -2354,21 +2353,12 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 			},
 			"agent_rule": "use this shorter watcher when one RDEV_*_GATEWAY_URL is configured; otherwise use watch_connection_status",
 		},
-		"mcp_follow_up": []map[string]any{
-			{
-				"tool": "rdev.support_session.status",
-				"arguments": map[string]any{
-					"ticket_code": opts.Ticket.Code,
-					"locale":      locale,
-					"wait":        true,
-					"gateway_url": gatewayURL,
-				},
-			},
-		},
+		"mcp_follow_up": []map[string]any{},
+		"cli_follow_up": statusCommand,
 		"human_message": localizedCreatedMessage(locale),
 		"agent_flow":    agentFlow,
 		"forbidden": []string{
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install",
 			"manual ticket/root/gateway/transport assembly for target user",
 			"ad hoc bootstrap script generated by the Agent",
@@ -2396,6 +2386,19 @@ func rdevBootstrapConnectorContract() map[string]any {
 			"requires_full_runner_before_session_tasks": true,
 			"asset_budget_rule":                         "the published bootstrap handoff must stay within first_connect_target_bytes",
 			"agent_rule":                                "use the published rdev-bootstrap layered-run path for every generated connection",
+		},
+		"windows_broker": map[string]any{
+			"surface":                     "signed-generated-visible-powershell",
+			"fallback_order":              []string{"current PowerShell policy", "process-scoped ExecutionPolicy Bypass retry", "native CMD"},
+			"shared_attempt_state":        true,
+			"max_bootstrap_starts":        1,
+			"max_core_starts":             1,
+			"max_connections":             1,
+			"bootstrap_command":           "rdev-bootstrap",
+			"agent_authored_fallback":     false,
+			"execution_policy_scope":      "generated-broker-process-only",
+			"native_cmd_after_powershell": true,
+			"agent_rule":                  "forward the signed generated broker unchanged; do not author a PowerShell/CMD retry or start a second bootstrap/core",
 		},
 		"cdn_download_optimizer":             cdnDownloadOptimizerContract(),
 		"grants_host_access":                 false,
@@ -2430,7 +2433,7 @@ func cdnDownloadOptimizerContract() map[string]any {
 }
 
 func userHandoff(locale, target, surface, copyPaste, joinURL string, targetCommands map[string]string, readiness AvailabilityReadiness) map[string]any {
-	agentNextStep := "send message plus copy_paste to the user, then call rdev.support_session.status with wait=true"
+	agentNextStep := "send message plus copy_paste to the user, then use the returned CLI status watcher"
 	agentRule := "do not rewrite copy_paste, do not ask the user to assemble ticket/root/gateway/transport, and do not add custom polling"
 	autoTargetRule := autoTargetHandoffRule(target)
 	if !readiness.ReadyToSend {
@@ -2462,7 +2465,7 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 		fullText += "\n\n" + card
 	}
 	agentRule := "send full_text verbatim to the target-side human; do not rewrite copy_paste, append ticket/root/gateway details, or generate custom setup scripts"
-	afterSend := "wait with connection_supervision, status_file.path, foreground_feedback, or rdev.support_session.status wait=true and report connected_next_steps.user_report when connected=true"
+	afterSend := "wait with connection_supervision, status_file.path, foreground_feedback, or the returned CLI status watcher and report connected_next_steps.user_report when connected=true"
 	autoTargetRule := autoTargetHandoffRule(target)
 	if !readiness.ReadyToSend {
 		agentRule = blockedHandoffInstruction(readiness.DegradedReason)
@@ -2494,7 +2497,7 @@ func targetHandoffEnvelope(locale, target, surface, copyPaste, joinURL string, t
 			"manual ticket/root/gateway/transport assembly",
 			"custom PowerShell or shell bootstrap",
 			"custom relay, mesh, VPN, SSH, authorization, or polling scripts",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install or persistence",
 		},
 	}
@@ -2815,12 +2818,12 @@ func connectionContinuityPolicy(candidates []GatewayURLCandidate) map[string]any
 		"stable_after_lan_change":             stableAfterLANChange,
 		"assessment":                          assessment,
 		"target_command_behavior":             "the returned target command is human-safe and includes signed gateway candidate metadata for rdev runtime failover after bootstrap",
-		"agent_watch_behavior":                "after handing over target_handoff_envelope.full_text, use rdev.support_session.status wait=true or the returned watcher command and proactively report connected=true",
+		"agent_watch_behavior":                "after handing over target_handoff_envelope.full_text, use the returned CLI status watcher and proactively report connected=true",
 		"automatic_downgrade":                 []string{"target command tries the next Connection Entry URL when direct or LAN bootstrap fails", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "after registration, host transport auto may switch to another signed join-manifest gateway candidate when the current gateway fails before session tasks are processed", "status wait timeout returns connection_recovery instead of requiring custom polling"},
 		"automatic_upgrade":                   []string{"when an RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL becomes configured, create a fresh Connection Entry so future target commands include that stable path", "for operator-owned recurring machines, move from attended-temporary to a reviewed managed Connection Entry only after explicit persistence authorization", "persist the best verified stable path in scoped runtime memory after evidence is reviewed"},
-		"if_lan_or_loopback_fails":            []string{"run rdev.support_session.prepare or rdev support-session prepare --build-assets to refresh gateway_url_candidates", "prefer configured hosted/relay/mesh/VPN/SSH gateway URLs before asking the human for network details", "ask only when privileged network changes, credentials, paid/cloud resources, or managed persistence are required"},
+		"if_lan_or_loopback_fails":            []string{"run rdev support-session prepare --build-assets to refresh gateway_url_candidates", "prefer configured hosted/relay/mesh/VPN/SSH gateway URLs before asking the human for network details", "ask only when privileged network changes, credentials, paid/cloud resources, or managed persistence are required"},
 		"requires_operator_authorization_for": []string{"opening ports, router/NAT/firewall/DNS/route changes", "installing tunnel, mesh, VPN, service, driver, or persistent helper components", "creating or editing SSH credentials/config", "using paid hosted relay or cloud resources", "turning a temporary third-party session into managed persistence"},
-		"forbidden":                           []string{"Agent-authored polling loops", "custom PowerShell or shell relay/bootstrap scripts", "asking humans to assemble ticket/root/gateway/transport/checksum values", "ExecutionPolicy Bypass", "hidden install or persistence"},
+		"forbidden":                           []string{"Agent-authored polling loops", "custom PowerShell or shell relay/bootstrap scripts", "asking humans to assemble ticket/root/gateway/transport/checksum values", "Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry", "hidden install or persistence"},
 		"agent_rule":                          "treat LAN as an opportunistic first path, not the reliability plan; when stable_after_lan_change is false, prefer a configured hosted/relay/mesh/VPN/SSH gateway for durable work before claiming robust connectivity",
 	}
 }
@@ -2844,18 +2847,10 @@ func connectionSupervision(ticketCode, locale, rdevCommand, gatewayURL string, a
 	if upgradeRecommended {
 		upgradeReason = "current Connection Entry has no configured stable fallback beyond direct/LAN/explicit candidates"
 	}
-	mcpWatchArgs := map[string]any{
-		"ticket_code": ticketCode,
-		"locale":      locale,
-		"wait":        true,
-	}
 	cliWatchCommand := []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale}
-	statusRecoveryArgs := map[string]any{"ticket_code": ticketCode, "locale": locale, "wait": true}
 	statusRecoveryCommand := []string{rdevCommand, "support-session", "status", "--ticket-code", ticketCode, "--wait", "--locale", locale}
 	if gatewayURL != "" {
-		mcpWatchArgs["gateway_url"] = gatewayURL
 		cliWatchCommand = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait", "--locale", locale}
-		statusRecoveryArgs["gateway_url"] = gatewayURL
 		statusRecoveryCommand = []string{rdevCommand, "support-session", "status", "--gateway-url", gatewayURL, "--ticket-code", ticketCode, "--wait", "--locale", locale}
 	}
 	return map[string]any{
@@ -2864,16 +2859,14 @@ func connectionSupervision(ticketCode, locale, rdevCommand, gatewayURL string, a
 		"ticket_code":    ticketCode,
 		"locale":         locale,
 		"mcp_watch_call": map[string]any{
-			"tool":      "rdev.support_session.status",
-			"arguments": mcpWatchArgs,
+			"available": false,
+			"tool":      "",
+			"reason":    "support-session ticket status is CLI-only; rdev.sessions.status requires a Control Plane session_id",
 		},
 		"cli_watch_command":       cliWatchCommand,
 		"connected_report_rule":   "when status.connected=true, immediately send connected_next_steps.user_report to the user before submitting session tasks",
 		"pending_activation_rule": "if status=pending-activation, wait briefly for the standard attended-temporary auto-activation path or create a fresh Connection Entry; do not call retired host lifecycle tools and do not ask the target human for ticket/root/gateway/transport",
-		"timeout_recovery_tools": []map[string]any{
-			{"tool": "rdev.support_session.status", "arguments": statusRecoveryArgs},
-			{"tool": "rdev.support_session.prepare", "arguments": map[string]any{"target": "auto", "build_assets": true}},
-		},
+		"timeout_recovery_tools":  []map[string]any{},
 		"timeout_recovery_commands": [][]string{
 			statusRecoveryCommand,
 			{rdevCommand, "support-session", "prepare", "--target", "auto", "--build-assets"},
@@ -2883,12 +2876,12 @@ func connectionSupervision(ticketCode, locale, rdevCommand, gatewayURL string, a
 		"stable_after_lan_change":             stableAfterLANChange,
 		"upgrade_recommended":                 upgradeRecommended,
 		"upgrade_reason":                      upgradeReason,
-		"standard_upgrade_paths":              []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence authorization", "use rdev.connection_entry.plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
+		"standard_upgrade_paths":              []string{"configure RDEV_HOSTED_GATEWAY_URL, RDEV_CLOUDFLARED_NAMED_TUNNEL_URL, RDEV_RELAY_GATEWAY_URL, RDEV_MESH_GATEWAY_URL, RDEV_VPN_GATEWAY_URL, or RDEV_SSH_GATEWAY_URL, then create a fresh Connection Entry", "for operator-owned recurring machines, materialize a reviewed managed Connection Entry package after explicit persistence authorization", "use CLI-only rdev connection-entry plan plus rdev connection-entry run --dry-run for package/runner-based path selection"},
 		"automatic_downgrade_boundaries":      []string{"target command owns ordered URL fallback and bounded timeouts", "host transport auto may downgrade WSS to HTTPS long-poll to short polling", "host runtime may reuse signed join-manifest gateway candidates after registration if the current gateway fails before processing session tasks", "status timeout returns connection_recovery for standard recovery"},
 		"requires_operator_authorization_for": continuityPolicy["requires_operator_authorization_for"],
 		"agent_rule":                          "after sending target_handoff_envelope.full_text, use this supervision contract to wait, report connected=true, and choose standard upgrade/recovery tools; do not write polling, relay, bootstrap, or network mutation scripts",
 		"human_surface_rule":                  "humans receive only target_handoff_envelope.full_text; supervision fields are for the Agent runtime",
-		"forbidden":                           []string{"custom polling loops", "Agent-authored PowerShell or shell relay/bootstrap scripts", "manual ticket/root/gateway/transport assembly", "ExecutionPolicy Bypass", "hidden install or persistence"},
+		"forbidden":                           []string{"custom polling loops", "Agent-authored PowerShell or shell relay/bootstrap scripts", "manual ticket/root/gateway/transport assembly", "Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry", "hidden install or persistence"},
 	}
 }
 
@@ -2898,7 +2891,7 @@ func bootstrapRequirements(target string) map[string]any {
 		"target":         target,
 		"agent_rule":     "support-session connect --start prepares these bootstrap assets automatically; if using an existing gateway, verify the relevant /assets endpoints before sending a platform command",
 		"standard_fix":   []string{"rdev support-session prepare --build-assets", "rdev support-session connect --start"},
-		"forbidden":      []string{"telling the target user to install rdev manually as the first recovery step", "writing an ad hoc bootstrap downloader", "using ExecutionPolicy Bypass"},
+		"forbidden":      []string{"telling the target user to install rdev manually as the first recovery step", "writing an ad hoc bootstrap downloader", "Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry"},
 	}
 	switch target {
 	case "windows":
@@ -3092,13 +3085,13 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 			"start gateway with the exact start_gateway argv in a managed terminal/session",
 			"create the invite through HTTP or CLI",
 			"give target user only the localized join URL or one-line visible script",
-			"watch connection status with rdev.support_session.status or rdev support-session status --wait",
+			"watch connection status with rdev support-session status --wait",
 			"when connected=true, proactively tell the user the connection is established before creating session tasks",
 			"do not write ad hoc relay/nohup/bootstrap code",
 			"after endpoint connects, continue through session status/events; do not call retired host-activation contracts",
 		},
 		"forbidden": []string{
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install",
 			"unverified binary download",
 			"manual ticket/root/gateway/transport assembly for target user",
@@ -3578,7 +3571,7 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 		agentActions = []string{
 			"treat this as target-side bootstrap progress before host registration, not as user inaction",
 			"inspect target_preconnect_summary before asking the target-side human to retry",
-			"continue using rdev.support_session.status with wait=true instead of writing a polling loop",
+			"continue using rdev support-session status --wait instead of writing a polling loop",
 		}
 		humanChecks = []string{
 			"keep the visible target-side command running while registration continues",
@@ -3586,15 +3579,15 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 		}
 	case "revoked":
 		agentActions = []string{
-			"create a new Connection Entry with rdev.support_session.create or rdev support-session connect --start",
+			"create a new Connection Entry with rdev support-session connect --start",
 			"send only the new user_handoff message plus copy_paste value to the human",
 			"do not reuse old ticket, manifest root, gateway, or transport metadata",
 		}
 	default:
 		agentActions = []string{
-			"keep using rdev.support_session.status with wait=true or rdev support-session status --wait",
+			"keep using rdev support-session status --wait",
 			"if the original target_handoff_envelope is still valid, resend target_handoff_envelope.full_text verbatim",
-			"if the target cannot reach the join URL or every gateway candidate times out, run rdev.support_session.prepare or rdev support-session prepare --build-assets, then create a fresh Connection Entry",
+			"if the target cannot reach the join URL or every gateway candidate times out, run rdev support-session prepare --build-assets, then create a fresh Connection Entry",
 			"use gateway_candidate_preflight, connection_attempt_policy, runner_plan, or standard_recovery fields to choose the next standard rdev path instead of writing ad hoc network scripts",
 		}
 		humanChecks = []string{
@@ -3635,14 +3628,11 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 		}...),
 		"human_checks": humanChecks,
 		"standard_tools": []string{
-			"rdev.support_session.status",
 			"rdev support-session status --wait",
-			"rdev.support_session.prepare",
 			"rdev support-session prepare --build-assets",
-			"rdev.support_session.create",
 			"rdev support-session connect --start",
 			"rdev support-session start",
-			"rdev.connection_entry.plan",
+			"rdev connection-entry plan",
 			"rdev connection-entry run --dry-run",
 			"rdev.sessions.status",
 			"rdev.sessions.events",
@@ -3653,7 +3643,7 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 		"forbidden": []string{
 			"Agent-authored PowerShell or shell relay scripts",
 			"manual ticket/root/gateway/transport assembly for target humans",
-			"ExecutionPolicy Bypass",
+			"Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker owns its bounded process-scoped retry",
 			"hidden install",
 			"UAC or sudo bypass",
 			"firewall, DNS, route, service, driver, credential, paid relay, or cloud changes without explicit authorization",

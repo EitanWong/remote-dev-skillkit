@@ -3307,7 +3307,7 @@ func buildAgentBootstrapPlan(ctx context.Context, repoRoot, framework string, re
 			"call rdev.sessions.connect or run rdev support-session connect",
 			"if no gateway is running, run the returned visible foreground rdev support-session connect --start command",
 			"send only handoff_text_file.path or target_handoff_envelope.full_text verbatim to the target side",
-			"wait through connection_supervision, foreground_feedback, status_file.path, or rdev.support_session.status",
+			"wait through connection_supervision, foreground_feedback, status_file.path, or the returned CLI status watcher",
 			"use connection_entry_runner_recommendation only for reviewed package materialization, managed owned-host planning, or restrictive-network recovery",
 		},
 		"safe_defaults": []string{
@@ -5797,9 +5797,10 @@ func supportSessionManagedUpgradeRecommendation(host map[string]any) map[string]
 			"RDEV_HOSTED_GATEWAY_URL",
 			"RDEV_CLOUDFLARED_NAMED_TUNNEL_URL",
 		},
-		"target_os":        targetOS,
-		"recommended_tool": "rdev.connection_entry.plan",
-		"agent_rule":       "If this is the operator's own recurring machine, ask one short ownership/persistence authorization question, configure a stable gateway, then generate a reviewed managed-service Connection Entry plan. Do not install persistence for third-party temporary support.",
+		"target_os":             targetOS,
+		"recommended_interface": "cli-only",
+		"recommended_tool":      "rdev connection-entry plan",
+		"agent_rule":            "If this is the operator's own recurring machine, ask one short ownership/persistence authorization question, configure a stable gateway, then generate a reviewed managed-service Connection Entry plan. Do not install persistence for third-party temporary support.",
 	}
 }
 
@@ -8041,7 +8042,7 @@ func (a App) connectionEntry(args []string) error {
 	case "plan":
 		fs := flag.NewFlagSet("connection-entry plan", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		invitePath := fs.String("invite", "", "invite JSON path from rdev invite create or rdev.invites.create")
+		invitePath := fs.String("invite", "", "invite JSON path from CLI-only rdev invite create")
 		inviteJSON := fs.String("invite-json", "", "inline invite JSON")
 		out := fs.String("out", "", "empty output directory for connection-entry materialization files")
 		targetOS := fs.String("target-os", runtime.GOOS, "target OS: windows, darwin, or linux")

@@ -17,6 +17,10 @@ The MCP server exposes only the eight `rdev.sessions.*` tools documented in
 such as legacy support-session, invite, or connection-entry dotted names
 through MCP. Workflows that are not session tools
 are CLI-only and must use their corresponding `rdev ...` command.
+When `rdev.sessions.connect` returns `cli_next_command`, execute that argv
+exactly. An empty `mcp_next_tool` is intentional; support-session ticket
+creation, ticket-status watching, and Connection Entry materialization remain
+CLI-only.
 
 ## Non-Negotiables
 
@@ -44,6 +48,12 @@ are CLI-only and must use their corresponding `rdev ...` command.
   host. Do not invent narrower surfaces such as customer links or connector
   package plans, and do not give humans raw ticket/root/gateway/transport
   assembly tasks.
+- On Windows, forward the signed generated Windows broker unchanged. It tries
+  the current PowerShell policy, one
+  process-scoped `ExecutionPolicy Bypass` retry, and then native CMD. All three
+  branches use shared attempt state and may start at most one core and one
+  connection through `rdev-bootstrap`.
+  Agents must not reproduce, reorder, or run those branches independently.
 - If `rdev` is missing from PATH, do not stop at "not installed". Recover it
   from the active checkout or safe clone: run `go install ./cmd/rdev`, or use
   `go run ./cmd/rdev bootstrap agent-plan --repo-root .` as a temporary
@@ -200,8 +210,9 @@ are CLI-only and must use their corresponding `rdev ...` command.
   prefer a configured hosted/relay/mesh/VPN/SSH gateway before claiming durable
   connectivity for long-running work.
 - Read returned `connection_supervision` after sending the handoff. Use its
-  `mcp_watch_call` or `cli_watch_command` to wait, immediately report
-  `connected_next_steps.user_report` when connected, and follow its standard
+  `cli_watch_command` to wait for a support-session ticket; use
+  `rdev.sessions.status` only after a Control Plane `session_id` exists.
+  Immediately report `connected_next_steps.user_report` when connected, and follow its standard
   upgrade/recovery paths when the current entry is LAN-only or times out.
 - Prefer returned `target_handoff_envelope.full_text` when telling the human
   what to run on the target machine. It is already localized plain text plus
@@ -296,10 +307,10 @@ are CLI-only and must use their corresponding `rdev ...` command.
   falling back to foreground `rdev support-session connect --start`.
 4. Load relevant Skill runtime memory, then verify or refresh any stale facts
    before using them for commands, paths, interrupts, or release decisions.
-5. If no suitable host is active and a reachable gateway already exists, create
-   the session with `rdev.sessions.create` or
-   `rdev support-session create`; give the target side only
-   `target_handoff_envelope.full_text` when present, falling back to
+5. If no suitable host is active and a reachable gateway already exists, call
+   `rdev.sessions.connect` and run its returned `cli_next_command` (the exact
+   support-session CLI argv selected by the returned contract); give the target
+   side only `target_handoff_envelope.full_text` when present, falling back to
    `target_command` or `join_url` only for older payloads, then watch the
    returned status command. If
    no gateway is running yet, run `rdev support-session connect --start` in a
@@ -332,9 +343,9 @@ are CLI-only and must use their corresponding `rdev ...` command.
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package
    metadata.
-6. Watch the host using returned `connection_supervision.mcp_watch_call`, or
-   `rdev.sessions.status` with `wait=true`, or
-   `rdev support-session status --wait`. When `connected=true`, proactively
+6. Watch the host using returned `connection_supervision.cli_watch_command` or
+   `rdev support-session status --wait`. After a Control Plane `session_id`
+   exists, `rdev.sessions.status` is also available. When `connected=true`, proactively
    report `connected_next_steps.user_report` to the user, inspect
    `rdev.sessions.status`, run standard smoke-test/report tooling, use
    `--remote-control` or `remote_control=true` only for remote-control adapter
@@ -367,11 +378,13 @@ are CLI-only and must use their corresponding `rdev ...` command.
    lifecycle; if it is third-party or one-off repair, choose attended-temporary
   mode with no persistence by default. If ownership or persistence authorization is
    unclear, ask one short question before creating a managed entry. Prefer a
-   signed self-contained connection entry package with the target-platform
-   `rdev` binary, release bundle, manifest URL, pinned manifest root, and
+   signed layered connection entry package with the target-platform
+   `rdev-bootstrap`, signed release metadata, manifest URL, pinned roots, and
    visible launcher before asking a human to install prerequisites or copy
-   flags. For attended temporary support, prefer the generated long-poll
-   bootstrap; reserve `--transport auto` for managed or explicit advanced
+   flags. The bootstrap downloads and verifies the core only after registration;
+   optional modules remain undownloaded until registered and needed. For
+   attended temporary support, prefer the generated long-poll bootstrap;
+   reserve `--transport auto` for managed or explicit advanced
    runner paths with validated WSS fallback. Use `connection_entry.package_catalog` and
    manifest `package_catalog` as the OS/architecture selection source; package
    status `planned-release-asset-required` means use the visible fallback script

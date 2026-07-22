@@ -810,9 +810,8 @@ func TestSupportSessionStatusUsesAuthoritativePublicCandidate(t *testing.T) {
 			t.Fatalf("%s gateway = %#v, want %q", name, runbook["gateway_url"], publicBase)
 		}
 		watch := runbook["watch"].(map[string]any)
-		watchArgs := watch["mcp_arguments"].(map[string]any)
-		if watchArgs["gateway_url"] != publicBase {
-			t.Fatalf("%s MCP watch gateway = %#v, want %q", name, watchArgs["gateway_url"], publicBase)
+		if watch["interface"] != "cli-only" || watch["mcp_tool"] != "" {
+			t.Fatalf("%s watch must remain CLI-only: %#v", name, watch)
 		}
 		commandValues := watch["cli_command"].([]any)
 		command := make([]string, 0, len(commandValues))

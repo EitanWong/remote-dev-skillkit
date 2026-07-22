@@ -35,8 +35,8 @@ func TestRunFreshAgentSupportSessionWritesPassingReport(t *testing.T) {
 	if report.HandoffNoGateway["selected_path"] != "start-foreground-gateway" {
 		t.Fatalf("expected foreground start path, got %#v", report.HandoffNoGateway)
 	}
-	if report.HandoffReachableGateway["mcp_next_tool"] != "rdev.support_session.create" {
-		t.Fatalf("expected create next tool, got %#v", report.HandoffReachableGateway)
+	if report.HandoffReachableGateway["mcp_next_tool"] != "" || report.HandoffReachableGateway["next_interface"] != "cli-only" {
+		t.Fatalf("expected CLI-only create route, got %#v", report.HandoffReachableGateway)
 	}
 	handoff := mapFromAny(report.CreatedSession["user_handoff"])
 	copyPaste := stringFromAny(handoff["copy_paste"])

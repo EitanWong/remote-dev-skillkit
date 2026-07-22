@@ -102,6 +102,39 @@ func TestServerToolCallSessionsConnectReturnsForegroundEntry(t *testing.T) {
 	}
 }
 
+func TestServerToolCallSessionsConnectUsesCLIForSupportSessionSetup(t *testing.T) {
+	result := callSessionTool(t, NewServer(gateway.NewMemoryGateway()), "rdev.sessions.connect", map[string]any{
+		"gateway_url": "https://gateway.example.test",
+		"target":      "windows",
+	})
+	if result["selected_path"] != "start-foreground-gateway" {
+		t.Fatalf("expected explicit gateway to remain readiness-gated by foreground setup, got %#v", result)
+	}
+	if tool, _ := result["mcp_next_tool"].(string); tool != "" {
+		t.Fatalf("sessions.connect must not recommend an unregistered MCP tool: %#v", result)
+	}
+	handoff, _ := result["handoff"].(map[string]any)
+	legacyArgs, _ := handoff["mcp_next_arguments"].(map[string]any)
+	if len(legacyArgs) != 0 {
+		t.Fatalf("retired MCP arguments must stay empty when no MCP tool is available: %#v", legacyArgs)
+	}
+	command, _ := result["cli_next_command"].([]any)
+	joined := make([]string, 0, len(command))
+	for _, value := range command {
+		joined = append(joined, value.(string))
+	}
+	commandText := strings.Join(joined, "\x00")
+	if !strings.Contains(commandText, "support-session\x00connect\x00--start") ||
+		!strings.Contains(commandText, "--gateway-url\x00https://gateway.example.test") {
+		t.Fatalf("expected exact CLI-only setup route, got %#v", command)
+	}
+	bootstrap, _ := result["rdev_bootstrap_connector"].(map[string]any)
+	windowsBroker, _ := bootstrap["windows_broker"].(map[string]any)
+	if windowsBroker["shared_attempt_state"] != true || windowsBroker["max_core_starts"] != float64(1) {
+		t.Fatalf("expected shared-attempt Windows broker contract, got %#v", windowsBroker)
+	}
+}
+
 func TestProxyPOSTToRetriesSessionTaskWithIdempotencyKey(t *testing.T) {
 	attempts := 0
 	keys := []string{}

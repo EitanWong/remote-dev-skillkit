@@ -633,13 +633,6 @@ func (s Server) sessionsConnect(args map[string]any) (any, error) {
 		AllowDegradedDirectHandoff: allowDegraded,
 		RequireForeground:          gatewayURL != "",
 	})
-	if nextArgs, ok := handoff["mcp_next_arguments"].(map[string]any); ok {
-		nextArgs["region"] = string(region)
-		if foregroundPolicyPath != "" {
-			nextArgs["provider_policy"] = foregroundPolicyPath
-		}
-		nextArgs["allow_degraded_direct_handoff"] = allowDegraded
-	}
 	readiness := supportsession.DirectAvailability(tunnel.AvailabilitySet{
 		SchemaVersion: tunnel.AvailabilitySchemaVersion,
 		Region:        region,

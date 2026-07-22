@@ -116,8 +116,8 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.sessions.connect",
-			Description: "Create or route the standard visible support-session entry, including region-aware tunnel availability, readiness, and the single human handoff contract.",
-			Safety:      "Does not bypass local controls or accept provider terms. Without an explicit start action it returns bounded commands/contracts; direct single-entry handoffs remain non-sendable unless the caller explicitly enables the degraded override.",
+			Description: "Create or route the standard visible support-session entry, including region-aware tunnel availability, readiness, and the single human handoff contract. Windows uses rdev-bootstrap through a signed PowerShell broker: current PowerShell policy, one bounded process-scoped ExecutionPolicy Bypass retry, then native CMD, all in one shared attempt. Support-session creation, ticket-status watching, and Connection Entry materialization remain CLI-only and are returned as exact argv rather than unregistered MCP tool names.",
+			Safety:      "Does not let the Agent author policy bypasses, accept provider terms, or start parallel runtimes. The signed generated Windows broker owns its bounded retry and shared attempt state, with at most one core and one connection. Without an explicit start action this tool returns bounded commands/contracts; direct single-entry handoffs remain non-sendable unless the caller explicitly enables the degraded override.",
 			InputSchema: object(map[string]any{
 				"repo_root":                     stringField(),
 				"work_dir":                      stringField(),

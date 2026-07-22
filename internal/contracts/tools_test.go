@@ -81,6 +81,28 @@ func TestSupportSessionConnectSchemaAcceptsRegionalTunnelPolicy(t *testing.T) {
 	}
 }
 
+func TestSupportSessionConnectDescribesLayeredWindowsAgentBoundary(t *testing.T) {
+	tool := findTool("rdev.sessions.connect")
+	if tool == nil {
+		t.Fatal("missing rdev.sessions.connect from live MCP contract")
+	}
+	for _, marker := range []string{
+		"rdev-bootstrap",
+		"signed PowerShell",
+		"process-scoped ExecutionPolicy Bypass",
+		"native CMD",
+		"one shared attempt",
+		"CLI-only",
+	} {
+		if !strings.Contains(tool.Description, marker) {
+			t.Fatalf("sessions.connect description must contain %q: %s", marker, tool.Description)
+		}
+	}
+	if !strings.Contains(tool.Safety, "at most one core") {
+		t.Fatalf("sessions.connect safety must describe the single-core boundary: %s", tool.Safety)
+	}
+}
+
 func TestToolsDoNotExposeOldExperimentalHostJobContracts(t *testing.T) {
 	forbidden := []string{
 		"rdev.hosts.list",

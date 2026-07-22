@@ -43,11 +43,8 @@ func TestBuildLiveE2EPlanHostIDOnlyUsesSessionPlaceholderForSmoke(t *testing.T) 
 		t.Fatalf("host-id-only plan should require a Control Plane session for smoke-test: %#v", command)
 	}
 	mcpArgs := liveE2EMap(t, smoke["mcp_arguments"])
-	if mcpArgs["session_id"] != "<session-id>" {
-		t.Fatalf("expected session_id MCP placeholder, got %#v", mcpArgs)
-	}
-	if _, ok := mcpArgs["host_id"]; ok {
-		t.Fatalf("smoke-test MCP arguments should omit unsupported host_id, got %#v", mcpArgs)
+	if smoke["proof_interface"] != "cli-only" || smoke["mcp_tool"] != "" || len(mcpArgs) != 0 {
+		t.Fatalf("smoke-test proof must remain CLI-only, got %#v", smoke)
 	}
 }
 
@@ -71,11 +68,8 @@ func TestBuildLiveE2EPlanTicketCodeOnlyOmitsHostIDPlaceholder(t *testing.T) {
 		t.Fatalf("ticket-code-only plan should require a Control Plane session for smoke-test: %#v", command)
 	}
 	mcpArgs := liveE2EMap(t, smoke["mcp_arguments"])
-	if mcpArgs["ticket_code"] != "TICKET-1" {
-		t.Fatalf("expected ticket_code MCP argument, got %#v", mcpArgs)
-	}
-	if mcpArgs["session_id"] != "<session-id>" {
-		t.Fatalf("expected session_id MCP placeholder, got %#v", mcpArgs)
+	if smoke["proof_interface"] != "cli-only" || smoke["mcp_tool"] != "" || len(mcpArgs) != 0 {
+		t.Fatalf("smoke-test proof must remain CLI-only, got %#v", smoke)
 	}
 }
 

@@ -366,7 +366,7 @@ func handoffContract() []string {
 		"Connection Entry is the universal target-side handoff for every new remote host.",
 		"The target side receives only a link, visible script, or signed package.",
 		"Ticket, gateway, manifest root, transport, release, and checksum values stay in Agent/package metadata.",
-		"Agents must use rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions.",
+		"Connection Entry materialization is CLI-only; Agents must run rdev connection-entry plan before giving target-side instructions.",
 		"Owned recurring machines use managed planning; third-party or one-off machines use attended-temporary planning by default.",
 	}
 }

@@ -57,18 +57,6 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 		"--remote-control",
 		"--timeout-seconds", timeoutText,
 	)
-	smokeMCPArguments := map[string]any{
-		"gateway_url":     gatewayURL,
-		"session_id":      sessionIDInput,
-		"remote_control":  true,
-		"timeout_seconds": timeoutSeconds,
-	}
-	if targetEndpointIDInput != "" {
-		smokeMCPArguments["target_endpoint_id"] = targetEndpointIDInput
-	}
-	if ticketCodeInput != "" {
-		smokeMCPArguments["ticket_code"] = ticketCodeInput
-	}
 	uploadCommand := []string{
 		rdevCommand, "files", "upload",
 		"--gateway-url", gatewayURL,
@@ -111,9 +99,10 @@ func BuildLiveE2EPlan(opts LiveE2EPlanOptions) map[string]any {
 					"active Control Plane session_id",
 					"optional target_endpoint_id when the session has multiple Windows targets",
 				},
-				"proof_command": smokeCommand,
-				"mcp_tool":      "rdev.support_session.smoke_test",
-				"mcp_arguments": smokeMCPArguments,
+				"proof_interface": "cli-only",
+				"proof_command":   smokeCommand,
+				"mcp_tool":        "",
+				"mcp_arguments":   map[string]any{},
 				"required_evidence": []string{
 					"ok=true",
 					"Windows target selected from session_id and optional target_endpoint_id",

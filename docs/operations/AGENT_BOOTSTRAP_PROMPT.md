@@ -118,7 +118,8 @@ Steps:
     forward `target_handoff_envelope.full_text` verbatim when present; fall
     back to `user_handoff.message` plus `user_handoff.copy_paste` only for
     older payloads. If it returns `ready_to_send_to_human=false`,
-    run the returned `cli_start_now_command` visible foreground `rdev support-session connect --start` command,
+    run the returned `cli_next_command` or `cli_start_now_command` visible
+    foreground support-session CLI command,
     read `handoff_text_file.path` when present and forward that plain text
     verbatim to the target-side human. If that file is not present, read
     `ready_file.path` when terminal stdout is hard to parse, then send only the
@@ -187,8 +188,15 @@ Steps:
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
     PowerShell, shell, relay, or interrupt-polling fallback. Ordinary attended
-    `/join/.../bootstrap.*` handoffs verify and invoke `rdev-bootstrap
-    layered-run`. The single verified core uses `--transport auto` and may
+    `/join/.../bootstrap.*` handoffs verify and invoke
+    `rdev-bootstrap layered-run`. On Windows, forward the signed generated broker unchanged: it
+    tries the current PowerShell policy, one process-scoped
+    `ExecutionPolicy Bypass` retry, and then native CMD. The branches share one
+    attempt and may start at most one core and one connection. Before
+    registration it downloads no optional modules; after registration,
+    `rdev-bootstrap` obtains the signed core and only the optional modules that
+    are automatically required or requested. The single verified core uses
+    `--transport auto` and may
     switch among signed routes without another registration. Read
     `agent_connection_runbook` first; it is the machine-readable order of
     operations for connecting, waiting, reporting, and recovering without
@@ -209,9 +217,9 @@ Steps:
     `connection_continuity_policy`: if `stable_after_lan_change=false`, treat
     LAN as an opportunistic first path and prefer a configured hosted, relay,
     mesh, VPN, or SSH gateway before promising durable connectivity. Read
-    `connection_supervision` after sending the handoff: use its watch call or
-    command, report `connected_next_steps.user_report` immediately when
-    connected, and use its standard upgrade/recovery paths instead of writing
+    `connection_supervision` after sending the handoff: use its
+    `cli_watch_command`, report `connected_next_steps.user_report` immediately
+    when connected, and use its standard upgrade/recovery paths instead of writing
     network scripts when a LAN-only path times out. Treat
     `connection_supervision.automatic_downgrade_boundaries` as the source of
     truth for post-registration signed gateway candidate failover. Prefer

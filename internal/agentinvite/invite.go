@@ -690,8 +690,8 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"do not expose raw ticket codes, manifest roots, gateway URLs, or transport flags to the human when a connection_entry can carry them",
 		},
 		RequiredAgentFlow: []string{
-			"create an invite first with rdev.invites.create or rdev invite create",
-			"materialize the invite with rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions",
+			"create an invite first with CLI-only rdev invite create",
+			"materialize the invite with CLI-only rdev connection-entry plan before giving target-side instructions",
 			"give the target side only the selected connection_entry.entry_url, visible launcher script, or signed package",
 			"keep ticket, gateway, manifest root, transport, release, and checksum values inside Agent/tool metadata",
 			"choose managed for owned recurring machines and attended-temporary for third-party or one-off machines",

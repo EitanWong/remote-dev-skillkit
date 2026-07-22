@@ -10,12 +10,12 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 MCP exposes only `rdev.sessions.*`: `create`, `connect`, `status`, `events`,
 `task`, `interrupt`, `artifacts`, and `close`. Legacy dotted MCP names for
 support sessions, invites, audits, policy, acceptance, adapters, or enrollment
-are retired. Use the documented `rdev ...` CLI command for those workflows;
-never ask an MCP client to call a retired name.
+are retired; use the documented `rdev ...` CLI command for those workflows.
+Execute `rdev.sessions.connect`'s returned `cli_next_command` exactly. An empty
+`mcp_next_tool` is intentional because support-session ticket
+creation and ticket-status watching remain CLI-only.
 
 Use this skill whenever a user says "connect to my machine", "remote debug", "help with this computer", or similar.
-
----
 
 ## CRITICAL CONNECTIVITY RULES (read before every session)
 
@@ -85,6 +85,12 @@ Do not ask them to:
 - Enter checksums
 
 Everything is already embedded in the handoff. If it is not, fix the session setup rather than asking the user.
+
+For Windows, forward the signed generated Windows broker unchanged. It tries
+the current PowerShell policy, one process-scoped `ExecutionPolicy Bypass` retry,
+and then native CMD. Every branch uses shared attempt state and may start
+at most one core and one connection through `rdev-bootstrap`; do not reproduce or
+launch the branches separately.
 
 Do not send `join_url` alone. If `ready_to_send_to_human=false` or
 `asset_report.all_ready=false`, stop and fix the session setup before sending
@@ -273,8 +279,6 @@ is locked, logged out, asleep, or blocked by OS/enterprise policy, report
 `desktop_session_unavailable` and use the standard recovery path. Do not bypass
 lock screens, privacy prompts, MDM, UAC, sudo, or enterprise controls.
 
----
-
 ## Workflow (5 steps, no branching for the user)
 
 ### Step 1 — Locate rdev (auto, no user input)
@@ -350,7 +354,7 @@ If multiple stale hosts appear for the same ticket, run:
 rdev support-session recover --gateway-url <ACTIVE_GATEWAY_URL> --ticket-code <TICKET>
 ```
 
-Do not ask the user to delete cached helper binaries, paste manifest roots, or
+Do not ask the user to delete cached bootstrap/core assets, paste manifest roots, or
 switch transports manually unless the recover command is unavailable.
 
 ### Step 5 — Run capability tests then report
@@ -407,8 +411,6 @@ rdev support-session report --gateway-url <ACTIVE_GATEWAY_URL> --ticket-code <TI
 Then produce the Audit Report and keep the connection alive. Do not revoke or
 disconnect after the report unless the operator explicitly asks for cleanup.
 
----
-
 ## Connection Auto-Recovery
 
 If the target does not appear within 2 minutes:
@@ -429,8 +431,6 @@ If the target does not appear within 2 minutes:
 6. **Do not write custom PowerShell/bash polling scripts.**
 7. Use `rdev.sessions.status` or `connection_recovery` returned fields.
 
----
-
 ## Audit Report Template
 
 After the session, produce a compact capability audit with: session mode,
@@ -439,8 +439,6 @@ capabilities tested, evidence/artifact IDs, what the Agent can and cannot do,
 gaps, cleanup state, residual risk, and whether the connection remains alive.
 Include file-transfer evidence when used, and screenshot/record/window/input
 audit plus interrupt/event IDs when desktop control was used or attempted.
-
----
 
 ## Default Capabilities for Temporary Sessions
 
@@ -459,8 +457,6 @@ Never add `service.manage`, `credential.change`, `gui.control`,
 `clipboard.read`, `clipboard.write`, or `unattended.access` without explicit
 authorization.
 
----
-
 ## Forbidden
 
 - Sending LAN-only IPs to users who might be remote
@@ -471,18 +467,17 @@ authorization.
   session-task file/desktop surfaces
 - Manual ticket/gateway/checksum assembly
 - Hidden installation or persistence
-- ExecutionPolicy Bypass
+- Agent-authored ExecutionPolicy Bypass; the signed generated Windows broker
+  owns its bounded process-scoped retry
 - UAC or sudo bypass without explicit authorization
 - Bypassing lock-screen, screen-unlock, MDM, or enterprise security policy
 - Storing secrets, tokens, private keys, or raw transcripts in memory
 - Running `rdev support-session connect --start` in a background terminal (`&`, `nohup`, etc.)
 - Calling gateway-backed `rdev.*` MCP tools without passing `"gateway_url": "<active-gateway-url>"`
 - Assuming retired plural host/task CLI groups are valid; use `rdev host` / `rdev task` or MCP tools
-- Manually deleting or replacing target helper binaries instead of using
+- Manually deleting or replacing target bootstrap/core assets instead of using
   `support-session connect --start`, `prepare --build-assets`, or
   `support-session recover`
-
----
 
 ## Stage Gates — Pass ALL before advancing
 

@@ -81,6 +81,31 @@ func TestAuditSkillsRejectsInvalidSkillTrees(t *testing.T) {
 	}
 }
 
+func TestWindowsLayeredAgentSkillsDescribeGeneratedBrokerBoundary(t *testing.T) {
+	repoRoot := filepath.Dir(mustGetwd(t))
+	for _, name := range []string{"remote-vibe-coding", "safe-remote-support"} {
+		path := filepath.Join(repoRoot, "skills", name, "SKILL.md")
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(content)
+		for _, marker := range []string{
+			"signed generated Windows broker",
+			"current PowerShell policy",
+			"process-scoped `ExecutionPolicy Bypass` retry",
+			"native CMD",
+			"shared attempt state",
+			"at most one core",
+			"`rdev-bootstrap`",
+		} {
+			if !strings.Contains(text, marker) {
+				t.Fatalf("%s must contain %q", name, marker)
+			}
+		}
+	}
+}
+
 func runAuditSkills(t *testing.T, skillsRoot string) (string, error) {
 	t.Helper()
 	repoRoot := filepath.Dir(mustGetwd(t))

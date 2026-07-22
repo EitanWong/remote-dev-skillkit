@@ -26,6 +26,15 @@ The MCP surface contains only these session-control tools:
 `mcp/tools.json` are generated from the same Go contract. Clients must use
 `tools/list` rather than guessing additional tool names.
 
+`rdev.sessions.connect` may return an exact `cli_next_command` while leaving
+`mcp_next_tool` empty. Support-session ticket creation and ticket-status
+watching, plus Connection Entry materialization, remain CLI-only workflows.
+Execute the returned argv rather than deriving an unregistered MCP tool name.
+On Windows, forward the signed generated broker unchanged: it tries the current
+PowerShell policy, one process-scoped `ExecutionPolicy Bypass` retry, and then
+native CMD. The branches share one attempt and may start at most one core and
+one connection, both through `rdev-bootstrap`.
+
 The session tools return bounded `structuredContent` together with a textual
 `content` item. Session status fields include `user_summary`,
 `agent_next_action`, `recoverable`, `retry_after_ms`, `last_seq`, and

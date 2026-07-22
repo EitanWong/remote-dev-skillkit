@@ -45,7 +45,7 @@ func BuildPlan(opts Options) Plan {
 		SampleBytes:            bounded(opts.SampleBytes, 128*1024, 16*1024, 256*1024),
 		TimeoutSeconds:         bounded(opts.TimeoutSeconds, 20, 5, 30),
 		CandidateSources: []string{
-			"signed helper asset mirrors from join manifest/package catalog",
+			"signed runtime asset mirrors from join manifest/package catalog",
 			"operator-authorized CDN candidate list",
 			"future Cloudflare IP range source after explicit enablement",
 		},

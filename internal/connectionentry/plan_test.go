@@ -57,7 +57,8 @@ func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	}
 	if plan.ConnectionEntryName != "Connection Entry" ||
 		plan.EntryPackagePlanSchema != EntryPackagePlanSchemaVersion ||
-		!slices.Contains(plan.HandoffContract, "Agents must use rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions.") {
+		!slices.Contains(plan.HandoffContract, "Connection Entry materialization is CLI-only; Agents must run rdev connection-entry plan before giving target-side instructions.") ||
+		strings.Contains(strings.Join(plan.HandoffContract, "\n"), "rdev.connection_entry.") {
 		t.Fatalf("expected universal connection entry contract, got %#v", plan)
 	}
 	if plan.SessionMode != string(model.HostModeAttendedTemporary) || plan.EntryURL == "" {

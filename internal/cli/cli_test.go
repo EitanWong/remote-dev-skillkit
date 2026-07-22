@@ -1281,6 +1281,7 @@ func TestBootstrapAgentPlanGuidesRdevRecoveryAndRemoteDefaults(t *testing.T) {
 	agentSteps := strings.Join(payload.RemoteDefaults.AgentShouldDo, "\n")
 	if !strings.Contains(agentSteps, "rdev.sessions.connect") ||
 		!strings.Contains(agentSteps, "target_handoff_envelope.full_text") ||
+		strings.Contains(agentSteps, "rdev.support_session.") ||
 		strings.Contains(agentSteps, "create an invite") ||
 		strings.Contains(agentSteps, "materialize a Connection Entry") {
 		t.Fatalf("remote defaults must guide fresh Agents to support-session connect before low-level invite/package flows: %#v", payload.RemoteDefaults.AgentShouldDo)
@@ -1339,7 +1340,7 @@ func TestAcceptanceFreshAgentSupportSession(t *testing.T) {
 	for _, expected := range []string{
 		"connect_without_gateway_returns_start_now_command",
 		"handoff_without_gateway_prefers_connect_start",
-		"handoff_with_gateway_selects_create_tool",
+		"handoff_with_gateway_selects_cli_create",
 		"auto_activation_connects_first_attended_host",
 		"connected_status_has_user_report",
 		"waiting_recovery_forbids_custom_scripts",
@@ -2294,6 +2295,7 @@ func TestSupportSessionHandoffSelectsCreateWhenGatewayExists(t *testing.T) {
 		SelectedPath     string         `json:"selected_path"`
 		MCPNextTool      string         `json:"mcp_next_tool"`
 		MCPNextArguments map[string]any `json:"mcp_next_arguments"`
+		CLICreateCommand []string       `json:"cli_create_command"`
 		AgentNextStep    string         `json:"agent_next_step"`
 		Forbidden        []string       `json:"forbidden"`
 	}
@@ -2302,9 +2304,11 @@ func TestSupportSessionHandoffSelectsCreateWhenGatewayExists(t *testing.T) {
 	}
 	if payload.SchemaVersion != "rdev.support-session-handoff.v1" ||
 		payload.SelectedPath != "create-with-reachable-gateway" ||
-		payload.MCPNextTool != "rdev.support_session.create" ||
-		payload.MCPNextArguments["gateway_url"] != "http://192.0.2.10:8787" ||
-		payload.MCPNextArguments["target"] != "windows" ||
+		payload.MCPNextTool != "" ||
+		len(payload.MCPNextArguments) != 0 ||
+		!strings.Contains(strings.Join(payload.CLICreateCommand, "\x00"), "support-session\x00create") ||
+		!slices.Contains(payload.CLICreateCommand, "http://192.0.2.10:8787") ||
+		!slices.Contains(payload.CLICreateCommand, "windows") ||
 		!strings.Contains(payload.AgentNextStep, "target_handoff_envelope.full_text") ||
 		!slices.Contains(payload.Forbidden, "Agent-authored PowerShell or shell bootstrap/recovery scripts") {
 		t.Fatalf("expected create handoff route, got %#v", payload)
@@ -2392,15 +2396,17 @@ func TestSupportSessionHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing
 		MCPNextTool      string         `json:"mcp_next_tool"`
 		GatewayURL       string         `json:"gateway_url"`
 		MCPNextArguments map[string]any `json:"mcp_next_arguments"`
+		CLICreateCommand []string       `json:"cli_create_command"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid support session handoff JSON: %v\n%s", err, stdout.String())
 	}
 	if payload.SchemaVersion != "rdev.support-session-handoff.v1" ||
 		payload.SelectedPath != "create-with-reachable-gateway" ||
-		payload.MCPNextTool != "rdev.support_session.create" ||
+		payload.MCPNextTool != "" ||
 		payload.GatewayURL != "https://hosted.example.test/rdev" ||
-		payload.MCPNextArguments["gateway_url"] != "https://hosted.example.test/rdev" {
+		len(payload.MCPNextArguments) != 0 ||
+		!slices.Contains(payload.CLICreateCommand, "https://hosted.example.test/rdev") {
 		t.Fatalf("expected configured gateway handoff route, got %#v", payload)
 	}
 }
@@ -2599,10 +2605,7 @@ func TestSupportSessionLiveE2EDefaultsToDryRunPlan(t *testing.T) {
 		"--ticket-code", "ABCD-1234",
 		"--remote-control",
 		"--timeout-seconds", "180",
-	}) || smoke.mcpTool != "rdev.support_session.smoke_test" ||
-		smoke.mcpArguments["session_id"] != "ses_1" ||
-		smoke.mcpArguments["target_endpoint_id"] != "ep_1" ||
-		smoke.mcpArguments["remote_control"] != true {
+	}) || smoke.mcpTool != "" || len(smoke.mcpArguments) != 0 {
 		t.Fatalf("unexpected smoke gate: %#v", smoke)
 	}
 	transfer := gates["windows_file_transfer_byte_compare"]
@@ -2906,7 +2909,7 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	if payload.TargetBootstrapRequirements.SchemaVersion != "rdev.support-session-target-bootstrap-requirements.v1" ||
 		!slices.Contains(payload.TargetBootstrapRequirements.RequiredAssets, "rdev-bootstrap-windows-amd64.exe") ||
 		!slices.Contains(payload.TargetBootstrapRequirements.StandardFix, "rdev support-session connect --start") ||
-		!slices.Contains(payload.TargetBootstrapRequirements.Forbidden, "using ExecutionPolicy Bypass") {
+		!strings.Contains(strings.Join(payload.TargetBootstrapRequirements.Forbidden, "\n"), "signed generated Windows broker") {
 		t.Fatalf("expected Windows bootstrap requirements and standard recovery, got %#v", payload.TargetBootstrapRequirements)
 	}
 	if payload.TargetBootstrapReadiness.SchemaVersion != "rdev.support-session-target-bootstrap-readiness.v1" ||
@@ -5234,7 +5237,9 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 		len(payload.ConnectionEntryPlan.ImplementationGaps) == 0 {
 		t.Fatalf("connection entry plan should define mode, package, network, privilege, and gap details: %#v", payload.ConnectionEntryPlan)
 	}
-	if !slices.Contains(payload.ConnectionEntryPlan.RequiredAgentFlow, "materialize the invite with rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions") {
+	if !slices.Contains(payload.ConnectionEntryPlan.RequiredAgentFlow, "materialize the invite with CLI-only rdev connection-entry plan before giving target-side instructions") ||
+		strings.Contains(strings.Join(payload.ConnectionEntryPlan.RequiredAgentFlow, "\n"), "rdev.connection_entry.") ||
+		strings.Contains(strings.Join(payload.ConnectionEntryPlan.RequiredAgentFlow, "\n"), "rdev.invites.") {
 		t.Fatalf("connection entry plan should require invite materialization before target handoff: %#v", payload.ConnectionEntryPlan.RequiredAgentFlow)
 	}
 	if payload.HostContextPlan.SchemaVersion != "rdev.host-context-plan.v1" || payload.HostContextPlan.StorageLocation != "remote-host-first" || payload.HostContextPlan.ServerContextBudget != "index-and-on-demand-slices" {
@@ -5497,7 +5502,8 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 		!strings.Contains(payload.Plan.ModeDecision, "attended-temporary") ||
 		!slices.Contains(payload.Plan.HumanSurface, "connection_entry.entry_url") ||
 		!slices.Contains(payload.Plan.AgentMetadata, "gateway URL") ||
-		!slices.Contains(payload.Plan.HandoffContract, "Agents must use rdev.connection_entry.plan or rdev connection-entry plan before giving target-side instructions.") {
+		!slices.Contains(payload.Plan.HandoffContract, "Connection Entry materialization is CLI-only; Agents must run rdev connection-entry plan before giving target-side instructions.") ||
+		strings.Contains(strings.Join(payload.Plan.HandoffContract, "\n"), "rdev.connection_entry.") {
 		t.Fatalf("expected universal mode decision and split human/agent surfaces, got %#v", payload.Plan)
 	}
 	if strings.Contains(stdout.String(), "customer_bootstrap") ||

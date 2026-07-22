@@ -381,14 +381,16 @@ func TestBuildHandoffRoutesFreshAgentToStandardEntry(t *testing.T) {
 		RdevCommand:  "rdev",
 	})
 
-	args := handoff["mcp_next_arguments"].(map[string]any)
+	createCommand := strings.Join(handoff["cli_create_command"].([]string), "\x00")
 	forbidden := strings.Join(anyStrings(handoff["forbidden"].([]string)), "\n")
 	if handoff["schema_version"] != HandoffSchemaVersion ||
 		handoff["selected_path"] != "create-with-reachable-gateway" ||
-		handoff["mcp_next_tool"] != "rdev.support_session.create" ||
-		args["gateway_url"] != "https://gateway.example.test" ||
-		args["target"] != "windows" ||
-		!strings.Contains(handoff["agent_next_step"].(string), "rdev.support_session.create") ||
+		handoff["next_interface"] != "cli-only" ||
+		handoff["mcp_next_tool"] != "" ||
+		!strings.Contains(createCommand, "support-session\x00create") ||
+		!strings.Contains(createCommand, "--gateway-url\x00https://gateway.example.test") ||
+		!strings.Contains(createCommand, "--target\x00windows") ||
+		!strings.Contains(handoff["agent_next_step"].(string), "cli_create_command") ||
 		!strings.Contains(forbidden, "Agent-authored PowerShell or shell bootstrap/recovery scripts") {
 		t.Fatalf("expected create handoff route, got %#v", handoff)
 	}
@@ -438,12 +440,12 @@ func TestBuildHandoffUsesConfiguredGatewayWithoutExplicitURL(t *testing.T) {
 		RdevCommand:  "rdev",
 	})
 
-	args := handoff["mcp_next_arguments"].(map[string]any)
+	createCommand := strings.Join(handoff["cli_create_command"].([]string), "\x00")
 	if handoff["schema_version"] != HandoffSchemaVersion ||
 		handoff["selected_path"] != "create-with-reachable-gateway" ||
-		handoff["mcp_next_tool"] != "rdev.support_session.create" ||
+		handoff["mcp_next_tool"] != "" ||
 		handoff["gateway_url"] != "https://hosted.example.test/rdev" ||
-		args["gateway_url"] != "https://hosted.example.test/rdev" ||
+		!strings.Contains(createCommand, "--gateway-url\x00https://hosted.example.test/rdev") ||
 		!slices.Contains(handoff["cli_start_now_command"].([]string), "https://hosted.example.test/rdev") {
 		t.Fatalf("expected configured gateway create route, got %#v", handoff)
 	}
@@ -792,13 +794,14 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 	supervision := created["connection_supervision"].(map[string]any)
 	watchCall := supervision["mcp_watch_call"].(map[string]any)
-	watchArgs := watchCall["arguments"].(map[string]any)
+	watchCommand := strings.Join(supervision["cli_watch_command"].([]string), "\x00")
 	if supervision["schema_version"] != ConnectionSupervisionSchemaVersion ||
 		supervision["stable_after_lan_change"] != false ||
 		supervision["upgrade_recommended"] != true ||
-		watchCall["tool"] != "rdev.support_session.status" ||
-		watchArgs["ticket_code"] != "ABCD-1234" ||
-		watchArgs["wait"] != true ||
+		watchCall["available"] != false ||
+		watchCall["tool"] != "" ||
+		!strings.Contains(watchCommand, "ABCD-1234") ||
+		!strings.Contains(watchCommand, "--wait") ||
 		!strings.Contains(supervision["connected_report_rule"].(string), "connected_next_steps.user_report") {
 		t.Fatalf("expected Agent-side connection supervision contract, got %#v", supervision)
 	}
@@ -879,7 +882,8 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	runner := created["connection_entry_runner_recommendation"].(map[string]any)
 	if runner["schema_version"] != ConnectionEntryRunnerRecommendationSchemaVersion ||
 		runner["ok"] != true ||
-		runner["standard_tool"] != "rdev.connection_entry.plan" ||
+		runner["standard_interface"] != "cli-only" ||
+		runner["standard_tool"] != "" ||
 		runner["target_os"] != "windows" ||
 		runner["recommended_now"] != true ||
 		!strings.Contains(strings.Join(runner["agent_sequence"].([]string), "\n"), "dry-run the generated runner") ||
@@ -896,12 +900,8 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		t.Fatalf("expected runner recommendation to carry complete invite metadata, got %#v", invite)
 	}
 	mcpPlanCall := runner["mcp_plan_call"].(map[string]any)
-	mcpPlanArgs := mcpPlanCall["arguments"].(map[string]any)
-	if mcpPlanCall["tool"] != "rdev.connection_entry.plan" ||
-		mcpPlanArgs["invite_json"] == "" ||
-		mcpPlanArgs["target_os"] != "windows" ||
-		mcpPlanArgs["session_mode"] != string(model.HostModeAttendedTemporary) {
-		t.Fatalf("expected ready MCP runner materialization call, got %#v", mcpPlanCall)
+	if mcpPlanCall["available"] != false || mcpPlanCall["tool"] != "" {
+		t.Fatalf("expected Connection Entry materialization to remain CLI-only, got %#v", mcpPlanCall)
 	}
 	dryRun := strings.Join(runner["cli_dry_run_argv_template"].([]string), "\x00")
 	if !strings.Contains(dryRun, "connection-entry\x00run") || !strings.Contains(dryRun, "--dry-run") {
@@ -919,7 +919,8 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	failurePrevention := runbook["fresh_agent_failure_prevention"].(map[string]any)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		runbook["phase"] != "created" ||
-		watchRunbook["mcp_tool"] != "rdev.support_session.status" ||
+		watchRunbook["interface"] != "cli-only" ||
+		watchRunbook["mcp_tool"] != "" ||
 		standardEntry["mcp_tool"] != "rdev.sessions.connect" ||
 		!strings.Contains(strings.Join(runbook["sequence"].([]string), "\n"), "connected_next_steps.user_report") ||
 		!strings.Contains(strings.Join(runbook["forbidden"].([]string), "\n"), "Agent-authored PowerShell") ||
@@ -932,9 +933,9 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		!strings.Contains(strings.Join(failurePrevention["forbidden_agent_generated_workarounds"].([]string), "\n"), "ExecutionPolicy Bypass") {
 		t.Fatalf("expected fresh-Agent failure-prevention contract, got %#v", failurePrevention)
 	}
-	followUp := created["mcp_follow_up"].([]map[string]any)
-	if len(followUp) == 0 || followUp[0]["arguments"].(map[string]any)["wait"] != true {
-		t.Fatalf("expected MCP follow-up to wait for the host, got %#v", followUp)
+	followUp := created["cli_follow_up"].([]string)
+	if !slices.Contains(followUp, "--wait") || !slices.Contains(followUp, "ABCD-1234") {
+		t.Fatalf("expected CLI-only follow-up to wait for the host, got %#v", followUp)
 	}
 	watch := strings.Join(created["watch_connection_status"].([]string), "\x00")
 	if !strings.Contains(watch, "ABCD-1234") ||
@@ -976,11 +977,13 @@ func TestConnectionContinuityPolicyReportsConfiguredStableFallback(t *testing.T)
 	supervision := connectionSupervision("ABCD-1234", "en", "rdev", "https://relay.example.test/rdev", map[string]any{
 		"candidate_order": []map[string]any{{"join_url": "https://relay.example.test/join/ABCD-1234", "kind": "relay"}},
 	}, policy)
-	watchArgs := supervision["mcp_watch_call"].(map[string]any)["arguments"].(map[string]any)
+	watchCall := supervision["mcp_watch_call"].(map[string]any)
+	watchCommand := strings.Join(supervision["cli_watch_command"].([]string), "\x00")
 	if supervision["schema_version"] != ConnectionSupervisionSchemaVersion ||
 		supervision["stable_after_lan_change"] != true ||
 		supervision["upgrade_recommended"] != false ||
-		watchArgs["gateway_url"] != "https://relay.example.test/rdev" ||
+		watchCall["available"] != false || watchCall["tool"] != "" ||
+		!strings.Contains(watchCommand, "--gateway-url\x00https://relay.example.test/rdev") ||
 		!strings.Contains(supervision["upgrade_reason"].(string), "already configured") {
 		t.Fatalf("expected supervision to recognize stable fallback, got %#v", supervision)
 	}
@@ -1456,12 +1459,12 @@ func TestBuildStatusReportsConnectedFeedback(t *testing.T) {
 	}
 	runbook := status["agent_connection_runbook"].(map[string]any)
 	watch := runbook["watch"].(map[string]any)
-	watchArgs := watch["mcp_arguments"].(map[string]any)
 	watchCommand := watch["cli_command"].([]string)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		runbook["status"] != "connected" ||
 		runbook["gateway_url"] != "https://gateway.example.test" ||
-		watchArgs["gateway_url"] != "https://gateway.example.test" ||
+		watch["interface"] != "cli-only" ||
+		watch["mcp_tool"] != "" ||
 		!slices.Contains(watchCommand, "--gateway-url") ||
 		!slices.Contains(watchCommand, "https://gateway.example.test") ||
 		!strings.Contains(strings.Join(runbook["on_connected"].([]string), "\n"), "capabilities") {
@@ -1613,22 +1616,28 @@ func TestBuildStatusIncludesStandardConnectionRecovery(t *testing.T) {
 
 	recovery := status["connection_recovery"].(map[string]any)
 	actions := strings.Join(anyStrings(recovery["agent_next_actions"].([]string)), "\n")
+	tools := strings.Join(anyStrings(recovery["standard_tools"].([]string)), "\n")
 	forbidden := strings.Join(anyStrings(recovery["forbidden"].([]string)), "\n")
 	if recovery["schema_version"] != ConnectionRecoverySchemaVersion ||
 		recovery["status"] != "waiting" ||
-		!strings.Contains(actions, "rdev.support_session.prepare") ||
+		!strings.Contains(actions, "rdev support-session prepare --build-assets") ||
+		strings.Contains(actions, "rdev.support_session.") ||
+		strings.Contains(tools, "rdev.support_session.") ||
+		strings.Contains(tools, "rdev.connection_entry.") ||
+		!strings.Contains(tools, "rdev connection-entry plan") ||
 		!strings.Contains(actions, "instead of writing ad hoc network scripts") ||
-		!strings.Contains(forbidden, "Agent-authored PowerShell or shell relay scripts") {
+		!strings.Contains(forbidden, "Agent-authored PowerShell or shell relay scripts") ||
+		!strings.Contains(forbidden, "signed generated Windows broker") {
 		t.Fatalf("expected standard connection recovery contract, got %#v", recovery)
 	}
 	runbook := recovery["agent_connection_runbook"].(map[string]any)
 	watch := runbook["watch"].(map[string]any)
-	watchArgs := watch["mcp_arguments"].(map[string]any)
 	watchCommand := watch["cli_command"].([]string)
 	if runbook["schema_version"] != AgentConnectionRunbookSchemaVersion ||
 		runbook["phase"] != "recovery" ||
 		runbook["gateway_url"] != "https://gateway.example.test" ||
-		watchArgs["gateway_url"] != "https://gateway.example.test" ||
+		watch["interface"] != "cli-only" ||
+		watch["mcp_tool"] != "" ||
 		!slices.Contains(watchCommand, "--gateway-url") ||
 		!slices.Contains(watchCommand, "https://gateway.example.test") ||
 		!strings.Contains(strings.Join(runbook["on_timeout_or_failure"].([]string), "\n"), "gateway_candidate_preflight") {
