@@ -186,7 +186,7 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 		files = append(files, entry)
 	}
 
-	files = append(files, copyOptionalEvidence(outDir, "evidence/runner-result.json", "runner-result", opts.RunnerResultPath, redactor, add)...)
+	files = append(files, copyRunnerResultEvidence(outDir, opts.RunnerResultPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/helper-transcript.txt", "helper-transcript", opts.HelperTranscriptPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/gateway-status.json", "gateway-status", opts.GatewayStatusPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/host-status.json", "host-status", opts.HostStatusPath, redactor, add)...)
@@ -234,6 +234,113 @@ func PackageRelayAdapterEvidence(opts RelayAdapterPackageOptions) (RelayAdapterA
 		return RelayAdapterAcceptancePackage{}, err
 	}
 	return pkg, nil
+}
+
+func copyRunnerResultEvidence(root, source string, redactor *shelladapter.ArtifactRedactor, add func(string, bool, string)) []AcceptancePackageFile {
+	if strings.TrimSpace(source) == "" {
+		add("runner-result_copied", false, "missing")
+		return nil
+	}
+	content, err := os.ReadFile(source)
+	if err == nil && acceptanceEvidencePath("evidence/runner-result.json") && evidenceContentIsPlaceholder(content) {
+		err = fmt.Errorf("evidence placeholder must be replaced before packaging: %s", source)
+	}
+	if err == nil && redactor != nil {
+		content = []byte(redactor.Redact(string(content)))
+	}
+	if err == nil {
+		content, err = sanitizeRunnerResultEvidence(content)
+	}
+	if err != nil {
+		add("runner-result_copied", false, packageEvidenceErrorDetail(err))
+		return nil
+	}
+	entry, err := writePackageContent(root, "evidence/runner-result.json", "runner-result", content, source)
+	if err != nil {
+		add("runner-result_copied", false, packageEvidenceErrorDetail(err))
+		return nil
+	}
+	add("runner-result_copied", true, entry.Path)
+	return []AcceptancePackageFile{entry}
+}
+
+func sanitizeRunnerResultEvidence(content []byte) ([]byte, error) {
+	var value any
+	if err := json.Unmarshal(content, &value); err != nil {
+		return nil, fmt.Errorf("decode runner result evidence: %w", err)
+	}
+	value = sanitizeRunnerResultValue(value, "")
+	clean, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encode runner result evidence: %w", err)
+	}
+	return append(clean, '\n'), nil
+}
+
+func sanitizeRunnerResultValue(value any, key string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		clean := make(map[string]any, len(typed))
+		for childKey, child := range typed {
+			if runnerResultSensitiveKey(childKey) {
+				clean[childKey] = runnerResultRedaction(childKey)
+				continue
+			}
+			clean[childKey] = sanitizeRunnerResultValue(child, childKey)
+		}
+		return clean
+	case []any:
+		clean := make([]any, len(typed))
+		for index, child := range typed {
+			clean[index] = sanitizeRunnerResultValue(child, key)
+		}
+		return clean
+	case string:
+		return sanitizeRunnerResultString(typed, key)
+	default:
+		return value
+	}
+}
+
+func runnerResultSensitiveKey(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	if lower == "selected_path" || lower == "path_id" {
+		return false
+	}
+	return lower == "manifest_path" || lower == "workspace_root" || lower == "path" ||
+		strings.HasSuffix(lower, "_path") || strings.HasSuffix(lower, "_url")
+}
+
+func runnerResultRedaction(key string) string {
+	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(key)), "_url") {
+		return "[REDACTED:gateway_url]"
+	}
+	return "[REDACTED:private_path]"
+}
+
+func sanitizeRunnerResultString(value, key string) string {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(key)), "_url") ||
+		strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return "[REDACTED:gateway_url]"
+	}
+	if runnerResultLooksLikePath(trimmed) || strings.Contains(lower, "/users/") ||
+		strings.Contains(lower, "/home/") || strings.Contains(lower, `\users\`) {
+		return "[REDACTED:private_path]"
+	}
+	if strings.Contains(lower, "://") {
+		return "[REDACTED:gateway_url]"
+	}
+	return value
+}
+
+func runnerResultLooksLikePath(value string) bool {
+	if value == "" || filepath.IsAbs(value) {
+		return value != ""
+	}
+	return len(value) >= 3 && ((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) &&
+		value[1] == ':' && (value[2] == '\\' || value[2] == '/')
 }
 
 func resolveRelayEvidenceDir(opts RelayAdapterPackageOptions) (RelayAdapterPackageOptions, error) {

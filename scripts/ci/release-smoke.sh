@@ -278,6 +278,9 @@ go run ./cmd/rdev connection-entry plan \
 	--out "$relay_acceptance_input/connection-entry" \
 	--target-os linux \
 	--ownership third-party \
+	--layered-assets-manifest-url https://assets.example.invalid/layered-assets.json \
+	--layered-release-version v0.0.0-smoke \
+	--release-root-public-key release-root:ddddddddddddddddddddddddddddddddddddddddddd \
 	> "$relay_acceptance_input/connection-entry-plan.json"
 fake_bin="$relay_acceptance_input/fake-bin"
 mkdir -p "$fake_bin"
@@ -653,9 +656,12 @@ assert build["ok"] is True, build
 build_manifest = json.loads(pathlib.Path(build["manifest"]).read_text())
 assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_manifest
 assert build_manifest["out_dir"] == ".", build_manifest
-assert len(build_manifest["artifacts"]) == 7, build_manifest["artifacts"]
-assert any(artifact["command"] == "rdev-bootstrap" and artifact["target"] == "windows/amd64" for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
-assert not any(artifact["command"] == "rdev-bootstrap" and artifact["target"] != "windows/amd64" for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
+assert len(build_manifest["artifacts"]) == 8, build_manifest["artifacts"]
+assert {
+    artifact["target"]
+    for artifact in build_manifest["artifacts"]
+    if artifact["command"] == "rdev-bootstrap"
+} == {"linux/amd64", "windows/amd64"}, build_manifest["artifacts"]
 assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert all(artifact["cgo_enabled"] is False for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 build_sbom_path = pathlib.Path(build["sbom"])
@@ -722,8 +728,13 @@ for candidate in platform_manifest["candidates"]:
         assert entry_manifest["schema_version"] == "rdev.connection-entry-release-package.v1", entry_manifest
         assert entry_manifest["no_private_parameters"] is True, entry_manifest
         assert entry_manifest["execution_mode"] == "runtime-invite-required", entry_manifest
-        required_artifacts = ",".join(artifact["name"] for artifact in candidate_json["artifacts"])
-        assert entry_manifest["required_release_artifacts"] == [artifact["name"] for artifact in candidate_json["artifacts"]], entry_manifest
+        entry_artifacts = [
+            artifact
+            for artifact in candidate_json["artifacts"]
+            if artifact["name"].removesuffix(".exe") in {"rdev-bootstrap", "rdev-verify"}
+        ]
+        required_artifacts = ",".join(entry_manifest["required_release_artifacts"])
+        assert set(entry_manifest["required_release_artifacts"]) == {artifact["name"] for artifact in entry_artifacts}, entry_manifest
         assert len(entry_manifest["launchers"]) >= 1, entry_manifest
         launcher_paths = [path for path in names if path.startswith("launchers/")]
         launcher_text = "\n".join(archive.read(path).decode() for path in launcher_paths)
@@ -731,7 +742,7 @@ for candidate in platform_manifest["candidates"]:
         assert "--bundle" in launcher_text and ("bin/release-bundle.json" in launcher_text or "bin\\release-bundle.json" in launcher_text), launcher_text
         assert "--root-public-key" in launcher_text and candidate_json["root_public_key"] in launcher_text, launcher_text
         assert "--require-artifacts" in launcher_text and required_artifacts in launcher_text, launcher_text
-        for artifact in candidate_json["artifacts"]:
+        for artifact in entry_artifacts:
             assert "bin/" + pathlib.Path(artifact["artifact_path"]).name in names, names
             assert "bin/" + pathlib.Path(artifact["manifest_path"]).name in names, names
     sbom = json.loads((pathlib.Path(candidate["candidate_dir"]) / "sbom.spdx.json").read_text())
@@ -1031,8 +1042,8 @@ assert fresh_agent_output["schema"] == "rdev.acceptance.fresh-agent-support-sess
 fresh_agent_checks = {check["name"]: check for check in fresh_agent_output["checks"]}
 bootstrap_self_repair_checks = [
     "bootstrap_self_repair_join_page_available",
-    "bootstrap_self_repair_windows_downloads_verified_helper",
-    "bootstrap_self_repair_shell_downloads_verified_helper",
+    "bootstrap_self_repair_windows_downloads_verified_bootstrap",
+    "bootstrap_self_repair_shell_downloads_verified_bootstrap",
     "bootstrap_self_repair_pins_manifest_root",
     "bootstrap_self_repair_starts_visible_host",
     "bootstrap_self_repair_assets_have_hashes",
